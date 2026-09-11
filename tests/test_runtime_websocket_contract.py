@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -70,6 +71,9 @@ class _FakeSessionRouter:
         self.bind_calls: list[dict] = []
         self.snapshot_calls: list[dict] = []
 
+    def for_target(self, target_app_id):
+        return self
+
     async def resolve_resume(self, **kwargs):  # noqa: ANN003
         self.resolve_calls.append(kwargs)
         return dict(self.resume_resolution)
@@ -117,6 +121,8 @@ def _patch_runtime_websocket_harness(
 
     async def fake_chat_coll():
         return collection
+
+    session_router._persistence = SimpleNamespace(_coll=fake_chat_coll)
 
     async def fake_auth(websocket, path_user_id: str, path_app_id: str, path_chat_id: str):  # noqa: ANN001
         _ = websocket
@@ -180,6 +186,7 @@ def _patch_runtime_websocket_harness(
 
     hooks = get_platform_hooks()
     monkeypatch.setattr(hooks, "call_chat_prereqs", fake_chat_prereqs)
+    monkeypatch.setattr(hooks, "call_chat_session_fields", AsyncMock(return_value={}))
     monkeypatch.setattr(hooks, "call_workflow_ordering", lambda names: list(names))
     monkeypatch.setattr(
         hooks,
@@ -526,348 +533,68 @@ async def test_runtime_websocket_endpoint_rejects_unowned_chat(monkeypatch: pyte
     assert harness.scheduled_coroutines == []
 
 
+@pytest.mark.parametrize("persisted_workflow", ["AgentGenerator", "RetiredWorkflow"])
 @pytest.mark.asyncio
-async def test_runtime_websocket_endpoint_honors_persisted_workflow_for_stale_client_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_runtime_websocket_rejects_workflow_mismatch_without_repair(monkeypatch, persisted_workflow):
     harness = _patch_runtime_websocket_harness(
         monkeypatch,
-        chat_docs=[
-            {
-                "_id": "chat_agent_1",
-                "app_id": "app_1",
-                "user_id": "user_1",
-                "workflow_name": "AgentGenerator",
-                "status": 0,
-                "messages": [{"role": "assistant", "content": "Resume me"}],
-            }
-        ],
-        resume_resolution={
-            "chat_id": "chat_agent_1",
-            "session_state": None,
-        },
-        workflow_startup_mode="Manual",
+        chat_docs=[{"_id": "chat_1", "app_id": "app_1", "user_id": "user_1",
+                    "workflow_name": persisted_workflow, "status": 0, "messages": []}],
+        resume_resolution={"chat_id": "chat_1"}, workflow_startup_mode="Manual",
         workflow_names=["DesignDocs", "AgentGenerator"],
     )
     websocket = _FakeWebSocket()
-
     await harness.runtime_app.websocket_endpoint(
-        websocket=websocket,
-        workflow_name="DesignDocs",
-        app_id="app_1",
-        chat_id="chat_agent_1",
-        user_id="user_1",
+        websocket=websocket, workflow_name="DesignDocs", app_id="app_1", chat_id="chat_1", user_id="user_1",
     )
-    await _drain_scheduled_coroutines(harness.scheduled_coroutines)
-
-    assert websocket.closed == []
-    assert harness.session_router.resolve_calls == [
-        {
-            "app_id": "app_1",
-            "user_id": "user_1",
-            "requested_workflow_id": "AgentGenerator",
-            "requested_chat_id": "chat_agent_1",
-        }
-    ]
-    assert harness.transport.handle_websocket_calls == [
-        {
-            "websocket": websocket,
-            "chat_id": "chat_agent_1",
-            "user_id": "user_1",
-            "workflow_name": "AgentGenerator",
-            "app_id": "app_1",
-            "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
-            "token_exp": 0,
-            "suppress_history_replay": False,
-        }
-    ]
-    assert harness.transport.ui_events == [
-        (
-            {
-                "kind": "chat_meta",
-                "chat_id": "chat_agent_1",
-                "workflow_name": "AgentGenerator",
-                "app_id": "app_1",
-                "user_id": "user_1",
-                "has_children": False,
-                "cache_seed": "seed:app_1:chat_agent_1",
-                "chat_exists": True,
-                "last_artifact": None,
-                "status": 0,
-                "run_history_count": 1,
-                "created_at": None,
-                "session_state": {},
-                "session_version": None,
-            },
-            "chat_agent_1",
-        )
-    ]
+    assert websocket.closed == [(1008, "Chat not found")]
+    assert harness.collection._docs["chat_1"]["workflow_name"] == persisted_workflow
+    assert harness.session_router.resolve_calls == []
     assert harness.transport.api_calls == []
 
 
+@pytest.mark.parametrize("resolved_doc", [
+    None,
+    {"_id": "resolved", "app_id": "app_1", "user_id": "other_user", "workflow_name": "AgentGenerator"},
+    {"_id": "resolved", "app_id": "other_host", "user_id": "user_1", "workflow_name": "AgentGenerator"},
+    {"_id": "resolved", "app_id": "app_1", "user_id": "user_1", "workflow_name": "AgentGenerator",
+     "run_build_binding": {"target_app_id": "other_target"}},
+])
 @pytest.mark.asyncio
-async def test_runtime_websocket_endpoint_repairs_non_runnable_persisted_workflow(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_runtime_websocket_rejects_missing_or_foreign_resolved_session(monkeypatch, resolved_doc):
+    docs = [{"_id": "requested", "app_id": "app_1", "user_id": "user_1",
+             "workflow_name": "AgentGenerator", "status": 0, "messages": []}]
+    if resolved_doc:
+        docs.append(resolved_doc)
     harness = _patch_runtime_websocket_harness(
-        monkeypatch,
-        chat_docs=[
-            {
-                "_id": "chat_agent_1",
-                "app_id": "app_1",
-                "user_id": "user_1",
-                "workflow_name": "LegacyWorkflow",
-                "status": 0,
-                "messages": [{"role": "assistant", "content": "Recover me"}],
-            }
-        ],
-        resume_resolution={
-            "chat_id": "chat_agent_1",
-            "session_state": None,
-        },
-        workflow_startup_mode="Manual",
-        workflow_names=["AgentGenerator"],
+        monkeypatch, chat_docs=docs, resume_resolution={"chat_id": "resolved"},
+        workflow_startup_mode="AgentDriven",
     )
     websocket = _FakeWebSocket()
-
     await harness.runtime_app.websocket_endpoint(
-        websocket=websocket,
-        workflow_name="AgentGenerator",
-        app_id="app_1",
-        chat_id="chat_agent_1",
-        user_id="user_1",
+        websocket=websocket, workflow_name="AgentGenerator", app_id="app_1", chat_id="requested", user_id="user_1",
     )
-    await _drain_scheduled_coroutines(harness.scheduled_coroutines)
-
-    assert websocket.closed == []
+    assert websocket.closed
     assert harness.created_sessions == []
-    assert harness.collection._docs["chat_agent_1"]["workflow_name"] == "AgentGenerator"
-    assert "last_updated_at" in harness.collection._docs["chat_agent_1"]
-    assert harness.session_router.resolve_calls == [
-        {
-            "app_id": "app_1",
-            "user_id": "user_1",
-            "requested_workflow_id": "AgentGenerator",
-            "requested_chat_id": "chat_agent_1",
-        }
-    ]
-    assert harness.transport.handle_websocket_calls == [
-        {
-            "websocket": websocket,
-            "chat_id": "chat_agent_1",
-            "user_id": "user_1",
-            "workflow_name": "AgentGenerator",
-            "app_id": "app_1",
-            "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
-            "token_exp": 0,
-            "suppress_history_replay": False,
-        }
-    ]
-    assert harness.transport.ui_events == [
-        (
-            {
-                "kind": "chat_meta",
-                "chat_id": "chat_agent_1",
-                "workflow_name": "AgentGenerator",
-                "app_id": "app_1",
-                "user_id": "user_1",
-                "has_children": False,
-                "cache_seed": "seed:app_1:chat_agent_1",
-                "chat_exists": True,
-                "last_artifact": None,
-                "status": 0,
-                "run_history_count": 1,
-                "created_at": None,
-                "session_state": {},
-                "session_version": None,
-            },
-            "chat_agent_1",
-        )
-    ]
+    assert harness.transport.handle_websocket_calls == []
     assert harness.transport.api_calls == []
+    assert harness.scheduled_coroutines == []
 
 
 @pytest.mark.asyncio
-async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before_handoff(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_runtime_websocket_binding_revalidation_failure_prevents_model_start(monkeypatch):
     harness = _patch_runtime_websocket_harness(
         monkeypatch,
-        chat_docs=[
-            {
-                "_id": "chat_requested",
-                "app_id": "app_1",
-                "user_id": "user_1",
-                "workflow_name": "AgentGenerator",
-                "status": 0,
-                "messages": [{"role": "assistant", "content": "Original link"}],
-            }
-        ],
-        resume_resolution={
-            "chat_id": "chat_recovered",
-            "session_state": None,
-        },
-        workflow_startup_mode="Manual",
-        workflow_names=["AgentGenerator"],
+        chat_docs=[{"_id": "chat_1", "app_id": "app_1", "user_id": "user_1",
+                    "workflow_name": "AgentGenerator", "status": 0, "messages": []}],
+        resume_resolution={"chat_id": "chat_1"}, workflow_startup_mode="AgentDriven",
     )
-    harness.session_router.snapshot = {
-        "current_chat_id": "chat_recovered",
-        "journey_position": 1,
-        "lifecycle_state": "active",
-    }
+    monkeypatch.setattr(harness.hooks, "call_chat_session_fields", AsyncMock(side_effect=ValueError("foreign target")))
     websocket = _FakeWebSocket()
-
     await harness.runtime_app.websocket_endpoint(
-        websocket=websocket,
-        workflow_name="AgentGenerator",
-        app_id="app_1",
-        chat_id="chat_requested",
-        user_id="user_1",
+        websocket=websocket, workflow_name="AgentGenerator", app_id="app_1", chat_id="chat_1", user_id="user_1",
     )
-    await _drain_scheduled_coroutines(harness.scheduled_coroutines)
-
-    assert websocket.closed == []
-    assert harness.created_sessions == [
-        {
-            "chat_id": "chat_recovered",
-            "app_id": "app_1",
-            "workflow_name": "AgentGenerator",
-            "user_id": "user_1",
-            "extra_fields": {},
-        }
-    ]
-    assert harness.session_router.resolve_calls == [
-        {
-            "app_id": "app_1",
-            "user_id": "user_1",
-            "requested_workflow_id": "AgentGenerator",
-            "requested_chat_id": "chat_requested",
-        }
-    ]
-    assert harness.session_router.bind_calls == [
-        {
-            "app_id": "app_1",
-            "user_id": "user_1",
-            "workflow_id": "AgentGenerator",
-            "chat_id": "chat_recovered",
-        }
-    ]
-    assert harness.session_router.snapshot_calls == [
-        {
-            "app_id": "app_1",
-            "user_id": "user_1",
-        }
-    ]
-    assert harness.collection._docs["chat_recovered"]["workflow_name"] == "AgentGenerator"
-    assert harness.transport.handle_websocket_calls == [
-        {
-            "websocket": websocket,
-            "chat_id": "chat_recovered",
-            "user_id": "user_1",
-            "workflow_name": "AgentGenerator",
-            "app_id": "app_1",
-            "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
-            "token_exp": 0,
-            "suppress_history_replay": False,
-        }
-    ]
-    assert harness.transport.ui_events == [
-        (
-            {
-                "kind": "chat_meta",
-                "chat_id": "chat_recovered",
-                "workflow_name": "AgentGenerator",
-                "app_id": "app_1",
-                "user_id": "user_1",
-                "has_children": False,
-                "cache_seed": "seed:app_1:chat_recovered",
-                "chat_exists": True,
-                "last_artifact": None,
-                "status": 0,
-                "run_history_count": 0,
-                "created_at": None,
-                "session_state": {
-                    "current_chat_id": "chat_recovered",
-                    "journey_position": 1,
-                    "lifecycle_state": "active",
-                },
-                "session_version": None,
-            },
-            "chat_recovered",
-        )
-    ]
+    assert websocket.closed
+    assert harness.session_router.resolve_calls == []
     assert harness.transport.api_calls == []
-
-
-@pytest.mark.asyncio
-async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_with_resume_workflow(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _patch_runtime_websocket_harness(
-        monkeypatch,
-        chat_docs=[],
-        resume_resolution={
-            "chat_id": "chat_value_engine",
-            "workflow_id": "ValueEngine",
-            "session_state": {
-                "current_workflow_id": "ValueEngine",
-                "current_chat_id": "chat_value_engine",
-            },
-        },
-        workflow_startup_mode="Manual",
-        workflow_names=["ExistingAppDiscovery", "ValueEngine"],
-    )
-    websocket = _FakeWebSocket()
-
-    await harness.runtime_app.websocket_endpoint(
-        websocket=websocket,
-        workflow_name="ExistingAppDiscovery",
-        app_id="app_1",
-        chat_id="chat_requested",
-        user_id="user_1",
-    )
-    await _drain_scheduled_coroutines(harness.scheduled_coroutines)
-
-    assert websocket.closed == []
-    assert harness.created_sessions == [
-        {
-            "chat_id": "chat_requested",
-            "app_id": "app_1",
-            "workflow_name": "ExistingAppDiscovery",
-            "user_id": "user_1",
-            "extra_fields": {},
-        },
-        {
-            "chat_id": "chat_value_engine",
-            "app_id": "app_1",
-            "workflow_name": "ValueEngine",
-            "user_id": "user_1",
-            "extra_fields": {},
-        },
-    ]
-    assert harness.session_router.bind_calls == [
-        {
-            "app_id": "app_1",
-            "user_id": "user_1",
-            "workflow_id": "ValueEngine",
-            "chat_id": "chat_value_engine",
-        }
-    ]
-    assert harness.transport.handle_websocket_calls == [
-        {
-            "websocket": websocket,
-            "chat_id": "chat_value_engine",
-            "user_id": "user_1",
-            "workflow_name": "ValueEngine",
-            "app_id": "app_1",
-            "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
-            "token_exp": 0,
-            "suppress_history_replay": False,
-        }
-    ]
-    assert harness.transport.ui_events[0][0]["workflow_name"] == "ValueEngine"
-    assert harness.transport.ui_events[0][0]["session_state"] == {
-        "current_workflow_id": "ValueEngine",
-        "current_chat_id": "chat_value_engine",
-    }
 

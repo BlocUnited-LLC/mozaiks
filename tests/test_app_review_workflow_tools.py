@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -25,9 +27,12 @@ class _Context:
 def _review_context(**overrides: Any) -> _Context:
     values = {
         "chat_id": "chat_review_1",
-        "app_id": "app_1",
-        "build_id": "build_1",
-        "build_registry_id": "appreg_1",
+        "app_id": "factory",
+        "user_id": "owner",
+        "run_build_binding": {
+            "build_id": "build_1", "build_registry_id": "appreg_1",
+            "target_app_id": "app_1", "phase": "genesis",
+        },
         "artifact_kind": "app_bundle",
         "artifact_key": "app_bundle",
         "artifact_version_id": "av_app_bundle_1",
@@ -60,7 +65,6 @@ def test_review_summary_payload_preserves_appgenerator_handoff_metadata() -> Non
 def test_review_summary_blocks_promotion_when_handoff_is_incomplete() -> None:
     payload = build_review_summary_payload(
         _review_context(
-            build_registry_id=None,
             artifact_version_id=None,
             app_validation_status=None,
             integration_tests_passed=False,
@@ -72,7 +76,6 @@ def test_review_summary_blocks_promotion_when_handoff_is_incomplete() -> None:
     assert payload["can_promote"] is False
     assert payload["can_revise"] is False
     assert payload["promotion_blockers"] == [
-        "missing_build_registry_id",
         "missing_artifact_version_id",
         "missing_app_validation_status",
         "integration_tests_failed",
@@ -197,14 +200,34 @@ async def test_submit_revision_request_rejects_empty_revision() -> None:
 
 
 @pytest.mark.asyncio
-async def test_submit_revision_request_marks_promotion_complete() -> None:
+async def test_submit_revision_request_marks_promotion_complete(monkeypatch) -> None:
     submit_module = importlib.import_module(
         "factory_app.workflows.AppReview.tools.submit_revision_request"
     )
 
     ctx = _review_context()
+    service_module = importlib.import_module("factory_app.app.modules.app_registry.backend.service")
+    monkeypatch.setattr(service_module, "AppRegistryService", lambda: SimpleNamespace(
+        get_app_record=AsyncMock(return_value={"app": {
+            "app_id": "app_1", "chat_app_id": "factory", "lifecycle_state": "active",
+            "current_build_run": {"build_id": "build_1"},
+        }}),
+    ))
     result = await submit_module.submit_revision_request(action="promote", context_variables=ctx)
 
     assert result == {"success": True, "action": "promote", "revision_request": None}
     assert ctx.data["review_complete"] is True
     assert ctx.data["lifecycle_state"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_agent_cannot_claim_an_unconfirmed_promotion(monkeypatch):
+    module = importlib.import_module("factory_app.workflows.AppReview.tools.submit_revision_request")
+    service_module = importlib.import_module("factory_app.app.modules.app_registry.backend.service")
+    monkeypatch.setattr(service_module, "AppRegistryService", lambda: SimpleNamespace(
+        get_app_record=AsyncMock(return_value={"app": None}),
+    ))
+    context = _review_context()
+    with pytest.raises(ValueError, match="not been confirmed"):
+        await module.submit_revision_request(action="promote", context_variables=context)
+    assert "review_complete" not in context.data

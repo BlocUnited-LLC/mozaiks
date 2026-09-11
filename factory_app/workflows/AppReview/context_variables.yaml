@@ -1,30 +1,16 @@
 definitions:
-  build_registry_id:
-    type: string
-    description: >
-      ID of the hosted app_registry record for the build being reviewed.
-      Passed in from the preceding AppGenerator session via journey context.
-      Used by present_review_summary to display the build record and by
-      the artifact promotion endpoint to mark the app registry active after
-      the reviewed artifact is restored.
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
     source:
-      type: state
-      default: null
+      type: runtime
+      required: true
 
   app_id:
     type: string
     description: >
-      App identifier for the build under review. Passed through to Studio
-      refinement triggers by the chat session.
-    source:
-      type: state
-      default: null
-
-  build_id:
-    type: string
-    description: >
-      Build attempt identifier associated with the staged bundle. Included in
-      refinement metadata for traceability.
+      Executing host app identifier. The reviewed target is read only from
+      the server-verified run_build_binding.
     source:
       type: state
       default: null

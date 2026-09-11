@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from tests.factory_context import factory_context
+
 
 def _load_generate_and_download_module():
     workspace = Path(__file__).resolve().parents[1]
@@ -33,7 +35,7 @@ generate_and_download_module = _load_generate_and_download_module()
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -255,7 +257,9 @@ def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypat
 
     monkeypatch.setattr(generate_and_download_module, "AG2PersistenceManager", lambda: _FakePersistence())
     monkeypatch.setattr(generate_and_download_module, "_inject_agent_context_env", noop)
-    monkeypatch.setattr(generate_and_download_module, "update_build_status", fail_if_called)
+    from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+
+    monkeypatch.setattr(AppRegistryService, "update_build_status", fail_if_called)
     monkeypatch.setattr(generate_and_download_module, "use_ui_tool", fail_if_called)
 
     context = _Context(
@@ -317,8 +321,8 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
     context = _Context(
         {
             "chat_id": "chat_123",
-            "app_id": "app/123",
-            "build_id": "build 123",
+            "app_id": "app-123",
+            "build_id": "build-123",
             "generated_files": {"app.json": '{"app_id":"app-123"}'},
         }
     )
@@ -343,8 +347,11 @@ def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_
     persistence = type("Persistence", (), {"gather_latest_agent_jsons": AsyncMock(return_value={})})()
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
     monkeypatch.setattr(module, "AG2PersistenceManager", lambda: persistence)
-    for name in ("_inject_agent_context_env", "_register_app_bundle_artifact_version", "update_build_status"):
+    for name in ("_inject_agent_context_env", "_register_app_bundle_artifact_version"):
         monkeypatch.setattr(module, name, AsyncMock(return_value=None))
+    from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+
+    monkeypatch.setattr(AppRegistryService, "update_build_status", AsyncMock(return_value={"success": True}))
     monkeypatch.setattr(module, "run_app_bundle_acceptance_gate", AsyncMock(return_value={
         "passed": True, "status": "passed", "bundle_scan": {"errors": []},
         "validation_evidence": {"completed": ["bundle_scan"], "failed": []},

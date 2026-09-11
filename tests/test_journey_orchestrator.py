@@ -8,6 +8,13 @@ import pytest
 
 from tests.import_utils import import_module_directly
 
+
+@pytest.fixture(autouse=True)
+def generic_platform_hooks(monkeypatch):
+    from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+
+    monkeypatch.setattr(PlatformHookRegistry, "_instance", PlatformHookRegistry())
+
 _session_model = import_module_directly("mozaiksai.core.session.model")
 _session_router = import_module_directly("mozaiksai.core.session.router")
 _workflow_manager = import_module_directly("mozaiksai.core.workflow.workflow_manager")
@@ -151,7 +158,10 @@ async def test_journey_orchestrator_uses_session_router_metadata(monkeypatch):
         return transport.connections.get(chat_id), transport
 
     monkeypatch.setattr(orchestrator, "_get_transport_conn", _fake_get_transport_conn)
-    monkeypatch.setattr(_journey_mod, "get_session_router", lambda: fake_router)
+    async def router_for_chat(**kwargs):
+        return fake_router
+
+    monkeypatch.setattr(_journey_mod, "get_session_router_for_chat", router_for_chat)
     monkeypatch.setattr(_journey_mod.session_registry, "complete_workflow", lambda ws_id, chat_id: None)
     monkeypatch.setattr(_journey_mod.session_registry, "add_workflow", lambda **kwargs: None)
 
@@ -301,7 +311,10 @@ async def test_journey_orchestrator_inherits_context_and_applies_launch_provider
         return transport.connections.get(chat_id), transport
 
     monkeypatch.setattr(orchestrator, "_get_transport_conn", _fake_get_transport_conn)
-    monkeypatch.setattr(_journey_mod, "get_session_router", lambda: fake_router)
+    async def router_for_chat(**kwargs):
+        return fake_router
+
+    monkeypatch.setattr(_journey_mod, "get_session_router_for_chat", router_for_chat)
     monkeypatch.setattr(_journey_mod.session_registry, "complete_workflow", lambda ws_id, chat_id: None)
     monkeypatch.setattr(_journey_mod.session_registry, "add_workflow", lambda **kwargs: None)
 

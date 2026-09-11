@@ -1,4 +1,11 @@
 definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
   app_bundle_export_outcome:
     type: string
     authority_class: closed_writer_routing_state
@@ -32,16 +39,6 @@ definitions:
       Used by scaffold/config agents to populate `app/app.json` `admins` without
       prompting the user. Falls back to null in OSS / unauthenticated contexts, in
       which case InterviewAgent captures the email during the intake interview.
-    source:
-      type: state
-      default: null
-  build_registry_id:
-    type: string
-    description: >
-      ID of the hosted app_registry record created at pipeline start by ValueEngine's
-      create_app_record lifecycle tool. Flows through the full pipeline so
-      generate_and_download can update the record to 'generated' once the bundle
-      is written. Null in OSS/unauthenticated runs where app_registry is not installed.
     source:
       type: state
       default: null
@@ -402,7 +399,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - ConceptOverview
       default: null
@@ -415,7 +412,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - ApiEndpoints
       default: []
@@ -428,7 +425,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - Blueprint
       default: null
@@ -440,7 +437,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: frontend
         status: succeeded
       fields:
@@ -456,7 +453,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -470,7 +467,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: database
         status: succeeded
       fields:
@@ -487,7 +484,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -505,7 +502,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -525,7 +522,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -542,7 +539,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -559,7 +556,7 @@ definitions:
       database_name: mozaiksai
       collection: DataContracts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - data_contract
       default: null
@@ -573,7 +570,7 @@ definitions:
       database_name: mozaiksai
       collection: ThemeCaptures
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - theme_config
       default: null
@@ -598,7 +595,7 @@ definitions:
       database_name: mozaiksai
       collection: ArtifactVersions
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         build_family: subscription_contract
         build_key: subscription_contract
         lifecycle_status: current
@@ -637,7 +634,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - agent_websocket_url
@@ -651,7 +648,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - agent_api_url
@@ -664,7 +661,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - repo_url
@@ -678,7 +675,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - agent_names
@@ -692,7 +689,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - tool_names
@@ -705,7 +702,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - available_agents
@@ -718,7 +715,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - available_tools
@@ -765,7 +762,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - workflow_name
@@ -782,7 +779,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - capability_id
@@ -800,7 +797,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - workflow_startup_mode
@@ -818,7 +815,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - trigger_events
@@ -1781,7 +1778,6 @@ agents:
     - bundle_repair_errors
   DownloadAgent:
     variables:
-    - build_registry_id
     - integration_readiness_status
     - integration_readiness_result
     - app_validation_status

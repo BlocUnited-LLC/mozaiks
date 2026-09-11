@@ -7,10 +7,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.data.persistence.persistence_manager import SERVER_OWNED_SESSION_FIELDS
 from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.persistence import SessionStateStore
-from mozaiksai.core.session.router import get_session_router
+from mozaiksai.core.session.router import get_session_router_for_chat
 from mozaiksai.core.transport.session_registry import session_registry
 
 logger = get_core_logger("journey_orchestrator")
@@ -88,7 +90,7 @@ def _extract_launch_context_from_chat_doc(chat_doc: Any) -> dict[str, Any]:
     for key, value in chat_doc.items():
         if not isinstance(key, str) or not key.strip():
             continue
-        if key in _CHAT_CONTEXT_INTERNAL_KEYS or key.startswith("_"):
+        if key in _CHAT_CONTEXT_INTERNAL_KEYS or key in SERVER_OWNED_SESSION_FIELDS or key.startswith("_"):
             continue
         context[key] = value
     return context
@@ -139,10 +141,12 @@ class JourneyOrchestrator:
         pm = transport._get_or_create_persistence_manager()
         coll = await pm._coll()
         source_chat_doc = await coll.find_one(
-            {"_id": chat_id, **build_app_scope_filter(app_id)}
+            {"_id": chat_id, "user_id": user_id, **build_app_scope_filter(app_id)}
         )
         inherited_context = _extract_launch_context_from_chat_doc(source_chat_doc)
-        session_router = get_session_router()
+        session_router = await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=chat_id)
+        raw_binding = source_chat_doc.get("run_build_binding") if source_chat_doc else None
+        binding = RunBuildBinding.model_validate(raw_binding) if raw_binding is not None else None
         advance = await session_router.advance_journey_after_run_complete(
             app_id=app_id,
             user_id=user_id,
@@ -180,7 +184,7 @@ class JourneyOrchestrator:
             pass
 
         spawned: list[tuple[str, str, bool]] = []  # (workflow_name, chat_id, created_new)
-        session_scope_id = SessionStateStore.session_id_for_scope(app_id, user_id)
+        session_scope_id = SessionStateStore.session_id_for_scope(app_id, user_id, binding.target_app_id if binding else None)
         next_group_index = int(advance.next_group_index or 0)
         for wf in advance.next_workflows:
             trigger_payload = {
@@ -226,6 +230,7 @@ class JourneyOrchestrator:
 
             from mozaiksai.core.session.launcher import (
                 apply_launch_context_provider,
+                create_routed_chat_session,
                 validate_context_for_workflow,
             )
 
@@ -269,12 +274,15 @@ class JourneyOrchestrator:
                     "journey_position": next_group_index,
                     "journey_total_steps": int(advance.journey_total_steps),
                 }
-                await pm.create_chat_session(
+                await create_routed_chat_session(
+                    persistence_manager=pm,
                     chat_id=next_chat_id,
                     app_id=app_id,
-                    workflow_name=wf,
+                    workflow_id=wf,
                     user_id=user_id,
-                    extra_fields=extra_fields,
+                    context_variables=extra_fields,
+                    trigger_meta={"trigger_source": "run_complete"},
+                    source_chat_id=chat_id,
                 )
                 created_new = True
             await session_router.annotate_workflow_chat(

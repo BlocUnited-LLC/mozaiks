@@ -50,11 +50,11 @@ export default function AppReviewSummary({ payload = {} }) {
     setPromoting(true);
     setError(null);
     try {
-      const appIdQuery = payload?.app_id ? `?app_id=${encodeURIComponent(payload.app_id)}` : '';
+      const appIdQuery = `?build_registry_id=${encodeURIComponent(payload.build_registry_id)}`;
       const res = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(payload.artifact_version_id)}/promote${appIdQuery}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ build_registry_id: payload.build_registry_id || null }),
+        body: JSON.stringify({}),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

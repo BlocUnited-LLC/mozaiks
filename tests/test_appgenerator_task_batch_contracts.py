@@ -13,6 +13,7 @@ from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,
     load_task_batches_config,
 )
+from tests.factory_context import factory_context
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = WORKSPACE / "factory_app" / "workflows"
@@ -34,7 +35,7 @@ def _read_yaml(relative_path: str) -> dict:
 
 class _Context:
     def __init__(self) -> None:
-        self.data: dict[str, object] = {}
+        self.data: dict[str, object] = factory_context()
 
     def set(self, key: str, value: object) -> None:
         self.data[key] = value

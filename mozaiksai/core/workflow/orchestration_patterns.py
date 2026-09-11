@@ -24,8 +24,12 @@ from typing import Any, cast
 from logs.logging_config import get_workflow_logger
 from logs.runtime_artifacts import get_agent_outputs_dir
 from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
-from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.data.persistence.persistence_manager import (
+    SERVER_OWNED_SESSION_FIELDS,
+    AG2PersistenceManager,
+)
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.workflow.execution.network_graph import (
     WorkflowGraphCompileError,
     compile_transition_rules_to_graph,
@@ -66,6 +70,7 @@ async def _fetch_chat_session_extra_context(
     chat_id: str,
     app_id: str,
     workflow_name: str,
+    user_id: str,
 ) -> dict[str, Any]:
     return cast(
         dict[str, Any],
@@ -73,6 +78,7 @@ async def _fetch_chat_session_extra_context(
             chat_id=chat_id,
             app_id=app_id,
             workflow_name=workflow_name,
+            user_id=user_id,
         ),
     )
 
@@ -89,7 +95,7 @@ async def _persist_context_variables(
         chat_id=chat_id,
         app_id=app_id,
         workflow_name=workflow_name,
-        variables=variables,
+        variables={key: value for key, value in variables.items() if key not in SERVER_OWNED_SESSION_FIELDS},
     )
 
 
@@ -770,7 +776,32 @@ async def run_workflow_orchestration(
             wf_logger.debug("[%s] frontend_context lookup failed: %s", workflow_name_upper, _fe_err)
 
         context: Any = None
-        persisted_extra_ctx: dict[str, Any] = {}
+        persisted_extra_ctx = await _fetch_chat_session_extra_context(
+            persistence_manager,
+            chat_id=chat_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+            user_id=user_id or "anonymous",
+        )
+        server_fields = {
+            key: value for key, value in persisted_extra_ctx.items()
+            if key in SERVER_OWNED_SESSION_FIELDS
+        }
+        await get_platform_hooks().call_chat_session_fields(
+            app_id=app_id,
+            user_id=user_id or "anonymous",
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            phase="resume",
+            session_fields=server_fields,
+        )
+        runtime_context = {
+            **server_fields,
+            "app_id": app_id,
+            "chat_id": chat_id,
+            "user_id": user_id or "anonymous",
+            "workflow_name": workflow_name,
+        }
         if context_factory:
             result_ctx = context_factory()
             if inspect.isawaitable(result_ctx):
@@ -779,7 +810,7 @@ async def run_workflow_orchestration(
                 context = result_ctx
         else:
             from .context.variables import _load_context_async
-            context = await _load_context_async(workflow_name, app_id)
+            context = await _load_context_async(workflow_name, app_id, runtime_context=runtime_context)
 
         if frontend_context and context is not None:
             for key, value in frontend_context.items():
@@ -793,15 +824,11 @@ async def run_workflow_orchestration(
                     wf_logger.debug("[%s] frontend_context inject failed key=%s: %s", workflow_name_upper, prefixed, _ctx_err)
 
         if context is not None:
-            extra_ctx = await _fetch_chat_session_extra_context(
-                persistence_manager,
-                chat_id=chat_id,
-                app_id=app_id,
-                workflow_name=workflow_name,
-            )
-            if isinstance(extra_ctx, dict) and extra_ctx:
-                persisted_extra_ctx = dict(extra_ctx)
-                merge_persisted_extra_context(context, extra_ctx)
+            if persisted_extra_ctx:
+                merge_persisted_extra_context(
+                    context,
+                    {key: value for key, value in persisted_extra_ctx.items() if key not in SERVER_OWNED_SESSION_FIELDS},
+                )
 
         context_time = (perf_counter() - context_start) * 1000
         performance_logger.info("context_load_duration_ms", extra={

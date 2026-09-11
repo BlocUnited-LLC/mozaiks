@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.app_context.models import (
     AdoptionPath,
     AdoptionPhase,
@@ -99,7 +100,7 @@ def build_existing_app_context_artifacts(
     )
     indexed_at = datetime.now(UTC)
 
-    app_id = _app_id(product_spec, discovery_artifact, context_variables)
+    app_id = require_build_binding(context_variables).target_app_id
     source_refs = _source_refs(product_spec, discovery_artifact, context_variables, app_id, indexed_at)
     default_source_ref = source_refs[0].source_ref_id if source_refs else None
 
@@ -225,23 +226,6 @@ def _split_stack(value: Any) -> list[str]:
     if not raw:
         return []
     return _unique_strings([part.strip() for part in re.split(r"[,;/|]+", raw) if part.strip()])
-
-
-def _app_id(
-    product_spec: Mapping[str, Any],
-    discovery_artifact: Mapping[str, Any],
-    context_variables: Mapping[str, Any] | Any | None,
-) -> str:
-    return _slug(
-        _context_get(context_variables, "app_id")
-        or discovery_artifact.get("app_id")
-        or product_spec.get("app_id")
-        or product_spec.get("app_name")
-        or _context_get(context_variables, "app_name")
-        or _context_get(context_variables, "chat_id")
-        or "existing_app",
-        fallback="existing_app",
-    )
 
 
 def _source_refs(

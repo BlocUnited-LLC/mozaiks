@@ -1,3 +1,4 @@
+from .build_binding import BuildTargetReference, RunBuildBinding
 from .build_context import (
     BuildContextError,
     merge_build_context,
@@ -44,6 +45,10 @@ def configure_session_router(*, trigger_route_resolver=None):
 
 
 def __getattr__(name: str):
+    if name == "get_session_router_for_chat":
+        from .router import get_session_router_for_chat
+
+        return get_session_router_for_chat
     if name == "SessionRouter":
         from .router import SessionRouter
 
@@ -55,6 +60,8 @@ def __getattr__(name: str):
     raise AttributeError(name)
 
 __all__ = [
+    "BuildTargetReference",
+    "RunBuildBinding",
     "JourneyAdvanceDecision",
     "PendingDecisionAction",
     "PendingHarnessDecision",
@@ -77,6 +84,7 @@ __all__ = [
     "configure_session_router",
     "emit_workflow_launch_navigation",
     "get_session_router",
+    "get_session_router_for_chat",
     "launch_prepared_workflow",
     "launch_routed_workflow",
     "launch_transition",

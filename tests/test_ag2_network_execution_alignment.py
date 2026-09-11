@@ -1078,6 +1078,7 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
             chat_id: str,
             app_id: str,
             workflow_name: str,
+            user_id: str,
         ) -> dict[str, Any]:
             self.fetched_scope = (chat_id, app_id, workflow_name)
             if persistence_failure == "fetch":
@@ -1247,6 +1248,7 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
             chat_id: str,
             app_id: str,
             workflow_name: str,
+            user_id: str,
         ) -> dict[str, Any]:
             assert workflow_name == "AgentGenerator"
             return {
@@ -1416,6 +1418,7 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             chat_id: str,
             app_id: str,
             workflow_name: str,
+            user_id: str,
         ) -> dict[str, Any]:
             assert workflow_name == "TaskBatchAlignmentSmoke"
             return {}
@@ -1604,6 +1607,7 @@ async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phas
             chat_id: str,
             app_id: str,
             workflow_name: str,
+            user_id: str,
         ) -> dict[str, Any]:
             assert workflow_name == "AgentGenerator"
             return {}

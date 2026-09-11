@@ -6,7 +6,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Code, LayoutGrid, Monitor } from 'lucide-react';
 import { useWorkflowStart } from '@mozaiks/chat-ui/hooks/useWorkflowStart.js';
-import { useChatUI } from '@mozaiks/chat-ui/context/ChatUIContext.jsx';
 import { workflowSurfaceStyles, workflowToolbarButtonClass } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
 import { useSandbox } from './useSandbox';
@@ -66,23 +65,24 @@ const AppWorkbench = ({
     ? artifactValidationResult.fallback_checks
     : [];
   const { startWorkflow, starting: refinementStarting, error: workflowStartError } = useWorkflowStart();
-  const { user } = useChatUI();
   const [activeArtifactVersionId, setActiveArtifactVersionId] = useState(
     payload?.artifact_version_id || payload?.artifactVersionId || null
   );
 
   // Derive artifact identity first — useSandbox depends on these values.
   const artifactVersionId = activeArtifactVersionId;
+  const buildRegistryId = payload?.build_registry_id;
+  const artifactQuery = `?build_registry_id=${encodeURIComponent(buildRegistryId || '')}`;
   const artifactKind = payload?.artifact_kind || payload?.artifactKind || 'app_bundle';
   const artifactKey = payload?.artifact_key || payload?.artifactKey || artifactKind;
 
   // Build a stable, app-scoped sandbox key so sandboxes are never shared
   // across different users' apps. Sanitised to match the backend id regex.
   const sandboxArtifactId = useMemo(() => {
-    const appId = payload?.app_id || user?.app_id || user?.id || '';
+    const appId = payload?.target_app_id || '';
     const raw = appId ? `${appId}_${artifactKey}` : artifactKey;
     return raw.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
-  }, [payload?.app_id, user?.app_id, user?.id, artifactKey]);
+  }, [payload?.target_app_id, artifactKey]);
 
   const {
     filesMap,
@@ -151,7 +151,7 @@ const AppWorkbench = ({
   useEffect(() => {
     let cancelled = false;
     async function loadReview() {
-      if (!artifactVersionId) {
+      if (!artifactVersionId || !buildRegistryId) {
         if (!cancelled) {
           setArtifactReview(null);
           setArtifactReviewError(null);
@@ -161,7 +161,7 @@ const AppWorkbench = ({
       setArtifactReviewBusy(true);
       setArtifactReviewError(null);
       try {
-        const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review`);
+        const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review${artifactQuery}`);
         const body = await response.json().catch(() => ({ detail: response.statusText }));
         if (!response.ok) {
           throw new Error(body.detail || 'Artifact review could not be loaded.');
@@ -181,7 +181,7 @@ const AppWorkbench = ({
     }
     loadReview();
     return () => { cancelled = true; };
-  }, [artifactVersionId]);
+  }, [artifactVersionId, artifactQuery, buildRegistryId]);
 
   const buildRefinementTriggerPayload = (harnessAction = null, overrideArtifactKind = null) => {
     const resolvedArtifactKind = overrideArtifactKind || artifactKind;
@@ -275,7 +275,7 @@ const AppWorkbench = ({
     const response = await startWorkflow(
       null,
       {},
-      { trigger_source: 'refinement', trigger_payload: buildRefinementTriggerPayload() }
+      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload() }
     );
     handleRefinementResponse(response);
   };
@@ -294,7 +294,7 @@ const AppWorkbench = ({
     const response = await startWorkflow(
       null,
       {},
-      { trigger_source: 'refinement', trigger_payload: buildRefinementTriggerPayload(null, 'theme_config') }
+      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload(null, 'theme_config') }
     );
     handleRefinementResponse(response);
   };
@@ -305,7 +305,7 @@ const AppWorkbench = ({
     const response = await startWorkflow(
       null,
       {},
-      { trigger_source: 'refinement', trigger_payload: buildRefinementTriggerPayload({ action_id: action.action_id }) }
+      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload({ action_id: action.action_id }) }
     );
     handleRefinementResponse(response);
   };
@@ -315,7 +315,7 @@ const AppWorkbench = ({
     setArtifactReviewBusy(true);
     setArtifactReviewError(null);
     try {
-      const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`, {
+      const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}${artifactQuery}`, {
         method: 'POST',
       });
       const body = await response.json().catch(() => ({ detail: response.statusText }));

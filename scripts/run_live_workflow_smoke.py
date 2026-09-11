@@ -410,7 +410,10 @@ def _pop_tool_response_payload(
         queue = response_queues.get(candidate)
         if not queue:
             continue
-        return _normalize_tool_response_payload(queue.popleft())
+        response = _normalize_tool_response_payload(queue.popleft())
+        if data.get("tool_name") == "save_value_manifest" and "review_id" not in response:
+            response["review_id"] = (data.get("payload") or {}).get("review_id")
+        return response
     return None
 
 
@@ -798,6 +801,8 @@ async def run_live_workflow_smoke(
     await _verify_mongo_available()
 
     from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+    from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+    from mozaiksai.core.session.launcher import create_routed_chat_session
     from mozaiksai.core.transport.simple_transport import SimpleTransport
     from mozaiksai.core.workflow.workflow_manager import get_workflow_manager, initialize_workflows
     from mozaiksai.factory import create_mozaiks_app
@@ -809,6 +814,15 @@ async def run_live_workflow_smoke(
     info = manager.get_workflow_info(workflow_name) or {}
     if info.get("status") != "loaded":
         raise RuntimeError(f"Workflow failed to load: {workflow_name} -> {info.get('error')}")
+
+    definitions = (manager.get_config(workflow_name).get("context_variables") or {}).get("definitions") or {}
+    is_factory_build = "run_build_binding" in definitions
+    if is_factory_build:
+        from factory_app.workflows._shared.platform.build_target import bind_factory_session
+
+        get_platform_hooks().register_bundle(
+            {"chat_session_fields": bind_factory_session}, source="mozaiks.studio", prepend=True,
+        )
 
     app = create_mozaiks_app(workflow_dir=str(effective_root), debug=False)
     port = _find_free_port()
@@ -825,12 +839,14 @@ async def run_live_workflow_smoke(
 
     try:
         await _wait_for_server(server)
-        await pm.create_chat_session(
+        await create_routed_chat_session(
+            persistence_manager=pm,
             chat_id=chat_id,
             app_id=app_id,
-            workflow_name=workflow_name,
+            workflow_id=workflow_name,
             user_id=user_id,
-            extra_fields=initial_context if isinstance(initial_context, dict) else None,
+            context_variables=dict(initial_context or {}),
+            trigger_meta={"trigger_source": "chat", "requested_workflow_id": workflow_name},
         )
 
         ws_url = f"ws://127.0.0.1:{port}/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"
@@ -997,7 +1013,7 @@ async def run_live_workflow_smoke(
             observed_event_types=observed_event_types,
         )
     finally:
-        if completed_successfully:
+        if completed_successfully and not is_factory_build:
             try:
                 coll = await pm._coll()
                 await coll.delete_many({"app_id": app_id})

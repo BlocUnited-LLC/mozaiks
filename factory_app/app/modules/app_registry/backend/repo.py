@@ -8,7 +8,7 @@ from uuid import uuid4
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
-from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.multitenant import build_app_scope_filter
 
@@ -35,6 +35,16 @@ class AppRegistryRepo:
     async def _collection(self):
         client = await self._client()
         return client[SYSTEM_DATABASE][APP_REGISTRY_COLLECTION]
+
+    async def get_owned_chat_binding(
+        self, *, app_id: str, owner_user_id: str, chat_id: str
+    ) -> dict[str, Any] | None:
+        coll = await self._pm._coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, **build_app_scope_filter(app_id), "user_id": owner_user_id},
+            {"run_build_binding": 1},
+        )
+        return (doc.get("run_build_binding") or {}) if isinstance(doc, dict) else None
 
     async def ensure_indexes(self) -> None:
         coll = await self._collection()
@@ -127,16 +137,9 @@ class AppRegistryRepo:
                 incoming=build_context_profile,
                 now=now,
             )
-        should_track_build_run = bool(
-            current_build_run
-            or (existing or {}).get("current_build_run")
-            or active_chat_id
-            or active_workflow_id
-            or lifecycle_state in BUILD_CONTINUE_STATES
-        )
+        should_track_build_run = bool(current_build_run or existing.get("current_build_run"))
         if should_track_build_run:
             build_run = self._merge_build_run(
-                build_registry_id=build_registry_id,
                 existing_run=(existing or {}).get("current_build_run"),
                 incoming=current_build_run,
                 lifecycle_state=lifecycle_state,
@@ -171,13 +174,23 @@ class AppRegistryRepo:
         active_chat_id: str | None = None,
         active_workflow_id: str | None = None,
         current_build_run: dict[str, Any] | None = None,
+        expected_build_id: str | None = None,
+        expected_artifact_version_id: str | None = None,
+        expected_lifecycle_state: str | None = None,
     ) -> dict[str, Any] | None:
         query = {"_id": build_registry_id, **owner_filter(owner_user_id)}
+        if expected_build_id is not None:
+            query["current_build_run.build_id"] = expected_build_id
+        if expected_artifact_version_id is not None:
+            query["current_build_run.artifact_version_id"] = expected_artifact_version_id
+        if expected_lifecycle_state is not None:
+            query["lifecycle_state"] = expected_lifecycle_state
         await self.ensure_indexes()
         coll = await self._collection()
         existing = await coll.find_one(query)
         if not existing:
             return None
+        query["updated_at"] = existing.get("updated_at")
         now = datetime.now(UTC)
         update_fields: dict[str, Any] = {
             "lifecycle_state": lifecycle_state,
@@ -190,19 +203,9 @@ class AppRegistryRepo:
             update_fields["active_chat_id"] = active_chat_id
         if active_workflow_id:
             update_fields["active_workflow_id"] = active_workflow_id
-        should_track_build_run = bool(
-            current_build_run
-            or existing.get("current_build_run")
-            or workflow_sequence
-            or active_chat_id
-            or active_workflow_id
-            or artifact_version_id
-            or bundle_path
-            or lifecycle_state in BUILD_CONTINUE_STATES
-        )
+        should_track_build_run = bool(current_build_run or existing.get("current_build_run"))
         if should_track_build_run:
             build_run = self._merge_build_run(
-                build_registry_id=build_registry_id,
                 existing_run=existing.get("current_build_run"),
                 incoming=current_build_run,
                 lifecycle_state=lifecycle_state,
@@ -215,6 +218,9 @@ class AppRegistryRepo:
             )
             update_fields["current_build_run"] = build_run
             update_fields["build_runs"] = self._upsert_build_run(existing.get("build_runs"), build_run)
+            if build_run["build_id"] != (existing.get("current_build_run") or {}).get("build_id"):
+                update_fields["active_chat_id"] = build_run.get("active_chat_id")
+                update_fields["active_workflow_id"] = build_run.get("active_workflow_id")
         doc = await coll.find_one_and_update(query, {"$set": update_fields}, return_document=ReturnDocument.AFTER)
         return self._normalize_doc(doc)
 
@@ -223,8 +229,7 @@ class AppRegistryRepo:
         await self.ensure_indexes()
         coll = await self._collection()
         docs = await coll.find(query).sort("updated_at", -1).to_list(length=500)
-        records = [normalized for doc in docs if (normalized := self._normalize_doc(doc))]
-        return [await self._with_active_chat_fallback(record, owner_user_id=owner_user_id) for record in records]
+        return [normalized for doc in docs if (normalized := self._normalize_doc(doc))]
 
     async def get_by_app_id(self, *, app_id: str, owner_user_id: str) -> dict[str, Any] | None:
         query = {"app_id": app_id, **owner_filter(owner_user_id)}
@@ -245,73 +250,6 @@ class AppRegistryRepo:
         coll = await self._collection()
         result = await coll.delete_one(query)
         return int(getattr(result, "deleted_count", 0) or 0) > 0
-
-    async def _with_active_chat_fallback(
-        self,
-        record: dict[str, Any],
-        *,
-        owner_user_id: str,
-    ) -> dict[str, Any]:
-        active_chat_id = str(record.get("active_chat_id") or "").strip()
-        if active_chat_id:
-            if record.get("chat_app_id") and record.get("active_workflow_id"):
-                return record
-            chat_doc = await self._find_chat_session(
-                chat_id=active_chat_id,
-                owner_user_id=owner_user_id,
-            )
-            if not chat_doc:
-                return record
-            enriched = dict(record)
-            if not enriched.get("chat_app_id") and chat_doc.get("app_id"):
-                enriched["chat_app_id"] = str(chat_doc["app_id"])
-            if not enriched.get("active_workflow_id") and chat_doc.get("workflow_name"):
-                enriched["active_workflow_id"] = str(chat_doc["workflow_name"])
-            return enriched
-        if str(record.get("lifecycle_state") or "") not in BUILD_CONTINUE_STATES:
-            return record
-        # chat_app_id is the factory session app_id under which the chat was created.
-        # Use app_id-only records when owner_id has not been set yet.
-        session_app_id = str(record.get("chat_app_id") or record.get("app_id") or "").strip()
-        if not session_app_id:
-            return record
-        try:
-            client = await self._client()
-            coll = client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
-            doc = await coll.find_one(
-                {"user_id": owner_user_id, **build_app_scope_filter(session_app_id)},
-                {"_id": 1, "workflow_name": 1, "last_updated_at": 1, "created_at": 1},
-                sort=[("last_updated_at", -1), ("created_at", -1)],
-            )
-        except Exception:
-            return record
-        if not isinstance(doc, dict) or not doc.get("_id"):
-            return record
-        enriched = dict(record)
-        enriched["active_chat_id"] = str(doc["_id"])
-        enriched["active_workflow_id"] = str(doc.get("workflow_name") or "ValueEngine")
-        if doc.get("app_id"):
-            enriched["chat_app_id"] = str(doc["app_id"])
-        return enriched
-
-    async def _find_chat_session(
-        self,
-        *,
-        chat_id: str,
-        owner_user_id: str,
-    ) -> dict[str, Any] | None:
-        if not chat_id:
-            return None
-        try:
-            client = await self._client()
-            coll = client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
-            doc = await coll.find_one(
-                {"_id": chat_id, "user_id": owner_user_id},
-                {"_id": 1, "app_id": 1, "workflow_name": 1},
-            )
-        except Exception:
-            return None
-        return doc if isinstance(doc, dict) else None
 
     @staticmethod
     def _normalize_doc(doc: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -339,7 +277,6 @@ class AppRegistryRepo:
     @staticmethod
     def _merge_build_run(
         *,
-        build_registry_id: str,
         existing_run: Any,
         incoming: dict[str, Any] | None,
         lifecycle_state: str,
@@ -352,6 +289,11 @@ class AppRegistryRepo:
     ) -> dict[str, Any]:
         existing = dict(existing_run) if isinstance(existing_run, dict) else {}
         source = dict(incoming) if isinstance(incoming, dict) else {}
+        build_id = source.get("build_id") or existing.get("build_id")
+        if not build_id:
+            raise ValueError("A build run requires its server-assigned build_id")
+        if existing.get("build_id") != build_id:
+            existing = {}
 
         def choose(*values: Any) -> str | None:
             for value in values:
@@ -361,7 +303,8 @@ class AppRegistryRepo:
             return None
 
         run: dict[str, Any] = {
-            "build_id": choose(source.get("build_id"), existing.get("build_id"), build_registry_id),
+            "build_id": build_id,
+            "phase": choose(source.get("phase"), existing.get("phase")),
             "workflow_sequence": choose(
                 source.get("workflow_sequence"),
                 workflow_sequence,

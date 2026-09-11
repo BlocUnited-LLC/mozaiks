@@ -14,6 +14,7 @@ from mozaiksai.core.artifacts.models import (
     ArtifactValidationStatus,
     ArtifactVersionDoc,
 )
+from tests.factory_context import factory_context
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 
@@ -37,6 +38,9 @@ def _load_module(relative_path: str, module_name: str):
 
 
 class _Context(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(factory_context(dict(*args, **kwargs)))
+
     def get(self, key, default=None):
         return super().get(key, default)
 
@@ -658,12 +662,12 @@ def test_workflow_component_registration_is_hmr_safe() -> None:
     assert "return initializeWorkflows(registerComponent)" in app_source
 
 
-def test_existing_app_preload_mutates_an_empty_context_container() -> None:
+def test_existing_app_preload_accepts_binding_without_discovery_input() -> None:
     module = _load_module(
         "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
         "tests.preload_discovery_empty_context",
     )
-    context: dict[str, object] = {}
+    context: dict[str, object] = factory_context()
 
     result = asyncio.run(module.collect_prechat_discovery_context(context_variables=context))
 

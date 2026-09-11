@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from tests.factory_context import factory_context
 from tests.import_utils import import_module_directly
 
 design_docs_module = import_module_directly(
@@ -13,7 +14,7 @@ design_docs_module = import_module_directly(
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value

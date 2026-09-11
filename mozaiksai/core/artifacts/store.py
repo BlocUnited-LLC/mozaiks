@@ -326,6 +326,10 @@ class BuildRecordStore:
             if isinstance(refinement_request, RefinementRequestPayload)
             else RefinementRequestPayload.model_validate(refinement_request)
         )
+        if refinement_request_doc.target_app_id and refinement_request_doc.target_app_id != resolved_app_id:
+            raise ValueError("Refinement target does not match artifact storage scope")
+        if refinement_request_doc.user_id and refinement_request_doc.user_id != created_by_user_id:
+            raise ValueError("Refinement user does not match change request ownership")
         change_intent_doc = (
             change_intent
             if isinstance(change_intent, ChangeIntentDoc)

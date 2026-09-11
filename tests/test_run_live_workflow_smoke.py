@@ -22,9 +22,28 @@ from scripts.run_live_workflow_smoke import (
     _load_context_file,
     _load_prompt_file,
     _load_tool_response_file,
+    _pop_tool_response_payload,
     _resolve_assistant_message,
     _resolve_default_workflows_root,
 )
+
+
+def test_scripted_concept_approval_is_bound_to_the_emitted_draft():
+    response = _pop_tool_response_payload(
+        {"save_value_manifest": deque([{"action": "approve", "approved": True}])},
+        {"tool_name": "save_value_manifest", "payload": {"review_id": "current-draft"}},
+    )
+    assert response == {"action": "approve", "approved": True, "review_id": "current-draft", "status": "submitted"}
+
+
+def test_smoke_does_not_invent_an_approval_or_replace_a_supplied_review_id():
+    data = {"tool_name": "save_value_manifest", "payload": {"review_id": "current-draft"}}
+    assert _pop_tool_response_payload({}, data) is None
+    response = _pop_tool_response_payload(
+        {"save_value_manifest": deque([{"action": "approve", "approved": True, "review_id": "stale-draft"}])},
+        data,
+    )
+    assert response["review_id"] == "stale-draft"
 
 
 def test_smoke_result_as_dict_serializes_nested_datetimes() -> None:

@@ -3539,6 +3539,7 @@ const ChatPage = () => {
             trigger_source: 'refinement',
             app_id: resolvedAppId,
             user_id: resolvedUserId,
+            source_chat_id: currentChatId,
             trigger_payload: triggerPayload,
           }),
         }, { auth })
@@ -5869,6 +5870,7 @@ const ChatPage = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             transition_id: pendingTransitionId,
+            source_chat_id: currentChatId || null,
             option_id,
             context_variables: mergedContext,
             app_id: resolvedAppId,
@@ -5967,6 +5969,7 @@ const ChatPage = () => {
       pendingTransitionContext,
       pendingTransitionId,
       connectionInProgressRef,
+      currentChatId,
       currentWorkflowNameRef,
       rememberWorkflowChatSession,
       resolveKnownWorkflowName,

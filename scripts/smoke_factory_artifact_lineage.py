@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import tempfile
+import zipfile
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -374,28 +375,44 @@ async def _run_lineage_smoke_with_store(
 
     metadata = workflow_integration_metadata or _workflow_integration_metadata()
 
-    from factory_app.workflows.AgentGenerator.tools.platform import (
-        build_lifecycle as agent_lifecycle,
+    from factory_app.workflows.AgentGenerator.tools.generate_and_download import (
+        _register_workflow_bundle_artifact_version,
     )
-    from factory_app.workflows.AppGenerator.tools.platform.build_lifecycle import (
-        _persist_app_bundle_artifact,
+    from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+        _register_app_bundle_artifact_version,
     )
 
-    await agent_lifecycle._persist_workflow_bundle_artifact(
+    binding = {
+        "build_registry_id": f"registry_{app_id}", "target_app_id": app_id,
+        "build_id": "build_lineage_smoke", "phase": "genesis",
+    }
+    fixture_files = build_appgenerator_acceptance_files(_primary_workflow_integration(metadata))
+    app_dir = REPO_ROOT / ".local" / "smoke-artifacts" / app_id / "app"
+    app_dir.mkdir(parents=True, exist_ok=True)
+    archive = app_dir.parent / "bundle.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
+        for path, content in fixture_files.items():
+            output.writestr(f"bundle/{path}", content)
+            file_path = app_dir / path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+    await _register_workflow_bundle_artifact_version(
         app_id=app_id,
         chat_id="chat_agentgenerator",
         user_id="user_1",
         workflow_name="AgentGenerator",
-        build_mode=None,
+        bundle_name="workflow_bundle", zip_path=archive,
+        context_variables={"run_build_binding": binding},
         artifact_store=store,
         workflow_integration_metadata=metadata,
     )
-    await _persist_app_bundle_artifact(
+    await _register_app_bundle_artifact_version(
         app_id=app_id,
         chat_id="chat_appgenerator",
         user_id="user_1",
         workflow_name="AppGenerator",
-        build_mode=None,
+        bundle_name="bundle", zip_path=archive, app_dir=app_dir, written_paths=list(fixture_files),
+        context_variables={"run_build_binding": binding, "app_bundle_acceptance_status": "passed"},
         artifact_store=store,
     )
 
@@ -439,6 +456,7 @@ async def _run_lineage_smoke_with_store(
             "workflow_name": "AppGenerator",
             "app_id": app_id,
             "chat_id": "chat_appgenerator",
+            "run_build_binding": binding,
             "artifact_version_refs": current_refs,
         }
     )

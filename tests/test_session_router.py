@@ -46,9 +46,23 @@ class _MemoryCollection:
     def __init__(self) -> None:
         self._docs = {}
 
+    @staticmethod
+    def _matches(doc, query):
+        missing = object()
+        for key, expected in query.items():
+            value = doc
+            for part in key.split("."):
+                value = value.get(part, missing) if isinstance(value, dict) else missing
+            if isinstance(expected, dict) and "$exists" in expected:
+                if (value is not missing) != expected["$exists"]:
+                    return False
+            elif value is missing or value != expected:
+                return False
+        return True
+
     async def find_one(self, query, projection=None, sort=None):  # noqa: ANN001
         for doc in self._docs.values():
-            if all(doc.get(k) == v for k, v in query.items()):
+            if self._matches(doc, query):
                 return dict(doc)
         return None
 
@@ -56,7 +70,7 @@ class _MemoryCollection:
         doc_id = filter_query.get("_id")
         if not doc_id:
             for existing_id, existing_doc in self._docs.items():
-                if all(existing_doc.get(k) == v for k, v in filter_query.items()):
+                if self._matches(existing_doc, filter_query):
                     doc_id = existing_id
                     break
         if not doc_id:

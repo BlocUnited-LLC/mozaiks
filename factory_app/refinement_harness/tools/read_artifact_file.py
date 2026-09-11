@@ -36,7 +36,7 @@ async def read_artifact_file(
     or an error shape when the workspace or file is not found.
     """
     tool_context = normalize_context(context)
-    app_id = str(tool_context.app_id or "").strip()
+    app_id = str(tool_context.artifact_app_id or "").strip()
     build_record_id = str(tool_context.build_record_id or "").strip()
     path_raw = (tool_context.extra or {}).get("path") or ""
     path = safe_relpath(str(path_raw).strip())

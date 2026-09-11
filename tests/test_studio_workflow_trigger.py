@@ -3,7 +3,9 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from mozaiksai.control_plane import CodingWorkerResult, ControlPlaneConfig, ScopeProposal
@@ -20,6 +22,62 @@ from mozaiksai.core.artifacts import (
     RefinementSessionDoc,
     RefinementSessionStatus,
 )
+from mozaiksai.core.session.build_binding import RunBuildBinding
+
+_BINDING = RunBuildBinding(
+    build_registry_id="appreg_1", target_app_id="app_1", build_id="build_1", phase="refinement",
+)
+
+
+class _BaselineStore:
+    versions = {}
+
+    async def get_build_record(self, *, app_id, build_record_id):
+        return self.versions.get(build_record_id) if app_id == "app_1" else None
+
+    async def get_change_request(self, *, app_id, change_request_id):
+        if app_id != "app_1" or change_request_id not in {"cr_core_1", "cr_scope_1"}:
+            return None
+        return SimpleNamespace(id=change_request_id, created_by_user_id="demo-user")
+
+
+@pytest.fixture(autouse=True)
+def _owned_build_target(monkeypatch, tmp_path):
+    from mozaiksai.core.session.router import SessionRouter
+    from mozaiksai.hosts import studio
+    from tests.test_session_router import _FakePersistence
+
+    record = {
+        "build_registry_id": "appreg_1", "app_id": "app_1", "chat_app_id": "factory",
+        "lifecycle_state": "review",
+        "current_build_run": {"build_id": "build_1", "artifact_version_id": "av_child_1"},
+    }
+    service = SimpleNamespace(
+        get_app_record=AsyncMock(return_value={"app": record}),
+        begin_refinement_run=AsyncMock(return_value=_BINDING),
+        update_build_status=AsyncMock(return_value={"success": True, "app": record}),
+        promote_build=AsyncMock(return_value={"success": True, "app": record}),
+    )
+    monkeypatch.setattr(studio, "_get_app_registry_service", lambda: service)
+    monkeypatch.setattr(studio, "_resolve_studio_scope", lambda *args, **kwargs: ("factory", "demo-user"))
+    router = SessionRouter(persistence=_FakePersistence())
+    monkeypatch.setattr(studio, "get_session_router", lambda: router)
+    monkeypatch.setenv("MOZAIKS_WORKSPACES_PATH", str(tmp_path / "workspaces"))
+    archive = tmp_path / "baseline.zip"
+    _make_bundle_zip(archive, {
+        "app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}",
+        "app/ui/components/ExportPanel.jsx": 'export function ExportPanel() { return "old"; }',
+        "app/modules/product/backend/handler.py": "# product handler",
+        "Dockerfile": "FROM scratch",
+    })
+    versions = {
+        key: _artifact_version(artifact_version_id=key, zip_path=archive, files_manifest=[])
+        for key in ("av_123", "av_456", "av_789", "av_scope_1", "av_core_1", "av_review_1")
+    }
+    versions["av_review_1"].commit_metadata.metadata["workspace_dir"] = str(tmp_path / "staged")
+    monkeypatch.setattr(_BaselineStore, "versions", versions)
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: _BaselineStore())
+    return service
 
 
 def _make_bundle_zip(zip_path: Path, files: dict[str, str]) -> None:
@@ -67,7 +125,7 @@ def _artifact_version(
                 message="Generated artifact",
                 source_workflow="AppGenerator",
                 source_chat_id="chat_1",
-                metadata={"artifact_path": str(zip_path)},
+                metadata={"artifact_path": str(zip_path), **_BINDING.model_dump()},
             ).model_dump(mode="python"),
         }
     )
@@ -175,7 +233,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             rerouted_by_dependency=False,
         )
 
-    class _ArtifactStore:
+    class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_123")
@@ -213,6 +271,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     response = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -278,9 +337,10 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "raw_user_request": "Add an export action",
             "source_surface": "app_build",
             "app_id": captured_prepare["app_id"],
+            "target_app_id": "app_1",
             "user_id": captured_prepare["user_id"],
             "requested_workflow_id": None,
-            "extra": {},
+            "extra": {"files_manifest": []},
         },
     }
     assert "change_class" not in captured_prepare
@@ -296,7 +356,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     }
     assert persisted_changes == [
         {
-            "app_id": captured_prepare["app_id"],
+            "app_id": "app_1",
             "build_family": "app_bundle",
             "build_key": "app_bundle",
             "build_record_id": "av_123",
@@ -311,9 +371,10 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                 "raw_user_request": "Add an export action",
                 "source_surface": "app_build",
                 "app_id": captured_prepare["app_id"],
+                "target_app_id": "app_1",
                 "user_id": "demo-user",
                 "requested_workflow_id": None,
-                "extra": {},
+                "extra": {"files_manifest": []},
             },
             "change_intent": {
                 "change_class": "feature",
@@ -379,7 +440,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     ]
     assert persisted_invalidations == [
         {
-            "app_id": captured_prepare["app_id"],
+            "app_id": "app_1",
             "artifact_version_refs": {"app_bundle": "av_123"},
             "affected_artifact_kinds": ["app_bundle"],
             "reason": "change_request:cr_123",
@@ -387,7 +448,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     ]
     assert updated_router_decisions == [
         {
-            "app_id": captured_prepare["app_id"],
+            "app_id": "app_1",
             "change_request_id": "cr_123",
             "router_decision": {
                 "workflow_id": "AppGenerator",
@@ -438,6 +499,7 @@ def test_studio_trigger_endpoint_rejects_removed_top_level_refinement_fields(mon
     response = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "change_class": "patch",
             "artifact_kind": "app_bundle",
@@ -468,6 +530,7 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
     response = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -505,7 +568,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
     async def fail_launch(launch):  # noqa: ANN001
         raise AssertionError("workflow launch should not run for coding worker execution")
 
-    class _ArtifactStore:
+    class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_code_1")
@@ -568,7 +631,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
                 "validation_result": {"validation_status": "skipped", "preview_url": None},
                 "blocked_reason": None,
                 "error": None,
-                "metadata": {"artifact_version_id": "av_child_code_1"},
+                "metadata": {"build_record_id": "av_child_code_1"},
             }
         ),
     )
@@ -577,6 +640,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
     response = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -653,7 +717,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
                 "validation_result": {"validation_status": "skipped", "preview_url": None},
                 "blocked_reason": None,
                 "error": None,
-                "metadata": {"artifact_version_id": "av_child_code_1"},
+                "metadata": {"build_record_id": "av_child_code_1"},
             },
     }
     assert persisted_changes[0]["router_decision"]["execution_mode"] == "coding_worker"
@@ -690,7 +754,7 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
     async def fail_launch(launch):  # noqa: ANN001
         raise AssertionError("workflow launch should not run for coding worker execution")
 
-    class _ArtifactStore:
+    class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_code_auto_1")
@@ -719,6 +783,9 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
     async def _fake_execute(request):  # noqa: ANN001
         assert request.files == {"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"}
         assert request.metadata["scope_proposal"]["selected_paths"] == ["app/ui/pages/Dashboard.jsx"]
+        child = _BaselineStore.versions[request.build_record_id].model_copy(deep=True, update={"id": "av_child_multi_1"})
+        child.commit_metadata.metadata.update(request.run_build_binding.model_dump())
+        _BaselineStore.versions[child.id] = child
         return CodingWorkerResult.model_validate(
             {
                 "eligible": True,
@@ -746,7 +813,7 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
                 "validation_result": {"validation_status": "skipped", "preview_url": None},
                 "blocked_reason": None,
                 "error": None,
-                "metadata": {},
+                "metadata": {"build_record_id": "av_child_multi_1"},
             }
         )
 
@@ -790,6 +857,7 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
     response = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -827,7 +895,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     async def fail_launch(launch):  # noqa: ANN001
         raise AssertionError("workflow launch should not run for coding worker execution")
 
-    class _ArtifactStore:
+    class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
             return SimpleNamespace(id=f"cr_scope_{len(persisted_changes)}")
@@ -864,6 +932,9 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
             "app/ui/components/ExportPanel.jsx",
             "app/ui/pages/Dashboard.jsx",
         ]
+        child = _BaselineStore.versions[request.build_record_id].model_copy(deep=True, update={"id": "av_child_multi_1"})
+        child.commit_metadata.metadata.update(request.run_build_binding.model_dump())
+        _BaselineStore.versions[child.id] = child
         return CodingWorkerResult.model_validate(
             {
                 "eligible": True,
@@ -899,7 +970,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
                 "validation_result": {"validation_status": "skipped", "preview_url": None},
                 "blocked_reason": None,
                 "error": None,
-                "metadata": {"artifact_version_id": "av_child_multi_1"},
+                "metadata": {"build_record_id": "av_child_multi_1"},
             }
         )
 
@@ -943,6 +1014,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     first = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -968,6 +1040,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     second = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -990,7 +1063,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     assert second.status_code == 200
     second_body = second.json()
     assert second_body["execution_mode"] == "coding_worker"
-    assert second_body["coding_worker"]["metadata"]["artifact_version_id"] == "av_child_multi_1"
+    assert second_body["coding_worker"]["metadata"]["build_record_id"] == "av_child_multi_1"
 
 
 def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(monkeypatch):
@@ -1007,7 +1080,7 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     async def fail_launch(launch):  # noqa: ANN001
         raise AssertionError("workflow launch should not run before a core confirmation")
 
-    class _ArtifactStore:
+    class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             return SimpleNamespace(id="cr_core_1")
 
@@ -1034,6 +1107,7 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     response = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -1169,7 +1243,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
             rerouted_by_dependency=False,
         )
 
-    class _ArtifactStore:
+    class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             create_calls.append(kwargs)
             return SimpleNamespace(id="cr_core_1")
@@ -1184,6 +1258,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
         get_session_snapshot=fake_get_session_snapshot,
         persist_revision_intent=fake_persist_revision_intent,
     )
+    router_double.for_target = lambda target: router_double
 
     monkeypatch.setattr(studio_app, "get_session_router", lambda: router_double)
     monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fake_prepare_routed_workflow_launch)
@@ -1206,6 +1281,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     first = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -1236,6 +1312,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     second = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -1268,7 +1345,7 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
     reset_auth_adapter()
     from mozaiksai.hosts import studio as studio_app
 
-    staged_bundle_path = "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app"
+    staged_bundle_path = _BaselineStore.versions["av_review_1"].commit_metadata.metadata["workspace_dir"]
     captured_pending: dict = {}
     create_calls: list[dict] = []
 
@@ -1299,7 +1376,7 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
             "active_revision_id": "rev_app_review_1",
         }
 
-    class _ArtifactStore:
+    class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             create_calls.append(kwargs)
             return SimpleNamespace(id="cr_app_review_1")
@@ -1307,11 +1384,9 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
         async def invalidate_artifact_version_refs(self, **kwargs):
             return [kwargs["artifact_version_refs"]["app_bundle"]]
 
-    monkeypatch.setattr(
-        studio_app,
-        "get_session_router",
-        lambda: SimpleNamespace(persist_revision_intent=fake_persist_revision_intent),
-    )
+    router_double = SimpleNamespace(persist_revision_intent=fake_persist_revision_intent)
+    router_double.for_target = lambda target: router_double
+    monkeypatch.setattr(studio_app, "get_session_router", lambda: router_double)
     monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
     monkeypatch.setattr(studio_app, "launch_prepared_workflow", fail_launch)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
@@ -1332,6 +1407,7 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
     response = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "app_id": "app_1",
             "user_id": "demo-user",
@@ -1344,7 +1420,7 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
                     "source_surface": "app_review",
                     "extra": {
                         "lifecycle_state": "review",
-                        "bundle_path": staged_bundle_path,
+                        "bundle_path": "/caller/cannot/select/this",
                         "build_registry_id": "appreg_review_1",
                         "build_id": "build_review_1",
                         "app_validation_status": "skipped",
@@ -1370,7 +1446,7 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
     assert seed["artifact_root"] == staged_bundle_path
     assert seed["lifecycle_state"] == "review"
     assert seed["refinement_request_meta"]["source_surface"] == "app_review"
-    assert seed["refinement_request_meta"]["extra"]["build_registry_id"] == "appreg_review_1"
+    assert "build_registry_id" not in seed["refinement_request_meta"]["extra"]
 
     pending_request = captured_pending["pending_trigger_payload"]["refinement_request"]
     assert pending_request["build_record_id"] == "av_review_1"
@@ -1456,6 +1532,7 @@ def _build_review_store(
     _make_bundle_zip(
         parent_zip,
         {
+            "GeneratedApp/app.json": '{"appId":"app_1"}',
             "GeneratedApp/src/App.jsx": 'export default function App() { return <div>Old title</div>; }\n',
             "GeneratedApp/package.json": '{"name":"demo"}\n',
         },
@@ -1463,6 +1540,7 @@ def _build_review_store(
     _make_bundle_zip(
         child_zip,
         {
+            "GeneratedApp/app.json": '{"appId":"app_1"}',
             "GeneratedApp/src/App.jsx": 'export default function App() { return <div>Builder Workspace</div>; }\n',
             "GeneratedApp/package.json": '{"name":"demo"}\n',
         },
@@ -1512,7 +1590,7 @@ def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, 
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
-    response = client.get("/api/studio/build/artifacts/av_child_1/bundle")
+    response = client.get("/api/studio/build/artifacts/av_child_1/bundle?build_registry_id=appreg_1")
 
     assert response.status_code == 200
     body = response.json()
@@ -1539,7 +1617,7 @@ def test_studio_artifact_review_endpoint_returns_diff_and_session_context(monkey
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
-    response = client.get("/api/studio/build/artifacts/av_child_1/review")
+    response = client.get("/api/studio/build/artifacts/av_child_1/review?build_registry_id=appreg_1")
 
     assert response.status_code == 200
     body = response.json()
@@ -1577,7 +1655,7 @@ def test_studio_artifact_review_marks_skipped_validation_as_override_required(mo
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
-    response = client.get("/api/studio/build/artifacts/av_child_1/review")
+    response = client.get("/api/studio/build/artifacts/av_child_1/review?build_registry_id=appreg_1")
 
     assert response.status_code == 200
     body = response.json()
@@ -1601,7 +1679,7 @@ def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monke
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
-    response = client.post("/api/studio/build/artifacts/av_child_1/accept")
+    response = client.post("/api/studio/build/artifacts/av_child_1/accept?build_registry_id=appreg_1")
 
     assert response.status_code == 200
     body = response.json()
@@ -1623,7 +1701,7 @@ def test_studio_artifact_reject_endpoint_archives_and_updates_session(monkeypatc
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
-    response = client.post("/api/studio/build/artifacts/av_child_1/reject")
+    response = client.post("/api/studio/build/artifacts/av_child_1/reject?build_registry_id=appreg_1")
 
     assert response.status_code == 200
     body = response.json()
@@ -1647,13 +1725,15 @@ def test_studio_artifact_promote_endpoint_restores_bundle_and_updates_session(mo
     monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
 
     client = TestClient(studio_app.app)
-    response = client.post("/api/studio/build/artifacts/av_child_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_child_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 200
     body = response.json()
     assert body["promoted"] is True
-    assert body["target_path"] == str(runtime_root)
-    assert (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
+    target = tmp_path / "workspaces" / "app_1" / "av_child_1"
+    assert body["target_path"] == str(target)
+    assert (target / "app" / "src" / "App.jsx").exists()
+    assert not runtime_root.exists()
     assert store.update_calls[-1]["status"] == RefinementSessionStatus.PROMOTED
 
 
@@ -1671,13 +1751,19 @@ def _async_classifier(*, change_class: str, rationale: str, confidence: float, s
 
 def _async_coding_worker(result: dict):
     async def _run(request):  # noqa: ANN001
+        result_id = result["metadata"]["build_record_id"]
+        source = _BaselineStore.versions[request.build_record_id]
+        child = source.model_copy(deep=True, update={"id": result_id})
+        child.commit_metadata.metadata.update(request.run_build_binding.model_dump())
+        _BaselineStore.versions[result_id] = child
         return CodingWorkerResult.model_validate(result)
 
     return _run
 
 
 
-def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_changes(monkeypatch):
+@pytest.mark.parametrize("validation_status", ["passed", "failed"])
+def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_changes(monkeypatch, validation_status):
     from mozaiksai.control_plane.contracts import (
         ContractSurfacePlan,
         ContractSurfaceUpdate,
@@ -1742,7 +1828,7 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     persisted_sessions: list[dict] = []
     persisted_changes: list[dict] = []
 
-    class _ArtifactStore:
+    class _ArtifactStore(_BaselineStore):
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_surface_1")
@@ -1775,17 +1861,35 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
         return _plan, _harness_decision
 
     async def _fake_execute_surface_plan(**kwargs):
+        assert kwargs["workspace_files"]["app/modules/product/backend/handler.py"] == "# product handler"
         return _surface_result
+
+    async def _fake_finalize_surface_output(**kwargs):
+        assert kwargs["run_build_binding"] == _BINDING
+        assert "Dockerfile" in kwargs["workspace_files"]
+        child = _BaselineStore.versions["av_456"].model_copy(update={
+            "id": "surface_child", "validation_status": ArtifactValidationStatus(validation_status),
+        })
+        child.commit_metadata = child.commit_metadata.model_copy(update={
+            "metadata": {**child.commit_metadata.metadata, **_BINDING.model_dump()},
+        })
+        _BaselineStore.versions[child.id] = child
+        return CodingWorkerResult(
+            eligible=True, status="validated" if validation_status == "passed" else "failed",
+            metadata={"build_record_id": child.id},
+        )
 
     harness = studio_app.get_orchestration_control_harness()
     monkeypatch.setattr(harness, "contract_surface_enabled", lambda: True)
     monkeypatch.setattr(harness, "prepare_contract_surface_request", _fake_prepare_contract_surface)
     monkeypatch.setattr(harness, "execute_surface_plan", _fake_execute_surface_plan)
+    monkeypatch.setattr(harness, "finalize_surface_output", _fake_finalize_surface_output)
 
     client = TestClient(studio_app.app)
     response = client.post(
         "/api/workflows/trigger",
         json={
+            "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
@@ -1808,10 +1912,13 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     assert body["trigger_source"] == "refinement"
     assert body["rerouted_by_dependency"] is False
     assert body["harness_decision"]["decision_type"] == "targeted_regeneration"
-    assert body["surface_result"]["status"] == "success"
+    assert body["surface_result"]["status"] == ("success" if validation_status == "passed" else "failed")
+    assert body["surface_result"]["metadata"]["build_record_id"] == "surface_child"
     assert "app/modules/product/backend/handler.py" in body["surface_result"]["all_files"]
     assert body["refinement_session_id"] == "rs_surface_1"
     assert len(persisted_sessions) == 1
     assert persisted_sessions[0]["provider"] == "contract_surface_regeneration"
     assert persisted_sessions[0]["build_record_id"] == "av_456"
     assert persisted_sessions[0]["change_request_id"] == "cr_surface_1"
+    assert persisted_sessions[0]["result_build_record_id"] == "surface_child"
+    assert persisted_sessions[0]["status"].value == ("validated" if validation_status == "passed" else "failed")

@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mozaiksai.core.session.build_binding import BuildIdentity, RunBuildBinding
+
 
 class RefinementLane(StrEnum):
     """Canonical refinement lanes — the second classification dimension.
@@ -121,6 +123,7 @@ class ControlPlaneToolContext(BaseModel):
 
     checkpoint: str | None = None
     app_id: str | None = None
+    target_app_id: BuildIdentity | None = None
     user_id: str | None = None
     build_family: str | None = None
     build_key: str | None = None
@@ -129,6 +132,10 @@ class ControlPlaneToolContext(BaseModel):
     source_surface: str | None = None
     raw_user_request: str = ""
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def artifact_app_id(self) -> str | None:
+        return self.target_app_id or self.app_id
 
     @model_validator(mode="before")
     @classmethod
@@ -171,6 +178,9 @@ class CodingWorkerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     app_id: str
+    target_app_id: BuildIdentity | None = None
+    run_build_binding: RunBuildBinding | None = None
+    baseline_files: dict[str, str] | None = None
     user_id: str | None = None
     build_family: str
     build_key: str | None = None
@@ -185,10 +195,20 @@ class CodingWorkerRequest(BaseModel):
     context_seed: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def validate_build_binding(self) -> CodingWorkerRequest:
+        if self.run_build_binding is not None and self.run_build_binding.target_app_id != self.artifact_app_id:
+            raise ValueError("Coding request target does not match its server build binding")
+        return self
+
     @model_validator(mode="before")
     @classmethod
     def _remap_legacy_fields(cls, values: Any) -> Any:
         return _remap_legacy_artifact_fields(values)
+
+    @property
+    def artifact_app_id(self) -> str:
+        return self.target_app_id or self.app_id
 
     @property
     def artifact_kind(self) -> str:
@@ -318,6 +338,10 @@ SECRET_SENSITIVE_PATH_TERMS = (
 
 def is_secret_sensitive_path(path: str) -> bool:
     """True when a bundle-relative path matches the secret-path policy."""
+    from mozaiksai.core.secrets.contract import is_secret_contract_path
+
+    if is_secret_contract_path(path):
+        return False
     normalized = str(path or "").replace("\\", "/").lower()
     parts = [part for part in normalized.split("/") if part]
     return any(term in normalized for term in SECRET_SENSITIVE_PATH_TERMS) or any(

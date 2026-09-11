@@ -1,4 +1,11 @@
 definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
   workflow_bundle_export_outcome:
     type: string
     authority_class: closed_writer_routing_state
@@ -340,7 +347,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - ConceptOverview
   concept_api_endpoints:
@@ -352,7 +359,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - ApiEndpoints
       default: []
@@ -365,7 +372,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - Blueprint
       default: null
@@ -379,7 +386,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -396,7 +403,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -413,7 +420,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -439,7 +446,7 @@ definitions:
       database_name: mozaiksai
       collection: ArtifactVersions
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         build_family: subscription_contract
         build_key: subscription_contract
         lifecycle_status: current
@@ -570,7 +577,7 @@ definitions:
       database_name: mozaiksai
       collection: ChatSessions
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         _id: '{{runtime.chat_id}}'
       fields:
       - attachments

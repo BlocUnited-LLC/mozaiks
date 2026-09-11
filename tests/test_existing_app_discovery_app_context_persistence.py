@@ -15,6 +15,7 @@ from mozaiksai.core.app_context.models import (
 )
 from mozaiksai.core.app_context.store import APP_CONTEXT_VERSION_ARTIFACT_KIND
 from mozaiksai.core.artifacts.models import ArtifactLifecycleStatus, ArtifactValidationStatus
+from tests.factory_context import factory_context
 
 ROOT = Path(__file__).resolve().parents[1]
 save_module = importlib.import_module(
@@ -182,7 +183,7 @@ def _discovery_output() -> dict:
 
 def _context() -> dict:
     return {
-        "app_id": "ops_studio",
+        **factory_context({"app_id": "ops_studio"}),
         "chat_id": "chat_ops_001",
         "repo_summary": {
             "repo_path": "repos/ops-studio",

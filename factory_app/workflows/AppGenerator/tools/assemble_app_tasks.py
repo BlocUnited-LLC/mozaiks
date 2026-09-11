@@ -327,7 +327,9 @@ async def assemble_app_tasks(
                 )
             feature_outputs.append({"code_files": schema_code_files})
 
-        app_id = context_variables.get("app_id")
+        from factory_app.workflows._shared.platform.build_target import require_build_binding
+
+        app_id = require_build_binding(context_variables).target_app_id
         inject_key = "app_task_batch_results"
 
         merged = context_variables.get(inject_key)

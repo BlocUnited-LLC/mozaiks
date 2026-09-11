@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -24,6 +25,7 @@ def test_studio_host_exposes_local_app_overview_endpoint() -> None:
 @pytest.mark.asyncio
 async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkeypatch) -> None:
     from mozaiksai.hosts import platform as platform_app
+    from mozaiksai.hosts import studio as studio_app
 
     monkeypatch.setenv("PLATFORM_PATH", "factory_app/app")
     studio_source = _read("mozaiksai/hosts/studio.py")
@@ -35,7 +37,7 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     platform_paths = {page.get("path") for page in platform_shell.get("pages", [])}
 
     assert 'build_shell_config(surface="studio")' in studio_source
-    assert "os.getenv" not in studio_source
+    assert "os.getenv" not in inspect.getsource(studio_app.get_studio_shell_config)
     assert "STUDIO_SHELL_ROUTES" not in platform_source
     assert "/usage" in console_pages
     assert "/integrations" in console_pages

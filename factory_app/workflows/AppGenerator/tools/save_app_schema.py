@@ -18,6 +18,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
     custom_route_bundle_page_files,
     dedupe,
 )
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
     load_default_ai_config,
 )
@@ -111,24 +112,8 @@ def _resolve_artifact_ids(
     context_variables: Any | None,
     manifest_dict: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
-    manifest_dict = manifest_dict or {}
-    app_id = (
-        _context_get(context_variables, "app_id")
-        or os.getenv("MOZAIKS_APP_ID")
-        or manifest_dict.get("app_id")
-        or manifest_dict.get("app_name")
-        or "local-app"
-    )
-    build_id = (
-        _context_get(context_variables, "build_id")
-        or _context_get(context_variables, "chat_id")
-        or os.getenv("MOZAIKS_BUILD_ID")
-        or "local-build"
-    )
-    return (
-        _safe_path_segment(app_id, fallback="local-app"),
-        _safe_path_segment(build_id, fallback="local-build"),
-    )
+    binding = require_build_binding(context_variables)
+    return binding.target_app_id, binding.build_id
 
 
 def _normalize_list(value: Any) -> list[Any]:
@@ -1454,6 +1439,7 @@ def _persist_to_filesystem(
     default_route = manifest_dict.get("default_route") or "/"
     auth_strategy = manifest_dict.get("auth_strategy")
     app_json = {
+        "appId": require_build_binding(context_variables).target_app_id,
         "appName": manifest_dict["app_name"],
         "startup": {"landing_spot": default_route},
         "targets": {"web": True, "mobile": False},
@@ -1474,7 +1460,7 @@ def _persist_to_filesystem(
     written.append("app.json")
 
     workflow_sequence = _context_text(context_variables, "workflow_sequence")
-    build_id = _context_text(context_variables, "build_id")
+    build_id = require_build_binding(context_variables).build_id
     generated_artifact_id = _context_text(context_variables, "generated_artifact_id")
     artifact_version_id = _context_text(context_variables, "artifact_version_id")
     app_context_version_id = _context_text(context_variables, "app_context_version_id")

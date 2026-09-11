@@ -1,4 +1,11 @@
 definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
   build_mode:
     type: string
     description: >
@@ -233,7 +240,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - ConceptOverview
       default: null
@@ -251,7 +258,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - Blueprint
       default: null
@@ -270,7 +277,7 @@ definitions:
       database_name: mozaiksai
       collection: ThemeCaptures
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - theme_config
       default: null

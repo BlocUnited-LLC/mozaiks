@@ -309,10 +309,13 @@ async def save_subscription_contract(
     if not isinstance(output, dict):
         return {"success": False, "error": "No SubscriptionContractOutput structured output found"}
 
-    app_id = _cv_get(context_variables, "app_id") or output.get("app_id")
+    from factory_app.workflows._shared.platform.build_target import require_build_binding
+
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
-    build_mode = _cv_get(context_variables, "build_mode")
+    build_mode = "revision" if binding.phase == "refinement" else "genesis"
     workflow_name = _cv_get(context_variables, "workflow_name") or "SubscriptionContractDesigner"
 
     if not app_id:

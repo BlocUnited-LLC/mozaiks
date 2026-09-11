@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.factory_context import factory_context
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -25,7 +27,7 @@ save_app_schema_module = _load_save_app_schema_module()
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value

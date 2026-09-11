@@ -44,7 +44,6 @@ CANONICAL_STUDIO_ROUTES = {
     ("GET", "/api/studio/overview"),
     ("GET", "/api/studio/apps"),
     ("POST", "/api/studio/apps"),
-    ("PUT", "/api/studio/apps/{build_registry_id}/status"),
     ("GET", "/api/studio/build"),
     ("PUT", "/api/studio/build"),
     ("WS", "/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"),

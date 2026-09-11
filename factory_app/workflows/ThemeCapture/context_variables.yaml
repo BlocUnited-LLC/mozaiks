@@ -4,6 +4,13 @@
 # the same way they do in the rest of the platform workflows.
 
 definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
   app_url:
     type: string
     description: Optional live URL used to preload deterministic theme evidence.

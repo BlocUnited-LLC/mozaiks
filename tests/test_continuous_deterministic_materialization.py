@@ -20,6 +20,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
 from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.validation import GeneratedAppValidationRequest, validate_generated_app_bundle
+from tests.factory_context import factory_context
 from tests.import_utils import import_module_directly
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -38,7 +39,7 @@ PACK_OUTPUT_PATHS = frozenset(
 
 class _Context:
     def __init__(self, initial: dict[str, Any] | None = None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)

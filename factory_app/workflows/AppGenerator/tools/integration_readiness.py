@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.workflow.generator_support.connector_request import (
     collect_missing_connector_needs,
 )
@@ -55,6 +56,7 @@ async def check_integration_readiness(
 
     return await collect_missing_connector_needs(
         context_variables=context_variables,
+        target_app_id=require_build_binding(context_variables).target_app_id,
         required_at=required_at,
         prompt=prompt,
     )

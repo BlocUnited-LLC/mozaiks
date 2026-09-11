@@ -26,6 +26,11 @@ This project follows a practical pre-1.0 changelog format:
 
 - Bind app service imports to the selected workspace on reload and reset
   platform health state for each startup attempt.
+- Keep Factory execution identity separate from generated-app targets through
+  handoffs, revision routing, artifact access, and downloads. Generated bundles
+  are promoted into version-specific workspaces, not the running Studio app.
+  Build identity and lifecycle pointers are server-owned; callers select an
+  owned registry record instead of supplying target IDs or artifact paths.
 
 - Build-record and version-counter uniqueness now follows `build_family` and
   `build_key`. Known retired indexes are replaced without deleting records;

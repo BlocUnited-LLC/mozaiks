@@ -496,6 +496,45 @@ async def test_execute_plan_propagates_requires_schema_migration():
 
 
 @pytest.mark.asyncio
+async def test_surface_finalization_reuses_validation_and_saves_complete_target_bundle(tmp_path):
+    import zipfile
+
+    from mozaiksai.control_plane.implementations.orchestration_control import (
+        OrchestrationControlHarness,
+    )
+    from mozaiksai.core.session.build_binding import RunBuildBinding
+    from tests.test_coding_worker import ScopedRefinementCodingWorker, _FakeArtifactStore
+
+    async def validate(**kwargs):
+        assert kwargs["app_id"] == "tracker"
+        assert kwargs["overlay_files"]["app.json"] == '{"appId":"tracker"}'
+        assert kwargs["overlay_files"]["modules/x/backend/service.py"] == "VALUE = 2\n"
+        return {"validation_status": "passed"}
+
+    store = _FakeArtifactStore()
+    worker = ScopedRefinementCodingWorker(source_validation_runner=validate, artifact_store=store, output_root=tmp_path)
+    harness = OrchestrationControlHarness(coding_worker=worker)
+    binding = RunBuildBinding(target_app_id="tracker", build_registry_id="registry", build_id="revision", phase="refinement")
+    request = _make_refinement_request(app_id="factory").model_copy(update={"target_app_id": "tracker", "build_record_id": "parent"})
+    plan = ContractSurfacePlan(
+        summary="Update service", build_family="app_bundle", change_class="feature",
+        surfaces=[_make_surface("module_action", "x", ["modules/x/backend/service.py"])],
+    )
+    result = await harness.finalize_surface_output(
+        plan=plan, result=SurfacePlanExecutionResult(status="success", all_files={"modules/x/backend/service.py": "VALUE = 2\n"}),
+        refinement_request=request, routing_decision=_make_routing_decision(), run_build_binding=binding,
+        workspace_files={"app.json": '{"appId":"tracker"}', "modules/x/backend/service.py": "VALUE = 1\n"},
+    )
+    assert result.status == "validated"
+    assert store.calls[0]["app_id"] == "tracker"
+    assert store.calls[0]["parent_build_record_id"] == "parent"
+    metadata = store.calls[0]["commit_metadata"]["metadata"]
+    assert all(metadata[key] == value for key, value in binding.model_dump().items())
+    with zipfile.ZipFile(metadata["artifact_path"]) as archive:
+        assert set(archive.namelist()) == {"app.json", "modules/x/backend/service.py"}
+
+
+@pytest.mark.asyncio
 async def test_harness_execute_surface_plan_delegates_to_worker():
     from mozaiksai.control_plane.config import ControlPlaneCapabilityConfig
     from mozaiksai.control_plane.implementations.orchestration_control import (

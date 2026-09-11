@@ -10,6 +10,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     ManagedCapabilityTemplateError,
     resolve_templates_for_pack,
 )
+from tests.factory_context import factory_context
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 OPERATOR_READINESS_PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "operator_readiness"
@@ -17,7 +18,7 @@ OPERATOR_READINESS_PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "op
 
 class _Ctx:
     def __init__(self, data: dict[str, Any]) -> None:
-        self.data = dict(data)
+        self.data = factory_context(data)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)

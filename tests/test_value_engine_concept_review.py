@@ -17,9 +17,13 @@ from mozaiksai.core.workflow.context.authority import build_context_authority_po
 from mozaiksai.core.workflow.contract_validation import validate_workflow_tool_outcomes
 from mozaiksai.core.workflow.declarative.contracts import ToolOutcomeSpec
 from mozaiksai.core.workflow.validation.tool_outcomes import wrap_tool_outcome
+from tests.factory_context import factory_context
 
 
 class Context(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(factory_context(dict(*args, **kwargs)))
+
     def set(self, key, value):
         self[key] = value
 
@@ -70,7 +74,8 @@ async def test_approval_is_structured_bound_to_draft_and_persisted(review):
     assert review.context["value_manifest"]["status"] == "approved"
     assert review.context["value_manifest"]["approved_scope"] == ["List, add, and edit customers"]
     assert review.persist.await_args.kwargs["summary_payload"]["status"] == "approved"
-    assert review.context["app_id"] == "build-app"
+    assert review.context["app_id"] == "factory-test"
+    assert review.context["run_build_binding"]["target_app_id"] == "build-app"
 
 
 @pytest.mark.parametrize("action,outcome", [("request_changes", "changes_requested"), ("cancel", "cancelled")])
@@ -164,7 +169,8 @@ async def test_review_outcome_drives_native_ag2_graph_and_resumes(review, action
             assert result.context_variables["concept_review_attempts"] == 2
             assert len(review.emitted) == 2
             assert review.emitted[0][1]["review_id"] != review.emitted[1][1]["review_id"]
-        assert result.context_variables["app_id"] == "build-app"
+        assert result.context_variables["app_id"] == "factory-test"
+        assert result.context_variables["run_build_binding"]["target_app_id"] == "build-app"
         if result.status is RunStatus.COMPLETED:
             assert result.context_variables["value_manifest"]["status"] == "approved"
             assert result.context_variables["concept_review_feedback"] == "Keep the scope small."
@@ -189,9 +195,19 @@ async def test_failed_approved_summary_persistence_does_not_advance(review):
     assert review.context.get("value_manifest", {}).get("status") != "approved"
 
 
-@pytest.mark.parametrize("key", ["app_id", "chat_id", "user_id", "structured_output"])
+@pytest.mark.parametrize("key", ["chat_id", "user_id", "structured_output"])
 async def test_missing_required_context_blocks(review, key):
     review.context.pop(key)
     result = await module.save_value_manifest(review.context)
     assert result["outcome"] == "blocked"
+    assert review.emitted == []
+
+
+async def test_missing_server_binding_cannot_save_or_request_review(review):
+    from pydantic import ValidationError
+
+    review.context.pop("run_build_binding")
+    with pytest.raises(ValidationError):
+        await module.save_value_manifest(review.context)
+    review.store.save_concept.assert_not_awaited()
     assert review.emitted == []

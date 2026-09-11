@@ -28,6 +28,7 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, M
 from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
+from tests.factory_context import factory_context
 from tests.module_authority_test_helpers import enforce_authority
 from tests.test_generated_saas_subscription_runtime_acceptance import (
     _Collection,
@@ -43,7 +44,7 @@ MOZAIKSPAY_PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "mozaikspay
 
 class _Context:
     def __init__(self, data: dict[str, Any]) -> None:
-        self.data = dict(data)
+        self.data = factory_context(data)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)

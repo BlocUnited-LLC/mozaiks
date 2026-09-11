@@ -9,6 +9,13 @@
 # 5. canonical artifact assembly
 
 definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
   app_type:
     type: string
     description: Always "brownfield_app" for this workflow unless explicitly overridden by a trigger.

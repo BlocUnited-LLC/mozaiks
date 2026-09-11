@@ -77,7 +77,9 @@ def _payload_for(model_cls: type[BaseModel]) -> dict[str, Any]:
 
 class _PatternContext:
     def __init__(self) -> None:
-        self.data: dict[str, Any] = {}
+        from tests.factory_context import factory_context
+
+        self.data: dict[str, Any] = factory_context({"app_id": "app-theme-1"})
 
     def get(self, key, default=None):
         return self.data.get(key, default)
@@ -256,4 +258,6 @@ async def test_extra_field_attack_rejects_before_normalization(
     assert side_effect_probes["summary_artifacts"] == []
     assert side_effect_probes["theme_saves"] == []
     assert side_effect_probes["context_persists"] == []
-    assert pattern.data == {}
+    from tests.factory_context import factory_context
+
+    assert pattern.data == factory_context({"app_id": "app-theme-1"})

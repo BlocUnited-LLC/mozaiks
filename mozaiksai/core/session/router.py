@@ -32,7 +32,11 @@ from .model import (
     UnmetDependency,
 )
 from .persistence import SessionStateStore
-from .trigger_routing import NullTriggerRouteResolver, TriggerRouteResolver
+from .trigger_routing import (
+    NullTriggerRouteResolver,
+    TriggerRouteResolver,
+    TriggerRoutingContribution,
+)
 
 logger = get_core_logger("session_router")
 
@@ -46,12 +50,36 @@ class SessionRouter:
         persistence: AG2PersistenceManager | None = None,
         trigger_route_resolver: TriggerRouteResolver | None = None,
         store: SessionStateStore | None = None,
+        target_app_id: str | None = None,
     ) -> None:
         self._persistence = persistence or AG2PersistenceManager()
         self._trigger_route_resolver = trigger_route_resolver or NullTriggerRouteResolver()
         self._store = store or SessionStateStore(self._persistence)
+        self._target_app_id = target_app_id
 
-    async def route_trigger(self, trigger: TriggerInput) -> RoutingDecision:
+    def for_target(self, target_app_id: str | None) -> SessionRouter:
+        """Use a verified target without changing the executing application."""
+        if target_app_id == self._target_app_id:
+            return self
+        return SessionRouter(
+            persistence=self._persistence,
+            trigger_route_resolver=self._trigger_route_resolver,
+            store=self._store,
+            target_app_id=target_app_id,
+        )
+
+    def _chat_scope(self, app_id: str) -> dict[str, Any]:
+        scope = build_app_scope_filter(app_id)
+        if self._target_app_id:
+            scope["run_build_binding.target_app_id"] = self._target_app_id
+        else:
+            scope["run_build_binding"] = {"$exists": False}
+        return scope
+
+    async def route_trigger(
+        self, trigger: TriggerInput, *, contribution: TriggerRoutingContribution | None = None,
+    ) -> RoutingDecision:
+        trigger.target_app_id = self._target_app_id
         app_id = str(trigger.app_id or "").strip()
         user_id = str(trigger.user_id or "").strip()
         str(trigger.trigger_source or "").strip().lower() or "chat"
@@ -65,7 +93,7 @@ class SessionRouter:
         is_full_restart = False
         lifecycle_state = SessionLifecycle.ACTIVE
 
-        route_contribution = await self._trigger_route_resolver.resolve(trigger)
+        route_contribution = contribution if contribution is not None else await self._trigger_route_resolver.resolve(trigger)
         if route_contribution is not None:
             context_seed.update(route_contribution.context_seed)
             explanation = route_contribution.explanation
@@ -308,7 +336,7 @@ class SessionRouter:
         # refinement requests — even after a normal (non-revision) workflow run.
         try:
             from mozaiksai.core.artifacts.store import get_artifact_store
-            current_refs = await get_artifact_store().get_current_build_record_refs(app_id=app)
+            current_refs = await get_artifact_store().get_current_build_record_refs(app_id=self._target_app_id or app)
             if current_refs:
                 state.artifact_version_refs.update(current_refs)
         except Exception as exc:
@@ -466,6 +494,8 @@ class SessionRouter:
             }
 
         if requested_chat:
+            if self._target_app_id is not None:
+                raise ValueError("Requested workflow session is not available in this target")
             latest_requested_workflow_doc = await self._find_latest_chat_doc(
                 coll=coll,
                 app_id=app,
@@ -743,13 +773,14 @@ class SessionRouter:
 
     async def _load_or_create_state(self, *, app_id: str, user_id: str) -> SessionState:
         now = datetime.now(UTC)
-        state = await self._store.load(app_id=app_id, user_id=user_id)
+        state = await self._store.load(app_id=app_id, user_id=user_id, target_app_id=self._target_app_id)
         if state is not None:
             return state
         return SessionState(
-            session_id=SessionStateStore.session_id_for_scope(app_id, user_id),
+            session_id=SessionStateStore.session_id_for_scope(app_id, user_id, self._target_app_id),
             app_id=app_id,
             user_id=user_id,
+            target_app_id=self._target_app_id,
             created_at=now,
             updated_at=now,
         )
@@ -963,7 +994,7 @@ class SessionRouter:
             "workflow_name": workflow_id,
         }
         await coll.update_one(
-            {"_id": chat_id, **build_app_scope_filter(app_id)},
+            {"_id": chat_id, "user_id": state.user_id, **self._chat_scope(app_id)},
             {"$set": update},
         )
 
@@ -973,6 +1004,7 @@ class SessionRouter:
             "session_id": state.session_id,
             "app_id": state.app_id,
             "user_id": state.user_id,
+            "target_app_id": state.target_app_id,
             "sequence_status": state.sequence_status.value,
             "sequence_completed_at": (
                 state.sequence_completed_at.isoformat()
@@ -1063,7 +1095,7 @@ class SessionRouter:
         query = {
             "_id": target_chat_id,
             "user_id": str(user_id),
-            **build_app_scope_filter(app_id),
+            **self._chat_scope(app_id),
         }
         if workflow_id:
             query["workflow_name"] = str(workflow_id)
@@ -1081,7 +1113,7 @@ class SessionRouter:
     ) -> dict[str, Any] | None:
         query = {
             "user_id": str(user_id),
-            **build_app_scope_filter(app_id),
+            **self._chat_scope(app_id),
         }
         if workflow_id:
             query["workflow_name"] = str(workflow_id)
@@ -1160,7 +1192,7 @@ class SessionRouter:
                     "journey_position": int(journey_position),
                     "workflow_name": str(workflow),
                     "status": int(WorkflowStatus.COMPLETED),
-                    **build_app_scope_filter(app_id),
+                    **self._chat_scope(app_id),
                 },
                 projection={"_id": 1},
                 sort=[("completed_at", -1), ("created_at", -1)],
@@ -1338,7 +1370,7 @@ class SessionRouter:
         query = {
             "workflow_name": str(workflow_id),
             "status": int(WorkflowStatus.COMPLETED),
-            **build_app_scope_filter(app_id),
+            **self._chat_scope(app_id),
         }
         if scope == "user":
             query["user_id"] = str(user_id)
@@ -1505,3 +1537,31 @@ def get_session_router() -> SessionRouter:
     if _router is None:
         _router = SessionRouter(trigger_route_resolver=_router_trigger_route_resolver)
     return _router
+
+
+async def get_session_router_for_chat(
+    *, app_id: str, user_id: str, chat_id: str, session_router: SessionRouter | None = None,
+) -> SessionRouter:
+    """Resolve routing scope from an owned session, never the last active app."""
+    from mozaiksai.core.data.persistence.persistence_manager import SERVER_OWNED_SESSION_FIELDS
+    from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+
+    from .build_binding import BuildTargetReference, RunBuildBinding
+
+    reference = BuildTargetReference(source_chat_id=chat_id)
+    router = session_router or get_session_router()
+    coll = await router._persistence._coll()
+    doc = await coll.find_one(
+        {"_id": reference.source_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+        {"workflow_name": 1, **{key: 1 for key in SERVER_OWNED_SESSION_FIELDS}},
+    )
+    if not isinstance(doc, dict):
+        raise ValueError("Workflow session is not available")
+    fields = {key: doc[key] for key in SERVER_OWNED_SESSION_FIELDS if key in doc}
+    await get_platform_hooks().call_chat_session_fields(
+        app_id=app_id, user_id=user_id, workflow_name=doc["workflow_name"],
+        chat_id=chat_id, phase="resume", session_fields=fields,
+    )
+    raw_binding = fields.get("run_build_binding")
+    binding = RunBuildBinding.model_validate(raw_binding) if raw_binding is not None else None
+    return router.for_target(binding.target_app_id if binding is not None else None)

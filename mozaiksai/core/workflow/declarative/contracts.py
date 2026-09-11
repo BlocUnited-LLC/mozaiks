@@ -320,7 +320,7 @@ class ContextTriggerSpec(DeclarativeModel):
 
 
 class ContextVariableSourceSpec(DeclarativeModel):
-    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context"]
+    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context", "runtime"]
     env_var: str | None = None
     default: Any | None = None
     required: bool | None = None

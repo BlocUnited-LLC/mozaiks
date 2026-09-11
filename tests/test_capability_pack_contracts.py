@@ -1007,6 +1007,8 @@ def test_app_build_plan_tool_rejects_refinement_harness_non_yaml_prompt() -> Non
 
 
 def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(monkeypatch) -> None:
+    from tests.factory_context import factory_context
+
     module = _load_module(
         "factory_app/workflows/ValueEngine/tools/manifest.py",
         "tests.valueengine_manifest_direct",
@@ -1032,6 +1034,7 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(m
     context = _Context(
         chat_id="chat_value_123",
         app_id="app_123",
+        run_build_binding=factory_context({"app_id": "app_123"})["run_build_binding"],
         user_id="user_123",
         workflow_name="ValueEngine",
         structured_output={

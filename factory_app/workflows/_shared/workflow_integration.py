@@ -318,9 +318,9 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
         apply_workflow_integration_context(context_variables, existing)
         return {"status": "hydrated", "source": "context_variables", "workflow_count": len(existing["workflows"])}
 
-    app_id = _text(_context_get(context_variables, "app_id"))
-    if not app_id:
-        return {"status": "skipped", "reason": "missing_app_id"}
+    from factory_app.workflows._shared.platform.build_target import require_build_binding
+
+    app_id = require_build_binding(context_variables).target_app_id
 
     if artifact_store is None:
         try:

@@ -80,8 +80,8 @@ def test_app_build_review_uses_authenticated_fetch_for_artifact_routes() -> None
     source = _read(PAGES / "AppBuildReviewPage.jsx")
 
     assert "import { studioFetch } from './studioApi.js'" in source
-    assert "studioFetch(\n    `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${endpoint}?app_id=${encodeURIComponent(appId)}`" in source
-    assert "studioFetch(\n          `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review?app_id=${encodeURIComponent(appId)}`" in source
+    assert "studioFetch(\n    `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${endpoint}?build_registry_id=${encodeURIComponent(buildRegistryId)}`" in source
+    assert "studioFetch(\n          `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review?build_registry_id=${encodeURIComponent(buildRegistryId)}`" in source
     assert "fetch(\n    `${API_BASE}/api/studio/build/artifacts/" not in source
     assert "fetch(\n          `${API_BASE}/api/studio/build/artifacts/" not in source
 
@@ -98,8 +98,8 @@ def test_app_workbench_uses_authenticated_fetch_for_artifact_review_actions() ->
     source = _read(ROOT / "factory_app" / "workflows" / "AppGenerator" / "ui" / "AppWorkbench.js")
 
     assert "import { studioFetch } from '../../../app/admin/pages/studioApi.js';" in source
-    assert "studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review`)" in source
-    assert "studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`" in source
+    assert "studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review${artifactQuery}`)" in source
+    assert "studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}${artifactQuery}`" in source
     assert "fetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review`)" not in source
     assert "fetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`" not in source
 

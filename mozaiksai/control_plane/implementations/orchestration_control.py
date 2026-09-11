@@ -19,6 +19,8 @@ from mozaiksai.control_plane.contracts import (
     CodingWorkerResult,
     ContractSurfacePlan,
     HarnessDecision,
+    ProposedFileChange,
+    StagedPatchProposal,
     SurfacePlanExecutionResult,
 )
 from mozaiksai.control_plane.invalidation import (
@@ -33,6 +35,7 @@ from mozaiksai.control_plane.metrics import (
 from mozaiksai.control_plane.refinement_tracking import record_refinement_event
 from mozaiksai.control_plane.runtime import ControlPlaneCheckpointRuntime
 from mozaiksai.core.artifacts import ArtifactStore
+from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
 
@@ -135,6 +138,7 @@ class OrchestrationControlHarness:
         *,
         payload: dict,
         app_id: str | None = None,
+        target_app_id: str | None = None,
         user_id: str | None = None,
         requested_workflow_id: str | None = None,
         default_source_surface: str | None = None,
@@ -144,6 +148,7 @@ class OrchestrationControlHarness:
         return self._refinement_resolver.request_from_payload(
             payload=payload,
             app_id=app_id,
+            target_app_id=target_app_id,
             user_id=user_id,
             requested_workflow_id=requested_workflow_id,
             default_source_surface=default_source_surface,
@@ -266,6 +271,34 @@ class OrchestrationControlHarness:
     def build_harness_decision(self, routing_decision: RefinementRoutingDecision) -> HarnessDecision:
         return self._decision_policy.for_workflow_route(routing_decision)
 
+    async def finalize_surface_output(
+        self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
+        refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
+        workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
+    ) -> CodingWorkerResult:
+        if result.status != "success" or plan.requires_schema_migration or plan.build_family != "app_bundle":
+            return CodingWorkerResult(eligible=True, status="failed", error="Surface output requires workflow completion")
+        owned_paths = {path for surface in plan.surfaces for path in surface.affected_paths}
+        if not result.all_files or set(result.all_files) - owned_paths:
+            raise ValueError("Surface output is empty or outside its declared scope")
+        request = CodingWorkerRequest(
+            app_id=refinement_request.app_id, target_app_id=refinement_request.target_app_id,
+            user_id=refinement_request.user_id, run_build_binding=run_build_binding,
+            build_family=refinement_request.build_family, build_key=refinement_request.normalized_build_key(),
+            build_record_id=refinement_request.build_record_id, requested_workflow_id=routing_decision.workflow_id,
+            raw_user_request=refinement_request.raw_user_request, change_class=plan.change_class,
+            source_surface=refinement_request.source_surface,
+            files={path: workspace_files.get(path, "") for path in owned_paths},
+            baseline_files=workspace_files, validation_strategy="local",
+        )
+        proposal = StagedPatchProposal(
+            proposal_id=run_build_binding.build_id, provider_id="contract_surface_regeneration",
+            status="completed", summary=plan.summary, rationale=plan.summary,
+            owned_paths=sorted(owned_paths), needs_human_review=True,
+            changed_files=[ProposedFileChange(path=path, content=content) for path, content in result.all_files.items()],
+        )
+        return await self._coding_worker.finalize_proposal(request, proposal)
+
     def build_coding_request(
         self,
         *,
@@ -282,6 +315,7 @@ class OrchestrationControlHarness:
         safe_files = files if isinstance(files, dict) else {}
         return CodingWorkerRequest(
             app_id=str(refinement_request.app_id or "").strip(),
+            target_app_id=refinement_request.target_app_id,
             user_id=str(refinement_request.user_id or "").strip() or None,
             build_family=refinement_request.build_family,
             build_key=refinement_request.normalized_build_key(),

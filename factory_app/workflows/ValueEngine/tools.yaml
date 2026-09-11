@@ -93,11 +93,6 @@ tools:
 # LIFECYCLE TOOLS
 # ============================================================================
 lifecycle_tools:
-  - trigger: before_chat
-    agent: null
-    file: create_app_record.py
-    function: create_app_record
-    description: Create a hosted build-registry record at pipeline start so the Apps directory shows the app as in-progress immediately.
   - trigger: on_start
     agent: null
     file: ../_shared/platform/build_lifecycle.py

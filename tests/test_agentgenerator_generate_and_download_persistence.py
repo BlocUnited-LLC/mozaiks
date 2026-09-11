@@ -52,7 +52,13 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
 
     zip_path = tmp_path / "GeneratedWorkflow.zip"
     zip_path.write_bytes(b"fake workflow bytes")
-    context = _Context({"artifact_version_id": "av_parent_1"})
+    context = _Context({
+        "artifact_version_id": "av_parent_1",
+        "run_build_binding": {
+            "build_registry_id": "registry_123", "target_app_id": "app_123",
+            "build_id": "build_123", "phase": "refinement",
+        },
+    })
     workflow_integration_metadata = {
         "contract_version": "1.0",
         "workflows": [

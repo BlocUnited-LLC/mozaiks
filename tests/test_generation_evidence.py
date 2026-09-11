@@ -44,7 +44,9 @@ async def test_completion_outbox_carries_current_evidence_before_delivery(monkey
 
     context = {"app_id": "app", "build_id": "build", "build_registry_id": "registry",
                "journey_instance_id": "journey", "execution_id": "execution",
-               "session_context": {"module_contract_quality_status": "passed"}}
+               "session_context": {"module_contract_quality_status": "passed"},
+               "target_app_id": "target", "phase": "genesis", "user_id": "alice", "chat_id": "chat",
+               "journey_key": "build", "journey_position": 0}
     monkeypatch.setattr(hooks, "_resolve_build_event_context", AsyncMock(return_value=context))
     monkeypatch.setattr(hooks, "_should_emit_build_completed", lambda **kw: True)
     monkeypatch.setattr(hooks, "get_build_artifacts", AsyncMock(return_value={}))
@@ -83,11 +85,11 @@ async def test_declared_completion_hook_receives_live_normalized_plan(monkeypatc
     manager.load_lifecycle_tools()
     tool = next(t for t in manager.tools[lifecycle.LifecycleTrigger.ON_COMPLETE] if t.function == "emit_build_completed")
     assert tool.accepts_context
-    monkeypatch.setitem(tool.callable.__globals__, "_read_build_mode", AsyncMock(return_value=None))
-    monkeypatch.setitem(tool.callable.__globals__, "_persist_app_bundle_artifact", AsyncMock())
     monkeypatch.setattr(hooks, "_resolve_build_event_context", AsyncMock(return_value={
         "app_id": "app", "build_id": "build", "build_registry_id": "registry",
         "execution_id": "execution", "journey_instance_id": "journey", "session_context": {},
+        "target_app_id": "target", "phase": "genesis", "user_id": "alice", "chat_id": "chat",
+        "journey_key": "build", "journey_position": 0,
     }))
     monkeypatch.setattr(hooks, "_should_emit_build_completed", lambda **kw: True)
     monkeypatch.setattr(hooks, "get_build_artifacts", AsyncMock(return_value={}))

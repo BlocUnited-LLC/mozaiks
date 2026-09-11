@@ -7,6 +7,7 @@ from factory_app.workflows._shared.context_graph.prompt_pack import (
     build_context_graph_prompt_pack,
     build_context_graph_unavailable_pack,
 )
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.control_plane.app_context import (
     get_current_app_context_graph,
     get_current_app_context_summary,
@@ -21,24 +22,7 @@ from mozaiksai.core.app_context import build_app_intelligence_catalog, build_sou
 async def load_context_graph_context(context_variables: Any = None) -> dict[str, Any]:
     """Load a compact Context Graph pack into workflow context before chat starts."""
     data = _context_data(context_variables)
-    app_id = _text(data.get("app_id"))
-    if not app_id:
-        _set_app_intelligence_unavailable(context_variables, reason="missing_app_id", warnings=["missing_app_id"])
-        _set_context_value(
-            context_variables,
-            "context_graph_pack",
-            build_context_graph_unavailable_pack(reason="missing_app_id", warnings=["missing_app_id"]),
-        )
-        _set_context_value(context_variables, "context_graph_catalog", None)
-        _set_context_value(context_variables, "context_graph_status", "unavailable")
-        _set_context_value(context_variables, "context_graph_reason", "missing_app_id")
-        _set_context_value(context_variables, "context_graph_warnings", ["missing_app_id"])
-        _set_context_value(
-            context_variables,
-            "context_graph_health",
-            {"source": "workflow_startup", "status": "unavailable", "reason": "missing_app_id"},
-        )
-        return {"present": False, "reason": "missing_app_id"}
+    app_id = require_build_binding(context_variables).target_app_id
 
     request_text = _request_text(data)
     artifact_version_id = _text(data.get("artifact_version_id"))

@@ -3,6 +3,7 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
@@ -305,7 +306,7 @@ async def save_design_doc(
     content: str,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    app_id = _cv_get(context_variables, "app_id")
+    app_id = require_build_binding(context_variables).target_app_id
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
 
@@ -365,13 +366,14 @@ async def save_design_docs_bundle(
     *,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    app_id = _cv_get(context_variables, "app_id")
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
     artifact_version_id = _cv_get(context_variables, "artifact_version_id")
-    build_id = _cv_get(context_variables, "build_id") or chat_id
+    build_id = binding.build_id
     revision_scope = _cv_get(context_variables, "revision_scope")
-    build_mode = _cv_get(context_variables, "build_mode")
+    build_mode = "revision" if binding.phase == "refinement" else "genesis"
 
     if not app_id or not isinstance(app_id, str):
         return {"ok": False, "reason": "missing_app_id"}

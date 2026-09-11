@@ -18,6 +18,7 @@ from typing import Any
 from factory_app.app.modules.workspace_integrations.backend.service import (
     WorkspaceIntegrationsService,
 )
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +51,11 @@ async def save_integration_manifest(
     consistently and the service layer remains the single path to the declarations store.
 
     Reads from context_variables:
-    - app_id: the app being built
+    - run_build_binding: server-owned identity of the app being built
     - integration_needs: list of {service, kind, purpose, required_at, optional, ...}
     - connector_inventory: result from collect_missing_connector_needs
     """
-    app_id = str(_context_get(context_variables, "app_id") or "").strip()
-    if not app_id:
-        logger.debug("save_integration_manifest: no app_id in context, skipping")
-        return {"saved": 0, "skipped": True, "reason": "no_app_id"}
+    app_id = require_build_binding(context_variables).target_app_id
 
     integration_needs: list[dict[str, Any]] = [
         need for need in (_context_get(context_variables, "integration_needs") or []) if isinstance(need, dict)

@@ -21,13 +21,9 @@ def test_app_registry_module_contract_is_present() -> None:
 
     assert manifest["module"]["id"] == "app_registry"
     assert manifest["module"]["handler"] == "backend.handler:AppRegistryModule"
-    assert {"create_app_record", "update_build_status", "list_apps", "get_app_record", "promote_build"} == actions
+    assert {"create_app_record", "list_apps", "get_app_record"} == actions
     create_props = next(entry for entry in manifest["actions"] if entry["id"] == "create_app_record")["input_schema"]["properties"]
-    update_props = next(entry for entry in manifest["actions"] if entry["id"] == "update_build_status")["input_schema"]["properties"]
-    assert "build_context_profile" in create_props
-    assert "current_build_run" in create_props
-    assert "artifact_version_id" in update_props
-    assert "current_build_run" in update_props
+    assert set(create_props) == {"name", "description"}
     assert contracts_dir.exists()
     assert (contracts_dir / "events.yaml").exists()
     assert (module_root / "backend" / "handler.py").exists()
@@ -181,32 +177,29 @@ async def test_app_registry_service_persists_build_context_and_current_run() -> 
     assert updated["app"]["build_runs"][0]["artifact_version_id"] == "av_bundle_1"
 
 
-@pytest.mark.asyncio
-async def test_app_registry_enriches_legacy_active_chat_with_session_app_id(monkeypatch) -> None:
-    repo = AppRegistryRepo.__new__(AppRegistryRepo)
+def test_new_build_does_not_inherit_prior_artifacts_or_completion() -> None:
+    from datetime import UTC, datetime
 
-    async def fake_find_chat_session(*, chat_id: str, owner_user_id: str):  # noqa: ANN001
-        assert chat_id == "chat_1"
-        assert owner_user_id == "user_1"
-        return {
-            "_id": "chat_1",
-            "app_id": "factory-session-app",
-            "workflow_name": "ValueEngine",
-        }
+    now = datetime.now(UTC)
+    run = AppRegistryRepo._merge_build_run(
+        existing_run={"build_id": "old", "artifact_version_id": "old_artifact",
+                      "bundle_path": "old.zip", "completed_at": "yesterday", "started_at": "yesterday"},
+        incoming={"build_id": "new", "phase": "refinement"},
+        lifecycle_state="building", now=now,
+    )
+    assert run["build_id"] == "new"
+    assert run["phase"] == "refinement"
+    assert run["started_at"] == now
+    assert "artifact_version_id" not in run
+    assert "bundle_path" not in run
+    assert "completed_at" not in run
 
-    monkeypatch.setattr(repo, "_find_chat_session", fake_find_chat_session)
-    record = {
-        "build_registry_id": "appreg_1",
-        "app_id": "generated-build-app",
-        "owner_user_id": "user_1",
-        "lifecycle_state": "building",
-        "active_chat_id": "chat_1",
-    }
 
-    enriched = await repo._with_active_chat_fallback(record, owner_user_id="user_1")  # noqa: SLF001
+def test_build_history_requires_explicit_build_identity() -> None:
+    from datetime import UTC, datetime
 
-    assert enriched["active_chat_id"] == "chat_1"
-    assert enriched["chat_app_id"] == "factory-session-app"
-    assert enriched["active_workflow_id"] == "ValueEngine"
-    assert record.get("chat_app_id") is None
+    with pytest.raises(ValueError, match="build_id"):
+        AppRegistryRepo._merge_build_run(
+            existing_run=None, incoming={}, lifecycle_state="building", now=datetime.now(UTC),
+        )
 

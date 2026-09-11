@@ -32,6 +32,7 @@ from mozaiksai.core.workflow.task_batches import (
     load_task_batches_config,
 )
 from mozaiksai.hosts import platform
+from tests.factory_context import factory_context
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = WORKSPACE / "tests" / "fixtures" / "appplan_saas_entitlement_dispatch_output.json"
@@ -40,7 +41,7 @@ WORKFLOWS_ROOT = WORKSPACE / "factory_app" / "workflows"
 
 class _Context:
     def __init__(self, initial: dict[str, Any] | None = None) -> None:
-        self.data: dict[str, Any] = dict(initial or {})
+        self.data: dict[str, Any] = factory_context(initial)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)

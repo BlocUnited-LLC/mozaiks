@@ -37,6 +37,7 @@ from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,
     load_task_batches_config,
 )
+from tests.factory_context import factory_context
 
 ROOT = Path(__file__).resolve().parents[1]
 RETIRED = "agent_backend_integration"
@@ -44,7 +45,7 @@ RETIRED = "agent_backend_integration"
 
 class Context:
     def __init__(self, data: dict | None = None):
-        self.data = dict(data or {})
+        self.data = factory_context(data)
 
     def get(self, key, default=None):
         return self.data.get(key, default)

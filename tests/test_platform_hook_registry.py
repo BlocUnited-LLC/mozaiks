@@ -198,14 +198,15 @@ class TestCallChatPrereqs:
         assert reason is not None  # normalized
 
     @pytest.mark.asyncio
-    async def test_exception_in_hook_is_tolerated(self):
+    async def test_prerequisite_exception_denies_launch(self):
         def bad_hook(**kw):
             raise RuntimeError("prereq failure")
 
         reg = _fresh()
         reg._register_bundle({"chat_prereqs": bad_hook})
         ok, reason = await reg.call_chat_prereqs("app", "user", "wf", None)
-        assert ok is True  # exception doesn't deny
+        assert ok is False
+        assert reason
 
     @pytest.mark.asyncio
     async def test_async_hook_awaited(self):
@@ -232,21 +233,21 @@ class TestCallChatSessionFields:
         assert result == {"journey_id": "j-1", "tier": "pro"}
 
     @pytest.mark.asyncio
-    async def test_exception_in_hook_is_tolerated(self):
+    async def test_session_field_exception_stops_launch(self):
         def bad(**kw):
             raise RuntimeError("session fields error")
 
         reg = _fresh()
         reg._register_bundle({"chat_session_fields": bad})
-        result = await reg.call_chat_session_fields("app", "user", "wf", "chat")
-        assert result == {}
+        with pytest.raises(RuntimeError, match="session fields error"):
+            await reg.call_chat_session_fields("app", "user", "wf", "chat")
 
     @pytest.mark.asyncio
-    async def test_non_dict_return_ignored(self):
+    async def test_non_dict_return_stops_launch(self):
         reg = _fresh()
         reg._register_bundle({"chat_session_fields": lambda **kw: "invalid"})
-        result = await reg.call_chat_session_fields("app", "user", "wf", "chat")
-        assert result == {}
+        with pytest.raises(TypeError, match="must return a mapping"):
+            await reg.call_chat_session_fields("app", "user", "wf", "chat")
 
     @pytest.mark.asyncio
     async def test_async_hook_awaited(self):

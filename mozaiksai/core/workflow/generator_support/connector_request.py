@@ -16,6 +16,7 @@ from typing import Any
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.data.persistence import ConnectorStore
+from mozaiksai.core.session.build_binding import BuildIdentity
 from mozaiksai.core.workflow.generator_support.connector_service import (
     get_connector_inventory,
     save_connector,
@@ -509,6 +510,7 @@ async def request_connector_bundle(
     agent_message: str | None = None,
     description: str | None = None,
     context_variables: Any = None,
+    target_app_id: BuildIdentity | None = None,
 ) -> dict[str, Any]:
     if not services:
         return {"status": "no_services", "services": [], "collected": [], "missing_required": []}
@@ -518,6 +520,7 @@ async def request_connector_bundle(
     app_id = _context_get(context_variables, "app_id")
     user_id = _context_get(context_variables, "user_id")
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id, app_id=app_id)
+    connector_app_id = target_app_id or app_id
 
     agent_message_id = f"connector_bundle_{uuid.uuid4().hex[:10]}"
     normalized_services: list[dict[str, Any]] = []
@@ -640,11 +643,11 @@ async def request_connector_bundle(
         metadata_error = None
         connector_record = None
 
-        if configured and app_id:
+        if configured and connector_app_id:
             try:
                 metadata_result = await save_connector_draft(
                     scope=ConnectorStore.SCOPE_APP,
-                    scope_id=str(app_id),
+                    scope_id=str(connector_app_id),
                     service=svc["service"],
                     provider=svc.get("provider"),
                     integration_id=svc.get("integration_id"),
@@ -668,7 +671,7 @@ async def request_connector_bundle(
                 try:
                     stored = await save_connector(
                         scope=ConnectorStore.SCOPE_APP,
-                        scope_id=str(app_id),
+                        scope_id=str(connector_app_id),
                         user_id=str(user_id) if user_id else "unknown",
                         service=svc["service"],
                         secret_value=trimmed_key,
@@ -795,6 +798,7 @@ async def collect_missing_connector_needs(
     context_variables: Any = None,
     required_at: list[str] | None = None,
     prompt: bool = True,
+    target_app_id: BuildIdentity | None = None,
 ) -> dict[str, Any]:
     """Aggregate connector needs, prompt for unresolved required services, persist status."""
 
@@ -805,7 +809,7 @@ async def collect_missing_connector_needs(
         for need in needs
         if not bool(need.get("optional", False)) and str(need.get("required_at") or "runtime") in required_at_set
     ]
-    app_id = _context_get(context_variables, "app_id")
+    app_id = target_app_id or _context_get(context_variables, "app_id")
     required_services = [need["service"] for need in blocking_needs]
     inventory = (
         await get_connector_inventory(scope=ConnectorStore.SCOPE_APP, scope_id=str(app_id), required_services=required_services)
@@ -827,6 +831,7 @@ async def collect_missing_connector_needs(
             agent_message="I need a few integration credentials to finish validating this app.",
             description="These were discovered while building the app. Saved credentials will appear in the app-scoped integrations surface.",
             context_variables=context_variables,
+            target_app_id=target_app_id,
         )
         inventory = (
             await get_connector_inventory(scope=ConnectorStore.SCOPE_APP, scope_id=str(app_id), required_services=required_services)

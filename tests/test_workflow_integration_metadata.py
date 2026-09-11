@@ -9,6 +9,7 @@ from factory_app.workflows._shared.workflow_integration import (
     hydrate_workflow_integration_context_from_latest_artifact,
     workflow_name_to_capability_id,
 )
+from tests.factory_context import factory_context
 
 
 def _metadata() -> dict:
@@ -111,7 +112,7 @@ def test_hydrate_workflow_integration_context_from_latest_artifact() -> None:
         ),
     )
     store = _FakeArtifactStore(artifact)
-    context = {"app_id": "app-1"}
+    context = factory_context({"app_id": "app-1"})
 
     result = asyncio.run(
         hydrate_workflow_integration_context_from_latest_artifact(

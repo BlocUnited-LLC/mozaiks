@@ -90,7 +90,7 @@ class ArtifactScopeProposer:
         refinement_request: RefinementRequest,
         selected_paths: list[str],
     ) -> dict[str, str]:
-        app_id = str(refinement_request.app_id or "").strip()
+        app_id = str(refinement_request.artifact_app_id or "").strip()
         build_record_id = str(refinement_request.build_record_id or "").strip()
         if not app_id or not build_record_id:
             return {}
@@ -147,6 +147,7 @@ class ArtifactScopeProposer:
         context = ControlPlaneToolContext(
             checkpoint=_CHECKPOINT_EVENT,
             app_id=refinement_request.app_id,
+            target_app_id=refinement_request.target_app_id,
             user_id=refinement_request.user_id,
             build_family=refinement_request.build_family,
             build_key=refinement_request.normalized_build_key(),
@@ -272,7 +273,7 @@ class ArtifactScopeProposer:
         )
 
     async def _available_workspace_paths(self, refinement_request: RefinementRequest) -> set[str]:
-        app_id = str(refinement_request.app_id or "").strip()
+        app_id = str(refinement_request.artifact_app_id or "").strip()
         build_record_id = str(refinement_request.build_record_id or "").strip()
         if not app_id or not build_record_id:
             return set()

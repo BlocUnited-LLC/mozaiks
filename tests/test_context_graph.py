@@ -213,7 +213,9 @@ async def test_context_graph_startup_loader_populates_compact_pack(monkeypatch: 
         return SimpleNamespace(graph=graph, warnings=[])
 
     monkeypatch.setattr(loader_mod, "get_current_app_context_graph", _current_graph)
-    context = _Context({"app_id": "app_1", "refinement_request": "Update task listing"})
+    from tests.factory_context import factory_context
+
+    context = _Context(factory_context({"app_id": "app_1", "refinement_request": "Update task listing"}))
 
     result = await loader_mod.load_context_graph_context(context_variables=context)
 
@@ -230,19 +232,13 @@ async def test_context_graph_startup_loader_populates_compact_pack(monkeypatch: 
 
 
 @pytest.mark.asyncio
-async def test_context_graph_startup_loader_reports_missing_app_id() -> None:
+async def test_context_graph_startup_loader_rejects_missing_build_binding() -> None:
+    from pydantic import ValidationError
+
     context = _Context({"context_graph_pack": {"graph_id": "stale"}, "context_graph_catalog": {"graph_id": "stale"}})
 
-    result = await loader_mod.load_context_graph_context(context_variables=context)
-
-    assert result == {"present": False, "reason": "missing_app_id"}
-    assert context.data["context_graph_pack"]["status"] == "unavailable"
-    assert context.data["context_graph_pack"]["reason"] == "missing_app_id"
-    assert context.data["context_graph_catalog"] is None
-    assert context.data["context_graph_status"] == "unavailable"
-    assert context.data["context_graph_reason"] == "missing_app_id"
-    assert context.data["context_graph_warnings"] == ["missing_app_id"]
-    assert context.data["context_graph_health"]["reason"] == "missing_app_id"
+    with pytest.raises(ValidationError):
+        await loader_mod.load_context_graph_context(context_variables=context)
 
 
 def test_app_and_agent_generators_declare_and_load_context_graph_packs() -> None:

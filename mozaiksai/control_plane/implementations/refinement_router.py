@@ -269,9 +269,14 @@ class RefinementRequest(BaseModel):
     raw_user_request: str = ""
     source_surface: str | None = None
     app_id: str | None = None
+    target_app_id: str | None = None
     user_id: str | None = None
     requested_workflow_id: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def artifact_app_id(self) -> str | None:
+        return self.target_app_id or self.app_id
 
     @field_validator("build_family")
     @classmethod
@@ -539,7 +544,7 @@ class RefinementTriggerRouteResolver:
             from mozaiksai.core.artifacts.store import ArtifactStore
 
             artifact = await ArtifactStore().get_build_record(
-                app_id=request.app_id,
+                app_id=request.artifact_app_id,
                 build_record_id=request.build_record_id,
             )
         except Exception as exc:
@@ -1385,7 +1390,7 @@ class RefinementTriggerRouteResolver:
                 ArtifactStore,  # local import avoids circular dep
             )
             store = ArtifactStore()
-            stale = await store.get_stale_artifact_families(app_id=request.app_id)
+            stale = await store.get_stale_artifact_families(app_id=request.artifact_app_id)
         except Exception as exc:
             _logger.debug("STALE_ARTIFACT_LOOKUP_FAILED app=%s: %s", request.app_id, exc)
             return None
@@ -1460,6 +1465,7 @@ class RefinementTriggerRouteResolver:
             build_record_id=request.build_record_id,
             source_surface=request.source_surface,
             app_id=request.app_id,
+            target_app_id=request.target_app_id,
             user_id=request.user_id,
             requested_workflow_id=request.requested_workflow_id,
             extra=request.extra,
@@ -1690,6 +1696,7 @@ class RefinementTriggerRouteResolver:
             ctx = ControlPlaneToolContext(
                 checkpoint="route_requested",
                 app_id=request.app_id,
+                target_app_id=request.target_app_id,
                 extra={"previous_app_bundle_ref": previous_app_bundle_ref},
             )
             result = await fn(context=ctx)
@@ -1817,7 +1824,7 @@ class RefinementTriggerRouteResolver:
 
     @staticmethod
     async def _current_app_context_seed(request: RefinementRequest) -> dict[str, Any]:
-        app_id = str(request.app_id or "").strip()
+        app_id = str(request.artifact_app_id or "").strip()
         if not app_id:
             return {
                 "app_context_summary": {
@@ -1886,6 +1893,7 @@ class RefinementTriggerRouteResolver:
         *,
         payload: dict[str, Any],
         app_id: str | None = None,
+        target_app_id: str | None = None,
         user_id: str | None = None,
         requested_workflow_id: str | None = None,
         default_source_surface: str | None = None,
@@ -1923,6 +1931,7 @@ class RefinementTriggerRouteResolver:
             or request_payload["build_family"]
         )
         request_payload["app_id"] = str(app_id or "").strip() or None
+        request_payload["target_app_id"] = target_app_id
         request_payload["user_id"] = str(user_id or "").strip() or None
         request_payload["requested_workflow_id"] = str(requested_workflow_id or "").strip() or None
         if default_source_surface and not request_payload.get("source_surface"):
@@ -1952,6 +1961,7 @@ class RefinementTriggerRouteResolver:
         return self.request_from_payload(
             payload=payload,
             app_id=trigger.app_id,
+            target_app_id=trigger.target_app_id,
             user_id=trigger.user_id,
             requested_workflow_id=trigger.workflow_id,
             default_source_surface=default_source_surface,

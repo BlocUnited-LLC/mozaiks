@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, StrictBool, StrictStr, ValidationError
 logger = logging.getLogger(__name__)
 
 from factory_app.app.modules.app_registry.backend.policy import is_generic_app_name
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.workflow.context.frozen import detach
@@ -103,7 +104,8 @@ async def save_value_manifest(
     _set_context_value(context_variables, "value_manifest", None)
     # Extract context
     chat_id = None
-    app_id = None
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
     user_id = None
     workflow_name = "ValueEngine"
     build_mode = None
@@ -111,10 +113,9 @@ async def save_value_manifest(
 
     if context_variables is not None and hasattr(context_variables, "get"):
         chat_id = context_variables.get("chat_id")
-        app_id = context_variables.get("app_id")
         user_id = context_variables.get("user_id")
         workflow_name = context_variables.get("workflow_name", "ValueEngine")
-        build_mode = context_variables.get("build_mode")
+        build_mode = "revision" if binding.phase == "refinement" else "genesis"
         # Structured output from GapAnalysisAgent
         structured_output = detach(context_variables.get("structured_output"))
     if not isinstance(structured_output, dict) or not structured_output:
@@ -278,7 +279,6 @@ async def save_value_manifest(
 
 
 async def get_value_manifest(
-    app_id: Annotated[str, "Application ID"],
     context_variables: Annotated[Any | None, "Runtime context"] = None,
 ) -> dict[str, Any]:
     """
@@ -286,6 +286,7 @@ async def get_value_manifest(
 
     Used by AgentGenerator/AppGenerator to understand what to build.
     """
+    app_id = require_build_binding(context_variables).target_app_id
     # Check context first
     if context_variables and hasattr(context_variables, "get"):
         cached = context_variables.get("value_manifest")

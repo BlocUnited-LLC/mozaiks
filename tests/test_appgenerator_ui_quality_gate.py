@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assemble_module
+from tests.factory_context import factory_context
 
 hook_quality_module = import_module(
     "factory_app.workflows.AppGenerator.tools.hook_app_ui_quality_gate"
@@ -45,7 +46,7 @@ def _read_yaml(relative_path: str):
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value

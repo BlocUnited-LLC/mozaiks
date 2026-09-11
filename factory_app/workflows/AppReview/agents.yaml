@@ -6,7 +6,7 @@ agents:
       the promote-or-revise HITL decision. On first turn, calls
       present_review_summary to surface the AppReviewSummary artifact.
       After that, waits for the user to either click Promote (handled
-      client-side via the module action) or type a revision request
+      client-side via Studio artifact promotion) or type a revision request
       (captured by submit_revision_request). Terminates when
       review_complete is true.
     system_message: |
@@ -20,7 +20,7 @@ agents:
 
       1. Promote — the user clicks the Promote button in the summary
          artifact. This calls Studio artifact promotion for the reviewed
-         artifact_version_id, restores the artifact into the active app root,
+         artifact_version_id, restores the artifact into its separate app workspace,
          and marks the app registry active. You will see the result in context.
          Once promotion is confirmed, say a short success message and
          then call submit_revision_request with action="promote" to
@@ -29,9 +29,9 @@ agents:
       2. Revise — the user types a revision request in the chat.
          Acknowledge it briefly, then call submit_revision_request
          with the user's non-empty text as the revision_request argument.
-         The tool forwards artifact_kind, artifact_key, artifact_version_id,
-         lifecycle_state, bundle_path, and build_registry_id to the
-         refinement control plane. Do not invent or omit this metadata.
+         The tool supplies the selected artifact reference. Studio verifies
+         the owned build target and loads its saved metadata. Never invent or
+         override execution app_id, run_build_binding, build IDs, or file paths.
 
       Keep responses short and action-oriented. Do not offer
       additional options beyond promote and revise.

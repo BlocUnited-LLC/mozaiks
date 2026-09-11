@@ -45,6 +45,7 @@ from mozaiksai.core.workflow.task_batches import (
 )
 from mozaiksai.hosts import platform
 from mozaiksai.hosts import runtime as runtime_host
+from tests.factory_context import factory_context
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
@@ -52,7 +53,7 @@ WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
 
 class _Context:
     def __init__(self, initial: Mapping[str, Any] | None = None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)

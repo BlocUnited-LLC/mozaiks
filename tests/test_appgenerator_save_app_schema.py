@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.factory_context import factory_context
+
 
 def _load_save_app_schema_module():
     workspace = Path(__file__).resolve().parents[1]
@@ -32,7 +34,7 @@ save_app_schema_module = _load_save_app_schema_module()
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -1135,7 +1137,7 @@ def test_save_app_schema_writes_to_generated_artifact_root(monkeypatch, tmp_path
     generated_root = tmp_path / "generated"
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
     monkeypatch.delenv("MOZAIKS_APP_ID", raising=False)
-    context = _Context({"app_id": "app/one", "build_id": "build one"})
+    context = _Context({"app_id": "app-one", "build_id": "build-one"})
 
     save_app_schema_module.save_app_schema(
         manifest=_base_manifest(),
@@ -1148,7 +1150,7 @@ def test_save_app_schema_writes_to_generated_artifact_root(monkeypatch, tmp_path
     provenance = yaml.safe_load((output_dir / "provenance.yaml").read_text(encoding="utf-8"))
     assert provenance["schema_version"] == "mozaiks.provenance.v1"
     assert provenance["created_with"]["workflow"] == "AppGenerator"
-    assert provenance["created_with"]["build_id"] == "build one"
+    assert provenance["created_with"]["build_id"] == "build-one"
     assert (output_dir / "ui" / "pages" / "Dashboard.yaml").exists()
     assert context.data["generated_app_dir"] == str(output_dir)
 

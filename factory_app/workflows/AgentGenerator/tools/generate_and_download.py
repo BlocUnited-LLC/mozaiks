@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 from typing import Annotated, Any
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows._shared.workflow_integration import (
     apply_workflow_integration_context,
     extract_workflow_integration_metadata_from_bundle_entries,
@@ -30,7 +31,6 @@ from mozaiksai.core.workflow.generator_support.workflow_exports import record_wo
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 from .export_agent_workflow import export_agent_workflow_to_github
-from .workflow_converter import promote_generated_workflow
 from .workflow_quality_gate import (
     prepare_workflow_bundle_repair,
     run_workflow_bundle_quality_gate,
@@ -145,24 +145,6 @@ def _build_pack_zip(
     return output_path
 
 
-def _promote_workflow_to_app_workspace(workflow_dir: Path, wf_name: str) -> None:
-    """Copy a generated workflow into the active app workspace's workflows/ directory.
-
-    Reads MOZAIKS_APP_WORKSPACE_PATH to locate the target. No-op when unset.
-    Logs a warning on failure but never raises.
-    """
-    workspace = os.getenv("MOZAIKS_APP_WORKSPACE_PATH", "").strip()
-    if not workspace:
-        _logger.debug("[%s] MOZAIKS_APP_WORKSPACE_PATH not set — skipping workflow promotion", wf_name)
-        return
-    target_root = Path(workspace) / "workflows"
-    try:
-        result = promote_generated_workflow(workflow_dir, target_root)
-        _logger.info("[%s] Promoted generated workflow to app workspace: %s", wf_name, result["target_dir"])
-    except Exception as exc:
-        _logger.warning("[%s] Failed to promote generated workflow to app workspace (%s): %s", wf_name, target_root, exc)
-
-
 async def _register_workflow_bundle_artifact_version(
     *,
     app_id: str,
@@ -173,6 +155,7 @@ async def _register_workflow_bundle_artifact_version(
     zip_path: Path | None,
     context_variables: Any | None,
     workflow_integration_metadata: dict[str, Any] | None = None,
+    artifact_store: Any | None = None,
 ) -> Any:
     try:
         import hashlib
@@ -206,10 +189,10 @@ async def _register_workflow_bundle_artifact_version(
         except Exception:
             pass
 
-    artifact_store = get_artifact_store()
+    artifact_store = artifact_store or get_artifact_store()
     canonical_inputs_version = await resolve_latest_artifact_version_refs(
         app_id=str(app_id),
-        artifact_kinds=("concept", "design_docs"),
+        artifact_kinds=("design_docs", "subscription_contract"),
         artifact_store=artifact_store,
     )
     artifact_version = await artifact_store.create_build_record(
@@ -231,6 +214,7 @@ async def _register_workflow_bundle_artifact_version(
             "source_workflow": workflow_name,
             "source_chat_id": chat_id,
             "metadata": {
+                **require_build_binding(context_variables).model_dump(),
                 "artifact_path": str(zip_path) if zip_path else None,
                 "workflow_name": bundle_name,
                 "workflow_integration_metadata": workflow_integration_metadata,
@@ -389,14 +373,15 @@ async def generate_and_download(
     app_id: str | None = None
     workflow_name: str | None = None
     user_id: str | None = None
-    build_id: str | None = None
+    from factory_app.workflows._shared.platform.build_target import require_build_binding
+
+    binding = require_build_binding(context_variables)
 
     if context_variables and hasattr(context_variables, "get"):
         chat_id = context_variables.get("chat_id")
         app_id = context_variables.get("app_id")
         workflow_name = context_variables.get("workflow_name")
         user_id = context_variables.get("user_id")
-        build_id = context_variables.get("build_id")
 
     wf_logger = get_workflow_logger(workflow_name=(workflow_name or "AgentGenerator"), chat_id=chat_id, app_id=app_id)
     tlog = None
@@ -508,8 +493,8 @@ async def generate_and_download(
     # Resolve output directory
     # ------------------------------------------------------------------
     base_generated = _resolve_workflow_output_root(
-        app_id=app_id,
-        build_id=build_id or chat_id,
+        app_id=binding.target_app_id,
+        build_id=binding.build_id,
     )
     base_generated.mkdir(parents=True, exist_ok=True)
 
@@ -555,14 +540,8 @@ async def generate_and_download(
         if not ui_files:
             return {"status": "error", "message": "Failed to create workflow bundle files"}
 
-        # Promote first workflow to app workspace (best-effort)
-        first_wf_name = bundle_entries[0].get("workflow_name", "") if bundle_entries else ""
-        if first_wf_name:
-            first_wf_dir = base_generated / first_wf_name
-            _promote_workflow_to_app_workspace(first_wf_dir, first_wf_name)
-
         await _record_context_and_artifacts(
-            app_id=app_id,
+            app_id=binding.target_app_id,
             user_id=user_id,
             chat_id=chat_id,
             pack_name=bundle_name,
@@ -621,13 +600,8 @@ async def generate_and_download(
         if not ui_files:
             return {"status": "error", "message": "Failed to create workflow bundle files"}
 
-        first_wf_name = bundle_entries[0].get("workflow_name", "") if bundle_entries else ""
-        if first_wf_name:
-            first_wf_dir = base_generated / first_wf_name
-            _promote_workflow_to_app_workspace(first_wf_dir, first_wf_name)
-
         await _record_context_and_artifacts(
-            app_id=app_id,
+            app_id=binding.target_app_id,
             user_id=user_id,
             chat_id=chat_id,
             pack_name=bundle_name,
@@ -704,7 +678,7 @@ async def generate_and_download(
                 wf_logger.info("🚀 Export to GitHub requested (repo=%s)", repo_name)
                 deployment_result = await export_agent_workflow_to_github(
                     bundle_path=str(zip_bundle_path),
-                    app_id=app_id,
+                    app_id=binding.target_app_id,
                     repo_name=repo_name,
                     commit_message=commit_message,
                     user_id=user_id,

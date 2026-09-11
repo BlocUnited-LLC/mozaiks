@@ -101,8 +101,9 @@ import importlib
 import inspect
 import os
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.runtime.composition.module_authority import ModuleExecutionPolicyDecision
@@ -283,7 +284,11 @@ class PlatformHookRegistry:
             except Exception as exc:
                 logger.warning("PLATFORM_HOOKS_LOAD_FAILED: %s — %s", entry, exc)
 
-    def _register_bundle(self, bundle: Any, source: str = "") -> None:
+    def register_bundle(self, bundle: Any, *, source: str, prepend: bool = False) -> None:
+        """Compose a host-owned bundle with configured operator extensions."""
+        self._register_bundle(bundle, source=source, prepend=prepend)
+
+    def _register_bundle(self, bundle: Any, source: str = "", *, prepend: bool = False) -> None:
         bundle = _normalize_bundle(bundle)
 
         def _get(key: str) -> Any:
@@ -304,7 +309,10 @@ class PlatformHookRegistry:
         for key, target in slot_map.items():
             val = _get(key)
             if callable(val):
-                target.append(val)
+                if prepend:
+                    target.insert(0, val)
+                else:
+                    target.append(val)
                 logger.debug("PLATFORM_HOOKS_REGISTERED: %s from %s", key, source)
 
     # ------------------------------------------------------------------
@@ -342,12 +350,15 @@ class PlatformHookRegistry:
                 )
                 if inspect.isawaitable(res):
                     res = await res
-                if isinstance(res, tuple) and len(res) == 2:
+                if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], bool):
                     ok, reason = res
                     if not ok:
                         return False, str(reason) if reason else "Prerequisite not met"
+                else:
+                    raise TypeError("chat_prereqs must return (bool, reason)")
             except Exception as exc:
                 logger.warning("PLATFORM_HOOKS_PREREQS_ERROR: %s", exc)
+                return False, "Chat prerequisite check failed"
         return True, None
 
     async def call_chat_session_fields(
@@ -356,9 +367,25 @@ class PlatformHookRegistry:
         user_id: str,
         workflow_name: str,
         chat_id: str,
+        *,
+        phase: Literal["prepare", "resume"] = "prepare",
+        trigger_source: str = "chat",
+        build_registry_id: str | None = None,
+        source_chat_id: str | None = None,
+        session_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Collect extra fields to inject into the chat session document."""
-        extra: dict[str, Any] = {}
+        """Resolve or revalidate trusted session fields, failing closed.
+
+        References are requests, not authority. Hooks see a detached snapshot;
+        a later extension may inspect but cannot replace an earlier binding.
+        Resume validates persisted facts and cannot install a different value.
+        """
+        from mozaiksai.core.session.build_binding import BuildTargetReference
+
+        reference = BuildTargetReference(
+            build_registry_id=build_registry_id, source_chat_id=source_chat_id,
+        )
+        extra: dict[str, Any] = deepcopy(session_fields or {})
         for hook in self._chat_session_fields_hooks:
             try:
                 res = hook(
@@ -366,13 +393,25 @@ class PlatformHookRegistry:
                     user_id=user_id,
                     workflow_name=workflow_name,
                     chat_id=chat_id,
+                    phase=phase,
+                    trigger_source=trigger_source,
+                    build_registry_id=reference.build_registry_id,
+                    source_chat_id=reference.source_chat_id,
+                    session_fields=deepcopy(extra),
                 )
                 if inspect.isawaitable(res):
                     res = await res
-                if isinstance(res, dict):
-                    extra.update(res)
+                if not isinstance(res, dict):
+                    raise TypeError("chat_session_fields must return a mapping")
+                for key, value in res.items():
+                    if key in extra and extra[key] != value:
+                        raise ValueError(f"Conflicting session field '{key}'")
+                    if phase == "resume" and key not in extra:
+                        raise ValueError(f"Resume cannot install session field '{key}'")
+                extra.update(deepcopy(res))
             except Exception as exc:
                 logger.warning("PLATFORM_HOOKS_SESSION_FIELDS_ERROR: %s", exc)
+                raise
         return extra
 
     async def call_module_permissions(

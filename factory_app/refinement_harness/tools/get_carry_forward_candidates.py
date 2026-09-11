@@ -57,7 +57,7 @@ async def get_carry_forward_candidates(
     Read-only. Never raises. Returns empty modules + warnings on any failure.
     """
     ctx = normalize_context(context)
-    app_id = str(ctx.app_id or "").strip()
+    app_id = str(ctx.artifact_app_id or "").strip()
     previous_app_bundle_ref = str(ctx.extra.get("previous_app_bundle_ref") or "").strip()
 
     if not app_id:

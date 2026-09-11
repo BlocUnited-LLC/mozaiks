@@ -22,6 +22,10 @@ from mozaiksai.core.runtime.app.loader import AppLoader
 async def generated_auth_bundle(monkeypatch, tmp_path):
     monkeypatch.setattr(schema_tool, "_resolve_output_dir", lambda **_: tmp_path)
     schema_tool.save_app_schema(
+        context_variables={"run_build_binding": {
+            "build_registry_id": "registry_auth", "target_app_id": "auth-route-proof",
+            "build_id": "build_auth", "phase": "genesis",
+        }},
         manifest={
             "app_name": "Auth route proof", "version": "1.0.0", "default_route": "/home",
             "pages": ["home"], "custom_routes": [], "auth_strategy": "oidc",

@@ -503,6 +503,7 @@ class AG2PersistenceManager:
         chat_id: str,
         app_id: str | None = None,
         workflow_name: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """Fetch non-canonical, non-message fields for a chat session.
 
@@ -524,6 +525,8 @@ class AG2PersistenceManager:
         query = {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))}
         if clean_workflow_name:
             query["workflow_name"] = clean_workflow_name
+        if user_id is not None:
+            query["user_id"] = user_id
 
         try:
             coll = await self._coll()
@@ -731,6 +734,7 @@ class AG2PersistenceManager:
         chat_id: str,
         app_id: str | None = None,
         workflow_name: str | None = None,
+        user_id: str | None = None,
         fields: dict[str, Any] | None = None,
     ) -> None:
         """Write server-owned lifecycle authority fields for a chat session.
@@ -757,6 +761,12 @@ class AG2PersistenceManager:
                     f"{key!r} is not a server-owned session field; use "
                     "persist_context_variables for workflow context"
                 )
+            if key == "run_build_binding":
+                from mozaiksai.core.session.build_binding import RunBuildBinding
+
+                if not user_id:
+                    raise ValueError("user_id is required to persist a build binding")
+                value = RunBuildBinding.model_validate(value).model_dump()
             updates[key] = deepcopy(value)
         if not updates:
             return
@@ -768,6 +778,15 @@ class AG2PersistenceManager:
         }
         if clean_workflow_name:
             scope["workflow_name"] = clean_workflow_name
+        if user_id is not None:
+            scope["user_id"] = user_id
+        if "run_build_binding" in updates:
+            # A session can acquire its binding once; retries may repeat it,
+            # but another target or build must use a new session.
+            scope["$or"] = [
+                {"run_build_binding": {"$exists": False}},
+                {"run_build_binding": updates["run_build_binding"]},
+            ]
         coll = await self._coll()
         result = await coll.update_one(
             scope,
@@ -782,7 +801,7 @@ class AG2PersistenceManager:
         if matched_count is not None and matched_count == 0:
             raise RuntimeError(
                 f"failed to persist server-owned session fields for chat_id={chat_id}: "
-                "scoped session was not found"
+                "scoped session was not found or its build binding conflicts"
             )
 
     async def create_general_chat_session(

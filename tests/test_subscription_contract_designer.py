@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from tests.factory_context import factory_context
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
@@ -547,7 +548,7 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
 
     monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
     context = {
-        "app_id": "app_test",
+        **factory_context({"app_id": "app_test"}),
         "chat_id": "chat_1",
         "user_id": "user_1",
         "structured_output": _sample_contract(),
@@ -608,7 +609,7 @@ async def test_save_subscription_contract_blocks_downstream_context_when_review_
     monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
 
     context = {
-        "app_id": "app_test",
+        **factory_context({"app_id": "app_test"}),
         "chat_id": "chat_1",
         "user_id": "user_1",
         "structured_output": _sample_contract(),

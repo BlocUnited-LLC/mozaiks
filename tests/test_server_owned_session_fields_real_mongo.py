@@ -9,6 +9,7 @@ can never reach the persisted session document through a generic API.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from uuid import uuid4
 
@@ -231,11 +232,15 @@ async def test_privileged_setter_writes_and_replay_returns_real_mongo() -> None:
         await _seed_session(pm, chat_id)
 
         receipt = {"kind": "failure", "workflow_run_id": "wfrun_legit"}
-        binding = {"workflow_run_id": "wfrun_legit", "build_id": "build_wfrun_legit"}
+        binding = {
+            "build_registry_id": "appreg_legit", "target_app_id": "target_legit",
+            "build_id": "build_wfrun_legit", "phase": "genesis",
+        }
         await pm.persist_server_owned_session_fields(
             chat_id=chat_id,
             app_id=_APP_ID,
             workflow_name=_WORKFLOW,
+            user_id="user-1",
             fields={
                 "workflow_run_id": "wfrun_legit",
                 "build_terminal_receipt": receipt,
@@ -249,6 +254,90 @@ async def test_privileged_setter_writes_and_replay_returns_real_mongo() -> None:
         assert fetched.get("workflow_run_id") == "wfrun_legit"
         assert fetched.get("build_terminal_receipt") == receipt
         assert fetched.get("run_build_binding") == binding
+        assert not await pm.fetch_chat_session_extra_context(
+            chat_id=chat_id, app_id=_APP_ID, workflow_name=_WORKFLOW, user_id="other-user",
+        )
+    finally:
+        await client.drop_database(database_name)
+        client.close()
+
+
+@pytest.mark.asyncio
+async def test_build_binding_is_owned_and_write_once_real_mongo() -> None:
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_boundary_test_{uuid4().hex}"
+    chat_id = f"chat_{uuid4().hex}"
+    try:
+        pm = _pm(client, database_name)
+        await _seed_session(pm, chat_id)
+        binding = {
+            "build_registry_id": "appreg_legit", "target_app_id": "target_legit",
+            "build_id": "build_legit", "phase": "genesis",
+        }
+
+        async def write(value, user_id="user-1"):
+            await pm.persist_server_owned_session_fields(
+                chat_id=chat_id, app_id=_APP_ID, workflow_name=_WORKFLOW,
+                user_id=user_id, fields={"run_build_binding": value},
+            )
+
+        with pytest.raises(RuntimeError, match="scoped session"):
+            await write(binding, user_id="other-user")
+        results = await asyncio.gather(
+            write(binding), write({**binding, "target_app_id": "other_target"}),
+            return_exceptions=True,
+        )
+        assert sum(isinstance(result, RuntimeError) for result in results) == 1
+        persisted = (await (await pm._coll()).find_one({"_id": chat_id}))["run_build_binding"]
+        await write(persisted)
+        with pytest.raises(RuntimeError, match="build binding conflicts"):
+            await write({**persisted, "build_id": "replacement_build"})
+        assert (await (await pm._coll()).find_one({"_id": chat_id}))["run_build_binding"] == persisted
+    finally:
+        await client.drop_database(database_name)
+        client.close()
+
+
+@pytest.mark.asyncio
+async def test_owner_targets_resume_independently_real_mongo() -> None:
+    from mozaiksai.core.session.router import SessionRouter
+
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_boundary_test_{uuid4().hex}"
+    try:
+        pm = _pm(client, database_name)
+        for target in ("tracker", "shop"):
+            await _seed_session(pm, f"chat_{target}")
+            await pm.persist_server_owned_session_fields(
+                chat_id=f"chat_{target}", app_id=_APP_ID, user_id="user-1", workflow_name=_WORKFLOW,
+                fields={"run_build_binding": {
+                    "build_registry_id": f"appreg_{target}", "target_app_id": target,
+                    "build_id": f"build_{target}", "phase": "genesis",
+                }},
+            )
+        router = SessionRouter(persistence=pm)
+        snapshots = []
+        for target in ("tracker", "shop"):
+            scoped = router.for_target(target)
+            resolved = await scoped.resolve_resume(
+                app_id=_APP_ID, user_id="user-1", requested_chat_id=f"chat_{target}",
+                requested_workflow_id=_WORKFLOW,
+            )
+            assert resolved["chat_id"] == f"chat_{target}"
+            assert resolved["session_state"]["target_app_id"] == target
+            snapshots.append(resolved["session_state"])
+        assert snapshots[0]["session_id"] != snapshots[1]["session_id"]
+        assert (await router.get_session_snapshot(app_id=_APP_ID, user_id="user-1"))["current_chat_id"] is None
+        for target in ("tracker", "shop"):
+            assert (await router.for_target(target).get_session_snapshot(
+                app_id=_APP_ID, user_id="other-owner",
+            ))["current_chat_id"] is None
+        tracker = router.for_target("tracker")
+        with pytest.raises(ValueError, match="not available in this target"):
+            await tracker.resolve_resume(
+                app_id=_APP_ID, user_id="user-1", requested_chat_id="chat_shop", requested_workflow_id=_WORKFLOW,
+            )
+        assert (await tracker.get_session_snapshot(app_id=_APP_ID, user_id="user-1"))["current_chat_id"] == "chat_tracker"
     finally:
         await client.drop_database(database_name)
         client.close()

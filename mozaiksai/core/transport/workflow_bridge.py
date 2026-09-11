@@ -415,9 +415,12 @@ class WorkflowBridgeMixin:
             # Clear stuck REVISING state so the next refinement request can route correctly.
             if app_id and user_id:
                 try:
-                    from mozaiksai.core.session.router import get_session_router
+                    from mozaiksai.core.session.router import get_session_router_for_chat
+                    revision_router = await get_session_router_for_chat(
+                        app_id=app_id, user_id=user_id, chat_id=chat_id,
+                    )
                     _rev_task = asyncio.create_task(
-                        get_session_router().fail_active_revision(
+                        revision_router.fail_active_revision(
                             app_id=app_id,
                             user_id=user_id,
                             workflow_id=workflow_name,

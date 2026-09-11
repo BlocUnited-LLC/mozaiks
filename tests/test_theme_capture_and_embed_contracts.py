@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+from tests.factory_context import factory_context
+
 WORKSPACE = Path(__file__).resolve().parents[1]
 
 
@@ -219,7 +221,7 @@ def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> 
             "ui": {},
         },
         "chat_id": "chat-123",
-        "app_id": "mozaiks-platform",
+        **factory_context({"app_id": "mozaiks-platform"}),
         "app_url": "https://example.test",
     }
 

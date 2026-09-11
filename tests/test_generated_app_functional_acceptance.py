@@ -1073,10 +1073,16 @@ def test_generated_workflow_agent_bundle_loads_catalog_and_starts_runtime_sessio
 
     monkeypatch.setattr(platform, "persistence_manager", fake_persistence)
     monkeypatch.setattr(platform.runtime_app, "persistence_manager", fake_persistence)
+    from mozaiksai.core import session as session_module
+    from mozaiksai.core.session.router import SessionRouter
+    from tests.test_session_router import _FakePersistence
+
+    router = SessionRouter(persistence=_FakePersistence())
+    monkeypatch.setattr(session_module, "get_session_router", lambda: router)
     monkeypatch.setattr(platform.runtime_app, "_chat_coll", _fake_chat_coll)
     monkeypatch.setattr(platform.runtime_app, "simple_transport", None)
 
-    with TestClient(platform.app, raise_server_exceptions=False) as client:
+    with TestClient(platform.app) as client:
         health = client.get("/health")
         assert health.status_code == 200, health.text
         assert health.json()["status"] == "ok"
