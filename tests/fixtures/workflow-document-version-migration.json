@@ -147,6 +147,18 @@
       "parser_document_fingerprint": "0d3382c785c380fc3d490040511eb6b99711746008a5ec085aa91d2331037687"
     },
     {
+      "path": "factory_app/workflows/SecurityReadiness/orchestrator.yaml",
+      "source_bytes_fingerprint": "65479f34a816fdada3e6a11c70c0ab9b2e840dc15ff815831722bb54e0e192c1",
+      "source_document_fingerprint": "5c3cdf20178514e658306bdd0c117fb5af9a44a97c0d276810cda3aa086dabf8",
+      "parser_document_fingerprint": "53d8d2f6d8c77e555388f8ae220cad81ad68a4e3ed67da91e8e097948e9ea67d"
+    },
+    {
+      "path": "factory_app/workflows/SecurityReadiness/structured_outputs.yaml",
+      "source_bytes_fingerprint": "144a92b6408c54fe5b1aaae1bfc07fd558ee20dd721ac5a8c46b936121197419",
+      "source_document_fingerprint": "63dbb51202d48e37649d904010bf4944b9f00e8040816e97de0290187c03b9b8",
+      "parser_document_fingerprint": "63dbb51202d48e37649d904010bf4944b9f00e8040816e97de0290187c03b9b8"
+    },
+    {
       "path": "factory_app/workflows/SubscriptionContractDesigner/orchestrator.yaml",
       "source_bytes_fingerprint": "071aab0449739eb55d49fcc71ca7b6ccc4ba8d1a36f091e43841f7fb6f2d4e56",
       "source_document_fingerprint": "a9bbc609cc94c9119cb88f449f78975f080ff1ef294afa25a8931324d3eaf8b1",
