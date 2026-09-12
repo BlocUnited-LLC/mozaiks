@@ -2,13 +2,17 @@
 
 Repository-level guidance for coding agents working in this repo.
 
-## Working Path Constraint
+## Shared Engineering Contract
 
-**Always work on `C:\Repos\BlocUnitedRepo\mozaiks` (this repo) and `C:\Repos\BlocUnitedRepo\mozaiks-app`.**
-Never read from or write to OneDrive paths (`C:\Users\...\OneDrive\...`). Those are stale copies, not the working repos.
+The rules below are canonical for every agent and live in one place:
+[docs/agent-engineering-contract.md](docs/agent-engineering-contract.md). Read it before
+changing code. Do not restate its rules here — a second copy drifts, and two agents then
+follow two different contracts.
 
-Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
-
+It covers: working path constraint, ADR authoring context, AG2 ownership boundary, release
+hold, contributor guidance operating system, generated deployment artifact contract,
+generated persistence contract, structured-output-first contract rule, contract-declared
+customization rule, and decision rules.
 ## Required Pre-Edit Architecture Check
 
 Before editing Mozaiks OSS:
@@ -29,18 +33,6 @@ Before editing Mozaiks OSS:
   cannot satisfy the requirement
 - architectural changes that contradict the frozen north star require an ADR or
   explicit architecture decision
-
-## ADR Authoring Context
-
-For an ADR that changes or extends app generation, semantic authority,
-compilation/materialization, or refinement, review
-[issue #411](https://github.com/BlocUnited-LLC/mozaiks/issues/411) and state
-explicitly whether the ADR adopts, modifies, rejects, or defers that direction.
-
-Issue #411 is a design prompt, not architecture authority. Current source and
-Accepted ADRs remain authoritative. Any ADR using the issue must verify its
-claims against the repository and must not make a typed decision ledger a
-second authority for application meaning.
 
 ## Deterministic Generation Rule
 
@@ -122,20 +114,6 @@ Rules for agents:
 - If a task requires a cloud service that costs money, note it as a
   pre-launch prerequisite and stop — do not provision it.
 
-## Release Hold
-
-Do **not** publish this repo yet.
-
-- Do not create or push `v*` Git tags.
-- Do not trigger `.github/workflows/release.yml`.
-- Do not publish to PyPI or create a GitHub release.
-- Do not treat trusted-publisher or GitHub environment setup as approval to
-  release.
-- Do not bump `mozaiksai/version.py` for a public release unless the user
-  explicitly says the repo is production-ready and wants to publish.
-
-Normal code pushes are fine. Public release actions are not.
-
 ## Replacement Policy
 
 When adjusting behavior:
@@ -170,43 +148,6 @@ Prefer:
 - explicit validation
 - small, named abstractions with clear ownership
 - removing drift at the source
-
-## AG2 Ownership Boundary
-
-Mozaiks uses AG2 as the long-term agentic backbone. Do not recreate an
-agentic framework inside Mozaiks when AG2 already owns the primitive or is the
-right upstream home for it. See
-[docs/architecture/workflows/ag2-ownership-boundary.md](docs/architecture/workflows/ag2-ownership-boundary.md)
-for the durable architecture contract and upgrade watchpoints.
-
-AG2 should own agentic execution mechanics wherever practical:
-
-- agent primitives, model calls, tools, middleware, and task execution
-- multi-agent network behavior, hubs, agent clients, channels, adapters, and
-  workflow state progression
-- task observation, task lifecycle events, delegation mechanics, and agent
-  runtime observability primitives
-
-Mozaiks should own deterministic product and runtime contracts around AG2:
-
-- declarative workflow files, structured-output contracts, and validation
-- canonical generated app/workflow/module artifact shapes
-- app/runtime persistence, transport integration, tenant/session boundaries,
-  and Studio/platform lifecycle concerns
-- factory refinement policies and deterministic decomposition contracts
-  that describe what work must be done before AG2 agents execute it
-
-When AG2 does not provide a required capability, first analyze AG2's current
-APIs, docs, and source shape. Implement the smallest Mozaiks-owned layer that
-fits inside AG2's framework, preferably behind `mozaiksai.core.adapters` or a
-similarly narrow boundary. Document every intentional divergence from AG2 so it
-can be revisited when AG2 updates, and raise upstream issues or proposals when
-the missing capability belongs in AG2 rather than Mozaiks.
-
-Do not introduce Mozaiks-owned replacements for AG2 hubs, agent clients,
-network adapters, task observation streams, delegation engines, or generic
-agent scheduling unless AG2 has no usable path and the custom boundary is
-explicitly documented.
 
 ## Canonical Repo Boundary
 
@@ -369,18 +310,6 @@ Primary repo ownership (avoids overlap by default):
 
 See `.claude/rules/multi-agent-coordination.md` for full rules.
 
-## Contributor Guidance Operating System
-
-For nontrivial OSS changes:
-
-- choose the closest active task skill before editing. Codex-facing skills live
-  under `.agents/skills/`; Claude Code-facing skills live under
-  `.claude/skills/`.
-- use `oss-contribution-review` when scope spans layers or the right skill is
-  unclear
-- include the appropriate impact section from `.claude/rules/testing.md` in the
-  final report and always list tests run
-
 ## Module Contract Rule
 
 When working in or generating modules:
@@ -497,27 +426,6 @@ When working in or generating app services:
   data alias, and runtime enforcement is handled by the OSS
   `ConfiguredEntitlementAdapter`.
 
-## Generated Deployment Artifact Contract
-
-Generated deployment artifacts are provider-neutral app-bundle root files:
-
-- `Dockerfile`
-- `docker-compose.yml`
-- `env.example`
-- `deployment.manifest.json`
-- `.github/workflows/deploy.yml`
-
-These files describe how the app runs and which env/CI secret names are
-expected. They must never contain raw secrets, cloud tenant ids, hosted product
-policy defaults, or provider execution code.
-
-AppBuildPlan build tasks must not own these paths. They are emitted by the
-DownloadAgent through the `generate_and_download` deployment contract renderer
-using `deployment_profile`, `include_dockerfiles`, `include_workflow`, and
-`include_compose`. Hosted products consume the manifest and apply provider
-policy, secret delivery, DNS, and deployment adapters outside the generated app
-bundle.
-
 ## Generated Secret Contract
 
 App-owned runtime secret output is names-first, not value-first:
@@ -532,71 +440,6 @@ App-owned runtime secret output is names-first, not value-first:
 - Connector/API-key collection during workflows must store raw credential values
   only through the configured secret backend. App artifacts should carry safe
   metadata and secret references, not raw values.
-
-## Generated Persistence Contract
-
-AppGenerator persistence output is data-contract-first, not runtime-DB-first:
-
-- `data_contract` is the canonical generated data planning object.
-- Generated app bundles write it to `data/contract.json`.
-- Additive refinement plans belong under
-  `data/migrations/{migration_id}.json`.
-- Persistent modules use `backend/repo.py`, `backend/policy.py`, and
-  `backend/schemas.py`; do not generate `backend/models.py` or
-  `backend/models/*.py`.
-- Do not generate `backend/database/schema.json` or
-  `backend/database/seed.json`.
-- Do not put database access in `handler.py`, and do not put raw persistence
-  operations in `service.py`.
-- Runtime injects `ctx.persistence` into `ModuleContext` when `app_id` exists.
-  Generated `backend/repo.py` must use
-  `ctx.persistence.collection(module_id, entity_name)`.
-- `data/contract.json` also covers cross-module aggregate ownership and explicit
-  existing database integration when needed.
-- External database provider mechanics, when explicitly required, belong under
-  `app/services/adapters/database/`. Do not generate `app/services/data/` for
-  customer apps.
-- Do not generate Python helper files under `data/` or `security/`. Those app
-  planes are declarative: data contracts/migrations and names-only secret
-  policy.
-- `ctx.db` remains absent and non-canonical; generated code must not require or
-  emit it.
-
-## Structured-Output-First Contract Rule
-
-When introducing or changing YAML contracts:
-
-- Treat canonical YAML files as structured-output-first contracts, not loose
-  configuration blobs.
-- Every canonical YAML shape must map cleanly to a strict structured output
-  model that agents can produce repeatably and runtime code can validate
-  deterministically.
-- If a taxonomy is used by agents or loaders, define it explicitly as reusable
-  typed fields/enums. Do not rely on prompt prose or naming conventions alone.
-- Prefer shared submodels and finite namespaces over freeform nested objects.
-- When a contract changes, update prompts, structured outputs, runtime
-  validators/loaders, docs, and tests together so generators do not drift from
-  execution.
-
-This applies to `module.yaml`, `contracts/events.yaml`, `contracts/reactions.yaml`,
-`contracts/notifications.yaml`, `contracts/settings.yaml`, `contracts/admin.yaml`,
-`contracts/profile.yaml`, workflow YAMLs, and page schemas.
-
-## Contract-Declared Customization Rule
-
-Customization is allowed, but only as a bounded extension of a strict
-contract.
-
-- YAML may reference helper/customization stubs only through explicit
-  contract-defined fields.
-- Python stubs are for backend/runtime-side extensions. JS/TS stubs are for
-  frontend/admin/workflow UI extensions.
-- Stubs must remain contract-bound: they implement declared hooks or entry
-  points, not alternate schemas or undeclared behavior paths.
-- Generator prompts must understand both the declarative contract and the stub
-  shape they are allowed to emit.
-- If a stub reference is optional, the contract must say when it is omitted and
-  what the canonical no-customization behavior is.
 
 ## Platform Shell Constraints
 
@@ -693,16 +536,50 @@ For runtime, generator, orchestration, or contract changes:
 - update docs
 - prefer at least one real runtime smoke when practical
 
-## Decision Rules
+## Autonomy
 
-When adding code, decide placement in this order:
+Bias toward action. Infer reasonable implementation details from the repository and carry
+the work through rather than interrupting to confirm. The repo — its canonical
+implementations, tests, ADRs, and git history — is the authority on architecture, not the
+prompt that sent you. When the prompt and the repo disagree about how something is built,
+read the code and believe the code.
 
-1. Is this required for every runtime instance and independent of app semantics? → **Runtime**.
-2. Is this generic Refinement Engine behavior over execution contexts, state, events, and routing? → **`mozaiksai/control_plane`**.
-3. Is this app hosting, routing, sessions, pages, modules, shell config, or app workspace composition? → **Platform**.
-4. Is this workspace management, build lifecycle, artifact review, run history, or configuration UI? → **Studio**.
-5. Is this first-party builder behavior, app generation logic, or builder-specific harness configuration? → **`factory_app`**.
-6. Is this hosted-only capability such as collaboration, billing, marketplace, deployment, or org management? → **Mozaiks App**.
-7. Is this filesystem scaffolding, process management, or terminal diagnostics? → **CLI**.
+Stop and ask ONLY when the ambiguity would materially change one of:
 
-Key: a feature is not CLI just because it runs locally. If it is management UI, it belongs in Studio. If it is generic intent routing across execution contexts, it belongs in the harness implementation. If it is builder-specific policy, it belongs in the factory harness pack.
+- a public contract or API shape
+- a security or authorization boundary
+- a persistence format or migration path
+- an architectural decision that is expensive to reverse
+
+Everything else: decide, implement, and report the decision in the deliverable. A question
+the repository can answer is not a question for the requester.
+
+## Investigate Before Changing
+
+Before editing code: fetch current `origin/main`, read the applicable repository
+instructions, locate the canonical implementation and its tests, inspect git history where
+architectural intent is unclear, and determine whether the change is already partially
+implemented. Do not assume architecture from the prompt when the repository can answer it.
+
+## Verification Proportionality
+
+Run the tests and checks proportionate to the affected surface. Do not re-run broader
+suites after the relevant checks are green unless a failure or an unresolved concern
+justifies it. Conversely, a change to a shared contract is not covered by its own unit
+test — run what the blast radius requires.
+
+## Deliverable
+
+Report these, in this order, on any change that touches code:
+
+1. Verdict — done / blocked / partial
+2. Base SHA the work started from
+3. Branch and PR
+4. Files changed
+5. Architectural decisions made, and what was rejected
+6. Tests and checks run, with exact results — not "tests pass"
+7. Unresolved risks
+8. Whether the PR is safe to merge, and why
+
+Claims must be checkable from the diff or from pasted command output. A green suite that
+was never run against the changed surface is not evidence.

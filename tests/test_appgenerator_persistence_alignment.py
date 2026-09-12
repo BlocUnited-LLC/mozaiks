@@ -366,6 +366,7 @@ def test_docs_state_ctx_persistence_is_runtime_supported() -> None:
             ROOT / "docs" / "architecture" / "foundations" / "events-and-data" / "persistence-and-artifact-storage.md",
             ROOT / "AGENTS.md",
             ROOT / "CLAUDE.md",
+            ROOT / "docs" / "agent-engineering-contract.md",
         )
     )
 
