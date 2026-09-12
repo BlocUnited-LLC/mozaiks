@@ -30,7 +30,40 @@ transition_rules:
   condition_value: true
   transition_target: AgentTarget
 
+# The workflow finishes when the assembler's auto tool has persisted the
+# canonical theme artifact. Without an explicit completion route the graph
+# could only "finish" by falling through to the no_transition_matched
+# default, which the runtime now correctly treats as failure.
+- source_agent: ThemeConfigAssemblerAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: theme_capture_persisted
+  condition_value: true
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+
 - source_agent: ThemeConfigAssemblerAgent
   target_agent: user
   transition_type: after_turn
   transition_target: RevertToUserTarget
+
+# User replies resume the pipeline at the right stage. Without these rules a
+# user message matches no transition and the run terminates on the graph's
+# no_transition_matched default (observed live: the builder's theme
+# description ended the workflow in 50ms with nothing captured).
+- source_agent: user
+  target_agent: ThemeInterviewAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_complete
+  condition_value: false
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: ThemeAnalysisAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_complete
+  condition_value: true
+  transition_target: AgentTarget

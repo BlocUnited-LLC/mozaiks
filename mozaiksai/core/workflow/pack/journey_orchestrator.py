@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.persistence import SessionStateStore
@@ -249,6 +250,12 @@ class JourneyOrchestrator:
                     "journey_instance_id": advance.journey_instance_id,
                     "journey_position": next_group_index,
                     "workflow_name": wf,
+                    # Never resurrect a terminal chat: a completed prior pass
+                    # must get a fresh chat, not a resume into stale state
+                    # (observed live: a re-entered journey reused a completed
+                    # AgentGenerator chat whose review flags and identity
+                    # scoping belonged to the previous pass).
+                    "status": int(WorkflowStatus.IN_PROGRESS),
                     **build_app_scope_filter(app_id),
                 },
                 projection={"_id": 1},
@@ -260,6 +267,25 @@ class JourneyOrchestrator:
                 else ""
             )
             created_new = False
+            if next_chat_id:
+                # A reused journey chat must carry THIS journey pass's
+                # inherited context. Without the refresh, a re-entered journey
+                # reuses the chat with the previous pass's identity scoping
+                # (observed live: a rebuilt journey's theme persisted under
+                # the prior pass's generated_app_id, splitting the artifact
+                # lineage across two app identities).
+                if validated_context:
+                    try:
+                        await coll.update_one(
+                            {"_id": next_chat_id, **build_app_scope_filter(app_id)},
+                            {"$set": dict(validated_context)},
+                        )
+                    except Exception as refresh_err:
+                        logger.warning(
+                            "[JOURNEY] reused-chat context refresh failed chat=%s: %s",
+                            next_chat_id,
+                            refresh_err,
+                        )
             if not next_chat_id:
                 next_chat_id = str(uuid.uuid4())
                 extra_fields = {

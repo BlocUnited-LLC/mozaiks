@@ -248,13 +248,26 @@ class ContextAuthorityPolicy:
                 and not authority.routing
                 and not authority.authorization
             )
-        if authority.authority_class in {
-            ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE,
-            ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE,
-        }:
+        if authority.authority_class is ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE:
+            # Routing state accepts deterministic machinery plus declared
+            # user-decision triggers: a user_text trigger writes a fixed
+            # declared value (never a capture), and HITL routing is exactly
+            # the user deciding where the workflow goes next.
+            return writer_id in authority.writer_ids and (
+                writer_id in _DETERMINISTIC_WRITERS or writer_id == USER_TEXT_TRIGGER_WRITER
+            )
+        if authority.authority_class is ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE:
             return writer_id in authority.writer_ids and writer_id in _DETERMINISTIC_WRITERS
         if authority.writer_ids:
-            return writer_id in authority.writer_ids
+            if writer_id in authority.writer_ids:
+                return True
+            # Sentinel extraction is the deterministic subset of agent-text
+            # authority: a declaration that authorizes agent_text also accepts
+            # fixed-value sentinel writes for the same key.
+            return (
+                writer_id == SENTINEL_TEXT_TRIGGER_WRITER
+                and AGENT_TEXT_WRITER in authority.writer_ids
+            )
         return writer_id in _ORDINARY_MUTATION_WRITERS
 
     def _require_resolved_declarations(self, values: Mapping[str, Any], *, operation: str) -> None:
@@ -477,9 +490,21 @@ def infer_context_authority(
     triggers = list(_value(source, "triggers", []) or [])
     trigger_types = {str(_value(trigger, "type", "") or "").strip() for trigger in triggers}
     task_keys = task_batch_context_keys or set()
+    # A sentinel is any agent_text trigger that writes a fixed declared value
+    # (no $1 capture): the model only emits a token; the value written is
+    # decided by the declaration and a deterministic comparison, regardless of
+    # whether the match is equals, contains, or an anchored regex. Capture
+    # triggers stay freeform AGENT_TEXT.
+    def _has_fixed_match(trigger: Any) -> bool:
+        match = _value(trigger, "match", None)
+        return any(
+            str(_value(match, kind, "") or "").strip()
+            for kind in ("equals", "contains", "regex")
+        )
+
     sentinel_trigger = any(
         str(_value(trigger, "type", "") or "").strip() == "agent_text"
-        and str(_value(_value(trigger, "match", None), "equals", "") or "").strip()
+        and _has_fixed_match(trigger)
         and str(_value(trigger, "value", "") or "") != "$1"
         for trigger in triggers
     )
@@ -507,10 +532,15 @@ def infer_context_authority(
 
     if authority_class is ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY:
         writer_ids = set()
-    if authority_class in {
-        ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE,
-        ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE,
-    }:
+    if authority_class is ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE:
+        # Keep declared user-decision triggers: user_text bindings write a
+        # fixed declared value, and HITL routing is the user's call.
+        writer_ids = {
+            writer
+            for writer in writer_ids
+            if writer in _DETERMINISTIC_WRITERS or writer == USER_TEXT_TRIGGER_WRITER
+        }
+    elif authority_class is ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE:
         writer_ids = {writer for writer in writer_ids if writer in _DETERMINISTIC_WRITERS}
 
     return ContextVariableAuthority(

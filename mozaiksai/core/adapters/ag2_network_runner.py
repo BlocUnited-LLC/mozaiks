@@ -182,6 +182,27 @@ async def _resume_pending_agent_turns(
     return total
 
 
+def _resolve_close_status(
+    status: RunStatus,
+    close_reason: str | None,
+    error: str | None,
+) -> tuple[RunStatus, str | None]:
+    """Map a terminal channel-close reason onto the run status.
+
+    ``workflow_failed`` is an explicit declared failure. ``no_transition_matched``
+    is the compiled graph's exhaustion default: a packet no transition could
+    route, i.e. a graph authoring gap — never a finished workflow. Observed
+    live: ThemeCapture and AgentGenerator terminated on it, were reported
+    completed, and the build sequence silently skipped their entire
+    generation stage.
+    """
+    if close_reason == "workflow_failed":
+        return RunStatus.FAILED, error or "workflow_failed"
+    if close_reason == "no_transition_matched":
+        return RunStatus.FAILED, error or "no_transition_matched"
+    return status, error
+
+
 def _closed_reason_from_wal(wal: Sequence[Any]) -> tuple[bool, str | None]:
     """Return the terminal channel reason after pending-turn recovery, if any."""
 
@@ -411,9 +432,7 @@ class AG2NetworkRunner:
                 close_reason: str | None = None,
                 error: str | None = None,
             ) -> AG2NetworkRunnerResult:
-                if close_reason == "workflow_failed":
-                    status = RunStatus.FAILED
-                    error = error or "workflow_failed"
+                status, error = _resolve_close_status(status, close_reason, error)
                 state = hub.adapter_state(channel.channel_id)
                 wal = await hub.read_wal(channel.channel_id)
                 agent_name_by_id = _agent_names()

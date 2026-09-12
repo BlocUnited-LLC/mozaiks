@@ -147,16 +147,54 @@ def test_freeform_capture_trigger_is_not_deterministic():
 def _agent_text_trigger_effective_writer(trigger: dict) -> str:
     """Mirror runtime writer resolution for an agent_text trigger.
 
-    A fixed-value sentinel (equals/contains match, no $1 capture) resolves to
-    the deterministic SENTINEL_TEXT_TRIGGER_WRITER; anything else (regex, or a
-    $1 capture) resolves to the freeform AGENT_TEXT_WRITER.
+    A fixed-value sentinel (equals/contains/regex match writing a fixed
+    declared value, no $1 capture) resolves to the deterministic
+    SENTINEL_TEXT_TRIGGER_WRITER; a $1 capture trigger resolves to the
+    freeform AGENT_TEXT_WRITER because there the model authors the value.
     """
     match = trigger.get("match") or {}
-    is_fixed_match = bool(match.get("equals") or match.get("contains"))
+    is_fixed_match = bool(match.get("equals") or match.get("contains") or match.get("regex"))
     captures = str(trigger.get("value") or "") == "$1"
     if is_fixed_match and not captures:
         return SENTINEL_TEXT_TRIGGER_WRITER
     return AGENT_TEXT_WRITER
+
+
+@pytest.mark.parametrize("workflow_dir", _workflow_dirs(), ids=lambda p: p.name)
+def test_user_text_triggers_can_write_their_target_key(workflow_dir: Path):
+    """Every declared user_text trigger must be able to write the key it
+    targets. user_text bindings always write a fixed declared value, so they
+    resolve to the deterministic user-decision writer; a routing key whose
+    only writer is a user_text trigger that the policy refuses is
+    unsatisfiable — the flag can never flip and the workflow dead-ends
+    (live: AgentGenerator's workflow_review_approved never set despite the
+    builder's reply matching its regex, so generation was silently skipped).
+    """
+    from mozaiksai.core.workflow.context.authority import USER_TEXT_TRIGGER_WRITER
+
+    definitions = _load(workflow_dir / "context_variables.yaml").get("definitions") or {}
+    transition_rules = _load(workflow_dir / "transition_graph.yaml").get("transition_rules") or []
+    policy = build_context_authority_policy(
+        workflow_name=workflow_dir.name,
+        definitions=definitions,
+        transition_rules=transition_rules,
+    )
+    unsatisfiable = []
+    for key, definition in definitions.items():
+        if not isinstance(definition, dict):
+            continue
+        source = definition.get("source") or {}
+        for trigger in (source.get("triggers") or []) if isinstance(source, dict) else []:
+            if not isinstance(trigger, dict) or trigger.get("type") != "user_text":
+                continue
+            if not policy.can_write(key, writer_id=USER_TEXT_TRIGGER_WRITER):
+                unsatisfiable.append(
+                    f"{key}: user_text trigger match={trigger.get('match')} cannot write this key"
+                )
+    assert not unsatisfiable, (
+        f"{workflow_dir.name} has user_text triggers that can never write their "
+        f"target key: {unsatisfiable}"
+    )
 
 
 @pytest.mark.parametrize("workflow_dir", _workflow_dirs(), ids=lambda p: p.name)

@@ -23,11 +23,19 @@ logger = get_workflow_logger("derived_context")
 
 
 def _agent_text_writer_for(trigger: Any) -> ContextWriterId:
-    """Exact-equals triggers with a fixed declared value are deterministic
-    sentinel extraction; anything freeform (contains/regex/capture) is not."""
-    equals = str(getattr(trigger, "equals", "") or "").strip()
+    """Fixed-value triggers are deterministic sentinel extraction.
+
+    The model only emits a token; the value written is decided by the
+    declaration and a deterministic comparison - regardless of whether the
+    match is equals, contains, or an anchored regex. Only $1 capture triggers
+    stay freeform AGENT_TEXT, because there the model authors the value.
+    """
+    has_fixed_match = any(
+        str(getattr(trigger, kind, "") or "").strip()
+        for kind in ("equals", "contains", "regex")
+    )
     value = getattr(trigger, "value", None)
-    if equals and value != "$1":
+    if has_fixed_match and value != "$1":
         return SENTINEL_TEXT_TRIGGER_WRITER
     return AGENT_TEXT_WRITER
 
