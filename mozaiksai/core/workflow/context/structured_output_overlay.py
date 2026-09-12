@@ -15,10 +15,10 @@ state.
 that makes the documented contract true without seizing application context
 authority: it wraps the live workflow context (a pattern context bridge or an
 ephemeral runtime container), serves ``structured_output`` reads from the
-runtime-held exact payload -- as a fresh plain-``dict``/``list`` deep copy per
-read, preserving the validated result's exact shape -- fails every mutation of
-that key closed, and delegates all other keys — reads, writes, snapshots, and persistence
-extraction — to the underlying context unchanged. Snapshots and iteration
+runtime-held exact payload — as a fresh plain-``dict``/``list`` deep copy per
+read, preserving the validated result's exact shape — fails every mutation of
+that key closed, and delegates all other keys — reads, writes, snapshots, and
+persistence extraction — to the underlying context unchanged. Snapshots and iteration
 never include the projection, so persistence and replay cannot inherit it.
 """
 
