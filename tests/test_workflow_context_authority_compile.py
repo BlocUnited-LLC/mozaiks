@@ -144,6 +144,61 @@ def test_freeform_capture_trigger_is_not_deterministic():
     assert SENTINEL_TEXT_TRIGGER_WRITER not in authority.writer_ids
 
 
+def _agent_text_trigger_effective_writer(trigger: dict) -> str:
+    """Mirror runtime writer resolution for an agent_text trigger.
+
+    A fixed-value sentinel (equals/contains match, no $1 capture) resolves to
+    the deterministic SENTINEL_TEXT_TRIGGER_WRITER; anything else (regex, or a
+    $1 capture) resolves to the freeform AGENT_TEXT_WRITER.
+    """
+    match = trigger.get("match") or {}
+    is_fixed_match = bool(match.get("equals") or match.get("contains"))
+    captures = str(trigger.get("value") or "") == "$1"
+    if is_fixed_match and not captures:
+        return SENTINEL_TEXT_TRIGGER_WRITER
+    return AGENT_TEXT_WRITER
+
+
+@pytest.mark.parametrize("workflow_dir", _workflow_dirs(), ids=lambda p: p.name)
+def test_agent_text_triggers_can_write_their_target_key(workflow_dir: Path):
+    """Every declared agent_text trigger must be able to write the key it
+    targets under the workflow's own authority policy.
+
+    The compile guard only proves a routing key has *some* authorized writer.
+    It does not prove the *declared trigger mechanism* is one of them. A
+    regex agent_text trigger on a `_complete`-suffixed routing key resolves to
+    the freeform AGENT_TEXT writer, which closed routing state refuses — so
+    the key can never be set and the workflow fails the instant the agent
+    emits its completion signal (live AgentGenerator interview_complete
+    failure). Compile stayed green; the run died.
+    """
+    definitions = _load(workflow_dir / "context_variables.yaml").get("definitions") or {}
+    transition_rules = _load(workflow_dir / "transition_graph.yaml").get("transition_rules") or []
+    policy = build_context_authority_policy(
+        workflow_name=workflow_dir.name,
+        definitions=definitions,
+        transition_rules=transition_rules,
+    )
+    unsatisfiable = []
+    for key, definition in definitions.items():
+        if not isinstance(definition, dict):
+            continue
+        source = definition.get("source") or {}
+        for trigger in (source.get("triggers") or []) if isinstance(source, dict) else []:
+            if not isinstance(trigger, dict) or trigger.get("type") != "agent_text":
+                continue
+            writer = _agent_text_trigger_effective_writer(trigger)
+            if not policy.can_write(key, writer_id=writer):
+                unsatisfiable.append(
+                    f"{key}: agent_text trigger match={trigger.get('match')} "
+                    f"resolves to writer={writer!r} which cannot write this key"
+                )
+    assert not unsatisfiable, (
+        f"{workflow_dir.name} has agent_text triggers that can never write their "
+        f"target key: {unsatisfiable}"
+    )
+
+
 def test_routing_state_accepts_deterministic_tool_writer():
     definitions = {
         "concept_presented": {

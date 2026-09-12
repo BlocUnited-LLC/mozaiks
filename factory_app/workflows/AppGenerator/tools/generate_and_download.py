@@ -882,6 +882,13 @@ async def generate_and_download(
         except Exception:
             pass
 
+    # Bundle content, staging paths, artifact records, app-context
+    # registration, and registry updates scope under the generated app's
+    # identity; chat persistence and loggers stay on the executing app_id.
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
+    generated_app_id = resolve_generated_app_id(context_variables)
+
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id, app_id=app_id)
     tlog = None
     if _get_tool_logger:  # type: ignore[truthy-function]
@@ -932,7 +939,7 @@ async def generate_and_download(
             if safe_cf and safe_cf not in files_map:
                 files_map[safe_cf] = str(cf_content)
 
-    await _inject_agent_context_env(files_map=files_map, app_id=str(app_id), context_variables=context_variables)
+    await _inject_agent_context_env(files_map=files_map, app_id=str(generated_app_id), context_variables=context_variables)
 
     # Inject requirements.txt if the agents did not produce one.
     if "requirements.txt" not in files_map:
@@ -973,7 +980,7 @@ async def generate_and_download(
         include_dockerfiles = True
     if include_dockerfiles or include_workflow or include_compose or production_deployment_profile:
         deployment_contract = generate_deployment_artifacts(
-            app_id=str(app_id),
+            app_id=str(generated_app_id),
             deployment_profile=deployment_profile,
             include_dockerfiles=include_dockerfiles,
             include_workflow=include_workflow,
@@ -994,7 +1001,7 @@ async def generate_and_download(
                 context_variables.set("deployment_contract_validation_errors", deployment_contract.get("bundle_errors") or [])
             except Exception:
                 pass
-        await _inject_agent_context_env(files_map=files_map, app_id=str(app_id), context_variables=context_variables)
+        await _inject_agent_context_env(files_map=files_map, app_id=str(generated_app_id), context_variables=context_variables)
 
     # Auth scaffold and app-schema routes have independent owners; compose their
     # normal declarations before final validation, without runtime route fallbacks.
@@ -1045,7 +1052,7 @@ async def generate_and_download(
         or "GeneratedApp"
     )
 
-    app_dir = _resolve_app_output_dir(app_id=app_id, build_id=build_id or chat_id)
+    app_dir = _resolve_app_output_dir(app_id=generated_app_id, build_id=build_id or chat_id)
     base_dir = app_dir.parent
     app_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1064,7 +1071,7 @@ async def generate_and_download(
 
     migration_record = await _persist_pending_schema_migration(
         pending_migration=pending_migration,
-        app_id=str(app_id),
+        app_id=str(generated_app_id),
         build_id=str(build_id or chat_id),
         workflow_name=workflow_name,
         chat_id=chat_id,
@@ -1083,7 +1090,7 @@ async def generate_and_download(
 
     zip_size = zip_path.stat().st_size
     artifact_version = await _register_app_bundle_artifact_version(
-        app_id=str(app_id),
+        app_id=str(generated_app_id),
         user_id=user_id,
         workflow_name=workflow_name,
         chat_id=chat_id,
@@ -1148,7 +1155,7 @@ async def generate_and_download(
         "artifact_kind": "app_bundle",
         "artifact_key": "app_bundle",
         "artifact_version_id": artifact_version_id,
-        "app_id": str(app_id),
+        "app_id": str(generated_app_id),
         # Workbench context (best-effort): allow ChatUI to render file tree + editor + preview.
         "generated_files": files_map,
     }
@@ -1224,7 +1231,7 @@ async def generate_and_download(
                     chat_id=chat_id,
                     status="failed",
                     data={
-                        "app_id": app_id,
+                        "app_id": generated_app_id,
                         "error": error_msg,
                         "message": error_msg,
                         "blocked": True,
@@ -1271,7 +1278,7 @@ async def generate_and_download(
                     )
             deployment_result = await export_app_code_to_github(
                 bundle_path=str(zip_path.resolve()),
-                app_id=app_id,
+                app_id=generated_app_id,
                 repo_name=repo_name,
                 commit_message=commit_message,
                 user_id=user_id,

@@ -50,7 +50,6 @@ async def save_captured_theme(
         }
 
     chat_id = context_variables.get("chat_id")
-    app_id = context_variables.get("app_id")
     app_url = context_variables.get("app_url")
     user_id = context_variables.get("user_id")
     build_mode = context_variables.get("build_mode")
@@ -62,7 +61,16 @@ async def save_captured_theme(
     fonts = theme_config.get("fonts") or {}
     theme_v2 = theme_config.get("theme") or {}
 
-    persistence_id = str(app_id or identity.get("app_name") or identity.get("name") or "captured-theme")
+    # Theme artifacts scope under the generated app's identity, not the
+    # executing factory session app_id.
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
+    persistence_id = str(
+        resolve_generated_app_id(context_variables)
+        or identity.get("app_name")
+        or identity.get("name")
+        or "captured-theme"
+    )
     now = datetime.now(UTC)
 
     if _HAS_PERSISTENCE and BuilderArtifactStore:  # type: ignore[truthy-function]

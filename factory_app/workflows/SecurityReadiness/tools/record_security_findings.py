@@ -54,7 +54,11 @@ async def record_security_findings(
         if findings is not None
         else _context_get(context_variables, "security_readiness_findings", [])
     )
-    app_id = str(_context_get(context_variables, "app_id", "") or "").strip()
+    # Findings attach to the generated app's identity, not the executing
+    # factory session app_id.
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
+    app_id = str(resolve_generated_app_id(context_variables) or "").strip()
     build_id = str(_context_get(context_variables, "build_id", "") or "").strip() or None
     artifact_version_id = (
         str(_context_get(context_variables, "artifact_version_id", "") or "").strip() or None

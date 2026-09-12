@@ -114,7 +114,9 @@ _ORDINARY_MUTATION_WRITERS = {
     DETERMINISTIC_TOOL_WRITER,
     SENTINEL_TEXT_TRIGGER_WRITER,
 }
-_IMMUTABLE_EXACT = {
+# Execution identity and security state. Never writable during a run and
+# never demotable by a workflow declaration.
+_IMMUTABLE_CORE_EXACT = {
     "app_id",
     "user_id",
     "chat_id",
@@ -128,6 +130,12 @@ _IMMUTABLE_EXACT = {
     "permission_claims",
     "entitlement_state",
     "entitlements",
+}
+# Default-immutable names. A workflow declaration may claim a non-core name
+# (for example a downstream registry pointer such as build_registry_id, or a
+# *_app_id key naming a different entity than the executing app) by declaring
+# an explicit non-immutable authority_class.
+_IMMUTABLE_EXACT = _IMMUTABLE_CORE_EXACT | {
     "build_registry_id",
 }
 _IMMUTABLE_SUFFIXES = ("_app_id", "_user_id", "_tenant_id", "_workspace_id")
@@ -378,14 +386,24 @@ def require_unchanged_runtime_authority(
     *,
     policy: ContextAuthorityPolicy | None = None,
 ) -> None:
-    """Reject lifecycle changes to runtime authority before agent execution."""
+    """Reject lifecycle changes to runtime authority before agent execution.
+
+    A resolved declaration with an explicit non-immutable ``authority_class``
+    governs its own key, so declared preload state (registry pointers,
+    generated-app identity) may be populated at bootstrap. Core execution
+    identity and credential-bearing keys can never be demoted by declaration.
+    Undeclared keys keep the fail-closed name heuristic.
+    """
     missing = object()
     for key in sorted(before.keys() | after.keys()):
         authority = policy.variables.get(key) if policy is not None else None
-        immutable = _is_immutable_key(key) or (
+        if (
             authority is not None
-            and authority.authority_class is ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY
-        )
+            and authority.authority_class is not ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY
+        ):
+            immutable = _is_core_identity_key(key)
+        else:
+            immutable = authority is not None or _is_immutable_key(key)
         if immutable and before.get(key, missing) != after.get(key, missing):
             raise ContextAuthorityError(
                 f"context_authority.lifecycle_changed_runtime_authority key={key}"
@@ -707,6 +725,12 @@ def _is_immutable_key(key: str) -> bool:
         or lower.endswith(_IMMUTABLE_SUFFIXES)
         or any(part in lower for part in _IMMUTABLE_PARTS)
     )
+
+
+def _is_core_identity_key(key: str) -> bool:
+    """Execution identity or credential-bearing keys — never declarable-away."""
+    lower = key.lower()
+    return lower in _IMMUTABLE_CORE_EXACT or any(part in lower for part in _IMMUTABLE_PARTS)
 
 
 def _is_quality_key(key: str) -> bool:

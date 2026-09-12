@@ -304,6 +304,12 @@ def _find_open_ended_object_path(
     """Return the first path that contains a freeform object/dict annotation."""
     visited_models = visited_models or set()
 
+    # Unparameterized containers and Any compile to schemas without a typed
+    # 'items'/'type' node ({} or bare {"type": "array"}), which providers
+    # reject in strict response_format mode just like open-ended dicts.
+    if annotation is Any or annotation in (dict, list, set, tuple):
+        return path
+
     origin = get_origin(annotation)
     if origin in (dict, dict):
         return path

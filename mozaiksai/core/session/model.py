@@ -94,6 +94,10 @@ class SessionState:
     journey_position: int = 0
     journey_total_steps: int = 0
     pending_transition_id: str | None = None
+    # Scalar journey context carried across a mid-journey transition hop so the
+    # next workflow launch inherits declared identity/mode keys the same way
+    # workflow-to-workflow journey hops do. Cleared when a workflow launches.
+    pending_transition_context: dict[str, Any] = field(default_factory=dict)
     pending_harness_decision: PendingHarnessDecision | None = None
     last_trigger_source: str | None = None
     last_requested_workflow_id: str | None = None

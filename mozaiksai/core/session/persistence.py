@@ -42,6 +42,22 @@ def _coerce_string_map(value: Any) -> dict[str, str]:
     return normalized
 
 
+def _coerce_scalar_map(value: Any) -> dict[str, Any]:
+    """Keep only string-keyed scalar entries (str/int/float/bool)."""
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        if isinstance(raw_value, bool | int | float):
+            normalized[key] = raw_value
+        elif isinstance(raw_value, str) and raw_value.strip():
+            normalized[key] = raw_value
+    return normalized
+
+
 def _coerce_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
@@ -224,6 +240,7 @@ class SessionStateStore:
             journey_position=int(doc.get("journey_position") or 0),
             journey_total_steps=int(doc.get("journey_total_steps") or 0),
             pending_transition_id=doc.get("pending_transition_id"),
+            pending_transition_context=_coerce_scalar_map(doc.get("pending_transition_context")),
             pending_harness_decision=_coerce_pending_harness_decision(
                 doc.get("pending_harness_decision"),
                 fallback=now,

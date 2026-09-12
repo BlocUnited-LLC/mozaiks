@@ -51,8 +51,17 @@ Mutable preload information can still be populated. The check does not undo
 external side effects already performed by a hook, or replace per-writer mutation
 authorization. A generated app's target identity must be resolved separately by
 the owning Factory/Studio build lifecycle; it must never replace the executing
-app's `app_id`. The existing ValueEngine registration hook and downstream artifact
-scoping still require that migration before a hosted full-build proof is safe.
+app's `app_id`. The factory build pipeline carries it in the declared
+`generated_app_id` context variable, written by ValueEngine's registration hook
+and consumed by artifact, staging, registry, and app-context scoping.
+
+Declarations govern non-core names: a resolved declaration with an explicit
+non-immutable `authority_class` (for example a downstream registry pointer such
+as `build_registry_id`, or a `*_app_id` key naming a different entity than the
+executing app) exempts that key from the name heuristic at this boundary. Core
+execution identity (`app_id`, `user_id`, `chat_id`, `workflow_name`, tenant and
+workspace scope, permissions) and credential-bearing keys can never be demoted
+by declaration, and undeclared keys keep the fail-closed name heuristic.
 
 Source types supported by runtime:
 

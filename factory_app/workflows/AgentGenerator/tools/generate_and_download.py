@@ -398,6 +398,13 @@ async def generate_and_download(
         user_id = context_variables.get("user_id")
         build_id = context_variables.get("build_id")
 
+    # Generated staging paths, workflow exports, and workflow_bundle artifact
+    # records scope under the generated app's identity; chat persistence and
+    # transport stay on the executing runtime app_id.
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
+    generated_app_id = resolve_generated_app_id(context_variables)
+
     wf_logger = get_workflow_logger(workflow_name=(workflow_name or "AgentGenerator"), chat_id=chat_id, app_id=app_id)
     tlog = None
     if _get_tool_logger:  # type: ignore[truthy-function]
@@ -508,7 +515,7 @@ async def generate_and_download(
     # Resolve output directory
     # ------------------------------------------------------------------
     base_generated = _resolve_workflow_output_root(
-        app_id=app_id,
+        app_id=generated_app_id,
         build_id=build_id or chat_id,
     )
     base_generated.mkdir(parents=True, exist_ok=True)
@@ -562,7 +569,7 @@ async def generate_and_download(
             _promote_workflow_to_app_workspace(first_wf_dir, first_wf_name)
 
         await _record_context_and_artifacts(
-            app_id=app_id,
+            app_id=generated_app_id,
             user_id=user_id,
             chat_id=chat_id,
             pack_name=bundle_name,
@@ -627,7 +634,7 @@ async def generate_and_download(
             _promote_workflow_to_app_workspace(first_wf_dir, first_wf_name)
 
         await _record_context_and_artifacts(
-            app_id=app_id,
+            app_id=generated_app_id,
             user_id=user_id,
             chat_id=chat_id,
             pack_name=bundle_name,
@@ -704,7 +711,7 @@ async def generate_and_download(
                 wf_logger.info("🚀 Export to GitHub requested (repo=%s)", repo_name)
                 deployment_result = await export_agent_workflow_to_github(
                     bundle_path=str(zip_bundle_path),
-                    app_id=app_id,
+                    app_id=generated_app_id,
                     repo_name=repo_name,
                     commit_message=commit_message,
                     user_id=user_id,

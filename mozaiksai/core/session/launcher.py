@@ -119,8 +119,12 @@ def validate_context_for_workflow(
             try:
                 policy.require_can_write(key, writer_id=writer_id)
             except ContextAuthorityError:
+                # A key this writer may not seed is dropped, not fatal: launch
+                # context is best-effort preload, and each workflow owns its
+                # declared closed-writer state (e.g. two workflows declaring
+                # the same routing flag must not inherit each other's value).
                 logger.warning("SESSION_LAUNCH_CONTEXT_AUTHORITY_REJECTED: key=%s workflow=%s writer=%s", key, workflow_id, writer_id)
-                raise
+                continue
         if isinstance(value, str) and len(value.encode()) > _CONTEXT_MAX_VALUE_BYTES:
             logger.warning(
                 "SESSION_LAUNCH_CONTEXT_VALUE_TOO_LARGE: key=%s workflow=%s size=%d limit=%d",

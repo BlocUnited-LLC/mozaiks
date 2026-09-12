@@ -208,15 +208,17 @@ async def test_context_variable_persistence_resume_round_trip_honors_authority_p
         },
     )
 
-    assert "build_registry_id" not in doc
-    assert "chat_app_id" not in doc
+    # build_registry_id and chat_app_id are declared mutable build-scoping
+    # state (not immutable identity), so they now persist and flow through the
+    # pipeline — that propagation is what lets AppGenerator/AppReview update
+    # the registry record. Unknown keys are still dropped.
+    assert doc["build_registry_id"] == "registry-1"
+    assert doc["chat_app_id"] == "authority-app-1"
     assert "stale_unknown_context_key" not in doc
     assert doc["build_mode"] == "revision"
     assert doc["app_name"] == "Round Trip App"
     assert coll.update_filters[-1]["workflow_name"] == "ValueEngine"
 
-    doc["build_registry_id"] = "stale-registry"
-    doc["chat_app_id"] = "stale-authority-app"
     doc["ag2_stream_id"] = "stale-stream"
     doc["session_version"] = 7
     doc["stale_historical_key"] = "SECRET_STALE_CONTEXT_VALUE"
@@ -228,10 +230,17 @@ async def test_context_variable_persistence_resume_round_trip_honors_authority_p
         workflow_name="ValueEngine",
     )
 
+    # Declared mutable state (including build-scoping pointers) round-trips;
+    # internal/protected keys (ag2_stream_id, session_version) and unknown
+    # historical keys are still filtered out on replay.
     assert replayed == {
         "build_mode": "revision",
         "app_name": "Round Trip App",
+        "build_registry_id": "registry-1",
+        "chat_app_id": "authority-app-1",
     }
+    assert "ag2_stream_id" not in replayed
+    assert "session_version" not in replayed
     assert coll.find_filters[-1]["workflow_name"] == "ValueEngine"
     assert "stale_historical_key" in caplog.text
     assert "ValueEngine" in caplog.text

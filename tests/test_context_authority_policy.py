@@ -479,8 +479,16 @@ def test_factory_context_inventory_classifies_authority_like_keys() -> None:
             definitions=plan.definitions,
             transition_rules=transition_rules,
         )
+        # Build-scoping pointers deliberately declare themselves mutable: they
+        # are populated by lifecycle hooks and must flow through the pipeline,
+        # unlike immutable execution identity or credentials. The heuristic
+        # below guards keys that rely on name inference; explicitly declared
+        # authority classes are the author's contract and are respected.
+        declared_mutable_scoping = {"generated_app_id", "build_registry_id", "chat_app_id"}
         assert set(policy.variables) == set(plan.definitions) | {"app_id", "chat_id", "user_id", "workflow_name"}
         for key, authority in policy.variables.items():
+            if key in declared_mutable_scoping:
+                continue
             if any(part in key.lower() for part in authority_like_parts):
                 assert authority.authority_class.value != "mutable_workflow_state", key
                 checked += 1

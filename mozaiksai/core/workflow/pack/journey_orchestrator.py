@@ -148,6 +148,7 @@ class JourneyOrchestrator:
             user_id=user_id,
             workflow_id=workflow_name,
             chat_id=chat_id,
+            carry_context=inherited_context,
         )
         if advance is None or advance.completed:
             return

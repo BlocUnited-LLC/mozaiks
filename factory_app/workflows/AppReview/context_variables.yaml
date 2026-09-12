@@ -1,6 +1,21 @@
 definitions:
+  generated_app_id:
+    type: string
+    authority_class: mutable_workflow_state
+    authorization: false
+    description: >
+      Registry identity of the app being generated, reserved at pipeline start
+      by ValueEngine's create_app_record lifecycle tool. Scopes artifact-store
+      records, generated staging paths, app-registry updates, and app-context
+      registration. Distinct from the immutable executing runtime app_id.
+    source:
+      type: state
+      default: null
+
   build_registry_id:
     type: string
+    authority_class: mutable_workflow_state
+    authorization: false
     description: >
       ID of the hosted app_registry record for the build being reviewed.
       Passed in from the preceding AppGenerator session via journey context.

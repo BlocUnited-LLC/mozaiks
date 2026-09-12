@@ -493,3 +493,30 @@ class TestSupportsProviderResponseFormat:
         ok, path = supports_provider_response_format(WithList)
         assert ok is True
         assert path is None
+
+    def test_model_with_bare_list_field(self):
+        # Compiles to items without a type — providers reject it in strict
+        # response_format mode (live DesignDocsBundle 400).
+        class WithBareList(BaseModel):
+            keys: list
+
+        ok, path = supports_provider_response_format(WithBareList)
+        assert ok is False
+        assert path is not None
+        assert "keys" in path
+
+    def test_model_with_list_of_bare_list_field(self):
+        class WithNestedBareList(BaseModel):
+            keys: list[list]
+
+        ok, path = supports_provider_response_format(WithNestedBareList)
+        assert ok is False
+        assert path is not None
+
+    def test_model_with_any_field(self):
+        class WithAny(BaseModel):
+            value: Any
+
+        ok, path = supports_provider_response_format(WithAny)
+        assert ok is False
+        assert path is not None
