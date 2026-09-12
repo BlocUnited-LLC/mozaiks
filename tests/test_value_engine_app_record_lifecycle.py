@@ -33,15 +33,20 @@ async def test_value_engine_create_app_record_creates_provisional_record_on_star
 
     assert result["success"] is True
     assert result["build_registry_id"] == "appreg_1"
-    assert result["app_id"].startswith("draft-build-")
+    # The generated app's registry identity travels as generated_app_id; the
+    # hook never returns or rebinds the executing runtime app_id (#507/#521).
+    assert result["generated_app_id"].startswith("draft-build-")
+    assert "app_id" not in result
     assert captured_payload["name"] is None
     assert captured_payload["name_source"] == "provisional"
-    assert captured_payload["app_id"] == result["app_id"]
+    assert captured_payload["app_id"] == result["generated_app_id"]
     assert captured_payload["chat_app_id"] == "factory-app"
     assert captured_payload["active_chat_id"] == "chat_1"
     assert captured_payload["current_build_run"]["build_id"] == "chat_1"
     assert ctx["build_registry_id"] == "appreg_1"
-    assert ctx["app_id"] == result["app_id"]
+    assert ctx["generated_app_id"] == result["generated_app_id"]
+    # The executing identity is immutable: it is still the factory session.
+    assert ctx["app_id"] == "factory-app"
     assert ctx["chat_app_id"] == "factory-app"
 
 
@@ -95,7 +100,10 @@ async def test_value_engine_create_app_record_skips_without_chat_id(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_value_engine_create_app_record_preserves_chat_app_id_on_reopen(monkeypatch) -> None:
+async def test_value_engine_create_app_record_preserves_identities_on_reopen(monkeypatch) -> None:
+    """Reopening a build reuses the generated identity instead of minting a new
+    one (a fresh id would split the artifact lineage across two apps), and
+    leaves the executing runtime app_id untouched."""
     async def fake_create(payload):  # noqa: ANN001
         assert payload["name"] == "Concept App"
         assert payload["name_source"] == "manual"
@@ -111,7 +119,8 @@ async def test_value_engine_create_app_record_preserves_chat_app_id_on_reopen(mo
 
     ctx = _Context(
         {
-            "app_id": "build-app",
+            "app_id": "factory-app",
+            "generated_app_id": "build-app",
             "chat_app_id": "factory-app",
             "build_registry_id": "appreg_1",
             "app_name": "Concept App",
@@ -124,7 +133,8 @@ async def test_value_engine_create_app_record_preserves_chat_app_id_on_reopen(mo
 
     assert result["success"] is True
     assert result["build_registry_id"] == "appreg_1"
-    assert result["app_id"] == "build-app"
+    assert result["generated_app_id"] == "build-app"
     assert ctx["build_registry_id"] == "appreg_1"
-    assert ctx["app_id"] == "build-app"
+    assert ctx["generated_app_id"] == "build-app"
+    assert ctx["app_id"] == "factory-app"
     assert ctx["chat_app_id"] == "factory-app"
