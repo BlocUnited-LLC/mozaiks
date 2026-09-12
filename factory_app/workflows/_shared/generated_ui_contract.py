@@ -17,6 +17,7 @@ try:
 except Exception:  # pragma: no cover - import failures are surfaced by tests.
     yaml = None  # type: ignore[assignment]
 
+from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
 from mozaiksai.core.runtime.app.page_schema import (
     VALID_PAGE_TYPES,
     PageSchemaValidationError,
@@ -1150,7 +1151,7 @@ def audit_app_ui_bundle_integrity(
         if not component:
             continue
         route_components.setdefault(component, set()).add(route_path or "<missing path>")
-        if component not in registered_components:
+        if component not in registered_components and component not in APP_AUTH_COMPONENTS:
             warnings.append(
                 f"{source_label} {label} path '{route_path or '<missing path>'}' references component '{component}' but no registerComponent('{component}', ...) call was found in ui/index.js."
             )

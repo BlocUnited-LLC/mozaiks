@@ -214,8 +214,8 @@ class AG2NetworkRunnerRequest:
     structured_registry: Mapping[str, Any] = field(default_factory=dict)
     max_turns: int | None = None
     close_timeout_seconds: float = 120.0
-    attach_network_plugin: bool = True
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None
+    agent_output_handler: Callable[[str, Any], Awaitable[None]] | None = None
     context_authority_policy: ContextAuthorityPolicy | None = None
     # ---------------------------------------------------------------------------
     # AG2 KnowledgeStore injection seam
@@ -353,7 +353,9 @@ class AG2NetworkRunner:
                     name,
                     passport=Passport(name=name),
                     resume=Resume(claimed_capabilities=[name]),
-                    attach_plugin=request.attach_network_plugin,
+                    # Workflow tools and topology are contract-owned. AG2's
+                    # optional plugin adds undeclared channel/delegation tools.
+                    attach_plugin=False,
                 )
                 _install_context_update_handler(
                     agent=agent,
@@ -361,6 +363,7 @@ class AG2NetworkRunner:
                     agent_name=name,
                     run_identity=(request.workflow_name, request.app_id, request.chat_id),
                     agent_text_context_deriver=request.agent_text_context_deriver,
+                    agent_output_handler=request.agent_output_handler,
                     context_authority_policy=request.context_authority_policy,
                 )
                 agent_clients[name] = client
@@ -408,6 +411,9 @@ class AG2NetworkRunner:
                 close_reason: str | None = None,
                 error: str | None = None,
             ) -> AG2NetworkRunnerResult:
+                if close_reason == "workflow_failed":
+                    status = RunStatus.FAILED
+                    error = error or "workflow_failed"
                 state = hub.adapter_state(channel.channel_id)
                 wal = await hub.read_wal(channel.channel_id)
                 agent_name_by_id = _agent_names()
@@ -783,16 +789,7 @@ class _AG2LiveWorkflowRun:
             while True:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
-                    result = await self._snapshot_result(
-                        status=RunStatus.PAUSED,
-                        close_reason="awaiting_user_input",
-                        error=(
-                            "workflow channel did not settle within "
-                            f"{self._close_timeout_seconds} seconds"
-                        ),
-                    )
-                    result.live_run = self
-                    return result
+                    break
 
                 event_task = asyncio.create_task(
                     self._initiator.wait_for_channel_event(
@@ -824,6 +821,8 @@ class _AG2LiveWorkflowRun:
 
                 try:
                     event_env = event_task.result()
+                except TimeoutError:
+                    break
                 finally:
                     for task in pending:
                         task.cancel()
@@ -848,6 +847,11 @@ class _AG2LiveWorkflowRun:
         finally:
             failure_task.cancel()
             await asyncio.gather(failure_task, return_exceptions=True)
+
+        return await self._snapshot_result(
+            status=RunStatus.FAILED,
+            error=f"workflow channel did not settle within {self._close_timeout_seconds} seconds",
+        )
 
     def _next_agent_audience_for_user_text(self, message: str) -> list[str] | None:
         state = self._hub.adapter_state(self.channel_id)
@@ -911,6 +915,7 @@ def _install_context_update_handler(
     agent_name: str,
     run_identity: tuple[str, str, str],
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None,
+    agent_output_handler: Callable[[str, Any], Awaitable[None]] | None = None,
     context_authority_policy: ContextAuthorityPolicy | None = None,
 ) -> None:
     """Commit Mozaiks tool context mutations through AG2 workflow packets.
@@ -925,11 +930,12 @@ def _install_context_update_handler(
     from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 
     bridge = getattr(agent, "_mozaiks_context_bridge", None)
+    tool_outcome = getattr(agent, "_mozaiks_tool_outcome", None)
     if bridge is not None:
         if not isinstance(bridge, ContextVariablesBridge):
             raise ContextAuthorityError("context_authority.untrusted_bridge")
         bridge._bind_run(run_identity, context_authority_policy)
-    if bridge is None and agent_text_context_deriver is None and context_authority_policy is None:
+    if bridge is None and agent_text_context_deriver is None and context_authority_policy is None and agent_output_handler is None:
         return
 
     async def _handler(envelope: Any) -> None:
@@ -944,6 +950,10 @@ def _install_context_update_handler(
                 == str(getattr(envelope, "channel_id", "") or "")
             ):
                 event_data = _json_safe_dict(getattr(out_envelope, "event_data", {}) or {})
+                if tool_outcome is not None and (event_data.get("routing") or {}).get("kind") in {"handoff", "finish"}:
+                    raise ValueError(f"tool_outcome.requires_declared_graph:{agent_name}")
+                if agent_output_handler is not None:
+                    await agent_output_handler(agent_name, out_envelope)
                 existing = dict(event_data.get("context_updates") or {})
                 existing_set = _authorized_context_updates(
                     existing.get("set") or {},
@@ -963,6 +973,13 @@ def _install_context_update_handler(
                     if bridge is not None
                     else {"set": {}, "delete": []}
                 )
+                if tool_outcome is not None:
+                    fresh = bridge_updates.get("set") or {}
+                    if (
+                        fresh.get(tool_outcome.context_key) not in tool_outcome.values
+                        or type(fresh.get(tool_outcome.attempts_key)) is not int
+                    ):
+                        raise ValueError(f"tool_outcome.missing_current_result:{agent_name}")
                 derived_updates: Mapping[str, Any] = {}
                 if agent_text_context_deriver is not None:
                     text = _packet_body_text(event_data)

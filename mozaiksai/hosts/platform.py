@@ -25,6 +25,7 @@ from mozaiksai.core.admin.registry import build_admin_shell_routes, load_admin_r
 from mozaiksai.core.auth import (
     WS_CLOSE_POLICY_VIOLATION,
     UserPrincipal,
+    accept_websocket,
     authenticate_websocket_with_path_binding,
     require_any_auth,
     require_user_scope,
@@ -46,6 +47,10 @@ from mozaiksai.core.profile.discovery import (
 )
 from mozaiksai.core.relationships.discovery import load_relationship_providers
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
+from mozaiksai.core.runtime.app.auth_contract import (
+    build_app_auth_projection,
+    load_app_auth_contract,
+)
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.app.module_loader import ModuleLoadError
@@ -254,11 +259,23 @@ async def _platform_startup() -> None:
     """Initialize platform/app-shell composition after runtime startup."""
     global _runtime_services
 
+    # Fail closed before serving any route: explicitly enabled authentication
+    # whose provider cannot be established must abort platform boot in every
+    # environment, never degrade to the trusted-bypass "none" adapter.
+    from mozaiksai.core.auth.adapters.registry import validate_auth_provider_configuration
+
+    validate_auth_provider_configuration()
+
+    app.state.startup_degraded = False
+    app.state.startup_degraded_reason = None
+    app.state.failed_module_names = []
     app_root = resolve_app_root()
     database_startup_policy = get_database_startup_policy()
     logger.info("DATABASE_STARTUP_POLICY: policy=%s app_root=%s", database_startup_policy, app_root)
     try:
-        load_result = await AppLoader.load(str(app_root))
+        module_defaults_path = getattr(app.state, "module_defaults_path", None)
+        load_options = {"module_defaults_path": module_defaults_path} if module_defaults_path else {}
+        load_result = await AppLoader.load(str(app_root), **load_options)
         app.state.subscriptions_config = load_result.subscriptions_config
         app.state.page_schemas = {
             name: schema.model_dump(mode="json", exclude_none=True)
@@ -351,7 +368,12 @@ async def _platform_startup() -> None:
             workflow_capability_routes = _load_workflow_capability_routes(app_root)
             app.state.workflow_capability_routes = workflow_capability_routes
 
-            mongo_uri = str(os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or "").strip()
+            from mozaiksai.core.secrets import inspect_secret_config, resolve_secret
+
+            mongo_uri = (
+                resolve_secret("MONGO_URI", app_root=app_root)
+                if inspect_secret_config("MONGO_URI", app_root=app_root).configured else ""
+            )
             _reaction_idempotency_store = ReactionIdempotencyStore() if mongo_uri else None
             workflow_trigger_guard = WorkflowTriggerGuard(
                 claim_store=_reaction_idempotency_store,
@@ -1189,6 +1211,8 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
         "landing_spot": "/apps" if is_studio else "/me" if is_user else "/",
     }
     app_manifest = _load_app_manifest()
+    auth_contract = load_app_auth_contract(app_root, auth_required=app_manifest.get("authRequired", False))
+    result["auth"] = await build_app_auth_projection(auth_contract)
     shell_shortcuts: dict[str, Any] | None = None
     shell_navigation: dict[str, Any] | None = None
     shell_chrome: dict[str, Any] | None = None
@@ -3505,7 +3529,7 @@ async def websocket_endpoint(
         )
         if not is_valid:
             try:
-                await websocket.accept()
+                await accept_websocket(websocket)
                 await send_event_envelope(websocket, {
                     "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
@@ -3524,7 +3548,7 @@ async def websocket_endpoint(
     except Exception as dep_err:
         logger.error("WS_PREREQ_VALIDATION_FAILED: %s", dep_err, exc_info=True)
         try:
-            await websocket.accept()
+            await accept_websocket(websocket)
             await send_event_envelope(websocket, {
                 "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.error",

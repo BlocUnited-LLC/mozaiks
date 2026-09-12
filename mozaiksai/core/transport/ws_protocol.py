@@ -318,6 +318,7 @@ class WebSocketProtocolMixin:
                     await self._queue_message_with_backpressure(
                         chat_id,
                         {
+                            "schema_version": "mozaiks.ui.event.v1",
                             "type": "chat.text",
                             "data": {
                                 "index": event_dict.get("index", 0),
@@ -337,6 +338,7 @@ class WebSocketProtocolMixin:
                     await self._queue_message_with_backpressure(
                         chat_id,
                         {
+                            "schema_version": "mozaiks.ui.event.v1",
                             "type": "chat.resume_boundary",
                             "data": boundary,
                         },
@@ -346,6 +348,7 @@ class WebSocketProtocolMixin:
                     await self._queue_message_with_backpressure(
                         chat_id,
                         {
+                            "schema_version": "mozaiks.ui.event.v1",
                             "type": "chat.awaiting_reply",
                             "data": awaiting,
                         },

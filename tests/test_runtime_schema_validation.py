@@ -224,7 +224,7 @@ class _Handler:
 async def test_executor_rejects_bad_input_schema_before_handler(schema: Any) -> None:
     handler = _Handler({"value": 1})
     executor = ModuleExecutor()
-    executor.register("probe", handler, action_schemas={"run": {"input": schema}})
+    executor.register("probe", handler, action_method_map={"run": "run"}, action_schemas={"run": {"input": schema}})
     result = await executor.execute(_request(module="probe", action="run"))
     assert result.success is False
     assert result.error_code == "INVALID_PARAMS"
@@ -237,7 +237,7 @@ async def test_executor_rejects_bad_input_schema_before_handler(schema: Any) -> 
 async def test_executor_rejects_bad_output_schema_including_null_results(schema: Any, value: Any) -> None:
     handler = _Handler(value)
     executor = ModuleExecutor()
-    executor.register("probe", handler, action_schemas={"run": {"output": schema}})
+    executor.register("probe", handler, action_method_map={"run": "run"}, action_schemas={"run": {"output": schema}})
     result = await executor.execute(_request(module="probe", action="run"))
     assert handler.calls == 1
     assert result.success is False
@@ -248,7 +248,7 @@ async def test_executor_rejects_bad_output_schema_including_null_results(schema:
 @pytest.mark.asyncio
 async def test_output_value_invalid_policy_remains_warning_only() -> None:
     executor = ModuleExecutor()
-    executor.register("probe", _Handler(None), action_schemas={"run": {"output": {"type": "object"}}})
+    executor.register("probe", _Handler(None), action_method_map={"run": "run"}, action_schemas={"run": {"output": {"type": "object"}}})
     result = await executor.execute(_request(module="probe", action="run"))
     assert result.success is True
     assert result.data is None
@@ -268,7 +268,7 @@ async def test_executor_rejects_bad_event_schema_before_emission(schema: Any) ->
             return {}
 
     executor = ModuleExecutor(event_emitter=emit)
-    executor.register("probe", Handler(), event_payload_schemas={"domain.probe.changed": schema})
+    executor.register("probe", Handler(), action_method_map={"run": "run"}, event_payload_schemas={"domain.probe.changed": schema})
     result = await executor.execute(_request(module="probe", action="run"))
     assert result.success is False
     assert result.error_code == "INVALID_EVENT_PAYLOAD"
@@ -352,13 +352,13 @@ async def test_explicit_empty_schema_never_bypasses_validation_in_any_caller(bou
                 await ctx.emit("domain.probe.changed", {})
 
         executor = ModuleExecutor(event_emitter=emit)
-        executor.register("probe", Handler(), event_payload_schemas={"domain.probe.changed": {}})
+        executor.register("probe", Handler(), action_method_map={"run": "run"}, event_payload_schemas={"domain.probe.changed": {}})
         result = await executor.execute(_request(module="probe", action="run"))
         assert result.error_code == "INVALID_EVENT_PAYLOAD"
         assert emitted == []
     else:
         executor = ModuleExecutor()
-        executor.register("probe", _Handler(), action_schemas={"run": {boundary: {}}})
+        executor.register("probe", _Handler(), action_method_map={"run": "run"}, action_schemas={"run": {boundary: {}}})
         result = await executor.execute(_request(module="probe", action="run"))
         assert result.error_code == ("INVALID_PARAMS" if boundary == "input" else "INVALID_OUTPUT_SCHEMA")
     assert result.success is False

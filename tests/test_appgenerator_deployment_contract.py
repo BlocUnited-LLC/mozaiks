@@ -846,10 +846,9 @@ def test_infra_scaffold_emits_provider_neutral_auth_contract_and_hardened_adapte
     assert "post_login_default: /dashboard" in files["config/auth.yaml"]
     assert "VITE_OIDC_DISCOVERY_URL" in files["config/auth.yaml"]
     assert "https://" not in files["config/auth.yaml"]
-    assert "TRANSACTION_KEY" in files["ui/auth/authAdapter.js"]
-    assert "state," in files["ui/auth/authAdapter.js"]
-    assert "clearStoredUserSession" in files["ui/auth/authAdapter.js"]
-    assert "return { returnPath:" in files["ui/auth/authAdapter.js"]
+    assert "from '@mozaiks/chat-ui/auth'" in files["ui/auth/authAdapter.js"]
+    assert "return createSharedAuthAdapter(" in files["ui/auth/authAdapter.js"]
+    assert "VITE_MOCK_MODE" not in files["ui/auth/authAdapter.js"]
     assert "localStorage" not in files["ui/auth/authAdapter.js"]
 
 

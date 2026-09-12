@@ -1153,26 +1153,36 @@ class ModuleLoader:
         "policy_hooks": ("policy_hooks.yaml", ModulePolicyHooksManifest),
     }
 
-    def __init__(self, base_path: str, *, taxonomy_advisory: bool = False) -> None:
+    def __init__(self, base_path: str, *, taxonomy_advisory: bool = False, module_defaults_path: str | None = None) -> None:
         self._base = Path(base_path)
+        self._module_roots = [self._base]
+        if module_defaults_path is not None:
+            defaults_root = Path(module_defaults_path)
+            if not defaults_root.is_dir():
+                raise ModuleLoadError(f"Module defaults app root not found: {defaults_root}")
+            if defaults_root.resolve() != self._base.resolve():
+                self._module_roots.append(defaults_root)
         self._taxonomy_advisory = taxonomy_advisory
         import_roots = [self._base.parent, self._base] if self._base.name == "app" else [self._base]
         for root in import_roots:
             root_text = str(root.resolve())
-            if root_text not in sys.path:
-                sys.path.insert(0, root_text)
+            if root_text in sys.path:
+                sys.path.remove(root_text)
+            sys.path.insert(0, root_text)
         self._clear_registered_package("services")
+        # Bind optional app support code to this workspace, even when another
+        # workspace has a regular services package elsewhere on sys.path.
+        self._register_module_package("services", self._base / "services")
 
     def discover_module_names(self) -> list[str]:
-        """Return module names for every modules/*/module.yaml in the bundle."""
-        modules_dir = self._base / "modules"
-        if not modules_dir.exists():
-            return []
-        names: list[str] = []
-        for child in sorted(modules_dir.iterdir(), key=lambda item: item.name.lower()):
-            if child.is_dir() and (child / self.YAML_FILENAME).exists():
-                names.append(child.name)
-        return names
+        """Discover active app modules and explicitly composed host defaults."""
+        names: set[str] = set()
+        for root in self._module_roots:
+            modules_dir = root / "modules"
+            if modules_dir.is_dir():
+                names.update(child.name for child in modules_dir.iterdir()
+                             if child.is_dir() and (child / self.YAML_FILENAME).exists())
+        return sorted(names, key=str.lower)
 
     async def load_all(
         self,
@@ -1199,7 +1209,10 @@ class ModuleLoader:
 
     def load(self, name: str) -> LoadedModule:
         """Load a single canonical module by folder name."""
-        module_dir = self._base / "modules" / name
+        module_dir = next(
+            (root / "modules" / name for root in self._module_roots if (root / "modules" / name).is_dir()),
+            self._base / "modules" / name,
+        )
         if not module_dir.exists():
             raise ModuleLoadError(f"Module directory not found: {module_dir}")
 

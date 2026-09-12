@@ -702,6 +702,7 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.MODULE_ADMIN_UI, LayoutOwner.MODULE, Requirement.OPTIONAL, app, "modules/{module_id}/ui/admin/{page_id}.jsx", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MODULE_ADMIN_PAGE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.MODULE_ADMIN_PAGE_IMPLEMENTATION,), deps=(ArtifactKind.MODULE_MANIFEST,), inputs=("artifact_declaration", "module", "page")),
         _family(ArtifactKind.MODULE_UI_EXTENSION_BARREL, LayoutOwner.MODULE, Requirement.OPTIONAL, app, "modules/{module_id}/ui/index.js", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, disposition=ArtifactDisposition.RENDER, deps=(ArtifactKind.MODULE_MANIFEST,), inputs=("artifact_declaration", "module", "page")),
         _family(ArtifactKind.APP_SERVICE_SUPPORT, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, "services/config.py", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, security=SecurityClass.EXECUTABLE_STUB, disposition=ArtifactDisposition.RENDER, assignment=(AssignmentKind.SERVICE_FOUNDATION,), inputs=integration_inputs),
+        *(_family(ArtifactKind.APP_SERVICE_SUPPORT, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, path, ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, multiplicity=Multiplicity.MANY if "{adapter_area}" in path else Multiplicity.SINGLE, security=SecurityClass.EXECUTABLE_STUB, disposition=ArtifactDisposition.RENDER, assignment=(AssignmentKind.SERVICE_FOUNDATION,), inputs=integration_inputs) for path in _APP_SERVICE_PACKAGE_MARKERS),
         _family(ArtifactKind.APP_SERVICE_INTEGRATION_CLIENT, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "services/integrations/{pack_id}_client.py", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MANAGED_CAPABILITY_SELECTED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, disposition=ArtifactDisposition.RENDER, assignment=(AssignmentKind.SERVICE_FOUNDATION, AssignmentKind.API_SURFACE), inputs=integration_inputs),
         _family(ArtifactKind.APP_SERVICE_ROUTE, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, "services/routes/{pack_id}.py", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_APP_ROUTE_EXTENSION_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.SERVICE_FOUNDATION, AssignmentKind.API_SURFACE, AssignmentKind.APP_ROUTE_EXTENSION_IMPLEMENTATION), inputs=("application", "artifact_declaration")),
         _family(ArtifactKind.APP_SERVICE_ADAPTER, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, "services/adapters/{adapter_area}/{pack_id}.py", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_APP_OWNED_INTEGRATION_SELECTED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.SERVICE_FOUNDATION, AssignmentKind.INTEGRATION_ADAPTER_IMPLEMENTATION), inputs=("application", "integration")),
@@ -777,6 +778,14 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         *(_prohibited(app, path) for path in _PROHIBITED_APP_BUNDLE_TEMPLATES),
     )
 
+
+_APP_SERVICE_PACKAGE_MARKERS = (
+    "services/__init__.py",
+    "services/integrations/__init__.py",
+    "services/routes/__init__.py",
+    "services/adapters/__init__.py",
+    "services/adapters/{adapter_area}/__init__.py",
+)
 
 _APP_ROOT_SUPPORT_FILES = (
     "__init__.py",

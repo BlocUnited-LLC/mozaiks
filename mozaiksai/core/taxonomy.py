@@ -51,14 +51,11 @@ def validate_identifier_grammar(category: SemanticCategory | str, identifier: st
     """Validate one category's canonical grammar and return a trimmed value."""
     resolved_category = SemanticCategory(category)
     value = str(identifier or "").strip()
-    if (
-        not value
-        or (
-            _GRAMMARS[resolved_category].fullmatch(value) is None
-            and not (
-                resolved_category is SemanticCategory.EVENT
-                and value in _GRANDFATHERED_EVENT_IDENTIFIERS
-            )
+    if not value or (
+        _GRAMMARS[resolved_category].fullmatch(value) is None
+        and not (
+            resolved_category is SemanticCategory.EVENT
+            and value in _GRANDFATHERED_EVENT_IDENTIFIERS
         )
     ):
         if resolved_category is SemanticCategory.CAPABILITY:
@@ -208,8 +205,7 @@ class TaxonomyRegistry(TaxonomyModel):
             for entry in namespace.entries:
                 if (
                     namespace.kind is NamespaceKind.EXTENSION
-                    and (entry.category, entry.identifier.split(".", 1)[0])
-                    in protected_core_roots
+                    and (entry.category, entry.identifier.split(".", 1)[0]) in protected_core_roots
                 ):
                     raise ValueError(
                         f"extension namespace {namespace.namespace_id!r} cannot occupy protected "
@@ -348,6 +344,8 @@ _CORE_EVENTS = (
     "domain.workspace_integrations.declaration_removed",
     "domain.workspace_integrations.declarations_saved",
     "domain.workspace_integrations.note_updated",
+    "domain.security_readiness.assessment_recorded",
+    "domain.security_readiness.finding_status_updated",
     "domain.workspace_support.message_added",
     "domain.workspace_support.negative_feedback",
     "domain.workspace_support.request_created",
@@ -402,6 +400,8 @@ _CORE_CAPABILITIES = (
     "operator_readiness.profile.select",
     "reports.export",
     "reports.view",
+    "security_readiness.findings.list",
+    "security_readiness.summary.get",
     "social.feed.read",
     "social.friends.connect",
     "social.friends.list",

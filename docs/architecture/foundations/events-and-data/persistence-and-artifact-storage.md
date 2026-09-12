@@ -80,6 +80,14 @@ Framework-owned pipeline artifacts produced and consumed by `factory_app`:
 These collections hold the durable handoff between workflow stages such as
 `ValueEngine`, `DesignDocs`, `AgentGenerator`, and `AppGenerator`.
 
+Versioned `BuildRecord` documents in `ArtifactVersions` use the unique key
+`(app_id, build_family, build_key, version_number)`. Counters in
+`ArtifactVersionCounters` use `(app_id, build_family, build_key)`. Store
+initialization installs these indexes for canonical records and removes only
+the known obsolete unique indexes over `artifact_kind` and `artifact_key`.
+Existing documents are not deleted or rewritten. An unexpected index definition
+or conflicting canonical data fails initialization and requires operator review.
+
 ### 2b. Platform Connector Metadata
 
 Platform-owned, app-scoped connector metadata used by the visible
@@ -234,6 +242,16 @@ definition changes require an explicit operator compatibility migration.
 App business data database names are resolved from an injected adapter value,
 then `MOZAIKS_APP_DATABASE_NAME`, then `MOZAIKS_APPS_DATABASE`, then
 `mozaiks_apps`.
+
+Account export and deletion dispatch registered module `AccountDataHandler`
+implementations through the platform's `/api/account/export` and `/api/account`
+routes. The routes use the authenticated principal's app and user identity and
+the existing app-data database accessor; they do not read the workflow runtime's
+persistence manager. App-data alias consumers additionally honor
+`MOZAIKS_APP_DATA_DATABASE_NAME` before the app database settings above. Handlers
+resolve their own collection contracts and enforce app/user ownership. Factory's
+onboarding module exercises this path with canonical generated collection names;
+an alias manifest is not required merely to resolve the account database.
 
 Migration history records use `in_progress`, `applied`, and `failed`. The
 `mozaiksai.AppDatabaseMigrations` collection also acts as the migration lock:

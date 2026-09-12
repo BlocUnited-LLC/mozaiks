@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
-from jinja2 import Template
+from jinja2 import StrictUndefined, Template, TemplateError
 
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.session.build_context import (
@@ -732,7 +732,17 @@ def resolve_templates_for_pack(
             output_path = _template_output_path(path, templates_root)
             content = path.read_text(encoding="utf-8")
             if path.suffix == ".j2":
-                content = Template(content).render(**template_vars)
+                try:
+                    content = Template(content, undefined=StrictUndefined).render(**template_vars)
+                    if output_path.endswith((".yaml", ".yml")):
+                        yaml.safe_load(content)
+                    elif output_path.endswith(".json"):
+                        json.loads(content)
+                except (TemplateError, yaml.YAMLError, ValueError, TypeError) as exc:
+                    raise ManagedCapabilityTemplateError(
+                        f"Pack '{pack_id}' template '{path.relative_to(context_root).as_posix()}' "
+                        f"could not render valid '{output_path}': {exc}"
+                    ) from exc
             existing = by_filename.get(output_path)
             if existing is not None and existing != content:
                 raise ManagedCapabilityTemplateError(

@@ -1,8 +1,16 @@
 schema_version: mozaiks.structured_outputs.v1
 registry:
-  ReviewAgent: RuntimeUIPrimitiveSmokeResult
+  ReviewAgent: RuntimeSmokeStep
+  ArtifactAgent: RuntimeSmokeStep
+  SynthesisAgent: RuntimeUIPrimitiveSmokeResult
 
 models:
+  RuntimeSmokeStep:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short message describing the upcoming runtime-controlled step.
   RuntimeUIPrimitiveSmokeResult:
     type: model
     fields:

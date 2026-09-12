@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+
 
 @dataclass(frozen=True)
 class FunctionalGeneratedAppDiagnostic:
@@ -37,7 +39,7 @@ _BUILT_IN_ROUTE_COMPONENTS = {
     "DashboardPortalPage",
     "AdminPortal",
     "ProfilePage",
-}
+} | APP_AUTH_COMPONENTS
 
 
 def _javascript_lexical_view(source: str) -> tuple[str, frozenset[int]]:
@@ -369,7 +371,7 @@ def _page_schema_index(
 def _registered_components(files: dict[str, str]) -> set[str]:
     registered: set[str] = set()
     for path, content in files.items():
-        if path == "ui/index.js" or path.endswith("/index.js") or path.endswith("/index.jsx"):
+        if path in {"index.js", "index.jsx", "ui/index.js"} or path.endswith("/index.js") or path.endswith("/index.jsx"):
             registered.update(match.group("name") for match in _REGISTER_COMPONENT_RE.finditer(content))
     return registered
 
@@ -377,12 +379,13 @@ def _registered_components(files: dict[str, str]) -> set[str]:
 def _validate_routes(
     files: dict[str, str],
     diagnostics: list[FunctionalGeneratedAppDiagnostic],
+    inherited_components: frozenset[str] = frozenset(),
 ) -> None:
     pages = _route_manifest_pages(files, diagnostics)
     if not pages:
         return
     schemas = _page_schema_index(files, diagnostics)
-    registered = _registered_components(files)
+    registered = _registered_components(files) | inherited_components
     custom_files = {
         PurePosixPath(path).stem
         for path in files
@@ -422,7 +425,7 @@ def _validate_routes(
                     )
                 )
             continue
-        if component in _BUILT_IN_ROUTE_COMPONENTS:
+        if component in _BUILT_IN_ROUTE_COMPONENTS or component in inherited_components:
             continue
         if component not in registered:
             diagnostics.append(
@@ -579,10 +582,9 @@ def _validate_mozaikspay_facade(
             )
 
 
-def _validate_placeholders(
-    files: dict[str, str],
-    diagnostics: list[FunctionalGeneratedAppDiagnostic],
-) -> None:
+def scan_placeholder_implementations(files: dict[str, str]) -> list[FunctionalGeneratedAppDiagnostic]:
+    """Find unfinished implementations in generated app and workflow source."""
+    diagnostics: list[FunctionalGeneratedAppDiagnostic] = []
     for path, content in sorted(files.items()):
         pure = PurePosixPath(path)
         if pure.suffix.lower() not in {".py", ".js", ".jsx", ".ts", ".tsx", ".yaml", ".yml"}:
@@ -603,12 +605,15 @@ def _validate_placeholders(
                     path=path,
                 )
             )
+    return diagnostics
 
 
 def scan_functional_generated_app(
     files: dict[str, str],
     *,
     capability_packs: list[dict[str, Any]] | None = None,
+    inherited_components: frozenset[str] = frozenset(),
+    check_placeholders: bool = True,
 ) -> list[FunctionalGeneratedAppDiagnostic]:
     """Validate cross-artifact functional coherence for a canonical app bundle.
 
@@ -621,15 +626,17 @@ def scan_functional_generated_app(
     diagnostics: list[FunctionalGeneratedAppDiagnostic] = []
     actions = _module_action_registry(safe_files, diagnostics)
     _validate_action_handlers(safe_files, actions, diagnostics)
-    _validate_routes(safe_files, diagnostics)
+    _validate_routes(safe_files, diagnostics, inherited_components)
     refs = _collect_module_refs(safe_files, diagnostics)
     _validate_module_refs(actions, refs, diagnostics)
     _validate_mozaikspay_facade(safe_files, actions, capability_packs or [], diagnostics)
-    _validate_placeholders(safe_files, diagnostics)
+    if check_placeholders:
+        diagnostics.extend(scan_placeholder_implementations(safe_files))
     return diagnostics
 
 
 __all__ = [
     "FunctionalGeneratedAppDiagnostic",
     "scan_functional_generated_app",
+    "scan_placeholder_implementations",
 ]

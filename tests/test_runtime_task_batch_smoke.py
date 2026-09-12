@@ -24,6 +24,18 @@ WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
 WORKFLOW_DIR = WORKFLOWS_ROOT / "RuntimeTaskBatchSmoke"
 
 
+def test_task_batch_continuation_projects_current_declared_results():
+    from mozaiksai.core.workflow.orchestration_patterns import _task_batch_continuation_prompt
+
+    prompt = _task_batch_continuation_prompt(
+        {"context_variables": {"agents": {"SynthesisAgent": {"variables": ["worker_results"]}}}},
+        "SynthesisAgent", {"worker_results": {"task_one": "completed"}, "unrelated_private_value": "do-not-project"},
+    )
+    assert "task_one" in prompt and "completed" in prompt
+    assert "do-not-project" not in prompt
+    assert "unrelated_private_value" not in prompt
+
+
 def _ag2_task_context(kwargs: dict) -> dict:
     state = kwargs["dependencies"][CHANNEL_STATE_DEP]
     return dict(state.context_vars)

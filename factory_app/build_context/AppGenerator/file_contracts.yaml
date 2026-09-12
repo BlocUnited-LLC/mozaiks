@@ -14,6 +14,12 @@ description: >
   Runtime truth remains the structured outputs, build_tasks, owned_paths, and
   runtime loaders — not this catalog.
 
+  Authenticated app scaffolds are emitted by InfraScaffoldAgent through
+  save_infra_scaffold outside AppBuildPlan build_tasks. config/auth.yaml
+  validates against the shared mozaiks.auth.v1 model; ui/auth/authAdapter.js
+  delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
+  local demo identity implementations. Backend configuration selects auth mode.
+
 task_contracts:
   page_bundle:
     owner_agent: AppSchemaAgent
@@ -203,9 +209,11 @@ task_contracts:
     summary: App-level service support code for integrations, provider adapters, routes, and names-only secret policy. Paths are app-bundle-relative and assemble under physical app/services/ or app/security/.
     required_outputs: []
     optional_outputs:
+      - services/__init__.py
       - services/config.py
       - services/integrations/*.py
       - services/routes/*.py
+      - services/adapters/__init__.py
       - services/adapters/**/*.py
       - security/secrets.yaml
       - task-owned service support files
@@ -214,7 +222,8 @@ task_contracts:
       - Emit integration glue or provider adapter support only.
       - Do not generate a standalone platform or alternate host.
       - App-owned support code belongs under app-bundle-relative services/integrations/ for external or hosted API clients, services/adapters/ for provider-specific implementation boundaries, and services/routes/ for app-level routes only when needed; physical generated workspaces place these under app/services/.
-      - If app-owned runtime secrets are required, emit security/secrets.yaml as a names-only contract for provider/vault policy, env handles, and secret names. Never emit raw secret values.
+      - Optional __init__.py package markers may be empty and must be preserved in services/, services/integrations/, services/routes/, services/adapters/, and services/adapters/{adapter_area}/. They do not authorize other service directories or move module-owned behavior into services.
+      - "If app-owned runtime secrets are required, emit security/secrets.yaml as a names-only contract validated by mozaiksai.core.secrets.AppSecretContract: version: 1 and secrets entries with env (never string entries), optional azure_key_vault.secret_name, and optional provider policy. Unknown fields and raw values are forbidden. Never emit raw secret values."
       - Common services/adapters/ areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the generated app itself directly owns those provider mechanics rather than consuming a hosted platform capability.
       - Do not use service_foundation for Mozaiks-hosted deployment, DNS, domain, billing, payment processing, or platform operations. Hosted platform capabilities are consumed through hosted API clients/facade modules and host-owned records; provider adapters stay in the hosted product.
       - services/adapters/ and services/integrations/ must not own business actions, product lifecycle, user-facing actions, emitted domain events, or persistence authority. Modules own those behaviors.

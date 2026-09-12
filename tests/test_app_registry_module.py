@@ -79,13 +79,13 @@ class _FakeRepo:
             return [self.record]
         return []
 
-    async def get_by_app_id(self, *, app_id: str):
-        if self.record and self.record["app_id"] == app_id:
+    async def get_by_app_id(self, *, app_id: str, owner_user_id: str):
+        if self.record and self.record["app_id"] == app_id and self.record["owner_user_id"] == owner_user_id:
             return self.record
         return None
 
-    async def get_by_build_registry_id(self, *, build_registry_id: str):
-        if self.record and self.record["build_registry_id"] == build_registry_id:
+    async def get_by_build_registry_id(self, *, build_registry_id: str, owner_user_id: str):
+        if self.record and self.record["build_registry_id"] == build_registry_id and self.record["owner_user_id"] == owner_user_id:
             return self.record
         return None
 
@@ -108,6 +108,7 @@ async def test_app_registry_service_creates_and_updates_lifecycle_records() -> N
     assert app["name_source"] == "manual"
 
     updated = await service.update_build_status(
+        owner_user_id="user_1",
         build_registry_id="appreg_1",
         status="review",
         bundle_path="generated/apps/app_1/build_1/app",
@@ -167,6 +168,7 @@ async def test_app_registry_service_persists_build_context_and_current_run() -> 
     assert app["current_build_run"]["active_chat_id"] == "chat_1"
 
     updated = await service.update_build_status(
+        owner_user_id="user_1",
         build_registry_id="appreg_1",
         status="review",
         bundle_path="generated/apps/app_1/build_1/app",

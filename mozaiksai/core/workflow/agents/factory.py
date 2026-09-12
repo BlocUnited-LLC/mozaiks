@@ -158,6 +158,7 @@ class _WorkflowToolInvocation:
     bridge: ContextVariablesBridge
     policy: ContextAuthorityPolicy | None
     run_identity: tuple[str, str, str] | None
+    user_id: str | None
     active: bool = True
 
 
@@ -166,9 +167,30 @@ _WORKFLOW_TOOL_INVOCATION: ContextVar[_WorkflowToolInvocation | None] = ContextV
 )
 
 
+def active_workflow_tool_run() -> tuple[str, str, str, str]:
+    """Return runtime-owned workflow/app/chat/actor identity for this invocation."""
+    invocation = _WORKFLOW_TOOL_INVOCATION.get()
+    if (
+        invocation is None
+        or not invocation.active
+        or invocation.run_identity is None
+        or invocation.policy is None
+        or invocation.user_id is None
+        or invocation.bridge._authority_policy is not invocation.policy
+        or invocation.bridge._run_identity != invocation.run_identity
+        or invocation.bridge.get("user_id") != invocation.user_id
+    ):
+        raise PermissionError("workflow_tool_invocation_unavailable")
+    return (*invocation.run_identity, invocation.user_id)
+
+
 @contextmanager
 def _workflow_tool_invocation(bridge: ContextVariablesBridge):
-    invocation = _WorkflowToolInvocation(bridge, bridge._authority_policy, bridge._run_identity)
+    actor = bridge.get("user_id")
+    invocation = _WorkflowToolInvocation(
+        bridge, bridge._authority_policy, bridge._run_identity,
+        actor if isinstance(actor, str) and actor.strip() else None,
+    )
     token = _WORKFLOW_TOOL_INVOCATION.set(invocation)
     try:
         yield
@@ -567,6 +589,13 @@ async def create_agents(
         agent_tool_functions = {}
 
     auto_tool_agent_names = workflow_manager.get_auto_tool_agents(workflow_name)
+    from ..declarative.contracts import ToolOutcomeSpec
+
+    tool_outcomes = {
+        tool["agent"]: ToolOutcomeSpec.model_validate(tool["outcome"])
+        for tool in workflow_config.get("tools", [])
+        if tool.get("outcome") is not None and isinstance(tool.get("agent"), str)
+    }
 
     required_structured_agents = _required_structured_agent_names(
         agent_configs,
@@ -932,6 +961,7 @@ async def create_agents(
         agent._mozaiks_ag2_token_watchdog_enabled = bool(observers)
         agent._mozaiks_agent_kind = "local"
         agent._mozaiks_context_bridge = context_bridge
+        agent._mozaiks_tool_outcome = tool_outcomes.get(agent_name)
 
         if structured_model_cls is not None:
             model_name = getattr(structured_model_cls, "__name__", None)

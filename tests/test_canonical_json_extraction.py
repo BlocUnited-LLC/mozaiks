@@ -60,7 +60,7 @@ def _source() -> dict[str, Any]:
     }
 
 
-def _authority():
+def _authority(*, registry=None):
     scope = ExecutionAccessScopeRef(tenant_id="tenant-json", workspace_id="workspace-json")
     payload = build_semantic_payload(
         WorkflowPayload,
@@ -82,7 +82,8 @@ def _authority():
         edges=[],
     )
     return plan_authority.build_compilation_plan_authority_inputs(
-        graph=graph, payloads=[payload], registry=build_app_layout_registry(()),
+        graph=graph, payloads=[payload],
+        registry=registry if registry is not None else build_app_layout_registry(()),
         structured_output_configs=_source(),
     )
 
@@ -104,7 +105,13 @@ def test_value_serialization_and_digest_are_byte_identical_to_exact_base() -> No
 
 
 def test_complete_plan_authority_serialization_and_digest_are_unchanged() -> None:
-    authority = _authority()
+    from tests.service_package_marker_migration_helpers import (
+        registry_before_service_package_markers,
+    )
+
+    # Hold registry inputs at this historical extraction's base. The later
+    # optional package-marker rows have a separate registry-identity proof.
+    authority = _authority(registry=registry_before_service_package_markers())
     encoded = authority.model_dump_json().encode("utf-8")
     assert len(encoded) == _REFERENCE_AUTHORITY_BYTE_COUNT
     assert hashlib.sha256(encoded).hexdigest() == _REFERENCE_DOCUMENT_BYTES_SHA256

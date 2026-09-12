@@ -187,6 +187,26 @@ def _workflow_catalog_bound_to_host_config() -> Iterator[None]:
         manager.__dict__.update(catalog_snapshot)
 
 
+@contextmanager
+def _module_defaults_bound_to_host(target_app: FastAPI, host: str) -> Iterator[None]:
+    """Compose first-party module defaults only for a running Studio host."""
+    if host != "studio":
+        yield
+        return
+    factory_workspace = resolve_factory_app_root()
+    if factory_workspace is None:
+        raise RuntimeError("Studio requires the packaged Factory workspace")
+    previous = getattr(target_app.state, "module_defaults_path", None)
+    target_app.state.module_defaults_path = str(factory_workspace / "app")
+    try:
+        yield
+    finally:
+        if previous is None:
+            del target_app.state.module_defaults_path
+        else:
+            target_app.state.module_defaults_path = previous
+
+
 def register_repo_host_bootstrap(target_app: FastAPI, host: str) -> None:
     """Arrange for ``configure_repo_host_defaults(host)`` to run at server startup.
 
@@ -211,7 +231,7 @@ def register_repo_host_bootstrap(target_app: FastAPI, host: str) -> None:
     @asynccontextmanager
     async def _bootstrap_lifespan(app_instance: FastAPI) -> AsyncIterator[None]:
         configure_repo_host_defaults(normalized_host)
-        with _workflow_catalog_bound_to_host_config():
+        with _workflow_catalog_bound_to_host_config(), _module_defaults_bound_to_host(app_instance, normalized_host):
             async with existing_lifespan(app_instance):
                 yield
 

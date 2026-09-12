@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createInitialSurfaceState, mapSurfaceEventToAction, uiSurfaceReducer } from '../state/uiSurfaceReducer';
 import platform from '../platform/index.js';
+import { NavigationContext } from '../providers/NavigationProvider';
 import { logChatPersistence } from '../session/chatSessionStorage';
 import {
   getStoredActiveChatId,
@@ -33,6 +34,7 @@ export const ChatUIProvider = ({
   onReady = () => {},
   agents = []
 }) => {
+  const navigation = useContext(NavigationContext);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
@@ -202,6 +204,8 @@ export const ChatUIProvider = ({
   }, [conversationMode]);
 
   useEffect(() => {
+    let cancelled = false;
+    let unsubscribeAuth;
     const initializeServices = async () => {
       try {
         // Optional: allow host to initialize workflow/tool registry without bundling
@@ -222,6 +226,7 @@ export const ChatUIProvider = ({
           }
         }
 
+        if (cancelled) return;
         // Adapters are host-injected; keep local state to avoid undefined access.
         setAuthAdapterInstance(authAdapter);
         setApiAdapterInstance(apiAdapter);
@@ -229,14 +234,16 @@ export const ChatUIProvider = ({
         // Get initial user (optional)
         try {
           const currentUser = await authAdapter?.getCurrentUser?.();
+          if (cancelled) return;
           setUser(currentUser || null);
         } catch (_) {
+          if (cancelled) return;
           setUser(null);
         }
 
         // Listen for auth state changes (optional)
         if (authAdapter?.onAuthStateChange) {
-          authAdapter.onAuthStateChange((newUser) => {
+          unsubscribeAuth = authAdapter.onAuthStateChange((newUser) => {
             setUser(newUser || null);
           });
         }
@@ -254,19 +261,29 @@ export const ChatUIProvider = ({
     };
 
     initializeServices();
+    return () => {
+      cancelled = true;
+      if (typeof unsubscribeAuth === 'function') unsubscribeAuth();
+    };
   }, [authAdapter, apiAdapter, workflowInitializer]);
 
   useEffect(() => {
     // Agents are auto-discovered through the workflow system
     if (agents.length > 0) {
-      console.warn('⚠️ Custom agent registration via props is not supported. Agents are defined in the agents.json file.');
+      console.warn('Custom agent registration via props is not supported. Agents are defined by workflow agents.yaml files.');
     }
   }, [agents]);
 
   const resolvedConfig = useMemo(() => {
-    if (uiConfig && typeof uiConfig === 'object') return uiConfig;
-    return {};
-  }, [uiConfig]);
+    const base = uiConfig && typeof uiConfig === 'object' ? uiConfig : {};
+    if (!navigation?.appId) return base;
+    // The active host owns the default app scope, not a shell/demo placeholder.
+    return {
+      ...base,
+      appName: navigation.appName || base.appName,
+      chat: { ...base.chat, defaultAppId: navigation.appId },
+    };
+  }, [uiConfig, navigation?.appId, navigation?.appName]);
 
   const contextValue = {
     // User state
@@ -352,7 +369,7 @@ export const ChatUIProvider = ({
     },
   };
 
-  if (loading) {
+  if (loading || navigation?.loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-blue-900">
         <div className="text-white text-center">
@@ -361,6 +378,10 @@ export const ChatUIProvider = ({
         </div>
       </div>
     );
+  }
+
+  if (navigation && !resolvedConfig.chat?.defaultAppId) {
+    return <div role="alert">App configuration could not be loaded.</div>;
   }
 
   return (

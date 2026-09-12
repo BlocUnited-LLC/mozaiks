@@ -59,6 +59,268 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Security Readiness now saves findings through permissioned workflow module
+  dispatch using the live session principal. Findings retain project/build
+  association and cannot overwrite another project's matching scanner rule.
+  Workflow handoffs tolerate brief reconnects while rechecking the original
+  actor and fresh permissions before dispatch; started actions are never retried.
+  Unavailable persistence and uninspected bundles remain explicit in review.
+- Studio workspaces inherit packaged first-party modules through the standard
+  app loader. App-local modules override defaults by id, so hosted workspaces
+  can reuse Security Readiness without copying its implementation.
+
+- Bind app service imports to the selected workspace on reload and reset
+  platform health state for each startup attempt.
+
+- Build-record and version-counter uniqueness now follows `build_family` and
+  `build_key`. Known retired indexes are replaced without deleting records;
+  failed index initialization is retried instead of leaving a half-ready store.
+
+- Preserve explicitly empty generated files, including Python package markers,
+  so app service imports resolve from the generated bundle.
+
+- ValueEngine concept review now waits for a structured approve, request-changes,
+  or cancel action tied to the displayed draft. Stale reviews, failed saves, and
+  invalid responses cannot complete the workflow. The declared review budget is
+  three proposals per run, with retries only after an explicit request for changes;
+  this is an execution guard, not a subscription allowance.
+
+- Preserve explicit provider-native output token limits and SDK retry counts
+  when converting runtime LLM configuration to AG2. Invalid, conflicting, or
+  unsupported limits now fail before a provider request instead of disappearing.
+  This does not introduce a wallet reservation or a total-spend guarantee.
+
+### App workspace alignment
+
+- Add an advisory `SecurityReadiness` Factory workflow and build context so generated app bundles can surface baseline auth, secret, permission, tenant-scope, deployment, and eval-readiness findings during AppReview.
+
+- Add a first-party Factory `security_readiness` module for app/build security
+  findings, summaries, and review status without introducing hosted-only
+  compliance logic into OSS.
+- Expose the existing reference bundle evaluator through `factory_app.eval` so
+  hosted apps can consume it without copying the implementation. Factory build
+  events carry bounded generation evidence through the existing authenticated
+  outbox; removed proprietary Build Intelligence HTTP hooks from OSS workflows.
+- Resolve packaged Factory prompt catalogs outside source checkouts and combine
+  explicitly declared workspace projections. Configured launch-provider failures
+  propagate instead of silently discarding enrichment.
+- Resolve workflow UI using the backend's explicit default-registry inheritance
+  and workspace folder overrides. Added installed-workspace composition proof to
+  wheel CI.
+- Add `validate_app_workspace` for shared declarations and static action/route
+  closure with explicit inherited UI; generated bundles retain stricter output
+  and placeholder checks.
+
+### Security
+
+- Reject startup hooks that change immutable runtime identity or authorization
+  context before agent creation and model dispatch, including hooks that swallow
+  their own errors. This is a runtime invariant, not a generated-app target resolver.
+
+- Factory now declares its authentication and runtime secret contracts. The
+  shared shell uses backend-confirmed auth mode and shared OIDC sign-in;
+  failed configuration cannot silently create a demo identity. Generated auth
+  adapters delegate to the shared implementation. Runtime model and MongoDB
+  secret lookups consume the selected names-only policy.
+
+- Studio App Registry reads, updates, promotions, and deletes now carry the
+  caller's owner scope into Mongo filters. Reopening an app ID cannot transfer
+  ownership; concurrent same-owner creation is idempotent. Directory deletion
+  no longer erases app-wide usage facts. Module creation without a target ID
+  allocates a new app instead of reusing the Studio host's identity.
+
+- App secret declarations now use one typed names-only contract in generation,
+  validation, and runtime. Invalid or explicitly missing policies fail closed;
+  selecting an app never borrows another workspace's manifest. Environment-only
+  apps need no vault service. Generated secret entries now use the runtime's
+  canonical `env` object shape.
+- Account export and deletion now bind the authenticated principal and the
+  canonical app-data database before invoking module lifecycle handlers.
+  Signed-token Mongo tests cover ownership, app isolation, and repeated deletion.
+- **Production-safe browser WebSocket authentication**: the shared browser client
+  no longer puts the access token in the WebSocket URL
+  (`?access_token=<jwt>`), where it leaked into server access logs, browser
+  history, `Referer` headers, and shared links. The credential now travels in
+  the `Sec-WebSocket-Protocol` handshake header — the one request header the
+  browser WebSocket API lets a client set — as
+  `["mozaiks.bearer.v1", base64url(token)]`. The runtime decodes it, validates
+  it through the same configured auth adapter as HTTP routes, binds the same
+  `WebSocketUser`, and echoes back only the marker, never the credential.
+  Authenticated browser connections therefore work in production and staging
+  **without** setting `MOZAIKS_WS_ALLOW_QUERY_TOKEN=true`. Query-string tokens
+  remain rejected by default and stay available only as an explicit
+  local-development opt-in for non-browser clients. Auth-disabled local
+  development is unchanged. The credential component must be canonical unpadded
+  base64url: illegal characters, whitespace, padding, trailing garbage,
+  impossible lengths, invalid UTF-8, and non-canonical encodings are refused
+  before the auth adapter runs, with their own bounded close reason, and are
+  never sanitized into a usable credential.
+- **Fail-closed module action dispatch**: `ModuleExecutor` no longer falls
+  back from an undeclared action id to a same-named Python handler method.
+  Only action ids declared in the module's contract
+  (`module.yaml` `actions[].handler_method`, mirrored in the registered
+  `action_method_map`) are dispatchable; unknown or undeclared actions —
+  including event-reaction handlers, private helpers, and arbitrary handler
+  attributes — return `ACTION_NOT_FOUND` before any handler resolution, for
+  trusted and enforce-mode authorities alike. The rejection path never
+  touches the handler object (no `getattr`/`hasattr`, so hostile
+  properties/descriptors/`__getattr__` cannot execute), and denied audits
+  carry only a bounded, sanitized action string.
+- **Fail-closed authentication configuration**: auth-mode environment
+  variables are interpreted by one canonical resolver
+  (`resolve_auth_config`) consumed by every predicate, adapter resolution,
+  and startup validation. With `AUTH_ENABLED=true`, a missing, misspelled,
+  or incomplete auth provider configuration is fatal at startup (runtime and
+  platform/Studio hosts) and at provider resolution, in every environment.
+  Contradictory explicit declarations (`AUTH_ENABLED=true` +
+  `AUTH_PROVIDER=none`; `AUTH_ENABLED=false` + a real explicit
+  `AUTH_PROVIDER`) and unrecognized `AUTH_ENABLED` values are fatal instead
+  of silently resolving. **Unauthenticated operation is now allowlisted:** it
+  is permitted only in the recognized local environments `development`,
+  `local`, `test` (`dev` normalizes to `development`) or with no environment
+  configured. Every other explicit `ENV`/`ENVIRONMENT` value — `production`,
+  `staging`, and unknown or regional names such as `prod-us`,
+  `production-east`, `preview`, or `qa` — refuses no-auth operation
+  (explicit disable or implicit demo) independent of
+  `MOZAIKS_STARTUP_CHECKS` mode, while still booting normally with
+  authentication configured. `ENV` and `ENVIRONMENT` are resolved
+  canonically: blank values are absence (a blank `ENV` cannot mask a
+  deployed `ENVIRONMENT`), aliases normalize before comparison, and two
+  non-blank values that disagree are a fatal configuration error rather than
+  a silent pick. The cached auth adapter is keyed by the complete
+  provider-specific configuration snapshot it is built from — issuer, JWKS
+  and discovery URLs, audience, every claim mapping, scope format, clock
+  skew, algorithms, cache TTLs, Keycloak claim mappings, Supabase secret,
+  and anonymous-persona settings — so changing any of them rebuilds the
+  adapter and no stale adapter can serve requests under newer configuration.
+  Custom adapters declare a `config_identity` at registration to participate
+  in that cache identity, and are never cached without one; malformed
+  identities (non-string, empty, whitespace-only, or a raising callable) are
+  rejected rather than coerced into a cache key. The adapter constructor
+  contract is established *positively* at registration by binding the
+  runtime's exact invocation against the complete signature: `settings` as a
+  keyword (or `**kwargs`) receives the snapshot, a constructor whose other
+  parameters are all optional is built with no arguments, and anything the
+  runtime cannot actually invoke — `(settings, required)`,
+  `(required, **kwargs)`, a positional-only `settings`, any required parameter
+  it cannot supply, or a signature it cannot inspect — is rejected instead of
+  being assumed to take no configuration
+  (`register_adapter(..., constructor_mode=...)` declares the contract
+  explicitly for uninspectable constructors). An exception raised inside a
+  constructor body — including `TypeError` — fails closed instead of
+  triggering a retry that would discard the canonical configuration. An adapter's lazily created OIDC discovery and
+  JWKS clients now inherit its snapshot (URLs and cache TTLs) and never
+  consult live environment or global `AuthConfig`, so an adapter built under
+  one configuration cannot begin validating tokens against another; explicit
+  constructor input to those clients is authoritative. `AUTH_JWKS_CACHE_TTL`
+  (default 3600) and `AUTH_DISCOVERY_CACHE_TTL` (default 86400) are validated
+  (integer seconds, zero or greater; `0` means always refetch and is never
+  treated as unset) during configuration resolution, so malformed values fail
+  startup instead of surfacing during lazy client creation on a request path.
+  Absent, empty, and whitespace-only values normalize identically through one
+  canonical resolver shared by configuration resolution, the adapter config,
+  and `AuthConfig`, and cache expiry compares elapsed time against the TTL so
+  every accepted value — including very large ones — stays usable at request
+  time.
+  Implicit demo mode (no auth configuration at all, in an environment that
+  permits it) still boots for local getting-started use.
+- **Fail-closed billing fulfillment ingress**:
+  `POST /api/billing/fulfillment/apply` (and the fulfillment admin listing)
+  now requires the internal API key, an *authenticated* billing-admin
+  principal (`UserPrincipal.is_authenticated` — real bearer-token
+  provenance, not role/scope strings, which anonymous and dev-persona
+  principals can carry), or explicitly disabled authentication
+  (`AUTH_ENABLED=false` / `AUTH_PROVIDER=none`, which protected
+  environments reject outright). Auth being merely unconfigured no longer
+  makes the ingress callable without authentication.
+
+### Added
+
+- **Billing fulfillment revision fencing**: `BillingFulfillmentCommand` accepts
+  an optional `subject_revision` — a provider-neutral, monotonically increasing
+  ordinal that the upstream billing source allocates per entitlement subject
+  when it commits a canonical revision. Subscription effects now commit only
+  when the incoming revision is strictly newer than the one already stored for
+  that subject, compared atomically on the assignment document at write time.
+  An out-of-order command (an older HTTP request that completes after a newer
+  one has already been applied) is suppressed rather than regressing
+  entitlement state: its assignment and plan-allowance effects are `skipped`
+  with reason `stale_revision`, and the result carries the new terminal status
+  `superseded` so the sender can settle it without retrying. The last committed
+  revision is stored in the assignment document under the new
+  `assignment_store.revision_field` (`billing_revision`, or null to opt out —
+  the field is a fixed authority name, not a customization point). Plan token
+  allowances are fenced at their own commit too: the ledger accepts an opaque
+  `subject_key`/`subject_revision` pair and folds the ordering predicate into
+  the same single-document update that changes the balance, so a stale command
+  cannot mint tokens even if it was already mid-flight when a newer revision
+  committed, and the wallet-side ordering head advances for every accepted
+  revision — including cancellations, zero-allowance plans, and revisions that
+  reuse an existing period allocation — so "latest accepted revision" is what
+  fences a delayed older allowance, not "revision that last minted tokens".
+  That ordering authority is claimed on every applicable wallet *before* the
+  assignment commits: a revision only becomes the newly authoritative one once
+  no wallet its subject can reach still admits an older revision, and a wallet
+  that reports a newer revision means the command was overtaken, so nothing
+  applies. A head write that *fails* is not a decline: it propagates, nothing
+  applies, and — because that failure provably precedes every effect — the
+  durable command reservation is released so the identical command can be
+  retried instead of being refused as permanently pending. Wallet heads already
+  claimed are never reversed; the retry finds them equal and proceeds.
+  A wallet balance only ever moves under a reservation the invocation has
+  positively acquired: a pending reservation is taken by compare-and-swap on
+  exactly the reservation fields the stored document actually carries —
+  including their absence, so an entry written before reservations were
+  tracked is still adoptable and a movement that already committed stays
+  recoverable — and a lost swap means re-reading and reacquiring rather than
+  writing anyway. A newer, entitled revision may adopt
+  a reservation a stale attempt left behind, and rollback then only ever
+  deletes a reservation the rolling-back attempt still owns.
+  Fencing is one decision for the whole command: an app that sets
+  `revision_field: null` gets prior behavior from both the assignment and the
+  wallet. Enabling fencing requires one assignment row per entitlement subject,
+  enforced by a unique index over the configured subject paths — a store that
+  already carries an equivalent unique index provides that guarantee under
+  whatever name it uses and is accepted as is; pre-existing duplicate subjects
+  fail closed with an actionable error rather than being silently resolved. `billing_revision` is reserved — no other assignment
+  mapping may target it — and a command whose remaining effects are invalidated
+  by a newer revision reports `superseded` even when an earlier effect applied.
+  A replayed command reports `original_status`, preserving whether it
+  originally applied, was rejected, or was superseded. Commands that
+  omit `subject_revision` are applied unfenced exactly as before and keep their
+  pre-existing durable command identity, so upgrading cannot turn a previously
+  completed command into a content conflict.
+
+### Fixed
+
+- Declarative workflow agents no longer receive undeclared AG2 network
+  delegation/discovery tools automatically. Declared tools and AG2 graph
+  execution remain available. Continuation timeouts now return failed results
+  and close live-run clients instead of escaping as an exception or pretending
+  to await human input.
+- Workflow entrypoints, transition choices, and refinement launches now forward
+  the configured auth adapter's access token through the shared API helper.
+  Authenticated builds no longer fail at these steps with a missing-token error.
+- The shared app shell now binds chat and workflow defaults to the active
+  host's app identity, waits for shell configuration, and no longer launches
+  under an implicit `demo-app` scope.
+- Live workflow smoke checks now read canonical AG2 run events and wait for
+  resumed user turns. Reconnect replay emits versioned event envelopes, and
+  runtime-seeded chat/user identity remains available to usage accounting even
+  when workflows declare no application context variables.
+- Workflow composer continuations no longer block the WebSocket receiver while
+  awaiting UI tool responses. Task-batch continuations receive current declared
+  worker results; the UI smoke dogfoods single-attempt approval and artifact
+  outcomes instead of model-controlled tool repetition.
+- Generated workflow exports now validate all runtime YAML contracts and tool
+  implementations before packaging or repair. Capability-pack templates reject
+  missing inputs and invalid rendered YAML/JSON; readiness configuration preserves
+  string values containing YAML punctuation.
+- Workflow operations can declare validated outcomes and enforced attempt budgets.
+  AgentGenerator materializes their context and transition rules from typed plans;
+  factory export failures now route to bounded repair or user attention instead of
+  completing as successful downloads.
+
 - **Exact structured-output auto-tool contracts**: declared workflow
   structured outputs are now exact at runtime — an agent output carrying an
   undeclared field (top-level or nested) rejects before any normalization, so
@@ -93,6 +355,10 @@ This project follows a practical pre-1.0 changelog format:
   distributed exactly-once delivery.
 
 ### Changed
+
+- **YAML-first workflow and integration config contracts**: generated workflow
+  declaratives and app integration sub-configs now consistently use `.yaml`;
+  retired JSON prompt artifacts and stale JSON-path guidance were removed.
 
 - **Canonical capability-pack action requests are closed**: all 63 actions
   across the 10 workspace_handler_split pack modules (commerce, entitlement

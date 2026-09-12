@@ -110,7 +110,9 @@ def test_action_revalidates_existing_nested_contracts_and_self_digest() -> None:
 
 
 def test_semantic_migration_changes_only_action_request_and_containing_identity() -> None:
-    from tests.test_compilation_plan import _plan
+    from tests.service_package_marker_migration_helpers import (
+        corpus_plan_before_service_package_markers,
+    )
     from tests.test_semantic_payload_graph_v2 import _corpus_graph
 
     baseline = json.loads((Path(__file__).parent / "fixtures/action-request-migration.json").read_text())
@@ -147,7 +149,9 @@ def test_semantic_migration_changes_only_action_request_and_containing_identity(
     restored_graph["graph_digest"] = baseline["graph_digest"]
     assert graph.graph_digest != baseline["graph_digest"]
 
-    plan = _plan()
+    # Compare this historical migration against its original registry; the
+    # subsequent package-marker registry addition has its own identity proof.
+    plan = corpus_plan_before_service_package_markers()
     restored_plan = plan.canonical_payload(include_digest=False)
     restored_plan["graph_digest"] = baseline["graph_digest"]
     assert canonical_digest(restored_plan) == baseline["plan_digest"]

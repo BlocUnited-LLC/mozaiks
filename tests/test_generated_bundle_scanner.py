@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     generate_deployment_artifacts,
 )
@@ -90,23 +92,16 @@ customization:
 
 
 def _auth_adapter_js() -> str:
-    return """
-const TRANSACTION_KEY = 'demo_oidc_transactions';
-function writeAuthTransaction(transaction) {
-  return transaction.state;
-}
-function readAuthTransaction(state) {
-  return state;
-}
-function clearStoredUserSession() {
-  sessionStorage.removeItem('demo_access_token');
-}
-async function handleCallback() {
-  const state = new URLSearchParams(window.location.search).get('state');
-  const transaction = readAuthTransaction(state);
-  return { returnPath: transaction?.returnPath || '/dashboard' };
-}
-"""
+    return (
+        _WORKSPACE / "factory_app/build_context/webapp_builder/templates/ui/auth/authAdapter.js"
+    ).read_text(encoding="utf-8")
+
+
+def _auth_routes_json() -> str:
+    return json.dumps({"pages": [
+        {"path": "/login", "component": "LoginPage", "meta": {"requiresAuth": False}},
+        {"path": "/auth/callback", "component": "AuthCallbackPage", "meta": {"requiresAuth": False}},
+    ]})
 
 
 def _mozaikspay_pack() -> list[dict]:
@@ -396,7 +391,8 @@ def test_scan_generated_bundle_rejects_raw_secret_fields() -> None:
     )
 
     assert any("names-only" in error for error in errors)
-    assert any("secrets.0.value" in error for error in errors)
+    assert any("extra_forbidden" in error for error in errors)
+    assert all("sk-test-raw" not in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_data_contract_module_id_mismatch() -> None:
@@ -658,6 +654,7 @@ def test_scan_generated_bundle_rejects_authenticated_app_without_auth_deploy_con
     files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
     files["config/auth.yaml"] = _auth_contract_yaml()
     files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+    files["ui/route_manifest.json"] = _auth_routes_json()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
@@ -678,10 +675,17 @@ def test_scan_generated_bundle_accepts_authenticated_app_deploy_contract() -> No
     files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
     files["config/auth.yaml"] = _auth_contract_yaml()
     files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+    files["ui/route_manifest.json"] = _auth_routes_json()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
     assert errors == []
+
+
+@pytest.mark.parametrize("intent", ["true", "false", 1, 0, None, [], {}])
+def test_scan_generated_bundle_rejects_non_boolean_auth_intent(intent: object) -> None:
+    errors = scan_generated_bundle({"app.json": json.dumps({"name": "Example", "authRequired": intent})})
+    assert "app.json.authRequired must be a boolean" in errors
 
 
 def test_scan_generated_bundle_rejects_authenticated_app_without_auth_yaml() -> None:
@@ -695,6 +699,7 @@ def test_scan_generated_bundle_rejects_authenticated_app_without_auth_yaml() -> 
     )["artifacts"]
     files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
     files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+    files["ui/route_manifest.json"] = _auth_routes_json()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
@@ -714,10 +719,11 @@ def test_scan_generated_bundle_rejects_auth_yaml_with_provider_url_literal() -> 
     files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
     files["config/auth.yaml"] = _auth_contract_yaml() + "\nprovider_url: https://accounts.google.com\n"
     files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+    files["ui/route_manifest.json"] = _auth_routes_json()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
-    assert any("provider URLs must be supplied by env handles" in error for error in errors)
+    assert any("provider_url" in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_auth_yaml_with_unknown_mode() -> None:
@@ -735,10 +741,11 @@ def test_scan_generated_bundle_rejects_auth_yaml_with_unknown_mode() -> None:
         "mode: direct_google_oauth",
     )
     files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+    files["ui/route_manifest.json"] = _auth_routes_json()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
-    assert any("mode must be one of" in error for error in errors)
+    assert any("mode:" in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_auth_yaml_with_direct_login_method_url() -> None:
@@ -759,12 +766,13 @@ login_methods:
     url: https://accounts.google.com
 """
     files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+    files["ui/route_manifest.json"] = _auth_routes_json()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
-    assert any("login_methods[0] has unsupported fields" in error for error in errors)
-    assert any("login_methods[0].kind" in error for error in errors)
-    assert any("provider URLs must be supplied by env handles" in error for error in errors)
+    assert any("login_methods.0.url" in error for error in errors)
+    assert any("login_methods.0.kind" in error for error in errors)
+    assert all("https://accounts.google.com" not in error for error in errors)
 
 
 def test_scan_generated_bundle_accepts_public_signup_auth_mode() -> None:
@@ -786,13 +794,14 @@ def test_scan_generated_bundle_accepts_public_signup_auth_mode() -> None:
         "  - id: create-account\n    kind: create_account\n    label: Create account\n    primary: false",
     )
     files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+    files["ui/route_manifest.json"] = _auth_routes_json()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
     assert errors == []
 
 
-def test_scan_generated_bundle_rejects_auth_adapter_without_stateful_pkce() -> None:
+def test_scan_generated_bundle_rejects_auth_adapter_without_shared_implementation() -> None:
     files = generate_deployment_artifacts(
         app_id="private-smoke",
         deployment_profile="generic_container",
@@ -807,7 +816,7 @@ def test_scan_generated_bundle_rejects_auth_adapter_without_stateful_pkce() -> N
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
-    assert any("state-bound PKCE" in error for error in errors)
+    assert any("@mozaiks/chat-ui/auth" in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_auth_adapter_local_storage() -> None:
@@ -825,7 +834,7 @@ def test_scan_generated_bundle_rejects_auth_adapter_local_storage() -> None:
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
-    assert any("must use sessionStorage, not localStorage" in error for error in errors)
+    assert any("regenerate the auth scaffold" in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_auth_adapter_provider_specific_code() -> None:
@@ -843,7 +852,7 @@ def test_scan_generated_bundle_rejects_auth_adapter_provider_specific_code() -> 
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
-    assert any("must stay provider-neutral OIDC" in error for error in errors)
+    assert any("regenerate the auth scaffold" in error for error in errors)
 
 
 def test_scan_generated_bundle_accepts_production_profile_readiness_only_contract() -> None:
@@ -858,6 +867,7 @@ def test_scan_generated_bundle_accepts_production_profile_readiness_only_contrac
     files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
     files["config/auth.yaml"] = _auth_contract_yaml()
     files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+    files["ui/route_manifest.json"] = _auth_routes_json()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 

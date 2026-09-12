@@ -173,18 +173,21 @@ class TestIsCanonicalAppConfigPath:
     def test_sensitive_config_not_canonical(self):
         assert is_canonical_app_config_path("config/secrets.yaml") is False
 
-    def test_integrations_subdir_json_canonical(self):
-        assert is_canonical_app_config_path("config/integrations/payment_provider.json") is True
+    def test_integrations_subdir_json_not_canonical(self):
+        assert is_canonical_app_config_path("config/integrations/payment_provider.json") is False
 
     def test_integrations_subdir_yaml_canonical(self):
         assert is_canonical_app_config_path("config/integrations/twilio.yaml") is True
+
+    def test_integrations_subdir_yml_not_canonical(self):
+        assert is_canonical_app_config_path("config/integrations/twilio.yml") is False
 
     def test_unknown_config_file_not_canonical(self):
         assert is_canonical_app_config_path("config/my_custom_settings.json") is False
 
     def test_integrations_subdir_with_sensitive_name_blocked(self):
-        # e.g. config/integrations/api_secrets.json — has "secrets" token
-        result = is_canonical_app_config_path("config/integrations/api_secrets.json")
+        # e.g. config/integrations/api_secrets.yaml has a "secrets" token
+        result = is_canonical_app_config_path("config/integrations/api_secrets.yaml")
         # sensitive token blocks it
         assert result is False
 

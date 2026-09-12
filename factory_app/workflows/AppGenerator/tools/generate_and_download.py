@@ -24,6 +24,7 @@ from pydantic import Field
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     collect_generated_app_file_map,
+    compose_bundle_auth_routes,
     extract_code_file_map_from_payload,
     extract_deleted_file_paths_from_payload,
 )
@@ -489,6 +490,23 @@ async def _inject_agent_context_env(*, files_map: dict[str, str], app_id: str, c
     lines = _ensure_env_line(lines, "VITE_AGENT_WEBSOCKET_URL", str(agent_ws or ""))
     lines = _ensure_env_line(lines, "VITE_AGENT_API_URL", str(agent_api or ""))
     files_map[".env.example"] = "\n".join(lines).rstrip() + "\n"
+
+
+def _export_repair_outcome(acceptance: dict[str, Any]) -> str:
+    integration = acceptance.get("workflow_integration_repair") or {}
+    bundle = acceptance.get("bundle_repair") or {}
+    if integration.get("status") == "blocked" or bundle.get("status") == "blocked":
+        return "blocked"
+    if integration.get("status") == "needs_revision":
+        return "repair_integration"
+    if bundle.get("status") == "needs_revision":
+        return {
+            "AppSchemaAgent": "repair_schema",
+            "ConfigMiddlewareAgent": "repair_integration",
+            "ServiceAgent": "repair_service",
+            "FrontendStubAgent": "repair_frontend",
+        }.get(str(bundle.get("target_agent") or ""), "blocked")
+    return "blocked"
 
 
 async def _emit_deployment_event(*, chat_id: str | None, status: str, data: dict) -> None:
@@ -978,6 +996,10 @@ async def generate_and_download(
                 pass
         await _inject_agent_context_env(files_map=files_map, app_id=str(app_id), context_variables=context_variables)
 
+    # Auth scaffold and app-schema routes have independent owners; compose their
+    # normal declarations before final validation, without runtime route fallbacks.
+    compose_bundle_auth_routes(files_map)
+
     acceptance_result = await run_app_bundle_acceptance_gate(
         files=files_map,
         context_variables=context_variables,
@@ -988,6 +1010,7 @@ async def generate_and_download(
             wf_logger.error("App bundle acceptance failure: %s", failed_test)
         return {
             "status": "error",
+            "outcome": _export_repair_outcome(acceptance_result),
             "message": (
                 "Generated app bundle failed deterministic acceptance. "
                 "Fix the reported contract errors and regenerate."
@@ -1173,6 +1196,7 @@ async def generate_and_download(
         _context_set(context_variables, "app_download_ready", False)
         return {
             "status": "cancelled",
+            "outcome": "cancelled",
             "ui_response": response,
             "agent_message_id": agent_message_id,
             "ui_files": [],
@@ -1220,7 +1244,8 @@ async def generate_and_download(
                 }
                 action = None
                 return {
-                    "status": "success",
+                    "status": "blocked",
+                    "outcome": "blocked",
                     "ui_response": response,
                     "agent_message_id": agent_message_id,
                     "ui_files": ui_files,
@@ -1254,6 +1279,7 @@ async def generate_and_download(
             )
     except Exception as deploy_err:
         wf_logger.warning("GitHub export flow failed: %s", deploy_err)
+        deployment_result = {"success": False, "error": "GitHub export failed; inspect export status before retrying."}
 
     download_result = {
         "bundle_dir": str(app_dir.resolve()),
@@ -1268,8 +1294,12 @@ async def generate_and_download(
     _context_set(context_variables, "app_download_ready", True)
     _context_set(context_variables, "download_result", download_result)
 
+    export_failed = action == "export_to_github" and (
+        not isinstance(deployment_result, dict) or deployment_result.get("success") is not True
+    )
     return {
-        "status": "success",
+        "status": "error" if export_failed else "success",
+        "outcome": "blocked" if export_failed else "ready",
         "ui_response": response,
         "agent_message_id": agent_message_id,
         "ui_files": ui_files,

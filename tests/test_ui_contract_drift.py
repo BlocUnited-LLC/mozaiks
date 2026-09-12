@@ -23,6 +23,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+
 # ---------------------------------------------------------------------------
 # Repo root helpers
 # ---------------------------------------------------------------------------
@@ -296,18 +298,18 @@ def test_factory_app_custom_route_closure_all_manifest_components_registered():
     """Every component listed in factory_app route_manifest.json must be registered.
 
     Registration happens transitively: ui/index.js calls registerAdminComponents()
-    which is defined in admin/index.js.  Both registration files are checked.
+    which is defined in admin/index.js. The shell registers shared auth pages.
     """
     manifest_components = _component_names_from_route_manifest(FACTORY_ROUTE_MANIFEST)
     registered = _registered_components_from_js_files(
-        FACTORY_UI_INDEX_JS, FACTORY_ADMIN_INDEX_JS
+        FACTORY_UI_INDEX_JS, FACTORY_ADMIN_INDEX_JS, REPO_ROOT / "web_shell/App.jsx"
     )
 
     unregistered = manifest_components - registered
     assert not unregistered, (
         f"route_manifest.json components missing from ui/index.js registerComponent calls:\n"
         f"  {sorted(unregistered)}\n"
-        "Each route_manifest entry needs a matching registerComponent() call in ui/index.js."
+        "Each route_manifest entry needs a matching app or shared-shell registration."
     )
 
 
@@ -332,9 +334,8 @@ _CHAT_UI_PAGES_ROOT = REPO_ROOT / "chat-ui" / "src" / "pages"
 def test_factory_app_manifest_component_files_exist_on_disk():
     """Every component referenced in route_manifest.json must have a backing source file.
 
-    Components imported from '@mozaiks/chat-ui/pages/*' are resolved under
-    chat-ui/src/pages/.  All other components are resolved under
-    factory_app/app/admin/pages/.
+    The shared auth exports live in chat-ui/src/auth/AuthPages.jsx. Other
+    imports resolve through the Factory admin barrel and its known source roots.
 
     This ensures the three-file closure (manifest entry → registration → file) is
     complete: a component name in the manifest with no backing file would silently
@@ -357,7 +358,10 @@ def test_factory_app_manifest_component_files_exist_on_disk():
     for page in manifest.get("pages", []):
         comp = page["component"]
         import_src = import_map.get(comp, "")
-        if import_src.startswith("@mozaiks/chat-ui/pages/"):
+        if comp in APP_AUTH_COMPONENTS:
+            candidate = REPO_ROOT / "chat-ui/src/auth/AuthPages.jsx"
+            assert f"export function {comp}(" in candidate.read_text(encoding="utf-8")
+        elif import_src.startswith("@mozaiks/chat-ui/pages/"):
             # Resolve to chat-ui/src/pages/
             filename = import_src.split("/")[-1]
             candidate = _CHAT_UI_PAGES_ROOT / filename

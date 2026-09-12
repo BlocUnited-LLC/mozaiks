@@ -57,17 +57,40 @@ def _env_list(key: str) -> list[str]:
 # Fallback config builder
 # ---------------------------------------------------------------------------
 
-def _resolve_api_key(api_type: str, explicit_key: str | None = None) -> str:
-    """Resolve API key for ``api_type``, preferring an explicit value then
-    provider-specific env vars then the generic ``LLM_PRIMARY_API_KEY``."""
+MODEL_API_KEY_ENV_NAMES: dict[str, tuple[str, ...]] = {
+    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_PRIMARY_API_KEY"),
+    "anthropic": ("ANTHROPIC_API_KEY", "LLM_PRIMARY_API_KEY"),
+    "openai": ("LLM_PRIMARY_API_KEY", "OPENAI_API_KEY"),
+    "ollama": (),
+}
+
+
+def _optional_secret(env_name: str) -> str:
+    from mozaiksai.core.secrets import SecretResolutionError, resolve_secret
+
+    try:
+        return resolve_secret(env_name)
+    except SecretResolutionError as exc:
+        if exc.source != "missing":
+            raise
+        return ""
+
+
+def resolve_model_api_key(api_type: str, explicit_key: str | None = None) -> str:
+    """Resolve the selected provider's key through the app's secret policy.
+
+    Explicit per-call keys take precedence. A missing optional reference permits
+    the next supported handle; invalid policy and configured vault failures do
+    not silently fall through to a different credential. Ollama needs no key.
+    """
     if explicit_key:
         return explicit_key
-    if api_type == "google":
-        return _env("GEMINI_API_KEY") or _env("GOOGLE_API_KEY") or _env("LLM_PRIMARY_API_KEY")
-    if api_type == "anthropic":
-        return _env("ANTHROPIC_API_KEY") or _env("LLM_PRIMARY_API_KEY")
-    # openai / azure / default
-    return _env("LLM_PRIMARY_API_KEY") or _env("OPENAI_API_KEY")
+    names = MODEL_API_KEY_ENV_NAMES.get(api_type, MODEL_API_KEY_ENV_NAMES["openai"])
+    for env_name in names:
+        value = _optional_secret(env_name)
+        if value:
+            return value
+    return ""
 
 
 def build_fallback_config_list(
@@ -107,7 +130,7 @@ def build_fallback_config_list(
     # ---- Primary ----
     resolved_api_type = (primary_api_type or _env("LLM_PRIMARY_API_TYPE", "openai")).lower()
     resolved_primary = primary_model or _env("LLM_PRIMARY_MODEL", "gpt-4o")
-    resolved_api_key = _resolve_api_key(resolved_api_type, primary_api_key or None)
+    resolved_api_key = resolve_model_api_key(resolved_api_type, primary_api_key or None)
     resolved_base_url = primary_base_url or _env("LLM_PRIMARY_BASE_URL") or None
 
     primary_entry: dict[str, Any] = {"model": resolved_primary, "api_type": resolved_api_type}
@@ -123,7 +146,10 @@ def build_fallback_config_list(
 
     # ---- Fallbacks ----
     resolved_fallback_models = fallback_models if fallback_models is not None else _env_list("LLM_FALLBACK_MODELS")
-    resolved_fallback_keys = fallback_api_keys if fallback_api_keys is not None else _env_list("LLM_FALLBACK_API_KEYS")
+    resolved_fallback_keys = (
+        fallback_api_keys if fallback_api_keys is not None
+        else [key.strip() for key in _optional_secret("LLM_FALLBACK_API_KEYS").split(",") if key.strip()]
+    )
     resolved_fallback_urls = fallback_base_urls if fallback_base_urls is not None else _env_list("LLM_FALLBACK_BASE_URLS")
 
     for idx, model in enumerate(resolved_fallback_models):
@@ -203,6 +229,28 @@ def build_fallback_llm_config(
 # AG2 typed config factory
 # ---------------------------------------------------------------------------
 
+def _model_call_limits(
+    llm_config: dict[str, Any],
+    entry: dict[str, Any],
+    supported: tuple[str, ...],
+) -> dict[str, int]:
+    """Keep explicit safety controls; never silently ignore an unsupported one."""
+    limits: dict[str, int] = {}
+    for key in ("max_tokens", "max_completion_tokens", "max_output_tokens", "max_retries"):
+        if key not in entry and key not in llm_config:
+            continue
+        if key not in supported:
+            raise ValueError(f"{key} is not supported by the selected AG2 model configuration")
+        value = entry[key] if key in entry else llm_config[key]
+        minimum = 0 if key == "max_retries" else 1
+        if type(value) is not int or value < minimum:
+            raise ValueError(f"{key} must be an integer >= {minimum}; omit it to use the provider default")
+        limits[key] = value
+    if len(limits.keys() - {"max_retries"}) > 1:
+        raise ValueError("Configure only one output token limit for the selected provider")
+    return limits
+
+
 def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     """Convert an AG2 ``llm_config`` dict to a typed AG2 ``ModelConfig`` instance.
 
@@ -215,6 +263,10 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     - ``"ollama"``           → ``OllamaConfig``  (local inference)
 
     Any unrecognised api_type falls through to ``OpenAIConfig``.
+
+    Explicit output/retry limits use the provider's native AG2 field names.
+    Provider-entry values override shared defaults. Unsupported, ambiguous,
+    or invalid limit declarations fail before constructing a provider client.
     """
     config_list = llm_config.get("config_list") or []
     if not config_list:
@@ -236,6 +288,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "api_key": api_key,
             "temperature": temperature,
             "streaming": streaming,
+            **_model_call_limits(llm_config, entry, ("max_output_tokens",)),
         }
         if llm_config.get("response_modalities"):
             kwargs["response_modalities"] = llm_config["response_modalities"]
@@ -244,15 +297,24 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         return GeminiConfig(**kwargs)
     if api_type == "anthropic":
         from ag2.config import AnthropicConfig  # type: ignore[attr-defined]
-        return AnthropicConfig(model=model, api_key=api_key, temperature=temperature, streaming=streaming)
+        kwargs = {
+            "model": model,
+            "api_key": api_key,
+            "temperature": temperature,
+            "streaming": streaming,
+            **_model_call_limits(llm_config, entry, ("max_tokens", "max_retries")),
+        }
+        return AnthropicConfig(**kwargs)
     if api_type == "ollama":
         from ag2.config import OllamaConfig  # type: ignore[attr-defined]
-        return OllamaConfig(
-            model=model,
-            host=base_url or "http://localhost:11434",
-            temperature=temperature,
-            streaming=streaming,
-        )
+        kwargs = {
+            "model": model,
+            "host": base_url or "http://localhost:11434",
+            "temperature": temperature,
+            "streaming": streaming,
+            **_model_call_limits(llm_config, entry, ("max_tokens",)),
+        }
+        return OllamaConfig(**kwargs)
     # openai / azure / default
     if api_type == "openai" and bool(llm_config.get("use_responses_api") or llm_config.get("responses_api")):
         from ag2.config import OpenAIResponsesConfig
@@ -263,10 +325,11 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "base_url": base_url,
             "temperature": temperature,
             "streaming": streaming,
+            **_model_call_limits(llm_config, entry, ("max_output_tokens", "max_retries")),
         }
         if timeout is not None:
             response_kwargs["timeout"] = timeout
-        for key in ("max_output_tokens", "max_tool_calls", "parallel_tool_calls", "store"):
+        for key in ("max_tool_calls", "parallel_tool_calls", "store"):
             if key in llm_config:
                 response_kwargs[key] = llm_config[key]
         return OpenAIResponsesConfig(**response_kwargs)
@@ -278,6 +341,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         "base_url": base_url,
         "temperature": temperature,
         "streaming": streaming,
+        **_model_call_limits(llm_config, entry, ("max_tokens", "max_completion_tokens", "max_retries")),
     }
     if timeout is not None:
         kwargs["timeout"] = timeout
@@ -322,6 +386,8 @@ def get_healthy_config_list(
 
 
 __all__ = [
+    "MODEL_API_KEY_ENV_NAMES",
+    "resolve_model_api_key",
     "build_fallback_config_list",
     "build_fallback_llm_config",
     "get_healthy_config_list",

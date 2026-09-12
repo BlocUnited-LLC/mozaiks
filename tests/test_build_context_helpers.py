@@ -246,12 +246,14 @@ class TestProjectRule:
 class TestResolveBuildContextRoot:
     def test_explicit_root_returned_as_path(self, tmp_path: Path):
         root = tmp_path / "my_context"
+        root.mkdir()
         result = resolve_build_context_root(build_context_root=root)
         assert result is not None
         assert result == root.resolve()
 
     def test_env_build_context_path_used(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         root = tmp_path / "env_context"
+        root.mkdir()
         monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
         result = resolve_build_context_root()
         assert result is not None
@@ -278,6 +280,8 @@ class TestResolveBuildContextRoot:
     def test_explicit_root_takes_priority_over_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         explicit = tmp_path / "explicit"
         env_path = tmp_path / "env"
+        explicit.mkdir()
+        env_path.mkdir()
         monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(env_path))
         result = resolve_build_context_root(build_context_root=explicit)
         assert result == explicit.resolve()

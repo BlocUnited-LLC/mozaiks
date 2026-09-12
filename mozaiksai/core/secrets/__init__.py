@@ -17,8 +17,18 @@ from .connector_vault import (
     get_connector_vault_backend,
     reset_connector_vault_backend,
 )
+from .contract import (
+    AppSecretContract,
+    AppSecretReference,
+    SecretContractError,
+    validate_secret_contract,
+)
 
 __all__ = [
+    "AppSecretContract",
+    "AppSecretReference",
+    "SecretContractError",
+    "validate_secret_contract",
     "AzureKeyVaultConnectorVaultBackend",
     "ConnectorVaultBackend",
     "NoopConnectorVaultBackend",

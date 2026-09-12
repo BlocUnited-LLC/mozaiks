@@ -49,6 +49,7 @@ def test_load_global_pack_graph_uses_canonical_file(monkeypatch) -> None:
         "AgentGenerator",
         "AppGenerator",
         "ExistingAppDiscovery",
+        "SecurityReadiness",
         "AppReview",
     }
 
@@ -58,7 +59,9 @@ def test_load_global_pack_graph_review_transition_uses_chat_session_contract(mon
     graph = load_global_pack_graph()
     assert graph is not None
 
-    review = next((transition for transition in graph.transitions if transition.id == "app_review"), None)
+    review = next(
+        (transition for transition in graph.transitions if transition.id == "app_review"), None
+    )
     assert review is not None
     assert review.transition_type == "chat_session"
     assert review.ui is None
@@ -67,7 +70,9 @@ def test_load_global_pack_graph_review_transition_uses_chat_session_contract(mon
     assert review.cancel_route is None
 
 
-def test_single_root_registry_path_uses_explicit_override_without_factory_merge(monkeypatch, tmp_path) -> None:
+def test_single_root_registry_path_uses_explicit_override_without_factory_merge(
+    monkeypatch, tmp_path
+) -> None:
     _use_repo_factory_workflows(monkeypatch)
 
     app_root = tmp_path / "app"
@@ -168,13 +173,15 @@ def test_registry_extends_packaged_default_with_app_overlay(monkeypatch, tmp_pat
     assert roots[1] == _resources.resolve_factory_workflows_root()
     workflow_paths = discover_workflow_paths(workflows_root)
     assert workflow_paths["HostedOnly"] == hosted_workflow_dir.resolve()
-    assert workflow_paths["AppGenerator"] == (
-        _resources.resolve_factory_workflows_root() / "AppGenerator"
-    ).resolve()
+    assert (
+        workflow_paths["AppGenerator"]
+        == (_resources.resolve_factory_workflows_root() / "AppGenerator").resolve()
+    )
     assert resolve_workflow_path("HostedOnly", workflows_root) == hosted_workflow_dir.resolve()
-    assert resolve_workflow_path("AppGenerator", workflows_root) == (
-        _resources.resolve_factory_workflows_root() / "AppGenerator"
-    ).resolve()
+    assert (
+        resolve_workflow_path("AppGenerator", workflows_root)
+        == (_resources.resolve_factory_workflows_root() / "AppGenerator").resolve()
+    )
 
 
 def test_explicit_app_registry_without_extends_does_not_discover_factory_workflows(
@@ -224,7 +231,9 @@ def test_declared_global_workflows_match_physical_workflow_folders(monkeypatch) 
     physical = {
         p.name
         for p in workflows_root.iterdir()
-        if p.is_dir() and p.name not in {"_pack", "__pycache__", "extended_orchestration"} and not p.name.startswith(".")
+        if p.is_dir()
+        and p.name not in {"_pack", "__pycache__", "extended_orchestration"}
+        and not p.name.startswith(".")
     }
 
     assert declared.issubset(physical)
@@ -297,7 +306,9 @@ def test_default_roots_use_repo_factory_workflows_when_no_active_app(monkeypatch
     assert "__no_active_app__" not in str(root)
 
 
-def test_active_app_root_uses_workspace_env_when_platform_path_missing(monkeypatch, tmp_path: Path) -> None:
+def test_active_app_root_uses_workspace_env_when_platform_path_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
     workspace_root = tmp_path / "external-workspace"
     app_root = workspace_root / "app"
     app_root.mkdir(parents=True)
@@ -319,20 +330,25 @@ def test_chat_ui_src_root_defaults_to_repo_checkout(monkeypatch) -> None:
     assert root == (repo_root / "chat-ui" / "src").resolve()
 
 
-def test_resource_resolution_prefers_repo_assets_over_stale_package_copy(monkeypatch, tmp_path: Path) -> None:
+def test_resource_resolution_prefers_repo_assets_over_stale_package_copy(
+    monkeypatch, tmp_path: Path
+) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     stale_package_root = tmp_path / "stale-package"
     stale_package_root.mkdir()
     monkeypatch.chdir(repo_root)
     monkeypatch.delenv("MOZAIKS_WEB_SHELL_PATH", raising=False)
     monkeypatch.delenv("MOZAIKS_CHAT_UI_PATH", raising=False)
-    monkeypatch.setattr(_resources, "_resolve_package_dir", lambda _package_name: stale_package_root)
+    monkeypatch.setattr(
+        _resources, "_resolve_package_dir", lambda _package_name: stale_package_root
+    )
 
     assert _resources.resolve_web_shell_root() == (repo_root / "web_shell").resolve()
     assert _resources.resolve_chat_ui_root() == (repo_root / "chat-ui").resolve()
 
 
 # ── artifact_dependency_graph ──────────────────────────────────────────────────
+
 
 def test_artifact_dependency_graph_uses_persisted_canonical_families(monkeypatch) -> None:
     _use_repo_factory_workflows(monkeypatch)
@@ -384,6 +400,7 @@ def test_stale_propagation_uses_real_design_and_theme_families(monkeypatch) -> N
 
 
 # ── conceptual_replan sequence ─────────────────────────────────────────────────
+
 
 def test_conceptual_replan_sequence_exists(monkeypatch) -> None:
     _use_repo_factory_workflows(monkeypatch)
@@ -444,5 +461,6 @@ def test_all_factory_sequence_ids_are_unique(monkeypatch) -> None:
     graph = load_global_pack_graph()
     assert graph is not None
     ids = [s.id for s in graph.journeys]
-    assert len(ids) == len(set(ids)), f"Duplicate sequence ids: {[x for x in ids if ids.count(x) > 1]}"
-
+    assert len(ids) == len(set(ids)), (
+        f"Duplicate sequence ids: {[x for x in ids if ids.count(x) > 1]}"
+    )

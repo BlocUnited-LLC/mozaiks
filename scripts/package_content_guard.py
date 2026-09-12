@@ -62,6 +62,8 @@ REQUIRED_RUNTIME_FAMILIES: list[str] = [
 # Compiled regexes matched against the archive-relative member path.
 # A match is an immediate error — publication is blocked.
 PROHIBITED_PATH_PATTERNS: list[re.Pattern[str]] = [
+    # Local frontend staging can mirror private app/workflow overlay sources.
+    re.compile(r"(?:^|/)\.mozaiks-tailwind-sources/", re.IGNORECASE),
     # Learned-artifact directories — private by default per OSS_PUBLICATION_POLICY.md.
     re.compile(r"(?:^|/)evals?/", re.IGNORECASE),
     re.compile(r"(?:^|/)corpora?/", re.IGNORECASE),
@@ -81,6 +83,18 @@ PROHIBITED_PATH_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?:^|/)(?:db|database)[_-]?dump", re.IGNORECASE),
     re.compile(r"(?:^|/)(?:mongo|postgres|mysql)[_-]?dump", re.IGNORECASE),
 ]
+
+# Public reference evaluation mechanisms approved by ADR 0005. This is an
+# exact source-file list, not permission to ship private eval inputs/results or
+# learned scorer variants. These files still undergo all content checks.
+PUBLIC_REFERENCE_EVAL_SOURCES: frozenset[str] = frozenset(
+    {
+        "factory_app/eval/__init__.py",
+        "factory_app/eval/bundle_eval.py",
+        "factory_app/eval/bundle_scorers.py",
+        "factory_app/eval/evidence.py",
+    }
+)
 
 # Compiled regexes matched against text content (up to MAX_CONTENT_SCAN_BYTES).
 # A match is an error.
@@ -152,6 +166,7 @@ APPROVED_FACTORY_APP_SUBFAMILIES: frozenset[str] = frozenset(
         "build_context",      # Capability pack build contexts (ADR 0002 approved)
         "refinement_harness", # Refinement harness prompts
         "app",                # Studio first-party app bundle
+        "eval",               # Exact public reference source files only (ADR 0005)
     }
 )
 
@@ -321,7 +336,7 @@ def inspect_archive(path: Path) -> tuple[list[ContentFinding], list[ContentFindi
 
         # Prohibited path patterns.
         for pattern in PROHIBITED_PATH_PATTERNS:
-            if pattern.search(normalized):
+            if normalized not in PUBLIC_REFERENCE_EVAL_SOURCES and pattern.search(normalized):
                 errors.append(
                     ContentFinding(
                         level="error",

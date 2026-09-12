@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from pymongo import ReturnDocument
+from pymongo.errors import OperationFailure
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
@@ -52,15 +53,21 @@ class BuildRecordStore:
         async with self._init_lock:
             if self.client is not None:
                 return
-            self.client = get_mongo_client()
-            await self._ensure_indexes()
+            client = get_mongo_client()
+            await self._ensure_indexes(client["mozaiksai"])
+            self.client = client
 
-    async def _ensure_indexes(self) -> None:
-        versions = await self._coll("ArtifactVersions")
+    async def _ensure_indexes(self, database: Any) -> None:
+        versions = database["ArtifactVersions"]
         await versions.create_index(
-            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1), ("version_number", -1)],
-            name="av_app_kind_key_version",
+            [("app_id", 1), ("build_family", 1), ("build_key", 1), ("version_number", -1)],
+            name="br_app_family_key_version",
             unique=True,
+            partialFilterExpression={"build_family": {"$type": "string"}, "build_key": {"$type": "string"}},
+        )
+        await self._retire_index(
+            versions, "av_app_kind_key_version",
+            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1), ("version_number", -1)],
         )
         await versions.create_index(
             [("app_id", 1), ("lineage_root_id", 1), ("created_at", -1)],
@@ -71,14 +78,19 @@ class BuildRecordStore:
             name="av_app_status_updated",
         )
 
-        counters = await self._coll("ArtifactVersionCounters")
+        counters = database["ArtifactVersionCounters"]
         await counters.create_index(
-            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1)],
-            name="avc_app_kind_key",
+            [("app_id", 1), ("build_family", 1), ("build_key", 1)],
+            name="brc_app_family_key",
             unique=True,
+            partialFilterExpression={"build_family": {"$type": "string"}, "build_key": {"$type": "string"}},
+        )
+        await self._retire_index(
+            counters, "avc_app_kind_key",
+            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1)],
         )
 
-        change_requests = await self._coll("ChangeRequests")
+        change_requests = database["ChangeRequests"]
         await change_requests.create_index(
             [("app_id", 1), ("build_record_id", 1), ("created_at", -1)],
             name="cr_app_record_created",
@@ -88,7 +100,7 @@ class BuildRecordStore:
             name="cr_app_class_created",
         )
 
-        refinement_sessions = await self._coll("RefinementSessions")
+        refinement_sessions = database["RefinementSessions"]
         await refinement_sessions.create_index(
             [("app_id", 1), ("build_record_id", 1), ("started_at", -1)],
             name="rs_app_record_started",
@@ -103,6 +115,19 @@ class BuildRecordStore:
             name="rs_app_sandbox",
             sparse=True,
         )
+
+    @staticmethod
+    async def _retire_index(collection: Any, name: str, expected_keys: list[tuple[str, int]]) -> None:
+        index = (await collection.index_information()).get(name)
+        if index is None:
+            return
+        if list(index.get("key", [])) != expected_keys or not index.get("unique"):
+            raise RuntimeError(f"Cannot replace unexpected index definition: {name}")
+        try:
+            await collection.drop_index(name)
+        except OperationFailure as exc:
+            if exc.code != 27:  # Another process may have retired the same index.
+                raise
 
     async def _coll(self, name: str):
         await self._ensure_client()

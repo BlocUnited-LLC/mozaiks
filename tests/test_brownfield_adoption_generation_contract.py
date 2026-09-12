@@ -423,6 +423,7 @@ def test_registry_declares_brownfield_overlay_generation_sequence() -> None:
         "SubscriptionContractDesigner",
         "AgentGenerator",
         "AppGenerator",
+        "SecurityReadiness",
     ]
 
 
@@ -441,6 +442,7 @@ def test_registry_declares_brownfield_module_generation_sequence() -> None:
         "SubscriptionContractDesigner",
         "AgentGenerator",
         "AppGenerator",
+        "SecurityReadiness",
     ]
 
 

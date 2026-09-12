@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import importlib.util
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -334,4 +335,35 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
     expected_app_dir = tmp_path / "generated" / "apps" / "app-123" / "build-123" / "app"
     assert (expected_app_dir / "app.json").exists()
     assert not (tmp_path / "generated_apps").exists()
+
+
+@pytest.mark.parametrize("export_result", [{"success": True}, {"success": False}, None, "exception"])
+def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_path, export_result):
+    module = generate_and_download_module
+    persistence = type("Persistence", (), {"gather_latest_agent_jsons": AsyncMock(return_value={})})()
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    monkeypatch.setattr(module, "AG2PersistenceManager", lambda: persistence)
+    for name in ("_inject_agent_context_env", "_register_app_bundle_artifact_version", "update_build_status"):
+        monkeypatch.setattr(module, name, AsyncMock(return_value=None))
+    monkeypatch.setattr(module, "run_app_bundle_acceptance_gate", AsyncMock(return_value={
+        "passed": True, "status": "passed", "bundle_scan": {"errors": []},
+        "validation_evidence": {"completed": ["bundle_scan"], "failed": []},
+    }))
+    monkeypatch.setattr(module, "use_ui_tool", AsyncMock(return_value={
+        "status": "completed", "action": "export_to_github",
+    }))
+    monkeypatch.setattr(module, "resolve_export_gate", lambda context: {"allow_export": True, "reasons": []})
+    monkeypatch.setattr(module, "export_app_code_to_github", AsyncMock(
+        return_value=export_result,
+        side_effect=TimeoutError("export timed out") if export_result == "exception" else None,
+    ))
+    context = _Context({
+        "chat_id": "chat", "app_id": "app", "build_id": "build",
+        "generated_files": {"app.json": '{"app_id":"app"}'},
+    })
+    result = asyncio.run(module.generate_and_download({}, "Bundle ready.", context_variables=context))
+    succeeded = export_result == {"success": True}
+    assert result["status"] == ("success" if succeeded else "error")
+    assert result["outcome"] == ("ready" if succeeded else "blocked")
+    assert Path(result["bundle_zip"]).exists()
 

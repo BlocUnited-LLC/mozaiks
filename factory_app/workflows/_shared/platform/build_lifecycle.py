@@ -612,11 +612,14 @@ async def _materialize_local_app_registry_event(
         build_registry_id = _normalize_text(context.get("build_registry_id"))
         existing = None
         if build_registry_id and context.get("build_registry_id_source") != "build_id_fallback":
-            existing_response = await service.get_app_record(build_registry_id=build_registry_id)
+            existing_response = await service.get_app_record(
+                build_registry_id=build_registry_id, owner_user_id=registry_payload["owner_user_id"],
+            )
             existing = existing_response.get("app") if isinstance(existing_response, dict) else None
 
         if isinstance(existing, dict) and existing.get("build_registry_id"):
             await service.update_build_status(
+                owner_user_id=registry_payload["owner_user_id"],
                 build_registry_id=str(existing["build_registry_id"]),
                 status=lifecycle_state,
                 workflow_sequence=registry_payload["current_build_run"].get("workflow_sequence"),
@@ -751,6 +754,7 @@ async def emit_build_completed(
     journey_key: str | None = None,
     journey_position: int | None = None,
     journey_total_steps: int | None = None,
+    context_variables: Any = None,
     **_: Any,
 ) -> str | None:
     context = await _resolve_build_event_context(
@@ -772,6 +776,14 @@ async def emit_build_completed(
         return None
 
     payload = _base_payload(context=context, workflow_name=workflow_name, user_id=user_id)
+    from factory_app.eval import collect_generation_evidence
+
+    evidence_context = dict(context.get("session_context") or {})
+    if isinstance(context_variables, dict):
+        evidence_context.update(context_variables)
+    elif hasattr(context_variables, "to_dict"):
+        evidence_context.update(context_variables.to_dict())
+    payload["buildEvidence"] = collect_generation_evidence(evidence_context).model_dump(mode="json")
     payload["artifacts"] = await get_build_artifacts(
         app_id=context["app_id"],
         build_id=context["build_id"],
@@ -828,6 +840,7 @@ async def emit_build_failed(
     journey_key: str | None = None,
     journey_position: int | None = None,
     journey_total_steps: int | None = None,
+    context_variables: Any = None,
     **_: Any,
 ) -> str | None:
     context = await _resolve_build_event_context(
@@ -848,6 +861,14 @@ async def emit_build_failed(
         return None
 
     payload = _base_payload(context=context, workflow_name=workflow_name, user_id=user_id)
+    from factory_app.eval import collect_generation_evidence
+
+    evidence_context = dict(context.get("session_context") or {})
+    if isinstance(context_variables, dict):
+        evidence_context.update(context_variables)
+    elif hasattr(context_variables, "to_dict"):
+        evidence_context.update(context_variables.to_dict())
+    payload["buildEvidence"] = collect_generation_evidence(evidence_context).model_dump(mode="json")
     payload["error"] = _normalize_text(error)
     outbox_event_id = await upsert_outbox_event(
         app_id=context["app_id"],

@@ -160,11 +160,13 @@ Do not put local dev login shortcuts into `app/app.json`.
 
 Local development convenience belongs in `.env`, for example:
 
-- `VITE_DEV_AUTH_MODE=mock`
-- `VITE_DEV_AUTOLOGIN=true`
-- `VITE_MOCK_MODE=true`
+- `ENV=development`
+- `AUTH_ENABLED=false`
+- `AUTH_ANON_ROLES=admin,user` when Studio management access is intended
 
-That keeps the app manifest focused on product intent.
+The backend resolves this explicit local mode and supplies its development
+identity through the shell bootstrap. Frontend flags do not grant identity or
+roles. The app manifest keeps the same authentication intent in every environment.
 
 ## Advanced Overrides
 

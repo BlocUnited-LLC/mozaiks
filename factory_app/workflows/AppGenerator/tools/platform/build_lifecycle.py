@@ -97,6 +97,7 @@ async def emit_build_completed(
     chat_id: str | None = None,
     user_id: str | None = None,
     workflow_name: str,
+    context_variables: Any = None,
     **kwargs: Any,
 ) -> str | None:
     """Emit build.completed and persist the app_bundle summary artifact."""
@@ -106,6 +107,7 @@ async def emit_build_completed(
         chat_id=chat_id,
         user_id=user_id,
         workflow_name=workflow_name,
+        context_variables=context_variables,
         **kwargs,
     )
 

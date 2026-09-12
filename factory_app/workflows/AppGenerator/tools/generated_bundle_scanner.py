@@ -28,9 +28,16 @@ from typing import Any
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
+from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
     resolve_declared_pack_output_paths,
+)
+from mozaiksai.core.runtime.app.auth_contract import (
+    APP_AUTH_COMPONENTS,
+    AppAuthContractError,
+    validate_app_auth_contract,
+    validate_app_auth_route_bindings,
 )
 from mozaiksai.core.runtime.app.layout_registry import (
     ExtensionSlot,
@@ -53,6 +60,7 @@ from mozaiksai.core.runtime.app.paths import (
     APP_DATA_CONTRACT_PATH,
     APP_SECURITY_SECRETS_PATH,
     disallowed_legacy_app_paths,
+    is_sensitive_app_config_path,
     noncanonical_app_config_paths,
     noncanonical_app_root_paths,
     unsafe_app_paths,
@@ -127,37 +135,7 @@ _SCANNABLE_SUFFIXES = (
     ".ps1", ".sh",
 )
 
-_RAW_SECRET_FIELD_KEYS = frozenset(
-    {
-        "api_key",
-        "client_secret",
-        "connection_string",
-        "password",
-        "private_key",
-        "raw_value",
-        "secret_value",
-        "token",
-        "value",
-        "webhook_secret",
-    }
-)
 
-_AUTH_MODES = frozenset(
-    {
-        "brokered_oidc",
-        "public_self_signup",
-        "private_workspace",
-        "enterprise_sso",
-        "multi_provider",
-    }
-)
-_AUTH_LOGIN_METHOD_KINDS = frozenset(
-    {
-        "oidc_redirect",
-        "create_account",
-        "enterprise_sso",
-    }
-)
 
 # Canonical action api_surface values — controls HTTP exposure posture.
 # Must match the typed literal in structured_outputs.yaml ModuleAction.api_surface
@@ -228,10 +206,14 @@ def _app_manifest_auth_required(files_map: dict[str, str]) -> bool:
             continue
         try:
             payload = json.loads(raw)
-        except Exception:
-            continue
-        if isinstance(payload, dict) and isinstance(payload.get("authRequired"), bool):
-            return bool(payload["authRequired"])
+        except (ValueError, TypeError):
+            raise AppAuthContractError("app.json must be a valid JSON object") from None
+        if not isinstance(payload, dict):
+            raise AppAuthContractError("app.json must be a valid JSON object")
+        required = payload.get("authRequired", False)
+        if type(required) is not bool:
+            raise AppAuthContractError("app.json.authRequired must be a boolean")
+        return required
     return False
 
 
@@ -340,30 +322,51 @@ def _scan_data_contract_module_alignment(files_map: dict[str, str]) -> list[str]
     return errors
 
 
+def _scan_reserved_app_paths(files_map: dict[str, str]) -> list[str]:
+    """Enforce path boundaries shared by generated and authored apps."""
+    errors: list[str] = []
+    unsafe_paths = unsafe_app_paths(files_map)
+    if unsafe_paths:
+        errors.append(
+            "App bundle contains absolute or traversal paths outside the app root: "
+            f"{unsafe_paths}. Every app path must be app-root-relative."
+        )
+    normalized_paths = sorted(_normalized_files_map(files_map))
+    legacy_paths = disallowed_legacy_app_paths(normalized_paths)
+    if legacy_paths:
+        errors.append(
+            "App bundle contains removed app paths that are no longer canonical: "
+            f"{legacy_paths}. Use {APP_DATA_CONTRACT_PATH}, data/migrations/*.json, "
+            f"and {APP_SECURITY_SECRETS_PATH}."
+        )
+    # Authored hosts may own additional typed declarative policies. Imperative
+    # code in these planes is prohibited for every app, independent of the
+    # generated-output file allowlist applied by the layout validator.
+    code_suffixes = {".py", ".js", ".jsx", ".ts", ".tsx"}
+    misplaced = [path for path in normalized_paths if (
+        (path.startswith(("security/", "data/")) and PurePosixPath(path).suffix in code_suffixes)
+        or is_sensitive_app_config_path(path)
+    ) and path not in legacy_paths]
+    if misplaced:
+        errors.append(
+            "App bundle contains imperative helpers in declarative data/security planes or misplaced secret config: "
+            f"{misplaced}. Keep backend code in modules/services and secret references in "
+            f"{APP_SECURITY_SECRETS_PATH}."
+        )
+    return errors
+
+
 def _scan_canonical_app_paths(
     files_map: dict[str, str],
     *,
     capability_packs: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    errors: list[str] = []
-    unsafe_paths = unsafe_app_paths(files_map)
-    if unsafe_paths:
-        errors.append(
-            "Generated app bundle contains absolute or traversal paths outside the app root: "
-            f"{unsafe_paths}. Every generated path must be app-root-relative."
-        )
+    errors = _scan_reserved_app_paths(files_map)
     normalized_paths = sorted(_normalized_files_map(files_map))
     try:
         declared_pack_paths = resolve_declared_pack_output_paths(capability_packs)
     except ManagedCapabilityTemplateError as exc:
-        return [f"Selected CapabilityPack output contract is invalid: {exc}"]
-    legacy_paths = disallowed_legacy_app_paths(normalized_paths)
-    if legacy_paths:
-        errors.append(
-            "Generated app bundle contains removed app paths that are no longer canonical: "
-            f"{legacy_paths}. Use {APP_DATA_CONTRACT_PATH}, data/migrations/*.json, "
-            f"and {APP_SECURITY_SECRETS_PATH}."
-        )
+        return [*errors, f"Selected CapabilityPack output contract is invalid: {exc}"]
 
     invalid_config_paths = sorted(
         set(noncanonical_app_config_paths(normalized_paths)) - declared_pack_paths
@@ -391,38 +394,21 @@ def _scan_canonical_app_paths(
     return errors
 
 
-def _find_raw_secret_fields(value: Any, path: tuple[str, ...] = ()) -> list[str]:
-    findings: list[str] = []
-    if isinstance(value, dict):
-        for raw_key, child in value.items():
-            key = str(raw_key or "").strip()
-            normalized_key = key.lower().replace("-", "_")
-            child_path = (*path, key or "<empty>")
-            if normalized_key in _RAW_SECRET_FIELD_KEYS and str(child or "").strip():
-                findings.append(".".join(child_path))
-            findings.extend(_find_raw_secret_fields(child, child_path))
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            findings.extend(_find_raw_secret_fields(child, (*path, str(index))))
-    return findings
-
-
 def _scan_security_secret_contract(files_map: dict[str, str]) -> list[str]:
     raw = _normalized_files_map(files_map).get(APP_SECURITY_SECRETS_PATH)
     if raw is None:
         return []
+    from mozaiksai.core.secrets import SecretContractError, validate_secret_contract
+
     try:
-        parsed = yaml.safe_load(raw) or {}
-    except Exception as exc:
-        return [f"{APP_SECURITY_SECRETS_PATH}: secrets contract must be valid YAML: {exc}"]
-    findings = _find_raw_secret_fields(parsed)
-    if not findings:
-        return []
-    return [
-        f"{APP_SECURITY_SECRETS_PATH}: generated secret contracts are names-only and "
-        f"must not contain raw credential fields: {findings}. Store raw values only "
-        "through the configured secret backend."
-    ]
+        parsed = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        return [f"{APP_SECURITY_SECRETS_PATH}: secrets contract must be valid YAML"]
+    try:
+        validate_secret_contract(parsed)
+    except SecretContractError as exc:
+        return [f"{APP_SECURITY_SECRETS_PATH}: {exc}; raw credential fields are forbidden"]
+    return []
 
 
 def _pack_id_from_descriptor(pack: Any) -> str:
@@ -1349,7 +1335,11 @@ def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
 
 def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
     """Require deploy-time JWT/OIDC contract metadata for authenticated apps."""
-    if not _app_manifest_auth_required(files_map):
+    try:
+        required = _app_manifest_auth_required(files_map)
+    except AppAuthContractError as exc:
+        return [str(exc)]
+    if not required:
         return []
 
     normalized_files = _normalized_files_map(files_map)
@@ -1409,206 +1399,53 @@ def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
     return errors
 
 
-def _is_local_route(value: Any) -> bool:
-    route = str(value or "").strip()
-    return bool(route) and route.startswith("/") and not route.startswith("//")
-
-
-def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
-    """Validate the provider-neutral generated app auth contract."""
-    if not _app_manifest_auth_required(files_map):
+def _scan_auth_app_contract(
+    files_map: dict[str, str], *, require_generated_adapter: bool = True,
+) -> list[str]:
+    """Consume the runtime auth schema and the deterministic shared-adapter facade."""
+    normalized = _normalized_files_map(files_map)
+    try:
+        required = _app_manifest_auth_required(files_map)
+    except AppAuthContractError as exc:
+        return [str(exc)]
+    raw_contract = normalized.get(APP_AUTH_CONFIG_PATH)
+    if raw_contract is None:
+        if required:
+            return [
+                f"Authenticated apps must include {APP_AUTH_CONFIG_PATH} "
+                "with schema_version mozaiks.auth.v1."
+            ]
         return []
 
-    normalized_files = _normalized_files_map(files_map)
-    errors: list[str] = []
-    raw_contract = normalized_files.get(APP_AUTH_CONFIG_PATH)
-    if raw_contract is None:
-        return [
-            f"Authenticated generated apps must include {APP_AUTH_CONFIG_PATH} "
-            "with schema_version mozaiks.auth.v1."
-        ]
-
     try:
-        contract = yaml.safe_load(raw_contract) or {}
-    except Exception as exc:
-        return [f"{APP_AUTH_CONFIG_PATH}: auth contract must be valid YAML: {exc}"]
+        contract = validate_app_auth_contract(yaml.safe_load(raw_contract))
+    except yaml.YAMLError:
+        return [f"{APP_AUTH_CONFIG_PATH}: auth contract must be valid YAML."]
+    except AppAuthContractError as exc:
+        return [f"{APP_AUTH_CONFIG_PATH}: {exc}"]
 
-    if not isinstance(contract, dict):
-        return [f"{APP_AUTH_CONFIG_PATH}: auth contract must be a YAML object."]
+    errors: list[str] = []
+    if contract.auth_required != required:
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: auth_required must match app.json.authRequired.")
+    try:
+        route_manifest = json.loads(normalized.get("ui/route_manifest.json", "{}"))
+        pages = route_manifest.get("pages") if isinstance(route_manifest, dict) else None
+        validate_app_auth_route_bindings(contract, pages)
+    except (TypeError, ValueError) as exc:
+        errors.append(str(exc) if isinstance(exc, AppAuthContractError) else "ui/route_manifest.json must be valid JSON for auth routes")
+    if not require_generated_adapter:
+        return errors
 
-    allowed_root_keys = {
-        "schema_version",
-        "auth_required",
-        "strategy",
-        "mode",
-        "signup_enabled",
-        "routes",
-        "frontend",
-        "runtime",
-        "identity_providers",
-        "login_methods",
-        "customization",
-    }
-    unknown_root_keys = sorted(set(contract) - allowed_root_keys)
-    if unknown_root_keys:
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: unsupported fields: {unknown_root_keys}.")
-
-    if contract.get("schema_version") != "mozaiks.auth.v1":
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: schema_version must be mozaiks.auth.v1.")
-    if contract.get("auth_required") is not True:
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: auth_required must be true when app.json.authRequired=true.")
-    if contract.get("strategy") != "oidc":
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: strategy must be oidc for authenticated generated apps.")
-
-    mode = contract.get("mode", "brokered_oidc")
-    if mode not in _AUTH_MODES:
+    adapter = normalized.get("ui/auth/authAdapter.js", "")
+    expected = workflow_context_path(
+        "webapp_builder", "templates", "ui", "auth", "authAdapter.js",
+    ).read_text(encoding="utf-8")
+    if adapter.strip() != expected.strip():
         errors.append(
-            f"{APP_AUTH_CONFIG_PATH}: mode must be one of {sorted(_AUTH_MODES)} when present."
+            "ui/auth/authAdapter.js must use the generated facade for "
+            "@mozaiks/chat-ui/auth; regenerate the auth scaffold. "
+            "OIDC and local-development behavior belong in the shared adapter."
         )
-    signup_enabled = contract.get("signup_enabled", False)
-    if not isinstance(signup_enabled, bool):
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: signup_enabled must be a boolean when present.")
-
-    routes = contract.get("routes") if isinstance(contract.get("routes"), dict) else {}
-    if not isinstance(routes, dict) or not routes:
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: routes must declare login, callback, logout, and post_login_default.")
-    else:
-        route_fields = ("login", "callback", "logout", "post_login_default")
-        missing_routes = [field for field in route_fields if field not in routes]
-        if missing_routes:
-            errors.append(f"{APP_AUTH_CONFIG_PATH}: routes missing fields: {missing_routes}.")
-        for field in route_fields:
-            if field in routes and not _is_local_route(routes.get(field)):
-                errors.append(f"{APP_AUTH_CONFIG_PATH}: routes.{field} must be an app-local route.")
-
-    frontend = contract.get("frontend") if isinstance(contract.get("frontend"), dict) else {}
-    required_frontend = {
-        "adapter": "oidc_pkce",
-        "client_id_env": "VITE_OIDC_CLIENT_ID",
-        "authority_env": "VITE_OIDC_AUTHORITY",
-        "discovery_url_env": "VITE_OIDC_DISCOVERY_URL",
-        "redirect_uri_env": "VITE_OIDC_REDIRECT_URI",
-        "scope_env": "VITE_OIDC_SCOPE",
-    }
-    if not isinstance(frontend, dict) or not frontend:
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: frontend must declare OIDC PKCE env handles.")
-    else:
-        for field, expected in required_frontend.items():
-            if frontend.get(field) != expected:
-                errors.append(f"{APP_AUTH_CONFIG_PATH}: frontend.{field} must be {expected}.")
-        scopes = frontend.get("default_scopes")
-        if not isinstance(scopes, list) or not {"openid", "profile", "email"}.issubset(set(scopes)):
-            errors.append(f"{APP_AUTH_CONFIG_PATH}: frontend.default_scopes must include openid, profile, and email.")
-
-    runtime = contract.get("runtime") if isinstance(contract.get("runtime"), dict) else {}
-    required_runtime = {
-        "provider_env": "AUTH_PROVIDER",
-        "enabled_env": "AUTH_ENABLED",
-        "authority_env": "MOZAIKS_OIDC_AUTHORITY",
-        "discovery_url_env": "MOZAIKS_OIDC_DISCOVERY_URL",
-        "issuer_env": "AUTH_ISSUER",
-        "jwks_url_env": "AUTH_JWKS_URL",
-    }
-    if not isinstance(runtime, dict) or not runtime:
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: runtime must declare provider-neutral backend env handles.")
-    else:
-        for field, expected in required_runtime.items():
-            if runtime.get(field) != expected:
-                errors.append(f"{APP_AUTH_CONFIG_PATH}: runtime.{field} must be {expected}.")
-
-    identity_providers = contract.get("identity_providers", [])
-    if identity_providers is None:
-        identity_providers = []
-    if not isinstance(identity_providers, list):
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: identity_providers must be a list when present.")
-    else:
-        allowed_idp_fields = {"id", "label", "provider_role"}
-        for index, item in enumerate(identity_providers):
-            if not isinstance(item, dict):
-                errors.append(f"{APP_AUTH_CONFIG_PATH}: identity_providers[{index}] must be an object.")
-                continue
-            unknown = sorted(set(item) - allowed_idp_fields)
-            if unknown:
-                errors.append(
-                    f"{APP_AUTH_CONFIG_PATH}: identity_providers[{index}] has unsupported fields: {unknown}."
-                )
-            if item.get("provider_role") not in {None, "upstream_oidc_provider"}:
-                errors.append(
-                    f"{APP_AUTH_CONFIG_PATH}: identity_providers[{index}].provider_role "
-                    "must be upstream_oidc_provider when present."
-                )
-
-    login_methods = contract.get("login_methods", [])
-    if login_methods is None:
-        login_methods = []
-    if not isinstance(login_methods, list):
-        errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods must be a list when present.")
-    else:
-        allowed_login_fields = {"id", "kind", "label", "primary", "provider_id"}
-        for index, item in enumerate(login_methods):
-            if not isinstance(item, dict):
-                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}] must be an object.")
-                continue
-            unknown = sorted(set(item) - allowed_login_fields)
-            if unknown:
-                errors.append(
-                    f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}] has unsupported fields: {unknown}."
-                )
-            if not str(item.get("id") or "").strip():
-                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].id is required.")
-            kind = item.get("kind")
-            if kind not in _AUTH_LOGIN_METHOD_KINDS:
-                errors.append(
-                    f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].kind "
-                    f"must be one of {sorted(_AUTH_LOGIN_METHOD_KINDS)}."
-                )
-            if not str(item.get("label") or "").strip():
-                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].label is required.")
-            if "primary" in item and not isinstance(item.get("primary"), bool):
-                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].primary must be boolean.")
-            if "provider_id" in item and not str(item.get("provider_id") or "").strip():
-                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].provider_id must be non-empty.")
-
-    if "http://" in raw_contract or "https://" in raw_contract:
-        errors.append(
-            f"{APP_AUTH_CONFIG_PATH}: provider URLs must be supplied by env handles, "
-            "not committed as literal URLs."
-        )
-
-    adapter = normalized_files.get("ui/auth/authAdapter.js", "")
-    if not adapter:
-        errors.append("Authenticated generated apps must include ui/auth/authAdapter.js.")
-    else:
-        required_markers = {
-            "TRANSACTION_KEY": "TRANSACTION_KEY",
-            "state": "state",
-            "clearStoredUserSession": "clearStoredUserSession",
-            "writeAuthTransaction": "writeAuthTransaction",
-            "readAuthTransaction": "readAuthTransaction",
-            "returnPath": "returnPath",
-        }
-        missing_markers = [label for label, marker in required_markers.items() if marker not in adapter]
-        if missing_markers:
-            errors.append(
-                "ui/auth/authAdapter.js must implement state-bound PKCE transaction handling; "
-                f"missing markers: {missing_markers}."
-            )
-        if "localStorage" in adapter:
-            errors.append("ui/auth/authAdapter.js must use sessionStorage, not localStorage, for auth state.")
-        forbidden_provider_markers = [
-            "accounts.google.com",
-            "GoogleAuthProvider",
-            "gapi.",
-            "keycloak-js",
-            "client_secret",
-        ]
-        found_provider_markers = [marker for marker in forbidden_provider_markers if marker in adapter]
-        if found_provider_markers:
-            errors.append(
-                "ui/auth/authAdapter.js must stay provider-neutral OIDC; "
-                f"found provider-specific markers: {found_provider_markers}."
-            )
-
     return errors
 
 
@@ -1879,7 +1716,7 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
         if not component:
             continue
         # Shell-built-in components are always available — no custom JSX file required.
-        if component in _SHELL_CORE_COMPONENTS:
+        if component in _SHELL_CORE_COMPONENTS or component in APP_AUTH_COMPONENTS:
             continue
         if component not in custom_page_stems:
             route_path = str(page.get("path") or "<unknown>").strip()
@@ -2143,6 +1980,25 @@ def _scan_declared_pack_repo_support_outputs(
     ]
 
 
+def scan_app_contracts(files_map: dict[str, str]) -> list[str]:
+    """Validate shared app declarations, independent of generation output policy."""
+    errors: list[str] = []
+    for scan in (
+        _scan_reserved_app_paths,
+        _scan_security_secret_contract,
+        _scan_route_manifest_consistency,
+        _scan_page_schema_structure,
+        _scan_page_api_endpoint_alignment,
+        _scan_action_api_surface,
+        _scan_event_reaction_closure,
+        _scan_data_contract_module_alignment,
+        _scan_entitlement_gate_capability_alignment,
+    ):
+        errors.extend(scan(files_map))
+    errors.extend(_scan_auth_app_contract(files_map, require_generated_adapter=False))
+    return errors
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -2186,15 +2042,12 @@ def scan_generated_bundle(
             capability_packs=capability_packs,
         )
     )
-    errors.extend(_scan_security_secret_contract(scannable_files_map))
+    errors.extend(error for error in scan_app_contracts(scannable_files_map) if error not in errors)
+    # Generation also requires the canonical frontend adapter artifact.
+    auth_errors = _scan_auth_app_contract(scannable_files_map)
+    errors.extend(error for error in auth_errors if error not in errors)
     errors.extend(_scan_pack_provenance_manifest(scannable_files_map))
-    errors.extend(_scan_route_manifest_consistency(scannable_files_map))
     errors.extend(_scan_route_manifest_component_files(scannable_files_map))
-    errors.extend(_scan_page_schema_structure(scannable_files_map))
-    errors.extend(_scan_page_api_endpoint_alignment(scannable_files_map))
-    errors.extend(_scan_action_api_surface(scannable_files_map))
-    errors.extend(_scan_event_reaction_closure(scannable_files_map))
-    errors.extend(_scan_data_contract_module_alignment(scannable_files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
             scannable_files_map,
@@ -2231,8 +2084,6 @@ def scan_generated_bundle(
             capability_packs=capability_packs,
         )
     )
-    errors.extend(_scan_entitlement_gate_capability_alignment(scannable_files_map))
-    errors.extend(_scan_auth_app_contract(scannable_files_map))
     if require_deployment_artifacts:
         errors.extend(_scan_deployment_artifacts_contract(scannable_files_map))
         errors.extend(_scan_auth_deployment_contract(scannable_files_map))

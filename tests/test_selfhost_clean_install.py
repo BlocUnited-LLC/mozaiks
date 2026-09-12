@@ -146,7 +146,7 @@ async def test_startup_warns_on_missing_llm_key_with_actionable_message(monkeypa
         admin = _Admin()
 
     with (
-        patch("mozaiksai.core.core_config.get_secret", side_effect=ValueError("not found")),
+        patch("mozaiksai.core.startup.validation.resolve_model_api_key", return_value=""),
         patch(
             "mozaiksai.core.startup.validation._has_mongo_llm_config",
             new_callable=AsyncMock,
@@ -176,7 +176,12 @@ async def test_startup_warns_on_missing_mongo_with_actionable_message(monkeypatc
     monkeypatch.setenv("INTERNAL_API_KEY", "test-key-long-enough-to-pass-the-check")
     monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
 
-    with patch("mozaiksai.core.startup.validation.get_secret", side_effect=ValueError("not found")):
+    from mozaiksai.core.secrets import SecretResolutionError
+
+    with patch(
+        "mozaiksai.core.startup.validation.resolve_secret",
+        side_effect=SecretResolutionError("MONGO_URI is not configured", env_name="MONGO_URI"),
+    ):
         warnings = await run_startup_checks()
 
     mongo_warnings = [w for w in warnings if "MONGO" in w or "MongoDB" in w]

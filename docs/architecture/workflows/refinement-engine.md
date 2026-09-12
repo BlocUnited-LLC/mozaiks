@@ -277,7 +277,7 @@ or CRM, the router can add integration path hints:
 - module files that declare or use the integration:
   `modules/{module_id}/module.yaml`, `backend/service.py`,
   `backend/schemas.py`, and `backend/policy.py`
-- connector declaration or setup docs such as `config/integrations*.json` and
+- connector declaration or setup docs such as `config/integrations*.yaml` and
   `docs/integrations*.md`
 - `ui/pages/*.yaml` or concrete page YAML files only for UI-facing setup or
   display requests

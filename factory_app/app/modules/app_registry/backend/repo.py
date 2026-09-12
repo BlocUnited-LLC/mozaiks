@@ -5,9 +5,14 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
+
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.multitenant import build_app_scope_filter
+
+from .policy import owner_filter
 
 IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
 APP_REGISTRY_COLLECTION = "AppRegistryRecords"
@@ -66,16 +71,33 @@ class AppRegistryRepo:
         build_context_profile: dict[str, Any] | None = None,
         current_build_run: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        query = {"app_id": app_id, **owner_filter(owner_user_id)}
         await self.ensure_indexes()
         coll = await self._collection()
         now = datetime.now(UTC)
-        existing = await coll.find_one({"app_id": app_id})
-        build_registry_id = str((existing or {}).get("_id") or f"appreg_{uuid4().hex}")
+        # Claim immutable ownership before merging lifecycle metadata. A failed
+        # merge leaves an owned draft that the same owner can safely reopen.
+        try:
+            existing = await coll.find_one_and_update(
+                query,
+                {"$setOnInsert": {
+                    "_id": f"appreg_{uuid4().hex}", "created_at": now,
+                    "updated_at": now, "lifecycle_state": "draft",
+                    "bundle_path": None, "description": None,
+                }},
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError as exc:
+            existing = await coll.find_one(query)
+            if existing is None:
+                raise ValueError("App id is not available") from exc
+        if existing is None:
+            raise RuntimeError("App record ownership could not be established")
+        build_registry_id = str(existing["_id"])
         existing_name_status = str((existing or {}).get("name_status") or "").strip()
         incoming_named = name_status == "named" and bool(name)
         set_fields: dict[str, Any] = {
-            "app_id": app_id,
-            "owner_user_id": owner_user_id,
             "lifecycle_state": lifecycle_state,
             "updated_at": now,
             "last_status_changed_at": now,
@@ -127,21 +149,11 @@ class AppRegistryRepo:
                 (existing or {}).get("build_runs"),
                 build_run,
             )
-        set_on_insert: dict[str, Any] = {
-            "created_at": now,
-            "bundle_path": None,
-        }
-        if "description" not in set_fields:
-            set_on_insert["description"] = description
-        await coll.update_one(
-            {"_id": build_registry_id},
-            {
-                "$set": set_fields,
-                "$setOnInsert": set_on_insert,
-            },
-            upsert=True,
+        doc = await coll.find_one_and_update(
+            {"_id": build_registry_id, **owner_filter(owner_user_id)},
+            {"$set": set_fields},
+            return_document=ReturnDocument.AFTER,
         )
-        doc = await coll.find_one({"_id": build_registry_id})
         normalized = self._normalize_doc(doc)
         if normalized is None:
             raise RuntimeError("App record could not be loaded after upsert")
@@ -151,6 +163,7 @@ class AppRegistryRepo:
         self,
         *,
         build_registry_id: str,
+        owner_user_id: str,
         lifecycle_state: str,
         bundle_path: str | None = None,
         artifact_version_id: str | None = None,
@@ -159,9 +172,10 @@ class AppRegistryRepo:
         active_workflow_id: str | None = None,
         current_build_run: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
+        query = {"_id": build_registry_id, **owner_filter(owner_user_id)}
         await self.ensure_indexes()
         coll = await self._collection()
-        existing = await coll.find_one({"_id": build_registry_id})
+        existing = await coll.find_one(query)
         if not existing:
             return None
         now = datetime.now(UTC)
@@ -201,31 +215,35 @@ class AppRegistryRepo:
             )
             update_fields["current_build_run"] = build_run
             update_fields["build_runs"] = self._upsert_build_run(existing.get("build_runs"), build_run)
-        await coll.update_one({"_id": build_registry_id}, {"$set": update_fields}, upsert=False)
-        return await self.get_by_build_registry_id(build_registry_id=build_registry_id)
+        doc = await coll.find_one_and_update(query, {"$set": update_fields}, return_document=ReturnDocument.AFTER)
+        return self._normalize_doc(doc)
 
     async def list_apps_for_user(self, *, owner_user_id: str) -> list[dict[str, Any]]:
+        query = owner_filter(owner_user_id)
         await self.ensure_indexes()
         coll = await self._collection()
-        docs = await coll.find({"owner_user_id": owner_user_id}).sort("updated_at", -1).to_list(length=500)
+        docs = await coll.find(query).sort("updated_at", -1).to_list(length=500)
         records = [normalized for doc in docs if (normalized := self._normalize_doc(doc))]
         return [await self._with_active_chat_fallback(record, owner_user_id=owner_user_id) for record in records]
 
-    async def get_by_app_id(self, *, app_id: str) -> dict[str, Any] | None:
+    async def get_by_app_id(self, *, app_id: str, owner_user_id: str) -> dict[str, Any] | None:
+        query = {"app_id": app_id, **owner_filter(owner_user_id)}
         await self.ensure_indexes()
         coll = await self._collection()
-        doc = await coll.find_one({"app_id": app_id})
+        doc = await coll.find_one(query)
         return self._normalize_doc(doc)
 
-    async def get_by_build_registry_id(self, *, build_registry_id: str) -> dict[str, Any] | None:
+    async def get_by_build_registry_id(self, *, build_registry_id: str, owner_user_id: str) -> dict[str, Any] | None:
+        query = {"_id": build_registry_id, **owner_filter(owner_user_id)}
         await self.ensure_indexes()
         coll = await self._collection()
-        doc = await coll.find_one({"_id": build_registry_id})
+        doc = await coll.find_one(query)
         return self._normalize_doc(doc)
 
-    async def delete_app(self, *, build_registry_id: str) -> bool:
+    async def delete_app(self, *, build_registry_id: str, owner_user_id: str) -> bool:
+        query = {"_id": build_registry_id, **owner_filter(owner_user_id)}
         coll = await self._collection()
-        result = await coll.delete_one({"_id": build_registry_id})
+        result = await coll.delete_one(query)
         return int(getattr(result, "deleted_count", 0) or 0) > 0
 
     async def _with_active_chat_fallback(

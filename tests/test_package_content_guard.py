@@ -97,6 +97,19 @@ class TestRequiredFamilies:
 
 
 class TestProhibitedPaths:
+    def test_authored_frontend_ships_but_generated_overlay_mirror_is_rejected(self, tmp_path) -> None:
+        members = _minimal_required_members()
+        authored = "web_shell/App.jsx"
+        staged = "web_shell/.mozaiks-tailwind-sources/platform-workflows/PrivateWorkflow/ui/Result.jsx"
+        wheel = tmp_path / "frontend.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            for name, content in members.items():
+                archive.writestr(name, content)
+            archive.writestr(authored, "export default function App() { return null; }")
+            archive.writestr(staged, "export default function Result() { return null; }")
+        errors, _ = inspect_archive(wheel)
+        assert [(error.code, error.member) for error in errors] == [("prohibited_path", staged)]
+
     @pytest.mark.parametrize(
         "path",
         [
@@ -141,6 +154,37 @@ class TestProhibitedPaths:
         errors, _ = inspect_archive(whl)
         path_errors = [e for e in errors if e.code == "prohibited_path"]
         assert not path_errors
+
+
+class TestPublicReferenceEvaluation:
+    def test_reference_source_files_pass_all_package_checks(self) -> None:
+        members = _minimal_required_members()
+        root = _GUARD_PATH.parents[1]
+        for name in ("__init__.py", "bundle_eval.py", "bundle_scorers.py", "evidence.py"):
+            path = f"factory_app/eval/{name}"
+            members[path] = (root / path).read_bytes()
+        errors, _ = inspect_archive(_make_wheel(members))
+        assert not errors
+
+    @pytest.mark.parametrize("path", [
+        "factory_app/eval/customer_results.json",
+        "factory_app/eval/corpus.jsonl",
+        "factory_app/eval/learned_scorers.py",
+        "factory_app/eval/private/__init__.py",
+        "factory_app/eval/evidence.py/results.json",
+    ])
+    def test_reference_source_approval_does_not_allow_other_eval_content(self, path: str) -> None:
+        members = _minimal_required_members()
+        members[path] = "private data"
+        errors, _ = inspect_archive(_make_wheel(members))
+        assert any(error.code == "prohibited_path" and error.member == path for error in errors)
+
+    def test_approved_reference_source_still_checks_for_secrets(self) -> None:
+        members = _minimal_required_members()
+        live_key = bytes([115, 107, 95, 108, 105, 118, 101, 95]).decode("ascii") + "ABCDEFGHIJ1234567890"
+        members["factory_app/eval/evidence.py"] = f"SECRET = '{live_key}'\n"
+        errors, _ = inspect_archive(_make_wheel(members))
+        assert any(error.code == "prohibited_content:raw_provider_secret" for error in errors)
 
 
 # ---------------------------------------------------------------------------

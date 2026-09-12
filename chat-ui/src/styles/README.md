@@ -331,7 +331,7 @@ colors.primary.border = 'border-[var(--color-primary)]'
 - **Integration Guide**: `docs/DESIGN_SYSTEM_INTEGRATION.md`
 - **Theme Runtime Guide**: `docs/app_THEME_MANAGEMENT.md`
 - **Code Examples**: `THEME_INTEGRATION_EXAMPLE.js`
-- **AI Agent Config**: `workflows/Generator/agents.json` (UIFileGenerator section)
+- **AI Agent Config**: `factory_app/workflows/AppGenerator/agents.yaml`
 
 ---
 

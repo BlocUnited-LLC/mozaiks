@@ -468,7 +468,7 @@ def test_malformed_output_does_not_advance_to_continuation_phase() -> None:
 def test_malformed_output_cannot_write_routing_variable() -> None:
     """INV-11: malformed structured output body does not appear in structured_outputs.
 
-    The structured_outputs list is what _emit_validated_structured_outputs_from_runner_result
+    The structured_outputs list is the accepted output history that transport
     uses to write context variables (routing keys, structured_output, etc.).
     If the list is empty, no context writes from malformed data can occur.
     """
@@ -501,37 +501,22 @@ def test_malformed_output_cannot_write_routing_variable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_structured_output_runner_result_does_not_commit_context() -> None:
-    """INV-11: failed structured-output runner results do not write context."""
-    from mozaiksai.core.ports.orchestration import RunStatus
+async def test_invalid_structured_packet_does_not_commit_context() -> None:
+    """INV-11: invalid structured output stops before routing or context writes."""
     from mozaiksai.core.workflow.orchestration_patterns import (
-        _emit_validated_structured_outputs_from_runner_result,
+        _dispatch_agent_packet_output,
     )
 
-    runner_result = SimpleNamespace(
-        status=RunStatus.FAILED,
-        error="structured output validation failed for StrictAgent: status missing",
-        structured_outputs=[
-            {
-                "agent": "StrictAgent",
-                "model_name": "RequiredModel",
-                "structured_data": {"status": "should-not-commit"},
-            }
-        ],
-    )
+    packet = SimpleNamespace(causation_id="input-1", channel_id="channel-1", event_data={"body": {}})
     context_vars: dict[str, Any] = {}
 
-    await _emit_validated_structured_outputs_from_runner_result(
-        runner_result=runner_result,
-        workflow_name="StrictWorkflow",
-        chat_id="chat-1",
-        app_id="app-1",
-        user_id=None,
-        turn_sequence_start=0,
-        context_vars_dict=context_vars,
-        context_bridge=None,
-        structured_registry={"StrictAgent": _RequiredModel},
-        wf_logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
-    )
+    with pytest.raises(ValueError, match="structured output validation failed"):
+        await _dispatch_agent_packet_output(
+            agent_name="StrictAgent", packet=packet,
+            workflow_name="StrictWorkflow", chat_id="chat-1", app_id="app-1", user_id=None,
+            context_bridge=None, structured_registry={"StrictAgent": _RequiredModel},
+            auto_tool_agents={"StrictAgent"},
+            wf_logger=SimpleNamespace(warning=lambda *args, **kwargs: None),
+        )
 
     assert context_vars == {}

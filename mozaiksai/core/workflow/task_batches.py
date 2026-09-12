@@ -661,6 +661,8 @@ async def _run_one_task(
 
     if agent is None:
         raise ValueError(f"task {task.get('task_id')!r} references unknown agent {agent_name!r}")
+    if getattr(agent, "_mozaiks_tool_outcome", None) is not None:
+        raise ValueError(f"task agent {agent_name!r} declares a network-only tool outcome; use the task-batch failure policy")
 
     async with semaphore:
         runner_result = None

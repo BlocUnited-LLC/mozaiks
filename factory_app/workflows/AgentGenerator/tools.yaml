@@ -24,6 +24,15 @@ tools:
   description: Assemble all workflow bundle files from workflow_bundle_results, zip them, and present the inline download UI.
   tool_type: UI_Tool
   auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: workflow_bundle_export_outcome
+    attempts_key: workflow_bundle_export_attempts
+    result_field: outcome
+    values: [ready, needs_revision, cancelled, blocked]
+    error_value: blocked
+    max_attempts: 3
+    retry_on: [needs_revision]
   ui:
     component: DownloadCenter
     mode: inline

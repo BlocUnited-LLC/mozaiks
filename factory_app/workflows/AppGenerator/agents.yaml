@@ -518,7 +518,7 @@ agents:
         - `external_adapter` capabilities: generate adapter/client wiring only — no provider business logic. Use app-bundle-relative `services/integrations/{service}_client.py` for external or managed API clients. Use `services/adapters/{area}/{provider}.py` for provider-specific implementation boundaries only when the generated app itself directly owns that provider integration and modules/workflows call it. Use `services/routes/` for app-level routes only when needed. These assemble into physical `app/services/**` workspace paths. Valid adapter areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is app-owned provider mechanics rather than managed platform operations.
         - Deployment, DNS/domain, billing, wallet, and platform operations may be supplied by managed platform capabilities. Do not generate provider adapters for those operations into a customer app bundle. The generated app consumes the managed platform through managed capability API clients/facade modules and host-owned records.
         - Generated app deployment packaging is not a `service_foundation` or `api_surface` task. When deployment artifacts are requested, DownloadAgent must use the provider-neutral deployment contract fields (`deployment_profile`, `include_dockerfiles`, `include_workflow`, `include_compose`) so `generate_and_download` emits `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`, and `deployment.manifest.json`.
-        - If an app needs durable runtime secrets, plan `security/secrets.yaml` as a names-only contract for provider/vault policy, env handles, and secret names. Never put raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets into generated files.
+        - If an app needs durable runtime secrets, plan `security/secrets.yaml` as a names-only contract validated by mozaiksai.core.secrets.AppSecretContract: version: 1 and secrets entries with env (never string entries), optional azure_key_vault.secret_name, and optional provider policy. Unknown fields and raw values are forbidden. Never put raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets into generated files.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
         - `surface_kind = app_policy` packs describe app-level declarative policy/config files such as `config/subscriptions.yaml`; they are not refinement harness surfaces and must not generate modules.
         - `surface_kind = refinement` packs are optional app-local harness packs. Do not invent a refinement surface inside AppGenerator; only materialize one when DesignDocs resolved an explicit app-owned `surface_kind = refinement` surface.
@@ -2516,7 +2516,7 @@ agents:
 
       `save_infra_scaffold` is auto-invoked after your structured output. It reads
       the parameterized templates from the build context, substitutes template variables
-      (APP_NAME, TOKEN_KEY_PREFIX, OIDC_CLIENT_ID, MOZAIKS_VERSION, REGISTRY,
+      (APP_NAME, AUTH_DEFAULT_ROUTE, MOZAIKS_VERSION, REGISTRY,
       DEPLOY_TARGET) from session context, and returns the rendered files as code_files.
   - id: objective
     heading: '[OBJECTIVE]'
@@ -2538,14 +2538,18 @@ agents:
         never be self-hosted.
 
       **emit_auth_adapter** — set `emit_auth_adapter: true` when:
-        - `app_build_plan.auth_provider` is not "mock" or "none", OR
-        - `VITE_OIDC_AUTHORITY` or `VITE_OIDC_DISCOVERY_URL` appears in the integration manifest.
-        Set `emit_auth_adapter: false` only when the app is mock-mode only (VITE_MOCK_MODE=true
-        and no real OIDC provider is configured).
+        - The persisted `app_manifest.auth_strategy` is non-empty and not "public",
+          matching the materialized `app.json.authRequired: true`.
+        Set `emit_auth_adapter: false` for public apps whose materialized manifest
+        declares `authRequired: false`. Provider environment handles do not change app intent.
+        Local development of authenticated apps still emits the contract and shared adapter facade;
+        only explicit backend local no-auth configuration enables the development identity.
 
         When true, the scaffold tool emits both:
         - `config/auth.yaml`: provider-neutral mozaiks.auth.v1 behavior/env contract.
-        - `ui/auth/authAdapter.js`: state-bound OIDC PKCE browser adapter.
+        - `ui/auth/authAdapter.js`: deterministic facade for `@mozaiks/chat-ui/auth`.
+        Preserve this shared delegation. Do not emit token storage, PKCE, discovery,
+        callback exchange, or mock-identity implementations into the app bundle.
 
         The auth contract may declare `mode` (`brokered_oidc`, `public_self_signup`,
         `private_workspace`, `enterprise_sso`, or `multi_provider`), `signup_enabled`,
@@ -2566,14 +2570,15 @@ agents:
         Use app-owned auth adapters only when the requested app directly owns custom
         auth mechanics that cannot be represented by the OIDC/JWT runtime contract.
 
-      When in doubt, default both to true. These files are operator-owned after first emit
-      and safe to include even when not immediately needed.
+      Resolve authentication intent from the persisted app manifest before selecting
+      the auth scaffold. Its declaration must agree with app.json during validation.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Upstream**:
       - AppValidationAgent has completed with integration_tests_passed=true.
-      - `app_build_plan` is available in context (deployment_profile, auth_provider, pages).
+      - `app_build_plan` and the persisted `app_manifest` are available in context;
+        `app_manifest.auth_strategy` owns the materialized app's authRequired intent.
       - `integration_manifest` is available in context (may include VITE_OIDC_* env keys).
 
       **Runtime**:
@@ -2631,6 +2636,9 @@ agents:
 
       **Runtime**:
       - Your structured output will auto-invoke the generate_and_download UI tool.
+      - The final tool result controls routing: ready completes, declared repair
+        outcomes return to the owning generator, and blocked/cancelled return to
+        the user. Never announce successful export before the tool confirms it.
       - Deployment artifacts are optional scaffold outputs for preview/export flows.
       - Deployment scaffold outputs are pre-deploy validation/preview only.
       - When enabled, includeDockerfiles/includeWorkflow/includeCompose produce deterministic provider-neutral outputs from the deployment contract.
@@ -2697,6 +2705,11 @@ agents:
       - Reference model details directly from the Code Context.
       - Use `backend/repo.py` and the runtime `ctx.persistence` adapter for all generated module persistence operations.
       - Keep generated module runtime logic production-honest: no fake/sample/demo records, no hardcoded live metrics, and no placeholder percentage changes.
+      - For actions consumed by workflows, implement the declared result schema
+        and explicit business failure outcomes. Workflow tools translate those
+        results into their outcome_plans contracts; module code must not write
+        workflow context or choose AG2 agents. Preserve idempotency for actions
+        that may be repeated and reconcile uncertain external results before retry.
   - id: context
     heading: '[CONTEXT]'
     content: |-

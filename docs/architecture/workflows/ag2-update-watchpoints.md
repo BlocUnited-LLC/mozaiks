@@ -80,6 +80,15 @@ Classify each AG2 update with exactly one primary outcome:
 
 ## Active Watchpoint Ledger
 
+For `AG2-WP-001` and `AG2-WP-002`, also verify the workflow tool boundary and
+continuation deadlines. The runner uses `attach_plugin=False` without replacing
+AG2's handler; only declared tools and adapter-owned protocol tools reach the
+model. A deadline reached before polling or inside `wait_for_channel_event`
+must return `FAILED` and close the live run, never `PAUSED` or an uncaught
+`TimeoutError`. The HTTP-provider fixture in
+`test_ag2_network_tool_routing.py` and both deadline cases in
+`test_ag2_network_execution_alignment.py` cover these contracts.
+
 The YAML index repeats only the fields used by automation. The reason and test
 intent below remain authoritative for maintainers.
 

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from mozaiksai.core.auth import (
     WS_CLOSE_POLICY_VIOLATION,
+    accept_websocket,
     authenticate_websocket,
     require_user_scope,
 )
@@ -175,7 +176,7 @@ async def ws_sandbox_stream(websocket: WebSocket, sandboxId: str):
         return  # Connection already closed with 1008
 
     mgr = get_artifact_preview_sessions()
-    await websocket.accept()
+    await accept_websocket(websocket)
     await mgr.register_ws(sandboxId, websocket)
     try:
         while True:

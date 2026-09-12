@@ -4,6 +4,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
+
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    ManagedCapabilityTemplateError,
+    resolve_templates_for_pack,
+)
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 OPERATOR_READINESS_PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "operator_readiness"
@@ -82,4 +88,22 @@ async def test_operator_readiness_pack_materializes_rendered_outputs_end_to_end(
     assert file_map["docs/operations/operator-readiness.md"].startswith("# Operator Readiness")
     assert "host_operator_platform" in file_map["docs/operations/operator-readiness.md"]
     assert "app.json" in file_map
+
+
+def test_readiness_template_requires_profile() -> None:
+    with pytest.raises(ManagedCapabilityTemplateError, match="readiness_profile"):
+        resolve_templates_for_pack(OPERATOR_READINESS_PACK_ROOT, "operator_readiness")
+
+
+def test_readiness_yaml_preserves_string_values() -> None:
+    command = 'python check.py --label "Launch: local" # keep this argument'
+    files = resolve_templates_for_pack(
+        OPERATOR_READINESS_PACK_ROOT,
+        "operator_readiness",
+        context_variables={"readiness_profile": "host_operator_platform", "launch_check_command": command},
+    )
+    file_map = {item["filename"]: item["content"] for item in files}
+
+    assert not any(path.endswith(".j2") for path in file_map)
+    assert yaml.safe_load(file_map["config/operator_readiness.yaml"])["launch_check_command"] == command
 

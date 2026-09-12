@@ -8,14 +8,72 @@ tools:
 - agent: GapAnalysisAgent
   file: manifest.py
   function: save_value_manifest
-  description: Auto-invoked after GapAnalysisAgent outputs ConceptBlueprint. Persists manifest and emits UI artifact.
-  tool_type: UI_Surface
+  description: Persist the concept draft and collect a structured owner review before downstream generation.
+  tool_type: UI_Tool
   auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: concept_review_outcome
+    attempts_key: concept_review_attempts
+    result_field: outcome
+    values: [approved, changes_requested, cancelled, blocked]
+    error_value: blocked
+    max_attempts: 3
+    retry_on: [changes_requested]
   ui:
     component: ConceptBlueprint
     mode: artifact
-    workflow_primitive: document_preview
-    realization: generated_component
+    workflow_primitive: approval_card
+    realization: workflow_wrapper
+  ui_contract:
+    surface_kind: agent_tool
+    payload_schema:
+      type: object
+      required: [review_id, blueprint]
+      properties:
+        review_id: {type: string}
+        blueprint: {type: object}
+      additionalProperties: true
+    actions_schema:
+    - id: approve
+      label: Approve Concept
+      variant: primary
+      approved: true
+      payload_schema:
+        type: object
+        required: [action, approved, review_id]
+        properties:
+          action: {type: string, enum: [approve]}
+          approved: {type: boolean, const: true}
+          review_id: {type: string}
+          rationale: {type: string}
+        additionalProperties: false
+    - id: request_changes
+      label: Request Changes
+      variant: secondary
+      approved: false
+      payload_schema:
+        type: object
+        required: [action, approved, review_id]
+        properties:
+          action: {type: string, enum: [request_changes]}
+          approved: {type: boolean, const: false}
+          review_id: {type: string}
+          rationale: {type: string}
+        additionalProperties: false
+    - id: cancel
+      label: Cancel
+      variant: ghost
+      approved: false
+      payload_schema:
+        type: object
+        required: [action, approved, review_id]
+        properties:
+          action: {type: string, enum: [cancel]}
+          approved: {type: boolean, const: false}
+          review_id: {type: string}
+          rationale: {type: string}
+        additionalProperties: false
 
 - agent: GapAnalysisAgent
   file: manifest.py

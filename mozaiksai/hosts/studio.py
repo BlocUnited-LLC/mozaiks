@@ -660,7 +660,7 @@ async def get_app_overview(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
     missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
@@ -670,7 +670,7 @@ async def get_app_overview(
         )
 
     try:
-        record = (await _get_app_registry_service().get_app_record(app_id=resolved_app_id)).get("app")
+        record = (await _get_app_registry_service().get_app_record(app_id=resolved_app_id, owner_user_id=user_id)).get("app")
         if not isinstance(record, dict):
             raise HTTPException(status_code=404, detail=f"App record not found: {resolved_app_id}")
         return build_app_overview_summary(
@@ -769,9 +769,10 @@ async def update_workspace_app_status(
     body: UpdateWorkspaceAppStatusRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    _, _user_id = _resolve_studio_scope(principal)
+    _, user_id = _resolve_studio_scope(principal)
     try:
-        return await _get_app_registry_service().update_build_status(
+        result = await _get_app_registry_service().update_build_status(
+            owner_user_id=user_id,
             build_registry_id=build_registry_id,
             status=body.status,
             bundle_path=body.bundle_path,
@@ -781,6 +782,11 @@ async def update_workspace_app_status(
             active_workflow_id=body.active_workflow_id,
             current_build_run=body.current_build_run,
         )
+        if not result.get("success"):
+            raise HTTPException(status_code=404, detail="App registry record not found")
+        return result
+    except HTTPException:
+        raise
     except ValueError as exc:
         logger.warning("update_app_status validation error: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid app status parameters.") from exc
@@ -794,9 +800,14 @@ async def delete_workspace_app(
     build_registry_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    _, _user_id = _resolve_studio_scope(principal)
+    _, user_id = _resolve_studio_scope(principal)
     try:
-        return await _get_app_registry_service().delete_app(build_registry_id=build_registry_id)
+        result = await _get_app_registry_service().delete_app(build_registry_id=build_registry_id, owner_user_id=user_id)
+        if not result.get("success"):
+            raise HTTPException(status_code=404, detail="App registry record not found")
+        return result
+    except HTTPException:
+        raise
     except ValueError as exc:
         logger.warning("delete_app validation error: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1895,7 +1906,7 @@ async def promote_build_artifact_version(
     if promotion_build_registry_id:
         app_registry_service = _get_app_registry_service()
         registry_record = (
-            await app_registry_service.get_app_record(build_registry_id=promotion_build_registry_id)
+            await app_registry_service.get_app_record(build_registry_id=promotion_build_registry_id, owner_user_id=user_id)
         ).get("app")
         if not registry_record:
             raise HTTPException(
@@ -2072,7 +2083,7 @@ async def get_build_surface(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
     missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
@@ -2082,7 +2093,7 @@ async def get_build_surface(
         )
 
     try:
-        record = (await _get_app_registry_service().get_app_record(app_id=app_id)).get("app")
+        record = (await _get_app_registry_service().get_app_record(app_id=app_id, owner_user_id=user_id)).get("app")
         if not isinstance(record, dict):
             raise HTTPException(status_code=404, detail=f"App record not found: {app_id}")
         build_state = await load_build_state_from_db(app_id)

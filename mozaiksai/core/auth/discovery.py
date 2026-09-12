@@ -25,11 +25,18 @@ from typing import Any
 import aiohttp
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.cache_ttl import (
+    DEFAULT_DISCOVERY_CACHE_TTL_SECONDS,
+    DISCOVERY_CACHE_TTL_ENV,
+    cache_entry_is_expired,
+    resolve_cache_ttl_setting,
+)
 
 logger = get_core_logger("auth.discovery")
 
 
-_DEFAULT_DISCOVERY_CACHE_TTL = 86400  # 24 hours (discovery rarely changes)
+# Canonical default lives in cache_ttl.py; aliased for local readability.
+_DEFAULT_DISCOVERY_CACHE_TTL = DEFAULT_DISCOVERY_CACHE_TTL_SECONDS
 
 
 @dataclass
@@ -41,7 +48,7 @@ class CachedDiscovery:
     ttl_seconds: int
 
     def is_expired(self) -> bool:
-        return time.time() > (self.fetched_at + self.ttl_seconds)
+        return cache_entry_is_expired(self.fetched_at, self.ttl_seconds, now=time.time())
 
     @property
     def jwks_uri(self) -> str | None:
@@ -64,46 +71,70 @@ class OIDCDiscoveryClient:
         self,
         discovery_url: str | None = None,
         cache_ttl: int | None = None,
+        *,
+        consult_environment: bool = True,
     ):
         """
         Initialize OIDC discovery client.
 
+        Authority contract: **explicit constructor input always wins.** A
+        client built with a caller-owned discovery URL and TTL keeps them for
+        its whole lifetime; later environment changes never alter its
+        behaviour. The environment is consulted only to fill in values the
+        caller did not supply, and only when ``consult_environment`` is True.
+
         Args:
-            discovery_url: Direct URL to discovery document. If None, resolved from
-                           MOZAIKS_OIDC_DISCOVERY_URL, or computed from
-                           MOZAIKS_OIDC_AUTHORITY + MOZAIKS_OIDC_TENANT_ID.
-                           If no authority is configured, discovery_url is None and
-                           get_discovery() raises a RuntimeError on first call.
-            cache_ttl: Cache TTL in seconds (default: 86400 = 24h)
+            discovery_url: Direct URL to the discovery document. Authoritative
+                           when supplied.
+            cache_ttl: Cache TTL in seconds. Authoritative when supplied.
+            consult_environment: When False, the environment is never read —
+                                 the client is fully bound to the values passed
+                                 in. Auth adapters pass False so their lazily
+                                 created clients stay bound to the same
+                                 immutable configuration snapshot that
+                                 identifies the adapter.
         """
-        # Explicit env override takes highest priority.
-        explicit_url = os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", "").strip()
-
-        if explicit_url:
-            self._discovery_url: str | None = explicit_url
-        elif discovery_url:
-            self._discovery_url = discovery_url
+        if discovery_url:
+            self._discovery_url: str | None = discovery_url
+        elif not consult_environment:
+            # Fully snapshot-bound with nothing supplied: discovery is
+            # unavailable for this client; get_discovery() raises on first use.
+            self._discovery_url = None
         else:
-            # Compute from authority + tenant if both are configured.
-            authority = os.getenv("MOZAIKS_OIDC_AUTHORITY", "").strip().rstrip("/")
-            tenant_id = os.getenv("MOZAIKS_OIDC_TENANT_ID", "").strip()
-            if authority and tenant_id:
-                self._discovery_url = (
-                    f"{authority}/{tenant_id}/v2.0/.well-known/openid-configuration"
-                )
-            elif authority:
-                # Authority without tenant: use the bare well-known endpoint.
-                self._discovery_url = f"{authority}/.well-known/openid-configuration"
+            explicit_url = os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", "").strip()
+            if explicit_url:
+                self._discovery_url = explicit_url
             else:
-                # No authority configured — discovery is unavailable.
-                # get_discovery() will raise a clear error on first call.
-                self._discovery_url = None
+                # Compute from authority + tenant if both are configured.
+                authority = os.getenv("MOZAIKS_OIDC_AUTHORITY", "").strip().rstrip("/")
+                tenant_id = os.getenv("MOZAIKS_OIDC_TENANT_ID", "").strip()
+                if authority and tenant_id:
+                    self._discovery_url = (
+                        f"{authority}/{tenant_id}/v2.0/.well-known/openid-configuration"
+                    )
+                elif authority:
+                    # Authority without tenant: use the bare well-known endpoint.
+                    self._discovery_url = f"{authority}/.well-known/openid-configuration"
+                else:
+                    # No authority configured — discovery is unavailable.
+                    # get_discovery() will raise a clear error on first call.
+                    self._discovery_url = None
 
-        self._cache_ttl = cache_ttl or int(
-            os.getenv("AUTH_DISCOVERY_CACHE_TTL", str(_DEFAULT_DISCOVERY_CACHE_TTL))
-        )
+        if cache_ttl is not None:
+            self._cache_ttl = cache_ttl
+        elif not consult_environment:
+            self._cache_ttl = _DEFAULT_DISCOVERY_CACHE_TTL
+        else:
+            self._cache_ttl = resolve_cache_ttl_setting(
+                DISCOVERY_CACHE_TTL_ENV, os.getenv(DISCOVERY_CACHE_TTL_ENV)
+            )
         self._cache: CachedDiscovery | None = None
         self._lock = asyncio.Lock()
+
+    @property
+    def cache_ttl_seconds(self) -> int:
+        """The TTL this client was bound to at construction."""
+        return self._cache_ttl
 
     @property
     def discovery_url(self) -> str | None:

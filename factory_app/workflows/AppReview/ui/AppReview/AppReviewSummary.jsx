@@ -17,6 +17,7 @@ const STATUS_TONE = {
   passed: 'success',
   failed: 'destructive',
   skipped: 'default',
+  attention_required: 'warning',
 };
 
 function ValidationRow({ label, status }) {
@@ -67,6 +68,9 @@ export default function AppReviewSummary({ payload = {} }) {
     }
   }, [payload]);
 
+  const securitySummary = payload.security_readiness_summary || {};
+  const securityStatus = securitySummary.status || (securitySummary.finding_count > 0 ? 'attention_required' : 'skipped');
+  const securityFindings = Array.isArray(securitySummary.findings) ? securitySummary.findings : [];
   const validationStatus = payload.app_validation_status || 'skipped';
   const acceptanceStatus = payload.app_bundle_acceptance_status || null;
   const integrationStatus =
@@ -102,7 +106,17 @@ export default function AppReviewSummary({ payload = {} }) {
         )}
         <ValidationRow label="Build validation" status={validationStatus} />
         <ValidationRow label="Integration checks" status={integrationStatus} />
+        <ValidationRow label="Security readiness" status={securityStatus} />
       </div>
+
+      {securityFindings.length > 0 && (
+        <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
+          <p className="text-sm font-medium text-warning">Security readiness needs attention</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {securityFindings.length} advisory finding{securityFindings.length === 1 ? '' : 's'} recorded for review.
+          </p>
+        </div>
+      )}
 
       {payload.app_validation_preview_url && (
         <div className="mb-4">

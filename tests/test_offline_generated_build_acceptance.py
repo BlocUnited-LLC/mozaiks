@@ -115,8 +115,7 @@ sections:
         "security/secrets.yaml": """
 version: 1
 secrets:
-  - name: ORDERS_WEBHOOK_SECRET
-    env: ORDERS_WEBHOOK_SECRET
+  - env: ORDERS_WEBHOOK_SECRET
     required: false
 """,
         "modules/orders/module.yaml": """

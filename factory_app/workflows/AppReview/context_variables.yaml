@@ -122,6 +122,15 @@ definitions:
       type: state
       default: null
 
+  security_readiness_summary:
+    type: object
+    description: >
+      Advisory SecurityReadiness result for the staged app bundle. The OSS
+      default is review evidence, not a promotion block.
+    source:
+      type: state
+      default: {}
+
   review_complete:
     type: boolean
     description: >

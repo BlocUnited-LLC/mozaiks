@@ -5,7 +5,7 @@ This adapter bypasses all authentication and returns anonymous user claims.
 Use this when AUTH_ENABLED=false or AUTH_PROVIDER=none.
 """
 
-import os
+from collections.abc import Mapping
 
 from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
 
@@ -44,6 +44,8 @@ class NoAuthAdapter(BaseAuthAdapter):
         "workspace_integrations.manage",
         "app_registry.read",
         "app_registry.manage",
+        "security_readiness.read",
+        "security_readiness.manage",
     ]
 
     def __init__(
@@ -52,19 +54,22 @@ class NoAuthAdapter(BaseAuthAdapter):
         default_email: str | None = None,
         default_roles: list | None = None,
         default_scopes: list | None = None,
+        settings: Mapping[str, str] | None = None,
     ):
-        super().__init__()
-        self._default_user_id = default_user_id or os.getenv("AUTH_ANON_USER_ID", "anonymous")
-        self._default_email = default_email or os.getenv("AUTH_ANON_EMAIL")
+        super().__init__(settings)
+        self._default_user_id = default_user_id or self._setting("AUTH_ANON_USER_ID", "anonymous")
+        self._default_email = default_email or self._optional_setting("AUTH_ANON_EMAIL")
         # AUTH_ANON_ROLES: comma-separated list of roles for the anonymous dev user
         # e.g. AUTH_ANON_ROLES=admin,user  — enables admin portal in no-auth dev mode
-        env_roles_raw = os.getenv("AUTH_ANON_ROLES", "")
-        env_roles = [r.strip() for r in env_roles_raw.split(",") if r.strip()] if env_roles_raw else []
+        env_roles_raw = self._setting("AUTH_ANON_ROLES")
+        env_roles = (
+            [r.strip() for r in env_roles_raw.split(",") if r.strip()] if env_roles_raw else []
+        )
         self._default_roles = default_roles or env_roles
         # AUTH_ANON_SCOPES: comma-separated override for module permission scopes.
         # Defaults to _DEV_DEFAULT_SCOPES which grants all first-party module
         # permissions so local dev works without auth configuration.
-        env_scopes_raw = os.getenv("AUTH_ANON_SCOPES", "")
+        env_scopes_raw = self._setting("AUTH_ANON_SCOPES")
         if env_scopes_raw:
             self._default_scopes = [s.strip() for s in env_scopes_raw.split(",") if s.strip()]
         else:

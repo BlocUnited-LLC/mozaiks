@@ -187,6 +187,8 @@ async def _agents(
                 }
             ],
             "streaming": False,
+            "max_completion_tokens": 128,
+            "max_retries": 0,
         }
 
     original_converter = factory.llm_config_to_ag2_config
@@ -276,6 +278,21 @@ def _assert_real_tool_events(scenario: _SDKScenario, names: tuple[str, ...]) -> 
     for payload in scenario.request_bodies:
         for tool in payload.get("tools", []):
             assert "context_variables" not in tool["function"]["parameters"].get("properties", {})
+
+
+@pytest.mark.asyncio
+async def test_workflow_agents_receive_only_declared_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = _SDKScenario()
+    result = await _run(monkeypatch, scenario, _rules())
+    assert result.status is RunStatus.COMPLETED, result.error
+    assert scenario.requests == {"AgentA": 2, "AgentB": 1}
+    for payload in scenario.request_bodies:
+        names = {tool["function"]["name"] for tool in payload.get("tools", [])}
+        expected = {"complete_intake", "other_tool"} if payload["model"] == "AgentA" else set()
+        assert names == expected
+        assert payload["max_completion_tokens"] == 128
 
 
 @pytest.mark.asyncio

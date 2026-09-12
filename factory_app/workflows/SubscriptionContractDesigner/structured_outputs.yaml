@@ -3,6 +3,10 @@ registry:
   ContractDesignerAgent: SubscriptionContractOutput
 
 models:
+  BillingRevisionField:
+    type: literal
+    values: [billing_revision]
+
   AssignmentStore:
     type: model
     fields:
@@ -46,6 +50,15 @@ models:
         type: union
         variants: [str, 'null']
         description: Field carrying the plan snapshot, or null.
+      revision_field:
+        type: union
+        variants: [BillingRevisionField, 'null']
+        description: >
+          Field storing the last committed entitlement revision, which fences
+          out-of-order fulfillment commands. Use "billing_revision" to enable
+          fencing (the default) or null to opt out. The runtime accepts only
+          those two values, so no other string may be generated. Explicit null
+          is meaning-bearing and is preserved end to end.
       active_statuses:
         type: list
         items: str

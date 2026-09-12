@@ -104,6 +104,27 @@ def test_agent_generator_runtime_helpers_are_yaml_first() -> None:
     assert '"/tools.json"' not in export_helper
 
 
+def test_factory_workflows_do_not_ship_legacy_json_declaratives() -> None:
+    workflows_root = _workspace() / "factory_app" / "workflows"
+    legacy_config_names = {
+        "agents.json",
+        "context_variables.json",
+        "middleware.json",
+        "orchestrator.json",
+        "structured_outputs.json",
+        "tools.json",
+        "transition_graph.json",
+        "ui_config.json",
+    }
+    offenders = [
+        path.relative_to(workflows_root).as_posix()
+        for path in workflows_root.rglob("*.json")
+        if path.name in legacy_config_names or path.name.endswith("Prompt.json")
+    ]
+
+    assert offenders == []
+
+
 def test_repo_workflow_tools_do_not_import_global_shared_workflow_bucket() -> None:
     from tests.conftest import _resolve_active_app_root
     app_root = _resolve_active_app_root()
@@ -264,7 +285,7 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
     assert 'rel_path.startswith("ui/")' in converter
     assert '"path": "ui/index.js"' in converter
 
-    assert "@chat-workflows-root/*/ui/index.{js,jsx}" in registry
+    assert "import workflowModules from 'virtual:mozaiks-workflow-ui'" in registry
     assert "@chat-workflows-root-secondary" not in registry
     assert "mozaiks-platform/app/workflows" not in registry
     assert "const namespacedComponentName = `${workflowName}:${componentName}`;" in registry
@@ -272,7 +293,7 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
     assert "'@mozaiks/factory-app-ui': path.resolve(factoryAppRoot, 'app/ui/index.js')" in app_vite
     assert "'@mozaiks/factory-admin': path.resolve(factoryAppRoot, 'app/admin/index.js')" in app_vite
     assert "@chat-workflows-root-secondary" not in app_vite
-    assert "'@chat-workflows-root': fileURLToPath(new URL('./src/workflows_stub', import.meta.url))" in embed_vite
+    assert "'virtual:mozaiks-workflow-ui': fileURLToPath(new URL('./src/embed/workflowUiModulesStub.js', import.meta.url))" in embed_vite
     assert "../mozaiks-platform/" not in tailwind
     assert "`@chat-workflows/${workflow}/components/index.js`" not in router
     assert "workflow && component ? `${workflow}:${component}` : null" in router
@@ -357,7 +378,6 @@ def test_shared_workflow_ui_contract_is_documented() -> None:
 def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
     files = [
         "factory_app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
-        "factory_app/workflows/ValueEngine/tools/manifest.py",
         "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools/show_acceptance_diagram.py",
     ]
 
@@ -365,6 +385,18 @@ def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
         content = _read(relative_path)
         assert "from mozaiksai.core.workflow.ui_tools import emit_ui_surface" in content
         assert "send_ui_tool_event(" not in content
+
+
+def test_value_engine_review_uses_response_bearing_ui_tool() -> None:
+    content = _read("factory_app/workflows/ValueEngine/tools/manifest.py")
+    assert "from mozaiksai.core.workflow.ui_tools import use_ui_tool" in content
+    assert "emit_ui_surface" not in content
+    tools = _read_yaml("factory_app/workflows/ValueEngine/tools.yaml")["tools"]
+    review = next(tool for tool in tools if tool["function"] == "save_value_manifest")
+    assert review["tool_type"] == "UI_Tool"
+    assert review["auto_tool_call"] is True
+    assert review["bind_to_agent"] is False
+    assert review["outcome"]["values"] == ["approved", "changes_requested", "cancelled", "blocked"]
 
 
 def test_ui_system_spec_documents_interactive_vs_one_way_producer_contracts() -> None:

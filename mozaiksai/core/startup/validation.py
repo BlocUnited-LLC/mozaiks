@@ -9,19 +9,23 @@ Behaviour is controlled by the ``MOZAIKS_STARTUP_CHECKS`` environment variable:
   ``"warn"``   — (default) emit WARNING log records but do not block startup.
 
 Checks performed:
-  LLM API key          — provider-specific API key resolvable via env based on
-                         ``LLM_PRIMARY_API_TYPE`` (google → GEMINI_API_KEY /
-                         GOOGLE_API_KEY; anthropic → ANTHROPIC_API_KEY; openai
-                         → OPENAI_API_KEY / Key Vault alias ``OpenAIApiKey``),
-                         or a MongoDB ``llm_config`` document.
-  MongoDB              — MONGO_URI must be set (env or Key Vault alias ``MongoURI``)
-                         and MongoDB must respond to a ping within the driver timeout.
+  Secret policy        — any selected app/security/secrets.yaml or explicitly
+                         configured manifest must be valid, even in warn mode.
+                         Required flags document needs; consumers enforce them.
+  LLM API key          — selected provider key through the shared app secret
+                         resolver, or a MongoDB llm_config document. Ollama
+                         needs no API key.
+  MongoDB              — MONGO_URI through the same resolver used by the Mongo
+                         client, followed by a ping within the driver timeout.
   Workflows path       — ``MOZAIKS_WORKFLOWS_PATH``, if set, must exist on disk.
   Upload dir           — ``UPLOAD_STORAGE_DIR``, if set, must be writable when it exists.
-  AUTH_ENABLED         — warns when ``ENV=production`` and ``AUTH_ENABLED=false``.
-  Auth provider        — warns when ``ENV=production``, auth is not explicitly disabled,
-                         and no auth provider env vars are configured (silently falls
-                         back to demo mode without this check).
+  Auth configuration   — mode-INDEPENDENT hard gate: the canonical auth
+                         resolution must succeed. Enabled auth without a usable
+                         provider, contradictory declarations, unrecognized
+                         AUTH_ENABLED values, conflicting ENV/ENVIRONMENT
+                         declarations, and any no-auth operation outside a
+                         recognized local/development/test environment abort
+                         startup regardless of ``MOZAIKS_STARTUP_CHECKS``.
   INTERNAL_API_KEY     — warns when the key is absent or shorter than 32 chars
                          (defense-in-depth; not a hard gate).
   RATE_LIMIT_ENABLED   — warns when ``ENV=production`` and ``RATE_LIMIT_ENABLED=false``.
@@ -42,7 +46,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from mozaiksai.core.core_config import get_mongo_client, get_secret
+from mozaiksai.core.adapters.llm_fallback import MODEL_API_KEY_ENV_NAMES, resolve_model_api_key
+from mozaiksai.core.core_config import get_mongo_client
+from mozaiksai.core.environment import EnvironmentConfigError, deployment_environment
+from mozaiksai.core.secrets import (
+    SecretContractError,
+    SecretResolutionError,
+    load_secret_contract,
+    resolve_secret,
+)
 
 logger = logging.getLogger("mozaiksai.startup.validation")
 
@@ -57,35 +69,12 @@ def _startup_mode() -> str:
 
 
 def _can_resolve_api_key() -> tuple[bool, str]:
-    """Return (resolvable, key_env_var_name) based on the configured LLM provider.
-
-    Mirrors the provider-specific resolution order in ``llm_fallback.py`` so
-    the startup check matches what the actual LLM adapter will attempt:
-      - ``LLM_PRIMARY_API_TYPE=google``    → GEMINI_API_KEY / GOOGLE_API_KEY
-      - ``LLM_PRIMARY_API_TYPE=anthropic`` → ANTHROPIC_API_KEY
-      - otherwise (openai / default)       → OPENAI_API_KEY / Key Vault alias
-
-    Key Vault is attempted only for the OpenAI case (existing behaviour) since
-    that is the only alias currently registered.
-    """
+    """Use the AG2 adapter's selected-provider resolution for startup too."""
     api_type = os.getenv("LLM_PRIMARY_API_TYPE", "openai").strip().lower()
-
-    if api_type == "google":
-        key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
-        return bool(key), "GEMINI_API_KEY / GOOGLE_API_KEY"
-
-    if api_type == "anthropic":
-        key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-        return bool(key), "ANTHROPIC_API_KEY"
-
-    # openai / azure / default
-    if os.getenv("OPENAI_API_KEY", "").strip():
-        return True, "OPENAI_API_KEY"
-    try:
-        val = get_secret("OpenAIApiKey")
-        return bool(str(val or "").strip()), "OpenAIApiKey (Key Vault)"
-    except Exception:
-        return False, "OPENAI_API_KEY"
+    names = MODEL_API_KEY_ENV_NAMES.get(api_type, MODEL_API_KEY_ENV_NAMES["openai"])
+    if not names:
+        return True, "ollama (no API key required)"
+    return bool(resolve_model_api_key(api_type)), " / ".join(names)
 
 
 async def _has_mongo_llm_config() -> bool:
@@ -118,15 +107,24 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
     mode = _startup_mode()
     warnings: list[str] = []
 
-    # ── LLM API key ──────────────────────────────────────────────────────────
-    api_key_in_env, key_var_name = _can_resolve_api_key()
-    api_key_in_mongo = False if api_key_in_env else await _has_mongo_llm_config()
+    # An invalid authored policy is a contract error, independent of readiness mode.
+    try:
+        load_secret_contract()
+    except SecretContractError as exc:
+        raise StartupConfigError(f"Secret configuration is invalid: {exc}") from exc
 
-    if not api_key_in_env and not api_key_in_mongo:
+    # ── LLM API key ──────────────────────────────────────────────────────────
+    try:
+        api_key_resolved, key_var_name = _can_resolve_api_key()
+    except SecretResolutionError as exc:
+        raise StartupConfigError(f"Model API key resolution failed: {exc}") from exc
+    api_key_in_mongo = False if api_key_resolved else await _has_mongo_llm_config()
+
+    if not api_key_resolved and not api_key_in_mongo:
         msg = (
             f"{key_var_name} is not set and no llm_config document was found in MongoDB. "
             "Workflow LLM calls will fail at request time. "
-            f"Set {key_var_name} in the environment (matching your LLM_PRIMARY_API_TYPE "
+            f"Configure {key_var_name} through the app secret policy (matching your LLM_PRIMARY_API_TYPE "
             "setting) or insert an llm_config document into the mozaiks_system.llm_config "
             "collection."
         )
@@ -139,7 +137,7 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
         if mode == "strict":
             raise StartupConfigError(msg)
     else:
-        source = "env" if api_key_in_env else "mongo_llm_config"
+        source = "selected_provider" if api_key_resolved else "mongo_llm_config"
         logger.info(
             "STARTUP_CHECK_OK: LLM API key resolvable via %s",
             source,
@@ -147,17 +145,16 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
         )
 
     # ── MongoDB reachability ──────────────────────────────────────────────────
-    mongo_uri = os.getenv("MONGO_URI", "").strip()
-    if not mongo_uri:
-        try:
-            get_secret("MongoURI")
-        except Exception:
-            pass
-        mongo_uri = os.getenv("MONGO_URI", "").strip()
+    try:
+        mongo_uri = resolve_secret("MONGO_URI")
+    except SecretResolutionError as exc:
+        if exc.source != "missing":
+            raise StartupConfigError(f"MONGO_URI secret resolution failed: {exc}") from exc
+        mongo_uri = ""
     if not mongo_uri:
         msg = (
             "MONGO_URI is not configured. The runtime requires MongoDB for session "
-            "persistence. Set MONGO_URI in the environment or Key Vault secret 'MongoURI'."
+            "persistence. Configure the MONGO_URI handle through the app secret policy or environment."
         )
         warnings.append(msg)
         logger.warning("STARTUP_CHECK_FAILED: %s", msg, extra={"check": "mongo_uri", "mode": mode})
@@ -223,77 +220,34 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
                 extra={"check": "upload_storage_dir", "mode": mode},
             )
 
-    # ── AUTH_ENABLED in production ───────────────────────────────────────────
-    # AUTH_ENABLED=false is intentional in dev but a critical gap in production.
-    # Warn when the runtime environment is production and auth is disabled.
-    env_name = os.getenv("ENV", os.getenv("ENVIRONMENT", "")).strip().lower()
-    auth_enabled = os.getenv("AUTH_ENABLED", "true").strip().lower()
-    if env_name == "production" and auth_enabled in {"false", "0", "no", "off"}:
-        msg = (
-            "AUTH_ENABLED=false in a production environment. "
-            "All endpoints are exposed to unauthenticated access. "
-            "Set AUTH_ENABLED=true and configure an auth provider before serving production traffic."
+    # ── Auth configuration resolution (fail closed, mode-independent) ────────
+    # The canonical auth resolution (mozaiksai.core.auth.adapters.registry)
+    # is fatal — never a warning — for: explicitly enabled auth whose provider
+    # is missing/unknown/incomplete, contradictory explicit declarations,
+    # unrecognized AUTH_ENABLED values, conflicting ENV/ENVIRONMENT
+    # declarations, and ANY no-auth operation (explicit disable or implicit
+    # demo mode) outside a recognized local/development/test environment.
+    # MOZAIKS_STARTUP_CHECKS mode does not weaken this.
+    from mozaiksai.core.auth.adapters.base import AuthError
+    from mozaiksai.core.auth.adapters.registry import validate_auth_provider_configuration
+
+    try:
+        env_name = deployment_environment()
+        resolved_provider = validate_auth_provider_configuration()
+        logger.info(
+            "STARTUP_CHECK_OK: auth provider resolved (%s, env=%s)",
+            resolved_provider,
+            env_name or "unset",
+            extra={"check": "auth_provider_resolution", "mode": mode},
         )
-        warnings.append(msg)
-        logger.warning(
+    except (AuthError, EnvironmentConfigError) as auth_exc:
+        msg = f"Authentication configuration is invalid: {auth_exc}"
+        logger.error(
             "STARTUP_CHECK_FAILED: %s",
             msg,
-            extra={"check": "auth_enabled", "mode": mode},
+            extra={"check": "auth_provider_resolution", "mode": mode},
         )
-        if mode == "strict":
-            raise StartupConfigError(msg)
-    else:
-        logger.info(
-            "STARTUP_CHECK_OK: AUTH_ENABLED=%s (env=%s)",
-            auth_enabled,
-            env_name or "unset",
-            extra={"check": "auth_enabled", "mode": mode},
-        )
-
-    # ── Auth provider configured in production ───────────────────────────────
-    # When auth is not explicitly disabled but no provider env vars are set,
-    # _auto_detect_provider() silently falls back to "none" (demo mode).
-    # Catch this at startup so operators are not surprised in production.
-    if env_name == "production" and auth_enabled not in {"false", "0", "no", "off"}:
-        explicit_provider = os.getenv("AUTH_PROVIDER", "").strip()
-        has_supabase = bool(os.getenv("SUPABASE_URL", "").strip())
-        has_keycloak = bool(
-            os.getenv("KEYCLOAK_URL", "").strip() and os.getenv("KEYCLOAK_REALM", "").strip()
-        )
-        has_jwt_overrides = bool(
-            os.getenv("AUTH_JWKS_URL", "").strip() and os.getenv("AUTH_ISSUER", "").strip()
-        )
-        has_oidc_discovery = bool(
-            os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", "").strip()
-            or os.getenv("MOZAIKS_OIDC_AUTHORITY", "").strip()
-        )
-        has_jwt = has_jwt_overrides or has_oidc_discovery
-        has_provider = bool(explicit_provider) or has_supabase or has_keycloak or has_jwt
-        if not has_provider:
-            msg = (
-                "AUTH_ENABLED is not false but no auth provider is configured in production. "
-                "The runtime will silently fall back to demo mode (no authentication). "
-                "Set AUTH_PROVIDER or configure SUPABASE_URL, KEYCLOAK_URL, "
-                "AUTH_JWKS_URL + AUTH_ISSUER, or MOZAIKS_OIDC_AUTHORITY."
-            )
-            warnings.append(msg)
-            logger.warning(
-                "STARTUP_CHECK_FAILED: %s",
-                msg,
-                extra={"check": "auth_provider", "mode": mode},
-            )
-            if mode == "strict":
-                raise StartupConfigError(msg)
-        else:
-            detected = (
-                explicit_provider
-                or ("supabase" if has_supabase else ("keycloak" if has_keycloak else "jwt"))
-            )
-            logger.info(
-                "STARTUP_CHECK_OK: auth provider configured (%s)",
-                detected,
-                extra={"check": "auth_provider", "mode": mode},
-            )
+        raise StartupConfigError(msg) from auth_exc
 
     # ── INTERNAL_API_KEY ─────────────────────────────────────────────────────
     # When not set, service-to-service requests bypass the key check (dev mode).

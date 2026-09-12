@@ -131,6 +131,7 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
         ["SubscriptionContractDesigner"],
         ["AgentGenerator"],
         ["AppGenerator"],
+        ["SecurityReadiness"],
     ]
     assert transition_steps == [
         "app_type_selector",
@@ -211,6 +212,7 @@ async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata
         ["SubscriptionContractDesigner"],
         ["AgentGenerator"],
         ["AppGenerator"],
+        ["SecurityReadiness"],
     ]
     assert result["artifact_lineage"]["workflow_bundle_inputs"] == {
         "design_docs": result["artifact_lineage"]["design_docs_id"],

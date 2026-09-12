@@ -308,7 +308,12 @@ def _integrations_document(
 def _secret_references_document(
     unit: FamilyInstancePlan, render_input: SecretReferencesRenderInput
 ) -> dict[str, object]:
-    return {"version": 1, "secrets": list(render_input.secret_names)}
+    from mozaiksai.core.secrets import validate_secret_contract
+
+    return validate_secret_contract({
+        "version": 1,
+        "secrets": [{"env": name} for name in render_input.secret_names],
+    }).model_dump(mode="json", exclude_none=True, exclude_unset=True)
 
 
 _DOCUMENT_BUILDERS: dict[

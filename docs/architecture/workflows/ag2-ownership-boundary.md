@@ -31,6 +31,27 @@ Mozaiks owns deterministic product and runtime contracts around AG2:
 
 ## Runtime Handoff
 
+Declarative workflow participants attach through AG2's public
+`attach_plugin=False` option. They keep AG2's default envelope handler,
+channel adapter, graph execution, and declared workflow tools, but do not
+automatically receive the optional `NetworkPlugin` tools (`delegate`, `peers`,
+`channels`, `tasks`, `context`). Those tools allow model-selected network work
+outside the declared workflow topology. Delegation inside a generated workflow
+must use its declared graph, task batches, or explicitly bound tools; prompts
+must not assume an implicit network-tool grant.
+
+This uses AG2's supported
+[network-tool opt-out](https://docs.ag2.ai/docs/user-guide/network/network_assigned_tools/),
+not a replacement scheduler or network implementation. The installed AG2
+1.0.3 source and real AG2 tests with provider HTTP replaced verify that the
+default handler still runs without the plugin. Recheck this boundary when
+upgrading AG2.
+
+A continuation settlement timeout is a failed run, not a human-input pause.
+The adapter returns a failed result and closes its live clients; transport
+then uses the existing failure event path. A timeout must not leave a reusable
+live-run handle or claim that the workflow is waiting for the user.
+
 AG2 network packets are the source trace for agent execution, not automatically
 user-visible chat copy. Mozaiks owns the projection from AG2 packet history into
 transport events and replayed chat history because that projection enforces
@@ -105,6 +126,15 @@ If AG2 does not provide a required capability:
    enforcement.
 
 ## Task Decomposition
+
+Workflow operation outcomes remain Mozaiks contracts in `tools.yaml`. Their
+finite return values, context ownership, and per-execution invocation budgets
+are validated before loading. Mozaiks dispatches validated output and auto-tools
+before committing the AG2 packet; AG2 then folds the resulting context and
+executes the declared graph. The tool outcome wrapper performs no scheduling,
+backoff loop, or autonomous repair. This adapter boundary is needed because
+AG2 does not own Mozaiks tool-result schemas or generated artifact acceptance.
+It does not make external side effects atomic with AG2's packet commit.
 
 Mozaiks decomposition should stay contract-first:
 

@@ -1,3 +1,4 @@
+import { localDevelopmentAuth } from '../fixtures/localAuth.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +20,7 @@ const pageSchemas = {
 };
 
 const shellConfig = {
+  auth: localDevelopmentAuth,
   version: '1.0.0',
   appName: 'Support Operations',
   appId: 'support-operations',

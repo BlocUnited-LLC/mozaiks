@@ -268,6 +268,8 @@ def _generated_monetized_saas_files() -> dict[str, str]:
     }
     files.update(
         {
+            "services/__init__.py": "",
+            "services/integrations/__init__.py": "",
             "services/integrations/mozaikspay_client.py": _template_file(
                 "services/integrations/mozaikspay_client.py"
             ),
@@ -580,6 +582,24 @@ def _assert_not_missing_or_placeholder(response, *, surface: str) -> None:
 
 
 def _prepare_platform_test_runtime(platform: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
+
+    platform.executor_registry = ExecutorRegistry()
+    platform.app.state.executor_registry = platform.executor_registry
+    platform.app.state.subscriptions_config = None
+    platform.app.state.startup_degraded = False
+    platform.app.state.startup_degraded_reason = None
+    platform.app.state.failed_module_names = []
+    platform.app.state.page_schemas = {}
+    platform.app.state.module_action_surfaces = {}
+    platform.app.state.workflow_capability_routes = {}
+    platform.app.state.database_index_readiness = None
+    for state_attr in ("module_event_router", "workflow_trigger_guard"):
+        if hasattr(platform.app.state, state_attr):
+            delattr(platform.app.state, state_attr)
+    runtime_services = getattr(platform, "_runtime_services", None)
+    if isinstance(runtime_services, list):
+        runtime_services.clear()
     monkeypatch.setattr(platform.runtime_app, "mongo_client", _RuntimeAcceptanceMongoClient())
 
 

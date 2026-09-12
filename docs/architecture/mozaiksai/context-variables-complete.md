@@ -39,6 +39,21 @@ Rules:
 
 ## Runtime Resolution Semantics
 
+Before agents are created, the runtime checks that `before_chat` hooks have not
+changed immutable runtime authority. This includes app/user/chat/workflow identity,
+tenant and workspace scope, permissions, secret handles, and variables explicitly
+declared `immutable_runtime_authority`. Adding or deleting an immutable value also
+fails. The check runs after the best-effort hook block, so a hook cannot bypass it
+by catching its own exception. Failure uses the existing failed-run transport and
+`on_fail` lifecycle path; orchestration does not dispatch that run to AG2.
+
+Mutable preload information can still be populated. The check does not undo
+external side effects already performed by a hook, or replace per-writer mutation
+authorization. A generated app's target identity must be resolved separately by
+the owning Factory/Studio build lifecycle; it must never replace the executing
+app's `app_id`. The existing ValueEngine registration hook and downstream artifact
+scoping still require that migration before a hosted full-build proof is safe.
+
 Source types supported by runtime:
 
 - `config`

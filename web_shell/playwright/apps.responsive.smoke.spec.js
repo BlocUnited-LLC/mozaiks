@@ -1,3 +1,4 @@
+import { localDevelopmentAuth } from './fixtures/localAuth.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,9 @@ import { expect, test } from '@playwright/test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
+const appConfig = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'app.json'), 'utf8'),
+);
 const themeConfig = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'brand', 'theme_config.json'), 'utf8'),
 );
@@ -32,7 +36,10 @@ const transitionRoutes = (extensionRegistry.entrypoints || []).map((entrypoint) 
   },
 }));
 const composedShellConfig = {
+  auth: localDevelopmentAuth,
   ...shellConfig,
+  appId: appConfig.appId,
+  appName: appConfig.appName,
   pages: [...(routeManifest.pages || []), ...transitionRoutes],
 };
 const dashboardPayload = {

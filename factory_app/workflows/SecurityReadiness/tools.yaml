@@ -1,0 +1,20 @@
+tools:
+  - agent: SecurityReadinessAgent
+    file: tools/inspect_generated_app_security.py
+    function: inspect_generated_app_security
+    description: >
+      Deterministically inspect generated app files or bundle_path for baseline
+      security readiness issues and persist the security_readiness_summary into
+      context_variables.
+    tool_type: Agent_Tool
+    auto_tool_call: false
+  - agent: SecurityReadinessAgent
+    file: tools/record_security_findings.py
+    function: record_security_findings
+    description: >
+      Persist the latest security_readiness_findings into the first-party
+      security_readiness module through the live session's permissioned action
+      dispatch. Keep the review summary and explicit persistence failures in
+      context_variables for AppReview.
+    tool_type: Agent_Tool
+    auto_tool_call: false
