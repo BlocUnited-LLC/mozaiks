@@ -128,13 +128,22 @@ surface for tooling and generated UI/API documentation, for example `public`,
 mechanism; backend access remains governed by the action's `permissions`.
 
 Actions declared `internal` or `admin_internal` **cannot be dispatched through
-the external HTTP module route** (`/api/modules/{name}/{action}`). The runtime
+the public HTTP module route** (`/api/modules/{name}/{action}`). The runtime
 rejects those requests with 404 regardless of authentication status. This
 prevents external callers from triggering event-bus reaction handlers directly.
-Use these surfaces for event reactions and trusted internal runtime calls; invoke
-them through `ModuleExecutor` with an explicitly constructed server-owned
-`ModuleDispatchAuthority` (for example `framework_internal`, or
-`event_reaction` built via `event_reaction_authority`) from trusted code paths.
+
+`admin_internal` actions have exactly one sanctioned HTTP path: the admin
+dispatch boundary at `/api/admin/modules/{name}/{action}`. It dispatches only
+for token-validated principals carrying an operator role or scope from the
+deny-by-default allowlist (`MOZAIKS_ADMIN_DISPATCH_ROLES`, default
+`platform_operator`), always with an enforce-mode authority — the action's
+declared `permissions` are enforced, never bypassed, including in local
+development — and every dispatch is audited with the provenance surface and a
+params digest. `internal` actions stay HTTP-unreachable everywhere: use them
+for event reactions and trusted runtime calls invoked through `ModuleExecutor`
+with an explicitly constructed server-owned `ModuleDispatchAuthority` (for
+example `framework_internal`, or `event_reaction` built via
+`event_reaction_authority`) from trusted code paths.
 
 ## module.yaml Schema Rules
 

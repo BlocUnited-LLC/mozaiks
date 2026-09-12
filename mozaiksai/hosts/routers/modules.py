@@ -6,10 +6,11 @@ Routes:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,7 +25,10 @@ from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchProvenance,
 )
 from mozaiksai.core.runtime.composition.module_executor import ModuleRequest
-from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.composition.platform_hooks import (
+    ModuleScopeResolutionError,
+    get_platform_hooks,
+)
 from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
     WORKFLOW_TRIGGER_TRACE_HEADER,
     WORKFLOW_TRIGGER_TRACE_KEY,
@@ -90,6 +94,38 @@ def _is_public_module_action(request: Request, module_name: str, action_name: st
 def _is_internal_module_action(request: Request, module_name: str, action_name: str) -> bool:
     """Return True when the action surface is internal-only and must not be dispatched via HTTP."""
     return _module_action_api_surface(request, module_name, action_name) in _INTERNAL_MODULE_API_SURFACES
+
+
+def _require_surface_map(request: Request) -> None:
+    """Fail closed when the surface map was never populated.
+
+    Surface enforcement depends on app.state.module_action_surfaces from
+    platform assembly. A host that mounts this router without that step has
+    no surface truth, and dispatching anything would expose internal
+    actions (ADR-0001 fail-open finding). An empty dict is a populated map
+    (no modules) and keeps normal dispatch semantics.
+    """
+    surfaces = getattr(request.app.state, "module_action_surfaces", None)
+    if not isinstance(surfaces, dict):
+        raise HTTPException(status_code=404, detail="Action not found")
+
+
+def _params_digest(params: dict[str, Any]) -> str:
+    """Content digest of action params for audit records — never raw params."""
+    canonical = json.dumps(params, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _dispatch_provenance_metadata(
+    request: Request, params: dict[str, Any], *, lane: str
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    trigger_trace = _workflow_trigger_trace(request)
+    if trigger_trace is not None:
+        metadata[WORKFLOW_TRIGGER_TRACE_KEY] = trigger_trace
+    if lane == "admin":
+        metadata["params_digest"] = _params_digest(params)
+    return metadata
 
 
 def _split_post_body(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -195,6 +231,7 @@ async def _resolve_module_dispatch_scope(
     workspace_id: str | None,
     user_id: str | None,
     params: dict[str, Any],
+    fail_closed: bool = False,
 ) -> dict[str, Any]:
     default_permissions = list(principal.scopes) if principal else []
     return await get_platform_hooks().call_module_scope(
@@ -210,6 +247,7 @@ async def _resolve_module_dispatch_scope(
         params=params,
         request=request,
         default_permissions=default_permissions,
+        fail_closed=fail_closed,
     )
 
 
@@ -221,18 +259,22 @@ async def _execute_module_action(
     principal: UserPrincipal | None,
     params: dict[str, Any],
     context_overrides: dict[str, Any] | None = None,
+    lane: Literal["public", "admin"] = "public",
 ) -> Any:
     if not _MODULE_NAME_RE.fullmatch(module_name):
         raise HTTPException(status_code=400, detail="Invalid module name")
     if not _MODULE_NAME_RE.fullmatch(action_name):
         raise HTTPException(status_code=400, detail="Invalid action name")
 
+    _require_surface_map(request)
+
     # Internal-surface actions are event-bus reactions or trusted runtime calls.
-    # They must never be reachable via the external HTTP module dispatch path,
-    # regardless of authentication status.  Callers that need to invoke these
-    # actions directly must use ModuleExecutor with a server-owned trusted
-    # dispatch authority.
-    if _is_internal_module_action(request, module_name, action_name):
+    # They must never be reachable via the public HTTP module dispatch path,
+    # regardless of authentication status.  The admin lane has already proven
+    # the action is admin_internal and the caller is a token-validated
+    # operator before reaching this function (ADR-0001); `internal` actions
+    # stay HTTP-unreachable on both lanes.
+    if lane == "public" and _is_internal_module_action(request, module_name, action_name):
         raise HTTPException(status_code=404, detail="Action not found")
 
     # Reconcile reserved execution-context words (app_id, user_id, tenant_id,
@@ -315,24 +357,48 @@ async def _execute_module_action(
     principal_user_id = principal.user_id if principal else None
     user_id = str(requested_user_id).strip() if requested_user_id else principal_user_id
 
-    dispatch_scope = await _resolve_module_dispatch_scope(
-        request=request,
-        principal=principal,
-        module_name=module_name,
-        action_name=action_name,
-        app_id=str(app_id),
-        tenant_id=str(tenant_id) if tenant_id else None,
-        workspace_id=str(workspace_id) if workspace_id else None,
-        user_id=str(user_id) if user_id else None,
-        params=params,
-    )
+    try:
+        dispatch_scope = await _resolve_module_dispatch_scope(
+            request=request,
+            principal=principal,
+            module_name=module_name,
+            action_name=action_name,
+            app_id=str(app_id),
+            tenant_id=str(tenant_id) if tenant_id else None,
+            workspace_id=str(workspace_id) if workspace_id else None,
+            user_id=str(user_id) if user_id else None,
+            params=params,
+            fail_closed=(lane == "admin"),
+        )
+    except ModuleScopeResolutionError as exc:
+        # A crashed narrowing hook must deny privileged dispatch, not widen it.
+        logger.exception(
+            "ADMIN_DISPATCH_SCOPE_RESOLUTION_FAILED: module=%s action=%s",
+            module_name,
+            action_name,
+        )
+        raise HTTPException(
+            status_code=403, detail="Operator scope resolution failed"
+        ) from exc
+    # Admin-lane dispatch is always enforce-mode with the operator's resolved
+    # permissions — never trusted_bypass over HTTP, including local
+    # development (ADR-0001). Per-action module.yaml permissions are then
+    # enforced by ModuleExecutor against these authority permissions.
+    if lane == "admin":
+        authority = ModuleDispatchAuthority(
+            kind="authenticated_user",
+            permission_mode="enforce",
+            reason="HTTP admin module dispatch",
+            actor_id=str(user_id) if user_id else None,
+            permissions=tuple(dispatch_scope.get("permissions") or []),
+        )
     # When auth is disabled (dev/local mode), optional_user still returns an
     # anonymous principal so downstream code has a stable user shape. Treat all
     # such module HTTP calls as trusted local dispatch so module permission
     # declarations don't block the Studio admin UI. In production
     # (AUTH_ENABLED=true), non-public HTTP callers must carry a token with
     # explicit scopes that become the enforce-mode authority's permissions.
-    if not is_auth_enabled():
+    elif not is_auth_enabled():
         authority = ModuleDispatchAuthority(
             kind="local_development",
             permission_mode="trusted_bypass",
@@ -364,13 +430,9 @@ async def _execute_module_action(
         correlation_id=str(correlation_id) if correlation_id else None,
         authority=authority,
         provenance=ModuleDispatchProvenance(
-            surface="http_module_dispatch",
+            surface="http_admin_module_dispatch" if lane == "admin" else "http_module_dispatch",
             correlation_id=str(correlation_id) if correlation_id else None,
-            metadata=(
-                {WORKFLOW_TRIGGER_TRACE_KEY: trigger_trace}
-                if (trigger_trace := _workflow_trigger_trace(request)) is not None
-                else {}
-            ),
+            metadata=_dispatch_provenance_metadata(request, params, lane=lane),
         ),
     )
 
