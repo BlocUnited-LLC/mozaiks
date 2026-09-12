@@ -14,6 +14,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Auto-invoked tools receive the exact validated structured output again.
+  The runtime's read-only `structured_output` projection was served through
+  `freeze()`, which rewrites the payload's shape (`dict` -> `MappingProxyType`,
+  `list` -> `tuple`). Every factory save tool that guards extraction with
+  `isinstance(raw, dict)` / `isinstance(raw, list)` therefore discarded a
+  schema-valid agent output and returned before its persistence work while
+  still reporting success — observed live as DesignDocs persisting no canonical
+  design-doc bundle, AppGenerator then producing an empty application bundle,
+  and SecurityReadiness truthfully reporting no files assessed. The projection
+  now delivers a fresh plain-`dict`/`list` deep copy per read, so canonical
+  state stays unreachable without altering the validated result's shape.
+
 - Greenfield Genesis builds run again under the execution-identity guard. The
   generated app's registry identity now travels in the declared
   `generated_app_id` context variable — reserved by ValueEngine's registration

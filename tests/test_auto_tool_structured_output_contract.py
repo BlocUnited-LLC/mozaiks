@@ -96,9 +96,10 @@ async def try_mutation(context_variables=None):
         outcomes["remove"] = "allowed"
     except Exception as exc:
         outcomes["remove"] = type(exc).__name__
-    frozen = context_variables.get("structured_output")
+    received = context_variables.get("structured_output")
+    outcomes["received_type"] = type(received).__name__
     try:
-        frozen["title"] = "mutated"
+        received["title"] = "mutated"
         outcomes["item_assignment"] = "allowed"
     except TypeError:
         outcomes["item_assignment"] = "TypeError"
@@ -352,7 +353,10 @@ def test_overlay_reads_exact_payload_and_delegates_other_keys():
     base = create_context_container({"declared_key": "value"})
     overlay = StructuredOutputOverlay(base, PAYLOAD)
     assert dict(overlay.get(STRUCTURED_OUTPUT_KEY)) == PAYLOAD
-    assert isinstance(overlay.get(STRUCTURED_OUTPUT_KEY), MappingProxyType)
+    # The tool receives the EXACT validated result: a plain dict, never a
+    # frozen view whose shape consumers' isinstance guards reject.
+    assert isinstance(overlay.get(STRUCTURED_OUTPUT_KEY), dict)
+    assert not isinstance(overlay.get(STRUCTURED_OUTPUT_KEY), MappingProxyType)
     assert overlay.get("declared_key") == "value"
     assert overlay.contains(STRUCTURED_OUTPUT_KEY)
     assert STRUCTURED_OUTPUT_KEY in overlay
@@ -371,8 +375,10 @@ def test_overlay_fails_every_projection_mutation_closed():
         overlay[STRUCTURED_OUTPUT_KEY] = {"forged": True}
     with pytest.raises(StructuredOutputWriteError):
         del overlay[STRUCTURED_OUTPUT_KEY]
-    with pytest.raises(TypeError):
-        overlay.get(STRUCTURED_OUTPUT_KEY)["title"] = "mutated"
+    # Each read returns a fresh private deep copy: mutating what a tool
+    # received cannot reach canonical state, the overlay, or any later read.
+    received = overlay.get(STRUCTURED_OUTPUT_KEY)
+    received["title"] = "mutated"
     assert dict(overlay.get(STRUCTURED_OUTPUT_KEY)) == PAYLOAD
 
 
@@ -455,7 +461,8 @@ async def test_auto_tool_cannot_mutate_or_replace_the_projection(
     outcomes = pattern.data["mutation_outcomes"]
     assert outcomes["set"] == "StructuredOutputWriteError"
     assert outcomes["remove"] == "StructuredOutputWriteError"
-    assert outcomes["item_assignment"] == "TypeError"
+    assert outcomes["received_type"] == "dict"
+    assert outcomes["item_assignment"] == "allowed"
     assert outcomes["value_after_attempts"] == PAYLOAD
     assert STRUCTURED_OUTPUT_KEY not in pattern.data
 

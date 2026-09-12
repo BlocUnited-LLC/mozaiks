@@ -15,8 +15,9 @@ state.
 that makes the documented contract true without seizing application context
 authority: it wraps the live workflow context (a pattern context bridge or an
 ephemeral runtime container), serves ``structured_output`` reads from the
-runtime-held exact payload, fails every mutation of that key closed, and
-delegates all other keys — reads, writes, snapshots, and persistence
+runtime-held exact payload -- as a fresh plain-``dict``/``list`` deep copy per
+read, preserving the validated result's exact shape -- fails every mutation of
+that key closed, and delegates all other keys — reads, writes, snapshots, and persistence
 extraction — to the underlying context unchanged. Snapshots and iteration
 never include the projection, so persistence and replay cannot inherit it.
 """
@@ -28,7 +29,7 @@ from typing import Any, cast
 
 from ..reserved_context_keys import STRUCTURED_OUTPUT_CONTEXT_KEY
 from .authority import ContextAuthorityError
-from .frozen import detach, freeze
+from .frozen import detach
 
 #: The documented public auto-tool context key for validated agent output.
 #: The canonical vocabulary lives in ``reserved_context_keys``; this alias is
@@ -62,7 +63,17 @@ class StructuredOutputOverlay:
 
     def get(self, key: str, default: Any | None = None) -> Any:
         if key == STRUCTURED_OUTPUT_KEY:
-            return freeze(self._structured_data)
+            # Deliver the EXACT validated result: plain dict/list, not a frozen
+            # view. freeze() rewrote the payload's shape (dict -> mappingproxy,
+            # list -> tuple), so every consumer guarding on isinstance(dict) /
+            # isinstance(list) silently discarded a valid agent output.
+            #
+            # Immutability of canonical state is preserved without freezing:
+            # _structured_data is already the overlay's private detached copy,
+            # and each read returns a fresh deep copy of it, so a tool mutating
+            # what it received cannot reach canonical state, the overlay's copy,
+            # or any later read.
+            return detach(self._structured_data)
         base_get = getattr(self._base, "get", None)
         if callable(base_get):
             return base_get(key, default)
