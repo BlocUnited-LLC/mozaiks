@@ -305,7 +305,10 @@ async def save_design_doc(
     content: str,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    app_id = _cv_get(context_variables, "app_id")
+    # Design-doc artifacts scope under the generated app's identity.
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
+    app_id = resolve_generated_app_id(context_variables)
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
 
@@ -365,7 +368,9 @@ async def save_design_docs_bundle(
     *,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    app_id = _cv_get(context_variables, "app_id")
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
+    app_id = resolve_generated_app_id(context_variables)
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
     artifact_version_id = _cv_get(context_variables, "artifact_version_id")

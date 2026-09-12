@@ -133,8 +133,10 @@ def build_review_summary_payload(context_variables: Any | None) -> dict[str, Any
     can_promote = not promotion_blockers
     can_revise = not revision_blockers
 
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
     return {
-        "app_id": _text(_context_get(context_variables, "app_id")),
+        "app_id": _text(resolve_generated_app_id(context_variables)),
         "build_id": _text(_context_get(context_variables, "build_id")),
         "build_registry_id": build_registry_id,
         "artifact_kind": artifact_kind,

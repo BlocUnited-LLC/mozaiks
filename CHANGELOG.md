@@ -14,6 +14,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Greenfield Genesis builds run again under the execution-identity guard. The
+  generated app's registry identity now travels in the declared
+  `generated_app_id` context variable — reserved by ValueEngine's registration
+  hook instead of rebinding the immutable executing `app_id` — and all factory
+  artifact, staging, registry, and app-context scoping reads it. Declarations
+  with an explicit non-immutable `authority_class` (registry pointers such as
+  `build_registry_id`, `chat_app_id`) now govern their own keys at the
+  before-chat identity boundary; core execution identity and credential keys
+  remain non-demotable. Mid-journey transition hops (coding journey and
+  database selectors) now carry scalar journey context to the next workflow
+  launch the same way workflow-to-workflow hops inherit it, so build identity
+  survives the full build sequence.
+
 - Security Readiness now saves findings through permissioned workflow module
   dispatch using the live session principal. Findings retain project/build
   association and cannot overwrite another project's matching scanner rule.

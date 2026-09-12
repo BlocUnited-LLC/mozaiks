@@ -1,4 +1,17 @@
 definitions:
+  generated_app_id:
+    type: string
+    authority_class: mutable_workflow_state
+    authorization: false
+    description: >
+      Registry identity of the app being generated, reserved at pipeline start
+      by ValueEngine's create_app_record lifecycle tool. Scopes artifact-store
+      records, generated staging paths, app-registry updates, and app-context
+      registration. Distinct from the immutable executing runtime app_id.
+    source:
+      type: state
+      default: null
+
   app_bundle_export_outcome:
     type: string
     authority_class: closed_writer_routing_state
@@ -37,6 +50,8 @@ definitions:
       default: null
   build_registry_id:
     type: string
+    authority_class: mutable_workflow_state
+    authorization: false
     description: >
       ID of the hosted app_registry record created at pipeline start by ValueEngine's
       create_app_record lifecycle tool. Flows through the full pipeline so
@@ -402,7 +417,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
       fields:
       - ConceptOverview
       default: null
@@ -415,7 +430,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
       fields:
       - ApiEndpoints
       default: []
@@ -428,7 +443,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
       fields:
       - Blueprint
       default: null
@@ -440,7 +455,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         kind: frontend
         status: succeeded
       fields:
@@ -456,7 +471,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -470,7 +485,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         kind: database
         status: succeeded
       fields:
@@ -487,7 +502,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -505,7 +520,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -525,7 +540,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -542,7 +557,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -559,7 +574,7 @@ definitions:
       database_name: mozaiksai
       collection: DataContracts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
       fields:
       - data_contract
       default: null
@@ -573,7 +588,7 @@ definitions:
       database_name: mozaiksai
       collection: ThemeCaptures
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
       fields:
       - theme_config
       default: null
@@ -598,7 +613,7 @@ definitions:
       database_name: mozaiksai
       collection: ArtifactVersions
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         build_family: subscription_contract
         build_key: subscription_contract
         lifecycle_status: current
@@ -637,7 +652,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - agent_websocket_url
@@ -651,7 +666,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - agent_api_url
@@ -664,7 +679,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - repo_url
@@ -678,7 +693,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - agent_names
@@ -692,7 +707,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - tool_names
@@ -705,7 +720,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - available_agents
@@ -718,7 +733,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - available_tools
@@ -765,7 +780,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - workflow_name
@@ -782,7 +797,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - capability_id
@@ -800,7 +815,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - workflow_startup_mode
@@ -818,7 +833,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{generated_app_id||runtime.app_id}}'
         workflow_type: agent-generator
       fields:
       - trigger_events

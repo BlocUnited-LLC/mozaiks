@@ -122,6 +122,12 @@ async def save_value_manifest(
     if not all(isinstance(value, str) and value.strip() for value in (app_id, chat_id, user_id)):
         return {"success": False, "outcome": "blocked", "error": "App, chat, and user identities are required for review"}
 
+    # Concept artifacts scope under the generated app's identity, not the
+    # executing factory session app_id.
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
+    artifact_app_id = resolve_generated_app_id(context_variables) or str(app_id)
+
     # Extract fields from structured output
     app_name = str(structured_output.get("app_name") or "").strip()
     if is_generic_app_name(app_name):
@@ -146,14 +152,14 @@ async def save_value_manifest(
     surface_candidate_hints = structured_output.get("surface_candidate_hints", [])
     agentic_capabilities = structured_output.get("agentic_capabilities", [])
 
-    manifest_id = f"manifest_{app_id}"
+    manifest_id = f"manifest_{artifact_app_id}"
     now = datetime.now(UTC)
     review_id = f"concept_review_{uuid4().hex}"
 
     # Build manifest for persistence
     manifest = {
         "manifest_id": manifest_id,
-        "app_id": str(app_id),
+        "app_id": str(artifact_app_id),
         "app_name": app_name,
         "value_proposition": value_proposition,
         "concept_overview": concept_overview,
@@ -175,7 +181,7 @@ async def save_value_manifest(
         "review_id": review_id,
     }
     concept_record = _build_concept_record(
-        app_id=str(app_id),
+        app_id=str(artifact_app_id),
         manifest_id=manifest_id,
         structured_output=structured_output,
         app_name=app_name,
@@ -190,9 +196,9 @@ async def save_value_manifest(
     concept_record.update(review_id=review_id, review_owner_user_id=user_id)
     store = BuilderArtifactStore()
     try:
-        await store.save_concept(app_id=str(app_id), concept_record=concept_record, created_at=now.isoformat())
+        await store.save_concept(app_id=str(artifact_app_id), concept_record=concept_record, created_at=now.isoformat())
         await persist_summary_artifact(
-            app_id=str(app_id),
+            app_id=str(artifact_app_id),
             artifact_kind="concept",
             artifact_key="concept",
             summary_payload=manifest,
@@ -208,7 +214,7 @@ async def save_value_manifest(
     # Build UI payload matching ConceptBlueprint.js expectations
     ui_payload = {
         "title": f"Concept Blueprint: {app_name}",
-        "app_id": str(app_id),
+        "app_id": str(artifact_app_id),
         "review_id": review_id,
         "concept_overview": concept_overview,
         "blueprint": {
@@ -247,7 +253,7 @@ async def save_value_manifest(
             return {"success": False, "outcome": "blocked", "error": "Concept review does not match this draft"}
         outcome = {"approve": "approved", "request_changes": "changes_requested", "cancel": "cancelled"}[response.action]
         if not await store.finish_concept_review(
-            app_id=str(app_id), review_id=review_id, status=outcome,
+            app_id=str(artifact_app_id), review_id=review_id, status=outcome,
             reviewed_by=str(user_id), feedback=response.rationale,
         ):
             return {"success": False, "outcome": "blocked", "error": "Concept draft is no longer awaiting this review"}
@@ -256,7 +262,7 @@ async def save_value_manifest(
             "approved_scope": core_features if outcome == "approved" else [],
         }
         await persist_summary_artifact(
-            app_id=str(app_id), artifact_kind="concept", artifact_key="concept", summary_payload=reviewed_manifest,
+            app_id=str(artifact_app_id), artifact_kind="concept", artifact_key="concept", summary_payload=reviewed_manifest,
             source_workflow=str(workflow_name or "ValueEngine"), source_chat_id=str(chat_id),
             author_user_id=str(user_id), revision_mode=str(build_mode or "").strip().lower() == "revision",
         )
@@ -272,7 +278,7 @@ async def save_value_manifest(
         "success": outcome == "approved",
         "outcome": outcome,
         "manifest_id": manifest_id,
-        "app_id": str(app_id),
+        "app_id": str(artifact_app_id),
         "message": f"Concept review: {outcome}",
     }
 
@@ -286,19 +292,25 @@ async def get_value_manifest(
 
     Used by AgentGenerator/AppGenerator to understand what to build.
     """
+    # Concept artifacts are scoped by the generated app's identity; agents may
+    # pass the executing session app_id, so resolve the artifact scope here.
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
+    artifact_app_id = resolve_generated_app_id(context_variables) or str(app_id)
+
     # Check context first
     if context_variables and hasattr(context_variables, "get"):
         cached = context_variables.get("value_manifest")
-        if cached and cached.get("app_id") == str(app_id):
+        if cached and cached.get("app_id") in {str(app_id), str(artifact_app_id)}:
             return {"success": True, "manifest": cached}
 
     # Load from MongoDB
     try:
         store = BuilderArtifactStore()
-        concept = await store.get_concept(app_id=str(app_id))
+        concept = await store.get_concept(app_id=str(artifact_app_id))
         if concept:
-            return {"success": True, "manifest": _concept_record_to_manifest(concept, str(app_id))}
+            return {"success": True, "manifest": _concept_record_to_manifest(concept, str(artifact_app_id))}
     except Exception as e:
         logger.warning("[ValueEngine] Load manifest failed: %s", e)
 
-    return {"success": False, "error": f"No manifest found for app_id={app_id}"}
+    return {"success": False, "error": f"No manifest found for app_id={artifact_app_id}"}

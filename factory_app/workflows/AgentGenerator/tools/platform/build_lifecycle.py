@@ -109,21 +109,28 @@ async def _persist_workflow_bundle_artifact(
     user_id: str | None,
     workflow_name: str,
     build_mode: str | None,
+    chat_scope_app_id: str | None = None,
     artifact_store: Any | None = None,
     workflow_integration_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Persist a versioned workflow_bundle summary artifact after AgentGenerator completes.
 
-    Pass ``artifact_store`` to direct artifact writes to a specific store instance
-    without touching process-level state.  Pass ``workflow_integration_metadata``
-    to supply the payload directly and skip the MongoDB chat-context read.
+    ``app_id`` scopes the artifact record (the generated app's identity);
+    ``chat_scope_app_id`` scopes the chat-context read (the executing runtime
+    app_id) and defaults to ``app_id``. Pass ``artifact_store`` to direct
+    artifact writes to a specific store instance without touching
+    process-level state. Pass ``workflow_integration_metadata`` to supply the
+    payload directly and skip the MongoDB chat-context read.
     """
     from mozaiksai.core.artifacts.summary_artifacts import persist_summary_artifact
 
     resolved_chat_id = (chat_id or "").strip() or None
     if workflow_integration_metadata is None:
         workflow_integration_metadata = (
-            await _read_workflow_integration_metadata(app_id=app_id, chat_id=resolved_chat_id)
+            await _read_workflow_integration_metadata(
+                app_id=chat_scope_app_id or app_id,
+                chat_id=resolved_chat_id,
+            )
             if resolved_chat_id
             else None
         )
@@ -165,13 +172,17 @@ async def emit_build_completed(
     )
 
     try:
+        from factory_app.workflows._shared.build_identity import read_generated_app_id_for_chat
+
         build_mode = await _read_build_mode(app_id=app_id, chat_id=chat_id or "")
+        artifact_app_id = await read_generated_app_id_for_chat(app_id=app_id, chat_id=chat_id or "")
         await _persist_workflow_bundle_artifact(
-            app_id=app_id,
+            app_id=artifact_app_id or app_id,
             chat_id=chat_id,
             user_id=user_id,
             workflow_name=workflow_name,
             build_mode=build_mode,
+            chat_scope_app_id=app_id,
         )
     except Exception as exc:
         from logs.logging_config import get_core_logger

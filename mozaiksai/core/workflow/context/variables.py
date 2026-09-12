@@ -294,7 +294,25 @@ def _resolve_template_value(template: Any, context: Any, app_id: str) -> Any:
     if not inner:
         return template
 
-    # runtime scoped value (e.g., {{runtime.app_id}})
+    # Fallback chains: {{a||b}} resolves to the first expression that yields a
+    # non-empty value, so declarations can express scope precedence such as
+    # {{generated_app_id||runtime.app_id}}.
+    if "||" in inner:
+        resolved: Any = None
+        for candidate in inner.split("||"):
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+            resolved = _resolve_template_expression(candidate, context, app_id)
+            if resolved is not None and resolved != "":
+                return resolved
+        return resolved
+
+    return _resolve_template_expression(inner, context, app_id)
+
+
+def _resolve_template_expression(inner: str, context: Any, app_id: str) -> Any:
+    # runtime scoped value (e.g., runtime.app_id)
     if inner.startswith("runtime."):
         key = inner.split(".", 1)[1]
         if key == "app_id":

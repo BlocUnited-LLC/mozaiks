@@ -112,9 +112,17 @@ async def emit_build_completed(
     )
 
     try:
+        from factory_app.workflows._shared.build_identity import (
+            read_generated_app_id_for_chat,
+            resolve_generated_app_id,
+        )
+
         build_mode = await _read_build_mode(app_id=app_id, chat_id=chat_id or "")
+        artifact_app_id = resolve_generated_app_id(context_variables)
+        if not artifact_app_id or artifact_app_id == app_id:
+            artifact_app_id = await read_generated_app_id_for_chat(app_id=app_id, chat_id=chat_id or "")
         await _persist_app_bundle_artifact(
-            app_id=app_id,
+            app_id=artifact_app_id or app_id,
             chat_id=chat_id,
             user_id=user_id,
             workflow_name=workflow_name,

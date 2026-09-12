@@ -309,7 +309,10 @@ async def save_subscription_contract(
     if not isinstance(output, dict):
         return {"success": False, "error": "No SubscriptionContractOutput structured output found"}
 
-    app_id = _cv_get(context_variables, "app_id") or output.get("app_id")
+    # Subscription-contract artifacts scope under the generated app's identity.
+    from factory_app.workflows._shared.build_identity import resolve_generated_app_id
+
+    app_id = resolve_generated_app_id(context_variables) or output.get("app_id")
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
     build_mode = _cv_get(context_variables, "build_mode")

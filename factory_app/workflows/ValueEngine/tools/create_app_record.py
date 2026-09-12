@@ -122,13 +122,16 @@ async def create_app_record(context_variables: Any | None = None) -> dict:
 
     Intentionally does NOT pass the factory session app_id as the registry app_id,
     because all ValueEngine sessions share the same factory app_id (from MOZAIKS_APP_ID).
-    Instead, it reserves a deterministic provisional app_id per workflow chat and
-    stores the factory session app_id as chat_app_id for correct chat session resume
+    Instead, it reserves a deterministic provisional app_id per workflow chat,
+    publishes it as the declared ``generated_app_id`` context variable (the
+    executing runtime ``app_id`` is immutable during a run), and stores the
+    factory session app_id as chat_app_id for correct chat session resume
     routing from the Apps directory.
     """
     cv = context_variables or {}
     user_id = _context_get(cv, "user_id", "anonymous")
     context_app_id = str(_context_get(cv, "app_id", "") or "").strip()
+    context_generated_app_id = str(_context_get(cv, "generated_app_id", "") or "").strip()
     chat_app_id = str(
         _context_get(cv, "chat_app_id")
         or _context_get(cv, "factory_app_id")
@@ -149,10 +152,16 @@ async def create_app_record(context_variables: Any | None = None) -> dict:
         }
 
     registry_app_id = (
-        context_app_id
-        if build_registry_id and context_app_id
+        context_generated_app_id
+        if build_registry_id and context_generated_app_id
         else _provisional_build_app_id(chat_app_id=chat_app_id, chat_id=chat_id, build_id=build_id)
     )
+    # The generated app's identity is carried in the declared generated_app_id
+    # context variable — the executing runtime app_id is immutable during a
+    # run (require_unchanged_runtime_authority). Publish it before the
+    # registry call so artifact, staging, and hydration scoping stays
+    # deterministic even when the hosted registry is unavailable.
+    _set_context_value(cv, "generated_app_id", registry_app_id)
     build_context_profile = _build_context_profile(cv)
     current_build_run = {
         "build_id": build_id,
@@ -197,11 +206,11 @@ async def create_app_record(context_variables: Any | None = None) -> dict:
         if chat_app_id:
             _set_context_value(cv, "chat_app_id", chat_app_id)
         if new_app_id:
-            _set_context_value(cv, "app_id", new_app_id)
+            _set_context_value(cv, "generated_app_id", new_app_id)
         return {
             "success": True,
             "build_registry_id": build_registry_id,
-            "app_id": new_app_id,
+            "generated_app_id": new_app_id or registry_app_id,
         }
 
-    return {"success": False}
+    return {"success": False, "generated_app_id": registry_app_id}

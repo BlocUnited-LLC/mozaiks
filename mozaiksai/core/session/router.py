@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -35,6 +36,31 @@ from .persistence import SessionStateStore
 from .trigger_routing import NullTriggerRouteResolver, TriggerRouteResolver
 
 logger = get_core_logger("session_router")
+
+_CARRY_CONTEXT_MAX_STR_LEN = 4000
+
+
+def _scalar_context_map(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Reduce a context mapping to string-keyed scalar values.
+
+    Journey context carried across a transition hop is identity/mode state
+    (ids, flags, selections), never artifact payloads — those flow through the
+    artifact store. Oversized strings and structured values are dropped.
+    """
+    if not isinstance(value, Mapping):
+        return {}
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        if isinstance(raw_value, bool | int | float):
+            normalized[key] = raw_value
+        elif isinstance(raw_value, str):
+            text = raw_value.strip()
+            if text and len(text) <= _CARRY_CONTEXT_MAX_STR_LEN:
+                normalized[key] = text
+    return normalized
 
 
 class SessionRouter:
@@ -151,6 +177,18 @@ class SessionRouter:
         if not current_transition_id:
             raise ValueError("transition_id is required")
 
+        # Mid-journey transitions re-seed the scalar journey context captured
+        # when the journey parked at this transition, so declared identity/mode
+        # keys survive the hop exactly like workflow-to-workflow hops. Caller
+        # and option context still win over the carried values.
+        state = await self._store.load(app_id=app, user_id=user)
+        if (
+            state is not None
+            and state.pending_transition_context
+            and state.pending_transition_id == current_transition_id
+        ):
+            resolved_context = {**state.pending_transition_context, **resolved_context}
+
         pack = load_global_pack_graph()
         if pack is None:
             raise ValueError("Global pack graph is not available")
@@ -240,6 +278,7 @@ class SessionRouter:
         state.current_chat_id = chat
         state.pending_harness_decision = None
         state.pending_transition_id = None
+        state.pending_transition_context = {}
         state.updated_at = datetime.now(UTC)
         await self._store.upsert(state)
         await self._persist_chat_journey_metadata(
@@ -289,6 +328,7 @@ class SessionRouter:
         user_id: str,
         workflow_id: str,
         chat_id: str,
+        carry_context: Mapping[str, Any] | None = None,
     ) -> JourneyAdvanceDecision | None:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
@@ -367,6 +407,7 @@ class SessionRouter:
             state.current_workflow_id = workflow
             state.current_chat_id = chat
             state.pending_transition_id = None
+            state.pending_transition_context = {}
             state.updated_at = now
             await self._store.upsert(state)
             return JourneyAdvanceDecision(
@@ -390,6 +431,7 @@ class SessionRouter:
             state.current_workflow_id = None
             state.current_chat_id = None
             state.pending_transition_id = next_transition_id
+            state.pending_transition_context = _scalar_context_map(carry_context)
             self._apply_journey_metadata_to_state(
                 state,
                 journey.id,
