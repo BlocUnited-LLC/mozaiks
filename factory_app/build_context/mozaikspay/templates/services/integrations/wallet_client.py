@@ -1,5 +1,12 @@
 """Thin MozaiksPay wallet client for generated apps.
 
+DORMANT SURFACE — DO NOT WIRE UP YET. The hosted wallet API this client
+targets (/api/mozaikspay/v1/wallet/*) is not published by any MozaiksPay
+provider deployment today; every call returns 404. The file ships only so
+the integration seam stays versioned with the rest of the pack. Do not
+call it from generated modules or pages until the provider publishes the
+wallet endpoints and this notice is removed.
+
 This file is copied to:
     services/integrations/wallet_client.py
 

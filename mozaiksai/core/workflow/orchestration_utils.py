@@ -38,7 +38,7 @@ def _normalize_human_in_the_loop(value) -> bool:
         v = value.strip().lower()
         if v in {"true", "yes", "1", "on", "always"}:
             return True
-        if v in {"false", "no", "0", "of", "never"}:
+        if v in {"false", "no", "0", "off", "never"}:
             return False
     return False
 
