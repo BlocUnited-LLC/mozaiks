@@ -155,12 +155,15 @@ class TestAgentGeneratorEmitBuildCompleted:
 
         assert result == "outbox_ag_1"
         shared_emit.assert_awaited_once()
+        # The artifact is scoped to the generated app identity, while the chat
+        # lookup stays scoped to the executing host app (#521 identity split).
         persist.assert_awaited_once_with(
             app_id="app-1",
             chat_id="chat-1",
             user_id="user-1",
             workflow_name="AgentGenerator",
             build_mode=None,
+            chat_scope_app_id="app-1",
         )
 
     @pytest.mark.asyncio
@@ -187,6 +190,7 @@ class TestAgentGeneratorEmitBuildCompleted:
             user_id="user-1",
             workflow_name="AgentGenerator",
             build_mode="revision",
+            chat_scope_app_id="app-1",
         )
 
     @pytest.mark.asyncio

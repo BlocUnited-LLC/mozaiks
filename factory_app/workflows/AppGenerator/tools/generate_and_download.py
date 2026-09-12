@@ -1223,6 +1223,14 @@ async def generate_and_download(
             gate = resolve_export_gate(context_variables)
             allow_export = bool(gate["allow_export"])
             reasons: list[str] = list(gate["reasons"])
+            if not generated_app_id:
+                # Fail closed: the export is scoped to the generated app's
+                # registry identity. Without it there is nothing to export
+                # under, and str(None) would publish under the literal "None".
+                allow_export = False
+                reasons.append(
+                    "no generated_app_id: the generated app has no registry identity to export under"
+                )
 
             if not allow_export:
                 error_msg = "Export blocked: " + " ".join(reasons) if reasons else "Export blocked."
@@ -1276,6 +1284,12 @@ async def generate_and_download(
                         or response["data"].get("commitMessage")
                         or commit_message
                     )
+            if not generated_app_id:
+                # Unreachable: the export gate above fails closed without an
+                # identity and returns. Explicit so the invariant is checked
+                # rather than assumed if that gate is ever restructured.
+                raise RuntimeError("export reached without a generated_app_id")
+
             deployment_result = await export_app_code_to_github(
                 bundle_path=str(zip_path.resolve()),
                 app_id=generated_app_id,

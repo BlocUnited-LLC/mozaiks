@@ -707,6 +707,13 @@ async def generate_and_download(
 
             if not zip_bundle_path:
                 deployment_result = {"success": False, "error": "ZIP bundle path not available for export."}
+            elif not generated_app_id:
+                # Fail closed: the export is scoped to the generated app's
+                # registry identity; str(None) would publish under "None".
+                deployment_result = {
+                    "success": False,
+                    "error": "Export blocked: no generated_app_id for this build.",
+                }
             else:
                 wf_logger.info("🚀 Export to GitHub requested (repo=%s)", repo_name)
                 deployment_result = await export_agent_workflow_to_github(
