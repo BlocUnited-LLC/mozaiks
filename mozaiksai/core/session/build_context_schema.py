@@ -46,6 +46,7 @@ VALID_CAPABILITY_SOURCES: frozenset[str] = frozenset({
     "managed_capability",
     "generated_module",
     "operator_extension",
+    "operator_pack",
     "external_adapter",
     "framework_pack",
 })
