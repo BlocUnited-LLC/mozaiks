@@ -706,3 +706,51 @@ When adding code, decide placement in this order:
 7. Is this filesystem scaffolding, process management, or terminal diagnostics? → **CLI**.
 
 Key: a feature is not CLI just because it runs locally. If it is management UI, it belongs in Studio. If it is generic intent routing across execution contexts, it belongs in the harness implementation. If it is builder-specific policy, it belongs in the factory harness pack.
+
+## Autonomy
+
+Bias toward action. Infer reasonable implementation details from the repository and carry
+the work through rather than interrupting to confirm. The repo — its canonical
+implementations, tests, ADRs, and git history — is the authority on architecture, not the
+prompt that sent you. When the prompt and the repo disagree about how something is built,
+read the code and believe the code.
+
+Stop and ask ONLY when the ambiguity would materially change one of:
+
+- a public contract or API shape
+- a security or authorization boundary
+- a persistence format or migration path
+- an architectural decision that is expensive to reverse
+
+Everything else: decide, implement, and report the decision in the deliverable. A question
+the repository can answer is not a question for the requester.
+
+## Investigate Before Changing
+
+Before editing code: fetch current `origin/main`, read the applicable repository
+instructions, locate the canonical implementation and its tests, inspect git history where
+architectural intent is unclear, and determine whether the change is already partially
+implemented. Do not assume architecture from the prompt when the repository can answer it.
+
+## Verification Proportionality
+
+Run the tests and checks proportionate to the affected surface. Do not re-run broader
+suites after the relevant checks are green unless a failure or an unresolved concern
+justifies it. Conversely, a change to a shared contract is not covered by its own unit
+test — run what the blast radius requires.
+
+## Deliverable
+
+Report these, in this order, on any change that touches code:
+
+1. Verdict — done / blocked / partial
+2. Base SHA the work started from
+3. Branch and PR
+4. Files changed
+5. Architectural decisions made, and what was rejected
+6. Tests and checks run, with exact results — not "tests pass"
+7. Unresolved risks
+8. Whether the PR is safe to merge, and why
+
+Claims must be checkable from the diff or from pasted command output. A green suite that
+was never run against the changed surface is not evidence.
