@@ -103,6 +103,10 @@ app.state.startup_degraded = False
 app.state.startup_degraded_reason: str | None = None
 app.state.failed_module_names: list[str] = []
 app.state.page_schemas = {}
+# Populated-empty by default so a healthy zero-module host keeps normal
+# dispatch semantics; the module routers fail closed only when this map is
+# genuinely absent (router mounted without platform assembly).
+app.state.module_action_surfaces = {}
 _runtime_services: list[Any] = []
 
 
@@ -136,6 +140,7 @@ except Exception as exc:  # pragma: no cover
 
 # Router modules extracted from platform.py for code organization.
 from mozaiksai.hosts.routers.account import router as _account_router  # noqa: E402
+from mozaiksai.hosts.routers.admin_modules import router as _admin_modules_router  # noqa: E402
 from mozaiksai.hosts.routers.billing import router as _billing_router  # noqa: E402
 from mozaiksai.hosts.routers.chat import router as _chat_router  # noqa: E402
 from mozaiksai.hosts.routers.media import router as _media_router  # noqa: E402
@@ -148,6 +153,7 @@ from mozaiksai.hosts.routers.transitions import router as _transitions_router  #
 from mozaiksai.hosts.routers.workflows import router as _workflows_router  # noqa: E402
 
 app.include_router(_account_router)
+app.include_router(_admin_modules_router)
 app.include_router(_billing_router)
 app.include_router(_media_router)
 app.include_router(_modules_router)

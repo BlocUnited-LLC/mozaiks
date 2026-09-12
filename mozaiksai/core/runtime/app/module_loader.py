@@ -225,6 +225,15 @@ class ActionDef(ModuleContractModel):
         text = value.strip()
         if not text:
             raise ValueError("api_surface must be non-empty")
+        # Closed vocabulary, fail closed at load time: HTTP dispatch gates are
+        # exact-match against these values, so a misspelled surface (e.g.
+        # "Admin_Internal") would otherwise silently dispatch as an ordinary
+        # authenticated action on the public route.
+        if text not in {"public", "public_readonly", "internal", "admin_internal"}:
+            raise ValueError(
+                "api_surface must be one of public, public_readonly, internal, "
+                f"admin_internal (got {text!r})"
+            )
         return text
 
 
