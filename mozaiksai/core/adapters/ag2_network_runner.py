@@ -45,6 +45,7 @@ from mozaiksai.core.workflow.context.authority import (
     CONTEXT_BRIDGE_WRITER,
     LIVE_USER_CONTEXT_WRITER,
     SENTINEL_TEXT_TRIGGER_WRITER,
+    USER_TEXT_TRIGGER_WRITER,
     ContextAuthorityError,
     ContextAuthorityPolicy,
     ContextWriterId,
@@ -101,9 +102,20 @@ def _authorized_context_updates(
 ) -> dict[str, Any]:
     if not updates:
         return {}
-    if elevated_writer_id is not None and (
-        writer_id != AGENT_TEXT_WRITER or elevated_writer_id != SENTINEL_TEXT_TRIGGER_WRITER
-    ):
+    # Trusted per-key attribution pairs: the mutation mechanism declares the
+    # more specific deterministic writer its trigger machinery represents;
+    # resolve_declared_context_writer still requires the key to declare it.
+    _ALLOWED_ELEVATIONS = {
+        (AGENT_TEXT_WRITER, SENTINEL_TEXT_TRIGGER_WRITER),
+        # A live user turn carries user_text trigger writes: the value set is
+        # the trigger's fixed declared value, so keys declaring a user_text
+        # trigger attribute to the deterministic user-decision writer
+        # (observed live: a builder's approval set workflow_review_approved
+        # via the trigger, then this lane re-applied it as live_user_context
+        # and the closed routing key rejected it, failing the resume turn).
+        (LIVE_USER_CONTEXT_WRITER, USER_TEXT_TRIGGER_WRITER),
+    }
+    if elevated_writer_id is not None and (writer_id, elevated_writer_id) not in _ALLOWED_ELEVATIONS:
         raise ContextAuthorityError("context_authority.untrusted_writer_attribution")
     safe: dict[str, Any] = {}
     for key, value in updates.items():
@@ -783,6 +795,7 @@ class _AG2LiveWorkflowRun:
             updates,
             writer_id=LIVE_USER_CONTEXT_WRITER,
             context_authority_policy=self._context_authority_policy,
+            elevated_writer_id=USER_TEXT_TRIGGER_WRITER,
         )
         await self._initiator.post_envelope(
             Envelope(

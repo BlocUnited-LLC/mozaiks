@@ -40,6 +40,79 @@ class TestNoTransitionMatchedIsFailure:
         assert status is RunStatus.PAUSED
 
 
+class TestLiveUserContextElevation:
+    """A live user turn carrying a declared user_text trigger write must
+    attribute to the deterministic user-decision writer — otherwise the
+    closed routing key rejects the re-application and the resume turn fails
+    (observed live: the builder's approval set workflow_review_approved via
+    the trigger, then the live-context lane errored the run re-applying it).
+    """
+
+    def _policy(self):
+        _authority = import_module_directly("mozaiksai.core.workflow.context.authority")
+        definitions = {
+            "workflow_review_approved": {
+                "type": "boolean",
+                "source": {
+                    "type": "state",
+                    "default": False,
+                    "triggers": [
+                        {"type": "user_text", "match": {"regex": r"(?i)\bapproved?\b"}}
+                    ],
+                },
+            }
+        }
+        rules = [
+            {
+                "source_agent": "user",
+                "target_agent": "PackBuildCoordinator",
+                "transition_type": "condition",
+                "condition_type": "context_equals",
+                "condition_key": "workflow_review_approved",
+                "condition_value": True,
+            }
+        ]
+        return _authority.build_context_authority_policy(
+            workflow_name="ElevationSmoke", definitions=definitions, transition_rules=rules
+        )
+
+    def test_live_user_context_elevates_to_declared_user_text_writer(self):
+        _authority = import_module_directly("mozaiksai.core.workflow.context.authority")
+        policy = self._policy()
+        safe = _runner._authorized_context_updates(
+            {"workflow_review_approved": True},
+            writer_id=_authority.LIVE_USER_CONTEXT_WRITER,
+            context_authority_policy=policy,
+            elevated_writer_id=_authority.USER_TEXT_TRIGGER_WRITER,
+        )
+        assert safe == {"workflow_review_approved": True}
+
+    def test_unelevated_live_user_context_still_rejected(self):
+        import pytest
+
+        _authority = import_module_directly("mozaiksai.core.workflow.context.authority")
+        policy = self._policy()
+        with pytest.raises(_authority.ContextAuthorityError):
+            _runner._authorized_context_updates(
+                {"workflow_review_approved": True},
+                writer_id=_authority.LIVE_USER_CONTEXT_WRITER,
+                context_authority_policy=policy,
+            )
+
+    def test_untrusted_elevation_pairs_still_raise(self):
+        import pytest
+
+        _authority = import_module_directly("mozaiksai.core.workflow.context.authority")
+        policy = self._policy()
+        with pytest.raises(_authority.ContextAuthorityError, match="untrusted_writer_attribution"):
+            _runner._authorized_context_updates(
+                {"workflow_review_approved": True},
+                writer_id=_authority.LIVE_USER_CONTEXT_WRITER,
+                context_authority_policy=policy,
+                elevated_writer_id=_authority.SENTINEL_TEXT_TRIGGER_WRITER,
+            )
+
+
 class TestToolWrapperFailureLogging:
     """RC5 — an ok:False / success:False return is not a success."""
 
