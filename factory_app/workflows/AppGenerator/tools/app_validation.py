@@ -37,6 +37,7 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
 )
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     local_app_validation_available,
     resolve_app_validation_strategy,
@@ -137,7 +138,7 @@ def _context_code_files(context_variables: Any | None) -> dict[str, str]:
     if context_variables is None or not hasattr(context_variables, "get"):
         return {}
     try:
-        raw = context_variables.get("code_files")
+        raw = detach(context_variables.get("code_files"))
     except Exception:
         raw = None
     return extract_code_file_map_from_payload({"code_files": raw})
@@ -147,7 +148,7 @@ def _context_deleted_files(context_variables: Any | None) -> list[str]:
     if context_variables is None or not hasattr(context_variables, "get"):
         return []
     try:
-        raw = context_variables.get("deleted_files")
+        raw = detach(context_variables.get("deleted_files"))
     except Exception:
         raw = None
     return extract_deleted_file_paths_from_payload({"deleted_files": raw})
@@ -336,7 +337,7 @@ def _generated_files_from_context(context_variables: Any | None) -> dict[str, st
     if context_variables is None or not hasattr(context_variables, "get"):
         return {}
     try:
-        raw = context_variables.get("generated_files")
+        raw = detach(context_variables.get("generated_files"))
     except Exception:
         raw = None
     if not isinstance(raw, dict):
@@ -1196,21 +1197,18 @@ def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
         return
     if not hasattr(context_variables, "set"):
         return
-    try:
-        context_variables.set(key, value)
-    except Exception:
-        pass
+    context_variables.set(key, value)
 
 
 def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
     if context_variables is None:
         return default
     if isinstance(context_variables, dict):
-        return context_variables.get(key, default)
+        return detach(context_variables.get(key, default))
     if not hasattr(context_variables, "get"):
         return default
     try:
-        return context_variables.get(key, default)
+        return detach(context_variables.get(key, default))
     except Exception:
         return default
 
@@ -1219,7 +1217,7 @@ def _capability_packs_from_context(context_variables: Any | None) -> list[dict[s
     if context_variables is None or not hasattr(context_variables, "get"):
         return []
     try:
-        app_build_plan = context_variables.get("app_build_plan")
+        app_build_plan = detach(context_variables.get("app_build_plan"))
     except Exception:
         app_build_plan = None
     if not isinstance(app_build_plan, dict):
@@ -1400,7 +1398,7 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
                         {
                             "test": "app_runtime_module_load",
                             "module": module_name,
-                            "error": f"AppLoader could not load module {module_name!r}.",
+                            "error": loaded.module_load_errors.get(module_name) or f"modules/{module_name}/module.yaml: AppLoader could not load module.",
                             "fix_suggestion": (
                                 "Fix the module contract, companion manifests, handler entrypoint, "
                                 "or app-owned service imports so AppLoader.load() can load every module."
@@ -1805,6 +1803,7 @@ def _workflow_integration_repair_request(failed_tests: list[dict[str, Any]]) -> 
 
 
 _BUNDLE_REPAIR_TARGET_LABELS = {
+    "DatabaseAgent": "data contracts and additive migrations",
     "AppSchemaAgent": "schema-driven generated app UI pages",
     "ConfigMiddlewareAgent": "configuration, subscription, module contract, or service-foundation files",
     "ServiceAgent": "module backend Python files",
@@ -1812,6 +1811,7 @@ _BUNDLE_REPAIR_TARGET_LABELS = {
 }
 
 _BUNDLE_REPAIR_TARGET_PRIORITY = (
+    "DatabaseAgent",
     "AppSchemaAgent",
     "ConfigMiddlewareAgent",
     "ServiceAgent",
@@ -1823,6 +1823,9 @@ def _bundle_repair_target_for_error(error: str) -> str | None:
     text = str(error or "").strip()
     lowered = text.lower()
     path = text.split(":", 1)[0].strip().replace("\\", "/").lower()
+
+    if path == "data/contract.json" or path.startswith("data/migrations/"):
+        return "DatabaseAgent"
 
     if path.startswith("ui/pages/") or "generated saas page" in lowered:
         return "AppSchemaAgent"
@@ -2212,6 +2215,7 @@ async def run_app_bundle_acceptance_gate(
     scanner_errors = scan_generated_bundle(
         generated_files,
         capability_packs=selected_capability_packs,
+        planned_data_contract=(_context_get(context_variables, "app_build_plan", {}) or {}).get("data_contract"),
         require_deployment_artifacts=_requires_deployment_artifacts(
             generated_files,
             context_variables,
@@ -2374,7 +2378,14 @@ async def run_app_bundle_acceptance_gate(
         context_variables,
     )
     bundle_repair = _prepare_bundle_repair(
-        bundle_scan_result,
+        {
+            "passed": bundle_scan_result["passed"] and app_runtime_load_result["passed"] and runtime_quality_result["passed"],
+            "errors": [
+                *bundle_scan_result.get("errors", []),
+                *[item["error"] for item in app_runtime_load_result.get("failed_tests", [])],
+                *runtime_quality_result.get("warnings", []),
+            ],
+        },
         context_variables,
     )
     result["workflow_integration_repair"] = workflow_integration_repair
@@ -2518,7 +2529,7 @@ def _context_has_agent_backend(context_variables: Any | None) -> bool:
         "tool_names",
     ):
         try:
-            value = context_variables.get(key)
+            value = detach(context_variables.get(key))
         except Exception:
             value = None
         if isinstance(value, str) and value.strip():

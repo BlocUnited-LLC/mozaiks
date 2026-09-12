@@ -50,6 +50,20 @@ the graph. This uses AG2's existing
 [channel context primitive](https://docs.ag2.ai/docs/user-guide/network/context_variables/),
 not a second persistence or routing authority.
 
+For an agent with a declared self-edge, the packet adapter supplies an explicit
+audience containing all workflow participants, including the sender. AG2 1.0.3
+excludes the sender from a default broadcast, otherwise leaving that self-edge
+without a delivery. Explicitly targeted packets are unchanged. AG2's default
+handler and `can_send` probe still select the authorized speaker; Mozaiks does
+not refold the graph or schedule an extra turn. Recheck this packet adaptation
+when upstream adds automatic self-edge notification.
+
+Initial prompts and user replies are shared within their workflow channel.
+They use AG2's broadcast visibility, not a private audience containing only
+the next interviewer. Otherwise later planners cannot see the user's corrections
+in AG2's projected conversation. AG2 still owns turn selection; visibility does
+not grant permission to speak. Tests inspect both history and current-turn input.
+
 Declarative workflow participants attach through AG2's public
 `attach_plugin=False` option. They keep AG2's default envelope handler,
 channel adapter, graph execution, and declared workflow tools, but do not
@@ -66,7 +80,7 @@ not a replacement scheduler or network implementation. The installed AG2
 default handler still runs without the plugin. Recheck this boundary when
 upgrading AG2.
 
-A continuation settlement timeout is a failed run, not a human-input pause.
+A settlement timeout, including initial execution, is a failed run, not a human-input pause.
 The adapter returns a failed result and closes its live clients; transport
 then uses the existing failure event path. A timeout must not leave a reusable
 live-run handle or claim that the workflow is waiting for the user.

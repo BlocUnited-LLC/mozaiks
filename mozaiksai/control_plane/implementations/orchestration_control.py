@@ -464,6 +464,7 @@ class OrchestrationControlHarness:
     def build_coding_result_decision(
         self,
         request: CodingWorkerRequest,
+        result: CodingWorkerResult,
     ) -> HarnessDecision:
         routing_payload = request.context_seed.get("routing_decision")
         if not isinstance(routing_payload, dict):
@@ -472,6 +473,7 @@ class OrchestrationControlHarness:
         return self._decision_policy.for_coding_result(
             routing_decision=routing_decision,
             selected_paths=list((request.metadata or {}).get("selected_file_paths") or []),
+            result=result,
         )
 
 _harness: OrchestrationControlHarness | None = None

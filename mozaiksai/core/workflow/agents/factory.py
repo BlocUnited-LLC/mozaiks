@@ -193,7 +193,7 @@ def _workflow_tool_invocation(
     invocation = _WorkflowToolInvocation(
         bridge, bridge._authority_policy, bridge._run_identity,
         actor if isinstance(actor, str) and actor.strip() else None,
-        writer_id,
+        writer_id=writer_id,
     )
     token = _WORKFLOW_TOOL_INVOCATION.set(invocation)
     try:

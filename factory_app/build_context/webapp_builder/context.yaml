@@ -12,7 +12,7 @@ assets:
   - path: templates
     kind: templates
     description: >
-      Web app scaffold templates emitted by InfraScaffoldAgent for generated apps.
+      Web app scaffold templates emitted by AuthScaffoldAgent for generated apps.
       Includes config/auth.yaml (provider-neutral auth contract) and
       ui/auth/authAdapter.js (facade for the shared @mozaiks/chat-ui/auth adapter).
       Auth template variable: AUTH_DEFAULT_ROUTE. The backend projects the

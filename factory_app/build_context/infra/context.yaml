@@ -4,7 +4,8 @@ description: Provider-neutral deployment scaffold templates.
 applies_to_workflows:
   - AppGenerator
 
-# Template variables substituted by InfraScaffoldAgent's save_infra_scaffold tool:
+# Reference template variables for explicitly selected infrastructure packs.
+# DownloadAgent's canonical deployment renderer owns generated deployment artifacts.
 #   APP_NAME                   — app slug used in image tags
 #   MOZAIKS_VERSION            — pinned mozaiks version from requirements.txt
 #   REGISTRY                   — container registry prefix (e.g. ghcr.io/your-org)
@@ -20,18 +21,16 @@ applies_to_workflows:
 #   TICK_METHOD                — service method name (e.g. run_placement_lifecycle_tick)
 #   ACTION_ID                  — log prefix identifier (e.g. placement_lifecycle)
 #
-# For azure_container_apps deploy targets, InfraScaffoldAgent should emit a
-# Microsoft.App/jobs resource (triggerType: Schedule) alongside the Container App
-# for each state_machine module that uses an external cron script. The job uses
-# the same container image and managed identity, with only the secrets the tick
-# needs (typically MONGO_URI). The deploy workflow must update the job image on
-# every push alongside the main Container App.
+# Provider job provisioning belongs to the operator or hosted deployment adapter,
+# not to generated apps or the auth scaffold.
 
 assets:
   - path: templates
     kind: templates
     description: >
-      Provider-neutral deployment scaffold templates emitted by InfraScaffoldAgent.
+      Reference infrastructure templates for explicitly selected build packs.
+      AuthScaffoldAgent does not emit these files. DownloadAgent owns the
+      canonical provider-neutral deployment artifact contract.
       Operator-owned after first emit; regeneration is explicit and opt-in.
       The readiness workflow is an environment-staging gate for the promoted or
       exported app. It is separate from Mozaiks artifact review staging, where

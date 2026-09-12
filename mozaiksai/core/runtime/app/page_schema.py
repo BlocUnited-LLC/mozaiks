@@ -8,7 +8,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ValidationError,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from mozaiksai.core.runtime.app.module_loader import LoadedModule
 from mozaiksai.core.workflow.ui_primitives import get_page_ui_primitive_names
@@ -77,6 +85,17 @@ class AppPageAction(PageContractModel):
     payload: list[AppPrimitiveKeyValue] | PrimitiveMap | None = None
     requires_selection: bool = False
     closes_modal: bool = True
+
+    @field_validator("payload", "context_variables")
+    @classmethod
+    def _unique_mapping_keys(cls, value):
+        if isinstance(value, list) and len({item.key for item in value}) != len(value):
+            raise ValueError("Action mapping keys must be unique")
+        return value
+
+    @field_serializer("payload", "context_variables")
+    def _serialize_mapping(self, value):
+        return {item.key: item.value for item in value} if isinstance(value, list) else value
 
     @model_validator(mode="after")
     def _validate_action_shape(self) -> AppPageAction:
@@ -192,6 +211,7 @@ class AppResourceTableConfig(AppDataTableConfig):
 
 class AppFormConfig(PageContractModel):
     fields: list[AppFormField]
+    initial_values_key: Literal["selected_row"] | None = None
     layout: str | None = None
     columns: int | None = None
     submit_label: str | None = None
@@ -290,7 +310,7 @@ class AppSummaryItem(PageContractModel):
     trend_label: str | None = None
 
 
-class AppSummaryStripConfig(PageContractModel):
+class AppSummaryStripConfig(DataBackedConfig):
     items: list[AppSummaryItem]
 
 
@@ -328,7 +348,7 @@ class AppStatusPillConfig(PageContractModel):
     dot: bool | None = None
 
 
-class AppMetricConfig(AppSummaryItem):
+class AppMetricConfig(AppSummaryItem, DataBackedConfig):
     pass
 
 
@@ -669,9 +689,62 @@ def validate_page_schema(
             )
         )
     diagnostics.extend(_validate_action_closure(page, action_index))
+    diagnostics.extend(_validate_interaction_contracts(page))
     if diagnostics:
         raise PageSchemaValidationError(diagnostics)
     return page
+
+
+def _validate_interaction_contracts(page: AppPageSchema) -> list[PageSchemaDiagnostic]:
+    nodes: list[tuple[str, Mapping[str, Any]]] = []
+
+    def form_references(value: Any) -> set[str]:
+        if isinstance(value, str):
+            return set(re.findall(r"\{(?:form|values)\.([^{}]+)\}", value))
+        if isinstance(value, Mapping):
+            return set().union(*(form_references(item) for item in value.values()))
+        if isinstance(value, list):
+            return set().union(*(form_references(item) for item in value))
+        return set()
+
+    def walk(value: Any, location: str) -> None:
+        if isinstance(value, Mapping):
+            nodes.append((location, value))
+            for key, item in value.items():
+                walk(item, f"{location}.{key}")
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                walk(item, f"{location}[{index}]")
+
+    walk(page.model_dump(exclude_none=True), "$")
+    modals = {node.get("id") for _, node in nodes if node.get("primitive") == "Modal"}
+    diagnostics = []
+    for location, node in nodes:
+        if node.get("primitive") == "Form":
+            config = node.get("config") or {}
+            submit = config.get("submit_action") or {}
+            if not config.get("disabled") and submit.get("action_type") == "submit" and submit.get("payload") is not None:
+                payload = submit["payload"]
+                submitted = form_references(payload)
+                missing = {
+                    field["name"] for field in config.get("fields") or []
+                    if field.get("name") and not field.get("disabled")
+                } - submitted
+                if missing:
+                    diagnostics.append(PageSchemaDiagnostic(
+                        code="page_schema.incomplete_form_payload", location=f"{location}.config.submit_action.payload",
+                        message=f"Explicit submit payload omits editable form values: {', '.join(sorted(missing))}. Bind each value with {{form.field}} or use null to submit all form values.",
+                    ))
+        if node.get("action_type") != "event" or node.get("event_type") not in {"ui.modal.open", "ui.modal.close"}:
+            continue
+        payload = node.get("payload") or {}
+        modal_id = payload.get("modal_id")
+        if not isinstance(modal_id, str) or modal_id not in modals:
+            diagnostics.append(PageSchemaDiagnostic(
+                code="page_schema.unknown_modal", location=f"{location}.payload.modal_id",
+                message="Modal actions require modal_id referencing a Modal on this page.",
+            ))
+    return diagnostics
 
 
 def _identity_key(value: str) -> str:
@@ -740,14 +813,14 @@ def _validate_href(value: str, action_type: str) -> None:
         _validate_api_endpoint(value)
         return
     if ".." in value or not _SAFE_ROUTE_RE.fullmatch(value):
-        raise ValueError("href must be a safe route or API path")
+        raise PydanticCustomError("page_href", "href must be a safe absolute route or API path; use null when the action does not use href")
 
 
 def _validate_api_endpoint(value: str) -> None:
     if "?" in value or "#" in value or ".." in value or "//" in value[1:]:
-        raise ValueError("api_endpoint must not contain traversal, query strings, or fragments")
+        raise PydanticCustomError("page_api_path", "api_endpoint must not contain traversal, query strings, or fragments")
     if not _API_PATH_RE.fullmatch(value):
-        raise ValueError("api_endpoint must be a safe absolute API path")
+        raise PydanticCustomError("page_api_path", "api_endpoint must be a safe absolute API path")
 
 
 def _validate_action_closure(
@@ -839,6 +912,9 @@ def _format_location(raw_location: Any) -> str:
 
 def _safe_validation_message(error: Mapping[str, Any]) -> str:
     error_type = str(error.get("type") or "invalid")
+    if error_type in {"page_href", "page_api_path"}:
+        # These validator-owned messages contain no rejected input values.
+        return str(error["msg"])
     if error_type == "extra_forbidden":
         return "Unknown runtime-affecting field is not allowed."
     if error_type == "missing":

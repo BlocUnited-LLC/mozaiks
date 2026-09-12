@@ -449,6 +449,39 @@ async def test_launch_routed_workflow_creates_chat_and_binds_session(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("caller_context", [{}, {"build_mode": "revision"}])
+async def test_refinement_router_seed_does_not_elevate_caller_authority(monkeypatch, caller_context):
+    from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
+    from mozaiksai.core.workflow.context.authority import ContextAuthorityError
+
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+    _workflow_manager.UnifiedWorkflowManager._instance = None
+    _workflow_manager.initialize_workflows(base_path=str(workflows_root))
+    monkeypatch.delenv("MOZAIKS_LAUNCH_CONTEXT_PROVIDER", raising=False)
+    contribution = TriggerRoutingContribution(
+        workflow_id="AppGenerator", context_seed={"build_mode": "revision"},
+    )
+
+    class Router:
+        async def route_trigger(self, trigger, *, contribution):
+            return _session_model.RoutingDecision(
+                workflow_id="AppGenerator", requested_workflow_id=trigger.workflow_id,
+                context_seed=contribution.context_seed,
+            )
+
+    kwargs = dict(
+        workflow_id="AppGenerator", app_id="app_1", user_id="user_1", trigger_source="refinement",
+        context_variables=caller_context, routing_contribution=contribution, session_router=Router(),
+    )
+    if caller_context:
+        with pytest.raises(ContextAuthorityError, match="caller_input"):
+            await _session_launcher.prepare_routed_workflow_launch(**kwargs)
+    else:
+        launch = await _session_launcher.prepare_routed_workflow_launch(**kwargs)
+        assert launch.validated_context["build_mode"] == "revision"
+
+
+@pytest.mark.asyncio
 async def test_launch_routed_workflow_binds_brownfield_app_adoption_journey(monkeypatch):
     persistence = _FakePersistence()
     store = SessionStateStore(persistence)

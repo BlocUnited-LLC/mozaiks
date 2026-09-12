@@ -18,6 +18,7 @@ Checks that the generated app does not:
 Called by generate_and_download.py after the full files_map is assembled.
 Returns a list of human-readable error strings. An empty list means clean.
 """
+
 from __future__ import annotations
 
 import json
@@ -72,8 +73,12 @@ from mozaiksai.core.runtime.app.paths import (
 
 # Generic payment-provider secret placeholder used by generated fixtures. Exact
 # hosted-processor key fingerprints belong in hosted/private validation packs.
-_PAYMENT_PROVIDER_SECRET_LITERAL_RE = re.compile(r"\b(?:payment_provider|provider)_(?:live|test)_[A-Za-z0-9]{10,}")
-_PAYMENT_PROVIDER_IMPORT_RE = re.compile(r"(?m)^\s*(?:import\s+payment_provider\b|from\s+payment_provider\s+import\b)")
+_PAYMENT_PROVIDER_SECRET_LITERAL_RE = re.compile(
+    r"\b(?:payment_provider|provider)_(?:live|test)_[A-Za-z0-9]{10,}"
+)
+_PAYMENT_PROVIDER_IMPORT_RE = re.compile(
+    r"(?m)^\s*(?:import\s+payment_provider\b|from\s+payment_provider\s+import\b)"
+)
 _RAW_PAYMENT_PROVIDER_IMPORT_RE = re.compile(
     r"(?m)^\s*(?:import\s+(stripe|paddle|paypal|braintree|square)\b|"
     r"from\s+(stripe|paddle|paypal|braintree|square)\s+import\b)",
@@ -127,37 +132,49 @@ _APP_LOCAL_LEDGER_CODE_RE = re.compile(
 # File suffixes and compound endings that carry executable or config content.
 # Checked via str.endswith so compound extensions like .env.example work.
 _SCANNABLE_SUFFIXES = (
-    ".py", ".js", ".jsx", ".ts", ".tsx",
-    ".yaml", ".yml", ".env.example", ".env.staging.example",
-    ".env.production.example", ".env",
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".yaml",
+    ".yml",
+    ".env.example",
+    ".env.staging.example",
+    ".env.production.example",
+    ".env",
     # Pack-declared workspace scripts ship to customers and must never carry
     # raw credentials or provider leaks.
-    ".ps1", ".sh",
+    ".ps1",
+    ".sh",
 )
 
 
-
 # Canonical action api_surface values — controls HTTP exposure posture.
-# Must match the typed literal in structured_outputs.yaml ModuleAction.api_surface
+# Must match the typed literal in structured_outputs.yaml ModuleApiSurface
 # and the runtime ActionDef.api_surface field.
-_CANONICAL_API_SURFACE_VALUES = frozenset({
-    "public",
-    "public_readonly",
-    "internal",
-    "admin_internal",
-})
+_CANONICAL_API_SURFACE_VALUES = frozenset(
+    {
+        "public",
+        "public_readonly",
+        "internal",
+        "admin_internal",
+    }
+)
 
 # Canonical reaction target kinds — must match file_contracts.yaml and the
 # mozaiks.reactions.v1 schema.  service_adapter is intentionally present here
 # and in the runtime loader but absent from structured_outputs.yaml: it is a
 # pack-only extension (capability packs can generate service_adapter reactions
 # via templates, but the AppGenerator LLM should not produce them directly).
-_CANONICAL_REACTION_TARGET_KINDS = frozenset({
-    "handler",
-    "capability",
-    "notification",
-    "service_adapter",
-})
+_CANONICAL_REACTION_TARGET_KINDS = frozenset(
+    {
+        "handler",
+        "capability",
+        "notification",
+        "service_adapter",
+    }
+)
 
 # Platform-provided event namespaces — events in these namespaces are NOT
 # declared in the bundle's events.yaml and must be skipped during closure checks.
@@ -166,17 +183,19 @@ _PLATFORM_EVENT_NAMESPACES = ("hosted.", "platform.", "mozaiks.")
 # Shell-built-in component names registered in chat-ui/src/registry/coreComponents.js.
 # These components are always available in the Mozaiks shell without a custom JSX file.
 # Route manifest entries referencing these names do NOT require a ui/pages/custom/*.jsx file.
-_SHELL_CORE_COMPONENTS = frozenset({
-    "ChatPage",
-    "SchemaPage",
-    "LauncherScreen",
-    "ConfirmScreen",
-    "ProfilePage",
-    "WorkflowCompletion",
-    "TokenStatusTab",
-    "AdminMyUsagePanel",
-    "AdminAppUsagePanel",
-})
+_SHELL_CORE_COMPONENTS = frozenset(
+    {
+        "ChatPage",
+        "SchemaPage",
+        "LauncherScreen",
+        "ConfirmScreen",
+        "ProfilePage",
+        "WorkflowCompletion",
+        "TokenStatusTab",
+        "AdminMyUsagePanel",
+        "AdminAppUsagePanel",
+    }
+)
 
 
 def _is_scannable(path: str) -> bool:
@@ -277,8 +296,12 @@ def _module_surface_ids(data_contract: dict[str, Any]) -> set[str]:
         for collection in collections:
             if not isinstance(collection, dict):
                 continue
-            ownership = collection.get("ownership") if isinstance(collection.get("ownership"), dict) else {}
-            module_id = str(collection.get("module_id") or ownership.get("surface_id") or "").strip()  # type: ignore[union-attr]
+            ownership = (
+                collection.get("ownership") if isinstance(collection.get("ownership"), dict) else {}
+            )
+            module_id = str(
+                collection.get("module_id") or ownership.get("surface_id") or ""
+            ).strip()  # type: ignore[union-attr]
             ownership_kind = str(ownership.get("surface_kind") or surface_kind).strip()  # type: ignore[union-attr]
             if ownership_kind == "module" and module_id:
                 module_ids.add(module_id)
@@ -343,10 +366,18 @@ def _scan_reserved_app_paths(files_map: dict[str, str]) -> list[str]:
     # code in these planes is prohibited for every app, independent of the
     # generated-output file allowlist applied by the layout validator.
     code_suffixes = {".py", ".js", ".jsx", ".ts", ".tsx"}
-    misplaced = [path for path in normalized_paths if (
-        (path.startswith(("security/", "data/")) and PurePosixPath(path).suffix in code_suffixes)
-        or is_sensitive_app_config_path(path)
-    ) and path not in legacy_paths]
+    misplaced = [
+        path
+        for path in normalized_paths
+        if (
+            (
+                path.startswith(("security/", "data/"))
+                and PurePosixPath(path).suffix in code_suffixes
+            )
+            or is_sensitive_app_config_path(path)
+        )
+        and path not in legacy_paths
+    ]
     if misplaced:
         errors.append(
             "App bundle contains imperative helpers in declarative data/security planes or misplaced secret config: "
@@ -414,7 +445,9 @@ def _scan_security_secret_contract(files_map: dict[str, str]) -> list[str]:
 def _pack_id_from_descriptor(pack: Any) -> str:
     if not isinstance(pack, dict):
         return ""
-    return str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
+    return str(
+        pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or ""
+    ).strip()
 
 
 def _selected_managed_capability_ids(capability_packs: list[dict[str, Any]] | None) -> set[str]:
@@ -515,7 +548,9 @@ def _forbidden_output_prefixes_from_pack(pack: dict[str, Any]) -> list[str]:
 def _path_matches_prefix(path: str, prefix: str) -> bool:
     normalized_path = _normalized_path(path).rstrip("/")
     normalized_prefix = _normalized_path(prefix).rstrip("/")
-    return normalized_path == normalized_prefix or normalized_path.startswith(f"{normalized_prefix}/")
+    return normalized_path == normalized_prefix or normalized_path.startswith(
+        f"{normalized_prefix}/"
+    )
 
 
 def _iter_api_endpoint_literals(content: str) -> list[str]:
@@ -730,12 +765,8 @@ def _validate_subscriptions_contract(
         return [f"{path}: invalid subscriptions contract: {exc}"]
 
     errors: list[str] = []
-    plans_with_token_allowances = [
-        plan.plan_id for plan in config.plans if plan.token_allowances
-    ]
-    plans_with_usage_limits = [
-        plan.plan_id for plan in config.plans if plan.usage_limits
-    ]
+    plans_with_token_allowances = [plan.plan_id for plan in config.plans if plan.token_allowances]
+    plans_with_usage_limits = [plan.plan_id for plan in config.plans if plan.usage_limits]
     if not config.token_wallets:
         if plans_with_token_allowances:
             errors.append(f"{path}: token_allowances require declared token_wallets.")
@@ -898,7 +929,9 @@ def _scan_mozaikspay_saas_contract(
             module_content,
         )
         if declared_module_id != "billing_portal":
-            errors.append("modules/billing_portal/module.yaml must declare module.id 'billing_portal'.")
+            errors.append(
+                "modules/billing_portal/module.yaml must declare module.id 'billing_portal'."
+            )
 
     service_content = normalized_files.get("modules/billing_portal/backend/service.py", "")
     if service_content:
@@ -957,11 +990,14 @@ def _scan_mozaikspay_saas_contract(
                 f"{missing_endpoints}."
             )
         direct_forbidden = [
-            endpoint for endpoint in endpoints
-            if endpoint.startswith((
-                "/api/modules/mozaikspay/",
-                "/api/modules/wallet/",
-            ))
+            endpoint
+            for endpoint in endpoints
+            if endpoint.startswith(
+                (
+                    "/api/modules/mozaikspay/",
+                    "/api/modules/wallet/",
+                )
+            )
         ]
         if direct_forbidden:
             errors.append(
@@ -1029,7 +1065,9 @@ def _scan_mozaiks_cloud_connector_contract(
 
     deployment_module = normalized_files.get("modules/cloud_deployment/module.yaml", "")
     if deployment_module:
-        actions = _module_actions_from_yaml("modules/cloud_deployment/module.yaml", deployment_module)
+        actions = _module_actions_from_yaml(
+            "modules/cloud_deployment/module.yaml", deployment_module
+        )
         required_actions = {
             "submit_deployment",
             "get_deployment_status",
@@ -1071,9 +1109,7 @@ def _scan_mozaiks_cloud_connector_contract(
             "modules/cloud_domain/module.yaml", domain_module
         )
         if declared_id != "cloud_domain":
-            errors.append(
-                "modules/cloud_domain/module.yaml must declare module.id 'cloud_domain'."
-            )
+            errors.append("modules/cloud_domain/module.yaml must declare module.id 'cloud_domain'.")
 
     return errors
 
@@ -1083,7 +1119,7 @@ def _entitlement_gates_from_module_yaml(path: str, content: str) -> set[str]:
     if error or not isinstance(parsed, dict):
         return set()
     gates: set[str] = set()
-    for action in (parsed.get("actions") or []):
+    for action in parsed.get("actions") or []:
         if not isinstance(action, dict):
             continue
         gate = str(action.get("entitlement_gate") or "").strip()
@@ -1098,7 +1134,7 @@ def _entitlement_gate_map_from_module_yaml(path: str, content: str) -> dict[str,
     if error or not isinstance(parsed, dict):
         return {}
     result: dict[str, str] = {}
-    for action in (parsed.get("actions") or []):
+    for action in parsed.get("actions") or []:
         if not isinstance(action, dict):
             continue
         gate = str(action.get("entitlement_gate") or "").strip()
@@ -1123,11 +1159,15 @@ def _subscriptions_config_from_yaml(path: str, content: str) -> tuple[Any | None
 def _capability_ids_from_subscriptions_config(config: Any) -> set[str]:
     """Extract capability_ids using the canonical subscriptions loader output."""
     capability_ids: set[str] = set()
-    for plan in (getattr(config, "plans", None) or []):
-        capability_ids.update(str(cap).strip() for cap in (plan.capabilities or []) if str(cap).strip())
-    for product in (getattr(config, "products", None) or []):
-        for plan in (getattr(product, "plans", None) or []):
-            capability_ids.update(str(cap).strip() for cap in (plan.capabilities or []) if str(cap).strip())
+    for plan in getattr(config, "plans", None) or []:
+        capability_ids.update(
+            str(cap).strip() for cap in (plan.capabilities or []) if str(cap).strip()
+        )
+    for product in getattr(config, "products", None) or []:
+        for plan in getattr(product, "plans", None) or []:
+            capability_ids.update(
+                str(cap).strip() for cap in (plan.capabilities or []) if str(cap).strip()
+            )
     return capability_ids
 
 
@@ -1156,7 +1196,8 @@ def _scan_self_hosted_entitlement_dispatch_contract(
     # [subscription_write_path] owns the subscription assignment write path.
     # entitlement_dispatch is only needed when no such pack is selected.
     managed_writers = [
-        p for p in _packs_providing(capability_packs, "subscription_write_path")
+        p
+        for p in _packs_providing(capability_packs, "subscription_write_path")
         if str(p.get("capability_source") or "").strip() == "managed_capability"
     ]
     if managed_writers:
@@ -1372,7 +1413,9 @@ def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
         try:
             manifest = json.loads(manifest_text)
         except Exception as exc:
-            errors.append(f"deployment.manifest.json must be valid JSON for auth contract scan: {exc}")
+            errors.append(
+                f"deployment.manifest.json must be valid JSON for auth contract scan: {exc}"
+            )
             return errors
 
         if not isinstance(manifest, dict):
@@ -1400,7 +1443,9 @@ def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
 
 
 def _scan_auth_app_contract(
-    files_map: dict[str, str], *, require_generated_adapter: bool = True,
+    files_map: dict[str, str],
+    *,
+    require_generated_adapter: bool = True,
 ) -> list[str]:
     """Consume the runtime auth schema and the deterministic shared-adapter facade."""
     normalized = _normalized_files_map(files_map)
@@ -1432,13 +1477,21 @@ def _scan_auth_app_contract(
         pages = route_manifest.get("pages") if isinstance(route_manifest, dict) else None
         validate_app_auth_route_bindings(contract, pages)
     except (TypeError, ValueError) as exc:
-        errors.append(str(exc) if isinstance(exc, AppAuthContractError) else "ui/route_manifest.json must be valid JSON for auth routes")
+        errors.append(
+            str(exc)
+            if isinstance(exc, AppAuthContractError)
+            else "ui/route_manifest.json must be valid JSON for auth routes"
+        )
     if not require_generated_adapter:
         return errors
 
     adapter = normalized.get("ui/auth/authAdapter.js", "")
     expected = workflow_context_path(
-        "webapp_builder", "templates", "ui", "auth", "authAdapter.js",
+        "webapp_builder",
+        "templates",
+        "ui",
+        "auth",
+        "authAdapter.js",
     ).read_text(encoding="utf-8")
     if adapter.strip() != expected.strip():
         errors.append(
@@ -1529,14 +1582,18 @@ def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
 _PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
 _PACK_PROVENANCE_SCHEMA_VERSION = "mozaiks.pack_provenance.v1"
 
-_PROVENANCE_REQUIRED_KEYS = frozenset({"schema_version", "framework_version", "generated_at", "packs"})
-_PROVENANCE_PACK_REQUIRED_KEYS = frozenset({
-    "pack_id",
-    "version",
-    "source",
-    "digest",
-    "materialized_owned_files",
-})
+_PROVENANCE_REQUIRED_KEYS = frozenset(
+    {"schema_version", "framework_version", "generated_at", "packs"}
+)
+_PROVENANCE_PACK_REQUIRED_KEYS = frozenset(
+    {
+        "pack_id",
+        "version",
+        "source",
+        "digest",
+        "materialized_owned_files",
+    }
+)
 
 
 def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
@@ -1587,13 +1644,17 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
                     continue
                 missing_pack_keys = _PROVENANCE_PACK_REQUIRED_KEYS - set(entry.keys())
                 for key in sorted(missing_pack_keys):
-                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] missing required field '{key}'")
+                    errors.append(
+                        f"{_PACK_PROVENANCE_PATH}: packs[{i}] missing required field '{key}'"
+                    )
                 unknown_pack_keys = sorted(set(entry.keys()) - _PROVENANCE_PACK_REQUIRED_KEYS)
                 for key in unknown_pack_keys:
                     errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] unsupported field '{key}'")
                 digest = str(entry.get("digest") or "")
                 if digest and not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}].digest must be a canonical sha256 digest")
+                    errors.append(
+                        f"{_PACK_PROVENANCE_PATH}: packs[{i}].digest must be a canonical sha256 digest"
+                    )
                 files = entry.get("materialized_owned_files")
                 if files is not None and not isinstance(files, list):
                     errors.append(
@@ -1619,6 +1680,7 @@ def _scan_page_api_endpoint_alignment(files_map: dict[str, str]) -> list[str]:
 
     # Build module_id → set[action_id] from all module.yaml files in the bundle.
     module_actions: dict[str, set[str]] = {}
+    internal_actions: set[tuple[str, str]] = set()
     for path, content in normalized_files.items():
         if not (path.startswith("modules/") and path.endswith("/module.yaml")):
             continue
@@ -1628,9 +1690,27 @@ def _scan_page_api_endpoint_alignment(files_map: dict[str, str]) -> list[str]:
         module_id = parts[1]
         actions = _module_actions_from_yaml(path, content)
         module_actions[module_id] = actions
+        document, _ = _load_yaml_mapping_from_file(normalized_files, path)
+        for action in (document or {}).get("actions", []):
+            if isinstance(action, dict) and action.get("api_surface") in {
+                "internal",
+                "admin_internal",
+            }:
+                internal_actions.add((module_id, action.get("id")))
 
     if not module_actions:
         return []  # No modules in bundle — skip reference closure.
+
+    def endpoints(node, location):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in {"api_endpoint", "href"} and isinstance(value, str):
+                    yield location, value
+                elif isinstance(value, (dict, list)):
+                    yield from endpoints(value, f"{location}.{key}")
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                yield from endpoints(value, f"{location}[{index}]")
 
     errors: list[str] = []
     for path, content in sorted(normalized_files.items()):
@@ -1645,36 +1725,34 @@ def _scan_page_api_endpoint_alignment(files_map: dict[str, str]) -> list[str]:
         sections = schema.get("sections")
         if not isinstance(sections, list):
             continue
-        for i, section in enumerate(sections):
-            if not isinstance(section, dict):
+        for location, ep in endpoints(sections, "sections"):
+            ep = ep.strip()
+            if not ep.startswith("/api/modules/"):
                 continue
-            for ep in (
-                section.get("api_endpoint"),
-                (section.get("config") or {}).get("api_endpoint"),
-            ):
-                if not isinstance(ep, str):
-                    continue
-                ep = ep.strip()
-                if not ep.startswith("/api/modules/"):
-                    continue
-                ep_parts = ep.split("/")
-                # Expected: ['', 'api', 'modules', module_id, action_id]
-                if len(ep_parts) != 5:
-                    continue
-                ref_module, ref_action = ep_parts[3], ep_parts[4]
-                if not ref_module or not ref_action:
-                    continue
-                if ref_module not in module_actions:
-                    errors.append(
-                        f"{path}: sections[{i}] api_endpoint '{ep}' references "
-                        f"module '{ref_module}' which is not declared in this bundle."
-                    )
-                elif ref_action not in module_actions[ref_module]:
-                    errors.append(
-                        f"{path}: sections[{i}] api_endpoint '{ep}' references "
-                        f"action '{ref_action}' which is not declared in "
-                        f"modules/{ref_module}/module.yaml."
-                    )
+            ep_parts = ep.split("/")
+            # Expected: ['', 'api', 'modules', module_id, action_id]
+            if len(ep_parts) != 5:
+                continue
+            ref_module, ref_action = ep_parts[3], ep_parts[4]
+            if not ref_module or not ref_action:
+                continue
+            if ref_module not in module_actions:
+                errors.append(
+                    f"{path}: {location} api_endpoint '{ep}' references "
+                    f"module '{ref_module}' which is not declared in this bundle."
+                )
+            elif ref_action not in module_actions[ref_module]:
+                errors.append(
+                    f"{path}: {location} api_endpoint '{ep}' references "
+                    f"action '{ref_action}' which is not declared in "
+                    f"modules/{ref_module}/module.yaml."
+                )
+            elif (ref_module, ref_action) in internal_actions:
+                errors.append(
+                    f"modules/{ref_module}/module.yaml: action '{ref_action}' is internal-only "
+                    f"but {path}: {location} calls it through HTTP. Use null api_surface "
+                    "for authenticated UI actions and retain permissions; do not make it public."
+                )
     return errors
 
 
@@ -1731,9 +1809,8 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
 def _scan_action_api_surface(files_map: dict[str, str]) -> list[str]:
     """Validate that action api_surface values in module.yaml use the canonical vocabulary.
 
-    api_surface controls HTTP exposure posture.  Unknown values are silently ignored
-    by the runtime and could produce unintended public exposure.  Only the four
-    declared values are canonical; any other string is a generation error.
+    Only the four declared strings and actual null are canonical. Keep this
+    diagnostic aligned with runtime ActionDef validation.
     """
     errors: list[str] = []
     normalized = _normalized_files_map(files_map)
@@ -1764,10 +1841,8 @@ def _scan_action_api_surface(files_map: dict[str, str]) -> list[str]:
             api_surface = action.get("api_surface")
             if api_surface is None:
                 continue
-            api_surface_str = str(api_surface).strip()
-            if not api_surface_str or api_surface_str == "null":
-                continue
-            if api_surface_str not in _CANONICAL_API_SURFACE_VALUES:
+            api_surface_str = str(api_surface)
+            if not isinstance(api_surface, str) or api_surface not in _CANONICAL_API_SURFACE_VALUES:
                 errors.append(
                     f"modules/{module_id}/module.yaml: action '{action_id}' "
                     f"api_surface '{api_surface_str}' is not a canonical value. "
@@ -1922,7 +1997,9 @@ def _layout_extensions_for_selected_packs(
                     f"Pack '{pack_id}' declares output {path!r} outside the "
                     f"permitted pack output lanes: {exc}"
                 ) from exc
-    return tuple(sorted(extensions, key=lambda item: (item.slot.value, item.pack_id, item.path or "")))
+    return tuple(
+        sorted(extensions, key=lambda item: (item.slot.value, item.pack_id, item.path or ""))
+    )
 
 
 def _path_matches_core_layout(path: str) -> bool:
@@ -1999,10 +2076,71 @@ def scan_app_contracts(files_map: dict[str, str]) -> list[str]:
     return errors
 
 
+def _scan_planned_user_data_scope(
+    files_map: dict[str, str], capability_packs: list[dict[str, Any]] | None
+) -> list[str]:
+    errors: list[str] = []
+    for pack in capability_packs or []:
+        if pack.get("capability_source") != "generated_module" or "user_data_scope" not in pack:
+            continue
+        module_id = str(pack.get("capability_pack_id") or "")
+        path = f"modules/{module_id}/module.yaml"
+        manifest, error = _load_yaml_mapping_from_file(files_map, path)
+        if error or manifest is None:
+            continue  # Layout/module validation reports missing or invalid manifests.
+        metadata = manifest.get("module") or {}
+        if not isinstance(metadata, dict):
+            continue
+        if metadata.get("user_data_scope", False) is not pack["user_data_scope"]:
+            errors.append(
+                f"{path}: module.user_data_scope must match the approved capability plan ({str(pack['user_data_scope']).lower()})."
+            )
+        handler = f"modules/{module_id}/backend/account_data_handler.py"
+        if pack["user_data_scope"] is True and handler not in files_map:
+            errors.append(f"{handler}: required by planned module.user_data_scope=true.")
+    return errors
+
+
+def _scan_planned_data_fields(
+    files_map: dict[str, str], planned: dict[str, Any] | None
+) -> list[str]:
+    if not planned:
+        return []
+    actual, error = _load_data_contract(files_map)
+    if error or not actual:
+        return [error or "data/contract.json: missing approved data contract."]
+    collections = {
+        (surface["surface_id"], collection["name"]): collection
+        for surface in actual.get("surfaces") or []
+        for collection in surface.get("collections") or []
+    }
+    errors = []
+    for surface in planned.get("surfaces") or []:
+        for collection in surface.get("collections") or []:
+            key = (surface["surface_id"], collection["name"])
+            emitted = collections.get(key)
+            if emitted is None:
+                errors.append(f"data/contract.json: missing approved collection {key!r}.")
+                continue
+            fields = {field["name"]: field for field in emitted.get("fields") or []}
+            for field in collection.get("fields") or []:
+                result = fields.get(field["name"])
+                if result is None or any(
+                    result.get(attr, False) != field.get(attr, False)
+                    for attr in ("type", "required")
+                ):
+                    errors.append(
+                        f"data/contract.json: {key!r}.{field['name']} must preserve the approved field "
+                        f"(type={field.get('type')}, required={field.get('required', False)})."
+                    )
+    return errors
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
     capability_packs: list[dict[str, Any]] | None = None,
+    planned_data_contract: dict[str, Any] | None = None,
     require_deployment_artifacts: bool = False,
 ) -> list[str]:
     """Scan files_map for forbidden patterns.
@@ -2043,6 +2181,8 @@ def scan_generated_bundle(
         )
     )
     errors.extend(error for error in scan_app_contracts(scannable_files_map) if error not in errors)
+    errors.extend(_scan_planned_user_data_scope(scannable_files_map, capability_packs))
+    errors.extend(_scan_planned_data_fields(scannable_files_map, planned_data_contract))
     # Generation also requires the canonical frontend adapter artifact.
     auth_errors = _scan_auth_app_contract(scannable_files_map)
     errors.extend(error for error in auth_errors if error not in errors)
@@ -2126,7 +2266,9 @@ def scan_generated_bundle(
                 "payment adapter."
             )
 
-        if _APP_LOCAL_LEDGER_PATH_RE.search(_normalized_path(path)) or _APP_LOCAL_LEDGER_CODE_RE.search(content):
+        if _APP_LOCAL_LEDGER_PATH_RE.search(
+            _normalized_path(path)
+        ) or _APP_LOCAL_LEDGER_CODE_RE.search(content):
             errors.append(
                 f"{path}: contains app-local token wallet or usage ledger code. Generated apps must "
                 "use OSS runtime token wallet and usage endpoints instead of duplicate ledgers."
@@ -2159,4 +2301,3 @@ def scan_generated_bundle(
 
 
 __all__ = ["scan_generated_bundle"]
-

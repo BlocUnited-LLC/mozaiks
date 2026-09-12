@@ -363,6 +363,7 @@ async def run_current_app_source_validation(
     *,
     app_id: str,
     artifact_store: ArtifactStore | None = None,
+    workspace_root: str | Path | None = None,
     allowed_kinds: Sequence[str] | None = None,
     include_install: bool = False,
     max_commands: int = 4,
@@ -371,7 +372,7 @@ async def run_current_app_source_validation(
     confirm_execution: bool = False,
     copy_workspace: bool = True,
 ) -> AppSourceValidationResult:
-    """Run validation against the current App Intelligence source root."""
+    """Validate an explicit staged workspace or the App Intelligence source root."""
     resolved_app_id = str(app_id or "").strip()
     if not resolved_app_id:
         raise ValueError("app_id is required")
@@ -382,7 +383,8 @@ async def run_current_app_source_validation(
         artifact_store=artifact_store,
         latest_job=latest_job,
     )
-    workspace_root = _workspace_root_from_job(latest_job)
+    explicit_workspace = workspace_root is not None
+    workspace_root = workspace_root if explicit_workspace else _workspace_root_from_job(latest_job)
 
     return await to_thread(
         run_app_source_validation,
@@ -396,18 +398,39 @@ async def run_current_app_source_validation(
         overlay_files=overlay_files,
         confirm_execution=confirm_execution,
         copy_workspace=copy_workspace,
-        source="app_intelligence_context",
+        source="explicit_workspace" if explicit_workspace else "app_intelligence_context",
     )
 
 
 def run_app_validation_fallback_checks(workspace_root: str | Path) -> list[AppValidationFallbackCheckResult]:
     """Run deterministic fallback checks when app commands are unavailable."""
     root = Path(workspace_root).expanduser().resolve()
-    return [
+    checks = [
         _json_manifest_check(root),
         _python_syntax_check(root),
         _yaml_manifest_check(root),
     ]
+    app_root = root if (root / "app.json").is_file() else root / "app"
+    if (app_root / "app.json").is_file():
+        from mozaiksai.core.runtime.app.page_schema import (
+            build_page_action_index_from_module_contracts,
+            load_app_page_schemas,
+        )
+
+        try:
+            load_app_page_schemas(
+                app_root, action_index=build_page_action_index_from_module_contracts(app_root),
+            )
+        except Exception as exc:
+            checks.append(AppValidationFallbackCheckResult(
+                name="mozaiks_page_contracts", status="failed", reason=str(exc),
+            ))
+        else:
+            checks.append(AppValidationFallbackCheckResult(
+                name="mozaiks_page_contracts", status="passed",
+                reason="Page schemas and module action references satisfy runtime contracts.",
+            ))
+    return checks
 
 
 def _selected_kinds(

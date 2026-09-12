@@ -267,6 +267,8 @@ def _wallet_task_outputs() -> dict[str, Any]:
                 {
                     "filename": "ui/pages/wallet.yaml",
                     "content": (
+                        "schema_version: mozaiks.app_page.v1\n"
+                        "name: wallet\nroute: /wallet\ntitle: Wallet\npage_type: record_list\nlayout: full-width\n"
                         "sections:\n"
                         "  - id: wallet-summary\n"
                         "    primitive: ResourceTable\n"

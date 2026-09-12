@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Alert, Button, StatusPill, SurfaceCard } from '../../ui/primitives/index.js';
 import { normalizePrimitiveActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
+import { authFetch } from '../../adapters/api.js';
 
 const fallbackActions = [
   { id: 'download_complete', label: 'Download Bundle', variant: 'primary', approved: true },
@@ -21,28 +22,16 @@ function formatFileSize(value) {
   return `${size} B`;
 }
 
-function resolveBackendOrigin() {
-  if (typeof window === 'undefined') {
-    return '';
+function buildDownloadUrl(payload, file) {
+  if (payload.artifact_version_id && payload.build_registry_id) {
+    const query = new URLSearchParams({ build_registry_id: payload.build_registry_id });
+    if (payload.app_id) query.set('app_id', payload.app_id);
+    return `/api/studio/build/artifacts/${encodeURIComponent(payload.artifact_version_id)}/download?${query}`;
   }
-  const override = window.__MOZAIKS_RUNTIME_API_BASE__ || window.__MOZAIKS_BACKEND_ORIGIN__;
-  if (typeof override === 'string' && override.trim()) {
-    return override.replace(/\/$/, '');
+  if (typeof file.download_url === 'string' && file.download_url.startsWith('/api/')) {
+    return file.download_url;
   }
-  const { protocol, hostname, port } = window.location;
-  if (port === '3000') {
-    return `${protocol}//${hostname}:8000`;
-  }
-  return `${protocol}//${hostname}${port ? `:${port}` : ''}`;
-}
-
-function buildDownloadUrl(backendOrigin, filePath) {
-  if (!backendOrigin) {
-    return `/api/download/workflow-file?file_path=${encodeURIComponent(filePath)}`;
-  }
-  const url = new URL('/api/download/workflow-file', backendOrigin);
-  url.searchParams.set('file_path', filePath);
-  return url.href;
+  throw new Error('This artifact has no authorized download URL.');
 }
 
 export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
@@ -56,10 +45,9 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
   );
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadErrors, setDownloadErrors] = useState([]);
-  const backendOrigin = useMemo(() => resolveBackendOrigin(), []);
 
   async function triggerBrowserDownloads() {
-    const downloadableFiles = files.filter((file) => file && typeof file.path === 'string' && file.path.trim());
+    const downloadableFiles = files.filter(Boolean);
     if (downloadableFiles.length === 0 || typeof window === 'undefined') {
       return [];
     }
@@ -69,7 +57,7 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
     try {
       for (const file of downloadableFiles) {
         try {
-          const response = await fetch(buildDownloadUrl(backendOrigin, file.path), {
+          const response = await authFetch(buildDownloadUrl(payload, file), {
             method: 'GET',
             credentials: 'include',
           });
@@ -107,6 +95,7 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
     if (action.id === 'download_complete') {
       const errors = await triggerBrowserDownloads();
       setDownloadErrors(errors);
+      if (errors.length) return;
       await sendPrimitiveResponse(onResponse, action, {
         files,
         download_accepted: errors.length === 0,

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from tests.factory_context import factory_context
 
 
@@ -80,7 +81,7 @@ class _FakeArtifactStore:
 
 def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_deletions() -> None:
     forbidden_path = "modules/billing/backend/token_wallet_ledger.py"
-    context = _Context(
+    context = ContextVariablesBridge(
         {
             "generated_files": {
                 "app.json": '{"id":"billing-app"}',
@@ -97,12 +98,12 @@ def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_de
         }
     )
     collected = {
-        "InfraScaffoldAgent": {
+        "ServiceAgent": {
             "code_files": [
-                {"filename": "Dockerfile", "content": "FROM python:3.13-slim\n"}
-            ]
+                {"filename": "modules/billing/backend/helper.py", "content": "VALUE = 1\n"}
+            ],
+            "deleted_files": [forbidden_path],
         },
-        "ServiceAgent": {"deleted_files": [forbidden_path]},
     }
 
     files_map = generate_and_download_module._merge_bundle_sources(
@@ -112,7 +113,7 @@ def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_de
 
     assert files_map["app.json"] == '{"id":"billing-app"}'
     assert "async def list_products" in files_map["modules/billing/backend/service.py"]
-    assert files_map["Dockerfile"].startswith("FROM python")
+    assert files_map["modules/billing/backend/helper.py"] == "VALUE = 1\n"
     assert forbidden_path not in files_map
 
 

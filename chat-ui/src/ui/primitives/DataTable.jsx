@@ -134,6 +134,7 @@ export function DataTable({
   onAction,
   onRefresh,
   loading: initialLoading = false,
+  error = null,
   empty,
   className,
 }) {
@@ -245,6 +246,14 @@ export function DataTable({
       {/* Table */}
       {loading ? (
         <Skeleton rows={5} height="h-10" />
+      ) : error ? (
+        <div role="alert">
+          <Empty
+            title={empty?.error_title || 'Unable to load records'}
+            message={empty?.error_message || String(error)}
+            action={onRefresh ? { label: empty?.retry_label || 'Retry', onClick: onRefresh } : undefined}
+          />
+        </div>
       ) : paged.length === 0 ? (
         <Empty
           title={empty?.title ?? 'No results'}

@@ -359,8 +359,14 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
                     "roles": None,
                     "navigation": None,
                     "meta": None,
-                    "sections": [],
-                        }
+                    "sections": [{
+                        "id": "reports-table", "primitive": "DataTable",
+                        "config": {
+                            "columns": [{"key": key, "label": key.title(), "type": "text", "width": None} for key in ("id", "title", "status")],
+                            "api_endpoint": "/api/modules/reports/list_reports", "search": True,
+                        },
+                    }],
+                }
             ],
             "custom_route_bundle": None,
             "theme_config_patch": {
@@ -452,6 +458,7 @@ async def test_materializer_rejects_path_traversal() -> None:
     context.set(
         "code_files",
         [
+            *[{"filename": path, "content": content} for path, content in files.items()],
             {"filename": "../../outside.txt", "content": "escape"},
             {"filename": "config/safe.txt", "content": "inside"},
         ],
@@ -463,6 +470,18 @@ async def test_materializer_rejects_path_traversal() -> None:
     assert "config/safe.txt" in paths
     assert all(not Path(path).is_absolute() and ".." not in Path(path).parts for path in paths)
     assert files
+
+
+def test_basic_table_config_does_not_acquire_resource_table_fields() -> None:
+    models = _load_models()
+    for name in ("AppPageSection", "AppPageChildSection"):
+        section = models[name].model_validate({
+            "id": "reports-table", "primitive": "DataTable",
+            "config": {"columns": [{"key": "title", "label": "Title", "type": "text", "width": None}]},
+        })
+        config = section.model_dump(mode="json")["config"]
+        assert "filters" not in config
+        assert "search_keys" not in config
 
 
 def test_operator_readiness_registers_only_declared_safe_pack_outputs() -> None:

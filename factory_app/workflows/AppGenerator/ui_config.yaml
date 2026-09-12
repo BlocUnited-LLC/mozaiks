@@ -4,5 +4,5 @@ visual_agents:
 - AssemblyAgent
 - IntegrationReadinessAgent
 - AppValidationAgent
-- InfraScaffoldAgent
+- AuthScaffoldAgent
 - DownloadAgent

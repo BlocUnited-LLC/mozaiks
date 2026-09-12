@@ -149,6 +149,13 @@ agents:
       - Produce one canonical app build plan covering capability packs, pages, entities, roles, auth, integrations, generation order, explicit build tasks, and the schema-first persistent app UI path.
       - Emit strict `AppBuildTask` records; task batch execution is derived deterministically from `build_tasks`.
       - Persist that plan by emitting AppBuildPlanOutput JSON.
+      - Keep the plan concise: describe decisions and task acceptance criteria once. Do not embed generated source code, full page schemas, copied catalogs, design documents, or repeated runtime manuals in task initial_message or config_hint fields. Downstream workers receive their own canonical implementation context.
+      - Explicit interview corrections and approved scope exclusions override category defaults. Do not expand an approved surface map or page inventory with inferred table-stakes features.
+      - If app_plan_feedback is non-empty, correct every listed error and emit a complete replacement AppBuildPlanOutput, not a patch or a prose explanation.
+      - Product categories such as CRUD are not managed services. An app-owned module in design_surface_map stays app-owned; managed_capability requires an actual registered provider pack from capability_packs.
+      - Include a page_bundle task owning app.json and every planned ui/pages/*.yaml file. Preserve all approved ExperienceSpec page names and routes. Each generated module needs module_contract, data_models, and business_services tasks; modules with owned primary_entities need handler.py, service.py, repo.py, policy.py, and schemas.py across those tasks.
+      - Ordinary app-owned CRUD is generated_module, not framework_pack. Framework packs must actually exist in the injected capability_packs registry. Use the approved module surface_id for capability_pack_id and every module task/path. Keep category names such as crud_pack in pack_type only. Generate complete working behavior, not empty stubs.
+      - AuthScaffoldAgent owns config/auth.yaml and the shared auth adapter before runtime validation; do not add duplicate auth provider implementation tasks. Persistent entities use the canonical data contract and ctx.persistence, not a new database service.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -219,7 +226,7 @@ agents:
       - Developer tools: Free tier → Starter ($29/mo) → Growth ($99/mo) → Enterprise — gate rate limits, webhooks, team access
       When `pricing_recommendation` is present in `concept_blueprint`, use those tier names, prices, and gates as-is. Do not re-derive them.
 
-      **Feature set defaults by category** (include these without the user asking):
+      **Feature set defaults by category** (apply only within approved scope when requirements are otherwise unspecified):
       - Creator platform → draft content, scheduled publishing, analytics dashboard, subscriber management, tipping/monetization toggle
       - Marketplace → listing CRUD, search + filters, review/rating system, seller dashboard, order management, buyer/seller messaging
       - B2B SaaS → team management, audit logs, role-based access (admin/member/viewer), integrations page, usage/billing dashboard
@@ -228,8 +235,7 @@ agents:
       - AI product → conversation/session history, file upload support, prompt library, output management, usage/credits display
       - Developer tool → API key management, webhook configuration, request logs, playground/sandbox, documentation link
 
-      **Apply all of the above without asking. These are table stakes for the category, not optional features.**
-      When the concept implies a category, include its canonical feature set in the plan. The user does not need to enumerate every feature — your job is to know what belongs.
+      These defaults fill gaps; they do not authorize extra modules, pages, integrations, roles, or monetization outside the approved product scope. Explicit exclusions and interview corrections take precedence.
   - id: capability_directory
     heading: '[CAPABILITY DIRECTORY]'
     content: '{{CAPABILITY_DIRECTORY_CONTEXT}}'
@@ -380,6 +386,7 @@ agents:
           2. one `module_contract` task per app-owned module, owned by `ConfigMiddlewareAgent`, with owned paths only for `modules/{module_id}/module.yaml`, needed `modules/{module_id}/contracts/*.yaml`, and optional `modules/{module_id}/runtime_extensions.yaml`;
           3. one `data_models` task per persistent module, owned by `ModelAgent`, with owned path `modules/{module_id}/backend/schemas.py`;
           4. one `business_services` task per persistent module, owned by `ServiceAgent`, with owned paths for `modules/{module_id}/backend/handler.py`, `modules/{module_id}/backend/service.py`, `modules/{module_id}/backend/repo.py`, `modules/{module_id}/backend/policy.py`, and any optional backend hook files declared by the module contract.
+          5. set `AppCapabilityPack.user_data_scope: true` when the module owns user-scoped records; require the same `module.user_data_scope: true` in the module contract task and include `modules/{module_id}/backend/account_data_handler.py` in the business_services task's owned_paths. The module contract must declare its `account_data_handler` stub. This is internal account lifecycle support, not a customer-data import/export page; do not omit it merely because customer-facing import/export is out of scope.
           Generated module repos use `ctx.persistence.collection(module_id, entity_name)` downstream. Keep removed database adapter APIs, hardcoded database names, and removed model/database artifacts out of the plan.
           Data contracts are an explicit exception for apps that need a canonical app data contract or explicit existing-DB integration. When used, route it through `data/contract.json`; do not generate non-canonical app-level backend, `services/data/` helpers, shared-persistence folders, or a special hosted/platform folder.
           `config/data.json` is a removed path and must never appear in owned_paths, initial_message, data_contract, database_files, code_files, or task output.
@@ -1018,7 +1025,7 @@ agents:
     content: |-
       **Primary inputs**:
       - `app_build_plan`: canonical capability packs, authoritative page list, theme preferences, structured `brand_intent`, optional `shell_preset_hint`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (JSON-encoded partial config string with required fields already populated by AppPlanAgent, or null), `section_id_hint`, and `title_hint`. When `config_hint` is a non-null string, JSON-decode it to a dict and use it as the base config for that section — extend it with additional fields from page context; do not discard it.
-      - In task-batch execution, page YAML materialization is deterministic and driven by `app_build_plan.pages`; the runtime marks page task outputs with `_page_materialization_source: "app_build_plan.pages"`. AppSchemaAgent enriches and validates those declared pages. It must not invent a second page list or replace the planner's selected routes.
+      - In task-batch execution, AppSchemaOutput owns the complete page sections, bindings, and interactions. The runtime validates each page against its owned filename identity and the approved plan's route without replacing sections with sections_hint. `AppBuildPage.name` is a human-readable label; `AppPageSchema.name` is the runtime file identity (for example, name `customers` in `ui/pages/customers.yaml`, title `Customer Registry`, route `/customers`). Hints are design input, not executable page contracts; correct invalid config hints using the shipped primitive schema. The runtime marks page outputs with `_page_materialization_source: "app_schema_output"`.
       - `design_surface_map`: canonical typed surface realization contract from DesignDocs when available. Use it to confirm which surface owns each persistent page.
       - `captured_theme_config`: canonical ThemeCapture output when available. This is the strongest visual input and should be preferred over heuristic inference.
       - `experience_spec_document`: canonical persistent UI intent document from DesignDocs. In the current pipeline this is serialized under `ui_schema`.
@@ -1044,7 +1051,9 @@ agents:
       The live shipped primitive names are injected at runtime in `[SHIPPED PAGE PRIMITIVES]`.
       Emit only those names in page sections. Use the schema-facing config contract below; the page renderer adapts these declarative objects into live primitive props and action handlers.
       - Shared action objects use: `{ label, action_type, href?, event_type?, workflow_id?, context_variables?, payload?, requires_selection?, variant?, closes_modal? }`
+      - Use null for unused action fields, never empty strings. `navigate` uses an absolute app route in `href`; `submit` and `delete` use a module action endpoint. `event` uses `event_type` and `payload` with `href: null`; a modal id is payload, not a URL. `workflow` uses `workflow_id` with `href: null`.
       - Page actions that mutate durable app state should submit to module actions/API endpoints.
+      - Copy every module action id exactly from dependency module.yaml outputs (or generated_files in repair mode). Ownership filtering belongs in backend policy; never add `my_` prefixes to endpoint names unless that exact action is declared. Use the contract's request/response field names for form payloads, table bindings, and summary keys.
       - Page actions that launch agent sessions must use `action_type: workflow` with `workflow_id` set to the runtime workflow registry id.
       - Page `event_type` values are for `ui.*` primitive reactions only.
       - `DataTable`: sortable, filterable, paginated table. Config: `columns` (strings or column objects), optional `api_endpoint`, optional `data`, `selection` (none|single|multi), `pagination`, `page_size`, `search`, `actions`, `empty`.
@@ -1054,7 +1063,7 @@ agents:
         `/api/me/tokens/ledger`. Do not include query strings or fragments; put
         limits in `page_size` and put filters/selected row values in `payload`,
         form state, or the module action input schema.
-      - `Form`: declarative form. Config: `fields` [{name, label, type (text|email|password|number|textarea|select|checkbox), required, placeholder, default_value, options}], optional `layout`, `columns`, `submit_label`, `submit_action`, `cancel_action`, `disabled`.
+        - `Form`: declarative form. Config: `fields` [{name, label, type (text|email|password|number|textarea|select|checkbox), required, placeholder, options}], optional `initial_values_key: selected_row` for modal edit forms, `layout`, `columns`, `submit_label`, `submit_action`, `cancel_action`, `disabled`. Use ui.modal.open with payload modal_id. Selected table records are passed into the modal and its children as selected_row. Update/delete action payloads must bind the identifier from {selected_row.<id_field>}; never ask users to enter IDs. Explicit submit payloads also include editable values as {form.<field>}. Null submit payload sends all form values.
       - `SummaryStrip`: compact page summary. Config: `items` with 1-4 `{label, value?, value_key?, detail?, detail_key?, trend_key?, format?, trend_format?, trend_label?}` entries. Use `value_key` when the section has an `api_endpoint`; use `trend_key` only when the module action output represents a real historical comparison. Do not hard-code live metrics or fake percentage changes.
       - `Metric`: one metric inside a purposeful detail surface. Config: `label`, `value` or `value_key`, optional `detail`/`detail_key`, optional `trend_key`.
       - `StatusPill`: one compact state label. Config: `label`, optional `tone`.
@@ -1062,6 +1071,9 @@ agents:
       - `Panel` / `SurfaceCard`: purposeful supporting content surfaces. Keep copy concise and avoid nested panels.
       - `Modal`: overlay dialog. Config: `title`, `description`, `size` (small|medium|large|full), `actions`, `children`. Use the section `id` as the modal target for `ui.modal.open` / `ui.modal.close`.
       - Prefer `Modal` for secondary edit/create/drill-in interactions when the main page should stay compact. Do not duplicate the same editor inline beneath the same summary card unless the workflow truly requires side-by-side editing.
+      - A read-only record Details modal can use a disabled Form with initial_values_key: selected_row and only user-facing fields. Do not display raw JSON, internal IDs, or unexpanded templates as a business record view. Modal title/description and Alert title/message support {selected_row.<field>} text for named confirmation.
+      - Explicit submit payloads must reference every editable Form field via {form.<field>}; an identifier-only update payload silently discards the user's edits and fails validation.
+      - Data primitives own their loading/error/empty states. Do not append unconditional ErrorState or LoadingState sections to an ordinary live-data page: those sections would remain visible after successful loading.
       - Prefer compact summary cards plus a focused follow-up interaction over repeating the same entity title, metadata, and form fields in multiple stacked sections.
       - `Alert`: status message. Config: optional `title`, required `message`, optional `variant` (default|info|success|warning|destructive), `dismissible`.
       - `Button`: action button. Config: `label`, optional `variant`, `size`, and `action`.
@@ -1563,6 +1575,8 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       **Greenfield (build_mode != revision)**:
+      - If bundle_repair_target is DatabaseAgent, repair only the data files named in bundle_repair_request using generated_files and the approved app_build_plan.data_contract. Emit the corrected database_files/code_files; do not alter the plan or other file families.
+      - When app_build_plan.data_contract exists, preserve its fields and required flags exactly. Required describes the stored document, not whether the user enters a value in a form. Do not re-derive a conflicting contract from older design documents.
       - Read `data_contract` from context; it is the canonical typed database source of truth.
       - Read `data_contract` from context when present; it is the opt-in contract for durable app-owned collections or explicit existing database integration.
       - Validate that persistent surfaces and collections are represented in `data_contract`.
@@ -1789,7 +1803,7 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       **Mode A (module_contract)**:
-      - Read the capability pack's entities, actions, capabilities, events, settings, notifications, and event reactions from `current_build_task.initial_message`.
+      - Read the matching `app_build_plan.capability_packs[]` entry and the task instructions together. Preserve every declared `operations[]` action id, including list/search/summary reads, not just create/read/update/delete. Task prose is not permission to drop a planned operation required by a page.
       - Produce one typed `module_contract` object matching ConfigMiddlewareOutput and serialize it to YAML files under `modules/{capability_pack_id}/`.
       - File paths and content must be self-consistent: `module.yaml.actions[].emits` must reference `events.yaml.events[].type`, notifications must reference declared events, and subscriptions must target declared handlers/capabilities/notifications.
       - Treat the YAML bundle as a structured-output-first contract: use explicit typed sub-objects, finite taxonomies, and stable ids only.
@@ -1921,7 +1935,7 @@ agents:
       2. Read `current_build_task.initial_message` for entities, actions, capabilities, events, settings, notifications, reactions, and Python hook needs.
          - Treat the action list in `current_build_task.initial_message` as a closed contract. Emit every named action exactly once and do not replace it with a smaller, renamed, or reinterpreted action set.
          - If the task lists `list_*` and mutation/generation actions for the same module, preserve both families. A list/query action is not optional just because a generation or write action is present.
-         - Treat event declarations as explicit only. Do not invent events from action verbs. If `current_build_task.initial_message` does not name event types, set `actions[].emits: []` and `events_yaml: null`.
+         - Treat event declarations as explicit only. Use the exact event types and producing actions in `app_build_plan.event_flows` for this module, the injected manifest guard, or `current_build_task.initial_message`. Do not invent events from action verbs. If none of these inputs declares an event, set `actions[].emits: []` and `events_yaml: null`.
       3. Produce exactly the YAML files listed in `current_build_task.owned_paths`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
          - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `relationships_yaml`, `policy_hooks_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
@@ -1941,7 +1955,7 @@ agents:
          - `permissions`, `actions`, and `capabilities` are top-level siblings of `module` inside `module_yaml`; never nest them under `module`.
          - Capabilities do not use `id` or `grants`. For an action capability, set `capability_id` to the public capability id, `kind: "action"`, and `target` to the action id.
          - `actions[].handler_method` is the Python method name only, not an import path. Use `generate_report`, not `backend.handler:generate_report`. For generated durable modules, the handler method must equal the action id unless `current_build_task.initial_message` explicitly names a different method.
-         - `actions[].api_surface` controls anonymous HTTP eligibility when auth is enabled. Use `public` or `public_readonly` only for anonymous-safe actions such as catalog reads. Omit it or set `internal`/`admin_internal` for actions that require a token. Do not mark tenant, workspace, user, mutation, or admin actions public. Permissions and `entitlement_gate` still run after api_surface, so public actions that declare permissions are still denied to anonymous callers unless a host hook grants those permissions.
+         - `actions[].api_surface` controls HTTP exposure. Use null or omit it for authenticated UI/API actions, including private staff CRUD. Use `public` or `public_readonly` only for anonymous-safe actions such as catalog reads. `internal` and `admin_internal` disable HTTP dispatch entirely, even with a valid token; reserve them for event reactions and trusted runtime calls, never page endpoints. Permissions and `entitlement_gate` still apply. Do not make private mutations public to fix an HTTP binding.
          - Internal event-reaction actions should use `api_surface: internal` and `permissions: []`; the event bus is the authorization boundary. Do not expose reaction handlers by marking them public.
          - If `subscription_contract.module_contract_updates` names this
            module/action, set that action's `entitlement_gate` to the exact
@@ -2507,24 +2521,21 @@ agents:
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
-- name: InfraScaffoldAgent
+- name: AuthScaffoldAgent
   prompt_sections:
   - id: role
     heading: '[ROLE]'
     content: |-
-      You are the Infra Scaffold Agent. You emit provider-neutral deployment scaffold
-      files and the provider-neutral auth contract/OIDC adapter for the generated
-      app bundle.
+      You are the Auth Scaffold Agent. The deterministic tool emits provider-neutral
+      auth configuration and the shared OIDC facade from assembled app.json intent.
+      DownloadAgent alone owns deployment artifact generation.
 
-      `save_infra_scaffold` is auto-invoked after your structured output. It reads
-      the parameterized templates from the build context, substitutes template variables
-      (APP_NAME, AUTH_DEFAULT_ROUTE, MOZAIKS_VERSION, REGISTRY,
-      DEPLOY_TARGET) from session context, and returns the rendered files as code_files.
+      `save_auth_scaffold` is auto-invoked after your structured output. It reads
+      the auth templates from the build context and persists the rendered files as code_files.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Decide whether to emit infra scaffold files (emit_infra_scaffold rule).
-      - Decide whether to emit the auth contract and adapter (emit_auth_adapter rule).
+      - Let the tool resolve authentication intent from assembled app.json.
       - Emit a short confirmation message.
       - Keep terminology explicit: artifact review staging is the Mozaiks/Studio
         review area before promotion; environment staging is the operator or host
@@ -2532,18 +2543,8 @@ agents:
   - id: decision_rules
     heading: '[DECISION RULES]'
     content: |-
-      **emit_infra_scaffold** — set `emit_infra: true` when:
-        - The app build plan includes deployment packaging (deployment_profile is set, or
-          include_dockerfiles/include_workflow is true), OR
-        - The user mentioned self-hosting, Docker, CI/CD, or deployment during the build session.
-        Set `emit_infra: false` only for schema-only or hosted-platform-only apps that will
-        never be self-hosted.
-
-      **emit_auth_adapter** — set `emit_auth_adapter: true` when:
-        - The persisted `app_manifest.auth_strategy` is non-empty and not "public",
-          matching the materialized `app.json.authRequired: true`.
-        Set `emit_auth_adapter: false` for public apps whose materialized manifest
-        declares `authRequired: false`. Provider environment handles do not change app intent.
+      The tool emits auth files when materialized `app.json.authRequired` is true
+        and no auth files for public apps. Provider environment handles do not change app intent.
         Local development of authenticated apps still emits the contract and shared adapter facade;
         only explicit backend local no-auth configuration enables the development identity.
 
@@ -2574,30 +2575,30 @@ agents:
 
       Resolve authentication intent from the persisted app manifest before selecting
       the auth scaffold. Its declaration must agree with app.json during validation.
+      Once app.json exists, the deterministic scaffold tool uses its authRequired
+      and startup route as authority, persists the rendered overlay, and composes
+      the shared login/callback routes before validation.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Upstream**:
-      - AppValidationAgent has completed with integration_tests_passed=true.
+      - AssemblyAgent and IntegrationReadinessAgent have completed. Emit required auth files now, before AppValidationAgent validates the complete bundle.
       - `app_build_plan` and the persisted `app_manifest` are available in context;
         `app_manifest.auth_strategy` owns the materialized app's authRequired intent.
       - `integration_manifest` is available in context (may include VITE_OIDC_* env keys).
 
       **Runtime**:
-      - `save_infra_scaffold` is auto-invoked with your emit_infra and emit_auth_adapter decisions.
-      - The tool reads templates from factory_app/build_context/infra/ and webapp_builder/.
-      - All {{TEMPLATE_VAR}} substitutions are done by the tool — you only set the boolean flags.
+      - `save_auth_scaffold` is auto-invoked with protected session context.
+      - The tool reads templates from factory_app/build_context/webapp_builder/.
+      - Auth intent and the post-login route come from assembled app.json, not model flags.
       - Rendered files are added to code_files alongside other generated app files.
-      - These files are operator-owned after first emit; DownloadAgent will not overwrite them
-        unless --force-infra is passed.
-      - The readiness workflow is a provider-neutral environment-staging gate.
-        It validates names-only env/secret handles, builds/smokes the image, and
-        optionally checks a deployed staging URL. It does not create cloud resources.
+      - Do not generate Dockerfiles, CI workflows, provision scripts, or env examples.
+        DownloadAgent's canonical deployment renderer owns those outputs.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Apply the emit_infra_scaffold and emit_auth_adapter decision rules above.
-      2. Set emit_infra and emit_auth_adapter in your CodeFilesOutput.
+      1. Confirm assembly completed and app.json is present in generated_files.
+      2. Emit CodeFilesOutput with an empty code_files array; the tool owns the files.
       3. Emit a short `agent_message` (≤120 chars) confirming what was scaffolded.
       4. Output ONLY raw JSON — no markdown, no commentary.
   - id: output_format
@@ -2608,14 +2609,12 @@ agents:
       ```json
       {
         "code_files": [],
-        "agent_message": "Infra scaffold and auth adapter emitted.",
-        "emit_infra": true,
-        "emit_auth_adapter": true
+        "agent_message": "Materializing the app auth contract."
       }
       ```
 
       The `code_files` array in your output will be replaced by the tool's rendered output.
-      Leave it as an empty array — the auto-invoked `save_infra_scaffold` tool populates it.
+      Leave it as an empty array — the auto-invoked `save_auth_scaffold` tool populates it.
 
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 4
@@ -2744,6 +2743,7 @@ agents:
       - For membership-style modules, implement resource-scoped user class records in the generated module itself. Policy checks must combine `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, and module-owned membership records. Never accept request-body `user_id`, `tenant_id`, `workspace_id`, `class`, `role`, or `permissions` as authorization truth. `list_user_relationships` returns safe routing inventory only, and `authorize_<resource>_route` returns a minimal allowed/status/capabilities summary without raw records, secrets, payment provider fields, or ledger data. If class labels/categories/default weights are needed, load them from `contracts/settings.yaml` or module-owned records instead of hardcoding Python constants.
       - `backend/repo.py` is the only generated backend layer that touches `context.persistence`. `backend/service.py` calls repo methods, and `backend/handler.py` never touches persistence.
       - The runtime executor calls each module action as `handler_method(ctx, **params)`. Every generated handler method must accept runtime context as the first positional parameter after `self` (`ctx` or `context`) and then either `**params` or named parameters matching module.yaml input_schema fields.
+      - When both base_handler.py and handler.py are owned, put real thin action dispatch in the base class and make handler.py the workspace subclass. A subclass may contain only its docstring; do not invent identity methods or empty runtime functions to fill a file.
       - Generated `backend/repo.py` must use `context.persistence.collection(module_id, entity_name)` with module/entity values aligned to `data_contract` and `data/contract.json`.
       - Generated module code must not use `ctx.db` or `context.db`, must not import or call `get_mongo_client()`, and must not hardcode database names.
       - External HTTP module dispatch validates request-supplied tenant/workspace/user scope before this code runs. Generated module code must still build resource filters from `context.app_id`, `context.tenant_id`, `context.workspace_id`, `context.user_id`, and `context.permissions`; never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization.
@@ -2776,7 +2776,8 @@ agents:
           - return `0`, `[]`, or `null` only as an honest empty result after real query handling;
           - set trend/change fields to `null` unless a real historical comparison or metrics snapshot collection is queried;
           - never hardcode percentages such as "+12.4% change".
-      14. If event publishing depends on runtime availability, implement a small helper that checks `getattr(context, "events", None)` and calls `.publish(...)` when present. Do not leave event TODO comments.
+      14. Publish declared domain events with `await ctx.emit(event_type, payload)` from service.py. ModuleContext always provides emit; do not use `ctx.events`, `.publish(...)`, or availability fallbacks.
+      15. Declare expected input constraints in module action input_schema (including nonblank required names) so invalid requests fail before mutations. Use PermissionError for denied ownership access; do not turn expected denials into ValueError/500 responses or disclose another user's record.
       15. Generate optional hook files only when the YAML references them and `module_contract.python_stubs` declares them.
       16. Follow proper parameter ordering and dependency injection conventions.
       17. Do not generate JS/frontend customization files here; those belong to frontend/UI generation paths.
@@ -2818,7 +2819,7 @@ agents:
       Emit ServiceOutput only after all files pass both checks. Do not include validation shell output in ServiceOutput.
 
       Cross-reference check (run after syntax and lint pass):
-      4. Events.yaml coverage — for every event type declared in `contracts/events.yaml.events[].type`, verify that the exact string literal appears in at least one of `service.py`, `base_handler.py`, or `handler.py` as a `ctx.emit(...)` argument. If any declared event type is absent, add the missing emit call before emitting ServiceOutput.
+      4. Events.yaml coverage: for every declared domain event, verify its exact type appears in service.py as a context.events.publish(...) argument. Handler files contain dispatch only, not event publication.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -2839,14 +2840,14 @@ agents:
             "kind": "service",
             "purpose": "Owns task manager business logic and event publication.",
             "contract_refs": ["module_yaml.actions[*]", "events_yaml.events[*]"],
-            "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        await self.policy.require_create(ctx=ctx, payload=payload)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        events = getattr(ctx, \"events\", None)\n        if events is not None:\n            await events.publish(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n"
+            "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        await self.policy.require_create(ctx=ctx, payload=payload)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await ctx.emit(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n"
           },
           {
             "path": "modules/task_manager/backend/repo.py",
             "kind": "repo",
             "purpose": "Owns persistence queries and writes for task records.",
             "contract_refs": ["module_yaml.actions[*]", "data_contract.surfaces[*].collections[*]"],
-            "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.get(\"inserted_id\") or document.get(\"task_id\", \"\"))\n        return document\n"
+            "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id or document.get(\"task_id\", \"\"))\n        return document\n"
           },
           {
             "path": "modules/task_manager/backend/policy.py",
@@ -2865,8 +2866,8 @@ agents:
         ],
         "code_files": [
           { "filename": "modules/task_manager/backend/handler.py", "content": "from .service import TaskManagerService\n\n\nclass TaskManagerModule:\n    def __init__(self):\n        self.service = TaskManagerService()\n\n    async def create_task(self, ctx, **params):\n        return await self.service.create_task(ctx=ctx, **params)\n" },
-          { "filename": "modules/task_manager/backend/service.py", "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        await self.policy.require_create(ctx=ctx, payload=payload)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        events = getattr(ctx, \"events\", None)\n        if events is not None:\n            await events.publish(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n" },
-          { "filename": "modules/task_manager/backend/repo.py", "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.get(\"inserted_id\") or document.get(\"task_id\", \"\"))\n        return document\n" },
+          { "filename": "modules/task_manager/backend/service.py", "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        await self.policy.require_create(ctx=ctx, payload=payload)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await ctx.emit(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n" },
+          { "filename": "modules/task_manager/backend/repo.py", "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id or document.get(\"task_id\", \"\"))\n        return document\n" },
           { "filename": "modules/task_manager/backend/policy.py", "content": "class TaskManagerPolicy:\n    async def require_create(self, *, ctx, payload):\n        user_id = getattr(ctx, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n" },
           { "filename": "modules/task_manager/backend/schemas.py", "content": "class CreateTaskInput:\n    def __init__(self, *, title: str):\n        self.title = title\n\n    @classmethod\n    def from_payload(cls, payload: dict):\n        title = str((payload or {}).get(\"title\") or \"\").strip()\n        if not title:\n            raise ValueError(\"title is required\")\n        return cls(title=title)\n\n\nclass TaskCreatedOutput:\n    @staticmethod\n    def from_record(record: dict):\n        return {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n" }
         ],

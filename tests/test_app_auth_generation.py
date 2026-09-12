@@ -13,9 +13,10 @@ from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
     _scan_auth_app_contract,
     _scan_route_manifest_component_files,
 )
-from factory_app.workflows.AppGenerator.tools.render_infra_scaffold import save_infra_scaffold
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import save_auth_scaffold
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.runtime.app.loader import AppLoader
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 
 
 @pytest.fixture
@@ -37,17 +38,35 @@ async def generated_auth_bundle(monkeypatch, tmp_path):
         }],
     )
     files = collect_generated_app_file_map(tmp_path)
-    scaffold = await save_infra_scaffold(
-        emit_infra=False, emit_auth_adapter=True, context_variables={"default_route": "/home"},
+    scaffold = await save_auth_scaffold(
+        context_variables={"generated_files": files},
     )
     files.update({entry["filename"]: entry["content"] for entry in scaffold["code_files"]})
     return files, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_scaffold_retains_auth_files_and_routes_before_validation():
+    context = ContextVariablesBridge({
+        "generated_files": {"app.json": json.dumps({
+            "appName": "Staff Ledger", "authRequired": True,
+            "startup": {"landing_spot": "/customers"},
+        })},
+        "code_files": [{"filename": "keep.txt", "content": "existing"}],
+    })
+    await save_auth_scaffold(context_variables=context)
+    overlay = {entry["filename"]: entry["content"] for entry in context.get("code_files")}
+    files = {**context.snapshot()["generated_files"], **overlay}
+    assert overlay["keep.txt"] == "existing"
+    assert "post_login_default: /customers" in overlay["config/auth.yaml"]
+    assert _scan_auth_app_contract(files) == []
+    assert {page["path"] for page in json.loads(overlay["ui/route_manifest.json"])["pages"]} == {"/login", "/auth/callback"}
+
+
+@pytest.mark.asyncio
 async def test_app_schema_and_auth_scaffold_compose_public_routes_and_load(generated_auth_bundle):
     files, root = generated_auth_bundle
-    assert _scan_auth_app_contract(files)  # Auth declaration alone is insufficient.
+    assert _scan_auth_app_contract(files) == []
     compose_bundle_auth_routes(files)
     first = files["ui/route_manifest.json"]
     compose_bundle_auth_routes(files)

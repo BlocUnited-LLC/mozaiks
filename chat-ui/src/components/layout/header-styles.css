@@ -425,7 +425,7 @@
   right: 0.75rem;
   bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
   left: 0.75rem;
-  z-index: 55;
+  z-index: 40;
   display: none;
   align-items: stretch;
   justify-content: space-around;

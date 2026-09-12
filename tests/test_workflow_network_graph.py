@@ -621,7 +621,7 @@ def test_appgenerator_validation_routes_repair_context_before_user_fallback():
     assert route({"bundle_repair_status": "blocked"}) == "user"
     assert route({"workflow_integration_repair_status": "blocked"}) == "user"
     assert route({"app_validation_status": "failed"}) == "user"
-    assert route({"integration_tests_passed": True}) == "InfraScaffoldAgent"
+    assert route({"integration_tests_passed": True}) == "DownloadAgent"
     assert route({}) == "user"
 
 

@@ -5,10 +5,11 @@ from typing import Annotated, Any
 import yaml
 from pydantic import Field
 
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    _page_from_plan,
     _page_stem_from_path,
     _page_stems,
+    validate_planned_page,
 )
 
 from .assembly_phase import assemble_features
@@ -54,12 +55,9 @@ def _apply_planned_page_contracts(
             stem = _page_stem_from_path(path)  # type: ignore[assignment]
             if not stem or stem not in planned_by_stem:
                 continue
-            file_map[path] = yaml.safe_dump(
-                _page_from_plan(planned_by_stem[stem], stem),
-                allow_unicode=True,
-                sort_keys=False,
-                default_flow_style=False,
-            )
+            if path not in file_map:
+                raise ValueError(f"{path}: missing planned page during assembly")
+            validate_planned_page(file_map[path], planned_by_stem[stem], path)
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
@@ -144,7 +142,7 @@ def _apply_managed_capability_templates(
 
     capability_packs = None
     if context_variables and hasattr(context_variables, "get"):
-        capability_packs = context_variables.get("capability_packs")
+        capability_packs = detach(context_variables.get("capability_packs"))
     if not capability_packs:
         capability_packs = app_build_plan.get("capability_packs")
     if not isinstance(capability_packs, list):
@@ -184,7 +182,7 @@ def _context_code_file_output(context_variables: Any | None) -> dict[str, list[d
     if context_variables is None or not hasattr(context_variables, "get"):
         return None
     try:
-        raw = context_variables.get("code_files")
+        raw = detach(context_variables.get("code_files"))
     except Exception:
         raw = None
     code_files = extract_code_file_entries_from_payload({"code_files": raw})
@@ -197,7 +195,7 @@ def _context_deleted_files(context_variables: Any | None) -> list[str]:
     if context_variables is None or not hasattr(context_variables, "get"):
         return []
     try:
-        raw = context_variables.get("deleted_files")
+        raw = detach(context_variables.get("deleted_files"))
     except Exception:
         raw = None
     return extract_deleted_file_paths_from_payload({"deleted_files": raw})
@@ -219,7 +217,7 @@ def _apply_entitlement_gates(
         return code_files
 
     def _ctx(key: str) -> Any:
-        return context_variables.get(key) if hasattr(context_variables, "get") else None
+        return detach(context_variables.get(key)) if hasattr(context_variables, "get") else None
 
     # Build a map: {module_id: {action_id: capability_id}} from module_contract_updates
     gates_by_module: dict[str, dict[str, str]] = {}
@@ -310,7 +308,7 @@ async def assemble_app_tasks(
         if schema_ready:
             quality_status = context_variables.get("app_ui_quality_status")
             if quality_status != "passed":
-                warnings = context_variables.get("app_ui_quality_warnings") or []
+                warnings = detach(context_variables.get("app_ui_quality_warnings")) or []
                 warning_text = ""
                 if isinstance(warnings, list) and warnings:
                     warning_text = " Warnings: " + "; ".join(str(item) for item in warnings)
@@ -332,7 +330,7 @@ async def assemble_app_tasks(
         app_id = require_build_binding(context_variables).target_app_id
         inject_key = "app_task_batch_results"
 
-        merged = context_variables.get(inject_key)
+        merged = detach(context_variables.get(inject_key))
         if isinstance(merged, dict):
             candidate_values: Any = (
                 merged.get("task_results")
@@ -373,7 +371,7 @@ async def assemble_app_tasks(
     )
 
     app_build_plan = (
-        context_variables.get("app_build_plan")
+        detach(context_variables.get("app_build_plan"))
         if context_variables and hasattr(context_variables, "get")
         else None
     )
@@ -405,7 +403,7 @@ async def assemble_app_tasks(
                 {str(f["filename"]): str(f["content"]) for f in code_files},
             )
             context_variables.set("assembled_source", "schema_and_task_batch_outputs")
-            task_results = context_variables.get("app_task_batch_results")
+            task_results = detach(context_variables.get("app_task_batch_results"))
             if isinstance(task_results, dict):
                 meta = task_results.get("_meta") if isinstance(task_results.get("_meta"), dict) else {}
                 context_variables.set(

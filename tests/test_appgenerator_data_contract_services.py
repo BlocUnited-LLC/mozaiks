@@ -122,7 +122,7 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
     contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
     assert contract["mode"] == "app_data_contract"
     assert contract["aliases"][0]["alias"] == "orders.lifecycle"
-    assert context.data["app_data_contract"]["aliases"][0]["collection"] == "orders"
+    assert context.data["data_contract"]["aliases"][0]["collection"] == "orders"
     assert "data/contract.json" in result
     assert "Data contract: yes" in result
 

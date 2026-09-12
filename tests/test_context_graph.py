@@ -241,6 +241,33 @@ async def test_context_graph_startup_loader_rejects_missing_build_binding() -> N
         await loader_mod.load_context_graph_context(context_variables=context)
 
 
+@pytest.mark.asyncio
+async def test_context_graph_startup_reads_canonical_build_record_identity(monkeypatch):
+    from tests.factory_context import factory_context
+
+    file_map = {"modules/tasks/module.yaml": "id: tasks\nactions: []\n"}
+    graph = build_context_graph_from_file_map(
+        app_id="app_1", artifact_version_id="av_1",
+        artifact_kind="app_bundle", file_map=file_map,
+    )
+
+    async def load_artifact(**kwargs):
+        assert kwargs["context"].build_record_id == "av_1"
+        return {
+            "present": True,
+            "artifact": SimpleNamespace(id="av_1", build_family="app_bundle", build_key="app_bundle"),
+            "file_map": file_map, "graph": graph,
+            "workspace": {"source": "artifact_zip"}, "warnings": [],
+        }
+
+    monkeypatch.setattr(loader_mod, "load_context_graph_for_tool", load_artifact)
+    context = _Context(factory_context({"app_id": "app_1", "artifact_version_id": "av_1"}))
+    result = await loader_mod.load_context_graph_context(context_variables=context)
+    assert result["source"] == "artifact_workspace"
+    assert context.data["context_graph_catalog"]["artifact_kind"] == "app_bundle"
+    assert context.data["context_graph_catalog"]["artifact_key"] == "app_bundle"
+
+
 def test_app_and_agent_generators_declare_and_load_context_graph_packs() -> None:
     root = Path(__file__).resolve().parents[1]
     for workflow_name in ("AppGenerator", "AgentGenerator"):

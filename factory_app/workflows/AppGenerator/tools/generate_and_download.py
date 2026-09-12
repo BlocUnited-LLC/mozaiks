@@ -43,6 +43,7 @@ from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_r
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.app_context.store import register_greenfield_app_context_version
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
@@ -166,14 +167,14 @@ def _context_get(context_variables: Any | None, key: str) -> Any | None:
         return None
     if hasattr(context_variables, "get"):
         try:
-            return context_variables.get(key)
+            return detach(context_variables.get(key))
         except Exception:
             pass
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key)
+        return detach(data.get(key))
     if isinstance(context_variables, dict):
-        return context_variables.get(key)
+        return detach(context_variables.get(key))
     return None
 
 
@@ -282,10 +283,7 @@ def _deployment_env_for_capability_packs(capability_packs: list[dict[str, Any]])
 def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None or not hasattr(context_variables, "set"):
         return
-    try:
-        context_variables.set(key, value)
-    except Exception:
-        return
+    context_variables.set(key, value)
 
 
 def _is_truthy(value: Any) -> bool:
@@ -503,6 +501,7 @@ def _export_repair_outcome(acceptance: dict[str, Any]) -> str:
     if bundle.get("status") == "needs_revision":
         return {
             "AppSchemaAgent": "repair_schema",
+            "DatabaseAgent": "repair_database",
             "ConfigMiddlewareAgent": "repair_integration",
             "ServiceAgent": "repair_service",
             "FrontendStubAgent": "repair_frontend",
@@ -1166,9 +1165,9 @@ async def generate_and_download(
         ui_payload["deployment_artifacts_included"] = True
         if context_variables is not None and hasattr(context_variables, "get"):
             try:
-                ui_payload["deploy_target_spec"] = context_variables.get("deploy_target_spec")
-                ui_payload["deployment_template_manifest"] = context_variables.get("deployment_template_manifest")
-                ui_payload["deployment_contract_validation_errors"] = context_variables.get("deployment_contract_validation_errors")
+                ui_payload["deploy_target_spec"] = _context_get(context_variables, "deploy_target_spec")
+                ui_payload["deployment_template_manifest"] = _context_get(context_variables, "deployment_template_manifest")
+                ui_payload["deployment_contract_validation_errors"] = _context_get(context_variables, "deployment_contract_validation_errors")
             except Exception:
                 pass
     if migration_record:
@@ -1176,14 +1175,14 @@ async def generate_and_download(
     # Best-effort: include validation/integration context for the AppWorkbench.
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
-            ui_payload["app_validation_status"] = context_variables.get("app_validation_status")
-            ui_payload["app_validation_strategy_used"] = context_variables.get("app_validation_strategy_used")
-            ui_payload["app_validation_preview_url"] = context_variables.get("app_validation_preview_url")
-            ui_payload["app_validation_result"] = context_variables.get("app_validation_result")
-            ui_payload["integration_tests_passed"] = context_variables.get("integration_tests_passed")
-            ui_payload["integration_test_result"] = context_variables.get("integration_test_result")
-            ui_payload["app_bundle_acceptance_status"] = context_variables.get("app_bundle_acceptance_status")
-            ui_payload["app_bundle_acceptance_result"] = context_variables.get("app_bundle_acceptance_result")
+            ui_payload["app_validation_status"] = _context_get(context_variables, "app_validation_status")
+            ui_payload["app_validation_strategy_used"] = _context_get(context_variables, "app_validation_strategy_used")
+            ui_payload["app_validation_preview_url"] = _context_get(context_variables, "app_validation_preview_url")
+            ui_payload["app_validation_result"] = _context_get(context_variables, "app_validation_result")
+            ui_payload["integration_tests_passed"] = _context_get(context_variables, "integration_tests_passed")
+            ui_payload["integration_test_result"] = _context_get(context_variables, "integration_test_result")
+            ui_payload["app_bundle_acceptance_status"] = _context_get(context_variables, "app_bundle_acceptance_status")
+            ui_payload["app_bundle_acceptance_result"] = _context_get(context_variables, "app_bundle_acceptance_result")
         except Exception:
             pass
 

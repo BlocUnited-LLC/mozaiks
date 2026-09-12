@@ -14,8 +14,8 @@ description: >
   Runtime truth remains the structured outputs, build_tasks, owned_paths, and
   runtime loaders — not this catalog.
 
-  Authenticated app scaffolds are emitted by InfraScaffoldAgent through
-  save_infra_scaffold outside AppBuildPlan build_tasks. config/auth.yaml
+  Authenticated app scaffolds are emitted by AuthScaffoldAgent through
+  save_auth_scaffold outside AppBuildPlan build_tasks. config/auth.yaml
   validates against the shared mozaiks.auth.v1 model; ui/auth/authAdapter.js
   delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
   local demo identity implementations. Backend configuration selects auth mode.
@@ -123,7 +123,7 @@ task_contracts:
       - Emit only files declared by owned_paths or explicit file_manifest.
       - Omit YAML files that would serialize to empty arrays or null objects.
       - YAML declares the contract; downstream agents implement Python and JS stubs.
-      - actions[].api_surface is part of the module contract. Use public or public_readonly only for anonymous-safe HTTP actions. Omit it or use internal/admin_internal for actions that require an authenticated token when AUTH_ENABLED=true.
+      - actions[].api_surface is part of the module contract. Use public or public_readonly only for anonymous-safe HTTP actions. Omit it or use null for authenticated UI/API actions. Internal/admin_internal actions reject every HTTP request, including authenticated requests; use them only for event reactions or trusted runtime dispatch, never page bindings.
       - Public/public_readonly actions are only anonymous entrypoints; they still dispatch with an enforce-mode authority carrying a concrete (possibly empty) permission set and still run actions[].permissions and actions[].entitlement_gate checks.
       - External HTTP dispatch and internal runtime dispatch are separate paths. Internal event reactions may use api_surface=internal and permissions=[] because the event bus is the authorization boundary; do not mark internal reaction handlers public.
       - contracts/reactions.yaml target.kind may be handler, capability, notification, or service_adapter. service_adapter targets must declare target.adapter and target.adapter_method, point only to app-owned services/adapters/* support code, and must not be used to bypass facade modules, module state ownership, or managed-provider boundaries.

@@ -19,8 +19,8 @@ from mozaiksai.core.runtime.app.page_schema import (
     load_and_validate_page_schema,
     validate_page_schema,
 )
-from mozaiksai.core.workflow.generator_support.page_plan_utils import _page_from_plan
 from mozaiksai.hosts.routers import shell
+from tests.page_plan_fixtures import _page_from_plan
 
 
 def _valid_page(**overrides: Any) -> dict[str, Any]:
@@ -48,6 +48,42 @@ def _valid_page(**overrides: Any) -> dict[str, Any]:
     return page
 
 
+@pytest.mark.parametrize("payload,valid", [
+    (None, True),
+    ({"record_id": "{selected_row.id}", "name": "{form.name}", "notes": "{form.notes}"}, True),
+    ({"record_id": "{selected_row.id}"}, False),
+])
+def test_explicit_form_payload_must_include_editable_values(payload, valid):
+    page = _valid_page(sections=[{
+        "id": "edit", "primitive": "Form", "config": {
+            "fields": [{"name": "name", "label": "Name", "type": "text"},
+                       {"name": "notes", "label": "Notes", "type": "textarea"}],
+            "submit_action": {"label": "Save", "action_type": "submit",
+                              "href": "/api/modules/records/update", "payload": payload},
+        },
+    }])
+    if valid:
+        validate_page_schema(page)
+    else:
+        with pytest.raises(PageSchemaValidationError) as exc_info:
+            validate_page_schema(page)
+        assert any(d.code == "page_schema.incomplete_form_payload" for d in exc_info.value.diagnostics)
+
+
+@pytest.mark.parametrize("primitive,config", [
+    ("SummaryStrip", {"items": [{"label": "Total", "value_key": "total"}]}),
+    ("Metric", {"label": "Total", "value_key": "total"}),
+])
+def test_live_metrics_preserve_and_validate_api_binding(primitive, config):
+    page = _valid_page(sections=[{"id": "total", "primitive": primitive,
+                                "config": {**config, "api_endpoint": "/api/modules/records/summary"}}])
+    result = validate_page_schema(page)
+    assert result.sections[0].config["api_endpoint"] == "/api/modules/records/summary"
+    page["sections"][0]["config"]["api_endpoint"] = "/api/modules/records/summary?bad=true"
+    with pytest.raises(PageSchemaValidationError):
+        validate_page_schema(page)
+
+
 def _write_app(root: Path, page: dict[str, Any] | str, *, page_name: str = "home") -> None:
     root.mkdir(parents=True, exist_ok=True)
     (root / "app.json").write_text(json.dumps({"appName": "Test App"}), encoding="utf-8")
@@ -63,6 +99,48 @@ def test_valid_page_schema_serves() -> None:
     assert page.name == "home"
     assert page.layout == "full-width"
     assert page.sections[0].primitive == "PageHeader"
+
+
+def test_structured_action_maps_compile_and_modal_targets_resolve():
+    page = _valid_page()
+    page["sections"][0]["config"]["actions"] = [{
+        "label": "Edit", "action_type": "event", "event_type": "ui.modal.open",
+        "payload": [{"key": "modal_id", "value": "edit"}],
+    }]
+    page["sections"].append({"id": "edit", "primitive": "Modal", "config": {"title": "Edit"}})
+    result = validate_page_schema(page).model_dump()
+    assert result["sections"][0]["config"]["actions"][0]["payload"] == {"modal_id": "edit"}
+    page["sections"][0]["config"]["actions"][0]["payload"][0]["key"] = "modalId"
+    with pytest.raises(PageSchemaValidationError, match="Invalid page schema"):
+        validate_page_schema(page)
+
+
+def test_duplicate_action_mapping_keys_are_rejected():
+    from mozaiksai.core.runtime.app.page_schema import AppPageAction
+    with pytest.raises(ValueError, match="keys must be unique"):
+        AppPageAction.model_validate({"label": "Save", "action_type": "submit", "href": "/api/modules/items/save",
+                                      "payload": [{"key": "id", "value": "a"}, {"key": "id", "value": "b"}]})
+
+
+def test_form_initial_values_are_a_closed_selected_record_binding():
+    from mozaiksai.core.runtime.app.page_schema import AppFormConfig
+    assert AppFormConfig(fields=[], initial_values_key="selected_row").initial_values_key == "selected_row"
+    with pytest.raises(ValueError):
+        AppFormConfig(fields=[], initial_values_key="eval(user_input)")
+
+
+@pytest.mark.parametrize("href", ["", "modal-create", "https://example.invalid/private-token"])
+def test_invalid_action_href_has_actionable_input_free_feedback(href: str) -> None:
+    page = _valid_page()
+    page["sections"][0]["config"]["actions"] = [
+        {"label": "Create", "action_type": "event", "event_type": "ui.modal.open", "href": href}
+    ]
+    with pytest.raises(PageSchemaValidationError) as exc_info:
+        validate_page_schema(page)
+    diagnostic = exc_info.value.diagnostics[0]
+    assert diagnostic.code == "page_schema.page_href"
+    assert "use null" in diagnostic.message
+    assert "private-token" not in diagnostic.message
 
 
 @pytest.mark.parametrize(

@@ -548,6 +548,10 @@ async def generate_and_download(
 
     ui_payload = {
         "downloadType": "single",
+        "artifact_kind": "workflow_bundle",
+        "artifact_version_id": context_variables.get("artifact_version_id") if context_variables else None,
+        "build_registry_id": binding.build_registry_id,
+        "app_id": app_id,
         "files": ui_files,
         "agent_message": agent_message_text,
         "description": agent_message_text,

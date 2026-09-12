@@ -343,6 +343,10 @@ def is_secret_sensitive_path(path: str) -> bool:
     if is_secret_contract_path(path):
         return False
     normalized = str(path or "").replace("\\", "/").lower()
+    # Bundle-root example configuration is distributable, just like env.example.
+    # Actual .env variants and examples nested under credential paths stay blocked.
+    if normalized == ".env.example":
+        return False
     parts = [part for part in normalized.split("/") if part]
     return any(term in normalized for term in SECRET_SENSITIVE_PATH_TERMS) or any(
         part == ".env" for part in parts

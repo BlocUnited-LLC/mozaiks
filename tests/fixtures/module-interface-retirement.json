@@ -133,7 +133,7 @@
     "modules/documents/backend/handler.py": "from .service import summarize_document\n\nclass DocumentsHandler:\n    async def summarize_document(self, ctx, **params):\n        return summarize_document(**params)\n",
     "modules/documents/backend/service.py": "def summarize_document(text: str = \"\") -> dict:\n    return {\"summary\": text[:80]}\n",
     "app.json": "{\"appId\": \"retirement-acceptance\", \"name\": \"Document Analysis\", \"authRequired\": false}",
-    "ui/pages/documents.yaml": "{}\n"
+    "ui/pages/documents.yaml": "schema_version: mozaiks.app_page.v1\nname: documents\nroute: /documents\ntitle: Documents\npage_type: wizard\nlayout: full-width\nsections:\n- id: summarize\n  primitive: Form\n  config:\n    fields:\n    - name: text\n      label: Document text\n      type: textarea\n      required: true\n    submit_action:\n      label: Summarize\n      action_type: submit\n      href: /api/modules/documents/summarize_document\n"
   },
   "workflow_files": {
     "orchestrator.yaml": "workflow_name: DocumentAnalysis\nworkflow_startup_mode: BackendOnly\ntriggers:\n  - type: event\n    event: domain.documents.analysis_requested\n",

@@ -42,7 +42,6 @@ COPY_FLAGS = (
     "handoff",
     "control room",
     "kpi wall",
-    "dashboard",
 )
 FONT_FLAGS = ("rajdhani", "orbitron", "fagrak")
 DEEP_IMPORT_FLAGS = (
@@ -480,7 +479,6 @@ def audit_generated_react_files(
         code_files,
         include_ui_index=include_ui_index,
     ):
-        component_name = PurePosixPath(filename).stem
         suffix = PurePosixPath(filename).suffix.lower()
         lower = content.lower()
 
@@ -585,11 +583,6 @@ def audit_generated_react_files(
         if summary_strip_count > 1:
             warnings.append(
                 f"{filename} renders multiple SummaryStrip components; keep generated UI compact."
-            )
-
-        if component_name.endswith("Dashboard"):
-            warnings.append(
-                f"{filename} uses dashboard-style naming ({component_name}); generated UI should describe the actual task or product surface."
             )
 
         # Layout shell contract: admin/pages/ files are workspace/app Studio
@@ -722,12 +715,6 @@ def audit_page_schemas(
                 f"{page_path} declares 'extensions', a retired unsupported field. "
                 "Remove it; use a custom_route_bundle page when primitives cannot "
                 "express the route."
-            )
-
-        title = str(page.get("title") or page.get("name") or "")
-        if "dashboard" in title.lower():
-            warnings.append(
-                f"{page_path} uses dashboard-style page naming; use the actual product surface name."
             )
 
         for text in _strings_from_value(page):

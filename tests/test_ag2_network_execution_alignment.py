@@ -757,6 +757,70 @@ async def test_ag2_network_runner_continues_paused_channel_with_user_message() -
 
 
 @pytest.mark.anyio
+async def test_initial_timeout_is_failure_and_cancels_waiting_agent() -> None:
+    cancelled = asyncio.Event()
+
+    class WaitingAgent(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="InitialTimeout", chat_id="initial-timeout", app_id="timeout-app",
+        agents={"Waiting": WaitingAgent("Waiting", "")},
+        transition_rules=[{"source_agent": "Waiting", "target_agent": "terminate", "transition_type": "after_turn"}],
+        initial_agent_name="Waiting", initial_message="Begin.",
+        context_variables={"retained": "evidence"}, close_timeout_seconds=0.05,
+    ))
+    assert result.status is RunStatus.FAILED
+    assert result.live_run is None
+    assert "did not close" in result.error
+    assert result.context_variables["retained"] == "evidence"
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+
+
+@pytest.mark.anyio
+async def test_interview_correction_is_visible_to_downstream_planner() -> None:
+    class Interviewer(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            self._body = "NEXT" if self.ask_calls else "Add an activity log?"
+            return await super().ask(*msg, **kwargs)
+
+    class Planner(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            self.visible_inputs = [await kwargs["stream"].history.get_events(), msg]
+            return await super().ask(*msg, **kwargs)
+
+    interviewer = Interviewer("Interviewer", "")
+    planner = Planner("Planner", "Plan complete")
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="SharedInterview", chat_id="shared-interview", app_id="test-app",
+        agents={"Interviewer": interviewer, "Planner": planner},
+        transition_rules=[
+            {"source_agent": "Interviewer", "target_agent": "Planner", "transition_type": "condition", "condition_type": "context_equals", "condition_key": "ready", "condition_value": True},
+            {"source_agent": "Interviewer", "target_agent": "user", "transition_type": "after_turn"},
+            {"source_agent": "user", "target_agent": "Interviewer", "transition_type": "after_turn"},
+            {"source_agent": "Planner", "target_agent": "terminate", "transition_type": "after_turn"},
+        ],
+        agent_text_context_deriver=lambda name, text: {"ready": text == "NEXT"} if name == "Interviewer" else {},
+        initial_agent_name="Interviewer", initial_message="Build a customer registry.",
+        close_timeout_seconds=3,
+    ))
+    assert result.status is RunStatus.PAUSED
+    try:
+        continued = await result.live_run.continue_with_user_message("No activity log. Email is optional.")
+        assert continued.status is RunStatus.COMPLETED, continued.error
+        assert len(interviewer.ask_calls) == 2
+        assert len(planner.ask_calls) == 1
+        assert "No activity log. Email is optional." in repr(planner.visible_inputs)
+        assert "Build a customer registry." in repr(planner.visible_inputs)
+    finally:
+        await result.live_run.close()
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("timeout", [0.0, 0.05])
 async def test_continuation_timeout_fails_and_closes_live_run(timeout: float) -> None:
     waiting = asyncio.Event()

@@ -23,6 +23,74 @@ This project follows a practical pre-1.0 changelog format:
 - Studio workspaces inherit packaged first-party modules through the standard
   app loader. App-local modules override defaults by id, so hosted workspaces
   can reuse Security Readiness without copying its implementation.
+- Validate scoped repairs against the complete staged app, including canonical
+  page schemas and action references, even without an indexed source workspace.
+  Failed repairs no longer report that a patch was applied; successful patches
+  are staged for review, not silently promoted.
+- Reject invented module API surface values and incomplete explicit form
+  payloads. Live metric/summary bindings share the canonical authenticated data API.
+- Generate module event calls through `await ctx.emit(...)`, not a nonexistent
+  context event bus, and reject that obsolete pattern during quality checks.
+- Keep required text fields nonblank, details forms read-only, and modal controls
+  accessible above mobile navigation, including on short viewports.
+- Isolate Vite dependency caches per app so concurrent Factory and generated-app
+  previews do not invalidate each other's prebundled dependencies.
+- Keep authenticated generated page actions on the authenticated module API;
+  reject nested page bindings to internal-only actions before export.
+- Preserve unchanged pages during partial schema repair and validate the newly
+  rendered files instead of a stale pre-repair bundle.
+- Authenticate artifact downloads through Studio's canonical artifact endpoint,
+  retain artifact identity for workflow exports, and only complete successful
+  downloads. Restored download surfaces can respond without echoing large file
+  payloads through the WebSocket.
+- Carry table selection into edit/confirmation dialogs, authenticate page data
+  and mutations, and preserve failed forms. Module deletions use the module
+  action protocol; data-load failures are visible and retryable.
+- Use canonical build-record identity when loading artifact context. Trusted
+  refinement-router state is validated separately from untrusted launch inputs.
+  Factory refinement profiles use the model exercised by local acceptance.
+- Project explicitly planned event names into worker manifest guidance and use
+  canonical companion paths under modules/{module_id}/contracts/.
+
+- Save validated Factory implementation outputs through auto tools before quality
+  routing, replacing extraction from a chat history that AG2 did not populate.
+  Data-contract failures have an explicit bounded DatabaseAgent repair route.
+- Reject invalid account-data implementations during module loading instead of
+  silently skipping registration; load helpers in the module's actual Python
+  namespace and send load diagnostics to the existing bounded Factory repair flow.
+- Expose complete file constraints and the runtime persistence API to Factory
+  workers. Reject unsupported Motor calls in generated repositories and changes
+  to approved data fields or optionality before export.
+- Detach protected export inputs so generated files reach the real download
+  and artifact persistence path instead of producing an empty workbench.
+- Let auto-invoked UI tools emit their own result surface; do not mount an empty
+  component or announce download readiness from arguments before export runs.
+- Preserve complete Factory prompts when catalog names appear inline in prose;
+  prompt hooks replace only standalone section headings and share one updater.
+  Planner category defaults cannot override approved scope exclusions.
+- Prefer the basic table configuration for ambiguous basic-table structured
+  output, avoiding resource-table-only fields rejected by the runtime.
+- Preserve validated AppSchemaOutput pages through task execution and assembly;
+  planner hints no longer overwrite forms, bindings, or interactions. Generate
+  auth contracts before the complete-bundle validation that requires them.
+  Validate page identity against its owned filename, keep display labels separate,
+  and provide actionable URL diagnostics without exposing rejected input values.
+  Forward build timestamps into task provenance materialization.
+- Separate AuthScaffoldAgent from DownloadAgent-owned deployment packaging;
+  do not emit partial deployment files or undeclared provision scripts before validation.
+- Persist schema data through the canonical data_contract state and fail explicitly
+  on rejected state writes. Valid dashboard page names are no longer rejected as
+  placeholder copy. User-owned module planning includes the account-data handler.
+- Keep initial prompts and interview replies visible to downstream workflow
+  agents through AG2 channel broadcasts; settlement timeouts fail explicitly.
+- Read protected task results, repair overlays, and app configuration as detached
+  data during assembly instead of overlooking read-only context containers.
+- Deliver declared workflow self-transitions through AG2's explicit audience
+  support so bounded same-agent repair loops receive their next turn.
+- Validate AppGenerator plan ownership and complete genesis file coverage before
+  worker calls, with bounded corrective feedback. Capability origins use a finite
+  vocabulary and registered managed packs; typed plan fields and frozen build
+  context catalogs are preserved through plan caching.
 - Clear stale AppGenerator plans before validation and terminate failed/empty
   plans instead of falling through to page generation without backend tasks.
 - Make optional generated module manifests nullable and remove automatic admin

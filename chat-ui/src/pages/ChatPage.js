@@ -749,7 +749,16 @@ const ChatPage = () => {
             payload: cachedPayload,
             tool_call_id: cached.tool_call_id || cachedToolCall.tool_call_id || null,
             workflow_name: cached.workflow_name || cachedToolCall.workflow_name || fallbackWorkflowName || currentWorkflowName,
-            onResponse: undefined,
+            onResponse: async (response) => {
+              const toolCallId = cached.tool_call_id || cachedToolCall.tool_call_id;
+              if (!toolCallId || !wsRef.current?.send) {
+                throw new Error('Reconnect to the workflow before submitting this response.');
+              }
+              return wsRef.current.send({
+                type: 'tool_call_response', tool_call_id: toolCallId,
+                tool_name: cachedToolName, response,
+              });
+            },
             display: cachedDisplay,
             component_type: cached.component_type || cachedToolCall.component_type || cachedPayload.component_type || cachedToolName,
             restored: true,

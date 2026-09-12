@@ -338,6 +338,11 @@ async def prepare_routed_workflow_launch(
         **({"contribution": routing_contribution} if routing_contribution is not None else {}),
     )
     resolved_workflow_id = routing_decision.workflow_id
+    if routing_contribution is not None:
+        # A trusted router seed must not upgrade the authority of browser input.
+        validate_context_for_workflow(
+            resolved_workflow_id, dict(context_variables or {}), writer_id=CALLER_INPUT_WRITER,
+        )
     merged_context = {**dict(routing_decision.context_seed), **dict(context_variables or {})}
     merged_context = await apply_launch_context_provider(
         workflow_id=resolved_workflow_id,
@@ -350,7 +355,9 @@ async def prepare_routed_workflow_launch(
         journey_id=routing_decision.journey_id,
     )
     launch_writer: ContextWriterId = (
-        TRANSITION_ROUTER_WRITER if trigger_source == "transition" else CALLER_INPUT_WRITER
+        TRANSITION_ROUTER_WRITER
+        if trigger_source == "transition" or routing_contribution is not None
+        else CALLER_INPUT_WRITER
     )
     validated_context = validate_context_for_workflow(
         resolved_workflow_id,

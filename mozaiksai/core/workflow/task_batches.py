@@ -23,9 +23,9 @@ from .generator_support.code_files import (
     safe_relpath,
 )
 from .generator_support.page_plan_utils import (
-    _page_from_plan,
     _page_stem_from_path,
     _page_stems,
+    validate_planned_page,
 )
 from .path_ownership import detect_owned_path_collisions, normalize_owned_paths
 from .paths import resolve_workflow_path
@@ -712,14 +712,16 @@ async def _run_one_task(
                 if not isinstance(output, dict):
                     output = {"agent_message": str(output)}
                 _reject_task_output_identity_drift(task, output)
-                canonical_code_files = extract_code_file_entries_from_payload(output)
+                canonical_code_files = extract_code_file_entries_from_payload(
+                    output, build_timestamp=base_context.get("build_timestamp"),
+                )
                 if canonical_code_files:
                     output["code_files"] = canonical_code_files
                 if str(task.get("task_type") or "").strip() == "page_bundle":
                     output["code_files"] = _normalize_owned_page_files_from_plan(
                         output.get("code_files"), task=task, base_context=base_context,
                     )
-                    output["_page_materialization_source"] = "app_build_plan.pages"
+                    output["_page_materialization_source"] = "app_schema_output"
                     output["_page_materialized_paths"] = [
                         path for path in _normalize_owned_paths(task.get("owned_paths"))
                         if _page_stem_from_path(path)
@@ -859,13 +861,10 @@ def _normalize_owned_page_files_from_plan(
             continue
         planned = planned_by_stem.get(stem)
         if not planned:
-            continue
-        file_map[path] = yaml.safe_dump(
-            _page_from_plan(planned, stem),
-            allow_unicode=True,
-            sort_keys=False,
-            default_flow_style=False,
-        )
+            raise ValueError(f"{path}: page has no approved plan identity")
+        if path not in file_map:
+            raise ValueError(f"{path}: page worker did not materialize its owned page")
+        validate_planned_page(file_map[path], planned, path)
     return [
         {"filename": filename, "content": content}
         for filename, content in file_map.items()

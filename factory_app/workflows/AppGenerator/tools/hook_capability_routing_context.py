@@ -97,8 +97,7 @@ def _build_routing_body(routing: dict[str, Any]) -> str:
     layers: dict[str, Any] = routing.get("layers") or {}
     parts: list[str] = []
 
-    # Always show all four layers in a compact form
-    for layer_key in ("runtime_provided", "ai_workflow", "capability_pack", "custom_owned"):
+    for layer_key in ("runtime_provided", "ai_workflow", "capability_pack", "app_owned", "custom_owned"):
         layer_data = layers.get(layer_key)
         if isinstance(layer_data, dict):
             parts.append(_format_layer(layer_key, layer_data))
@@ -125,7 +124,8 @@ def _build_routing_body(routing: dict[str, Any]) -> str:
         "  1. runtime_provided? → reference only, never generate\n"
         "  2. needs AI reasoning/orchestration? → workflow_touchpoint + data module\n"
         "  3. matches a known capability_pack? → select it; generate only app-specific wiring\n"
-        "  4. custom/bring-your-own? → module.yaml action interfaces + empty stubs only"
+        "  4. app-owned domain behavior? → generated_module with complete implementation\n"
+        "  5. explicitly bring-your-own external engine? → contract-bound integration stubs"
     )
 
     return "\n\n".join(parts)

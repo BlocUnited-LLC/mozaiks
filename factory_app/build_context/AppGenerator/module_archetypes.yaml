@@ -744,9 +744,9 @@ behavior_patterns:
         code on errors. Required env vars must be documented in the script
         module docstring.
       - >
-        For azure_container_apps, InfraScaffoldAgent should emit a
-        Microsoft.App/jobs resource alongside the Container App for each external
-        cron tick. Do not call the tick from a user-facing request handler.
+        Provider-specific scheduled jobs belong to the operator or hosted deployment
+        adapter, not AuthScaffoldAgent or the generated app bundle. Do not call the
+        tick from a user-facing request handler.
 
   file_storage:
     canonical_module_type: standard

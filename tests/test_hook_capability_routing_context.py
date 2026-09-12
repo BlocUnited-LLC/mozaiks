@@ -128,13 +128,16 @@ class TestCapabilityRoutingHook:
         _run_hook(agent)
         assert "[CAPABILITY ROUTING CONTEXT]" in agent.system_message
 
-    def test_routing_block_contains_all_four_layers(self) -> None:
+    def test_routing_block_distinguishes_app_owned_from_external_engines(self) -> None:
         agent = _FakeAgent("AppPlanAgent")
         _run_hook(agent)
-        for layer in ("runtime_provided", "ai_workflow", "capability_pack", "custom_owned"):
+        for layer in ("runtime_provided", "ai_workflow", "capability_pack", "app_owned", "custom_owned"):
             assert layer in agent.system_message, (
                 f"[CAPABILITY ROUTING CONTEXT] must mention layer: {layer}"
             )
+        assert "generated_module with complete implementation" in agent.system_message
+        assert "explicitly bring-your-own external engine" in agent.system_message
+        assert "custom/bring-your-own?" not in agent.system_message
 
     def test_routing_block_lists_known_packs(self) -> None:
         agent = _FakeAgent("AppPlanAgent")

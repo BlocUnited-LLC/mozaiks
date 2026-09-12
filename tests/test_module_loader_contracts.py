@@ -300,7 +300,7 @@ def test_action_api_surface_known_metadata_values_load(api_surface: str) -> None
     assert action.api_surface == api_surface
 
 
-@pytest.mark.parametrize("api_surface", [123, [], {}])
+@pytest.mark.parametrize("api_surface", [123, [], {}, "null", "authenticated", "external", " public"])
 def test_action_api_surface_must_be_string(api_surface) -> None:
     with pytest.raises(ValueError, match="api_surface"):
         ActionDef(
@@ -1118,6 +1118,40 @@ def test_module_loader_rejects_user_data_scope_without_account_data_handler(
 # ---------------------------------------------------------------------------
 # Lane 2 — handler_method alignment (hard error, explicit rejection test)
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("source", [
+    "raise RuntimeError('broken import')\n",
+    "VALUE = 1\n",
+    "class AccountDataHandler:\n    def __init__(self, repo): pass\n",
+    "class AccountDataHandler:\n    def __init__(self, db): pass\n    async def delete_user_data(self, ctx, user_id): pass\n    async def export_user_data(self, ctx, user_id): pass\n",
+])
+def test_module_loader_rejects_invalid_account_handler(tmp_path: Path, source: str) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    manifest = module_dir / "module.yaml"
+    manifest.write_text(manifest.read_text().replace("  handler: backend.handler:TasksModule", "  handler: backend.handler:TasksModule\n  user_data_scope: true"))
+    (module_dir / "backend/account_data_handler.py").write_text(source)
+    with pytest.raises(ModuleLoadError, match="backend/account_data_handler.py"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+def test_module_loader_registers_account_handler_with_relative_imports(tmp_path: Path, monkeypatch) -> None:
+    from mozaiksai.core.account import account_data_registry
+
+    monkeypatch.setattr(account_data_registry, "_handlers", {})
+    module_dir = _write_canonical_module(tmp_path)
+    manifest = module_dir / "module.yaml"
+    manifest.write_text(manifest.read_text().replace("  handler: backend.handler:TasksModule", "  handler: backend.handler:TasksModule\n  user_data_scope: true"))
+    (module_dir / "backend/account_helper.py").write_text("VALUE = 1\n")
+    (module_dir / "backend/account_data_handler.py").write_text(
+        "from .account_helper import VALUE\n"
+        "class AccountDataHandler:\n"
+        "    def __init__(self, db): self.db = db\n"
+        "    async def delete_user_data(self, *, app_id, user_id): return {'deleted_count': 0}\n"
+        "    async def export_user_data(self, *, app_id, user_id): return {}\n"
+    )
+    ModuleLoader(str(tmp_path)).load("tasks")
+    assert account_data_registry.registered_module_ids() == ["tasks"]
 
 
 def test_module_loader_rejects_missing_handler_method(tmp_path: Path) -> None:

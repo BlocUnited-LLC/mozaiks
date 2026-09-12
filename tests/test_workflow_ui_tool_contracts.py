@@ -201,7 +201,7 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "ModuleRuntimeQualityAgent",
         "ModelAgent",
         "AppValidationAgent",
-        "InfraScaffoldAgent",
+        "AuthScaffoldAgent",
         "DownloadAgent",
         "ServiceAgent",
         "FrontendStubAgent",

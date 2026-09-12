@@ -23,6 +23,13 @@ transition_rules:
   transition_type: after_turn
   transition_target: RevertToUserTarget
 - source_agent: AppPlanAgent
+  target_agent: AppPlanAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_plan_outcome
+  condition_value: needs_revision
+  transition_target: AgentTarget
+- source_agent: AppPlanAgent
   target_agent: terminate
   transition_type: after_turn
   transition_target: TerminateTarget
@@ -68,7 +75,7 @@ transition_rules:
   transition_type: after_turn
   transition_target: AgentTarget
 - source_agent: IntegrationReadinessAgent
-  target_agent: AppValidationAgent
+  target_agent: AuthScaffoldAgent
   transition_type: after_turn
   transition_target: AgentTarget
 - source_agent: IntegrationReadinessAgent
@@ -78,6 +85,13 @@ transition_rules:
   condition_key: integration_readiness_status
   condition_value: blocked
   transition_target: RevertToUserTarget
+- source_agent: DatabaseAgent
+  target_agent: AppValidationAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_target
+  condition_value: DatabaseAgent
+  transition_target: AgentTarget
 - source_agent: DatabaseAgent
   target_agent: ConfigMiddlewareAgent
   transition_type: after_turn
@@ -184,6 +198,13 @@ transition_rules:
   condition_value: true
   transition_target: TerminateTarget
 - source_agent: AppValidationAgent
+  target_agent: DatabaseAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_target
+  condition_value: DatabaseAgent
+  transition_target: AgentTarget
+- source_agent: AppValidationAgent
   target_agent: ConfigMiddlewareAgent
   transition_type: condition
   condition_type: context_equals
@@ -240,7 +261,7 @@ transition_rules:
   condition_value: failed
   transition_target: RevertToUserTarget
 - source_agent: AppValidationAgent
-  target_agent: InfraScaffoldAgent
+  target_agent: DownloadAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: integration_tests_passed
@@ -250,9 +271,16 @@ transition_rules:
   target_agent: user
   transition_type: after_turn
   transition_target: RevertToUserTarget
-- source_agent: InfraScaffoldAgent
-  target_agent: DownloadAgent
+- source_agent: AuthScaffoldAgent
+  target_agent: AppValidationAgent
   transition_type: after_turn
+  transition_target: AgentTarget
+- source_agent: DownloadAgent
+  target_agent: DatabaseAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_bundle_export_outcome
+  condition_value: repair_database
   transition_target: AgentTarget
 - source_agent: DownloadAgent
   target_agent: terminate

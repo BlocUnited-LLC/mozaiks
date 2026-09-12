@@ -446,7 +446,7 @@ class SupportTicketsRepo:
         if collection is None:
             return []
         query = {"priority": priority} if priority else {}
-        return await collection.find(query).to_list(length=100)
+        return await collection.find_many(query, limit=100)
 
     async def create_ticket(self, record):
         collection = self._collection()
@@ -616,7 +616,7 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
     packaged_files = _merge_bundle_sources(
         context_variables=context,
         collected={
-            "InfraScaffoldAgent": {
+            "AuthScaffoldAgent": {
                 "code_files": [
                     {
                         "filename": "Dockerfile",
@@ -649,7 +649,7 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
     if FORBIDDEN_APP_LOCAL_LEDGER_PATH in packaged_files:
         errors.append("Download packaging merge still contains the deleted app-local ledger.")
     if "Dockerfile" not in packaged_files:
-        errors.append("Download packaging merge did not preserve persisted InfraScaffoldAgent output.")
+        errors.append("Download packaging merge did not preserve persisted AuthScaffoldAgent output.")
     if not export_gate.get("allow_export"):
         errors.extend(str(reason) for reason in export_gate.get("reasons") or [])
     if not runtime_loader.get("loaded"):

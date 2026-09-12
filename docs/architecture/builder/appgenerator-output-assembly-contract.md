@@ -21,6 +21,33 @@ AppPlanAgent clears stale plan/task state before validating a replacement.
 Only a completed declared task batch may advance it to assembly; a rejected
 or empty plan cannot fall through to standalone page generation.
 
+The workflow-owned `review_app_build_plan` tool validates the strict AppBuildPlan
+model, registered pack origins, approved app-owned module identities, page
+inventory, and complete genesis task ownership. Capability sources use the
+build-context registry vocabulary plus `host_universal` for built-in host
+surfaces. A product category is not a registered managed service.
+The existing plan cache preserves all typed plan fields. Frozen context values
+are detached before catalog lookup and validation.
+
+Plan review follows the Factory quality-gate pattern: deterministic tool state
+routes an invalid plan back to AppPlanAgent, with at most three total attempts.
+Exhaustion leaves the plan unready and the worker queue empty, then terminates
+as a workflow failure. Graph outcome operations remain separate from task-batch
+triggers; this gate does not change that runtime contract. Scoped revision and
+brownfield plans do not have to regenerate the entire genesis inventory.
+Auth scaffolding remains AuthScaffoldAgent's responsibility outside build tasks.
+It runs after integration readiness and before app validation, which requires the
+auth contract. Only a passed complete-bundle validation advances to DownloadAgent.
+Persistent entities are planned through the canonical data contract and
+`ctx.persistence`, not a generated replacement database service.
+
+Prompt-time catalog injection preserves the complete authored instructions and
+live repair feedback. Catalog names mentioned inline are not section boundaries;
+the shared section updater replaces only standalone bracketed headings. Planning
+describes the approved scope and task contracts without copying implementation
+source or entire catalogs into task messages. Category defaults do not expand
+explicitly approved surfaces or override interview exclusions.
+
 Module action/capability schemas and event payload schemas are compiled from
 `JsonSchemaContract` lists into runtime JSON Schema maps. Null annotations are
 omitted; enums and array item types are rendered under their JSON Schema keys.
@@ -118,6 +145,20 @@ It emits:
 It does **not** emit shell content such as header actions, profile menu items, notification copy, or footer links.
 
 ### 2. AppSchemaAgent
+
+`app_build_plan.pages` owns the approved page name/route inventory, while
+`AppSchemaOutput` supplies complete runtime page contracts. Task acceptance and
+assembly validate those schemas without replacing their sections, forms, or
+bindings with planner hints. Invalid schemas receive bounded task feedback.
+Missing worker pages fail instead of being synthesized from incomplete hints.
+Generated-module capability plans declare `user_data_scope`, matching the
+runtime module field. True requires a planned `backend/account_data_handler.py`
+implementation and its module stub; bundle validation rejects scope drift or a
+missing handler. The account lifecycle protocol remains owned by the runtime.
+The plan's page name is a display label; the runtime page `name` must match its
+owned filename, with the display label in `title`. The approved route remains
+unchanged. Page URL validation supplies input-free corrective diagnostics, and
+task materialization forwards the build timestamp used for provenance replay.
 
 `AppSchemaAgent` compiles persistent UI into one `AppSchemaOutput` with six payloads:
 
@@ -544,6 +585,22 @@ load. The check persists `app_runtime_load_passed` and
 `app_runtime_load_result` into workflow context and includes `app_runtime_load`
 in `app_bundle_acceptance_result.validation_evidence`.
 
+Modules declaring `user_data_scope` must provide a loadable account-data class
+with a `db` constructor and asynchronous, keyword-callable `delete_user_data`
+and `export_user_data` methods accepting `app_id` and `user_id`. The loader
+imports it in the same module namespace as the action handler and fails the
+module when the contract cannot be registered. Account-data load failures and
+repository API quality failures join the existing bounded `ServiceAgent`
+repair path; they do not become successful loads with warnings.
+
+File-contract prompt hooks preserve all hard constraints. Service workers see
+the callable signatures from the runtime's `PersistenceCollection` protocol,
+not a Motor collection API. The repository quality gate rejects unsupported
+cursor and find-and-modify calls. Bundle acceptance also checks that generated
+data contracts preserve the approved plan's field types and required flags.
+These checks do not prove arbitrary business logic correct; live authenticated
+CRUD and ownership tests remain necessary for end-to-end acceptance.
+
 ### 7. AppValidation Strategy
 
 `AppValidationAgent` must use an explicit validation strategy contract instead of
@@ -593,6 +650,41 @@ Materialization rule:
 ---
 
 ## Bundle Rules
+
+Partial AppSchema repairs overlay the existing page inventory by canonical page
+name, preserve unchanged routes, and publish the rendered file overlay back to
+the same validation bundle. A corrected page on disk is not sufficient if the
+export gate still sees stale context.
+
+Page HTTP bindings, including nested form and modal actions, must resolve to
+HTTP-visible module actions. Omitted/null `api_surface` means authenticated API
+access; `internal` and `admin_internal` are not browser endpoints. Keep declared
+permissions and user ownership when correcting exposure; do not make the action
+public to bypass authentication.
+
+Optional event manifests remain explicit. When a task owns `contracts/events.yaml`,
+ConfigMiddlewareAgent receives the exact event/action bindings from the approved
+plan's `event_flows`, even if the task's prose does not repeat them.
+
+Service implementations emit declared events with `await ctx.emit(event_type,
+payload)` after persistence, not `ctx.events.publish(...)`. The module quality
+gate rejects access to that nonexistent event bus. Input constraints belong in
+the action's JSON Schema; expected ownership denials use `PermissionError` so
+the module API returns a permission response instead of an internal error.
+
+`api_surface` is a finite runtime contract. Omitted/null is distinct from the
+invalid string `"null"`. Explicit form submit payloads must bind every declared
+field that the form submits. `SummaryStrip` and `MetricCard` may declare
+`api_endpoint` for live module-backed values through the same authenticated
+data loader as tables.
+
+Scoped coding repair validates the full staged baseline plus changed files,
+not just a patch or an unrelated indexed workspace. When using fallback checks,
+Mozaiks page validation also resolves module action references and rejects
+unsupported primitive configuration. A source validation failure blocks artifact
+creation. Explicit validation skips remain skips, not proof of functionality.
+The result message distinguishes a staged patch from a failed, ineligible, or
+planned repair; staging never implies promotion or successful live acceptance.
 
 Do:
 

@@ -14,6 +14,7 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     normalize_app_path,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 
 try:
     from .managed_monetization_contract import (
@@ -459,7 +460,7 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
     if context_variables is None or not hasattr(context_variables, "get"):
         return default
     try:
-        return context_variables.get(key, default)
+        return detach(context_variables.get(key, default))
     except Exception:
         return default
 
@@ -1878,6 +1879,7 @@ def app_build_plan(
         context_variables.set("app_build_plan", None)
         context_variables.set("app_task_batch_items", [])
         context_variables.set("app_task_batch_status", None)
+    AppBuildPlan = detach(AppBuildPlan)
     if not AppBuildPlan or not isinstance(AppBuildPlan, dict):
         raise ValueError("AppBuildPlan payload is required and must be a dictionary")
     AppBuildPlan = _unwrap_app_build_plan_payload(AppBuildPlan)
@@ -2037,6 +2039,7 @@ def app_build_plan(
         normalized_build_tasks.append(normalized_task)
 
     normalized_plan = {
+        **AppBuildPlan,
         "agent_message": agent_message or "App build plan cached successfully.",
         "app_kind": app_kind,
         "pages": pages,

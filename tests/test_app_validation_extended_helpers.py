@@ -57,6 +57,7 @@ from factory_app.workflows.AppGenerator.tools.app_validation import (
     _input_schema_required_fields,
     _normalize_module_yaml,
 )
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 
 # ---------------------------------------------------------------------------
 # 1. _append_command_output
@@ -153,6 +154,14 @@ class TestNormalizeModuleYaml:
 # ---------------------------------------------------------------------------
 
 class TestGeneratedFilesFromContext:
+    def test_frozen_context_preserves_files_repairs_and_deletions(self):
+        ctx = ContextVariablesBridge({
+            "generated_files": {"keep.py": "old", "delete.py": "unused"},
+            "code_files": [{"filename": "keep.py", "content": "repaired"}],
+            "deleted_files": ["delete.py"],
+        })
+        assert _generated_files_from_context(ctx) == {"keep.py": "repaired"}
+
     def test_none_context_returns_empty(self):
         assert _generated_files_from_context(None) == {}
 

@@ -27,6 +27,7 @@
       "fields"
     ],
     "properties": {
+      "initial_values_key": "string: selected_row — Prefill editable fields from the record passed to the containing modal.",
       "fields": "array of {name,label,type,required?,placeholder?,default_value?,options?} — min 1 — REQUIRED",
       "layout": "string: vertical|horizontal|grid — default vertical",
       "columns": "integer — default 2",
@@ -263,6 +264,7 @@
       "items"
     ],
     "properties": {
+      "api_endpoint": "string — Endpoint returning live summary values selected by value_key.",
       "items": "array of {id?,label,value,detail?} — min 1 — REQUIRED"
     }
   },
@@ -347,6 +349,7 @@
       "label"
     ],
     "properties": {
+      "api_endpoint": "string",
       "label": "string — REQUIRED",
       "value": "any",
       "value_key": "string",

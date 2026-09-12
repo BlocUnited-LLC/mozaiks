@@ -176,6 +176,7 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
             "workflow_name": "AgentGenerator",
             "user_id": "user-1",
             "pack_name": "ReviewWorkflow",
+            "artifact_version_id": "av_1",
             "is_multi_workflow": False,
             "workflow_bundle_results": bundle_results,
         }
@@ -216,6 +217,10 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     assert result["status"] == ("success" if succeeded else "error")
     assert result["outcome"] == ("ready" if succeeded else "blocked")
     assert context.data["workflow_bundle_validation_status"] == "passed"
+    download_payload = generate_and_download_module.use_ui_tool.call_args.kwargs["payload"]
+    assert download_payload["artifact_version_id"] == "av_1"
+    assert download_payload["build_registry_id"] == context.get("run_build_binding")["build_registry_id"]
+    assert download_payload["app_id"] == "app-1"
     assert len(result["ui_files"]) == 1
     zip_entry = result["ui_files"][0]
     assert zip_entry["type"] == "zip"

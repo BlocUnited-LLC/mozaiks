@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -98,6 +99,26 @@ def _definitions(workflow_id: str) -> dict:
 def _agent_variables(workflow_id: str, agent_name: str) -> set[str]:
     agents = _load_context_variables(workflow_id).get("agents") or {}
     return set((agents.get(agent_name) or {}).get("variables") or [])
+
+
+def test_appgenerator_tool_state_writes_are_declared_and_authorized():
+    definitions = _definitions("AppGenerator")
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=definitions)
+    for path in (WORKFLOWS_ROOT / "AppGenerator" / "tools").glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "_context_set" and len(node.args) >= 3
+                    and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+                continue
+            key = node.args[1].value
+            assert key in definitions, f"{path.name} writes undeclared state {key}"
+            policy.require_can_write(key, writer_id="deterministic_tool")
+
+
+def test_app_acceptance_evidence_cannot_be_written_by_agent_text():
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=_definitions("AppGenerator"))
+    for key in ("app_bundle_acceptance_status", "app_bundle_acceptance_result", "app_bundle_validation_evidence"):
+        assert not policy.can_write(key, writer_id=AGENT_TEXT_WRITER)
 
 
 def test_agentgenerator_interview_completion_uses_authorized_exact_sentinel() -> None:

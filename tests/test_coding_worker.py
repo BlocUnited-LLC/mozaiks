@@ -142,6 +142,10 @@ class _FakeToolExecutor:
 async def _fake_source_validation_runner(**kwargs):  # noqa: ANN003
     assert kwargs["app_id"] == "app_1"
     assert "app/ui/pages/Dashboard.jsx" in kwargs["overlay_files"]
+    root = Path(kwargs["workspace_root"])
+    assert root.is_dir()
+    for name, content in kwargs["overlay_files"].items():
+        assert (root / name).read_text(encoding="utf-8") == content
     return {
         "success": True,
         "validation_status": "passed",

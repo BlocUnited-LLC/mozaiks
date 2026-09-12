@@ -72,5 +72,14 @@ test('Vite module imports every effective barrel by absolute path', (t) => {
   const source = plugin.load.call({ addWatchFile: (name) => watched.push(name) }, id);
   assert.ok(source.includes(JSON.stringify(path.join(f.primaryRoot, 'Local', 'ui', 'index.js').replaceAll('\\', '/'))));
   assert.ok(source.includes('"Local": () => import('));
-  assert.equal(watched.length, 2);
+  assert.equal(watched.length, 1);
+});
+
+test('apps without workflows do not emit imports or watch nonexistent registry files', (t) => {
+  const f = fixture(t);
+  const plugin = workflowUiPlugin(f);
+  const watched = [];
+  const source = plugin.load.call({ addWatchFile: (name) => watched.push(name) }, plugin.resolveId('virtual:mozaiks-workflow-ui'));
+  assert.equal(source, 'export const transitionComponents = {};\nexport default {};');
+  assert.deepEqual(watched, []);
 });

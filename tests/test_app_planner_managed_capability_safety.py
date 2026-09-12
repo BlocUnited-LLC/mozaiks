@@ -147,13 +147,14 @@ class TestCapabilitySourceSchema:
         assert "capability_source" in models["AppCapabilityPack"]["fields"], \
             "AppCapabilityPack missing capability_source field"
 
-    def test_capability_source_is_optional_str(self):
+    def test_capability_source_is_required_finite_origin(self):
         models = _read_yaml(
             "factory_app/workflows/AppGenerator/structured_outputs.yaml"
         )["models"]
         cs = models["AppCapabilityPack"]["fields"]["capability_source"]
-        assert cs.get("type") == "optional_str", \
-            f"capability_source.type should be optional_str, got {cs.get('type')!r}"
+        assert cs["type"] == "literal"
+        assert cs.get("required", True) is True
+        assert "generated_module" in cs["values"]
 
     def test_capability_source_description_covers_managed_capability(self):
         models = _read_yaml(

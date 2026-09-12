@@ -22,7 +22,6 @@ from ag2.network import (
     EV_CHANNEL_CLOSED,
     EV_CONTEXT_SET,
     EV_PACKET,
-    EV_TEXT,
     AgentTarget,
     ChannelState,
     Envelope,
@@ -34,7 +33,6 @@ from ag2.network import (
     Resume,
     Transition,
     TransitionGraph,
-    WorkflowAdapter,
 )
 from ag2.network.client.handlers import default_handler
 
@@ -303,6 +301,8 @@ class AG2NetworkRunner:
         hub_clients: list[HubClient] = []
         channel_id: str | None = None
         keep_live_run = False
+        failure_task: asyncio.Task | None = None
+        event_task: asyncio.Task | None = None
 
         try:
             active_channels = [
@@ -357,17 +357,24 @@ class AG2NetworkRunner:
                     # optional plugin adds undeclared channel/delegation tools.
                     attach_plugin=False,
                 )
+                agent_clients[name] = client
+                agent_id_by_name[name] = client.agent_id
+
+            for name, client in agent_clients.items():
+                self_routing = any(
+                    rule.get("source_agent") == name and rule.get("target_agent") == name
+                    for rule in request.transition_rules
+                )
                 _install_context_update_handler(
-                    agent=agent,
+                    agent=request.agents[name],
                     client=client,
                     agent_name=name,
                     run_identity=(request.workflow_name, request.app_id, request.chat_id),
                     agent_text_context_deriver=request.agent_text_context_deriver,
                     agent_output_handler=request.agent_output_handler,
                     context_authority_policy=request.context_authority_policy,
+                    broadcast_audience=list(dict.fromkeys(agent_id_by_name.values())) if self_routing else None,
                 )
-                agent_clients[name] = client
-                agent_id_by_name[name] = client.agent_id
 
             if initial_agent_name not in agent_clients:
                 raise ValueError(f"initial agent {initial_agent_name!r} did not register")
@@ -397,7 +404,7 @@ class AG2NetworkRunner:
                 await initiator.send(
                     channel.channel_id,
                     request.initial_message or ".",
-                    audience=[agent_clients[initial_agent_name].agent_id],
+                    audience=None,
                 )
             def _agent_names() -> dict[str, str]:
                 return {
@@ -596,12 +603,14 @@ class AG2NetworkRunner:
                     return result
         except TimeoutError:
             wal = await hub.read_wal(channel_id) if channel_id else []
+            state = hub.adapter_state(channel_id) if channel_id else None
             return AG2NetworkRunnerResult(
-                status=RunStatus.PAUSED,
+                status=RunStatus.FAILED,
                 workflow_name=request.workflow_name,
                 chat_id=request.chat_id,
                 app_id=request.app_id,
                 channel_id=channel_id,
+                context_variables=_json_safe_dict(getattr(state, "context_vars", {}) or {}),
                 wal=[_envelope_to_dict(envelope) for envelope in wal],
                 error=f"workflow channel did not close within {request.close_timeout_seconds} seconds",
             )
@@ -624,6 +633,11 @@ class AG2NetworkRunner:
                 error="internal_error",
             )
         finally:
+            pending_tasks = [task for task in (failure_task, event_task) if task is not None and not task.done()]
+            for task in pending_tasks:
+                task.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
             if not keep_live_run:
                 for hub_client in reversed(hub_clients):
                     try:
@@ -749,11 +763,10 @@ class _AG2LiveWorkflowRun:
 
             if context_updates:
                 await self._apply_context_updates(context_updates)
-            audience = self._next_agent_audience_for_user_text(str(message or "."))
             await self._initiator.send(
                 self.channel_id,
                 str(message or "."),
-                audience=audience,
+                audience=None,
             )
 
             result = await self._wait_for_settlement(seen_envelope_ids=seen_envelope_ids)
@@ -865,27 +878,6 @@ class _AG2LiveWorkflowRun:
             error=f"workflow channel did not settle within {self._close_timeout_seconds} seconds",
         )
 
-    def _next_agent_audience_for_user_text(self, message: str) -> list[str] | None:
-        state = self._hub.adapter_state(self.channel_id)
-        next_state = WorkflowAdapter().fold(
-            Envelope(
-                channel_id=self.channel_id,
-                sender_id=self._initiator.agent_id,
-                audience=[],
-                event_type=EV_TEXT,
-                event_data={"text": message},
-            ),
-            state,
-        )
-        next_speaker = str(getattr(next_state, "expected_next_speaker", "") or "").strip()
-        if not next_speaker:
-            # Termination state — send to nobody; the fold closes the channel
-            # without any registered agent intercepting the EV_TEXT envelope.
-            return []
-        if next_speaker in {"user", self._initiator.agent_id}:
-            return None
-        return [next_speaker]
-
     async def close(self) -> None:
         if self._closed:
             return
@@ -929,6 +921,7 @@ def _install_context_update_handler(
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None,
     agent_output_handler: Callable[[str, Any], Awaitable[None]] | None = None,
     context_authority_policy: ContextAuthorityPolicy | None = None,
+    broadcast_audience: list[str] | None = None,
 ) -> None:
     """Commit Mozaiks tool context mutations through AG2 workflow packets.
 
@@ -947,7 +940,7 @@ def _install_context_update_handler(
         if not isinstance(bridge, ContextVariablesBridge):
             raise ContextAuthorityError("context_authority.untrusted_bridge")
         bridge._bind_run(run_identity, context_authority_policy)
-    if bridge is None and agent_text_context_deriver is None and context_authority_policy is None and agent_output_handler is None:
+    if bridge is None and agent_text_context_deriver is None and context_authority_policy is None and agent_output_handler is None and broadcast_audience is None:
         return
 
     async def _handler(envelope: Any) -> None:
@@ -962,6 +955,10 @@ def _install_context_update_handler(
                 == str(getattr(envelope, "channel_id", "") or "")
             ):
                 event_data = _json_safe_dict(getattr(out_envelope, "event_data", {}) or {})
+                if broadcast_audience is not None and out_envelope.audience is None:
+                    # AG2 broadcasts exclude the sender. Explicit delivery enables
+                    # self-edges; AG2's can_send probe still owns turn selection.
+                    out_envelope.audience = list(broadcast_audience)
                 if tool_outcome is not None and (event_data.get("routing") or {}).get("kind") in {"handoff", "finish"}:
                     raise ValueError(f"tool_outcome.requires_declared_graph:{agent_name}")
                 if agent_output_handler is not None:

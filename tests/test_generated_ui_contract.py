@@ -56,7 +56,6 @@ def test_generated_ui_contract_blocks_removed_primitives_and_hardcoded_style() -
     assert any("renders non-canonical component primitive <Badge>" in warning for warning in warnings)
     assert any("hardcodes color values" in warning for warning in warnings)
     assert any("literal brand fonts" in warning for warning in warnings)
-    assert any("dashboard-style naming" in warning for warning in warnings)
 
 
 def test_generated_ui_contract_blocks_direct_font_family_declarations() -> None:
@@ -513,11 +512,18 @@ def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
         ]
     )
 
-    assert any("dashboard-style page naming" in warning for warning in warnings)
     assert any("placeholder/internal copy" in warning for warning in warnings)
     assert any("uses removed primitive 'Card'" in warning for warning in warnings)
     assert any("nests SurfaceCard inside Panel" in warning for warning in warnings)
     assert any("uses 2 SummaryStrip sections" in warning for warning in warnings)
+
+
+def test_dashboard_is_a_valid_product_page_not_placeholder_copy() -> None:
+    page = _strict_page(
+        name="dashboard", title="Dashboard", route="/dashboard", page_type="analytics_dashboard",
+        sections=[{"id": "title", "primitive": "PageHeader", "config": {"title": "Dashboard"}}],
+    )
+    assert audit_page_schemas([page]) == []
 
 
 def test_wizard_page_with_form_passes_quality_gate() -> None:

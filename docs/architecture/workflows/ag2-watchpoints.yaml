@@ -34,6 +34,7 @@ watchpoints:
     verification_tests:
       - tests/test_ag2_network_execution_alignment.py
       - tests/test_workflow_network_graph.py
+      - tests/test_ag2_network_tool_routing.py
 
   - watchpoint_id: AG2-WP-004
     ag2_surface: Source-scoped transition condition composition

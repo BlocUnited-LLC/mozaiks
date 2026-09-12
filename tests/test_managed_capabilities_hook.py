@@ -262,14 +262,15 @@ class TestStructuredOutputContract:
         fields = pack_model.get("fields", {})
         assert "capability_source" in fields, "AppCapabilityPack missing capability_source field"
 
-    def test_capability_source_is_optional(self):
+    def test_capability_source_is_required_finite_origin(self):
         data = yaml.safe_load(_STRUCTURED_OUTPUTS_PATH.read_text(encoding="utf-8"))
         models = data.get("models", {})
         pack_model = models.get("AppCapabilityPack", {})
         fields = pack_model.get("fields", {})
         cs = fields.get("capability_source", {})
-        assert cs.get("type") in ("optional_str", "str", "optional"), \
-            f"capability_source should be optional, got type={cs.get('type')!r}"
+        assert cs["type"] == "literal"
+        assert cs.get("required", True) is True
+        assert "managed_capability" in cs["values"]
 
     def test_appplanagent_variables_include_capability_packs(self):
         data = yaml.safe_load(_CONTEXT_VARS_PATH.read_text(encoding="utf-8"))

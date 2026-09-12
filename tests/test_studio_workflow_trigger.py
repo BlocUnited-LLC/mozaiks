@@ -671,7 +671,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
         "refinement_session_id": "rs_code_1",
             "harness_decision": {
                 "decision_type": "auto_patch",
-                "message": "Scoped patch applied.",
+                "message": "Scoped patch staged for review.",
                 "rationale": "This is a narrow patch.",
                 "confidence": 0.95,
                 "recommended_workflow_id": "AppGenerator",
@@ -690,7 +690,8 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
                     }
                 ],
                 "metadata": {
-                    "scope_origin": "applied",
+                    "scope_origin": "staged",
+                    "coding_status": "validated",
                 },
             },
             "coding_worker": {

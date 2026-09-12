@@ -52,9 +52,8 @@ async def account_host(monkeypatch, request):
     monkeypatch.setattr(account, "account_data_registry", registry)
     monkeypatch.setattr(account_routes, "account_data_registry", registry)
     monkeypatch.setattr(PlatformHookRegistry, "_instance", PlatformHookRegistry())
-    module_root = factory_root / "app" / "modules"
-    loader = ModuleLoader(str(module_root))
-    loader._register_account_data_handler("user_onboarding", module_root / "user_onboarding")
+    loader = ModuleLoader(str(factory_root / "app"))
+    loader.load("user_onboarding")
     assert registry.registered_module_ids() == ["user_onboarding"]
     host = FastAPI()
     host.include_router(account_routes.router)

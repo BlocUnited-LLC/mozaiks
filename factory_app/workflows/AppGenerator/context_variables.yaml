@@ -1,4 +1,116 @@
 definitions:
+  app_bundle_acceptance_status:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: pending
+  app_bundle_acceptance_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_bundle_validation_evidence:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_runtime_load_passed:
+    type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: false
+  app_runtime_load_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  bundle_scan_passed:
+    type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: false
+  bundle_scan_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  generated_app_functional_completeness_passed:
+    type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: false
+  generated_app_functional_completeness_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  module_contract_quality_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_context_artifact_version_id:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_context_registration_warning:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_context_version_id:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  greenfield_app_context_registered:
+    type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: false
   run_build_binding:
     type: object
     description: Server-verified target and build lineage. Execution app_id remains the host identity.
@@ -941,6 +1053,24 @@ definitions:
         ui_hidden: true
         match:
           equals: NEXT
+  app_plan_feedback:
+    type: string
+    description: Exact deterministic errors to repair in the next complete AppBuildPlan.
+    source: {type: computed, default: ''}
+  app_plan_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Validated plan outcome used by the existing AG2 transition graph.
+    source: {type: state, default: blocked}
+  app_plan_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Runtime-owned count of complete plan validation attempts.
+    source: {type: state, default: 0}
   app_build_plan:
     type: object
     description: Canonical app build plan derived from the brief and design documents.
@@ -1483,6 +1613,7 @@ agents:
     - brownfield_registration
   AppPlanAgent:
     variables:
+    - app_plan_feedback
     - platform_user_email
     - app_backend_url
     - build_mode
@@ -1611,6 +1742,11 @@ agents:
     - missing_connector_services
   DatabaseAgent:
     variables:
+    - generated_files
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_errors
     - build_mode
     - revision_scope
     - change_request_id

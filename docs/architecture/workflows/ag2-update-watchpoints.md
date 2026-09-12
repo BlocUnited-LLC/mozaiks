@@ -108,6 +108,14 @@ intent below remain authoritative for maintainers.
 | `AG2-WP-012` | App-scoped channel events | Mozaiks projects AG2 WAL events into app-scoped websocket and chat persistence contracts. | Shrink WAL polling when native subscriptions preserve those product boundaries. | `WATCH` | 1.0.3 | `test_ag2_network_execution_alignment.py` |
 | `AG2-WP-013` | Durable human attachment | `_attach_human_client` reconnects hydrated human identity because AG2 lacks public `HubClient.attach_human(...)`. | Delete the private fallback when AG2 exposes public human reattachment. | `ACTIVE` | 1.0.3 | `test_ag2_network_execution_alignment.py` |
 
+For `AG2-WP-003`, also recheck explicit broadcast audiences for declared
+self-edges. AG2 1.0.3 `Hub._dispatch` excludes the sender when `audience=None`,
+while the default handler can process explicit self-delivery through `can_send`.
+The existing packet adapter includes all participants only for agents with a
+declared self-edge. `test_declared_self_transition_runs_again_and_then_terminates`
+reproduces the timeout without that adaptation and verifies two real AG2 turns
+with it. Upstream automatic self-edge notification should remove this adaptation.
+
 For `AG2-WP-003`, preserve the trusted callable invocation and retained mutation
 attribution described in [Declarative Config to AG2 Mapping](declarative-ag2-mapping.md#context_variablesyaml)
 when replacing the packet hook. Ordinary packet updates must not acquire

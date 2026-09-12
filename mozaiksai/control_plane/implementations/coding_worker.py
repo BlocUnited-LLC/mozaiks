@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import tempfile
 import uuid
 import zipfile
 
@@ -197,12 +198,19 @@ class ScopedRefinementCodingWorker:
         validation_result = None
         status = "planned"
         if resolved_artifact_kind == "app_bundle" and merged_files:
-            validation_result = await self._run_source_validation(
-                request=request,
-                plan=resolved_plan,
-                merged_files=merged_files,
-                validation_strategy=resolved_strategy,
-            )
+            try:
+                validation_result = await self._run_source_validation(
+                    request=request,
+                    plan=resolved_plan,
+                    merged_files=merged_files,
+                    validation_strategy=resolved_strategy,
+                )
+            except Exception as exc:
+                return CodingWorkerResult(
+                    eligible=True, status="failed", provider=proposal.provider_id,
+                    error=f"SOURCE_VALIDATION_FAILED: {exc}",
+                    metadata={"coding_provider_attempts": provider_attempts},
+                )
             validation_status = str((validation_result or {}).get("validation_status") or "").strip().lower()
             if validation_status == "passed":
                 status = "validated"
@@ -329,17 +337,23 @@ class ScopedRefinementCodingWorker:
             plan=plan,
             validation_strategy=validation_strategy,
         )
-        result = await self._source_validation_runner(
-            app_id=request.artifact_app_id,
-            artifact_store=self._artifact_store,
-            overlay_files=merged_files,
-            allowed_kinds=options["allowed_kinds"],
-            include_install=options["include_install"],
-            max_commands=options["max_commands"],
-            timeout_seconds=options["timeout_seconds"],
-            confirm_execution=options["confirm_execution"],
-            copy_workspace=True,
-        )
+        # Validate the selected artifact plus patch, not an unrelated or absent
+        # brownfield indexing workspace.
+        self._output_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="validation-", dir=self._output_root.resolve()) as root:
+            staged = materialize_coding_workspace(merged_files, workspace_root=Path(root))
+            result = await self._source_validation_runner(
+                app_id=request.artifact_app_id,
+                artifact_store=self._artifact_store,
+                workspace_root=staged.workspace_root,
+                overlay_files=merged_files,
+                allowed_kinds=options["allowed_kinds"],
+                include_install=options["include_install"],
+                max_commands=options["max_commands"],
+                timeout_seconds=options["timeout_seconds"],
+                confirm_execution=options["confirm_execution"],
+                copy_workspace=True,
+            )
         if hasattr(result, "model_dump"):
             payload = cast(dict[str, Any], result.model_dump(mode="json"))
         elif isinstance(result, dict):

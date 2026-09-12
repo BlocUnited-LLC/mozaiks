@@ -19,6 +19,9 @@ from factory_app.workflows._shared.generated_ui_contract import (
     dedupe,
 )
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    extract_code_file_map_from_payload,
+)
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
     load_default_ai_config,
 )
@@ -32,7 +35,6 @@ from mozaiksai.core.runtime.app.provenance import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.ui_primitives import (
-    get_page_ui_primitive_names,
     validate_page_ui_primitives,
 )
 
@@ -1684,7 +1686,7 @@ def save_app_schema(
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
-        app_asset_manifest, app_data_contract, app_custom_route_bundle,
+        app_asset_manifest, data_contract, app_custom_route_bundle,
         app_schema_ready
 
     Tools are dumb — no reasoning, no transformation. AppSchemaAgent already
@@ -1702,6 +1704,23 @@ def save_app_schema(
         if isinstance(page, dict) and "extensions" in page:
             raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
     page_list = [_normalize_page_schema(page) for page in raw_page_list]
+    baseline_files = detach(_context_get(context_variables, "generated_files")) or {}
+    code_files = extract_code_file_map_from_payload(
+        {"code_files": detach(_context_get(context_variables, "code_files")) or []}
+    )
+    baseline_files = {**baseline_files, **code_files}
+    if baseline_files:
+        # Repairs are partial typed outputs; unchanged pages still own their routes.
+        baseline_pages = {}
+        for path, content in baseline_files.items():
+            parts = Path(path).parts
+            if len(parts) == 3 and parts[:2] == ("ui", "pages") and path.endswith(".yaml"):
+                page = yaml.safe_load(content)
+                baseline_pages[page["name"]] = page
+        baseline_pages.update({page["name"]: page for page in page_list})
+        page_list = list(baseline_pages.values())
+        if custom_route_bundle is None:
+            custom_route_bundle = detach(_context_get(context_variables, "app_custom_route_bundle"))
     if page_list and not isinstance(page_list, list):
         raise ValueError("save_app_schema: pages must be a list")
     _repair_missing_submit_hrefs(page_list, context_variables)
@@ -1801,14 +1820,13 @@ def save_app_schema(
             context_variables.set("app_theme_config_patch", theme_config_patch)
             context_variables.set("app_shell_config", shell_config)
             context_variables.set("app_asset_manifest", asset_manifest)
-            context_variables.set("app_data_contract", resolved_data_contract)
+            context_variables.set("data_contract", resolved_data_contract)
             context_variables.set("app_custom_route_bundle", custom_route_bundle)
             context_variables.set("app_schema_ready", True)
-            context_variables.set("available_page_primitives", list(get_page_ui_primitive_names()))
             context_variables.set("app_ui_quality_warnings", app_ui_quality_warnings)
         except Exception as exc:
             _logger.error("Failed to store app schema in context_variables: %s", exc)
-            return f"Error persisting app schema to context: {exc}"
+            raise RuntimeError("Failed to persist app schema state") from exc
     else:
         _logger.warning("context_variables not available or missing 'set' method")
 
@@ -1842,6 +1860,15 @@ def save_app_schema(
         )
         if context_variables and hasattr(context_variables, "set"):
             context_variables.set("generated_app_dir", str(output_dir))
+            rendered_files = {
+                path: (output_dir / path).read_text(encoding="utf-8") for path in written
+            }
+            code_files.update(rendered_files)
+            context_variables.set("code_files", [
+                {"filename": path, "content": content}
+                for path, content in sorted(code_files.items())
+            ])
+            context_variables.set("generated_files", {**baseline_files, **rendered_files})
     except Exception as exc:
         _logger.exception("Could not write schema files to disk")
         raise RuntimeError("Could not write schema files to disk") from exc

@@ -96,7 +96,7 @@ export function PageRenderer({ schema, className, onNavigate }) {
   const { sectionData, refetch } = usePageData(sections);
 
   const handleRefetch = useCallback((sectionId) => {
-    refetch(sectionId);
+    return refetch(sectionId);
   }, [refetch]);
 
   const layoutClass = LAYOUT_CLASSES[layout] ?? LAYOUT_CLASSES['full-width'];

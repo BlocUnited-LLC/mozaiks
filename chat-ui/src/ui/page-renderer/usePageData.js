@@ -14,11 +14,12 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { flattenSections } from './schemaUtils.js';
+import { authFetch } from '../../adapters/api.js';
 
 const DEFAULT_HEADERS = { 'Content-Type': 'application/json' };
 
 async function fetchEndpoint(endpoint) {
-  const res = await fetch(endpoint, { headers: DEFAULT_HEADERS });
+  const res = await authFetch(endpoint, { headers: DEFAULT_HEADERS });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }

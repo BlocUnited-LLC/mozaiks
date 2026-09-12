@@ -452,8 +452,7 @@ def _research_files() -> dict[str, str]:
                     self.collection = ctx.persistence.collection("research", "research_results")
 
                 async def list_results(self):
-                    cursor = self.collection.find({})
-                    return await cursor.to_list(length=100)
+                    return await self.collection.find_many({}, limit=100)
 
                 async def save(self, record):
                     await self.collection.insert_one(record)

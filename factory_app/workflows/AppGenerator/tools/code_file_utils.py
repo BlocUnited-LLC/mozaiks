@@ -27,6 +27,7 @@ from mozaiksai.core.runtime.app.auth_contract import (
     compose_app_auth_routes,
     validate_app_auth_contract,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
 )
@@ -136,6 +137,33 @@ def extract_deleted_file_paths_from_payload(payload: Any) -> list[str]:
     return paths
 
 
+def save_generated_code(context_variables: Any) -> dict[str, Any]:
+    """Persist the current validated output before AG2 advances to a quality gate."""
+    payload = detach(context_variables.get("structured_output"))
+    if not isinstance(payload, dict):
+        raise ValueError("Generated code persistence requires validated structured_output.")
+    incoming = extract_code_file_map_from_payload(payload)
+    deleted = extract_deleted_file_paths_from_payload(payload)
+    existing = detach(context_variables.get("code_files", [])) or []
+    files = extract_code_file_map_from_payload({"code_files": existing})
+    files.update(incoming)
+    removed = set(detach(context_variables.get("deleted_files", [])) or [])
+    removed.update(deleted)
+    removed.difference_update(incoming)
+    for path in removed:
+        files.pop(path, None)
+    values = {
+        "code_files": [{"filename": path, "content": content} for path, content in sorted(files.items())],
+        "deleted_files": sorted(removed),
+    }
+    for key, value in values.items():
+        if isinstance(context_variables, dict):
+            context_variables[key] = value
+        else:
+            context_variables.set(key, value)
+    return {"saved_files": sorted(incoming), "deleted_files": deleted}
+
+
 def collect_generated_app_file_map(
     generated_app_dir: Any,
     *,
@@ -189,5 +217,6 @@ __all__ = [
     "extract_code_file_map_from_payload",
     "extract_deleted_file_paths_from_payload",
     "safe_relpath",
+    "save_generated_code",
 ]
 

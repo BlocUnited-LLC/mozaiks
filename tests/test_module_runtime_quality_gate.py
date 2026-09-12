@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 _APPGEN_DIR = (
@@ -19,6 +19,21 @@ _HANDOFFS_YAML = _APPGEN_DIR / "transition_graph.yaml"
 _TOOLS_YAML = _APPGEN_DIR / "tools.yaml"
 _CTX_YAML = _APPGEN_DIR / "context_variables.yaml"
 _STRUCTURED_OUTPUTS_YAML = _APPGEN_DIR / "structured_outputs.yaml"
+
+
+@pytest.mark.parametrize("body", ["return ctx.events", "return getattr(context, 'events', None)"])
+def test_quality_gate_rejects_nonexistent_context_event_api(body):
+    from factory_app.workflows.AppGenerator.tools.module_runtime_quality import _audit_ast
+
+    errors = _audit_ast("modules/records/backend/service.py", f"def action(ctx, context):\n    {body}\n")
+    assert any("ModuleContext has no events API" in error for error in errors)
+
+
+def test_service_prompt_and_examples_use_runtime_event_api():
+    prompts = (_APPGEN_DIR / "agents.yaml").read_text(encoding="utf-8")
+    assert 'events = getattr' not in prompts
+    assert "await ctx.emit(" in prompts
+    assert "Use PermissionError for denied ownership access" in prompts
 
 
 def _code_files(*pairs: tuple[str, str]) -> list[dict[str, Any]]:
@@ -192,7 +207,8 @@ class TestModuleRuntimeQualityHook:
 
         run_module_runtime_quality_gate(agent, messages or [])
 
-    def test_hook_extracts_service_output_and_sets_context(self):
+    def test_hook_audits_persisted_validated_service_output(self):
+        from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
         payload = {
             "python_files": [
                 {
@@ -206,11 +222,9 @@ class TestModuleRuntimeQualityHook:
             "code_files": [],
             "agent_message": "Implemented service.",
         }
-        agent = _FakeAgent("ModuleRuntimeQualityAgent", {})
-        self._run_hook(
-            agent,
-            [{"name": "ServiceAgent", "content": json.dumps(payload)}],
-        )
+        agent = _FakeAgent("ModuleRuntimeQualityAgent", {"structured_output": payload})
+        save_generated_code(agent.context_variables)
+        self._run_hook(agent)
         assert "[MODULE RUNTIME QUALITY GATE]" in agent.system_message
         assert agent.context_variables["code_files"]
         assert agent.context_variables["module_runtime_quality_status"] == "needs_revision"

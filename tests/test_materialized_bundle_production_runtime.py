@@ -289,18 +289,10 @@ async def test_materialized_broken_handler_fails_before_bootable(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_materialized_unresolved_page_action_fails_before_bootable() -> None:
-    broken_plan = deepcopy(_plan_payload())
-    section_hint = broken_plan["AppBuildPlan"]["pages"][0]["sections_hint"][0]
-    section_hint["config_hint"] = json.dumps(
-        {
-            "columns": ["id", "title", "status"],
-            "api_endpoint": "/api/modules/reports/archive_reports",
-            "search": True,
-        },
-        sort_keys=True,
-    )
-
-    files, context = await _assemble_from_payload(plan_payload=broken_plan)
+    outputs = _typed_task_outputs(_load_models())
+    page_output = next(value for value in outputs.values() if value.get("pages"))
+    page_output["pages"][0]["sections"][0]["config"]["api_endpoint"] = "/api/modules/reports/archive_reports"
+    files, context = await _assemble_from_payload(task_outputs=outputs)
 
     scanner_errors = scan_generated_bundle(files, capability_packs=_selected_packs())
     assert any("archive_reports" in error for error in scanner_errors)

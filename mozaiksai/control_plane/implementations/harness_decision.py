@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mozaiksai.control_plane.contracts import (
+    CodingWorkerResult,
     ContractSurfacePlan,
     HarnessDecision,
     HarnessDecisionAction,
@@ -268,10 +269,18 @@ class FirstPartyHarnessDecisionPolicy:
         *,
         routing_decision: RefinementRoutingDecision,
         selected_paths: list[str],
+        result: CodingWorkerResult,
     ) -> HarnessDecision:
+        staged = result.status == "validated"
+        messages = {
+            "validated": "Scoped patch staged for review.",
+            "planned": "Scoped patch planned; no changes staged.",
+            "ineligible": "Scoped patch is not eligible; no changes staged.",
+            "failed": "Scoped patch failed; no changes staged.",
+        }
         return HarnessDecision(
             decision_type="auto_patch",
-            message="Scoped patch applied.",
+            message=messages[result.status],
             rationale=str(routing_decision.change_intent.rationale or routing_decision.explanation).strip(),
             confidence=float(routing_decision.change_intent.confidence or 0.0),
             recommended_workflow_id=routing_decision.workflow_id,
@@ -284,8 +293,8 @@ class FirstPartyHarnessDecisionPolicy:
                     action_type="review_patch",
                     workflow_id=routing_decision.workflow_id,
                 )
-            ],
-            metadata={"scope_origin": "applied"},
+            ] if staged else [],
+            metadata={"scope_origin": "staged" if staged else "none", "coding_status": result.status},
         )
 
     def for_contract_surface_plan(

@@ -188,12 +188,12 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppBuildPlan"]["fields"]["shell_preset_hint"]["variants"] == ["str", "null"]
     module_action_fields = models["ModuleAction"]["fields"]
     assert "api_surface" in module_action_fields
-    assert module_action_fields["api_surface"]["type"] == "literal"
-    assert set(module_action_fields["api_surface"]["values"]) >= {
-        "public", "public_readonly", "internal", "admin_internal", "null"
+    assert module_action_fields["api_surface"]["variants"] == ["ModuleApiSurface", "null"]
+    assert set(models["ModuleApiSurface"]["values"]) == {
+        "public", "public_readonly", "internal", "admin_internal"
     }
     assert "public_readonly" in module_action_fields["api_surface"]["description"]
-    assert "AUTH_ENABLED=true" in module_action_fields["api_surface"]["description"]
+    assert "authenticated UI/API actions" in module_action_fields["api_surface"]["description"]
     assert models["AppShellMode"]["values"] == [
         "standard",
         "workspace",
@@ -403,10 +403,8 @@ def test_appgenerator_guides_module_auth_surface_and_scope_contract() -> None:
     structured_outputs = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
 
     module_action = structured_outputs["models"]["ModuleAction"]["fields"]
-    assert module_action["api_surface"]["type"] == "literal"
-    assert set(module_action["api_surface"]["values"]) >= {
-        "public", "public_readonly", "internal", "admin_internal", "null"
-    }
+    assert module_action["api_surface"]["type"] == "union"
+    assert module_action["api_surface"]["variants"] == ["ModuleApiSurface", "null"]
     assert "public_readonly" in module_action["api_surface"]["description"]
     assert "entitlement_gate" in module_action["api_surface"]["description"]
 
@@ -415,15 +413,15 @@ def test_appgenerator_guides_module_auth_surface_and_scope_contract() -> None:
     standard_constraints = "\n".join(module_archetypes["archetypes"]["standard"]["hard_constraints"])
 
     assert "actions[].api_surface is part of the module contract" in module_constraints
-    assert "AUTH_ENABLED=true" in module_constraints
+    assert "Internal/admin_internal actions reject every HTTP request" in module_constraints
     assert "External HTTP dispatch and internal runtime dispatch are separate paths" in module_constraints
     assert "ctx.workspace_id" in module_constraints
     assert "Custom API adapters must not bypass module action auth" in api_constraints
     assert "Tenant, workspace, user, mutation, and admin actions require authenticated HTTP dispatch" in standard_constraints
 
     assert "`actions`: list of `{id, description, handler_method, api_surface" in source
-    assert "`actions[].api_surface` controls anonymous HTTP eligibility" in source
-    assert "Do not mark tenant, workspace, user, mutation, or admin actions public" in source
+    assert "`actions[].api_surface` controls HTTP exposure" in source
+    assert "Do not make private mutations public to fix an HTTP binding" in source
     assert "`context.workspace_id`" in source
     assert "never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization" in source
 

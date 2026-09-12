@@ -1,7 +1,9 @@
 # Infra Scaffold Templates
 
-Templates emitted by `InfraScaffoldAgent` during app generation.
-After first emit the operator owns these files — regeneration is explicit and opt-in.
+`DownloadAgent` emits deployment packaging through
+`generate_and_download` and its canonical deployment contract renderer.
+`AuthScaffoldAgent` only materializes auth configuration, the shared OIDC facade,
+and public login/callback routes from assembled `app.json` before validation.
 
 ## Staging Terms
 
@@ -14,27 +16,17 @@ Mozaiks uses two different staging concepts:
   prove a promoted/exported app before production, such as a GitHub `staging`
   environment or preview runtime.
 
-These templates only handle environment staging. They do not bypass artifact
-review, mutate source during generation, or provision hosted product resources.
+Deployment packaging describes environment staging. It does not bypass artifact
+review or provision hosted resources.
 
-## Template Variables
-
-| Variable | Source | Description |
-|----------|--------|-------------|
-| `{{APP_NAME}}` | `app/app.json .name` (or `.slug`) | Slug used in image tags, container names, nginx conf |
-| `{{MOZAIKS_VERSION}}` | `requirements.txt` or latest at generation time | Pinned mozaiks pip version |
-| `{{REGISTRY}}` | generator input | Container registry prefix (e.g. `ghcr.io/org`) |
-| `{{DEPLOY_TARGET}}` | generator input | `azure_container_apps` \| `fly` \| `render` \| `generic` |
-| `{{AUTH_DEFAULT_ROUTE}}` | `app/config/auth.yaml routes.post_login_default` | Safe app-local route used after login when no return path is available |
-
-## Template Files
+## Artifact Ownership
 
 | File | Purpose |
 |------|---------|
-| `templates/Dockerfile` | Multi-stage build: frontend (Node/Vite) → Python deps → nginx+uvicorn runtime |
-| `templates/workflows/deploy.yml` | CI/CD: build + push image → deploy → health verify with rollback stub |
-| `templates/workflows/readiness.yml` | Pre-production gate: image smoke, remote health, entitlement smoke |
-| `templates/scripts/provision.sh` | Secret-sync: reads `app/security/secrets.yaml`, validates env file, syncs to deploy target |
+| `Dockerfile`, `docker-compose.yml` | Download renderer, controlled by deployment request |
+| `.github/workflows/deploy.yml`, `.github/workflows/readiness.yml` | Download renderer, controlled by deployment request |
+| `deployment.manifest.json`, env examples | Download renderer, validated before export |
+| `scripts/provision.sh` | Not emitted by the default Factory journey; provider execution belongs to the operator or hosted adapter |
 
 Auth contract and adapter templates live in `webapp_builder/templates/`:
 
@@ -51,7 +43,7 @@ not enable it. See [Factory security](../factory-security.md) for both modes.
 
 ## Usage After Generation
 
-1. Copy template files to the generated app bundle root, substituting variables.
+1. Request deployment artifacts during Factory export; do not manually combine partial scaffold templates.
 2. Review generated `deployment.manifest.json`, `.env.example`,
    `.env.staging.example`, and `.env.production.example`; all
    env examples carry names only, never secret values.
@@ -60,16 +52,14 @@ not enable it. See [Factory security](../factory-security.md) for both modes.
 4. Copy `.env.staging.example` to ignored `.env.staging` or
    `.env.production.example` to ignored `.env.production`, then fill values
    outside source control.
-5. Run `scripts/provision.sh staging` when the target provider uses the
-   generated provision helper.
-6. Run `.github/workflows/readiness.yml` before production promotion/deploy.
-7. Push to `main` or `staging`, or use workflow dispatch, to trigger deploy.
+5. Run the generated readiness checks locally before configuring any external target.
+6. Provider execution and paid infrastructure remain explicit operator decisions.
 
 ## Operator Ownership
 
 Generated infra files belong to the operator after first emit.
-The generator will not overwrite them on subsequent runs unless `--force-infra` is passed.
-Review the diff carefully before accepting any regenerated infrastructure changes.
+Review artifact diffs before accepting regenerated infrastructure changes.
+There is no `--force-infra` overwrite policy in the Factory export contract.
 
 Hosted products may consume the generated manifest and map it into provider
 records, secrets, readiness gates, and deployment status. Those hosted records

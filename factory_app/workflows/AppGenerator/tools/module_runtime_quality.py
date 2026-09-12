@@ -17,6 +17,8 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
+from mozaiksai.core.workflow.context.frozen import detach
+
 logger = logging.getLogger(__name__)
 
 _RUNTIME_BACKEND_FILE = re.compile(r"(^|/)modules/[^/]+/backend/[^/]+\.py$")
@@ -73,7 +75,7 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
     if hasattr(context_variables, "get"):
         try:
             value = context_variables.get(key)
-            return default if value is None else value
+            return default if value is None else detach(value)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)
@@ -206,8 +208,39 @@ def _audit_ast(filename: str, content: str) -> list[str]:
         # Syntax is handled by build validation. Avoid duplicating that concern here.
         return warnings
 
+    function_passes = {
+        id(child)
+        for function in ast.walk(tree)
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for child in ast.walk(function)
+        if isinstance(child, ast.Pass)
+    }
     for node in ast.walk(tree):
-        if isinstance(node, ast.Pass):
+        direct_events = (
+            isinstance(node, ast.Attribute) and node.attr == "events"
+            and isinstance(node.value, ast.Name) and node.value.id in {"ctx", "context"}
+        )
+        optional_events = (
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr" and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Name) and node.args[0].id in {"ctx", "context"}
+            and isinstance(node.args[1], ast.Constant) and node.args[1].value == "events"
+        )
+        if direct_events or optional_events:
+            warnings.append(
+                f"{filename}:{node.lineno}: ModuleContext has no events API; use await ctx.emit(event_type, payload)."
+            )
+        if (
+            filename.endswith("/backend/repo.py")
+            and isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"find", "count_documents", "find_one_and_update", "find_one_and_delete", "estimated_document_count", "to_list"}
+        ):
+            warnings.append(
+                f"{filename}:{node.lineno}: {node.func.attr} is not a PersistenceCollection method. "
+                "Use find_many (returns a list), count, or update_one/delete_one followed by scoped find_one; no Motor cursor API in generated repositories."
+            )
+        if isinstance(node, ast.Pass) and id(node) in function_passes:
             warnings.append(
                 f"{filename}:{node.lineno}: runtime function contains pass; generated module runtime code must execute real logic or return an honest value."
             )
@@ -314,7 +347,7 @@ def review_module_runtime_quality(
         revision_count = prior_attempts + 1
         revision_request = (
             "Revise the generated module backend before frontend/controller work. "
-            "Remove placeholder runtime facts and make stats/counts repo-backed or "
+            "Correct unsupported persistence calls, remove placeholder runtime facts, and make stats/counts repo-backed or "
             "return honest empty values with null trends:\n- "
             + "\n- ".join(warnings)
         )

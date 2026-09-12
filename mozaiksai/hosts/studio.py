@@ -2525,7 +2525,7 @@ async def trigger_workflow(
                         await _complete_inline_refinement(
                             binding=inline_binding, user_id=user_id, result=coding_result,
                         )
-                        harness_decision = orchestration_control.build_coding_result_decision(coding_request)
+                        harness_decision = orchestration_control.build_coding_result_decision(coding_request, coding_result)
                 except HTTPException:
                     if inline_binding is not None:
                         await _fail_inline_refinement(binding=inline_binding, user_id=user_id)
