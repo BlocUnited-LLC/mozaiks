@@ -11,6 +11,7 @@ import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     ValidationError,
     field_serializer,
     field_validator,
@@ -194,11 +195,27 @@ class AppDataTableConfig(DataBackedConfig):
     data_key: str | None = None
     selection: str | None = None
     pagination: bool = False
-    page_size: int | None = None
+    pagination_mode: Literal["client", "server"] = "client"
+    page_size: int | None = Field(default=None, ge=1, strict=True)
+    total_key: str | None = None
     search: bool = False
     search_keys: list[str] | None = None
     actions: list[AppPageAction] | None = None
     empty: AppEmptyStateConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_pagination(self) -> AppDataTableConfig:
+        if self.pagination_mode == "server":
+            if not self.pagination or self.page_size is None or self.page_size > 100:
+                raise ValueError("Server pagination requires pagination=true and page_size (1-100)")
+            if not self.api_endpoint or not _MODULE_API_RE.fullmatch(self.api_endpoint):
+                raise ValueError("Server pagination requires a canonical module endpoint")
+            for key in (self.data_key, self.total_key):
+                if not key or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", key):
+                    raise ValueError("Server pagination requires explicit data_key and total_key response paths")
+        elif self.total_key is not None:
+            raise ValueError("total_key requires server pagination")
+        return self
 
 
 class AppResourceTableConfig(AppDataTableConfig):
@@ -208,6 +225,12 @@ class AppResourceTableConfig(AppDataTableConfig):
     default_filter: str | None = None
     sorts: list[AppTableSort] | None = None
     default_sort: str | None = None
+
+    @model_validator(mode="after")
+    def _client_pagination_only(self) -> AppResourceTableConfig:
+        if self.pagination_mode != "client":
+            raise ValueError("Server pagination is supported only by DataTable")
+        return self
 
 
 class AppFormConfig(PageContractModel):

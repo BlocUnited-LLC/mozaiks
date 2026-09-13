@@ -13,7 +13,7 @@
 
 import { useCallback, useState } from 'react';
 import { getPrimitive, getPrimitiveSchema } from './PrimitiveRegistry.js';
-import { getChildSections } from './schemaUtils.js';
+import { getChildSections, resolvePath } from './schemaUtils.js';
 import { emitAppEvent, useAppEvent } from '../hooks/useAppEventBus.js';
 import { cn } from '../lib/cn.js';
 import { useWorkflowStart } from '../../hooks/useWorkflowStart.js';
@@ -41,14 +41,6 @@ function titleize(value) {
   return String(value)
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase());
-}
-
-function resolvePath(source, path) {
-  if (!path) return undefined;
-  return String(path)
-    .split('.')
-    .filter(Boolean)
-    .reduce((current, segment) => (current == null ? undefined : current[segment]), source);
 }
 
 function interpolateString(template, context) {
@@ -592,10 +584,14 @@ export function SectionRenderer({
       primitiveProps = {
         id: componentId,
         columns: normalizeColumns(config.columns),
-        data: resolveTableData(config, effectiveData),
+        data: config.pagination_mode === 'server' ? liveState?.rows : resolveTableData(config, effectiveData),
         selection: config.selection ?? 'none',
         pagination: config.pagination ?? true,
+        pagination_mode: config.pagination_mode ?? 'client',
         page_size: config.page_size ?? 20,
+        total: liveState?.total,
+        query: liveState?.query,
+        onQueryChange: (query) => onRefetch?.(section.id, query),
         search: config.search ?? true,
         search_placeholder: config.search_placeholder,
         search_keys: config.search_keys,

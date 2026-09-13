@@ -480,8 +480,9 @@ def test_basic_table_config_does_not_acquire_resource_table_fields() -> None:
             "config": {"columns": [{"key": "title", "label": "Title", "type": "text", "width": None}]},
         })
         config = section.model_dump(mode="json")["config"]
-        assert "filters" not in config
-        assert "search_keys" not in config
+        assert config["search_keys"] is None
+        for resource_only in ("filters", "default_filter", "sorts", "default_sort", "search_placeholder"):
+            assert resource_only not in config
 
 
 def test_operator_readiness_registers_only_declared_safe_pack_outputs() -> None:

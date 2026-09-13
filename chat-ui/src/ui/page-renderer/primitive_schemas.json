@@ -2,8 +2,8 @@
   "_comment": "Auto-derived from PrimitiveRegistry.js, PrimitiveSchemas.js, and PrimitiveCatalog.js. Do not edit manually. Consumed by mozaiksai/core/workflow/ui_primitives.py for agent guidance injection.",
   "DataTable": {
     "tier": "specialized",
-    "use": "Use only when ResourceTable is not appropriate for dense operational data.",
-    "avoid": "Do not use as the default collection page primitive; prefer ResourceTable.",
+    "use": "Use pagination_mode=server for ordinary CRUD lists whose module returns a bounded page. Declare page/page_size/search inputs and data_key/total_key response paths. The module owns literal search, tenant/user filtering, stable ordering and bounded aggregate pagination. Client mode is for fully loaded rows.",
+    "avoid": "Do not fetch an unbounded collection or paginate only a capped first batch. Never fake totals or apply local search/sorting to a server page. ResourceTable server filters are unsupported.",
     "required": [
       "columns"
     ],
@@ -11,11 +11,14 @@
       "columns": "array of string|{key,label?,type?,sortable?,width?} — min 1 — Column definitions. Each entry is a string key or a column config object. — REQUIRED",
       "api_endpoint": "string — Backend endpoint to fetch rows from.",
       "data": "array of items — Static row data (alternative to api_endpoint).",
+      "data_key": "string — Response path containing rows. Required in server mode.",
       "selection": "string: none|single|multi — default none",
       "pagination": "boolean — default true",
-      "page_size": "integer — default 20",
+      "pagination_mode": "string: client|server — default client — Select server for paged list endpoints. Requires pagination=true, an explicit module api_endpoint, data_key, total_key, and page_size (1-100). Sends canonical page/page_size/search GET inputs; server owns literal search, stable order and total. No local filtering/slicing or interactive sorting in server mode.",
+      "total_key": "string — Required in server mode: response path containing a nonnegative integer count of all matching owned rows before pagination. Omit in client mode; never infer it from page length.",
+      "page_size": "integer — default 20 — Positive integer. Explicit 1-100 is required for server mode.",
       "search": "boolean — default true",
-      "search_keys": "array of string — Row keys searched within loaded rows only. Omitted/null uses all column keys; [] searches no fields. Set explicit keys to exclude other columns, such as notes. Does not fetch server rows.",
+      "search_keys": "array of string — Client mode row keys searched within loaded rows only. Omitted/null uses all column keys; [] searches no fields. Server mode does not apply these keys or send them: the module must implement the requested literal search fields across its full owned dataset.",
       "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
       "empty": "{title?,message?,action?}"
     }
@@ -238,8 +241,8 @@
   },
   "ResourceTable": {
     "tier": "default",
-    "use": "Use for collection/index pages that need search, filters, sorting, status, updated time, and row actions.",
-    "avoid": "Do not wrap ResourceTable in decorative cards or add fake analytics around it.",
+    "use": "Use for bounded, fully loaded collection/index pages with client-local controls and row actions. For a paged list endpoint, choose DataTable with pagination_mode=server.",
+    "avoid": "Do not use ResourceTable for server pagination or pretend local resource filters query the whole dataset. Do not wrap it in decorative cards or add fake analytics.",
     "required": [
       "columns"
     ],
@@ -251,6 +254,7 @@
       "selection": "string: none|single|multi — default none",
       "search": "boolean — default true",
       "search_placeholder": "string",
+      "pagination_mode": "string: client — default client — Server paging is not supported here. Use DataTable for paged endpoints; resource filters/sorts are not server query inputs.",
       "search_keys": "array of string — Row keys searched within loaded rows only. Omitted/null uses all column keys; [] searches no fields. Set explicit keys to exclude other columns, such as notes. Does not fetch server rows.",
       "filters": "array of {label,value,field?,match_values?}",
       "default_sort": "string",

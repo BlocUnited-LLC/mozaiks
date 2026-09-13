@@ -289,6 +289,16 @@ async def _execute_module_action(
     action_input_properties = _module_action_input_properties(schema_module_executor, module_name, action_name)
     _reconcile_reserved_params(params, context_overrides, action_input_properties=action_input_properties)
 
+    # HTTP query strings have no numeric type. Decode only declared integers;
+    # invalid values still reach the executor's canonical schema validation.
+    if getattr(request, "method", None) == "GET":
+        for key, value in params.items():
+            field = action_input_properties.get(key)
+            if (isinstance(field, dict) and field.get("type") == "integer"
+                    and isinstance(value, str) and re.fullmatch(r"-?(?:0|[1-9][0-9]*)", value)
+                    and len(value) <= 16):
+                params[key] = int(value)
+
     if is_auth_enabled() and principal is None and not _is_public_module_action(request, module_name, action_name):
         raise HTTPException(status_code=401, detail="Missing authorization token")
 

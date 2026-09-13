@@ -3761,6 +3761,12 @@ models:
         - 'null'
         description: Optional status such as ready, generating, or error.
 
+  AppPaginationMode:
+    type: literal
+    values:
+    - client
+    - server
+
   AppDataTableConfig:
     type: model
     fields:
@@ -3773,13 +3779,13 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional canonical module endpoint for row data. Use /api/modules/{module_id}/{action_id}; do not include query strings or fragments. Put limits in page_size and filters in payload/input config.
+        description: Canonical module endpoint for row data. Use /api/modules/{module_id}/{action_id} without query strings or fragments. Server mode sends page/page_size/search; declare those action inputs and implement bounded paging in the module. Client mode sends no query inputs.
       data_key:
         type: union
         variants:
         - str
         - 'null'
-        description: Optional response key containing row data.
+        description: Response path containing row data. Required in server mode; use an explicit key such as items, not an inferred response shape.
       selection:
         type: union
         variants:
@@ -3790,12 +3796,21 @@ models:
         type: bool
         description: Whether pagination is enabled.
         default: false
+      pagination_mode:
+        type: union
+        variants:
+        - AppPaginationMode
+        - 'null'
+        description: Select server when the list endpoint returns a bounded page. Null omits the field and uses the runtime client default. Server requires pagination=true, page_size (1-100), api_endpoint, data_key, and total_key; requests canonical page/page_size/search inputs. Client operates only on loaded rows. Server owns search and stable ordering; column sorting is disabled.
+      total_key:
+        type: optional_str
+        description: Required response path to a nonnegative integer total in server mode; null in client mode. Count all rows matching the same owner scope and literal search, before paging.
       page_size:
         type: union
         variants:
         - int
         - 'null'
-        description: Optional page size.
+        description: Positive integer; server mode requires an explicit value from 1 through 100. Null in client mode uses the primitive default.
       search:
         type: bool
         description: Whether table-local search is enabled.
@@ -3803,7 +3818,7 @@ models:
       search_keys:
         type: optional_list
         items: str
-        description: Explicit row keys searched within loaded rows. Set these when search must exclude other columns (for example title and author but not notes). Null uses all column keys; an empty list searches no fields. This does not query or fetch additional server rows.
+        description: Client-mode row keys searched within loaded rows. Null uses all column keys; an empty list searches no fields. Server mode never applies or sends these keys; the declared module must implement the requested literal search fields across its full owned dataset.
       actions:
         type: optional_list
         items: AppPageAction
@@ -4206,6 +4221,12 @@ models:
         type: bool
         description: Whether pagination is enabled.
         default: false
+      pagination_mode:
+        type: union
+        variants:
+        - AppPaginationMode
+        - 'null'
+        description: ResourceTable requires client or null (runtime client default); server is rejected by page validation. Use DataTable for server pagination; resource filters and sorts are not a server query contract.
       page_size:
         type: union
         variants:

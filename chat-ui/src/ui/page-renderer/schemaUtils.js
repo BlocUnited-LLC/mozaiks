@@ -48,3 +48,11 @@ export function flattenSections(sections = []) {
   normalizeSections(sections).forEach(visit);
   return flattened;
 }
+
+export function resolvePath(source, path) {
+  if (!path) return undefined;
+  return String(path)
+    .split('.')
+    .filter(Boolean)
+    .reduce((current, segment) => (current == null ? undefined : current[segment]), source);
+}
