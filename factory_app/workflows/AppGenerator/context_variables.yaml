@@ -1424,7 +1424,7 @@ definitions:
       default: null
   lifecycle_state:
     type: string
-    writer_ids: [deterministic_tool]
+    writer_ids: [transition_router, deterministic_tool]
     persisted: true
     description: Review state published after the staged bundle is registered.
     source:

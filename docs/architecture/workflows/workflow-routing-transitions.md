@@ -48,6 +48,38 @@ the runtime validates the bearer token and checks that the requested scope
 matches the authenticated principal. Local no-auth operation remains governed
 by runtime configuration, not by a browser-side bypass.
 
+### Failed Workflow Retry
+
+Studio's existing `POST /api/workflows/trigger` accepts `retry_failed: true`
+with `trigger_source: "manual"`, the execution `app_id`, `workflow_id`, and
+`source_chat_id`. The source must be that principal's failed session (status
+`2`) for the same host and workflow, with a current registered build binding.
+The optional `build_registry_id` is a selector, not target authority. Retry
+rejects context, trigger payload, journey, action, and artifact-key overrides.
+Ordinary source-chat launches without this flag retain their existing behavior.
+
+A genesis retry starts fresh. A refinement retry uses the saved typed change
+request, selected baseline record, and journey through
+`TriggerRoutingContribution`; it does not reclassify the request or allocate a
+new build. Missing, foreign, retired, or inconsistent baseline records fail
+closed. Rebuild/full-restart intent is unsupported by this retry path and is
+rejected rather than converted to a partial revision. The trusted contribution's
+`require_exact_route` constraint runs after dependency checks but before router
+state persistence or chat creation. Unmet dependencies or workflow/journey
+drift reject the retry; dependency checks are not bypassed.
+
+AppGenerator retains its declared InterviewAgent entry and revision prompt.
+Its existing first `before_chat` hook verifies the committed baseline archive
+and hydrates `generated_files`; it does not read a mutable workspace fallback.
+Lifecycle hook errors are logged, and assembly repeats the verification and
+rejects missing, changed, retired, or unsupported content. Archive integrity
+is verified by that loader, not by the trigger's record-scope checks.
+
+Each retry gets a fresh chat with default execution state. Saved intent IDs and
+baseline/journey provenance survive a subsequent retry, while generated output,
+validation, counters, messages, and the failed source session are not copied or
+reset. An idle same-build chat does not itself supersede the current binding.
+
 ## Contract
 
 `extension_registry.json` has three concerns:

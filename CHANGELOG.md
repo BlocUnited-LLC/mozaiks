@@ -36,6 +36,8 @@ This project follows a practical pre-1.0 changelog format:
   including frozen workflow context, instead of passing empty or stale wiring.
 - Studio offers a fresh, owner-bound launch for failed workflows, with
   acknowledgement checks and disabled terminal-session input.
+  Refinement retries recover the saved request and baseline without copying
+  failed execution state, and reject routing drift before persisting a launch.
 - Factory live previews boot saved, owner-bound app artifacts through the real
   platform host, shared frontend, and disposable Mongo database. Failed startup,
   expiry, and artifact changes clear stale preview URLs. A local Docker image

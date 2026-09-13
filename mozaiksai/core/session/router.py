@@ -144,6 +144,12 @@ class SessionRouter:
                 context_seed.setdefault("dependency_reason", unmet_dependency.reason)
                 lifecycle_state = SessionLifecycle.ACTIVE
 
+        if route_contribution is not None and route_contribution.require_exact_route:
+            if (unmet_dependency is not None
+                    or resolved_workflow_id != route_contribution.workflow_id
+                    or explicit_journey_id != route_contribution.journey_id):
+                raise ValueError("Trigger requires exact route to the saved workflow and journey; prerequisites no longer match")
+
         decision = RoutingDecision(
             workflow_id=resolved_workflow_id,
             requested_workflow_id=requested_workflow_id,

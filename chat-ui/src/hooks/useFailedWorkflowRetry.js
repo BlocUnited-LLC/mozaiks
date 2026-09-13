@@ -36,7 +36,7 @@ export function useFailedWorkflowRetry({ appId, userId, chatId, workflowName, su
     try {
       const result = await startWorkflow(workflowName, {}, {
         trigger_source: 'manual', app_id: appId, user_id: userId,
-        source_chat_id: chatId, signal: pending.controller.signal,
+        source_chat_id: chatId, retry_failed: true, signal: pending.controller.signal,
       });
       if (result && !pending.controller.signal.aborted && currentScope.current === scope) {
         setLaunchedScope(scope);

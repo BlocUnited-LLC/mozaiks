@@ -257,7 +257,7 @@ test('failed workflow retry uses the existing authenticated launch path', async 
         url: '/api/workflows/trigger', method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer current-token' },
         body: { trigger_source: 'manual', context_variables: {}, app_id: 'execution-host', user_id: 'operator',
-          source_chat_id: 'failed-chat', workflow_id: 'ExampleWorkflow' },
+          source_chat_id: 'failed-chat', retry_failed: true, workflow_id: 'ExampleWorkflow' },
       }]);
       assert.deepEqual(await page.evaluate(() => window.fixture.navigations), []);
       await page.evaluate(() => window.fixture.release());
