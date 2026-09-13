@@ -102,6 +102,14 @@ was successfully validated.
 
 ## Diagnostics
 
+Page task validation reuses the runtime page schema and reports its diagnostic
+location. Builder retry feedback additionally preserves the known, input-free
+action requirements (for example, `submit actions require href`); it does not
+expose arbitrary validator messages or rejected values. A Form submit action
+must carry its own fixed module endpoint. When create and update target different
+actions, AppSchema generates separate forms/modals, not a null or conditional
+`href`. The runtime schema and bounded task retry budget remain unchanged.
+
 Functional failures are structured diagnostics. Examples:
 
 - `MISSING_ROUTE_COMPONENT`

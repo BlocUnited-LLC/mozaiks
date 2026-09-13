@@ -3544,7 +3544,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Safe absolute route or API/module endpoint starting with /. Required for navigate, submit, and delete actions; supports {field} interpolation. Use null for event/workflow actions that do not use a URL, never an empty string or a modal id.
+        description: Safe absolute route or API/module endpoint starting with /. Required for navigate, submit, and delete actions. Module submit/delete actions need one fixed /api/modules/{module_id}/{action_id}; never null or a conditional create/update URL. Navigation routes support {field} interpolation. Use null for event/workflow actions that do not use a URL, never an empty string or a modal id.
       event_type:
         type: union
         variants:
@@ -3848,7 +3848,7 @@ models:
         variants:
         - AppPageAction
         - 'null'
-        description: Submit action. Prefer module/API routes or workflow actions.
+        description: Submit action. action_type submit requires its own fixed module endpoint in href; payload and the table endpoint cannot supply it. Use separate create/edit forms or modals when their module action IDs differ. Workflow submissions use action_type workflow with workflow_id instead.
       cancel_label:
         type: union
         variants:
