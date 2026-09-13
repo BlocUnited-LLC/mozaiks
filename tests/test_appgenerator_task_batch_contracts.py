@@ -340,8 +340,9 @@ def test_appgenerator_handoffs_start_from_agents_not_pseudo_user() -> None:
 
     # The generation chain is agent-driven, but the pseudo-user is a legitimate
     # SOURCE for HITL resume routes. The blanket ban this assertion used to make
-    # dates from the AG2 beta (#32) and is now contradicted by AgentGenerator,
-    # ThemeCapture and ValueEngine, which all declare user-source rules. It also
+    # predates the current routing conventions (#32) and is now contradicted by
+    # AgentGenerator, ThemeCapture and ValueEngine, which all declare
+    # user-source rules. It also
     # became actively harmful once no_transition_matched began failing runs:
     # AppGenerator reverts to the user twelve times, so with no resume route
     # every builder reply closed the run as FAILED — the reply failed the build
