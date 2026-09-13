@@ -55,7 +55,10 @@ export const SHARED_DEFINITIONS = {
       type:          { type: 'string', enum: ['text', 'email', 'password', 'number', 'textarea', 'select', 'checkbox'] },
       required:      { type: 'boolean' },
       placeholder:   { type: 'string' },
-      default_value: {},
+      default_value: {
+        type: ['string', 'number', 'boolean', 'null'],
+        description: 'Literal per-field default; a non-null selected_row field takes precedence. No expressions or nested values.',
+      },
       options: {
         type: 'array',
         items: { type: 'object', required: ['value', 'label'], properties: { value: {}, label: { type: 'string' } } },
@@ -205,6 +208,7 @@ export const PRIMITIVE_SCHEMAS = {
       selection:          { type: 'string', enum: ['none', 'single', 'multi'], default: 'none' },
       search:             { type: 'boolean', default: true },
       search_placeholder: { type: 'string' },
+      search_keys:        { type: 'array', items: { type: 'string' }, description: 'Row keys searched within loaded rows only. Omitted/null uses all column keys; [] searches no fields. Set explicit keys to exclude other columns, such as notes. Does not fetch server rows.' },
       filters:            { type: 'array', items: SHARED_DEFINITIONS.tableFilter },
       default_sort:       { type: 'string' },
       actions:            { type: 'array', items: SHARED_DEFINITIONS.action },
@@ -355,6 +359,7 @@ export const PRIMITIVE_SCHEMAS = {
       pagination:   { type: 'boolean', default: true },
       page_size:    { type: 'integer', minimum: 1, default: 20 },
       search:       { type: 'boolean', default: true },
+      search_keys:  { type: 'array', items: { type: 'string' }, description: 'Row keys searched within loaded rows only. Omitted/null uses all column keys; [] searches no fields. Set explicit keys to exclude other columns, such as notes. Does not fetch server rows.' },
       actions:      { type: 'array', items: SHARED_DEFINITIONS.action },
       empty: {
         type: 'object',
@@ -372,7 +377,7 @@ export const PRIMITIVE_SCHEMAS = {
     required: ['fields'],
     properties: {
       initial_values_key: { type: 'string', enum: ['selected_row'], description: 'Prefill editable fields from the record passed to the containing modal.' },
-      fields:        { type: 'array', minItems: 1, items: SHARED_DEFINITIONS.formField },
+      fields:        { type: 'array', minItems: 1, items: SHARED_DEFINITIONS.formField, description: 'Declare requested create-form defaults with fields[].default_value: string, number, boolean, or null. Non-null selected_row values override defaults, including false, 0, and empty strings. Null/omitted defaults use the primitive empty value. No top-level defaults, expressions, objects, or arrays.' },
       layout:        { type: 'string', enum: ['vertical', 'horizontal', 'grid'], default: 'vertical' },
       columns:       { type: 'integer', minimum: 1, default: 2 },
       submit_label:  { type: 'string', default: 'Submit' },

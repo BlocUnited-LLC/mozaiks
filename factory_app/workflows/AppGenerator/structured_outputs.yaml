@@ -3637,6 +3637,10 @@ models:
         type: bool
         description: Whether the field is required.
         default: false
+      default_value:
+        type: AppPrimitiveValue
+        default: null
+        description: Literal per-field default (string, number, boolean, or null). Use for requested create-form defaults; no objects, arrays, expressions, or top-level defaults. A non-null selected_row field takes precedence in edit forms; null uses the primitive empty value.
       placeholder:
         type: union
         variants:
@@ -3796,6 +3800,10 @@ models:
         type: bool
         description: Whether table-local search is enabled.
         default: false
+      search_keys:
+        type: optional_list
+        items: str
+        description: Explicit row keys searched within loaded rows. Set these when search must exclude other columns (for example title and author but not notes). Null uses all column keys; an empty list searches no fields. This does not query or fetch additional server rows.
       actions:
         type: optional_list
         items: AppPageAction
@@ -3820,7 +3828,7 @@ models:
         variants:
         - AppFormInitialValuesKey
         - 'null'
-        description: Use selected_row to prefill an edit form from the record passed to its modal. Null starts a blank create form.
+        description: Use selected_row to prefill an edit form from the record passed to its modal. Null starts a create form using each field's default_value or the primitive empty value.
       fields:
         type: list
         items: AppFormField
@@ -4217,7 +4225,7 @@ models:
       search_keys:
         type: optional_list
         items: str
-        description: Optional row fields used for search.
+        description: Explicit row keys searched within loaded rows. Set these when search must exclude other columns (for example title and author but not notes). Null uses all column keys; an empty list searches no fields. This does not query or fetch additional server rows.
       filters:
         type: optional_list
         items: AppTableFilter

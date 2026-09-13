@@ -45,6 +45,30 @@ Shared foundations:
 Use the same primitives where possible.
 Do not collapse the producers that use them.
 
+### Form defaults and table search
+
+`Form.config.fields[].default_value` declares a literal scalar default: string,
+number, boolean, or null. For example, a status select can declare
+`default_value: planned` with a matching select option. Objects, arrays,
+expressions, and top-level form defaults are not supported. In edit forms,
+`initial_values_key: selected_row` supplies existing non-null field values ahead
+of defaults, preserving `false`, `0`, and empty strings. An omitted or null
+default falls back to the primitive's empty value (false for checkboxes, an empty
+string otherwise).
+
+Both `DataTable` and `ResourceTable` accept `config.search_keys`, an optional
+list of row keys. With `search: true`, `search_keys: [title, author]` searches
+only those keys, even when notes are also displayed. Omitted or null keys search
+all declared column keys; an empty list searches no fields. Keys may refer to
+non-displayed fields present in the loaded rows. Search and pagination operate
+on loaded rows only; neither fetches additional records or sends a server query.
+
+These fields pass through the strict runtime page model, AppGenerator structured
+output, and `save_app_schema` YAML materialization. `SectionRenderer` forwards
+them to the existing primitives. Generator prompt guidance comes from the shared
+primitive catalog; regenerate it with `node scripts/export-primitive-schemas.js`
+after changing `PrimitiveSchemas.js`.
+
 ### Brand-driven visual identity
 
 `app/brand/theme_config.json` is the canonical visual identity source for an

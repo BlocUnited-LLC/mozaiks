@@ -28,6 +28,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated form defaults and explicit table search fields survive the strict
+  page contracts and materialization into the existing shared UI primitives.
 - Summary metric columns adapt to their container width and wrap complete labels
   instead of truncating short labels in narrow dashboard panels.
 - Factory planning receives exact materializer page paths and actionable

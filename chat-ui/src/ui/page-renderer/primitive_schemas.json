@@ -15,6 +15,7 @@
       "pagination": "boolean — default true",
       "page_size": "integer — default 20",
       "search": "boolean — default true",
+      "search_keys": "array of string — Row keys searched within loaded rows only. Omitted/null uses all column keys; [] searches no fields. Set explicit keys to exclude other columns, such as notes. Does not fetch server rows.",
       "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
       "empty": "{title?,message?,action?}"
     }
@@ -28,7 +29,7 @@
     ],
     "properties": {
       "initial_values_key": "string: selected_row — Prefill editable fields from the record passed to the containing modal.",
-      "fields": "array of {name,label,type,required?,placeholder?,default_value?,options?} — min 1 — REQUIRED",
+      "fields": "array of {name,label,type,required?,placeholder?,default_value?,options?} — min 1 — Declare requested create-form defaults with fields[].default_value: string, number, boolean, or null. Non-null selected_row values override defaults, including false, 0, and empty strings. Null/omitted defaults use the primitive empty value. No top-level defaults, expressions, objects, or arrays. — REQUIRED",
       "layout": "string: vertical|horizontal|grid — default vertical",
       "columns": "integer — default 2",
       "submit_label": "string — default Submit",
@@ -250,6 +251,7 @@
       "selection": "string: none|single|multi — default none",
       "search": "boolean — default true",
       "search_placeholder": "string",
+      "search_keys": "array of string — Row keys searched within loaded rows only. Omitted/null uses all column keys; [] searches no fields. Set explicit keys to exclude other columns, such as notes. Does not fetch server rows.",
       "filters": "array of {label,value,field?,match_values?}",
       "default_sort": "string",
       "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",

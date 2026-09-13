@@ -128,6 +128,7 @@ class AppFormField(PageContractModel):
     label: str
     type: Literal["text", "email", "password", "number", "textarea", "select", "checkbox"]
     required: bool = False
+    default_value: PrimitiveValue = None
     placeholder: str | None = None
     options: list[AppSelectOption] | None = None
 
@@ -195,6 +196,7 @@ class AppDataTableConfig(DataBackedConfig):
     pagination: bool = False
     page_size: int | None = None
     search: bool = False
+    search_keys: list[str] | None = None
     actions: list[AppPageAction] | None = None
     empty: AppEmptyStateConfig | None = None
 
@@ -202,7 +204,6 @@ class AppDataTableConfig(DataBackedConfig):
 class AppResourceTableConfig(AppDataTableConfig):
     search: bool = True
     search_placeholder: str | None = None
-    search_keys: list[str] | None = None
     filters: list[AppTableFilter] | None = None
     default_filter: str | None = None
     sorts: list[AppTableSort] | None = None
