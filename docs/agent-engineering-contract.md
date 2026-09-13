@@ -89,6 +89,28 @@ adapters, task streams, task observation, delegation engines, or generic
 agent scheduling unless there is no viable AG2-aligned implementation path and
 the boundary is documented before or with the code change.
 
+## Commit Attribution
+
+Every commit must identify the agent that wrote it, in the message body:
+
+```
+Co-Authored-By: <agent and model> <noreply@example.invalid>
+```
+
+Git author identity does **not** identify the agent. Agents commit under the human
+operator's configured `user.name`/`user.email`, and multiple agents routinely share one
+worktree, so per-repo or per-worktree git config cannot separate them either. The commit
+message is the only reliable carrier.
+
+This is not bookkeeping. On PR #521 two agents worked the same branch simultaneously and
+three separate test regressions survived for hours because each lane assumed the other
+was watching; reconstructing who wrote what afterwards required guessing from an
+incidental difference in sign-off formatting. An unattributable commit makes a
+regression unassignable, and an unassignable regression is nobody's to fix.
+
+Keep the DCO `Signed-off-by:` trailer as well — it certifies provenance for the human
+operator and is a separate requirement (see `DCO.md`). Sign off once, not twice.
+
 ## Release Hold
 
 Do **not** publish this repo yet.
