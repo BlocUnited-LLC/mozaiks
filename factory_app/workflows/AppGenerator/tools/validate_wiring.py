@@ -29,6 +29,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
 from mozaiksai.core.workflow.context.frozen import detach
 
@@ -273,8 +275,8 @@ def _actions_from_module_yamls(app_dir: Path) -> set[str]:
     return valid
 
 
-def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
-    valid: set[str] = set()
+def _generated_module_action_contracts(files: dict[str, str]) -> dict[str, dict[str, Any]]:
+    contracts: dict[str, dict[str, Any]] = {}
     for path, content in sorted(files.items()):
         if not path.startswith("modules/") or not path.endswith("/module.yaml"):
             continue
@@ -300,9 +302,88 @@ def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
             else:
                 continue
             if action_id:
-                valid.add(f"{module_id}/{action_id}")
-                valid.add(action_id)
-    return valid
+                contracts[f"{module_id}/{action_id}"] = action if isinstance(action, dict) else {}
+    return contracts
+
+
+def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
+    contracts = _generated_module_action_contracts(files)
+    return set(contracts) | {key.split("/", 1)[1] for key in contracts}
+
+
+def _has_schema_reference(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(key in value for key in ("$ref", "$dynamicRef", "$recursiveRef")) or any(
+            _has_schema_reference(item) for item in value.values()
+        )
+    return isinstance(value, list) and any(_has_schema_reference(item) for item in value)
+
+
+def _required_output_type(schema: Any, key_path: Any, expected: str) -> bool:
+    if not isinstance(key_path, str) or not key_path:
+        return False
+    for key in key_path.split("."):
+        if not isinstance(schema, dict) or schema.get("type") != "object":
+            return False
+        properties = schema.get("properties")
+        if not isinstance(properties, dict) or key not in (schema.get("required") or []):
+            return False
+        schema = properties.get(key)
+    return isinstance(schema, dict) and schema.get("type") == expected
+
+
+def _server_table_contract_error(config: dict[str, Any], action: dict[str, Any]) -> str | None:
+    if action.get("api_surface") in {"internal", "admin_internal"}:
+        return "Server paging cannot bind an internal-only module action."
+    inputs, outputs = action.get("input_schema"), action.get("output_schema")
+    if not isinstance(inputs, dict) or not isinstance(outputs, dict):
+        return "Server paging requires the generated action's input and output schemas."
+    try:
+        if _has_schema_reference(inputs) or _has_schema_reference(outputs):
+            return "Server paging requires inline query and response schemas; schema references are unsupported."
+        Draft202012Validator.check_schema(inputs)
+        Draft202012Validator.check_schema(outputs)
+        properties = inputs.get("properties", {})
+        for field, expected in (("page", "integer"), ("page_size", "integer"), ("search", "string")):
+            declaration = properties.get(field, {})
+            if declaration.get("type") != expected:
+                return f"Server paging requires an explicit {expected} input named {field}."
+        validator = Draft202012Validator(inputs)
+        for page in (1, 2):
+            if not validator.is_valid({"page": page, "page_size": config.get("page_size"), "search": ""}):
+                return "The action schema rejects the table's initial or next-page query."
+        for field, expected in (("data_key", "array"), ("total_key", "integer")):
+            if not _required_output_type(outputs, config.get(field), expected):
+                return f"Server paging {field} must resolve to a required {expected} response field."
+    except (SchemaError, TypeError, ValueError, RecursionError, AttributeError):
+        return "Server paging requires valid, inline action schemas."
+    return None
+
+
+def _server_table_binding_errors(pages: list[Any], contracts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+
+    def visit(page_name: str, sections: Any) -> None:
+        for section in sections or []:
+            if not isinstance(section, dict) or not isinstance(section.get("config"), dict):
+                continue
+            config = section["config"]
+            if config.get("pagination_mode") == "server":
+                endpoint = config.get("api_endpoint")
+                key, _ = _endpoint_to_action_key(endpoint) if isinstance(endpoint, str) else (None, None)
+                error = _server_table_contract_error(config, contracts.get(key or "", {}))
+                if error:
+                    failures.append({
+                        "test": "wiring_server_table_contract", "page": page_name,
+                        "section": str(section.get("id") or "<no-id>"), "error": error,
+                        "fix_suggestion": "Align the table's page/page_size/search inputs and required data_key/total_key outputs with the generated module action contract.",
+                    })
+            visit(page_name, config.get("children"))
+
+    for page in pages:
+        if isinstance(page, dict):
+            visit(str(page.get("name") or "<unnamed>"), page.get("sections"))
+    return failures
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +476,18 @@ async def validate_wiring(
     if generated_files:
         known_actions.update(_actions_from_generated_module_files(generated_files))
 
+    contract_files = generated_files
+    if not has_file_snapshot and app_dir and app_dir.is_dir():
+        contract_files = {}
+        for path in sorted((app_dir / "modules").glob("*/module.yaml")):
+            try:
+                contract_files[path.relative_to(app_dir).as_posix()] = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                _logger.warning("validate_wiring: module contract could not be read: %s", path)
+    server_table_failures = _server_table_binding_errors(
+        app_pages, _generated_module_action_contracts(contract_files),
+    )
+
     # ── 3. Cross-reference ────────────────────────────────────────────────
     wired: list[dict[str, str]] = []
     platform_endpoints: list[dict[str, str]] = []
@@ -427,11 +520,11 @@ async def validate_wiring(
     has_invalid_endpoints = bool(invalid_endpoints)
     missing_input = not generated_files and not app_pages
 
-    blocking_pass: bool = not (missing_input or has_invalid_endpoints or has_orphaned_pages)
+    blocking_pass: bool = not (missing_input or has_invalid_endpoints or has_orphaned_pages or server_table_failures)
 
     # ── 5. Build human-readable output ───────────────────────────────────
     warnings: list[str] = []
-    failed_tests: list[dict[str, Any]] = []
+    failed_tests: list[dict[str, Any]] = list(server_table_failures)
 
     if missing_input:
         failed_tests.append({
@@ -498,6 +591,8 @@ async def validate_wiring(
         message = "Wiring validation requires generated files or page schemas."
     elif has_invalid_endpoints:
         message = f"{len(invalid_endpoints)} page endpoint(s) have invalid api_endpoint syntax."
+    elif server_table_failures:
+        message = f"{len(server_table_failures)} server table binding(s) do not match their module action contracts."
     elif not blocking_pass:
         message = (
             f"{len(orphaned_pages)} page endpoint(s) reference unknown module actions."

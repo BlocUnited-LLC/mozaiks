@@ -1,5 +1,22 @@
 # AppGenerator Output Assembly Contract
 
+## Server Table Binding Acceptance
+
+Opt-in server-paged DataTable sections must close against the actual generated
+module action contract during the existing `validate_wiring` acceptance gate.
+Action names in a plan alone are insufficient. The action declares integer
+`page` and `page_size`, string `search`, and accepts the table's initial and
+next-page query, including empty search. Extra required inputs cannot be supplied
+by this fixed query contract. Internal-only actions are not browser endpoints.
+
+`data_key` and `total_key` resolve through required inline object properties to
+an array and integer respectively. Schema references are not supported in this
+bounded binding contract and are never fetched. Missing or incompatible bindings
+fail the existing wiring check; they do not create another routing or retry
+system. Client-paged tables retain their current input contract. At runtime,
+the data-fetch owner separately validates actual rows and counts; declaration
+closure does not prove that generated backend behavior implements the query.
+
 **Status:** Canonical contract
 **Purpose:** Define exactly how AppGenerator turns persistent UI intent into bundle artifacts.
 

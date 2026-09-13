@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- DataTable can opt into bounded server paging and search through declared
+  module action inputs and required row/count response fields. ResourceTable
+  keeps client paging; unsupported server bindings fail validation.
+- Revision workers receive the original requested behavior within their owned
+  tasks and operator contracts, including precise search, paging, default and
+  mutation-outcome requirements.
+
 - Ask-mode answers are grounded in server-side workspace truth. The general-mode
   exchange now reads the user's current workflow session from the session router
   (instead of the per-connection registry, which reported the ask carrier itself
