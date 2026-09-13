@@ -114,6 +114,16 @@ read-only module actions whose results ground the ask agent's answers in live
 page data. The client only ever names the page; the declarations and dispatch
 are server-side.
 
+Both schema-native `AppPageMeta` and custom-route metadata support the same
+`AppAskContextAction` declarations. App loading checks declared module/action
+references and ask eligibility; Factory acceptance checks the actual saved
+module contracts, including custom-route manifest metadata. Unknown references,
+actions without `ask_context_safe: true`, and actions requiring permissions
+fail before promotion. Plan-only action names cannot authorize ask context.
+Eligibility is independent of `api_surface`; it never makes an action public.
+Runtime dispatch remains best-effort for operational failures, not a substitute
+for this artifact validation. No user permissions or identity are added by it.
+
 ### Header contract
 
 The expanded widget keeps a fixed header:

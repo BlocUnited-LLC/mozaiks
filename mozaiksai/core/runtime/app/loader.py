@@ -234,9 +234,12 @@ class AppLoader:
         try:
             action_index = build_page_action_index_from_module_contracts(base_path)
             action_index.update(build_page_action_index(loaded_modules))
+            ask_context_index = build_page_action_index_from_module_contracts(base_path, ask_context_only=True)
+            ask_context_index.update(build_page_action_index(loaded_modules, ask_context_only=True))
             page_schemas = load_app_page_schemas(
                 base_path,
                 action_index=action_index,
+                ask_context_index=ask_context_index,
             )
         except PageSchemaValidationError as exc:
             formatted = "; ".join(

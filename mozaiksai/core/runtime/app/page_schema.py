@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Canonical runtime contract for declarative app page schemas."""
 
+import json
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -12,6 +13,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     ValidationError,
     field_serializer,
     field_validator,
@@ -563,7 +565,7 @@ class AppRouteAuth(PageContractModel):
 class AppAskContextAction(PageContractModel):
     """A read-only module action whose result grounds ask-mode answers on this page.
 
-    Only actions the module declares with ``api_surface: public_readonly`` and
+    Only actions the module declares with ``ask_context_safe: true`` and
     an empty permission list resolve at runtime; everything else fails closed.
     """
 
@@ -628,14 +630,21 @@ class AppPageSchema(PageContractModel):
         return self
 
 
-def build_page_action_index(modules: Iterable[LoadedModule]) -> dict[str, frozenset[str]]:
+def build_page_action_index(
+    modules: Iterable[LoadedModule], *, ask_context_only: bool = False,
+) -> dict[str, frozenset[str]]:
     return {
-        module.name: frozenset(module.action_method_map)
+        module.name: frozenset(
+            action for action in module.action_method_map
+            if not ask_context_only or module.action_ask_context_map.get(action) is True
+        )
         for module in sorted(modules, key=lambda item: item.name)
     }
 
 
-def build_page_action_index_from_module_contracts(base_path: Path) -> dict[str, frozenset[str]]:
+def build_page_action_index_from_module_contracts(
+    base_path: Path, *, ask_context_only: bool = False,
+) -> dict[str, frozenset[str]]:
     """Build page action closure authority from declared module contracts."""
     index: dict[str, frozenset[str]] = {}
     modules_dir = base_path / "modules"
@@ -660,6 +669,9 @@ def build_page_action_index_from_module_contracts(base_path: Path) -> dict[str, 
             str(action.get("id") or "").strip()
             for action in data.get("actions") or []
             if isinstance(action, dict) and str(action.get("id") or "").strip()
+            and (not ask_context_only or (
+                action.get("ask_context_safe") is True and action.get("permissions", []) == []
+            ))
         ]
         index[module_id] = frozenset(sorted(action_ids))
     return index
@@ -670,6 +682,7 @@ def load_and_validate_page_schema(
     *,
     expected_name: str | None = None,
     action_index: Mapping[str, frozenset[str]] | None = None,
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
 ) -> AppPageSchema:
     try:
         raw = yaml.safe_load(page_path.read_text(encoding="utf-8"))
@@ -693,7 +706,9 @@ def load_and_validate_page_schema(
                 )
             ]
         )
-    return validate_page_schema(raw, expected_name=expected_name, action_index=action_index)
+    return validate_page_schema(
+        raw, expected_name=expected_name, action_index=action_index, ask_context_index=ask_context_index,
+    )
 
 
 def validate_page_schema(
@@ -701,6 +716,7 @@ def validate_page_schema(
     *,
     expected_name: str | None = None,
     action_index: Mapping[str, frozenset[str]] | None = None,
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
 ) -> AppPageSchema:
     try:
         page = AppPageSchema.model_validate(dict(schema))
@@ -726,7 +742,7 @@ def validate_page_schema(
                 message="Page schema name must match the requested page.",
             )
         )
-    diagnostics.extend(_validate_action_closure(page, action_index))
+    diagnostics.extend(_validate_action_closure(page, action_index, ask_context_index))
     diagnostics.extend(_validate_interaction_contracts(page))
     if diagnostics:
         raise PageSchemaValidationError(diagnostics)
@@ -811,9 +827,33 @@ def load_app_page_schemas(
     base_path: Path,
     *,
     action_index: Mapping[str, frozenset[str]] | None = None,
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
 ) -> dict[str, AppPageSchema]:
+    manifest_path = base_path / "ui/route_manifest.json"
+    if action_index is not None and manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PageSchemaValidationError([PageSchemaDiagnostic(
+                code="page_schema.invalid_route_manifest", location="$.pages",
+                message="Route manifest could not be read for ask-context validation.",
+            )]) from exc
+        entries = manifest.get("pages", []) if isinstance(manifest, dict) else []
+        diagnostics = []
+        for index, entry in enumerate(entries if isinstance(entries, list) else []):
+            meta = entry.get("meta") if isinstance(entry, dict) else None
+            declarations = meta.get("ask_context") if isinstance(meta, dict) else None
+            if declarations is not None:
+                diagnostics.extend(validate_ask_context_references(
+                    declarations, action_index=action_index, ask_context_index=ask_context_index,
+                    location=f"$.pages[{index}].meta.ask_context",
+                ))
+        if diagnostics:
+            raise PageSchemaValidationError(diagnostics)
     pages = {
-        name: load_and_validate_page_schema(path, expected_name=name, action_index=action_index)
+        name: load_and_validate_page_schema(
+            path, expected_name=name, action_index=action_index, ask_context_index=ask_context_index,
+        )
         for name, path in discover_page_schema_paths(base_path).items()
     }
     return dict(sorted(pages.items()))
@@ -864,6 +904,7 @@ def _validate_api_endpoint(value: str) -> None:
 def _validate_action_closure(
     page: AppPageSchema,
     action_index: Mapping[str, frozenset[str]] | None,
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
 ) -> list[PageSchemaDiagnostic]:
     if action_index is None:
         return []
@@ -871,6 +912,10 @@ def _validate_action_closure(
     route_auth = page.meta.routeAuth if page.meta is not None else None
     if route_auth is not None:
         diagnostics.extend(_validate_module_action(route_auth.module, route_auth.action, "$.meta.routeAuth", action_index))
+    if page.meta is not None:
+        diagnostics.extend(validate_ask_context_references(
+            page.meta.ask_context or [], action_index=action_index, ask_context_index=ask_context_index,
+        ))
     for location, endpoint in _walk_api_endpoints(page.model_dump(mode="json", exclude_none=True)):
         match = _MODULE_API_RE.fullmatch(endpoint)
         if match:
@@ -882,6 +927,36 @@ def _validate_action_closure(
                     action_index,
                 )
             )
+    return diagnostics
+
+
+def validate_ask_context_references(
+    declarations: Any,
+    *,
+    action_index: Mapping[str, frozenset[str]],
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
+    location: str = "$.meta.ask_context",
+) -> list[PageSchemaDiagnostic]:
+    """Shared reference closure for schema pages and route-manifest metadata."""
+    try:
+        parsed = TypeAdapter(list[AppAskContextAction]).validate_python(declarations)
+    except ValidationError:
+        return [PageSchemaDiagnostic(
+            code="page_schema.invalid_ask_context", location=location,
+            message="Ask context must contain valid module/action declarations.",
+        )]
+    diagnostics: list[PageSchemaDiagnostic] = []
+    for index, declaration in enumerate(parsed):
+        item_location = f"{location}[{index}]"
+        missing = _validate_module_action(declaration.module, declaration.action, item_location, action_index)
+        diagnostics.extend(missing)
+        if not missing and ask_context_index is not None and declaration.action not in ask_context_index.get(
+            declaration.module, frozenset(),
+        ):
+            diagnostics.append(PageSchemaDiagnostic(
+                code="page_schema.ineligible_ask_context", location=item_location,
+                message="Ask context requires an action with ask_context_safe: true and permissions: [].",
+            ))
     return diagnostics
 
 
@@ -970,6 +1045,7 @@ __all__ = [
     "VALID_PAGE_TYPES",
     "build_page_action_index",
     "build_page_action_index_from_module_contracts",
+    "validate_ask_context_references",
     "discover_page_schema_paths",
     "load_and_validate_page_schema",
     "load_app_page_schemas",

@@ -291,7 +291,7 @@ class ModuleDefinition(ModuleContractModel):
     @property
     def action_ask_context_map(self) -> dict[str, bool]:
         """Maps each action id to its page-declared ask-context eligibility."""
-        return {action.id: bool(action.ask_context_safe) for action in self.actions}
+        return {action.id: action.ask_context_safe and not action.permissions for action in self.actions}
 
     @model_validator(mode="after")
     def _validate_unique_ids(self) -> ModuleDefinition:

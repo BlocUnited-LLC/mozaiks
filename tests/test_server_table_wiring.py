@@ -150,3 +150,47 @@ async def test_planned_action_names_cannot_authorize_server_bindings():
         "capability_packs": [{"module_id": "books", "actions": ["list"]}],
     }})
     assert not result["passed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["snapshot", "disk"])
+@pytest.mark.parametrize("fault", [None, "server", "ask", "endpoint"])
+async def test_ask_and_server_bindings_share_resolved_pages(tmp_path, source, fault):
+    action, page = bundle()
+    action.update(ask_context_safe=True, permissions=[])
+    page["meta"] = {"ask_context": [{"module": "books", "action": "list"}]}
+    if fault == "server":
+        action["output_schema"]["properties"]["stats"]["required"] = []
+    elif fault == "ask":
+        page["meta"]["ask_context"][0]["action"] = "missing"
+    elif fault == "endpoint":
+        page["sections"][0]["config"]["children"][0]["config"]["api_endpoint"] = "/api/modules/books/missing"
+    files = {
+        "ui/pages/books.yaml": yaml.safe_dump(page),
+        "modules/books/module.yaml": yaml.safe_dump({"module": {"id": "books"}, "actions": [action]}),
+    }
+    if source == "disk":
+        for name, content in files.items():
+            path = tmp_path / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        context = {"generated_app_dir": str(tmp_path)}
+    else:
+        context = {"generated_files": files}
+    result = await validate_wiring(ContextVariablesBridge(context))
+    assert result["passed"] is (fault is None)
+    assert result["checks"][0]["details"]["total_endpoints_referenced"] == 1
+    if fault:
+        expected = {"server": "wiring_server_table_contract", "ask": "wiring_ask_context",
+                    "endpoint": "wiring_orphaned_endpoint"}[fault]
+        assert expected in {item["test"] for item in result["failed_tests"]}
+
+
+@pytest.mark.asyncio
+async def test_empty_saved_snapshot_cannot_fall_back_to_disk_ask_pages(tmp_path):
+    path = tmp_path / "ui/route_manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"pages":[{"path":"/books","component":"Books"}]}', encoding="utf-8")
+    result = await validate_wiring({"generated_files": {}, "generated_app_dir": str(tmp_path)})
+    assert result["passed"] is False
+    assert result["failed_tests"][0]["test"] == "wiring_missing_input"

@@ -7,9 +7,9 @@ AppSchemaAgent output and task-batch assembly are complete.
 
 Algorithm
 ---------
-1. Extract page API references from generated_files, including nested actions.
-2. Build the action registry from module.yaml files in that same snapshot.
+1. Build the action registry from module.yaml files in generated_files.
    Before assembly, app_pages and planned/on-disk actions support standalone checks.
+2. Extract page API references from that snapshot, including nested actions.
 3. Cross-reference every referenced endpoint against the registry or the small
    allowlist of platform-owned read endpoints that the page renderer may fetch.
 4. Report:
@@ -22,6 +22,7 @@ Unresolved endpoints and missing input are blocking. A static/custom UI bundle
 may legitimately have no declarative page API references.
 """
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -32,6 +33,7 @@ import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from mozaiksai.core.runtime.app.page_schema import validate_ask_context_references
 from mozaiksai.core.workflow.context.frozen import detach
 
 _logger = logging.getLogger("tools.validate_wiring")
@@ -398,6 +400,37 @@ def _server_table_binding_errors(pages: list[Any], contracts: dict[str, dict[str
     return failures
 
 
+def _ask_context_binding_errors(pages: list[Any], contracts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    modules = {key.split("/", 1)[0] for key in contracts}
+    action_index = {
+        module: frozenset(key.split("/", 1)[1] for key in contracts if key.startswith(f"{module}/"))
+        for module in modules
+    }
+    eligible_index = {
+        module: frozenset(
+            key.split("/", 1)[1] for key, action in contracts.items()
+            if key.startswith(f"{module}/")
+            and action.get("ask_context_safe") is True and action.get("permissions", []) == []
+        ) for module in modules
+    }
+    failures: list[dict[str, Any]] = []
+    for page in pages:
+        meta = page.get("meta") if isinstance(page, dict) else None
+        raw = meta.get("ask_context") if isinstance(meta, dict) else None
+        if raw is None:
+            continue
+        errors = [(item.location, item.message) for item in validate_ask_context_references(
+            raw, action_index=action_index, ask_context_index=eligible_index,
+        )]
+        for location, message in errors:
+            failures.append({
+                "test": "wiring_ask_context", "page": page.get("name") or page.get("path") or "<unnamed>",
+                "section": location, "error": message,
+                "fix_suggestion": "Reference an existing read-only action with ask_context_safe: true and permissions: [].",
+            })
+    return failures
+
+
 # ---------------------------------------------------------------------------
 # Main tool function
 # ---------------------------------------------------------------------------
@@ -431,32 +464,7 @@ async def validate_wiring(
     app_build_plan: dict[str, Any] = _context_get(context_variables, "app_build_plan") or {}
     generated_app_dir_str: str | None = _context_get(context_variables, "generated_app_dir")
 
-    # ── 1. Collect endpoint references from pages ─────────────────────────
-    endpoint_refs = _extract_endpoint_refs(app_pages)
-    referenced_set: set[str] = set()
-    endpoint_keys: dict[tuple[str, str, str], str | None] = {}
-    invalid_refs: set[tuple[str, str, str]] = set()
-    invalid_endpoints: list[dict[str, str]] = []
-    platform_refs: set[tuple[str, str, str]] = set()
-    for page_name, section_id, endpoint in endpoint_refs:
-        action_key, error = _endpoint_to_action_key(endpoint)
-        endpoint_keys[(page_name, section_id, endpoint)] = action_key
-        if _is_platform_read_endpoint(endpoint):
-            platform_refs.add((page_name, section_id, endpoint))
-        if action_key:
-            referenced_set.add(action_key)
-            if "/" in action_key:
-                referenced_set.add(action_key.split("/", 1)[1])
-        if error:
-            invalid_refs.add((page_name, section_id, endpoint))
-            invalid_endpoints.append({
-                "page": page_name,
-                "section": section_id,
-                "endpoint": endpoint,
-                "error": error,
-            })
-
-    # ── 2. Build module action registry ──────────────────────────────────
+    # Build the module action registry.
     known_actions: set[str] = set()
 
     # Source A: capability_packs
@@ -488,6 +496,7 @@ async def validate_wiring(
     if generated_files:
         known_actions.update(_actions_from_generated_module_files(generated_files))
 
+    # Saved snapshots are authoritative; disk input is only for standalone checks.
     contract_files = generated_files
     if not has_file_snapshot and app_dir and app_dir.is_dir():
         contract_files = {}
@@ -496,9 +505,49 @@ async def validate_wiring(
                 contract_files[path.relative_to(app_dir).as_posix()] = path.read_text(encoding="utf-8")
             except (OSError, UnicodeError):
                 _logger.warning("validate_wiring: module contract could not be read: %s", path)
-    server_table_failures = _server_table_binding_errors(
-        app_pages, _generated_module_action_contracts(contract_files),
+        manifest_path = app_dir / "ui/route_manifest.json"
+        if manifest_path.is_file():
+            contract_files["ui/route_manifest.json"] = manifest_path.read_text(encoding="utf-8")
+        if not app_pages:
+            app_pages = _pages_from_generated_files({
+                path.relative_to(app_dir).as_posix(): path.read_text(encoding="utf-8")
+                for path in sorted((app_dir / "ui/pages").glob("*.yaml"))
+            })
+    ask_pages = list(app_pages)
+    if "ui/route_manifest.json" in contract_files:
+        manifest = json.loads(contract_files["ui/route_manifest.json"])
+        if isinstance(manifest, dict) and isinstance(manifest.get("pages"), list):
+            ask_pages.extend(manifest["pages"])
+    action_contracts = _generated_module_action_contracts(contract_files)
+    server_table_failures = _server_table_binding_errors(app_pages, action_contracts)
+    ask_context_failures = _ask_context_binding_errors(
+        ask_pages, action_contracts,
     )
+
+    # Collect endpoint references after standalone disk pages have been resolved.
+    endpoint_refs = _extract_endpoint_refs(app_pages)
+    referenced_set: set[str] = set()
+    endpoint_keys: dict[tuple[str, str, str], str | None] = {}
+    invalid_refs: set[tuple[str, str, str]] = set()
+    invalid_endpoints: list[dict[str, str]] = []
+    platform_refs: set[tuple[str, str, str]] = set()
+    for page_name, section_id, endpoint in endpoint_refs:
+        action_key, error = _endpoint_to_action_key(endpoint)
+        endpoint_keys[(page_name, section_id, endpoint)] = action_key
+        if _is_platform_read_endpoint(endpoint):
+            platform_refs.add((page_name, section_id, endpoint))
+        if action_key:
+            referenced_set.add(action_key)
+            if "/" in action_key:
+                referenced_set.add(action_key.split("/", 1)[1])
+        if error:
+            invalid_refs.add((page_name, section_id, endpoint))
+            invalid_endpoints.append({
+                "page": page_name,
+                "section": section_id,
+                "endpoint": endpoint,
+                "error": error,
+            })
 
     # ── 3. Cross-reference ────────────────────────────────────────────────
     wired: list[dict[str, str]] = []
@@ -530,13 +579,16 @@ async def validate_wiring(
     no_registry = not known_actions
     has_orphaned_pages = bool(orphaned_pages)
     has_invalid_endpoints = bool(invalid_endpoints)
-    missing_input = not generated_files and not app_pages
+    missing_input = not generated_files and not app_pages and not ask_pages
 
-    blocking_pass: bool = not (missing_input or has_invalid_endpoints or has_orphaned_pages or server_table_failures)
+    blocking_pass: bool = not (
+        missing_input or has_invalid_endpoints or has_orphaned_pages
+        or server_table_failures or ask_context_failures
+    )
 
     # ── 5. Build human-readable output ───────────────────────────────────
     warnings: list[str] = []
-    failed_tests: list[dict[str, Any]] = list(server_table_failures)
+    failed_tests: list[dict[str, Any]] = [*server_table_failures, *ask_context_failures]
 
     if missing_input:
         failed_tests.append({
@@ -601,6 +653,8 @@ async def validate_wiring(
 
     if missing_input:
         message = "Wiring validation requires generated files or page schemas."
+    elif ask_context_failures:
+        message = f"{len(ask_context_failures)} page ask-context declaration(s) do not resolve to eligible actions."
     elif has_invalid_endpoints:
         message = f"{len(invalid_endpoints)} page endpoint(s) have invalid api_endpoint syntax."
     elif server_table_failures:
@@ -629,6 +683,7 @@ async def validate_wiring(
         "message": message,
         "details": {
             "blocking": True,
+            "ask_context_failures": ask_context_failures,
             "total_endpoints_referenced": len(endpoint_refs),
             "wired_count": len(wired),
             "platform_endpoint_count": len(platform_endpoints),
