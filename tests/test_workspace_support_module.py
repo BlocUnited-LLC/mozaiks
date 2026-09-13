@@ -855,6 +855,8 @@ async def test_list_support_requests_embeds_thread_messages_with_canonical_persi
         {
             "thread_id": thread_id,
             "app_id": "app_1",
+            "scope_type": "app",
+            "scope_id": "app_1",
             "participant_ids": ["user_1"],
             "status": "open",
             "updated_at": "2026-01-01T00:02:00Z",

@@ -25,8 +25,8 @@ class ThreadRepo:
     async def insert(self, ctx, *, record: Mapping[str, Any]) -> None:
         await _collection(ctx, "threads").insert_one(dict(record))
 
-    async def get(self, ctx, *, thread_id: str) -> Document | None:
-        return _document(await _collection(ctx, "threads").find_one({"thread_id": thread_id}))
+    async def get(self, ctx, *, query: Mapping[str, Any]) -> Document | None:
+        return _document(await _collection(ctx, "threads").find_one(dict(query)))
 
     async def list(self, ctx, *, query: dict[str, Any], limit: int) -> list[Document]:
         return _documents(
@@ -37,9 +37,9 @@ class ThreadRepo:
             )
         )
 
-    async def update(self, ctx, *, thread_id: str, updates: Mapping[str, Any]) -> int:
+    async def update(self, ctx, *, query: Mapping[str, Any], updates: Mapping[str, Any]) -> int:
         result = await _collection(ctx, "threads").update_one(
-            {"thread_id": thread_id},
+            dict(query),
             {"$set": dict(updates)},
         )
         return int(getattr(result, "matched_count", 0) or 0)
@@ -49,6 +49,7 @@ class ThreadRepo:
         ctx,
         *,
         thread_id: str,
+        query: Mapping[str, Any] | None = None,
         updated_at: str,
         preview: Mapping[str, Any],
         participant_ids: Sequence[str] | None = None,
@@ -60,17 +61,17 @@ class ThreadRepo:
         }
         if participant_ids is not None:
             updates["participant_ids"] = list(participant_ids)
-        return await self.update(ctx, thread_id=thread_id, updates=updates)
+        return await self.update(ctx, query=query or {"thread_id": thread_id}, updates=updates)
 
 
 class MessageRepo:
     async def insert(self, ctx, *, record: Mapping[str, Any]) -> None:
         await _collection(ctx, "messages").insert_one(dict(record))
 
-    async def list(self, ctx, *, thread_id: str, limit: int) -> list[Document]:
+    async def list(self, ctx, *, query: Mapping[str, Any], limit: int) -> list[Document]:
         return _documents(
             await _collection(ctx, "messages").find_many(
-                {"thread_id": thread_id, "is_deleted": {"$ne": True}},
+                dict(query),
                 limit=limit,
                 sort=[("created_at", 1)],
             )
@@ -78,9 +79,26 @@ class MessageRepo:
 
 
 class ReadStateRepo:
-    async def upsert(self, ctx, *, thread_id: str, user_id: str, read_at: str) -> None:
+    async def upsert(
+        self,
+        ctx,
+        *,
+        thread_id: str,
+        user_id: str,
+        read_at: str,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+    ) -> None:
+        query = {"thread_id": thread_id, "user_id": user_id}
+        updates = {"thread_id": thread_id, "user_id": user_id, "read_at": read_at}
+        if scope_type:
+            query["scope_type"] = scope_type
+            updates["scope_type"] = scope_type
+        if scope_id:
+            query["scope_id"] = scope_id
+            updates["scope_id"] = scope_id
         await _collection(ctx, "thread_reads").update_one(
-            {"thread_id": thread_id, "user_id": user_id},
-            {"$set": {"thread_id": thread_id, "user_id": user_id, "read_at": read_at}},
+            query,
+            {"$set": updates},
             upsert=True,
         )

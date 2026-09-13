@@ -68,7 +68,12 @@
           "indexes": [
             {
               "name": "reads_by_thread_user",
-              "keys": [{"field": "thread_id", "order": 1}, {"field": "user_id", "order": 1}],
+              "keys": [
+                {"field": "scope_type", "order": 1},
+                {"field": "scope_id", "order": 1},
+                {"field": "thread_id", "order": 1},
+                {"field": "user_id", "order": 1}
+              ],
               "unique": true
             },
             {
