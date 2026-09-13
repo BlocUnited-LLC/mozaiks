@@ -504,13 +504,18 @@ definitions:
     description: >
       True when the user explicitly approves the ProjectOverviewAgent review step
       and wants generation to continue without further diagram changes.
+      The match is a LINE-ANCHORED sentinel, not a substring search: the
+      runtime matcher uses re.search, so an unanchored pattern accepted
+      "this is not approved", "I do not approve this design" and "looks good
+      so far" as approval — and the write is persisted and never reset.
+      Keep it anchored.
     source:
       type: state
       default: false
       triggers:
       - type: user_text
         match:
-          regex: (?i)\b(approved?|looks good|sequence diagram looks good|proceed with implementation)\b
+          regex: (?im)^\s*(approved?|looks good|sequence diagram looks good|proceed with implementation)\s*[.!]*\s*$
   workflow_review_revision_requested:
     type: boolean
     description: >

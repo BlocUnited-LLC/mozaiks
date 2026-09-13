@@ -338,7 +338,27 @@ def test_appgenerator_handoffs_start_from_agents_not_pseudo_user() -> None:
     handoffs = _read_yaml("factory_app/workflows/AppGenerator/transition_graph.yaml")
     rules = handoffs["transition_rules"]
 
-    assert all(rule["source_agent"] != "user" for rule in rules)
+    # The generation chain is agent-driven, but the pseudo-user is a legitimate
+    # SOURCE for HITL resume routes. The blanket ban this assertion used to make
+    # dates from the AG2 beta (#32) and is now contradicted by AgentGenerator,
+    # ThemeCapture and ValueEngine, which all declare user-source rules. It also
+    # became actively harmful once no_transition_matched began failing runs:
+    # AppGenerator reverts to the user twelve times, so with no resume route
+    # every builder reply closed the run as FAILED — the reply failed the build
+    # it was sent to rescue.
+    #
+    # Assert the property the ban was protecting instead: a user reply may only
+    # resume an agent that actually pauses for input (or the entry agent), never
+    # jump into the middle of the generation chain.
+    user_rules = [rule for rule in rules if rule["source_agent"] == "user"]
+    assert user_rules, "AppGenerator reverts to the user; it must declare resume routes"
+    pausing_agents = {rule["source_agent"] for rule in rules if rule.get("target_agent") == "user"}
+    resumable = pausing_agents | {"InterviewAgent"}
+    assert all(rule["target_agent"] in resumable for rule in user_rules), (
+        "user replies must resume an agent that pauses for input: "
+        f"{sorted({r['target_agent'] for r in user_rules} - resumable)} do not"
+    )
+
     interview_rules = [rule for rule in rules if rule["source_agent"] == "InterviewAgent"]
     assert [rule["target_agent"] for rule in interview_rules[:2]] == [
         "AppPlanAgent",

@@ -287,3 +287,114 @@ transition_rules:
 - source_agent: DownloadAgent
   target_agent: user
   transition_type: after_turn
+
+# ---------------------------------------------------------------------------
+# User resume routes
+# ---------------------------------------------------------------------------
+# Twelve rules above revert to the user, but the graph declared no user-source
+# rule: every builder reply matched nothing and closed the run on the
+# no_transition_matched default, which the runtime now treats as failure. So
+# each HITL unblock reply failed the build it was sent to rescue.
+#
+# Each rule below is the exact inverse of the revert rule that caused the
+# pause, so a reply resumes the agent that asked for it. Rule order is
+# priority; the interview fallback is last.
+- source_agent: user
+  target_agent: AppUIQualityAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_ui_quality_status
+  condition_value: blocked
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: IntegrationReadinessAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: integration_readiness_status
+  condition_value: blocked
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: ModuleContractQualityAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: module_contract_quality_status
+  condition_value: blocked
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: ModuleRuntimeQualityAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: module_runtime_quality_status
+  condition_value: blocked
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: AppValidationAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_status
+  condition_value: blocked
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: AppValidationAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_integration_repair_status
+  condition_value: blocked
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: AppValidationAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_validation_status
+  condition_value: failed
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: DownloadAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_bundle_export_outcome
+  condition_value: cancelled
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: DownloadAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_bundle_export_outcome
+  condition_value: blocked
+  transition_target: AgentTarget
+
+# The export is presented: a reply is an answer to DownloadAgent, not a new
+# interview turn.
+- source_agent: user
+  target_agent: DownloadAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_bundle_export_outcome
+  condition_value: ready
+  transition_target: AgentTarget
+
+# Nothing is blocked and no export is pending: the builder is still in the
+# interview.
+- source_agent: user
+  target_agent: InterviewAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_complete
+  condition_value: false
+  transition_target: AgentTarget
+
+# Tail fallback: keeps any unforeseen pause recoverable instead of failing the
+# run. InterviewAgent is the workflow's entry agent and its only unconditional
+# user-facing stage.
+- source_agent: user
+  target_agent: InterviewAgent
+  transition_type: after_turn
+  transition_target: AgentTarget

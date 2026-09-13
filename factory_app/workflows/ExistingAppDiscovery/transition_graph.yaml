@@ -100,3 +100,49 @@ transition_rules:
   target_agent: user
   transition_type: after_turn
   transition_target: RevertToUserTarget
+
+# ---------------------------------------------------------------------------
+# User resume routes
+# ---------------------------------------------------------------------------
+# Every stage above reverts to the user, but the graph declared no user-source
+# rule, so a builder reply matched nothing and closed the run on the
+# no_transition_matched default — now treated as failure, making this workflow
+# impossible to complete. Rule order is priority, so these resume the pipeline
+# at the earliest stage that has not reported complete.
+- source_agent: user
+  target_agent: DiscoveryHostAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: identity_complete
+  condition_value: false
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: CapabilityMapperAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: capabilities_complete
+  condition_value: false
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: IntegrationPlannerAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: plan_complete
+  condition_value: false
+  transition_target: AgentTarget
+
+# Tail fallback: planning is done, so the builder is answering the decomposer
+# or the assembler. KNOWN COARSE EDGE: on the ecosystem /
+# gradual_modernization paths a reply sent while ModuleDecomposerAgent is still
+# working resumes at the assembler instead of the decomposer, because
+# decomposition_complete is also false on the embed/bridge paths (where the
+# decomposer never runs) and context_equals cannot test two keys. Routing the
+# tail to the decomposer would mis-route embed/bridge instead. Resolving this
+# properly needs a decomposer-specific resume signal; until then the run
+# completes rather than failing outright.
+- source_agent: user
+  target_agent: DiscoveryArtifactAssemblerAgent
+  transition_type: after_turn
+  transition_target: AgentTarget

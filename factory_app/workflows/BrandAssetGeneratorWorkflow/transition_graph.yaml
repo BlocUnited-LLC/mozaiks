@@ -8,3 +8,10 @@ transition_rules:
   - source_agent: BrandDesignerAgent
     target_agent: user
     transition_type: after_turn
+  # A builder reply resumes the iteration loop. BrandDesignerAgent is the
+  # workflow's only agent, so the resume target is unambiguous. Without this
+  # rule the first reply matches no transition and closes the run on the
+  # graph's no_transition_matched default, now treated as failure.
+  - source_agent: user
+    target_agent: BrandDesignerAgent
+    transition_type: after_turn

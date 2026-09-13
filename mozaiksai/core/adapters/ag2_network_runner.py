@@ -207,11 +207,21 @@ def _resolve_close_status(
     live: ThemeCapture and AgentGenerator terminated on it, were reported
     completed, and the build sequence silently skipped their entire
     generation stage.
+
+    ``max_turns`` is AG2's turn-budget cutoff (``auto_close_reason="max_turns"``
+    in ``ag2.network.adapters.workflow``): the run was severed mid-flight with
+    its declared completion state never reached. It is the same silent-skip
+    class as the two above — a workflow that ran out of turns has not finished
+    its work, so reporting it as a clean completion lets the build sequence
+    advance past an unfinished stage. Only a declared terminate route or an
+    explicit completion is success.
     """
     if close_reason == "workflow_failed":
         return RunStatus.FAILED, error or "workflow_failed"
     if close_reason == "no_transition_matched":
         return RunStatus.FAILED, error or "no_transition_matched"
+    if close_reason == "max_turns":
+        return RunStatus.FAILED, error or "max_turns"
     return status, error
 
 
