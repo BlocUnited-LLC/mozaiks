@@ -9,6 +9,8 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assemble_module
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from tests.factory_context import factory_context
 
 hook_quality_module = import_module(
     "factory_app.workflows.AppGenerator.tools.hook_app_ui_quality_gate"
@@ -45,7 +47,7 @@ def _read_yaml(relative_path: str):
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -54,7 +56,8 @@ class _Context:
         return self.data.get(key, default)
 
 
-def test_review_ui_quality_passes_without_warnings() -> None:
+@pytest.mark.parametrize("frozen", [False, True])
+def test_review_ui_quality_passes_without_warnings(frozen: bool) -> None:
     context = _Context(
         {
             "app_ui_quality_warnings": [],
@@ -80,11 +83,13 @@ def test_review_ui_quality_passes_without_warnings() -> None:
         }
     )
 
+    if frozen:
+        context = ContextVariablesBridge(context.data)
     result = ui_quality_module.review_ui_quality(context_variables=context)
 
     assert result["status"] == "passed"
-    assert context.data["app_ui_quality_status"] == "passed"
-    assert context.data["app_ui_quality_revision_request"] is None
+    assert context.get("app_ui_quality_status") == "passed"
+    assert context.get("app_ui_quality_revision_request") is None
 
 
 def test_review_ui_quality_requires_persisted_schema_before_passing() -> None:
@@ -166,7 +171,6 @@ def test_review_ui_quality_audits_persisted_page_schemas() -> None:
     result = ui_quality_module.review_ui_quality(context_variables=context)
 
     assert result["status"] == "needs_revision"
-    assert any("dashboard-style page naming" in warning for warning in result["warnings"])
     assert any("uses 2 SummaryStrip sections" in warning for warning in result["warnings"])
 
 
@@ -438,7 +442,8 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
 
 
 @pytest.mark.asyncio
-async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_quality_gate() -> None:
+@pytest.mark.parametrize("frozen", [False, True])
+async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_quality_gate(frozen: bool) -> None:
     context = _Context(
         {
             "app_id": "support",
@@ -462,6 +467,8 @@ async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_qual
         }
     )
 
+    if frozen:
+        context = ContextVariablesBridge(context.data)
     result = await assemble_module.assemble_app_tasks(context_variables=context)
 
     filenames = {item["filename"] for item in result["code_files"]}
@@ -470,8 +477,9 @@ async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_qual
         "config/targets.json",
         "modules/tickets/module.yaml",
     }
-    assert context.data["app_task_batch_results"]["assembled"] is True
-    assert context.data["app_task_batch_results_summary"]["completed_tasks"] == ["tickets_module"]
+    assert context.get("app_task_batch_results")["assembled"] is True
+    assert list(context.get("app_task_batch_results_summary")["completed_tasks"]) == ["tickets_module"]
+    assert context.get("generated_files")["modules/tickets/module.yaml"] == "id: tickets\n"
 
 
 def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
@@ -491,8 +499,9 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
         for rule in handoffs["transition_rules"]
     }
     tool_entries = {
-        (entry["agent"], entry["function"]): entry
+        (agent, entry["function"]): entry
         for entry in tools["tools"]
+        for agent in (entry["agent"] if isinstance(entry["agent"], list) else [entry["agent"]])
     }
 
     assert ("AppSchemaAgent", "AppUIQualityAgent") in handoff_pairs
@@ -504,9 +513,9 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert handoff_pairs[("AppUIQualityAgent", "AdminRegistryAgent")]["condition_value"] == "passed"
     assert ("AdminRegistryAgent", "AssemblyAgent") in handoff_pairs
     assert ("AssemblyAgent", "IntegrationReadinessAgent") in handoff_pairs
-    assert ("IntegrationReadinessAgent", "AppValidationAgent") in handoff_pairs
-    assert ("AppValidationAgent", "InfraScaffoldAgent") in handoff_pairs
-    assert ("InfraScaffoldAgent", "DownloadAgent") in handoff_pairs
+    assert ("IntegrationReadinessAgent", "AuthScaffoldAgent") in handoff_pairs
+    assert ("AuthScaffoldAgent", "AppValidationAgent") in handoff_pairs
+    assert ("AppValidationAgent", "DownloadAgent") in handoff_pairs
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_type"] == "context_equals"
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_key"] == "app_ui_quality_status"
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_value"] == "blocked"

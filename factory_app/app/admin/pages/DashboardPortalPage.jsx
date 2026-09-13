@@ -100,15 +100,16 @@ function approvalTone(state) {
 }
 
 function runTone(status) {
-  if (status === 2 || status === 'completed' || status === 'success') return 'success'
-  if (status === 'failed' || status === 'error') return 'destructive'
-  if (status === 1 || status === 'running') return 'primary'
+  if (status === 1 || status === 'completed' || status === 'success') return 'success'
+  if (status === 2 || status === 'failed' || status === 'error') return 'destructive'
+  if (status === 0 || status === 'in_progress' || status === 'running') return 'primary'
   return 'default'
 }
 
 function runLabel(status) {
-  if (status === 2) return 'Completed'
-  if (status === 1) return 'Running'
+  if (status === 2) return 'Failed'
+  if (status === 1) return 'Completed'
+  if (status === 0) return 'Running'
   return String(status || 'Unknown').replace(/_/g, ' ')
 }
 
@@ -136,7 +137,7 @@ function useDashboardPortal(scope, appId, pathname) {
   useEffect(() => {
     const controller = new AbortController()
     setState({ loading: true, error: null, surface: null, portal: null })
-    fetchDashboardConfig({ scope, appId, signal: controller.signal })
+    fetchDashboardConfig({ scope, signal: controller.signal })
       .then((payload) => {
         const surface = getDashboardSurface(payload, scope)
         const portals = Array.isArray(surface?.portals) ? surface.portals : []

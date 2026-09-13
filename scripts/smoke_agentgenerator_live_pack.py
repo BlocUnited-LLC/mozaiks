@@ -258,7 +258,6 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
     return {
         "build_mode": "initial",
         "task_run_mode": False,
-        "workflow_review_approved": True,
         "concept_overview": (
             "Support Operations Automation is an internal support backbone that "
             "classifies support tickets and triages heavy ticket queues through "

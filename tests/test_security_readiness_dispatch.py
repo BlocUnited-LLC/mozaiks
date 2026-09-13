@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from copy import copy
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,33 +24,20 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow import module_tools
-from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _wrap_tool_with_context
-from mozaiksai.core.workflow.context.authority import (
-    ContextAuthorityError,
-    build_context_authority_policy,
-)
-from mozaiksai.core.workflow.context.schema import load_context_variables_config
+from mozaiksai.core.workflow.agents.factory import _wrap_tool_with_context
+from mozaiksai.core.workflow.context.authority import ContextAuthorityError
 from tests.test_security_readiness_module import _WrapperStylePersistence
+from tests.test_security_readiness_target_binding import security_bridge as _bridge
+from tests.test_security_readiness_target_binding import security_build_fixture  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 RUN = ("SecurityReadiness", "factory-host", "chat_1")
 
 
-def _bridge(project="project_a", *, user_id="owner_1"):
-    config = yaml.safe_load((ROOT / "factory_app/workflows/SecurityReadiness/context_variables.yaml").read_text())
-    definitions = load_context_variables_config(config).definitions
-    policy = build_context_authority_policy(workflow_name=RUN[0], definitions=definitions)
-    bridge = ContextVariablesBridge({
-        "app_id": RUN[1], "user_id": user_id, "build_id": "build_1", "build_registry_id": project,
-        "artifact_version_id": "artifact_1", "security_readiness_mode": "advisory",
-        "generated_files": {"app/app.json": json.dumps({"authRequired": True})},
-    }, authority_policy=policy)
-    bridge._bind_run(RUN, policy)
-    return bridge
-
-
 @pytest.fixture
-def live_runtime(monkeypatch):
+def live_runtime(monkeypatch, security_build):
+    for project in ("project_a", "project_b"):
+        security_build.add(project=project)
     manifest = yaml.safe_load((ROOT / "factory_app/app/modules/security_readiness/module.yaml").read_text())
     event_contract = yaml.safe_load((ROOT / "factory_app/app/modules/security_readiness/contracts/events.yaml").read_text())
     executor = ModuleExecutor()
@@ -105,6 +91,8 @@ async def test_real_bound_scan_records_through_executor_and_project_filter(live_
     assert {row["build_registry_id"] for row in rows} == {"project_a", "project_b"}
     assert all(row["owner_user_id"] == "owner_1" for row in rows)
     assert all(row["app_id"] == RUN[1] and row["remediation"] and row["evidence_ref"] for row in rows)
+    assert {row["artifact_version_id"] for row in rows} == {"artifact_project_a", "artifact_project_b"}
+    assert {row["build_id"] for row in rows} == {"build_1"}
     request = live_runtime.scopes[0]
     assert request.authority.kind == "workflow"
     assert request.authority.permission_mode == "enforce"
@@ -211,13 +199,15 @@ async def test_workflow_cannot_dispatch_internal_or_undeclared_action(live_runti
 
 
 @pytest.mark.asyncio
-async def test_recording_without_optional_lineage_matches_event_schema(live_runtime):
+async def test_recording_resolves_lineage_without_artifact_selector(live_runtime):
     bridge = _bridge()
-    bridge.set("build_id", None)
     bridge.set("artifact_version_id", None)
     await _wrap_tool_with_context(inspect_generated_app_security, bridge)()
     recorded = await _wrap_tool_with_context(record_security_findings, bridge)()
     assert recorded["persisted"] is True
+    row = live_runtime.persistence.collection_handle.rows[0]
+    assert row["build_id"] == "build_1"
+    assert row["artifact_version_id"] == "artifact_project_a"
 
 
 @pytest.mark.asyncio
@@ -313,7 +303,7 @@ async def test_missing_runtime_actor_never_uses_connection_as_actor_source(live_
     bridge = _bridge(user_id=None)
     await _wrap_tool_with_context(inspect_generated_app_security, bridge)()
     result = await _wrap_tool_with_context(record_security_findings, bridge)()
-    assert result["persistence_error"] == "workflow_tool_invocation_unavailable"
+    assert result["source_error"] == "workflow_tool_invocation_unavailable"
     assert not live_runtime.scopes
 
 

@@ -731,7 +731,7 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
                     if collection is None:
                         return []
                     query = {"user_id": user_id} if user_id else {}
-                    return await collection.find(query).to_list(length=100)
+                    return await collection.find_many(query, limit=100)
 
                 async def save_report(self, record):
                     collection = self._collection()

@@ -25,7 +25,13 @@ workflow_quality_gate_module = import_module(
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = {
+            "run_build_binding": {
+                "build_registry_id": "registry_fixture", "target_app_id": "target-app",
+                "build_id": "build-1", "phase": "genesis",
+            },
+            **dict(initial or {}),
+        }
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -167,19 +173,17 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
         {
             "chat_id": "chat-1",
             "app_id": "app-1",
-            "build_id": "build-1",
             "workflow_name": "AgentGenerator",
             "user_id": "user-1",
             "pack_name": "ReviewWorkflow",
+            "artifact_version_id": "av_1",
             "is_multi_workflow": False,
             "workflow_bundle_results": bundle_results,
         }
     )
 
     # Redirect output to tmp_path
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(generate_and_download_module, "_promote_workflow_to_app_workspace", lambda *a, **kw: None)
-    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "record_workflow_artifacts", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_api_url", lambda app_id: f"https://api.test/{app_id}")
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: f"wss://ws.test/{app_id}")
@@ -213,6 +217,10 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     assert result["status"] == ("success" if succeeded else "error")
     assert result["outcome"] == ("ready" if succeeded else "blocked")
     assert context.data["workflow_bundle_validation_status"] == "passed"
+    download_payload = generate_and_download_module.use_ui_tool.call_args.kwargs["payload"]
+    assert download_payload["artifact_version_id"] == "av_1"
+    assert download_payload["build_registry_id"] == context.get("run_build_binding")["build_registry_id"]
+    assert download_payload["app_id"] == "app-1"
     assert len(result["ui_files"]) == 1
     zip_entry = result["ui_files"][0]
     assert zip_entry["type"] == "zip"
@@ -220,7 +228,7 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
 
     zip_path = Path(zip_entry["path"])
     assert zip_path.exists()
-    assert zip_path.parent == tmp_path / "generated" / "workflows" / "app-1" / "build-1"
+    assert zip_path.parent == tmp_path / "generated" / "workflows" / "target-app" / "build-1"
     assert (zip_path.parent / "ReviewWorkflow" / "orchestrator.yaml").exists()
     with zipfile.ZipFile(zip_path) as zf:
         names = zf.namelist()
@@ -406,9 +414,7 @@ def test_generate_and_download_multi_workflow_pack_zips_all_bundles(
         }
     )
 
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(generate_and_download_module, "_promote_workflow_to_app_workspace", lambda *a, **kw: None)
-    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "record_workflow_artifacts", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_api_url", lambda app_id: f"https://api.test/{app_id}")
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: f"wss://ws.test/{app_id}")
@@ -484,9 +490,7 @@ def test_generate_and_download_skips_meta_key(monkeypatch, tmp_path: Path) -> No
         }
     )
 
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(generate_and_download_module, "_promote_workflow_to_app_workspace", lambda *a, **kw: None)
-    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "record_workflow_artifacts", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_api_url", lambda app_id: "https://api.test")
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: "wss://ws.test")

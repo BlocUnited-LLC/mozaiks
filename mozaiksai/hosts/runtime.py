@@ -669,13 +669,29 @@ async def start_chat(
     reuse_cutoff = datetime.now(UTC) - timedelta(seconds=idempotency_window_sec)
     coll = await _chat_coll()
 
-    if not force_new:
+    from mozaiksai.core.session import (
+        BuildTargetReference,
+        create_routed_chat_session,
+        get_session_router_for_chat,
+    )
+
+    try:
+        reference = BuildTargetReference(
+            build_registry_id=data.get("build_registry_id"), source_chat_id=data.get("source_chat_id"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid build target reference") from exc
+    if client_request_id is not None and (not isinstance(client_request_id, str) or not 1 <= len(client_request_id) <= 128):
+        raise HTTPException(status_code=400, detail="Invalid client_request_id")
+
+    if not force_new and client_request_id:
         base_query = {
             "user_id": user_id,
             "workflow_name": workflow_name,
             "status": 0,
             "created_at": {"$gte": reuse_cutoff},
             **build_app_scope_filter(app_id),
+            "launch_target_reference": reference.model_dump(),
         }
         reused_doc = None
         if client_request_id:
@@ -683,10 +699,9 @@ async def start_chat(
                 {**base_query, "client_request_id": client_request_id},
                 projection={"chat_id": 1, "created_at": 1},
             )
-        if not reused_doc:
-            reused_doc = await coll.find_one(base_query, projection={"chat_id": 1, "created_at": 1})
         if reused_doc:
             chat_id = reused_doc.get("chat_id") or reused_doc.get("_id")
+            await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=chat_id)
             try:
                 cache_seed = await persistence_manager.get_or_assign_cache_seed(chat_id, app_id)
             except Exception:
@@ -703,19 +718,22 @@ async def start_chat(
             }
 
     chat_id = str(uuid4())
-    extra_fields: dict[str, Any] = {}
+    extra_fields: dict[str, Any] = {"launch_target_reference": reference.model_dump()}
     if client_request_id:
         extra_fields["client_request_id"] = client_request_id
     if transport_purpose == "ask_carrier":
         extra_fields["transport_purpose"] = "ask_carrier"
     extra_fields.update(context_variables)
 
-    await persistence_manager.create_chat_session(
+    await create_routed_chat_session(
         chat_id=chat_id,
         app_id=app_id,
-        workflow_name=workflow_name,
+        workflow_id=workflow_name,
         user_id=user_id,
-        extra_fields=extra_fields or None,
+        context_variables=extra_fields,
+        trigger_meta={"trigger_source": "chat"},
+        persistence_manager=persistence_manager,
+        **reference.model_dump(),
     )
 
     try:
@@ -741,6 +759,8 @@ class TriggerWorkflowRequest(BaseModel):
     user_id: str = Field(..., description="User ID to run workflow as")
     app_id: str | None = Field(None, description="Application ID")
     journey_id: str | None = Field(None, description="Optional workflow sequence to bind the run to")
+    build_registry_id: str | None = None
+    source_chat_id: str | None = None
     context: dict[str, Any] | None = Field(None, description="Initial context variables")
     webhook_url: str | None = Field(None, description="Optional completion notification URL (https:// only)")
 
@@ -799,7 +819,7 @@ async def trigger_workflow(
     # When an authenticated principal has an app_id claim, validate it matches the
     # requested app_id to prevent cross-tenant workflow creation via this endpoint.
     validate_path_app_id(principal, app_id)
-    user_id = body.user_id
+    user_id = _validate_user_id_against_principal(principal, body_user_id=body.user_id)
     chat_id = str(uuid4())
     context = _validate_context_for_workflow(workflow_name, body.context or {})
 
@@ -808,27 +828,20 @@ async def trigger_workflow(
         extra_fields["webhook_url"] = body.webhook_url
     extra_fields.update(context)
 
-    await persistence_manager.create_chat_session(
+    from mozaiksai.core.session import create_routed_chat_session, get_session_router
+
+    await create_routed_chat_session(
         chat_id=chat_id,
         app_id=app_id,
-        workflow_name=workflow_name,
+        workflow_id=workflow_name,
         user_id=user_id,
-        extra_fields=extra_fields,
+        context_variables=extra_fields,
+        trigger_meta={"trigger_source": "api"},
+        journey_id=body.journey_id,
+        session_router=get_session_router() if body.journey_id else None,
+        build_registry_id=body.build_registry_id,
+        source_chat_id=body.source_chat_id,
     )
-
-    if body.journey_id:
-        try:
-            from mozaiksai.core.session.router import get_session_router
-
-            await get_session_router().bind_workflow_session(
-                app_id=app_id,
-                user_id=user_id,
-                workflow_id=workflow_name,
-                chat_id=chat_id,
-                journey_id=body.journey_id,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail="Invalid journey binding") from exc
 
     return {
         "success": True,
@@ -889,9 +902,9 @@ async def websocket_endpoint(
 
     ws_id: int | None = None
     try:
+        from mozaiksai.core.data.models import WorkflowStatus
         from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
         from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
-        from mozaiksai.core.session.router import get_session_router
         from mozaiksai.core.transport.event_contract import send_event_envelope
         from mozaiksai.core.transport.session_registry import session_registry
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
@@ -900,42 +913,27 @@ async def websocket_endpoint(
         hooks = get_platform_hooks()
         workflow_names = hooks.call_workflow_ordering(list(workflow_manager.get_all_workflow_names()))
 
-        existing = await coll.find_one(
-            {"_id": chat_id, **build_app_scope_filter(app_id)},
-            {
-                "_id": 1,
-                "user_id": 1,
-                "workflow_name": 1,
-                "workflow_ui_state.last_artifact": 1,
-                "status": 1,
-                "created_at": 1,
-            },
-        )
-        if existing:
-            owner = existing.get("user_id")
-            if not owner or str(owner).strip() != str(user_id).strip():
-                await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
-                return
+        from mozaiksai.core.session import create_routed_chat_session, get_session_router_for_chat
 
-        persisted_workflow = str((existing or {}).get("workflow_name") or "").strip()
-        resolved_persisted = (
-            hooks.call_workflow_name_resolver(persisted_workflow, workflow_names)
-            if persisted_workflow
-            else None
-        )
-        resolved_requested = hooks.call_workflow_name_resolver(workflow_name, workflow_names)
+        query = {"_id": chat_id, **build_app_scope_filter(app_id)}
+        projection = {
+            "_id": 1, "user_id": 1, "workflow_name": 1, "workflow_ui_state.last_artifact": 1,
+            "status": 1, "created_at": 1, "run_build_binding": 1,
+        }
+        existing = await coll.find_one(query, projection)
+        resolved_workflow_name = hooks.call_workflow_name_resolver(workflow_name, workflow_names)
+        if not resolved_workflow_name:
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Workflow not found")
+            return
+        if existing and (
+            existing.get("user_id") != user_id or existing.get("workflow_name") != resolved_workflow_name
+        ):
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
+            return
 
-        if resolved_persisted:
-            resolved_workflow_name = resolved_persisted
-        else:
-            resolved_workflow_name = resolved_requested or workflow_name
-            if existing and persisted_workflow and persisted_workflow != resolved_workflow_name:
-                await coll.update_one(
-                    {"_id": chat_id, **build_app_scope_filter(app_id)},
-                    {"$set": {"workflow_name": resolved_workflow_name, "last_updated_at": datetime.now(UTC)}},
-                )
-                existing["workflow_name"] = resolved_workflow_name
-                existing["last_updated_at"] = datetime.now(UTC)
+        if existing and existing.get("status") == int(WorkflowStatus.FAILED):
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Workflow session failed; start a new run")
+            return
 
         try:
             prereqs_ok, prereq_reason = await hooks.call_chat_prereqs(
@@ -980,111 +978,39 @@ async def websocket_endpoint(
             )
             await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Prerequisites not met")
             return
-
-        if not existing:
-            await persistence_manager.create_chat_session(
-                chat_id=chat_id,
-                app_id=app_id,
-                workflow_name=resolved_workflow_name,
-                user_id=user_id,
+        created_resolved_chat = existing is None
+        if existing is None:
+            await create_routed_chat_session(
+                chat_id=chat_id, app_id=app_id, user_id=user_id, workflow_id=resolved_workflow_name,
+                context_variables={}, trigger_meta={"trigger_source": "chat"},
             )
-            existing = await coll.find_one(
-                {"_id": chat_id, **build_app_scope_filter(app_id)},
-                {
-                    "_id": 1,
-                    "user_id": 1,
-                    "workflow_name": 1,
-                    "workflow_ui_state.last_artifact": 1,
-                    "status": 1,
-                    "created_at": 1,
-                },
-            ) or {
-                "_id": chat_id,
-                "user_id": user_id,
-                "workflow_name": resolved_workflow_name,
-                "status": 0,
-            }
+            existing = await coll.find_one({**query, "user_id": user_id}, projection)
+        if existing is None:
+            raise ValueError("Created workflow session is not available")
 
-        session_router = get_session_router()
+        session_router = await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=chat_id)
         resume_resolution = await session_router.resolve_resume(
-            app_id=app_id,
-            user_id=user_id,
-            requested_workflow_id=resolved_workflow_name,
-            requested_chat_id=chat_id,
+            app_id=app_id, user_id=user_id, requested_workflow_id=resolved_workflow_name, requested_chat_id=chat_id,
         )
         resolved_chat_id = str(resume_resolution.get("chat_id") or chat_id)
-        resume_workflow_name = str(resume_resolution.get("workflow_id") or "").strip()
-        if resume_workflow_name:
-            resolved_resume_workflow = hooks.call_workflow_name_resolver(resume_workflow_name, workflow_names)
-            if resolved_resume_workflow:
-                resolved_workflow_name = resolved_resume_workflow
+        resolved_workflow_name = resume_resolution.get("workflow_id") or resolved_workflow_name
         resolved_doc = await coll.find_one(
-            {"_id": resolved_chat_id, **build_app_scope_filter(app_id)},
-            {
-                "_id": 1,
-                "user_id": 1,
-                "workflow_name": 1,
-                "workflow_ui_state.last_artifact": 1,
-                "status": 1,
-                "created_at": 1,
-            },
+            {"_id": resolved_chat_id, **build_app_scope_filter(app_id), "user_id": user_id,
+             "workflow_name": resolved_workflow_name},
+            projection,
         )
-
-        created_resolved_chat = False
-        if not resolved_doc:
-            await persistence_manager.create_chat_session(
-                chat_id=resolved_chat_id,
-                app_id=app_id,
-                workflow_name=resolved_workflow_name,
-                user_id=user_id,
-            )
-            created_resolved_chat = True
-            await session_router.bind_workflow_session(
-                app_id=app_id,
-                user_id=user_id,
-                workflow_id=resolved_workflow_name,
-                chat_id=resolved_chat_id,
-            )
-            resolved_doc = await coll.find_one(
-                {"_id": resolved_chat_id, **build_app_scope_filter(app_id)},
-                {
-                    "_id": 1,
-                    "user_id": 1,
-                    "workflow_name": 1,
-                    "workflow_ui_state.last_artifact": 1,
-                    "status": 1,
-                    "created_at": 1,
-                },
-            ) or {
-                "_id": resolved_chat_id,
-                "user_id": user_id,
-                "workflow_name": resolved_workflow_name,
-                "status": 0,
-            }
-
-        owner = resolved_doc.get("user_id")
-        if not owner or str(owner).strip() != str(user_id).strip():
-            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
+        if resolved_doc is None:
+            raise ValueError("Resolved workflow session is not available")
+        if resolved_doc.get("status") == int(WorkflowStatus.FAILED):
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Workflow session failed; start a new run")
             return
-
-        resolved_doc_workflow = str(resolved_doc.get("workflow_name") or "").strip()
-        if resolved_doc_workflow and resolved_doc_workflow != resolved_workflow_name:
-            maybe_resolved = hooks.call_workflow_name_resolver(resolved_doc_workflow, workflow_names)
-            if maybe_resolved:
-                resolved_workflow_name = maybe_resolved
-            else:
-                await coll.update_one(
-                    {"_id": resolved_chat_id, **build_app_scope_filter(app_id)},
-                    {"$set": {"workflow_name": resolved_workflow_name, "last_updated_at": datetime.now(UTC)}},
-                )
-                resolved_doc["workflow_name"] = resolved_workflow_name
-
-        session_state = resume_resolution.get("session_state")
-        if session_state is None:
-            if created_resolved_chat:
-                session_state = await session_router.get_session_snapshot(app_id=app_id, user_id=user_id)
-            else:
-                session_state = {}
+        original_target = (existing.get("run_build_binding") or {}).get("target_app_id")
+        resolved_target = (resolved_doc.get("run_build_binding") or {}).get("target_app_id")
+        if resolved_target != original_target:
+            raise ValueError("Resume cannot switch build targets")
+        if resolved_chat_id != chat_id:
+            await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=resolved_chat_id)
+        session_state = resume_resolution.get("session_state") or {}
 
         # Capture session version at the point of resume.  This baseline is used
         # later to detect silent concurrent writes (a soft staleness guard that
@@ -1145,6 +1071,7 @@ async def websocket_endpoint(
                 launch_behavior=_autostart_launch_behavior,
             )
             and run_history_count == 0
+            and resolved_doc.get("status") == int(WorkflowStatus.IN_PROGRESS)
         ):
             existing_task = simple_transport._background_tasks.get(resolved_chat_id)
             if not (existing_task and not existing_task.done()):

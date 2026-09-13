@@ -1,95 +1,89 @@
-"""
-mermaid_sequence_diagram tool - renders the workflow sequence diagram artifact.
-
-Reads MermaidSequenceDiagram structured output and emits a UI artifact
-via the shipped DiagramViewer component for user review.
-"""
+"""Review an exact workflow partition through the runtime's correlated UI tool."""
 
 from __future__ import annotations
 
-import logging
-from typing import Annotated, Any
+import hashlib
+import json
+from typing import Any, Literal
+from uuid import uuid4
 
-from mozaiksai.core.workflow.ui_tools import emit_ui_surface
+from pydantic import BaseModel, Field, StrictBool, StrictStr
 
-_logger = logging.getLogger("tools.mermaid_sequence_diagram")
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+from mozaiksai.core.workflow.ui_tools import use_ui_tool
+
+from .pattern_selection import validate_selection
+
+
+class WorkflowPlanReviewResponse(BaseModel):
+    action: Literal["approve", "request_changes", "cancel"]
+    approved: StrictBool
+    review_id: StrictStr
+    rationale: StrictStr = Field(default="", max_length=4000)
+
+
+def _fingerprint(selection: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(selection, sort_keys=True).encode()).hexdigest()
 
 
 async def mermaid_sequence_diagram(
     *,
-    MermaidSequenceDiagram: Annotated[
-        dict[str, Any] | None,
-        "MermaidSequenceDiagram payload from the diagram agent",
-    ] = None,
-    context_variables: Annotated[Any | None, "Context variables provided by AG2"] = None,
-) -> str:
-    """Emit the sequence diagram as a UI artifact for user review."""
+    MermaidSequenceDiagram: dict[str, Any] | None = None,
+    context_variables: Any | None = None,
+) -> dict[str, Any]:
+    if context_variables is None:
+        raise ValueError("Workflow plan review requires runtime context")
+    selection = validate_selection(context_variables.get("PatternSelection"), context_variables)
+    models, _ = load_workflow_structured_outputs("AgentGenerator")
+    raw = MermaidSequenceDiagram
+    if raw is None:
+        output = detach(context_variables.get("structured_output"))
+        raw = output.get("MermaidSequenceDiagram") if isinstance(output, dict) else None
+    diagram = models["MermaidSequenceDiagram"].model_validate(detach(raw)).model_dump(mode="json")
+    review_id = f"workflow_review_{uuid4().hex}"
+    fingerprint = _fingerprint(selection)
+    review = {"review_id": review_id, "selection_hash": fingerprint, "status": "pending"}
+    context_variables.set("workflow_plan_review", review)
+    context_variables.set("workflow_review_feedback", "")
+    workflows = selection["workflows"]
+    response = WorkflowPlanReviewResponse.model_validate(await use_ui_tool(
+        tool_id="WorkflowPlanReview",
+        payload={
+            **diagram,
+            "review_id": review_id,
+            "title": selection["pack_name"],
+            "summary": selection["pack_partition_reason"] or "Review the workflows to generate.",
+            "workflow_count": len(workflows),
+            "checkpoints": [f"{item['name']}: {item['description']}" for item in workflows]
+            or ["No AI workflows. App modules and pages provide the requested functionality."],
+        },
+        chat_id=context_variables.get("chat_id"),
+        workflow_name=context_variables.get("workflow_name") or "AgentGenerator",
+    ))
+    current = validate_selection(context_variables.get("PatternSelection"), context_variables)
+    current_review = detach(context_variables.get("workflow_plan_review"))
+    if current_review != review or response.review_id != review_id or _fingerprint(current) != fingerprint:
+        raise ValueError("Workflow approval does not match the current draft")
+    if response.approved is not (response.action == "approve"):
+        raise ValueError("Workflow review action and approval disagree")
+    outcome = {"approve": "approved", "request_changes": "changes_requested", "cancel": "cancelled"}[response.action]
+    context_variables.set("workflow_review_feedback", response.rationale)
+    context_variables.set("workflow_plan_review", {**review, "status": outcome, "rationale": response.rationale})
+    if outcome == "approved" and not workflows:
+        from factory_app.workflows._shared.platform.build_target import require_build_binding
 
-    # Fall back to structured_output injected by the auto-invoke runtime
-    if not MermaidSequenceDiagram or not isinstance(MermaidSequenceDiagram, dict):
-        structured: Any = None
-        if context_variables:
-            try:
-                getter = getattr(context_variables, "get", None)
-                if callable(getter):
-                    structured = getter("structured_output")
-                else:
-                    data = getattr(context_variables, "data", None)
-                    if isinstance(data, dict):
-                        structured = data.get("structured_output")
-            except Exception:
-                pass
-        if isinstance(structured, dict):
-            MermaidSequenceDiagram = structured.get("MermaidSequenceDiagram") or structured
+        from .generate_and_download import _record_context_and_artifacts
 
-    if not MermaidSequenceDiagram or not isinstance(MermaidSequenceDiagram, dict):
-        _logger.warning("mermaid_sequence_diagram: no diagram data available")
-        return "No diagram data provided"
-
-    workflow_name: str = str(MermaidSequenceDiagram.get("workflow_name") or "").strip()
-    diagram_text: str = str(MermaidSequenceDiagram.get("diagram") or "").strip()
-    legend: list[str] = MermaidSequenceDiagram.get("legend") or []
-    notes: str | None = MermaidSequenceDiagram.get("notes") or None
-    agent_message: str = str(
-        MermaidSequenceDiagram.get("agent_message") or "Review the sequence diagram below."
-    ).strip()
-
-    if not isinstance(legend, list):
-        legend = []
-
-    chat_id = None
-    runtime_workflow_name = "AgentGenerator"
-    if context_variables:
-        try:
-            getter = getattr(context_variables, "get", None)
-            if callable(getter):
-                chat_id = getter("chat_id")
-                runtime_workflow_name = getter("workflow_name") or runtime_workflow_name
-            else:
-                data = getattr(context_variables, "data", None)
-                if isinstance(data, dict):
-                    chat_id = data.get("chat_id")
-                    runtime_workflow_name = data.get("workflow_name") or runtime_workflow_name
-        except Exception:
-            pass
-
-    try:
-        await emit_ui_surface(
-            "DiagramViewer",
-            {
-                "workflow_name": workflow_name,
-                "diagram": diagram_text,
-                "diagram_type": "mermaid",
-                "legend": legend,
-                "notes": notes,
-                "agent_message": agent_message,
-            },
-            chat_id=str(chat_id) if chat_id else None,
-            workflow_name=str(runtime_workflow_name or "AgentGenerator"),
+        binding = require_build_binding(context_variables)
+        await _record_context_and_artifacts(
+            app_id=binding.target_app_id,
+            user_id=context_variables.get("user_id"),
+            chat_id=context_variables.get("chat_id"),
+            pack_name=selection["pack_name"],
+            bundle_entries=[],
+            zip_path=None,
+            context_variables=context_variables,
         )
-        _logger.info("Emitted DiagramViewer artifact for '%s'", workflow_name)
-    except Exception as exc:
-        _logger.error("Failed to emit DiagramViewer artifact: %s", exc)
-        return f"Error rendering diagram: {exc}"
-
-    return f"Sequence diagram rendered for '{workflow_name}'"
+        outcome = "no_workflows"
+    return {"outcome": outcome, "review_id": review_id, "workflow_count": len(workflows)}

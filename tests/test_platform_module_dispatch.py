@@ -14,6 +14,36 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
 from mozaiksai.hosts import platform as platform_host
 
 
+@pytest.mark.parametrize("failure,status,code", [("input", 400, "INVALID_PARAMS"), ("bug", 500, "EXECUTION_ERROR")])
+def test_service_business_validation_uses_existing_http_error_contract(monkeypatch, failure, status, code):
+    from mozaiksai.core.runtime import ModuleInputValidationError
+
+    writes = []
+
+    class Handler:
+        async def create(self, ctx, *, name):
+            if not name.strip():
+                error_type = ModuleInputValidationError if failure == "input" else ValueError
+                raise error_type("private invalid value")
+            writes.append(name)
+            return {"name": name}
+
+    executor = ModuleExecutor()
+    executor.register("records", Handler(), action_method_map={"create": "create"})
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    response = _client().post("/api/modules/records/create", json={"name": "   "})
+    assert response.status_code == status
+    if failure == "input":
+        assert response.json()["detail"]["error_code"] == code
+    else:
+        assert response.json()["detail"] == "Internal server error"
+    assert "private invalid value" not in response.text
+    assert writes == []
+
+
 class _OrdersHandler:
     async def list(self, ctx):
         return {"permissions": ctx.permissions}

@@ -10,6 +10,7 @@ import shutil
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.workflow.workflow_ui_catalog import (
     get_workflow_shipped_component_map,
     infer_workflow_ui_realization,
@@ -67,25 +68,8 @@ def _resolve_artifact_ids(
     data: dict[str, Any] | None = None,
     context_variables: Any | None = None,
 ) -> tuple[str, str]:
-    data = data or {}
-    app_id = (
-        _context_get(context_variables, "app_id")
-        or data.get("app_id")
-        or os.getenv("MOZAIKS_APP_ID")
-        or "local-app"
-    )
-    build_id = (
-        _context_get(context_variables, "build_id")
-        or data.get("build_id")
-        or _context_get(context_variables, "chat_id")
-        or data.get("chat_id")
-        or os.getenv("MOZAIKS_BUILD_ID")
-        or "local-build"
-    )
-    return (
-        _safe_path_segment(app_id, fallback="local-app"),
-        _safe_path_segment(build_id, fallback="local-build"),
-    )
+    binding = require_build_binding(context_variables)
+    return binding.target_app_id, binding.build_id
 
 
 def _resolve_workflow_output_dir(

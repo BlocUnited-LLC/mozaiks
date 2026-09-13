@@ -6,19 +6,13 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.artifacts import persist_summary_artifact
+from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
 logger = logging.getLogger(__name__)
-
-try:
-    from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
-
-    _HAS_PERSISTENCE = True
-except ImportError:
-    _HAS_PERSISTENCE = False
-    BuilderArtifactStore = None  # type: ignore[assignment,misc]
-
 
 def _set_context_value(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None or not key:
@@ -42,7 +36,7 @@ async def save_captured_theme(
     if not context_variables:
         return {"success": False, "error": "No context provided"}
 
-    data = context_variables.get("structured_output")
+    data = detach(context_variables.get("structured_output"))
     if not data:
         return {
             "success": False,
@@ -50,10 +44,11 @@ async def save_captured_theme(
         }
 
     chat_id = context_variables.get("chat_id")
-    app_id = context_variables.get("app_id")
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
     app_url = context_variables.get("app_url")
     user_id = context_variables.get("user_id")
-    build_mode = context_variables.get("build_mode")
+    build_mode = "revision" if binding.phase == "refinement" else "genesis"
 
     agent_message = data.get("agent_message", "Theme captured successfully.")
     theme_config = {key: value for key, value in data.items() if key != "agent_message"}
@@ -62,21 +57,17 @@ async def save_captured_theme(
     fonts = theme_config.get("fonts") or {}
     theme_v2 = theme_config.get("theme") or {}
 
-    persistence_id = str(app_id or identity.get("app_name") or identity.get("name") or "captured-theme")
+    persistence_id = app_id
     now = datetime.now(UTC)
 
-    if _HAS_PERSISTENCE and BuilderArtifactStore:  # type: ignore[truthy-function]
-        try:
-            store = BuilderArtifactStore()
-            await store.save_theme_capture(
-                app_id=persistence_id,
-                chat_id=str(chat_id) if chat_id else None,
-                app_url=app_url,
-                identity=identity,
-                theme_config=theme_config,
-            )
-        except Exception as exc:
-            logger.warning("[ThemeCapture] Persistence failed: %s", exc)
+    store = BuilderArtifactStore()
+    await store.save_theme_capture(
+        app_id=persistence_id,
+        chat_id=str(chat_id) if chat_id else None,
+        app_url=app_url,
+        identity=identity,
+        theme_config=theme_config,
+    )
 
     try:
         await persist_summary_artifact(
@@ -99,6 +90,7 @@ async def save_captured_theme(
         )
     except Exception as exc:
         logger.warning("[ThemeCapture] Generic theme artifact persistence failed: %s", exc)
+        raise
 
     ui_payload = {
         "title": f"Theme: {identity.get('app_name', 'Captured Theme')}",
@@ -135,6 +127,7 @@ async def save_captured_theme(
 
     return {
         "success": True,
+        "outcome": "saved",
         "message": agent_message,
         "app_id": persistence_id,
         "theme_config_keys": list(theme_config.keys()),

@@ -46,8 +46,8 @@ const WorkflowCompletion = ({
 
   return (
     <TransitionActionPanel
-      eyebrow="Build Complete"
-      title="Congratulations!"
+      eyebrow="Workflow Complete"
+      title={workflowName}
       body={completionMessage}
       icon="success"
       entered={entered}

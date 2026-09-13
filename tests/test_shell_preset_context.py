@@ -6,6 +6,9 @@ from unittest.mock import patch
 
 import yaml
 
+from factory_app.workflows.AppGenerator.tools.hook_file_contract_context import (
+    inject_cookie_cutter_contracts_context,
+)
 from factory_app.workflows.AppGenerator.tools.hook_shell_preset_context import (
     _load_shell_presets,
     inject_shell_preset_context,
@@ -94,6 +97,29 @@ def test_shell_preset_hook_is_noop_for_unrelated_agents() -> None:
         agent = _FakeAgent(agent_name)
         _run_hook(agent)
         assert agent.system_message == ""
+
+
+def test_shell_preset_hook_preserves_inline_references_and_build_instructions() -> None:
+    agent = _FakeAgent("AppPlanAgent")
+    base = "[INSTRUCTIONS]\nRead `[SHELL PRESET CONTEXT]` for chrome.\nKeep account_data_handler.py.\n\n[OUTPUT]\nReturn JSON."
+    agent.system_message = base
+    _run_hook(agent)
+    assert agent.system_message.startswith(base + "\n\n[SHELL PRESET CONTEXT]\n")
+    inject_cookie_cutter_contracts_context(agent, [])
+    assert agent.system_message.startswith(base + "\n\n[SHELL PRESET CONTEXT]\n")
+    first = agent.system_message
+    _run_hook(agent)
+    assert agent.system_message == first
+
+
+def test_shell_preset_hook_preserves_full_factory_planner_instructions() -> None:
+    config = yaml.safe_load((_APPGEN_DIR / "agents.yaml").read_text(encoding="utf-8"))
+    planner = next(agent for agent in config["agents"] if agent["name"] == "AppPlanAgent")
+    base = "\n\n".join(f"{section['heading']}\n{section['content']}" for section in planner["prompt_sections"])
+    agent = _FakeAgent("AppPlanAgent")
+    agent.system_message = base
+    _run_hook(agent)
+    assert agent.system_message.startswith(base + "\n\n[SHELL PRESET CONTEXT]\n")
 
 
 def test_shell_preset_hook_replaces_section_without_dropping_trailing_content() -> None:

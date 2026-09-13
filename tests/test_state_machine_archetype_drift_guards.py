@@ -1,7 +1,7 @@
 """Drift guards for the state_machine module archetype and cron tick contract.
 
 These tests protect against regressions in:
-- The cron_tick.py template that InfraScaffoldAgent emits for state_machine modules
+- The cron_tick.py template available to selected state_machine build packs
 - The state_machine archetype spec in module_archetypes.yaml
 - The infra pack context.yaml that declares cron tick template variables
 - The runtime behaviour of _MinimalCtx and the run() exit-code logic
@@ -61,7 +61,7 @@ def test_cron_tick_template_file_exists() -> None:
     """The cron_tick.py template must exist at the canonical infra scripts path."""
     assert CRON_TICK_TEMPLATE.exists(), (
         f"Missing cron tick template at {CRON_TICK_TEMPLATE}. "
-        "InfraScaffoldAgent emits one copy per state_machine module."
+        "Selected state_machine packs provide the external cron template."
     )
 
 
@@ -178,7 +178,7 @@ def test_cron_tick_template_contains_all_expected_template_vars() -> None:
     missing = [var for var in _EXPECTED_TEMPLATE_VARS if var not in source]
     assert not missing, (
         f"Missing template variable(s) in cron_tick.py: {missing}. "
-        "InfraScaffoldAgent substitutes these at generation time."
+        "The selected pack materializer substitutes these at generation time."
     )
 
 
@@ -235,10 +235,11 @@ def test_state_machine_behavior_pattern_requires_errors_key_in_tick_result() -> 
     assert "errors" in spec_text
 
 
-def test_state_machine_behavior_pattern_describes_azure_container_apps_job() -> None:
-    """State-machine guidance must describe Azure Container Apps job resources."""
+def test_state_machine_behavior_pattern_keeps_provider_jobs_operator_owned() -> None:
+    """Generated app bundles do not own provider-specific scheduler provisioning."""
     spec_text = yaml.dump(_state_machine_pattern())
-    assert "azure_container_apps" in spec_text or "Microsoft.App/jobs" in spec_text
+    assert "operator or hosted deployment" in spec_text
+    assert "not AuthScaffoldAgent or the generated app bundle" in spec_text
 
 
 def test_state_machine_behavior_pattern_mandates_env_vars_in_docstring() -> None:

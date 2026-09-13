@@ -65,6 +65,7 @@ class AutoToolBinding:
     accepts_context: bool
     ui_config: dict[str, Any]
     model_cls: Any
+    self_emits_ui: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ class AutoToolBindingDescriptor:
     function_name: str
     ui_config: dict[str, Any]
     model_cls: Any
+    self_emits_ui: bool = False
 
 
 #: Per-binding execution checkpoint states. "PENDING" is the absence of a
@@ -432,6 +434,7 @@ class AutoToolEventHandler:
                     accepts_context="context_variables" in sig.parameters,
                     ui_config=descriptor.ui_config,
                     model_cls=descriptor.model_cls,
+                    self_emits_ui=descriptor.self_emits_ui,
                 )
             )
         return bindings
@@ -594,6 +597,7 @@ class AutoToolEventHandler:
                     function_name=function_name,
                     ui_config=ui_cfg,
                     model_cls=model_cls,
+                    self_emits_ui=tool_type in {"UI_TOOL", "UI_SURFACE"},
                 )
                 mapping.setdefault(model_name, []).append(descriptor)
                 logger.debug("AUTO_TOOL_BINDING_CREATED model=%s agent=%s tool=%s", model_name, agent_name, descriptor.tool_name)
@@ -780,6 +784,10 @@ class AutoToolEventHandler:
             )
         except Exception:
             logger.debug("[AUTO_TOOL] Failed to emit select_speaker for agent=%s", agent_name)
+        # UI tools own their validated payload and use_ui_tool interaction.
+        # Mounting the component with input arguments creates an empty/fake result.
+        if binding.self_emits_ui:
+            return
         display_mode = binding.ui_config.get("mode") or "inline"
         workflow_name = binding.ui_config.get("workflow_name")
         event_payload = {

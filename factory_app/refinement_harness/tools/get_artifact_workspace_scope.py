@@ -23,7 +23,7 @@ async def get_artifact_workspace_scope(
     artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     tool_context = normalize_context(context)
-    app_id = str(tool_context.app_id or "").strip()
+    app_id = str(tool_context.artifact_app_id or "").strip()
     build_record_id = str(tool_context.build_record_id or "").strip()
     if not app_id or not build_record_id:
         return {"present": False, "reason": "missing_app_id_or_build_record"}

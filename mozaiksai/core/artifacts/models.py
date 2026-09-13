@@ -83,6 +83,8 @@ class RefinementRequestPayload(BaseModel):
     raw_user_request: str = ""
     source_surface: str | None = None
     app_id: str | None = None
+    target_app_id: str | None = None
+    user_id: str | None = None
     requested_workflow_id: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 

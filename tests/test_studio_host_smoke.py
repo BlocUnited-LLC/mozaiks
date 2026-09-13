@@ -114,6 +114,7 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
         async def create_app_record(self, **kwargs):  # noqa: ANN003
             self._app = {
                 "app_id": kwargs.get("app_id") or "smoke-app",
+                "chat_app_id": kwargs.get("chat_app_id"),
                 "bundle_path": None,
                 "created_at": "2025-01-01T00:00:00+00:00",
                 "description": kwargs.get("description"),
@@ -153,26 +154,23 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
         "/api/studio/apps",
         json={
             "name": "Smoke App",
-            "active_chat_id": "chat-smoke",
-            "active_workflow_id": "ValueEngine",
         },
     )
     assert create_response.status_code == 200
     app_id = create_response.json()["app"]["app_id"]
     build_registry_id = create_response.json()["app"]["build_registry_id"]
-    assert create_response.json()["app"]["active_chat_id"] == "chat-smoke"
-    assert create_response.json()["app"]["active_workflow_id"] == "ValueEngine"
+    assert create_response.json()["app"]["active_chat_id"] is None
+    assert create_response.json()["app"]["active_workflow_id"] is None
 
     build_response = client.get(f"/api/studio/build?app_id={app_id}")
     status_response = client.put(
         f"/api/studio/apps/{build_registry_id}/status",
         json={"status": "review", "bundle_path": "generated/apps/smoke"},
     )
-    history_response = client.get("/api/studio/build/history?limit=10")
+    history_response = client.get(f"/api/studio/build/history?limit=10&build_registry_id={build_registry_id}")
 
     assert build_response.status_code == 200
-    assert status_response.status_code == 200
-    assert status_response.json()["app"]["lifecycle_state"] == "review"
+    assert status_response.status_code == 404
     assert history_response.status_code == 200
 
 

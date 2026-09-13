@@ -54,7 +54,8 @@ export function workflowUiPlugin(options) {
         this.addWatchFile(filename);
         return `${JSON.stringify(name)}: () => import(${JSON.stringify(filename.replaceAll('\\', '/'))})`;
       });
-      this.addWatchFile(path.join(options.primaryRoot, 'extended_orchestration', 'extension_registry.json'));
+      const registryPath = path.join(options.primaryRoot, 'extended_orchestration', 'extension_registry.json');
+      if (fs.existsSync(registryPath)) this.addWatchFile(registryPath);
       return `${transitionImport}export default {${entries.join(',\n')}};`;
     },
   };

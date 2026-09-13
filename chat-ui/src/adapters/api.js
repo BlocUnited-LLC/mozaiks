@@ -518,7 +518,9 @@ export class WebSocketApiAdapter extends ApiAdapter {
     };
 
     socket.onclose = () => {
-      this._chatConnections.delete(chatId);
+      const current = this._chatConnections.get(chatId);
+      if (current && current !== connection) return;
+      if (current === connection) this._chatConnections.delete(chatId);
       if (callbacks.onClose) callbacks.onClose();
     };
 
@@ -550,7 +552,9 @@ export class WebSocketApiAdapter extends ApiAdapter {
             socket.close();
           }
         } finally {
-          this._chatConnections.delete(chatId);
+          if (this._chatConnections.get(chatId) === connection) {
+            this._chatConnections.delete(chatId);
+          }
         }
       }
     };

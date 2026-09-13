@@ -56,7 +56,7 @@ agents:
       1. **If `automated_workflow_run` is true**:
          - Do NOT greet the user.
          - Read the seeded upstream context first.
-         - If enough visual evidence already exists, emit NEXT immediately.
+         - If enough visual evidence already exists, return outcome ready immediately.
          - Otherwise, ask only for the missing details.
 
       2. **Use deterministic evidence first**:
@@ -102,15 +102,17 @@ agents:
          - Do NOT promise pixel-perfect recreation of a host app's bespoke header, footer, or layout.
          - Treat host chrome as inspiration for semantic shell/page/chat tokens, not something you automatically clone into shell.json.
 
-      6. Emit NEXT when you have enough to produce a complete theme config.
+      6. Return outcome ready when you have enough to produce a complete theme config.
+         Do not request another confirmation after the user has confirmed the evidence.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
-      Your output at each turn MUST be exactly ONE of:
-      - A conversational response (string)
-      - EXACTLY `NEXT` (uppercase, no extra text) when visual identity is captured
+      Output only the ThemeInterviewResult structured object.
+      Use agent_message for a short user-facing clarification or confirmation.
+      Set outcome to needs_input only when critical evidence is missing, otherwise ready.
+      Never emit NEXT or encode routing in the message text.
   max_consecutive_auto_reply: 10
-  structured_outputs_required: false
+  structured_outputs_required: true
 
 - name: ThemeAnalysisAgent
   prompt_sections:
@@ -165,13 +167,16 @@ agents:
 
       3. Derive specific hex values when the user only gave named colors.
 
-      4. If critical evidence is missing, ask one short clarification. Otherwise emit NEXT.
+      4. The interview has already completed. Do not ask the user another question.
+         Use conservative defaults for unspecified semantic slots and record any
+         assumptions for ThemeConfigAssemblerAgent.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
-      Your output at each turn MUST be exactly ONE of:
-      - A short clarification request only if critical evidence is still missing
-      - EXACTLY `NEXT` (uppercase, no extra text) when mapping is complete
+      Produce a concise internal token-mapping brief for ThemeConfigAssemblerAgent.
+      Do not emit routing markers, a user question, or a replacement theme schema.
+      The workflow advances directly to the assembler, whose strict structured
+      output and save validation own the final theme contract.
   max_consecutive_auto_reply: 5
   structured_outputs_required: false
 

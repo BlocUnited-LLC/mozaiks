@@ -5,6 +5,22 @@
 # the ThemePreviewCard UI summary.
 
 tools:
+- agent: ThemeInterviewAgent
+  file: record_theme_interview.py
+  function: record_theme_interview
+  description: Validate typed interview readiness before advancing to theme analysis.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: interview_outcome
+    attempts_key: interview_attempts
+    result_field: outcome
+    values: [needs_input, ready, blocked]
+    error_value: blocked
+    max_attempts: 10
+    retry_on: [needs_input]
+
 - agent: ThemeConfigAssemblerAgent
   file: save_captured_theme.py
   function: save_captured_theme
@@ -13,6 +29,15 @@ tools:
     CapturedThemeConfig. Persists the artifact set and emits a preview card.
   tool_type: UI_Surface
   auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: theme_save_outcome
+    attempts_key: theme_save_attempts
+    result_field: outcome
+    values: [saved, blocked]
+    error_value: blocked
+    max_attempts: 1
+    retry_on: []
   ui:
     component: ThemePreviewCard
     mode: artifact

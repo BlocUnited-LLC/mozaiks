@@ -33,6 +33,20 @@ bootstrap/replay, and reconnectable UI state.
 Current implemented workflow-run persistence contract:
 
 - `ChatSessions` is run metadata and UI-state projection, not canonical execution history.
+- Its `WorkflowStatus` is `0` (in progress, including pauses), `1` (completed),
+  or `2` (failed). Failure writes `failed_at`, duration, and a session-version
+  increment before failure hooks or terminal UI delivery, and clears pending
+  input without discarding artifacts. A terminal status cannot be overwritten
+  by another outcome. Only completed sessions satisfy workflow prerequisites.
+- Failed sessions reject websocket reconnection and execution input. Both
+  completed and failed sessions reject direct orchestration re-entry. Pauses,
+  admission denials, lease loss, and cancellation do not mark a session failed.
+  Retrying a failed workflow requires a new session, not replay of that run.
+- A closed chat-scoped AG2 channel also blocks opening a replacement channel,
+  even for older session projections left at `0`. This uses AG2's existing WAL,
+  not Factory build receipts or a second runtime state store. A receipt-only
+  historical failure with no terminal AG2 state cannot be inferred generically;
+  this change does not migrate historical records or inspect product outcomes.
 - AG2 run history is persisted separately through the AG2 stream storage adapters and is the source of truth for execution re-entry and UI replay.
 - While the backend process still owns a paused AG2 workflow channel, user
   replies continue that live AG2 channel first. Persisted AG2 events are the

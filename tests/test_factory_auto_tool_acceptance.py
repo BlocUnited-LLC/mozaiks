@@ -77,7 +77,10 @@ def _payload_for(model_cls: type[BaseModel]) -> dict[str, Any]:
 
 class _PatternContext:
     def __init__(self) -> None:
-        self.data: dict[str, Any] = {}
+        from tests.factory_context import factory_context
+
+        self.data: dict[str, Any] = factory_context({"app_id": "app-theme-1"})
+        self.data.update(theme_save_outcome="blocked", theme_save_attempts=0)
 
     def get(self, key, default=None):
         return self.data.get(key, default)
@@ -134,6 +137,8 @@ def side_effect_probes(monkeypatch):
     probes: dict[str, list] = {"summary_artifacts": [], "ui_surfaces": [], "theme_saves": [], "context_persists": []}
 
     async def fake_persist_summary_artifact(**kwargs):
+        from bson import BSON
+        BSON.encode(kwargs)
         probes["summary_artifacts"].append(kwargs)
 
     async def fake_emit_ui_surface(component, payload, **kwargs):
@@ -141,6 +146,8 @@ def side_effect_probes(monkeypatch):
 
     class _FakeStore:
         async def save_theme_capture(self, **kwargs):
+            from bson import BSON
+            BSON.encode(kwargs)
             probes["theme_saves"].append(kwargs)
 
     class _FakePersistenceManager:
@@ -173,7 +180,7 @@ def _valid_theme_payload() -> dict[str, Any]:
     return payload
 
 
-async def _drive_runtime(payload: dict[str, Any], pattern: _PatternContext) -> Any:
+async def _drive_runtime(payload: dict[str, Any], pattern: _PatternContext, turn: int = 1) -> Any:
     _, registry = _so.load_workflow_structured_outputs(WORKFLOW)
     return await emit_validated_agent_output(
         current_agent_name=AGENT,
@@ -182,7 +189,7 @@ async def _drive_runtime(payload: dict[str, Any], pattern: _PatternContext) -> A
         chat_id="chat-theme-1",
         app_id="app-theme-1",
         user_id="user-1",
-        turn_sequence=1,
+        turn_sequence=turn,
         context_vars_dict={"app_id": "app-theme-1"},
         context_bridge=pattern,
         structured_registry=registry,
@@ -216,6 +223,38 @@ async def test_theme_capture_auto_tool_succeeds_through_real_runtime_path(
     assert side_effect_probes["context_persists"], "context persistence did not run"
     for snapshot in side_effect_probes["context_persists"]:
         assert STRUCTURED_OUTPUT_KEY not in snapshot
+
+
+async def test_typed_theme_question_reaches_chat_through_auto_tool_binding(
+    factory_manager, side_effect_probes, monkeypatch,
+):
+    events = []
+
+    class Transport:
+        async def send_event_to_ui(self, event, chat_id):
+            events.append(event)
+
+    async def get_transport():
+        return Transport()
+
+    monkeypatch.setattr(_auto_tool_mod, "_get_simple_transport", get_transport)
+    _, registry = _so.load_workflow_structured_outputs(WORKFLOW)
+    pattern = _PatternContext()
+    pattern.data.update(interview_outcome="blocked", interview_attempts=0)
+    payload = {"agent_message": "What is your primary brand color?", "outcome": "needs_input"}
+    await emit_validated_agent_output(
+        current_agent_name="ThemeInterviewAgent", last_reply=payload,
+        workflow_name=WORKFLOW, chat_id="theme-interview", app_id="app-theme-1",
+        user_id="user-1", turn_sequence=1, context_vars_dict={"app_id": "app-theme-1"},
+        context_bridge=pattern, structured_registry=registry,
+        auto_tool_agents={"ThemeInterviewAgent"}, wf_logger=_Logger(),
+    )
+    calls = [event for event in events if event["kind"] == "tool_call"]
+    assert len(calls) == 1
+    assert calls[0]["payload"]["agent_message"] == payload["agent_message"]
+    assert calls[0]["awaiting_response"] is False
+    assert pattern.data["interview_outcome"] == "needs_input"
+    assert STRUCTURED_OUTPUT_KEY not in pattern.data
 
 
 @pytest.mark.parametrize(
@@ -256,4 +295,19 @@ async def test_extra_field_attack_rejects_before_normalization(
     assert side_effect_probes["summary_artifacts"] == []
     assert side_effect_probes["theme_saves"] == []
     assert side_effect_probes["context_persists"] == []
-    assert pattern.data == {}
+    assert pattern.data == _PatternContext().data
+
+
+async def test_theme_save_failure_sets_blocked_outcome_in_runtime(factory_manager, side_effect_probes, monkeypatch):
+    class FailingStore:
+        async def save_theme_capture(self, **_kwargs):
+            raise RuntimeError("theme store unavailable")
+
+    monkeypatch.setattr("mozaiksai.core.data.persistence.artifact_store.BuilderArtifactStore", FailingStore)
+    pattern = _PatternContext()
+    await _drive_runtime(_valid_theme_payload(), pattern, turn=2)
+    assert pattern.data["theme_save_outcome"] == "blocked"
+    assert pattern.data["theme_save_attempts"] == 1
+    assert not pattern.data.get("theme_capture_persisted")
+    assert side_effect_probes["ui_surfaces"] == []
+    assert side_effect_probes["summary_artifacts"] == []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -94,6 +95,13 @@ def test_route_renderer_posts_app_and_user_scope_for_transition_resolution() -> 
     assert "const { user, config, auth } = useChatUI();" in source
 
 
+def test_workflow_completion_does_not_claim_entire_build_is_complete() -> None:
+    source = _read_text("chat-ui/src/ui/screens/WorkflowCompletion.jsx")
+    assert 'eyebrow="Workflow Complete"' in source
+    assert "title={workflowName}" in source
+    assert "Build Complete" not in source
+
+
 @pytest.mark.asyncio
 async def test_transition_resolve_workflow_response_includes_context_variables(monkeypatch) -> None:
     principal = UserPrincipal(
@@ -166,6 +174,36 @@ def test_workflow_start_posts_app_and_user_scope_for_triggered_workflows() -> No
     assert "const { user, config, auth } = useChatUI();" in source
 
 
+def test_live_workflow_reconciliation_does_not_read_stale_storage() -> None:
+    source = _read_text("chat-ui/src/pages/ChatPage.js")
+    body = source.split("    const urlResolvedWorkflow =", 1)[1].split("  }, [workflowConfigLoaded", 1)[0]
+    script = """
+const assert = require('node:assert/strict');
+const workflowConfig = { resolveKnownWorkflowName: value => value, getDefaultWorkflow: () => 'ValueEngine' };
+const getStoredActiveWorkflowName = () => { throw new Error('Storage is stale during a handoff'); };
+const resolveWorkflow = () => 'ValueEngine';
+const currentChatId = 'next-chat';
+const urlWorkflowName = 'ThemeCapture';
+let currentWorkflowName = 'ThemeCapture';
+let activeWorkflowName = 'DesignDocs';
+let updates = 0;
+const setCurrentWorkflowName = value => { currentWorkflowName = value; updates++; };
+const setActiveWorkflowName = value => { activeWorkflowName = value; updates++; };
+function reconcile() {
+    const urlResolvedWorkflow =""" + body + """
+}
+reconcile();
+reconcile();
+assert.equal(currentWorkflowName, 'DesignDocs');
+assert.equal(activeWorkflowName, 'DesignDocs');
+assert.equal(updates, 1);
+"""
+    result = subprocess.run(
+        ["node", "--eval", script], cwd=WORKSPACE, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_chat_page_transition_handoff_persists_workflow_before_reconnect() -> None:
     source = _read_text("chat-ui/src/pages/ChatPage.js")
     startup_source = _read_text("chat-ui/src/hooks/useChatStartupEffects.js")
@@ -173,6 +211,9 @@ def test_chat_page_transition_handoff_persists_workflow_before_reconnect() -> No
 
     assert "setStoredActiveWorkflowName(resolvedWorkflowName)" in source
     assert "currentChatId\n        ? activeResolvedWorkflow || urlResolvedWorkflow" in source
+    reconciliation = source.split("const urlResolvedWorkflow =", 1)[1].split("useEffect(() =>", 1)[0]
+    assert "getStoredActiveWorkflowName" not in reconciliation
+    assert "workflowConfig.resolveKnownWorkflowName(activeWorkflowName)" in reconciliation
     assert "workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())" in source
     assert "buildWorkflowResolutionCandidates({" in source
     assert "includeAvailable: Boolean(queryChatId)" in source

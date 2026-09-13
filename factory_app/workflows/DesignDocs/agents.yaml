@@ -419,7 +419,7 @@ agents:
                     { "name": "app_id", "type": "string", "required": true, "default": null, "enum": null, "nullable": false }
                   ],
                   "indexes": [
-                    { "keys": [["app_id", 1], ["user_id", 1]], "unique": true, "sparse": null, "name": null }
+                      { "keys": [{"field": "app_id", "order": 1}, {"field": "user_id", "order": 1}], "unique": true, "sparse": null, "name": null }
                   ],
                   "search_by": "user_id",
                   "lifecycle": {

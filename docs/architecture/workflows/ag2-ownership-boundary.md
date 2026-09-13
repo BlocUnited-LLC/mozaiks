@@ -31,6 +31,44 @@ Mozaiks owns deterministic product and runtime contracts around AG2:
 
 ## Runtime Handoff
 
+Declared task batches execute after their trigger agent's validated output and
+auto tools, before AG2 folds that agent's outgoing packet. This applies at any
+point in the graph, including after an interview, human approval, or resume.
+The existing task-batch executor and AG2 Task adapter own worker execution;
+only declared result/status keys are committed with task-batch writer authority.
+AG2 then evaluates the original transition graph. Mozaiks must not replace the
+first turn with an artificial termination and a separately selected continuation.
+A failed required batch fails the run rather than advancing to assembly.
+The declared task retry budget covers response validation, deterministic file
+materialization, task identity, and file ownership. A rejected response supplies
+bounded validation feedback to the next attempt at the same task; it does not
+change the task's ownership or create an unlimited repair loop.
+For materialization/ownership failures, that retry also receives the rejected
+candidate as explicitly non-authoritative data: AG2 task attempts have independent
+streams, so error text alone cannot show the worker what needs correcting. The
+candidate is not committed as accepted output, and all original validation runs
+again. Retry limits and model-call admission still apply to the additional input.
+If an output hook fails after authorized tool or batch writes, the adapter
+commits those writes using AG2 `EV_CONTEXT_SET` without sending the failed
+reply packet. Failure evidence therefore survives WAL replay without advancing
+the graph. This uses AG2's existing
+[channel context primitive](https://docs.ag2.ai/docs/user-guide/network/context_variables/),
+not a second persistence or routing authority.
+
+For an agent with a declared self-edge, the packet adapter supplies an explicit
+audience containing all workflow participants, including the sender. AG2 1.0.3
+excludes the sender from a default broadcast, otherwise leaving that self-edge
+without a delivery. Explicitly targeted packets are unchanged. AG2's default
+handler and `can_send` probe still select the authorized speaker; Mozaiks does
+not refold the graph or schedule an extra turn. Recheck this packet adaptation
+when upstream adds automatic self-edge notification.
+
+Initial prompts and user replies are shared within their workflow channel.
+They use AG2's broadcast visibility, not a private audience containing only
+the next interviewer. Otherwise later planners cannot see the user's corrections
+in AG2's projected conversation. AG2 still owns turn selection; visibility does
+not grant permission to speak. Tests inspect both history and current-turn input.
+
 Declarative workflow participants attach through AG2's public
 `attach_plugin=False` option. They keep AG2's default envelope handler,
 channel adapter, graph execution, and declared workflow tools, but do not
@@ -47,7 +85,7 @@ not a replacement scheduler or network implementation. The installed AG2
 default handler still runs without the plugin. Recheck this boundary when
 upgrading AG2.
 
-A continuation settlement timeout is a failed run, not a human-input pause.
+A settlement timeout, including initial execution, is a failed run, not a human-input pause.
 The adapter returns a failed result and closes its live clients; transport
 then uses the existing failure event path. A timeout must not leave a reusable
 live-run handle or claim that the workflow is waiting for the user.
@@ -206,6 +244,23 @@ run_workflow_orchestration(knowledge_store=...)
     → AG2NetworkRunnerRequest(knowledge_store=...)
       → Hub.open(request.knowledge_store or MemoryKnowledgeStore(), ...)
 ```
+
+## Reconnect Integration
+
+The network adapter snapshots AG2's pending participants before calling its
+`resume_pending_turns()` API. It must not discover and replay downstream turns
+that are already advancing through live delivery, or send a new user message
+before the recovered workflow settles. AG2's pending-turn state, causation
+deduplication, turn probe, and graph remain authoritative.
+
+Mozaiks serializes callbacks per attached client only while its mutable context
+bridge and temporary packet-send hook are installed. This prevents overlapping
+live/recovery notifications from nesting hooks or clearing another callback's
+context changes. It is not a workflow scheduler or a new replay ledger. Revisit
+this boundary if AG2 supplies an atomic per-client round hook or serialized
+concurrent redelivery in its default handler. See the upstream
+[client handler contract](https://docs.ag2.ai/docs/user-guide/network/agent_clients/)
+and [reconnect contract](https://docs.ag2.ai/docs/user-guide/network/distributed/).
 
 ## Review Checklist
 

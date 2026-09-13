@@ -1,96 +1,63 @@
-"""
-pattern_selection tool - stores AG2 Network patternbook selection from PatternAgent.
-
-Caches the selected pattern so prompt middleware functions can inject pattern-specific
-guidance into downstream agent prompts.
-"""
+"""Validate the workflow partition before dispatch or human review."""
 
 from __future__ import annotations
 
-import logging
 from typing import Annotated, Any
 
-_logger = logging.getLogger("tools.pattern_selection")
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
 
-def _cache_context_value(context_variables: Any, key: str, value: Any) -> None:
-    if not context_variables:
-        return
-    try:
-        setter = getattr(context_variables, "set", None)
-        if callable(setter):
-            setter(key, value)
-            return
-    except Exception as exc:  # pragma: no cover - defensive logging
-        _logger.debug("Unable to cache %s via context_variables.set: %s", key, exc)
-
-    try:
-        data = getattr(context_variables, "data", None)
-        if isinstance(data, dict):
-            data[key] = value
-    except Exception as exc:  # pragma: no cover - defensive logging
-        _logger.debug("Unable to cache %s via context_variables.data: %s", key, exc)
+def validate_selection(raw_selection: Any, context_variables: Any) -> dict[str, Any]:
+    models, _ = load_workflow_structured_outputs("AgentGenerator")
+    selection = models["PatternSelection"].model_validate(detach(raw_selection)).model_dump(mode="json")
+    workflows = selection["workflows"]
+    if selection["is_multi_workflow"] != (len(workflows) > 1):
+        raise ValueError("is_multi_workflow must match the workflow count")
+    if not workflows and not (selection["pack_partition_reason"] or "").strip():
+        raise ValueError("An empty workflow partition requires a rationale")
+    names = [item["name"] for item in workflows]
+    if len(set(names)) != len(names):
+        raise ValueError("Workflow names must be unique")
+    for item in workflows:
+        if item["initial_agent"] != "WorkflowBundleBuilderAgent" or item["pattern_id"] not in range(1, 10):
+            raise ValueError("Workflow dispatch must use the supported builder and pattern")
+        if set(item.get("depends_on") or []) - (set(names) - {item["name"]}):
+            raise ValueError("Workflow dependencies must reference other declared workflows")
+    surface_map = detach(context_variables.get("design_surface_map"))
+    if surface_map is not None:
+        design_models, _ = load_workflow_structured_outputs("DesignDocs")
+        surfaces = design_models["DesignSurfaceMap"].model_validate(surface_map).model_dump(mode="json")["surfaces"]
+        has_workflows = any(item.get("surface_kind") == "workflow" for item in surfaces)
+        if bool(workflows) != has_workflows:
+            expected = "at least one declared AI workflow" if has_workflows else "workflows: [] (no AI workflows)"
+            raise ValueError(f"The canonical design surface map requires {expected}")
+    return selection
 
 
 def pattern_selection(
     *,
-    PatternSelection: Annotated[dict[str, Any] | None, "Pattern selection payload"],
-    context_variables: Annotated[Any | None, "Context variables provided by AG2"] = None,
-) -> str:
-    """Persist pattern selection for downstream prompt injections."""
-
-    if not PatternSelection or not isinstance(PatternSelection, dict):
-        _logger.warning("pattern_selection called with no PatternSelection data")
-        return "No pattern selection provided"
-
-    _cache_context_value(context_variables, "PatternSelection", PatternSelection)
-
-    is_multi = bool(PatternSelection.get("is_multi_workflow"))
-    pack_name = PatternSelection.get("pack_name")
-    if not isinstance(pack_name, str) or not pack_name.strip():
-        pack_name = None
-
-    workflows = PatternSelection.get("workflows")
-    if not isinstance(workflows, list):
-        workflows = []
-
-    _cache_context_value(context_variables, "is_multi_workflow", is_multi)
-    _cache_context_value(context_variables, "pack_name", pack_name)
-    _cache_context_value(
-        context_variables,
-        "pack_partition_reason",
-        PatternSelection.get("pack_partition_reason"),
-    )
-    _cache_context_value(context_variables, "workflows_spec", workflows)
-
-    _logger.info(
-        "Cached PatternSelection: multi=%s pack=%s workflows=%d",
-        is_multi,
-        pack_name,
-        len(workflows),
-    )
-
-    if is_multi:
-        return f"Selected Pack: {pack_name or 'Unnamed Pack'} ({len(workflows)} workflows)"
-
-    primary = None
-    for wf in workflows:
-        if isinstance(wf, dict) and wf.get("role") == "primary":
-            primary = wf
-            break
-    if primary is None and workflows and isinstance(workflows[0], dict):
-        primary = workflows[0]
-
-    if not primary:
-        return f"Selected Pack: {pack_name or 'Unnamed Pack'}"
-
-    wf_name = primary.get("name") if isinstance(primary.get("name"), str) else "(unnamed)"
-    pattern_id = primary.get("pattern_id")
-    if not isinstance(pattern_id, int):
-        pattern_id = None
-    pattern_name = (
-        primary.get("pattern_name") if isinstance(primary.get("pattern_name"), str) else "Unknown"
-    )
-
-    return f"Selected Workflow: {wf_name} — Pattern {pattern_id or '?'} ({pattern_name})"
+    PatternSelection: Annotated[dict[str, Any] | None, "Pattern selection payload"] = None,
+    context_variables: Annotated[Any | None, "Runtime context"] = None,
+) -> dict[str, Any]:
+    if context_variables is None:
+        raise ValueError("Pattern selection requires runtime context")
+    raw = PatternSelection
+    if raw is None:
+        output = detach(context_variables.get("structured_output"))
+        raw = output.get("PatternSelection") if isinstance(output, dict) else None
+    try:
+        selection = validate_selection(raw, context_variables)
+    except ValueError as error:
+        context_variables.set("pattern_selection_feedback", str(error))
+        context_variables.set("PatternSelection", None)
+        context_variables.set("workflow_plan_review", None)
+        return {"outcome": "invalid", "error": str(error)}
+    context_variables.set("pattern_selection_feedback", "")
+    context_variables.set("PatternSelection", selection)
+    for key in ("is_multi_workflow", "pack_name", "pack_partition_reason"):
+        context_variables.set(key, selection[key])
+    context_variables.set("workflows_spec", selection["workflows"])
+    context_variables.set("workflow_plan_review", None)
+    return {"outcome": "selected", "workflow_count": len(selection["workflows"])}
 

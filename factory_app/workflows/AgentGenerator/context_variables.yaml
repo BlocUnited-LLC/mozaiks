@@ -1,4 +1,11 @@
 definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
   workflow_bundle_export_outcome:
     type: string
     authority_class: closed_writer_routing_state
@@ -340,7 +347,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - ConceptOverview
   concept_api_endpoints:
@@ -352,7 +359,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - ApiEndpoints
       default: []
@@ -365,7 +372,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - Blueprint
       default: null
@@ -379,7 +386,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -396,7 +403,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -413,7 +420,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -439,7 +446,7 @@ definitions:
       database_name: mozaiksai
       collection: ArtifactVersions
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         build_family: subscription_contract
         build_key: subscription_contract
         lifecycle_status: current
@@ -485,31 +492,53 @@ definitions:
         agent: InterviewAgent
         ui_hidden: true
         match:
-          regex: (?m)^\s*NEXT\s*$
-  workflow_review_approved:
-    type: boolean
-    description: >
-      True when the user explicitly approves the ProjectOverviewAgent review step
-      and wants generation to continue without further diagram changes.
+          equals: NEXT
+  pattern_selection_feedback:
+    type: string
+    description: Validation feedback from the last rejected workflow partition. Correct it without changing the canonical design boundary.
     source:
-      type: state
-      default: false
-      triggers:
-      - type: user_text
-        match:
-          regex: (?i)\b(approved?|looks good|sequence diagram looks good|proceed with implementation)\b
-  workflow_review_revision_requested:
-    type: boolean
-    description: >
-      True when the user asks for revisions after the ProjectOverviewAgent review
-      step instead of approving the current workflow design.
-    source:
-      type: state
-      default: false
-      triggers:
-      - type: user_text
-        match:
-          regex: (?i)((sequence diagram|workflow design|agent flow|diagram).*(revise|revision|change|changes|adjust|adjustments|modify|modification|feedback|different))|((revise|revision|change|changes|adjust|adjustments|modify|modification|feedback|different).*(sequence diagram|workflow design|agent flow|diagram))
+      type: computed
+      default: ''
+  pattern_selection_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Declared result of validating the workflow partition.
+    source: {type: state, default: blocked}
+  pattern_selection_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Runtime-owned count of workflow partition validation attempts.
+    source: {type: state, default: 0}
+  PatternSelection:
+    type: object
+    description: Validated PatternSelection structured output used for review and dispatch.
+    source: {type: computed, default: null}
+  workflow_review_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Declared result of the current draft-bound workflow plan review.
+    source: {type: state, default: blocked}
+  workflow_review_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Runtime-owned bounded count of workflow plan review attempts.
+    source: {type: state, default: 0}
+  workflow_plan_review:
+    type: object
+    description: Current review id, selection hash, decision, and feedback. Not application meaning.
+    source: {type: computed, default: null}
+  workflow_review_feedback:
+    type: string
+    description: Human feedback from the latest structured workflow plan review.
+    source: {type: computed, default: ''}
   connector_inventory:
     type: object
     description: >
@@ -590,8 +619,7 @@ definitions:
       default: null
   pack_partition_reason:
     type: string
-    description: PatternAgent rationale for choosing a multi-workflow pack, or null
-      for single-workflow generation.
+    description: Rationale for zero or multiple workflows; optional for a single workflow.
     source:
       type: computed
       default: null
@@ -818,6 +846,8 @@ agents:
     - monetization_enabled
   PatternAgent:
     variables:
+    - workflow_review_feedback
+    - pattern_selection_feedback
     - concept_overview
     - concept_api_endpoints
     - concept_blueprint

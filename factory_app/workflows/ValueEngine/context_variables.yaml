@@ -2,6 +2,13 @@
 # Follows AgentGenerator pattern: definitions[] + agents[]
 
 definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
 # ============================================================================
 # CONFIG - Deployment settings (env vars)
 # ============================================================================
@@ -446,21 +453,6 @@ definitions:
     source:
       type: computed
       default: []
-  build_registry_id:
-    type: string
-    description: ID of the hosted product build or app registry record created at pipeline start.
-    source:
-      type: computed
-      default: null
-  chat_app_id:
-    type: string
-    description: >
-      Runtime app id under which the active workflow chat was created. Preserved
-      separately from the generated build app_id so the Apps directory can route
-      back to the correct persisted workflow chat.
-    source:
-      type: computed
-      default: null
 
 # ============================================================================
 # AGENT VARIABLE INJECTION

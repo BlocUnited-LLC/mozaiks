@@ -405,7 +405,7 @@ async def test_persistence_records_staged_file_hashes(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_secret_scoped_file_fails_persistence_loudly(tmp_path: Path) -> None:
+async def test_secret_scoped_file_fails_before_source_validation(tmp_path: Path) -> None:
     secret_path = "config/secrets.yaml"
     proposal = _completed_proposal(
         changed_files=[ProposedFileChange(path=secret_path, op="update", content="key: value")],
@@ -424,8 +424,9 @@ async def test_secret_scoped_file_fails_persistence_loudly(tmp_path: Path) -> No
     )
 
     assert result.status == "failed"
-    assert "ARTIFACT_PERSISTENCE_FAILED" in str(result.error)
+    assert "SOURCE_VALIDATION_FAILED" in str(result.error)
     assert "WORKSPACE_SECRET_PATH" in str(result.error)
+    assert "build_record_id" not in result.metadata
 
 
 @pytest.mark.asyncio

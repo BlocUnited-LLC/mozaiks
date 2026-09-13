@@ -146,6 +146,14 @@ SERVER_OWNED_SESSION_FIELDS = frozenset({
 })
 
 
+class ChatSessionTerminalError(RuntimeError):
+    """A settled workflow session cannot accept more execution."""
+
+    def __init__(self, status: WorkflowStatus):
+        self.status = status
+        super().__init__(f"Workflow session is terminal: {status}")
+
+
 class PersistenceManager:
     """Mongo connection holder for runtime persistence."""
 
@@ -472,6 +480,7 @@ class AG2PersistenceManager:
                     "workflow_name",
                     "user_id",
                     "status",
+                    "failed_at",
                     "created_at",
                     "last_updated_at",
                     "last_sequence",
@@ -503,6 +512,7 @@ class AG2PersistenceManager:
         chat_id: str,
         app_id: str | None = None,
         workflow_name: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """Fetch non-canonical, non-message fields for a chat session.
 
@@ -524,6 +534,8 @@ class AG2PersistenceManager:
         query = {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))}
         if clean_workflow_name:
             query["workflow_name"] = clean_workflow_name
+        if user_id is not None:
+            query["user_id"] = user_id
 
         try:
             coll = await self._coll()
@@ -547,6 +559,7 @@ class AG2PersistenceManager:
             "workflow_name",
             "user_id",
             "status",
+            "failed_at",
             "created_at",
             "last_updated_at",
             "last_sequence",
@@ -654,6 +667,7 @@ class AG2PersistenceManager:
             "workflow_name",
             "user_id",
             "status",
+            "failed_at",
             "created_at",
             "last_updated_at",
             "last_sequence",
@@ -731,6 +745,7 @@ class AG2PersistenceManager:
         chat_id: str,
         app_id: str | None = None,
         workflow_name: str | None = None,
+        user_id: str | None = None,
         fields: dict[str, Any] | None = None,
     ) -> None:
         """Write server-owned lifecycle authority fields for a chat session.
@@ -757,6 +772,12 @@ class AG2PersistenceManager:
                     f"{key!r} is not a server-owned session field; use "
                     "persist_context_variables for workflow context"
                 )
+            if key == "run_build_binding":
+                from mozaiksai.core.session.build_binding import RunBuildBinding
+
+                if not user_id:
+                    raise ValueError("user_id is required to persist a build binding")
+                value = RunBuildBinding.model_validate(value).model_dump()
             updates[key] = deepcopy(value)
         if not updates:
             return
@@ -768,6 +789,15 @@ class AG2PersistenceManager:
         }
         if clean_workflow_name:
             scope["workflow_name"] = clean_workflow_name
+        if user_id is not None:
+            scope["user_id"] = user_id
+        if "run_build_binding" in updates:
+            # A session can acquire its binding once; retries may repeat it,
+            # but another target or build must use a new session.
+            scope["$or"] = [
+                {"run_build_binding": {"$exists": False}},
+                {"run_build_binding": updates["run_build_binding"]},
+            ]
         coll = await self._coll()
         result = await coll.update_one(
             scope,
@@ -782,7 +812,7 @@ class AG2PersistenceManager:
         if matched_count is not None and matched_count == 0:
             raise RuntimeError(
                 f"failed to persist server-owned session fields for chat_id={chat_id}: "
-                "scoped session was not found"
+                "scoped session was not found or its build binding conflicts"
             )
 
     async def create_general_chat_session(
@@ -849,7 +879,26 @@ class AG2PersistenceManager:
             logger.error("Failed to create general chat session app_id=%s user=%s: %s", resolved_app_id, user_id, e, exc_info=True)
             raise
 
+    async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+        """Fail closed on storage errors; an absent session may be created."""
+        if not app_id:
+            raise ValueError("app_id is required")
+        coll = await self._coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, **build_app_scope_filter(app_id)}, {"status": 1},
+        )
+        if doc is not None:
+            status = WorkflowStatus(doc["status"])
+            if status is not WorkflowStatus.IN_PROGRESS:
+                raise ChatSessionTerminalError(status)
+
     async def mark_chat_completed(self, chat_id: str, app_id: str | None = None) -> bool:
+        return await self._mark_chat_terminal(chat_id, app_id, WorkflowStatus.COMPLETED)
+
+    async def mark_chat_failed(self, chat_id: str, app_id: str | None = None) -> bool:
+        return await self._mark_chat_terminal(chat_id, app_id, WorkflowStatus.FAILED)
+
+    async def _mark_chat_terminal(self, chat_id: str, app_id: str | None, status: WorkflowStatus) -> bool:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -862,28 +911,53 @@ class AG2PersistenceManager:
             # Fetch created_at to compute run duration.
             base_doc = await coll.find_one(
                 {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
-                {"created_at": 1},
+                {"created_at": 1, "status": 1},
             )
+            if base_doc is None:
+                return False
+            current_status = WorkflowStatus(base_doc["status"])
+            if current_status is status:
+                return True
+            if current_status is not WorkflowStatus.IN_PROGRESS:
+                raise ChatSessionTerminalError(current_status)
             created_at = base_doc.get("created_at") if base_doc else None
             if isinstance(created_at, datetime) and created_at.tzinfo is None:
                 # Mongo can return naive datetimes when tz_aware=False; treat them as UTC.
                 created_at = created_at.replace(tzinfo=UTC)
             dur = float((now - created_at).total_seconds()) if isinstance(created_at, datetime) else 0.0
             # Use dot-path write so unrecognized workflow_ui_state fields are preserved.
-            res = await coll.update_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}, {
+            res = await coll.update_one({
+                "_id": chat_id, **build_app_scope_filter(resolved_app_id),
+                "status": int(WorkflowStatus.IN_PROGRESS),
+            }, {
                 "$set": {
-                    "status": int(WorkflowStatus.COMPLETED),
-                    "completed_at": now,
+                    "status": int(status),
+                    "failed_at" if status is WorkflowStatus.FAILED else "completed_at": now,
                     "last_updated_at": now,
                     "duration_sec": dur,
                     "workflow_ui_state.pending_input_request": None,
                 },
                 "$inc": {"session_version": 1},
             })
-            return res.modified_count > 0
+            if not res.acknowledged:
+                raise RuntimeError("Terminal workflow session write was not applied")
+            if res.modified_count != 1:
+                # Duplicate settlement may lose the CAS to the same terminal outcome.
+                settled_doc = await coll.find_one(
+                    {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
+                    {"status": 1},
+                )
+                if settled_doc is not None:
+                    settled_status = WorkflowStatus(settled_doc["status"])
+                    if settled_status is status:
+                        return True
+                    if settled_status is not WorkflowStatus.IN_PROGRESS:
+                        raise ChatSessionTerminalError(settled_status)
+                raise RuntimeError("Terminal workflow session write was not applied")
+            return True
         except Exception as e:  # pragma: no cover
-            logger.error("Failed to mark chat %s as completed: %s", chat_id, e, exc_info=True)
-            return False
+            logger.error("Failed to mark chat %s as %s: %s", chat_id, status, e, exc_info=True)
+            raise
 
     async def update_last_artifact(
         self,
@@ -1309,7 +1383,7 @@ class AG2PersistenceManager:
         - Queries `ChatSessions` for the app/user and returns a simple dict
           suitable for seeding the `workflows` field in the pattern context contract.
         - `status` is normalized to the canonical strings: `not_started`,
-          `in_progress`, `completed`, or `unknown`.
+          `in_progress`, `completed`, `failed`, or `unknown`.
         """
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
@@ -1333,13 +1407,13 @@ class AG2PersistenceManager:
                 if wf in result:
                     continue
                 chat_id = d.get("_id")
-                status_int = int(d.get("status", -1) or -1)
+                status_int = int(d.get("status", -1))
                 try:
                     status_name = WorkflowStatus(status_int).name.lower()
                 except Exception:
                     status_name = "unknown"
                 # normalize to expected minimal set
-                if status_name not in ("not_started", "in_progress", "completed"):
+                if status_name not in ("not_started", "in_progress", "completed", "failed"):
                     if status_name == "unknown":
                         normalized = "unknown"
                     else:

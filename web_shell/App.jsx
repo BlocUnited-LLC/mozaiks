@@ -22,7 +22,11 @@ function bootstrap() {
     }).then(({ authAdapter, shellConfig }) => {
       window.mozaiksAuth = authAdapter;
       // App initialization runs only after the host's authentication bootstrap.
-      platformExtensions.register(componentRegistry.registerComponent.bind(componentRegistry));
+      const register = Reflect.get(platformExtensions, 'register');
+      if (register !== undefined) {
+        if (typeof register !== 'function') throw new Error('App UI register export must be a function');
+        register(componentRegistry.registerComponent.bind(componentRegistry));
+      }
       if (!componentRegistry.hasComponent('LoginPage')) componentRegistry.registerComponent('LoginPage', LoginPage);
       if (!componentRegistry.hasComponent('AuthCallbackPage')) componentRegistry.registerComponent('AuthCallbackPage', AuthCallbackPage);
       const apiAdapter = new WebSocketApiAdapter({

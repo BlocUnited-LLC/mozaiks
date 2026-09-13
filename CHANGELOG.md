@@ -14,18 +14,181 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Contextual workflow logging supports exception tracebacks so an error handler
+  can persist failed indexing/build state instead of raising a logging error.
+- Studio app/build summaries select owned generated targets through their build
+  registry without changing the authenticated host scope. Build review filters
+  app bundles instead of showing non-bundle App Intelligence projections as builds;
+  demo data no longer replaces unavailable real apps.
+- Mobile record cards wrap long values, and bottom navigation uses the app's
+  light/dark theme. Dashboard run labels distinguish failed runs from completed.
+- Structured-output compiler results retain their Pydantic model types. Artifact
+  registration requires runtime context, and refinement lookups guard missing
+  execution identity before reading app-scoped state.
+
+- Preserve source line endings during app validation and export so Windows
+  refinement does not repeatedly insert blank lines into unchanged files.
+- Honor ResourceTable search fields and placeholder, preserve selected record identity
+  after sorting, and guide generated primary tables toward full-width page layouts.
+- Return HTTP 400 for explicit module service input-validation errors without
+  masking unexpected application errors. Text-only branding no longer warns about
+  an intentionally absent logo image.
+- Preserve the requested chat when routing an in-page refinement and keep
+  backend repairs scoped to validation rather than unrelated generation steps.
+- Preserve canonical prompt-context views for detached task workers and retain
+  captured themes when assembling partial UI theme output.
+- Make AppWorkbench single-file refinement opt-in and use the canonical
+  `brand/theme_config.json` artifact for theme refinement.
+- Route module implementation validation failures through the existing bounded
+  bundle repair graph without relaxing handler contracts or retry limits.
+- Prevent Factory reconnects from replaying newly active downstream AG2 turns or
+  overlapping context-packet callbacks, and await recovery settlement before user input.
+- Include rejected task candidates in bounded validation retries so fresh AG2
+  worker attempts can repair their output without bypassing ownership or quality checks.
+- Display explicit user-facing messages from nonvisual automatic tools without
+  exposing internal tool payloads or duplicating replayed messages.
+- Preserve escaped Unicode and backslashes when replacing generated design
+  document surface maps instead of interpreting YAML as regex replacement syntax.
+- Keep workflow reviews visible on rejected or unconfirmed decisions and display
+  submission errors instead of closing the review before server acknowledgement.
+- Remove obsolete duplicate planner output examples and refer to the canonical
+  structured response schema; task prompts reuse inherited build context.
+- Attribute model usage to the validated run build binding without changing
+  execution-host charging or trusting caller-supplied build IDs.
+- Preserve registered operator-pack identity through typed app planning and
+  template expansion; reject unregistered pack references before generation.
+- Read workflow attachments from the execution session while keeping generated
+  artifacts scoped to the bound target app.
+- Route theme interviews using typed readiness and advance internal analysis
+  directly to validated theme assembly, without chat-text routing markers.
 - Security Readiness now saves findings through permissioned workflow module
   dispatch using the live session principal. Findings retain project/build
   association and cannot overwrite another project's matching scanner rule.
   Workflow handoffs tolerate brief reconnects while rechecking the original
   actor and fresh permissions before dispatch; started actions are never retried.
   Unavailable persistence and uninspected bundles remain explicit in review.
+- Resolve Security Readiness input from the authenticated build binding and
+  verified target-owned artifact, rejecting stale, foreign, or tampered bundles.
 - Studio workspaces inherit packaged first-party modules through the standard
   app loader. App-local modules override defaults by id, so hosted workspaces
   can reuse Security Readiness without copying its implementation.
+- Validate scoped repairs against the complete staged app, including canonical
+  page schemas and action references, even without an indexed source workspace.
+  Failed repairs no longer report that a patch was applied; successful patches
+  are staged for review, not silently promoted.
+- Reject invented module API surface values and incomplete explicit form
+  payloads. Live metric/summary bindings share the canonical authenticated data API.
+- Generate module event calls through `await ctx.emit(...)`, not a nonexistent
+  context event bus, and reject that obsolete pattern during quality checks.
+- Keep required text fields nonblank, details forms read-only, and modal controls
+  accessible above mobile navigation, including on short viewports.
+- Isolate Vite dependency caches per app so concurrent Factory and generated-app
+  previews do not invalidate each other's prebundled dependencies.
+- Keep authenticated generated page actions on the authenticated module API;
+  reject nested page bindings to internal-only actions before export.
+- Preserve unchanged pages during partial schema repair and validate the newly
+  rendered files instead of a stale pre-repair bundle.
+- Authenticate artifact downloads through Studio's canonical artifact endpoint,
+  retain artifact identity for workflow exports, and only complete successful
+  downloads. Restored download surfaces can respond without echoing large file
+  payloads through the WebSocket.
+- Carry table selection into edit/confirmation dialogs, authenticate page data
+  and mutations, and preserve failed forms. Module deletions use the module
+  action protocol; data-load failures are visible and retryable.
+- Use canonical build-record identity when loading artifact context. Trusted
+  refinement-router state is validated separately from untrusted launch inputs.
+  Factory refinement profiles use the model exercised by local acceptance.
+- Project explicitly planned event names into worker manifest guidance and use
+  canonical companion paths under modules/{module_id}/contracts/.
+
+- Save validated Factory implementation outputs through auto tools before quality
+  routing, replacing extraction from a chat history that AG2 did not populate.
+  Data-contract failures have an explicit bounded DatabaseAgent repair route.
+- Reject invalid account-data implementations during module loading instead of
+  silently skipping registration; load helpers in the module's actual Python
+  namespace and send load diagnostics to the existing bounded Factory repair flow.
+- Expose complete file constraints and the runtime persistence API to Factory
+  workers. Reject unsupported Motor calls in generated repositories and changes
+  to approved data fields or optionality before export.
+- Detach protected export inputs so generated files reach the real download
+  and artifact persistence path instead of producing an empty workbench.
+- Let auto-invoked UI tools emit their own result surface; do not mount an empty
+  component or announce download readiness from arguments before export runs.
+- Preserve complete Factory prompts when catalog names appear inline in prose;
+  prompt hooks replace only standalone section headings and share one updater.
+  Planner category defaults cannot override approved scope exclusions.
+- Prefer the basic table configuration for ambiguous basic-table structured
+  output, avoiding resource-table-only fields rejected by the runtime.
+- Preserve validated AppSchemaOutput pages through task execution and assembly;
+  planner hints no longer overwrite forms, bindings, or interactions. Generate
+  auth contracts before the complete-bundle validation that requires them.
+  Validate page identity against its owned filename, keep display labels separate,
+  and provide actionable URL diagnostics without exposing rejected input values.
+  Forward build timestamps into task provenance materialization.
+- Separate AuthScaffoldAgent from DownloadAgent-owned deployment packaging;
+  do not emit partial deployment files or undeclared provision scripts before validation.
+- Persist schema data through the canonical data_contract state and fail explicitly
+  on rejected state writes. Valid dashboard page names are no longer rejected as
+  placeholder copy. User-owned module planning includes the account-data handler.
+- Keep initial prompts and interview replies visible to downstream workflow
+  agents through AG2 channel broadcasts; settlement timeouts fail explicitly.
+- Read protected task results, repair overlays, and app configuration as detached
+  data during assembly instead of overlooking read-only context containers.
+- Deliver declared workflow self-transitions through AG2's explicit audience
+  support so bounded same-agent repair loops receive their next turn.
+- Validate AppGenerator plan ownership and complete genesis file coverage before
+  worker calls, with bounded corrective feedback. Capability origins use a finite
+  vocabulary and registered managed packs; typed plan fields and frozen build
+  context catalogs are preserved through plan caching.
+- Clear stale AppGenerator plans before validation and terminate failed/empty
+  plans instead of falling through to page generation without backend tasks.
+- Make optional generated module manifests nullable and remove automatic admin
+  panel generation outside the approved task's file ownership.
+  Reject raw files that contradict an explicitly null typed manifest.
+- Include generated-file and task-identity validation in the existing task retry
+  budget, with corrective feedback on the next attempt. Exhausted failures stop
+  assembly and retain authorized diagnostics through AG2 context events.
+- Compile typed module action/capability and event schemas into runtime JSON
+  Schema instead of emitting generator-only property lists. Request schemas
+  obey the canonical closed profile; conflicting required fields fail early.
+
+- Execute declared task batches at their actual trigger inside the AG2 graph,
+  including interview-first builds, instead of checking only the first agent.
+- Detach protected runtime state before AppGenerator schema persistence and UI
+  quality checks so valid upstream data contracts are not rejected as non-objects.
+
+- Refresh each agent's declared context in the existing AG2 prompt middleware
+  before every model call, so later steps and revision attempts see current
+  tool results and user feedback instead of launch-time values.
+- Workflow tool loading registers Python module globals before execution so
+  typed models, dataclasses, and postponed annotations work in generated tools.
+  Reloads still refresh workflow-owned code; failed imports leave no partial module.
+- AgentGenerator supports approved apps with no AI workflows, records an explicit
+  empty workflow bundle, and clears stale workflow hints. Draft-correlated review
+  actions replace approval keywords; invalid plans receive bounded correction
+  attempts and cannot contradict the canonical design surface map.
+- Preserve workflow UI registrations across reloads and carry only declared,
+  writable launch inputs between journey steps. Handoff errors are visible in
+  chat; completing one workflow no longer claims the whole build is complete.
+- Factory theme, design, and subscription saves consume read-only structured
+  output through detached values and use declared failure outcomes. Failed
+  persistence or unavailable subscription review cannot advance the build.
+- DesignDocs index keys now use typed `field`/`order` entries, matching
+  AppGenerator. Untyped arrays and values are rejected before strict model calls.
+- Treat unmatched workflow transitions and exhausted AG2 turn limits as failures,
+  including when channel closure races a user handoff. ThemeCapture declares
+  user-return edges; AgentGenerator uses the authorized exact `NEXT` trigger.
+- Prevent stale browser storage from undoing live workflow handoffs and old
+  WebSocket close handlers from removing replacement connections. Failed message
+  submission is visible instead of leaving an indefinite typing indicator.
 
 - Bind app service imports to the selected workspace on reload and reset
   platform health state for each startup attempt.
+- Keep Factory execution identity separate from generated-app targets through
+  handoffs, revision routing, artifact access, and downloads. Generated bundles
+  are promoted into version-specific workspaces, not the running Studio app.
+  Build identity and lifecycle pointers are server-owned; callers select an
+  owned registry record instead of supplying target IDs or artifact paths.
 
 - Build-record and version-counter uniqueness now follows `build_family` and
   `build_key`. Known retired indexes are replaced without deleting records;
@@ -3404,3 +3567,5 @@ This project follows a practical pre-1.0 changelog format:
 - Packaged CLI entrypoint with `mozaiks --version`.
 - Tag-driven GitHub Actions release flow for building, smoke-testing, creating a GitHub release, and publishing to PyPI.
 
+- Preserve untouched app files during partial AppGenerator revisions using the
+  selected artifact's verified archive as the baseline for agents and assembly.

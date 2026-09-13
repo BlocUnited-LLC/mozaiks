@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
 
 logger = logging.getLogger(__name__)
 
@@ -77,43 +77,6 @@ def _resolve_pack_id(agent: Any) -> str:
         if pack_id and isinstance(pack_id, str) and pack_id.strip():
             return pack_id.strip()  # type: ignore[no-any-return]
     return _DEFAULT_PACK_ID
-
-
-def _update_section(agent: Any, header: str, body: str) -> None:
-    try:
-        current: str = (
-            getattr(agent, "system_message", None)
-            or getattr(agent, "_system_message", "")
-            or ""
-        )
-        section = f"{header}\n{body}"
-
-        if header in current:
-            pre, _, rest = current.partition(header)
-            next_section_idx = rest.find("\n\n[")
-            after = rest[next_section_idx:] if next_section_idx > 0 else ""
-            new_message = f"{pre.rstrip()}\n\n{section}{after}"
-        else:
-            new_message = f"{current}\n\n{section}" if current else section
-
-        if new_message == current:
-            return
-
-        updater = getattr(agent, "update_system_message", None)
-        if callable(updater):
-            updater(new_message)
-        elif hasattr(agent, "_system_message"):
-            agent._system_message = new_message
-        else:
-            agent._system_message = new_message
-
-    except Exception as exc:
-        logger.error(
-            "[%s] Failed to update system message section %s: %s",
-            getattr(agent, "name", "?"),
-            header,
-            exc,
-        )
 
 
 def _fmt_list(label: str, items: list[str], indent: int = 2) -> list[str]:
@@ -268,7 +231,7 @@ def inject_language_profile_context(agent: Any, messages: list[dict[str, Any]]) 
 
         body = _build_body(agent_name, profile)
         if body:
-            _update_section(agent, _LANGUAGE_PROFILE_HEADER, body)
+            update_agent_section(agent, _LANGUAGE_PROFILE_HEADER, body)
             logger.info(
                 "[%s] Injected language profile context (pack=%s)",
                 agent_name,

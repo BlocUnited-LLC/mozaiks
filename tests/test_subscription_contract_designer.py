@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from tests.factory_context import factory_context
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
@@ -529,7 +530,8 @@ def test_agentgenerator_preserves_workflow_metering_contract_without_runtime_log
 
 
 @pytest.mark.asyncio
-async def test_save_subscription_contract_validates_and_persists_provider_neutral_config(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("read_only", [False, True])
+async def test_save_subscription_contract_validates_and_persists_provider_neutral_config(monkeypatch: pytest.MonkeyPatch, read_only: bool) -> None:
     from factory_app.workflows.SubscriptionContractDesigner.tools import (
         save_subscription_contract as module,
     )
@@ -547,12 +549,15 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
 
     monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
     context = {
-        "app_id": "app_test",
+        **factory_context({"app_id": "app_test"}),
         "chat_id": "chat_1",
         "user_id": "user_1",
         "structured_output": _sample_contract(),
     }
 
+    if read_only:
+        from mozaiksai.core.workflow.context.frozen import freeze
+        context["structured_output"] = freeze(context["structured_output"])
     result = await module.save_subscription_contract(context)
 
     assert result["success"] is True
@@ -608,7 +613,7 @@ async def test_save_subscription_contract_blocks_downstream_context_when_review_
     monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
 
     context = {
-        "app_id": "app_test",
+        **factory_context({"app_id": "app_test"}),
         "chat_id": "chat_1",
         "user_id": "user_1",
         "structured_output": _sample_contract(),
@@ -643,9 +648,9 @@ def test_transition_graph_routes_changes_requested_back_to_designer() -> None:
         "changes_requested instead of terminating without an approved contract"
     )
     assert loop_back["transition_type"] == "condition"
-    assert loop_back["condition_type"] == "context_expression"
-    assert "changes_requested" in loop_back["context_expression"]
-    assert "subscription_contract_review_status" in loop_back["context_expression"]
+    assert loop_back["condition_type"] == "context_equals"
+    assert loop_back["condition_value"] == "changes_requested"
+    assert loop_back["condition_key"] == "subscription_contract_review_status"
 
     terminate = [
         rule
@@ -665,6 +670,32 @@ def test_transition_graph_routes_changes_requested_back_to_designer() -> None:
         agent_id_by_name={"ContractDesignerAgent": "contract_designer"},
     )
     assert compiled is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["review", "persistence"])
+async def test_subscription_save_does_not_publish_success_after_dependency_failure(monkeypatch, failure):
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    async def review(*_args, **_kwargs):
+        if failure == "review":
+            raise module.UIToolError("review transport unavailable")
+        return {"action": "confirm", "approved": True}
+
+    async def persist(**_kwargs):
+        if failure == "review":
+            raise AssertionError("must not save before review")
+        raise RuntimeError("artifact store unavailable")
+
+    monkeypatch.setattr(module, "use_ui_tool", review)
+    monkeypatch.setattr(module, "persist_summary_artifact", persist)
+    context = {**factory_context({"app_id": "app_test"}), "chat_id": "chat", "structured_output": _sample_contract()}
+    with pytest.raises((module.UIToolError, RuntimeError), match="unavailable"):
+        await module.save_subscription_contract(context)
+    assert not context.get("subscription_contract")
+    assert context.get("subscription_contract_review_status") != "confirmed"
 
 
 def _generator_agent_stub(name: str, context: dict) -> SimpleNamespace:

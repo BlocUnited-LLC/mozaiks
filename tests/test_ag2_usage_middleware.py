@@ -25,20 +25,29 @@ class _ContextBridge:
 
 
 @pytest.mark.asyncio
-async def test_ag2_usage_middleware_emits_usage_delta(monkeypatch):
+@pytest.mark.parametrize("phase", [None, "genesis", "refinement"])
+async def test_ag2_usage_middleware_emits_usage_delta(monkeypatch, phase):
     emitted = {}
 
     async def fake_emit_usage_delta(**payload):
         emitted.update(payload)
 
     monkeypatch.setattr(usage_mod.TokenManager, "emit_usage_delta", fake_emit_usage_delta)
+    context_variables = {**_ContextBridge.data, "build_id": "untrusted-build"}
+    if phase:
+        context_variables["run_build_binding"] = {
+            "build_registry_id": "registry-1",
+            "target_app_id": "generated-target",
+            "build_id": f"build-{phase}",
+            "phase": phase,
+        }
 
     middleware = usage_mod.MozaiksUsageMiddleware(
         event=SimpleNamespace(),
         context=SimpleNamespace(),
         agent_name="PlannerAgent",
         workflow_name="AppGenerator",
-        context_variables=_ContextBridge(),
+        context_variables=context_variables,
         model_name="gpt-test",
     )
 
@@ -63,6 +72,7 @@ async def test_ag2_usage_middleware_emits_usage_delta(monkeypatch):
     assert emitted["tenant_id"] == "tenant-1"
     assert emitted["workspace_id"] == "workspace-1"
     assert emitted["workflow_name"] == "AppGenerator"
+    assert emitted["build_id"] == (f"build-{phase}" if phase else None)
     assert emitted["agent_name"] == "PlannerAgent"
     assert emitted["model_name"] == "gpt-test"
     assert emitted["prompt_tokens"] == 12
@@ -70,6 +80,27 @@ async def test_ag2_usage_middleware_emits_usage_delta(monkeypatch):
     assert emitted["total_tokens"] == 20
     assert emitted["cached"] is True
     assert emitted["cached_tokens"] == 5
+
+
+@pytest.mark.asyncio
+async def test_ag2_usage_middleware_rejects_invalid_binding_before_model_call():
+    middleware = usage_mod.MozaiksUsageMiddleware(
+        event=SimpleNamespace(),
+        context=SimpleNamespace(),
+        agent_name="PlannerAgent",
+        workflow_name="AppGenerator",
+        context_variables={**_ContextBridge.data, "run_build_binding": {"build_id": "forged"}},
+    )
+    called = False
+
+    async def call_next(events, context):
+        nonlocal called
+        called = True
+        return SimpleNamespace(usage=None)
+
+    with pytest.raises(ValueError):
+        await middleware.on_llm_call(call_next, [], SimpleNamespace())
+    assert not called
 
 
 def test_build_ag2_usage_middleware_returns_ag2_middleware():

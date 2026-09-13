@@ -195,6 +195,10 @@ def _validate_schema(value: Any, schema: dict[str, Any] | bool | None) -> str | 
     return diagnostic.message if diagnostic is not None else None
 
 
+class ModuleInputValidationError(ValueError):
+    """Expected service-level input rejection before persistence or side effects."""
+
+
 class ModuleEventPayloadValidationError(ValueError):
     """Raised when a module emits an event payload that violates its contract."""
 
@@ -617,6 +621,16 @@ class ModuleExecutor:
                 success=False,
                 error=f"Action '{request.action}' timed out",
                 error_code="ACTION_TIMEOUT",
+            )
+        except ModuleInputValidationError:
+            logger.info(
+                "MODULE_INPUT_INVALID: module=%s action=%s user=%s",
+                request.module, request.action, request.user_id,
+            )
+            return ModuleResult(
+                success=False,
+                error=f"Invalid parameters for action '{request.action}'",
+                error_code="INVALID_PARAMS",
             )
         except TypeError as exc:
             logger.warning(

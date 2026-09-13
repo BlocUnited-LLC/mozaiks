@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -35,6 +36,8 @@ class _Transport:
         self.connections = {
             "requested_chat": {
                 "ws_id": "ws-1",
+                "app_id": "demo-app",
+                "user_id": "demo-user",
                 "websocket": object(),
             }
         }
@@ -54,6 +57,8 @@ class _Transport:
 @pytest.mark.asyncio
 async def test_switch_workflow_stale_ack_does_not_block_userdriven_autostart(monkeypatch: pytest.MonkeyPatch) -> None:
     transport = _Transport()
+    from mozaiksai.core import session
+    monkeypatch.setattr(session, "get_session_router_for_chat", AsyncMock())
     active_context = SimpleNamespace(
         workflow_name="ValueEngine",
         artifact_id=None,

@@ -485,6 +485,43 @@ console.log(JSON.stringify(protocols[1]));
         socket = _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL, credential])
         assert extract_subprotocol_bearer_token(socket) == VALID_TOKEN
 
+    def test_replaced_socket_cannot_remove_or_disconnect_its_successor(self):
+        source = (ROOT / "chat-ui/src/adapters/api.js").read_text(encoding="utf-8")
+        start = source.index("    const wsBase = this.getWsBaseUrl();")
+        end = source.index("    return connection;", start) + len("    return connection;")
+        body = source[start:end]
+        script = f"""
+import assert from 'node:assert/strict';
+import {{ openAuthenticatedWebSocket }} from '{WS_AUTH_MODULE}';
+globalThis.WebSocket = class {{
+  static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
+  constructor() {{ this.readyState = 1; this.sent = []; }}
+  close() {{ this.readyState = 2; }}
+  send(message) {{ this.sent.push(message); }}
+}};
+const platform = {{ storage: {{ getItem: () => null, setItem: () => {{}} }} }};
+const getAccessToken = () => null;
+const adapter = {{ getWsBaseUrl: () => 'wss://app.example', _chatConnections: new Map(), config: {{}} }};
+function construct(actualworkflowname, callbacks = {{}}) {{
+  const appId = 'app-1', userId = 'user-1', chatId = 'chat-1', options = {{}};
+  return (function () {{ {body} }}).call(adapter);
+}}
+let staleCloses = 0, currentCloses = 0;
+const old = construct('ThemeCapture', {{ onClose: () => staleCloses++ }});
+const current = construct('DesignDocs', {{ onClose: () => currentCloses++ }});
+old.socket.onclose();
+old.close();
+assert.equal(adapter._chatConnections.get('chat-1'), current);
+assert.equal(staleCloses, 0);
+assert.equal(current.send({{ type: 'user.input.submit', text: 'Continue' }}), true);
+assert.equal(current.socket.sent.length, 1);
+current.socket.onclose();
+assert.equal(adapter._chatConnections.has('chat-1'), false);
+assert.equal(currentCloses, 1);
+"""
+        result = run_node(script)
+        assert result.returncode == 0, result.stdout + result.stderr
+
     def test_runtime_bridge_url_carries_no_credential(self):
         source = (ROOT / "chat-ui/src/runtimeBridge.js").read_text(encoding="utf-8")
         assert "access_token" not in source

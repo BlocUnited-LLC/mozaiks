@@ -9,12 +9,17 @@ from types import SimpleNamespace
 import pytest
 
 from mozaiksai.core.adapters import ag2_network_runner as runner
-from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _wrap_tool_with_context
+from mozaiksai.core.workflow.agents.factory import (
+    ContextVariablesBridge,
+    _workflow_tool_invocation,
+    _wrap_tool_with_context,
+)
 from mozaiksai.core.workflow.context.authority import (
     AGENT_TEXT_WRITER,
     CONTEXT_BRIDGE_WRITER,
     DETERMINISTIC_TOOL_WRITER,
     LIVE_USER_CONTEXT_WRITER,
+    TASK_BATCH_WRITER,
     UI_RESPONSE_TRIGGER_WRITER,
     ContextAuthorityError,
     ScopedContextWriter,
@@ -124,6 +129,29 @@ def test_caller_writer_string_and_scoped_writer_cannot_elevate_ordinary_bridge()
     with pytest.raises(ContextAuthorityError):
         ScopedContextWriter(policy, DETERMINISTIC_TOOL_WRITER).set(bridge, READY, True)
     assert bridge.get(READY) is False
+
+
+def test_task_batch_scope_commits_only_declared_batch_state():
+    plan = load_context_variables_config({"definitions": {
+        "batch_status": {
+            "type": "string", "source": {"type": "state", "default": "planned"},
+            "authority_class": "closed_writer_routing_state", "routing": True,
+            "writer_ids": ["task_batch"],
+        },
+        "app_id": {"type": "string", "source": {"type": "state", "default": "app-1"}},
+    }})
+    policy = build_context_authority_policy(workflow_name=RUN[0], definitions=plan.definitions)
+    bridge = ContextVariablesBridge({"batch_status": "planned", "app_id": "app-1"}, authority_policy=policy)
+    bridge._bind_run(RUN, policy)
+    with pytest.raises(ContextAuthorityError):
+        _wrap_tool_with_context(lambda context_variables: context_variables.set("batch_status", "completed"), bridge)()
+    with _workflow_tool_invocation(bridge, writer_id=TASK_BATCH_WRITER):
+        bridge.set("batch_status", "completed")
+        with pytest.raises(ContextAuthorityError):
+            bridge.set("app_id", "another-app")
+    assert bridge.consume_authorized_context_updates(policy=policy, run_identity=RUN) == {
+        "set": {"batch_status": "completed"}, "delete": [],
+    }
 
 
 @pytest.mark.parametrize("writer", [

@@ -56,7 +56,7 @@ def test_materialize_rejects_unsafe_paths(tmp_path: Path, bad_path: str) -> None
 
 @pytest.mark.parametrize(
     "secret_path",
-    [".env", "config/secrets.yaml", "keys/id_rsa", "certs/server.pem"],
+    [".env", ".env.local", ".env.production", "secrets/.env.example", "config/secrets.yaml", "keys/id_rsa", "certs/server.pem"],
 )
 def test_materialize_rejects_secret_paths(tmp_path: Path, secret_path: str) -> None:
     with pytest.raises(ValueError, match="WORKSPACE_SECRET_PATH"):
@@ -69,6 +69,14 @@ def test_cleanup_removes_tree_and_is_idempotent(tmp_path: Path) -> None:
     workspace.cleanup()
     assert not workspace.workspace_root.exists()
     workspace.cleanup()  # second call must not raise
+
+
+def test_bundle_environment_example_is_preserved(tmp_path: Path) -> None:
+    files = {**_FILES, ".env.example": "VITE_APP_ID=example-app\nOPENAI_API_KEY=\n"}
+    workspace = materialize_coding_workspace(files, workspace_root=tmp_path / "ws")
+    harvest = harvest_coding_workspace(workspace)
+    assert harvest.clean
+    assert {entry.path: entry.content for entry in harvest.files} == files
 
 
 # ---------------------------------------------------------------------------

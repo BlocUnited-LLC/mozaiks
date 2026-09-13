@@ -80,10 +80,10 @@ async def registry_host(monkeypatch):
         mongo.close()
 
 
-async def _create(host, *, owner="alice", app_id="owned-app", status="review"):
+async def _create(host, *, owner="alice"):
     response = await host.http.post(
         "/api/studio/apps", headers=host.headers(owner),
-        json={"app_id": app_id, "name": "Owner's app", "status": status},
+        json={"name": "Owner's app"},
     )
     assert response.status_code == 200, response.text
     return response.json()["app"]
@@ -97,19 +97,19 @@ async def test_another_user_cannot_take_over_existing_app_id(registry_host):
         "/api/studio/apps", headers=host.headers("bob"),
         json={"app_id": "owned-app", "name": "Replacement", "owner_user_id": "alice"},
     )
-    assert response.status_code == 400
+    assert response.status_code == 422
     assert await host.collection.find_one({"_id": record["build_registry_id"]}) == before
 
 
 @pytest.mark.parametrize("path", ["/api/studio/overview", "/api/studio/build"])
 async def test_studio_reads_hide_other_owners_record(registry_host, path):
     host = registry_host
-    await _create(host)
-    response = await host.http.get(path + "?app_id=owned-app", headers=host.headers("bob"))
+    record = await _create(host)
+    response = await host.http.get(path + "?app_id=" + record["app_id"], headers=host.headers("bob"))
     assert response.status_code == 404, response.text
 
 
-@pytest.mark.parametrize("method", ["PUT", "DELETE"])
+@pytest.mark.parametrize("method", ["DELETE"])
 async def test_other_owner_and_anonymous_cannot_mutate_or_purge(registry_host, method):
     host = registry_host
     record = await _create(host)
@@ -123,45 +123,88 @@ async def test_other_owner_and_anonymous_cannot_mutate_or_purge(registry_host, m
     assert host.purged == []
 
 
-async def test_owner_can_reopen_update_and_delete_record(registry_host):
+async def test_owner_can_create_distinct_apps_and_delete_record(registry_host):
     host = registry_host
     original = await _create(host)
     reopened = await _create(host)
-    assert original["build_registry_id"] == reopened["build_registry_id"]
+    assert original["build_registry_id"] != reopened["build_registry_id"]
+    assert original["app_id"] != reopened["app_id"]
     path = f"/api/studio/apps/{original['build_registry_id']}"
     updated = await host.http.put(path + "/status", headers=host.headers("alice"), json={"status": "active"})
-    assert updated.status_code == 200, updated.text
-    assert updated.json()["app"]["lifecycle_state"] == "active"
+    assert updated.status_code == 404, updated.text
     deleted = await host.http.delete(path, headers=host.headers("alice"))
     assert deleted.status_code == 200, deleted.text
     assert deleted.json()["success"] is True
-    assert await host.collection.count_documents({}) == 0
+    assert await host.collection.count_documents({}) == 1
     assert host.purged == []
 
 
-async def test_concurrent_same_owner_creation_is_idempotent(registry_host):
+async def test_concurrent_new_app_requests_allocate_distinct_targets(registry_host):
     host = registry_host
     results = await asyncio.gather(*[_create(host) for _ in range(12)])
-    assert len({item["build_registry_id"] for item in results}) == 1
-    assert await host.collection.count_documents({}) == 1
+    assert len({item["build_registry_id"] for item in results}) == 12
+    assert len({item["app_id"] for item in results}) == 12
+    assert await host.collection.count_documents({}) == 12
 
 
 async def test_service_reads_and_promotions_require_owner(registry_host):
     host = registry_host
-    record = await _create(host)
+    record = (await host.service.create_app_record(
+        owner_user_id="alice", app_id="owned-app", status="review",
+        current_build_run={"build_id": "build_1", "phase": "genesis", "artifact_version_id": "av_1"},
+    ))["app"]
     for reference in ({"app_id": "owned-app"}, {"build_registry_id": record["build_registry_id"]}):
         assert (await host.service.get_app_record(owner_user_id="bob", **reference))["app"] is None
         assert (await host.service.get_app_record(owner_user_id="alice", **reference))["app"]["app_id"] == "owned-app"
     with pytest.raises(ValueError, match="not found"):
-        await host.service.promote_build(build_registry_id=record["build_registry_id"], promoted_by="bob")
+        await host.service.promote_build(
+            build_registry_id=record["build_registry_id"], promoted_by="bob",
+            expected_build_id="build_1", expected_artifact_version_id="av_1",
+        )
     assert (await host.collection.find_one({"app_id": "owned-app"}))["lifecycle_state"] == "review"
-    result = await host.service.promote_build(build_registry_id=record["build_registry_id"], promoted_by="alice")
+    result = await host.service.promote_build(
+        build_registry_id=record["build_registry_id"], promoted_by="alice",
+        expected_build_id="build_1", expected_artifact_version_id="av_1",
+    )
     assert result["app"]["lifecycle_state"] == "active"
+
+
+async def test_promotion_cannot_activate_a_superseded_build(registry_host):
+    host = registry_host
+    record = (await host.service.create_app_record(
+        owner_user_id="alice", app_id="owned-app", status="review",
+        current_build_run={"build_id": "new-build", "phase": "refinement", "artifact_version_id": "new-artifact"},
+    ))["app"]
+    before = await host.collection.find_one({"app_id": "owned-app"})
+    result = await host.service.promote_build(
+        build_registry_id=record["build_registry_id"], promoted_by="alice",
+        expected_build_id="old-build", expected_artifact_version_id="old-artifact",
+    )
+    assert result == {"success": False, "app": None}
+    assert await host.collection.find_one({"app_id": "owned-app"}) == before
+
+
+async def test_inline_refinement_does_not_inherit_previous_chat(registry_host):
+    host = registry_host
+    record = (await host.service.create_app_record(
+        owner_user_id="alice", app_id="owned-app", status="active",
+        active_chat_id="genesis-chat", active_workflow_id="AppGenerator",
+        current_build_run={"build_id": "genesis-build", "phase": "genesis"},
+    ))["app"]
+    updated = await host.service.repo.update_lifecycle_state(
+        build_registry_id=record["build_registry_id"], owner_user_id="alice",
+        lifecycle_state="building", expected_build_id="genesis-build",
+        current_build_run={"build_id": "inline-build", "phase": "refinement"},
+    )
+    assert updated["current_build_run"]["build_id"] == "inline-build"
+    assert updated["active_chat_id"] is None
+    assert updated["active_workflow_id"] is None
+    assert updated["build_runs"][0]["active_chat_id"] == "genesis-chat"
 
 
 async def test_ensure_status_cannot_reopen_someone_elses_record(registry_host):
     host = registry_host
-    await _create(host)
+    await host.service.create_app_record(owner_user_id="alice", app_id="owned-app")
     before = await host.collection.find_one({"app_id": "owned-app"})
     with pytest.raises(ValueError):
         await host.service.ensure_status_for_app(app_id="owned-app", owner_user_id="bob", status="draft")
@@ -182,10 +225,9 @@ async def test_concurrent_different_owners_cannot_share_an_app_id(registry_host)
         host.http.post("/api/studio/apps", headers=host.headers(owner), json={"app_id": "shared-target"})
         for owner in owners
     ])
-    record = await host.collection.find_one({"app_id": "shared-target"})
-    assert await host.collection.count_documents({}) == 1
-    for owner, response in zip(owners, responses, strict=True):
-        assert response.status_code == (200 if owner == record["owner_user_id"] else 400)
+    assert await host.collection.count_documents({}) == 0
+    for response in responses:
+        assert response.status_code == 422
 
 
 async def test_interrupted_creation_keeps_ownership_and_allows_owner_retry(registry_host, monkeypatch):
@@ -206,7 +248,7 @@ async def test_interrupted_creation_keeps_ownership_and_allows_owner_retry(regis
     monkeypatch.setattr(host.collection, "find_one_and_update", original)
     with pytest.raises(ValueError, match="not available"):
         await host.service.create_app_record(owner_user_id="bob", app_id="owned-app")
-    reopened = await _create(host)
+    reopened = (await host.service.create_app_record(owner_user_id="alice", app_id="owned-app"))["app"]
     assert reopened["build_registry_id"] == draft["_id"]
 
 
@@ -222,10 +264,9 @@ async def test_module_actions_use_context_owner_and_do_not_emit_on_denial(regist
     context = SimpleNamespace(user_id="bob", app_id="studio-host", emit=emit)
     reference = {"build_registry_id": record["build_registry_id"]}
     assert (await module.get_app_record(context, **reference))["app"] is None
-    assert (await module.update_build_status(context, status="active", **reference))["success"] is False
+    assert not hasattr(module, "update_build_status")
     assert (await module.delete_app(context, **reference))["success"] is False
-    with pytest.raises(ValueError, match="not found"):
-        await module.promote_build(context, **reference)
+    assert not hasattr(module, "promote_build")
     assert events == []
     created = await module.create_app_record(context, name="Independent app")
     assert created["app"]["app_id"] != "studio-host"

@@ -2,45 +2,21 @@ from __future__ import annotations
 
 from typing import Any
 
+from mozaiksai.core.workflow.agents.factory import active_workflow_tool_run
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.module_tools import dispatch_workflow_module_action
 
-
-def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
-    if context_variables is None:
-        return default
-    if isinstance(context_variables, dict):
-        return context_variables.get(key, default)
-    if hasattr(context_variables, "get"):
-        try:
-            return detach(context_variables.get(key, default))
-        except TypeError:
-            try:
-                return detach(context_variables.get(key))
-            except Exception:
-                return default
-        except Exception:
-            return default
-    return default
-
-
-def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
-    if context_variables is None:
-        return
-    if isinstance(context_variables, dict):
-        context_variables[key] = value
-        return
-    if hasattr(context_variables, "set"):
-        try:
-            context_variables.set(key, value)
-        except Exception:
-            return
-
-
-def _normalize_findings(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    return [dict(item) for item in value if isinstance(item, dict)]
+from .build_artifact import (
+    context_get as _context_get,
+)
+from .build_artifact import (
+    context_set as _context_set,
+)
+from .build_artifact import (
+    resolve_security_artifact,
+    source_exception,
+    source_failure,
+)
 
 
 async def record_security_findings(
@@ -49,21 +25,30 @@ async def record_security_findings(
 ) -> dict[str, Any]:
     """Record findings through the live run's permissioned module dispatch."""
 
-    resolved_findings = _normalize_findings(
-        findings
-        if findings is not None
-        else _context_get(context_variables, "security_readiness_findings", [])
-    )
-    app_id = str(_context_get(context_variables, "app_id", "") or "").strip()
-    build_id = str(_context_get(context_variables, "build_id", "") or "").strip() or None
-    artifact_version_id = (
-        str(_context_get(context_variables, "artifact_version_id", "") or "").strip() or None
-    )
+    _context_set(context_variables, "security_readiness_recorded", False)
+    inspected = _context_get(context_variables, "security_readiness_summary", {})
+    if inspected.get("source_error"):
+        return dict(inspected)
+    try:
+        binding, artifact = await resolve_security_artifact(context_variables)
+    except Exception as exc:
+        return source_exception(context_variables, exc)
+    if not inspected.get("success") or not inspected.get("checked_file_count"):
+        return source_failure(context_variables, "security_source_not_inspected")
+    if inspected.get("artifact_version_id") != artifact.id or any(
+        inspected.get(key) != value for key, value in binding.model_dump().items()
+    ):
+        return source_failure(context_variables, "security_source_assessment_stale")
+    resolved_findings = _context_get(context_variables, "security_readiness_findings", [])
+    if findings is not None and detach(findings) != resolved_findings:
+        return source_failure(context_variables, "security_source_findings_mismatch")
 
-    build_registry_id = str(_context_get(context_variables, "build_registry_id", "") or "").strip() or None
+    # The module's persistence plane belongs to the host; verified lineage
+    # identifies the generated target within that plane.
+    app_id = active_workflow_tool_run()[1]
     persisted = False
     result: dict[str, Any] = {"success": True, "persisted": False, "findings": resolved_findings}
-    if app_id and resolved_findings:
+    if resolved_findings:
         params = {
             "app_id": app_id,
             "source": "validation",
@@ -78,10 +63,10 @@ async def record_security_findings(
                 for item in resolved_findings
             ],
         }
-        params.update({key: value for key, value in {
-            "build_id": build_id, "build_registry_id": build_registry_id,
-            "artifact_version_id": artifact_version_id,
-        }.items() if value})
+        params.update({
+            "build_id": binding.build_id, "build_registry_id": binding.build_registry_id,
+            "artifact_version_id": artifact.id,
+        })
         try:
             dispatched = await dispatch_workflow_module_action("security_readiness", "record_assessment", params)
             persisted = dispatched.success and bool((dispatched.data or {}).get("success"))
@@ -93,13 +78,12 @@ async def record_security_findings(
             result.update(success=False, persistence_error=str(exc))
         except Exception:
             result.update(success=False, persistence_error="security_findings_record_failed")
-    elif not app_id and resolved_findings:
-        result.update(success=False, persistence_error="security_findings_app_id_missing")
     result["persisted"] = persisted
 
-    inspected = _context_get(context_variables, "security_readiness_summary", {})
-    checked_file_count = inspected.get("checked_file_count", 0) if isinstance(inspected, dict) else 0
+    checked_file_count = inspected["checked_file_count"]
     summary = {
+        **inspected,
+        "success": result["success"],
         "status": "attention_required" if resolved_findings else "passed" if checked_file_count else "not_assessed",
         "mode": str(
             _context_get(context_variables, "security_readiness_mode", "advisory") or "advisory"
@@ -112,5 +96,5 @@ async def record_security_findings(
     if result.get("persistence_error"):
         summary["persistence_error"] = result["persistence_error"]
     _context_set(context_variables, "security_readiness_summary", summary)
-    _context_set(context_variables, "security_readiness_recorded", True)
+    _context_set(context_variables, "security_readiness_recorded", result["success"])
     return result

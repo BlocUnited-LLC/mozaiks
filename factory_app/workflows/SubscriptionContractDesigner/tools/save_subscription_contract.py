@@ -15,6 +15,7 @@ import yaml
 
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 logger = logging.getLogger(__name__)
@@ -61,14 +62,9 @@ def _cv_set(context_variables: Any, key: str, value: Any) -> None:
 
 
 def _extract_output(context_variables: Any) -> dict[str, Any] | None:
-    raw = _cv_get(context_variables, "structured_output")
-    if not isinstance(raw, dict):
-        raw = _cv_get(context_variables, "SubscriptionContractOutput")
+    raw = detach(_cv_get(context_variables, "structured_output"))
     if not isinstance(raw, dict):
         return None
-    nested = raw.get("SubscriptionContractOutput")
-    if isinstance(nested, dict):
-        return nested
     return raw
 
 
@@ -309,10 +305,13 @@ async def save_subscription_contract(
     if not isinstance(output, dict):
         return {"success": False, "error": "No SubscriptionContractOutput structured output found"}
 
-    app_id = _cv_get(context_variables, "app_id") or output.get("app_id")
+    from factory_app.workflows._shared.platform.build_target import require_build_binding
+
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
-    build_mode = _cv_get(context_variables, "build_mode")
+    build_mode = "revision" if binding.phase == "refinement" else "genesis"
     workflow_name = _cv_get(context_variables, "workflow_name") or "SubscriptionContractDesigner"
 
     if not app_id:
@@ -341,7 +340,7 @@ async def save_subscription_contract(
             )
         except UIToolError as exc:
             logger.warning("[SubscriptionContractDesigner] Review UI unavailable: %s", exc)
-            review_status = "ui_unavailable"
+            raise
         else:
             review_response = dict(response) if isinstance(response, dict) else {"response": response}
             if not _approved_review_response(response):
@@ -366,12 +365,6 @@ async def save_subscription_contract(
     if review_response:
         normalized["review_response"] = review_response
 
-    _cv_set(context_variables, "subscription_contract", normalized)
-    _cv_set(context_variables, "subscription_contract_files", normalized.get("code_files") or [])
-    _cv_set(context_variables, "subscription_contract_review_status", review_status)
-    if review_response:
-        _cv_set(context_variables, "subscription_contract_review_response", review_response)
-
     try:
         artifact = await persist_summary_artifact(
             app_id=str(app_id),
@@ -387,6 +380,13 @@ async def save_subscription_contract(
         _cv_set(context_variables, "subscription_contract_artifact_version_id", artifact.id)
     except Exception as exc:
         logger.warning("[SubscriptionContractDesigner] Artifact persistence failed: %s", exc)
+        raise
+
+    _cv_set(context_variables, "subscription_contract", normalized)
+    _cv_set(context_variables, "subscription_contract_files", normalized.get("code_files") or [])
+    _cv_set(context_variables, "subscription_contract_review_status", review_status)
+    if review_response:
+        _cv_set(context_variables, "subscription_contract_review_response", review_response)
 
     return {
         "success": True,

@@ -1,7 +1,7 @@
 # AgentGenerator Output Assembly Contract
 
 **Status:** CANONICAL — describes what actually exists
-**Last verified:** 2026-09-09
+**Last verified:** 2026-09-11
 **Source files:**
 - `factory_app/workflows/AgentGenerator/tools/generate_and_download.py`
 - `factory_app/workflows/AgentGenerator/tools/workflow_converter.py`
@@ -18,13 +18,33 @@
 
 ## How This Works
 
-AgentGenerator uses the **task batch pattern**:
+AgentGenerator first validates and reviews the workflow partition:
 
-1. `PackBuildCoordinator` collects the user's workflow pack specification into `workflows_spec` (context variable)
-2. The `workflow_generation_tasks` task batch fires — one `WorkflowBundleBuilderAgent` instance per workflow in the pack, running in parallel
-3. Each worker emits a `WorkflowBundleBuilderOutput` with a `files` list of `CodeFile` entries
-4. The runtime collects all results into `context_variables["workflow_bundle_results"]`, keyed by task_id
-5. `generate_and_download` validates `workflow_bundle_results` against the runtime contracts, then writes each accepted bundle to disk, zips it, and presents the download UI
+1. `PatternAgent` emits `PatternSelection`. Its tool validates the typed selection against the canonical DesignDocs surface map before writing `workflows_spec`.
+2. Invalid selections return validation feedback to `PatternAgent`. Three total selection attempts are permitted per run; exhausted attempts fail rather than dispatching an invalid plan.
+3. `ProjectOverviewAgent` presents `WorkflowPlanReview`. Approval, request-changes, and cancellation are structured UI responses correlated by `review_id` and the exact selection hash. Chat keywords cannot approve a plan.
+4. For an approved non-empty partition, `PackBuildCoordinator` starts `workflow_generation_tasks`: one `WorkflowBundleBuilderAgent` per workflow.
+5. Each worker emits `WorkflowBundleBuilderOutput` containing `CodeFile` entries. The runtime collects results in `workflow_bundle_results`, keyed by task ID.
+6. `generate_and_download` validates the resulting contracts, writes accepted bundles, creates the ZIP, and presents the download UI.
+
+### Apps Without AI Workflows
+
+An explicit `workflows: []`, `is_multi_workflow: false`, and non-empty
+`pack_partition_reason` is valid when the approved design requires only modules
+and pages. A missing or malformed selection is not equivalent to this decision.
+Unknown surface kinds and contradictions with DesignDocs fail validation.
+
+After the user approves an empty partition, the existing artifact recorder saves
+a `workflow_bundle` build record with `workflows: []`, the correlated review,
+and no workflow ZIP, primary workflow, API endpoint, or websocket endpoint.
+The stage completes only after this required save succeeds. It does not run the
+task batch or fabricate a workflow. Downstream AppGenerator consumes the same
+explicit empty integration metadata; prior workflow hints are cleared.
+
+Review changes return to `PatternAgent`; at most three review attempts are
+allowed, with retries only after `changes_requested`. These limits are runtime
+execution guards, not freemium or subscription entitlements. Cancellation,
+stale approval, failed recording, and exhausted attempts fail the stage.
 
 There are no sequential planning agents scraping MongoDB. Each `WorkflowBundleBuilderAgent` instance owns its full bundle output end-to-end.
 
@@ -43,8 +63,10 @@ step copies them into an active app root's `workflows/` directory.
 
 | Agent | Role |
 |-------|------|
-| `PatternAgent` | Selects orchestration pattern; output available to `WorkflowBundleBuilderAgent` via context |
-| `PackBuildCoordinator` | Interviews the user, populates `pack_spec`, seeds the task batch |
+| `InterviewAgent` | Clarifies missing AI requirements without inventing automation |
+| `PatternAgent` | Selects zero, one, or multiple workflows inside the approved design boundary |
+| `ProjectOverviewAgent` | Presents the draft-correlated workflow plan review |
+| `PackBuildCoordinator` | Starts the task batch for an approved non-empty partition |
 | `WorkflowBundleBuilderAgent` | Task batch worker — generates all YAML and code files for one workflow bundle |
 | `PackMetadataAgent` | Produces pack-level `extension_registry.json` metadata after workflow bundles complete |
 | `DownloadAgent` | Triggers `generate_and_download` after pack metadata is ready |

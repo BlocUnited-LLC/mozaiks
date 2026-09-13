@@ -311,6 +311,18 @@ async def test_factory_tool_authority_reaches_network_context_equals(
 
 
 @pytest.mark.asyncio
+async def test_declared_self_transition_runs_again_and_then_terminates(monkeypatch):
+    scenario = _SDKScenario()
+    rules = _rules()
+    rules[0]["target_agent"] = "AgentA"
+    result = await _run(monkeypatch, scenario, rules)
+    assert result.status is RunStatus.COMPLETED, result.error
+    assert scenario.requests == {"AgentA": 3}
+    assert len(_packets(result, "AgentA")) == 2
+    assert not _packets(result, "AgentB")
+
+
+@pytest.mark.asyncio
 async def test_factory_tool_forbidden_write_never_reaches_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,12 +1,30 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from mozaiksai.core.workflow.context.context_utils import (
     apply_context_exposures,
 )
+
+
+@pytest.mark.parametrize("agent", [
+    "AppPlanAgent", "AppSchemaAgent", "DatabaseAgent", "ConfigMiddlewareAgent",
+    "ModelAgent", "ServiceAgent", "ControllerAgent", "FrontendStubAgent",
+])
+def test_revision_writers_receive_existing_source_from_canonical_view(agent):
+    config = yaml.safe_load((Path(__file__).resolve().parents[1]
+        / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))
+    message = apply_context_exposures(
+        "Update only the assigned files.", [],
+        {"generated_files": {"modules/records/backend/schemas.py": "def retained_serializer(): pass"},
+         "unexposed_data": "never-render-this"}, config["agents"][agent]["variables"],
+    )
+    assert "retained_serializer" in message
+    assert "never-render-this" not in message
 
 
 def test_apply_context_exposures_uses_agent_variable_fallback() -> None:
@@ -29,7 +47,50 @@ def test_apply_context_exposures_uses_agent_variable_fallback() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_agents_exposes_declared_context_variables_without_explicit_exposures(monkeypatch) -> None:
+@pytest.mark.parametrize("with_hook", [False, True])
+async def test_prompt_middleware_refreshes_declared_values_without_accumulation(with_hook):
+    from ag2 import Context, MemoryStream
+    from ag2.events import ModelRequest, ModelResponse
+
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+    from mozaiksai.core.workflow.execution.middleware import build_prompt_middleware
+
+    bridge = ContextVariablesBridge({"feedback": "first draft", "private_value": "not exposed"})
+    context = Context(MemoryStream(), prompt=["initial"], variables={})
+
+    def hook(agent, _messages):
+        agent.update_system_message(agent.system_message + "\nHOOK")
+
+    build = build_prompt_middleware(
+        middleware_functions=[hook] if with_hook else [], agent_name="Planner",
+        base_system_message="Review the plan.", context_bridge=bridge,
+        context_variables=["feedback"],
+    )
+    prompts = []
+
+    async def call_next(_events, call_context):
+        prompts.append("\n".join(call_context.prompt))
+        return ModelResponse()
+
+    for value in ("first draft", "requested correction", None):
+        bridge.set("feedback", value)
+        middleware = build(ModelRequest("continue"), context)
+        await middleware.on_llm_call(call_next, [], context)
+
+    assert "FEEDBACK: first draft" in prompts[0]
+    assert "FEEDBACK: requested correction" in prompts[1]
+    assert "first draft" not in prompts[1]
+    assert "FEEDBACK: None" in prompts[2]
+    assert "requested correction" not in prompts[2]
+    for prompt in prompts:
+        assert "not exposed" not in prompt
+        assert prompt.count("FEEDBACK:") == 1
+        assert prompt.count("HOOK") == int(with_hook)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plain_snapshot", [False, True])
+async def test_create_agents_uses_declared_views_for_containers_and_task_snapshots(monkeypatch, plain_snapshot) -> None:
     from mozaiksai.core.workflow import llm_config
     from mozaiksai.core.workflow.agents import factory
     from mozaiksai.core.workflow.agents import tools as agent_tools
@@ -46,7 +107,16 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
                             {"heading": "[ROLE]", "content": "Generate the app UI."}
                         ],
                     }
-                ]
+                ],
+                "context_variables": {
+                    "definitions": {
+                        name: {"type": "object", "source": {"type": "state"}}
+                        for name in ("app_build_plan", "captured_theme_config", "unexposed_data")
+                    },
+                    "agents": {
+                        "AppSchemaAgent": {"variables": ["app_build_plan", "captured_theme_config"]},
+                    },
+                },
             }
 
         def get_auto_tool_agents(self, workflow_name: str):
@@ -56,16 +126,14 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
             return None
 
     class _Context:
-        _mozaiks_context_agents = {
-            "AppSchemaAgent": SimpleNamespace(variables=["app_build_plan"])
-        }
-
         def __init__(self) -> None:
             self.data = {
                 "app_build_plan": {
                     "app_name": "Support Operations",
                     "pages": [{"name": "Tickets", "route": "/tickets"}],
-                }
+                },
+                "captured_theme_config": {"theme": {"primary": "emerald", "font": "system-ui"}},
+                "unexposed_data": {"value": "must-not-enter-prompt"},
             }
 
         def get(self, key: str, default=None):
@@ -84,12 +152,18 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
     monkeypatch.setattr(structured, "get_llm_for_workflow", _fake_llm_config)
     monkeypatch.setattr(agent_tools, "load_agent_tool_functions", lambda _workflow: {})
 
-    agents = await factory.create_agents("AppGenerator", context_variables=_Context())
+    context = _Context()
+    agents = await factory.create_agents(
+        "AppGenerator", context_variables=context.snapshot() if plain_snapshot else context,
+    )
 
     assert "AppSchemaAgent" in agents
     system_message = agents["AppSchemaAgent"]._mozaiks_base_system_message
     assert "APP_BUILD_PLAN" in system_message
     assert "SUPPORT OPERATIONS" in system_message.upper()
+    assert "CAPTURED_THEME_CONFIG" in system_message
+    assert "emerald" in system_message
+    assert "must-not-enter-prompt" not in system_message
 
 
 def test_persisted_session_context_overrides_declared_defaults() -> None:

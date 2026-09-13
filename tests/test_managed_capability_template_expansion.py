@@ -7,6 +7,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.factory_context import factory_context
+
 WORKSPACE = Path(__file__).resolve().parents[1]
 
 
@@ -27,7 +29,7 @@ def _load_resolver():
 
 class _Ctx:
     def __init__(self, data: dict[str, Any]) -> None:
-        self.data = dict(data)
+        self.data = factory_context(data)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)

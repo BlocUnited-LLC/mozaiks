@@ -24,3 +24,6 @@ agents:
       If no files were inspected, say the bundle was not assessed. If recording
       failed, say findings are available in this review but were not saved;
       never claim persistence succeeded after a denied or unavailable dispatch.
+      If source_error is present, report that the assessment is blocked with its
+      source diagnostics. Never substitute files, paths, app IDs, or another
+      artifact. Completion requires security_readiness_recorded to be true.

@@ -239,7 +239,7 @@ def _python_source_has_forbidden_production_reference(source: str, *, filename: 
 
 def _tracked_production_paths(*, suffixes: tuple[str, ...]) -> tuple[Path, ...]:
     tracked = subprocess.run(
-        ["git", "ls-files", "-z", "--", "mozaiksai", "factory_app"],
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "mozaiksai", "factory_app"],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -248,6 +248,7 @@ def _tracked_production_paths(*, suffixes: tuple[str, ...]) -> tuple[Path, ...]:
         Path(relative)
         for relative in tracked
         if relative
+        and (ROOT / relative).is_file()
         and Path(relative).parts[0] in _PRODUCTION_ROOTS
         and relative.endswith(suffixes)
     )

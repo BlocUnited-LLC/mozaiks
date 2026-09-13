@@ -1,546 +1,201 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from tests.import_utils import import_module_directly
+from factory_app.workflows._shared.platform import build_lifecycle as hooks
+from mozaiksai.core.workflow.pack.schema import parse_global_pack_graph
 
-_schema = import_module_directly("mozaiksai.core.workflow.pack.schema")
-_build_lifecycle = import_module_directly(
-    "factory_app.workflows._shared.platform.build_lifecycle"
-)
-
-parse_global_pack_graph = _schema.parse_global_pack_graph
-
-
-def _make_build_pack():
-    return parse_global_pack_graph(
-        {
-            "version": 3,
-            "workflows": [{"id": "ValueEngine"}, {"id": "AppGenerator"}],
-            "transitions": [],
-            "workflow_sequences": [
-                {
-                    "id": "build",
-                    "steps": [
-                        {"workflows": ["ValueEngine"]},
-                        {"workflows": ["AppGenerator"]},
-                    ],
-                }
-            ],
-        }
-    )
+BINDING = {
+    "target_app_id": "tracker", "build_id": "build_1",
+    "build_registry_id": "appreg_1", "phase": "genesis",
+}
+CALL = {"app_id": "factory", "user_id": "alice", "chat_id": "chat_1", "execution_id": "exec_1"}
 
 
-def _make_brownfield_pack():
-    return parse_global_pack_graph(
-        {
-            "version": 3,
-            "workflows": [{"id": "ExistingAppDiscovery"}],
-            "transitions": [
-                {
-                    "id": "app_type_selector",
-                    "transition_type": "user_choice_context",
-                    "ui": {"component": "AppTypeSelector", "mode": "screen"},
-                    "options": [
-                        {
-                            "id": "brownfield_app",
-                            "route_to": "brownfield_path_selector",
-                            "sequence": "brownfield_app_adoption",
-                        }
-                    ],
-                },
-                {
-                    "id": "brownfield_path_selector",
-                    "transition_type": "user_choice_context",
-                    "ui": {"component": "BrownfieldPathSelector", "mode": "screen"},
-                    "options": [
-                        {
-                            "id": "light_integration",
-                            "route_to": "brownfield_repo_input",
-                            "sequence": "brownfield_app_adoption",
-                        }
-                    ],
-                },
-                {
-                    "id": "brownfield_repo_input",
-                    "transition_type": "user_choice_context",
-                    "ui": {"component": "BrownfieldRepoInput", "mode": "screen"},
-                    "options": [
-                        {
-                            "id": "start_discovery",
-                            "route_to": "ExistingAppDiscovery",
-                            "sequence": "brownfield_app_adoption",
-                        }
-                    ],
-                },
-            ],
-            "workflow_sequences": [
-                {
-                    "id": "brownfield_app_adoption",
-                    "steps": [
-                        {"transition": "app_type_selector"},
-                        {"transition": "brownfield_path_selector"},
-                        {"transition": "brownfield_repo_input"},
-                        {"workflows": ["ExistingAppDiscovery"]},
-                    ],
-                }
-            ],
-        }
-    )
-
-
-class _FakeAppRegistryService:
-    def __init__(self, existing: dict | None = None) -> None:
-        self.existing = existing
-        self.create_calls: list[dict] = []
-        self.update_calls: list[dict] = []
-
-    async def get_app_record(self, **kwargs):  # noqa: ANN003
-        if self.existing and kwargs.get("build_registry_id") == self.existing.get("build_registry_id"):
-            return {"app": self.existing}
-        return {"app": None}
-
-    async def create_app_record(self, **kwargs):  # noqa: ANN003
-        self.create_calls.append(kwargs)
-        return {
-            "success": True,
-            "app": {
-                "build_registry_id": "appreg_imported_1",
-                "app_id": kwargs.get("app_id"),
-                "lifecycle_state": kwargs.get("status"),
-            },
-        }
-
-    async def update_build_status(self, **kwargs):  # noqa: ANN003
-        self.update_calls.append(kwargs)
-        return {"success": True, "app": {**(self.existing or {}), **kwargs}}
+@pytest.fixture
+def state(monkeypatch):
+    session = {**{"run_build_binding": BINDING}, "journey_instance_id": "journey_1",
+               "journey_key": "build", "journey_position": 0, "journey_total_steps": 2}
+    record = {"app_id": "tracker", "chat_app_id": "factory", "build_registry_id": "appreg_1",
+              "current_build_run": {"build_id": "build_1", "phase": "genesis"}}
+    registry = AsyncMock()
+    registry.get_app_record.return_value = {"app": record}
+    registry.update_build_status.return_value = {"success": True}
+    events = AsyncMock(return_value="outbox_1")
+    telemetry = []
+    monkeypatch.setattr(hooks, "_get_chat_session_context", AsyncMock(return_value=session))
+    monkeypatch.setattr(hooks, "_app_registry_service", lambda: registry)
+    monkeypatch.setattr(hooks, "upsert_outbox_event", events)
+    monkeypatch.setattr(hooks, "_spawn_delivery", lambda **kw: None)
+    monkeypatch.setattr(hooks, "_emit_telemetry", lambda **kw: telemetry.append(kw))
+    pack = parse_global_pack_graph({
+        "version": 3, "workflows": [{"id": "ValueEngine"}, {"id": "AppGenerator"}],
+        "transitions": [], "workflow_sequences": [{"id": "build", "steps": [
+            {"workflows": ["ValueEngine"]}, {"workflows": ["AppGenerator"]},
+        ]}],
+    })
+    monkeypatch.setattr(hooks, "load_global_pack_graph", lambda: pack)
+    return SimpleNamespace(session=session, record=record, registry=registry, events=events, telemetry=telemetry)
 
 
 @pytest.mark.asyncio
-async def test_emit_build_started_accepts_runtime_hook_kwargs_and_emits_for_first_journey_workflow(monkeypatch):
-    events = []
-
-    async def fake_upsert_outbox_event(**kwargs):  # noqa: ANN003
-        events.append(kwargs)
-        return "outbox_1"
-
-    async def fake_context(**kwargs):  # noqa: ANN003
-        return {
-            "app_id": kwargs["app_id"],
-            "build_id": "journey_1",
-            "build_registry_id": None,
-            "journey_instance_id": "journey_1",
-            "journey_key": "build",
-            "journey_position": 0,
-            "chat_id": kwargs["chat_id"],
-            "execution_id": kwargs["execution_id"],
-        }
-
-    monkeypatch.setattr(_build_lifecycle, "load_global_pack_graph", lambda: _make_build_pack())
-    monkeypatch.setattr(_build_lifecycle, "_resolve_build_event_context", fake_context)
-    monkeypatch.setattr(_build_lifecycle, "upsert_outbox_event", fake_upsert_outbox_event)
-    monkeypatch.setattr(_build_lifecycle, "_spawn_delivery", lambda *args, **kwargs: None)
-
-    await _build_lifecycle.emit_build_started(
-        app_id="app_1",
-        execution_id="exec_1",
-        chat_id="chat_1",
-        user_id="user_1",
-        workflow_name="ValueEngine",
-    )
-
-    assert len(events) == 1
-    assert events[0]["event_type"] == "build.started"
-    assert events[0]["status"] == "started"
-    assert events[0]["user_id"] == "user_1"
-    assert events[0]["workflow_name"] == "ValueEngine"
-    payload = events[0]["payload"]
-    assert payload["buildId"] == "journey_1"
-    assert payload["journeyId"] == "build"
+async def test_started_uses_persisted_binding_and_preserves_host_identity(state):
+    await hooks.emit_build_started(**CALL, workflow_name="ValueEngine", build_id="forged", build_registry_id="forged")
+    payload = state.events.call_args.kwargs["payload"]
+    assert payload["appId"] == "factory"
+    assert payload["targetAppId"] == "tracker"
+    assert payload["buildId"] == "build_1"
+    assert payload["buildRegistryId"] == "appreg_1"
     assert payload["journeyInstanceId"] == "journey_1"
-    assert payload["executionId"] == "exec_1"
+    assert payload["eventType"] == "build.started"
+    assert payload["status"] == "started"
+    assert payload["idempotencyKey"] == "build:factory:build_1:build.started"
+    state.registry.get_app_record.assert_awaited_once_with(build_registry_id="appreg_1", owner_user_id="alice")
+    state.registry.create_app_record.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_emit_build_started_materializes_existing_app_import_in_local_registry(monkeypatch):
-    events = []
-    registry = _FakeAppRegistryService()
-    registry_pointers = []
-
-    async def fake_upsert_outbox_event(**kwargs):  # noqa: ANN003
-        events.append(kwargs)
-        return "outbox_import_1"
-
-    async def fake_context(**kwargs):  # noqa: ANN003
-        return {
-            "app_id": kwargs["app_id"],
-            "build_id": "journey_1",
-            "build_registry_id": "journey_1",
-            "build_registry_id_source": "build_id_fallback",
-            "journey_instance_id": "journey_1",
-            "journey_key": "brownfield_app_adoption",
-            "journey_position": 3,
-            "journey_total_steps": 4,
-            "chat_id": kwargs["chat_id"],
-            "execution_id": kwargs["execution_id"],
-            "session_context": {
-                "github_repo": "BlocUnited-LLC/mozaiks-app",
-                "app_name": "mozaiks-app",
-                "brownfield_build_path": "light_integration",
-                "current_app_context_version_id": "ctx_1",
-                "app_intelligence_artifact_version_id": "av_ai_1",
-            },
-        }
-
-    async def fake_record_pointer(**kwargs):  # noqa: ANN003
-        registry_pointers.append(kwargs)
-
-    monkeypatch.setattr(_build_lifecycle, "load_global_pack_graph", lambda: _make_brownfield_pack())
-    monkeypatch.setattr(_build_lifecycle, "_resolve_build_event_context", fake_context)
-    monkeypatch.setattr(_build_lifecycle, "upsert_outbox_event", fake_upsert_outbox_event)
-    monkeypatch.setattr(_build_lifecycle, "_spawn_delivery", lambda *args, **kwargs: None)
-    monkeypatch.setattr(_build_lifecycle, "_app_registry_service", lambda: registry)
-    monkeypatch.setattr(_build_lifecycle, "_record_chat_session_build_registry_id", fake_record_pointer)
-
-    await _build_lifecycle.emit_build_started(
-        app_id="demo-app",
-        execution_id="exec_1",
-        chat_id="chat_1",
-        user_id="demo-user",
-        workflow_name="ExistingAppDiscovery",
-    )
-
-    assert len(events) == 1
-    assert len(registry.create_calls) == 1
-    created = registry.create_calls[0]
-    assert created["owner_user_id"] == "demo-user"
-    assert created["name"] == "mozaiks-app"
-    assert created["name_source"] == "imported_app"
-    assert created["status"] == "building"
-    assert created["app_id"].startswith("mozaiks-app-")
-    assert created["chat_app_id"] == "demo-app"
-    assert created["active_chat_id"] == "chat_1"
-    assert created["active_workflow_id"] == "ExistingAppDiscovery"
-    assert created["build_context_profile"]["workflow_sequence"] == "brownfield_app_adoption"
-    assert created["build_context_profile"]["github_repo"] == "BlocUnited-LLC/mozaiks-app"
-    assert created["build_context_profile"]["brownfield_build_path"] == "light_integration"
-    assert created["build_context_profile"]["current_app_context_version_id"] == "ctx_1"
-    assert created["current_build_run"]["build_id"] == "journey_1"
-    assert registry_pointers == [
-        {
-            "app_id": "demo-app",
-            "chat_id": "chat_1",
-            "build_registry_id": "appreg_imported_1",
-        }
-    ]
+async def test_each_workflow_advances_directory_pointer_without_duplicate_started_event(state):
+    state.session["journey_position"] = 1
+    assert await hooks.emit_build_started(**CALL, workflow_name="AppGenerator") is None
+    state.events.assert_not_awaited()
+    updated = state.registry.update_build_status.call_args.kwargs
+    assert updated["active_chat_id"] == "chat_1"
+    assert updated["active_workflow_id"] == "AppGenerator"
+    assert updated["current_build_run"]["build_id"] == "build_1"
 
 
 @pytest.mark.asyncio
-async def test_emit_build_completed_skips_non_terminal_journey_workflow(monkeypatch):
-    events = []
+async def test_completion_skips_nonterminal_workflow(state):
+    assert await hooks.emit_build_completed(**CALL, workflow_name="ValueEngine") is None
+    state.events.assert_not_awaited()
+    state.registry.update_build_status.assert_not_awaited()
 
-    async def fake_upsert_outbox_event(**kwargs):  # noqa: ANN003
-        events.append(kwargs)
-        return "outbox_1"
 
-    async def fake_context(**kwargs):  # noqa: ANN003
-        return {
-            "app_id": kwargs["app_id"],
-            "build_id": "journey_1",
-            "build_registry_id": None,
-            "journey_instance_id": "journey_1",
-            "journey_key": "build",
-            "journey_position": 0,
-            "chat_id": kwargs["chat_id"],
-            "execution_id": kwargs["execution_id"],
-        }
-
-    monkeypatch.setattr(_build_lifecycle, "load_global_pack_graph", lambda: _make_build_pack())
-    monkeypatch.setattr(_build_lifecycle, "_resolve_build_event_context", fake_context)
-    monkeypatch.setattr(_build_lifecycle, "upsert_outbox_event", fake_upsert_outbox_event)
-    monkeypatch.setattr(_build_lifecycle, "_spawn_delivery", lambda *args, **kwargs: None)
-
-    await _build_lifecycle.emit_build_completed(
-        app_id="app_1",
-        execution_id="exec_1",
-        chat_id="chat_1",
-        user_id="user_1",
-        workflow_name="ValueEngine",
-    )
-
-    assert events == []
+@pytest.mark.parametrize("wrong", [None, {"app_id": "other", "chat_app_id": "factory"},
+                                   {"app_id": "tracker", "chat_app_id": "other"}])
+@pytest.mark.asyncio
+async def test_missing_or_mismatched_registry_never_recreated(state, wrong):
+    state.registry.get_app_record.return_value = {"app": wrong}
+    with pytest.raises(ValueError, match="not available"):
+        await hooks.emit_build_started(**CALL, workflow_name="ValueEngine")
+    state.registry.create_app_record.assert_not_called()
+    state.registry.update_build_status.assert_not_awaited()
+    state.events.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_emit_build_completed_emits_for_terminal_journey_workflow(monkeypatch):
-    events = []
-
-    async def fake_upsert_outbox_event(**kwargs):  # noqa: ANN003
-        events.append(kwargs)
-        return "outbox_1"
-
-    async def fake_context(**kwargs):  # noqa: ANN003
-        return {
-            "app_id": kwargs["app_id"],
-            "build_id": "journey_1",
-            "build_registry_id": "build_reg_1",
-            "journey_instance_id": "journey_1",
-            "journey_key": "build",
-            "journey_position": 1,
-            "chat_id": kwargs["chat_id"],
-            "execution_id": kwargs["execution_id"],
-        }
-
-    async def fake_get_build_artifacts(**kwargs):  # noqa: ANN003
-        assert kwargs["export_build_id"] == "build_reg_1"
-        return {
-            "previewUrl": None,
-            "exportDownloadUrl": "/api/apps/app_1/builds/build_reg_1/export",
-        }
-
-    monkeypatch.setattr(_build_lifecycle, "load_global_pack_graph", lambda: _make_build_pack())
-    monkeypatch.setattr(_build_lifecycle, "_resolve_build_event_context", fake_context)
-    monkeypatch.setattr(_build_lifecycle, "get_build_artifacts", fake_get_build_artifacts)
-    monkeypatch.setattr(_build_lifecycle, "upsert_outbox_event", fake_upsert_outbox_event)
-    monkeypatch.setattr(_build_lifecycle, "_spawn_delivery", lambda *args, **kwargs: None)
-
-    await _build_lifecycle.emit_build_completed(
-        app_id="app_1",
-        execution_id="exec_2",
-        chat_id="chat_2",
-        user_id="user_1",
-        workflow_name="AppGenerator",
-    )
-
-    assert len(events) == 1
-    assert events[0]["event_type"] == "build.completed"
-    assert events[0]["status"] == "completed"
-    assert events[0]["user_id"] == "user_1"
-    assert events[0]["workflow_name"] == "AppGenerator"
-    payload = events[0]["payload"]
-    assert payload["buildId"] == "journey_1"
-    assert payload["buildRegistryId"] == "build_reg_1"
-    assert payload["artifacts"]["exportDownloadUrl"] == "/api/apps/app_1/builds/build_reg_1/export"
+async def test_stale_completion_cannot_overwrite_new_build(state):
+    state.record["current_build_run"]["build_id"] = "new_build"
+    with pytest.raises(ValueError, match="superseded"):
+        await hooks.emit_build_completed(**CALL, workflow_name="AppGenerator")
+    state.registry.update_build_status.assert_not_awaited()
+    state.events.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_emit_build_completed_updates_existing_local_registry_record(monkeypatch):
-    events = []
-    registry = _FakeAppRegistryService(existing={"build_registry_id": "build_reg_1", "app_id": "app_1"})
-
-    async def fake_upsert_outbox_event(**kwargs):  # noqa: ANN003
-        events.append(kwargs)
-        return "outbox_1"
-
-    async def fake_context(**kwargs):  # noqa: ANN003
-        return {
-            "app_id": kwargs["app_id"],
-            "build_id": "journey_1",
-            "build_registry_id": "build_reg_1",
-            "build_registry_id_source": "session",
-            "journey_instance_id": "journey_1",
-            "journey_key": "build",
-            "journey_position": 1,
-            "chat_id": kwargs["chat_id"],
-            "execution_id": kwargs["execution_id"],
-            "session_context": {},
-        }
-
-    async def fake_get_build_artifacts(**kwargs):  # noqa: ANN003
-        return {
-            "previewUrl": None,
-            "exportDownloadUrl": "/api/apps/app_1/builds/build_reg_1/export",
-        }
-
-    monkeypatch.setattr(_build_lifecycle, "load_global_pack_graph", lambda: _make_build_pack())
-    monkeypatch.setattr(_build_lifecycle, "_resolve_build_event_context", fake_context)
-    monkeypatch.setattr(_build_lifecycle, "get_build_artifacts", fake_get_build_artifacts)
-    monkeypatch.setattr(_build_lifecycle, "upsert_outbox_event", fake_upsert_outbox_event)
-    monkeypatch.setattr(_build_lifecycle, "_spawn_delivery", lambda *args, **kwargs: None)
-    monkeypatch.setattr(_build_lifecycle, "_app_registry_service", lambda: registry)
-
-    await _build_lifecycle.emit_build_completed(
-        app_id="app_1",
-        execution_id="exec_2",
-        chat_id="chat_2",
-        user_id="user_1",
-        workflow_name="AppGenerator",
-    )
-
-    assert len(events) == 1
-    assert registry.create_calls == []
-    assert registry.update_calls == [
-        {
-            "owner_user_id": "user_1",
-            "build_registry_id": "build_reg_1",
-            "status": "review",
-            "workflow_sequence": "build",
-            "active_chat_id": "chat_2",
-            "active_workflow_id": "AppGenerator",
-            "current_build_run": {
-                "build_id": "journey_1",
-                "workflow_sequence": "build",
-                "status": "review",
-                "active_chat_id": "chat_2",
-                "active_workflow_id": "AppGenerator",
-            },
-        }
-    ]
+async def test_missing_binding_stops_before_registry_or_events(state):
+    state.session.pop("run_build_binding")
+    with pytest.raises(ValueError):
+        await hooks.emit_build_started(**CALL, workflow_name="ValueEngine")
+    state.registry.get_app_record.assert_not_awaited()
+    state.events.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_emit_build_completed_schedules_anonymized_telemetry_for_terminal_journey_workflow(monkeypatch):
-    from mozaiksai.core import telemetry as telemetry_mod
+async def test_registry_update_failure_prevents_success_event(state):
+    state.registry.update_build_status.return_value = {"success": False}
+    with pytest.raises(ValueError, match="disappeared"):
+        await hooks.emit_build_started(**CALL, workflow_name="ValueEngine")
+    state.events.assert_not_awaited()
 
-    events = []
-    telemetry_events = []
 
-    async def fake_upsert_outbox_event(**kwargs):  # noqa: ANN003
-        events.append(kwargs)
-        return "outbox_1"
-
-    async def fake_context(**kwargs):  # noqa: ANN003
-        return {
-            "app_id": kwargs["app_id"],
-            "build_id": "journey_1",
-            "build_registry_id": "build_reg_1",
-            "journey_instance_id": "journey_1",
-            "journey_key": "build",
-            "journey_position": 1,
-            "chat_id": kwargs["chat_id"],
-            "execution_id": kwargs["execution_id"],
-        }
-
-    async def fake_get_build_artifacts(**kwargs):  # noqa: ANN003
-        return {
-            "previewUrl": None,
-            "exportDownloadUrl": "/api/apps/app_1/builds/build_reg_1/export",
-        }
-
-    async def fake_emit_build_telemetry(payload):  # noqa: ANN001
-        telemetry_events.append(payload)
-
-    monkeypatch.setattr(_build_lifecycle, "load_global_pack_graph", lambda: _make_build_pack())
-    monkeypatch.setattr(_build_lifecycle, "_resolve_build_event_context", fake_context)
-    monkeypatch.setattr(_build_lifecycle, "get_build_artifacts", fake_get_build_artifacts)
-    monkeypatch.setattr(_build_lifecycle, "upsert_outbox_event", fake_upsert_outbox_event)
-    monkeypatch.setattr(_build_lifecycle, "_spawn_delivery", lambda *args, **kwargs: None)
-    monkeypatch.setattr(telemetry_mod, "emit_build_telemetry", fake_emit_build_telemetry)
-
-    await _build_lifecycle.emit_build_completed(
-        app_id="app_1",
-        execution_id="exec_2",
-        chat_id="chat_2",
-        user_id="user_1",
-        workflow_name="AppGenerator",
+@pytest.mark.asyncio
+async def test_completion_references_real_bundle_without_writing_summary(state, monkeypatch):
+    from mozaiksai.core import artifacts
+    state.session["journey_position"] = 1
+    state.record["current_build_run"].update(artifact_version_id="av_1", bundle_path="generated/apps/tracker/build_1/app")
+    store = AsyncMock()
+    store.get_build_record.return_value = SimpleNamespace(
+        id="av_1", commit_metadata=SimpleNamespace(metadata=BINDING),
     )
+    monkeypatch.setattr(artifacts, "get_artifact_store", lambda: store)
+    await hooks.emit_build_completed(**CALL, workflow_name="AppGenerator")
+    store.get_build_record.assert_awaited_once_with(app_id="tracker", build_record_id="av_1")
+    store.create_build_record.assert_not_called()
+    payload = state.events.call_args.kwargs["payload"]
+    assert payload["artifacts"]["artifactVersionId"] == "av_1"
+    assert payload["eventType"] == "build.completed"
+    assert payload["status"] == "completed"
+    assert payload["artifacts"]["exportDownloadUrl"] == "/api/studio/build/artifacts/av_1/download?build_registry_id=appreg_1"
+    assert state.registry.update_build_status.call_args.kwargs["status"] == "review"
+    assert state.telemetry[0]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_missing_bundle_does_not_get_a_fake_download_url(state):
+    context = await hooks._resolve_build_event_context(**CALL, workflow_name="ValueEngine")
+    assert await hooks.get_build_artifacts(context=context) == {}
+
+
+@pytest.mark.asyncio
+async def test_failure_updates_same_build_and_includes_live_gate_evidence(state):
+    await hooks.emit_build_failed(
+        **CALL, workflow_name="ValueEngine", error="generation failed",
+        context_variables={"module_contract_quality_status": "blocked"},
+    )
+    event = state.events.call_args.kwargs
+    assert event["event_type"] == "build.failed"
+    assert event["payload"]["eventType"] == "build.failed"
+    assert event["payload"]["status"] == "failed"
+    assert event["payload"]["buildEvidence"]["gates"][0]["status"] == "blocked"
+    assert state.registry.update_build_status.call_args.kwargs["status"] == "needs_revision"
+    assert state.telemetry[0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_session_lookup_includes_owner_host_and_workflow(monkeypatch):
+    from mozaiksai.core.data.persistence import persistence_manager
+    coll = AsyncMock()
+    coll.find_one.return_value = None
+    monkeypatch.setattr(persistence_manager.AG2PersistenceManager, "_coll", AsyncMock(return_value=coll))
+    with pytest.raises(ValueError, match="not available"):
+        await hooks._get_chat_session_context(app_id="factory", user_id="alice", chat_id="foreign", workflow_name="ValueEngine")
+    query = coll.find_one.call_args.args[0]
+    assert query["app_id"] == "factory"
+    assert query["user_id"] == "alice"
+    assert query["_id"] == "foreign"
+    assert query["workflow_name"] == "ValueEngine"
+
+
+@pytest.mark.asyncio
+async def test_delivery_posts_original_host_scope_and_records_attempt(monkeypatch):
+    monkeypatch.setattr(hooks, "get_outbox_event", AsyncMock(return_value={
+        "app_id": "factory", "payload": {"targetAppId": "tracker"},
+    }))
+    client = AsyncMock()
+    client.post_build_event.return_value = SimpleNamespace(ok=True, status_code=202, error=None)
+    monkeypatch.setattr(hooks, "_build_events_client", lambda: client)
+    attempt = AsyncMock()
+    monkeypatch.setattr(hooks, "mark_attempt", attempt)
+    await hooks._deliver_outbox_event_once(outbox_event_id="outbox_1")
+    client.post_build_event.assert_awaited_once_with(app_id="factory", payload={"targetAppId": "tracker"})
+    attempt.assert_awaited_once_with(outbox_id="outbox_1", ok=True, status_code=202, error=None)
+
+
+@pytest.mark.asyncio
+async def test_telemetry_remains_anonymized(monkeypatch):
+    from mozaiksai.core import telemetry
+    emitted = AsyncMock()
+    monkeypatch.setattr(telemetry, "emit_build_telemetry", emitted)
+    hooks._emit_telemetry(workflow_name="AppGenerator", status="completed", context=BINDING)
     await asyncio.sleep(0)
-
-    assert len(events) == 1
-    assert len(telemetry_events) == 1
-    telemetry_payload = telemetry_events[0]
-    assert telemetry_payload["workflow_name"] == "AppGenerator"
-    assert telemetry_payload["final_status"] == "completed"
-    assert telemetry_payload["build_id_hash"]
-    assert "event" not in telemetry_payload
-    assert "rating" not in telemetry_payload
-    assert "sequence_id" not in telemetry_payload
-    assert "build_reg_1" not in json.dumps(telemetry_payload)
-
-
-@pytest.mark.asyncio
-async def test_emit_build_failed_schedules_anonymized_telemetry_for_journey_workflow(monkeypatch):
-    from mozaiksai.core import telemetry as telemetry_mod
-
-    events = []
-    telemetry_events = []
-
-    async def fake_upsert_outbox_event(**kwargs):  # noqa: ANN003
-        events.append(kwargs)
-        return "outbox_1"
-
-    async def fake_context(**kwargs):  # noqa: ANN003
-        return {
-            "app_id": kwargs["app_id"],
-            "build_id": "journey_1",
-            "build_registry_id": "build_reg_1",
-            "journey_instance_id": "journey_1",
-            "journey_key": "build",
-            "journey_position": 0,
-            "chat_id": kwargs["chat_id"],
-            "execution_id": kwargs["execution_id"],
-        }
-
-    async def fake_emit_build_telemetry(payload):  # noqa: ANN001
-        telemetry_events.append(payload)
-
-    monkeypatch.setattr(_build_lifecycle, "load_global_pack_graph", lambda: _make_build_pack())
-    monkeypatch.setattr(_build_lifecycle, "_resolve_build_event_context", fake_context)
-    monkeypatch.setattr(_build_lifecycle, "upsert_outbox_event", fake_upsert_outbox_event)
-    monkeypatch.setattr(_build_lifecycle, "_spawn_delivery", lambda *args, **kwargs: None)
-    monkeypatch.setattr(telemetry_mod, "emit_build_telemetry", fake_emit_build_telemetry)
-
-    await _build_lifecycle.emit_build_failed(
-        app_id="app_1",
-        execution_id="exec_3",
-        chat_id="chat_3",
-        user_id="user_1",
-        workflow_name="ValueEngine",
-        error="boom",
-    )
-    await asyncio.sleep(0)
-
-    assert len(events) == 1
-    assert events[0]["event_type"] == "build.failed"
-    assert len(telemetry_events) == 1
-    telemetry_payload = telemetry_events[0]
-    assert telemetry_payload["workflow_name"] == "ValueEngine"
-    assert telemetry_payload["final_status"] == "failed"
-    assert telemetry_payload["build_id_hash"]
-    assert "event" not in telemetry_payload
-    assert "rating" not in telemetry_payload
-    assert "sequence_id" not in telemetry_payload
-    assert "build_reg_1" not in json.dumps(telemetry_payload)
-
-
-@pytest.mark.asyncio
-async def test_deliver_outbox_event_posts_payload_and_marks_attempt(monkeypatch):
-    attempts = []
-    posted = []
-
-    async def fake_get_outbox_event(**kwargs):  # noqa: ANN003
-        assert kwargs == {"outbox_id": "outbox_1"}
-        return {
-            "_id": "outbox_1",
-            "app_id": "app_1",
-            "payload": {"eventType": "build.started"},
-        }
-
-    async def fake_mark_attempt(**kwargs):  # noqa: ANN003
-        attempts.append(kwargs)
-
-    class _FakeClient:
-        async def post_build_event(self, **kwargs):  # noqa: ANN003
-            posted.append(kwargs)
-            return SimpleNamespace(ok=True, status_code=202, error=None)
-
-    monkeypatch.setattr(_build_lifecycle, "get_outbox_event", fake_get_outbox_event)
-    monkeypatch.setattr(_build_lifecycle, "mark_attempt", fake_mark_attempt)
-    monkeypatch.setattr(_build_lifecycle, "_build_events_client", lambda: _FakeClient())
-
-    await _build_lifecycle._deliver_outbox_event_once(outbox_event_id="outbox_1")
-
-    assert posted == [{"app_id": "app_1", "payload": {"eventType": "build.started"}}]
-    assert attempts == [
-        {
-            "outbox_id": "outbox_1",
-            "ok": True,
-            "status_code": 202,
-            "error": None,
-        }
-    ]
+    assert emitted.await_count == 1
+    payload = emitted.call_args.args[0]
+    assert payload["build_id_hash"]
+    assert "appreg_1" not in str(payload)
 

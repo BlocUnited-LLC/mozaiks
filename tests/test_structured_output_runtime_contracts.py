@@ -294,13 +294,22 @@ def test_designdocs_agent_output_supports_provider_strict_response_format() -> N
     _structured_mod._workflow_structured_agents.clear()
     _structured_mod._provider_response_model_cache.clear()
 
-    _, registry = _structured_mod.load_workflow_structured_outputs("DesignDocs")
+    models, registry = _structured_mod.load_workflow_structured_outputs("DesignDocs")
     supported, offending_path = _structured_mod.supports_provider_response_format(
         registry["DesignDocsAgent"]
     )
 
     assert supported is True, f"DesignDocsAgent output fails strict mode at: {offending_path}"
     assert offending_path is None
+
+    index = models["DataContractIndex"](keys=[{"field": "owner_id", "order": 1}])
+    assert index.model_dump(mode="json")["keys"] == [{"field": "owner_id", "order": 1}]
+    schema = _structured_mod.get_provider_response_model(models["DataContractIndex"]).model_json_schema()
+    item = schema["properties"]["keys"]["items"]
+    assert item["type"] == "object"
+    assert item["properties"]["field"]["type"] == "string"
+    assert item["properties"]["order"]["type"] == "integer"
+    assert item["additionalProperties"] is False
 
 
 def test_runtime_task_batch_models_mark_declared_fields_as_required() -> None:

@@ -41,7 +41,12 @@ from .composition.module_event_provenance import (
     normalize_module_event_provenance,
     normalize_module_reaction_provenance,
 )
-from .composition.module_executor import ModuleExecutor, ModuleRequest, ModuleResult
+from .composition.module_executor import (
+    ModuleExecutor,
+    ModuleInputValidationError,
+    ModuleRequest,
+    ModuleResult,
+)
 from .composition.platform_hooks import PlatformHookRegistry, get_platform_hooks
 from .readiness import (
     EnvReader,
@@ -96,6 +101,7 @@ __all__ = [
     "ModuleExecutionPolicyInput",
     "ModulePermissionCheck",
     "ModuleExecutor",
+    "ModuleInputValidationError",
     "ModuleRequest",
     "ModuleResult",
     "EnvReader",

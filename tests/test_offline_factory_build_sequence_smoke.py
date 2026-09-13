@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import subprocess
@@ -98,6 +99,7 @@ class _MemoryArtifactStore:
             canonical_inputs_version=dict(kwargs.get("canonical_inputs_version") or {}),
             lifecycle_status=kwargs["lifecycle_status"],
             validation_status=kwargs["validation_status"],
+            files_manifest=kwargs.get("files_manifest", []),
             commit_metadata=kwargs["commit_metadata"],
         )
         self._versions.setdefault((artifact.build_family, artifact.build_key), []).insert(0, artifact)
@@ -109,13 +111,8 @@ def _factory_workflows_root() -> Path:
 
 
 @pytest.mark.asyncio
-async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chain() -> None:
-    """Offline production smoke for the build journey.
-
-    This uses the real factory registry and real summary artifact persistence,
-    but replaces storage with an in-memory artifact store. It proves the
-    cross-workflow contract without OpenAI, AG2 model calls, MongoDB, or HTTP.
-    """
+async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chain(monkeypatch, tmp_path) -> None:
+    """Exercise the real archive writers, not duplicate lifecycle summaries."""
 
     graph = _pack_config.load_global_pack_graph(workflows_root=_factory_workflows_root())
     assert graph is not None
@@ -151,28 +148,32 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
     subscription_contract = store.seed(app_id=app_id, build_family="subscription_contract")
     theme_capture = store.seed(app_id=app_id, build_family="theme_capture")
 
-    from factory_app.workflows.AgentGenerator.tools.platform.build_lifecycle import (
-        _persist_workflow_bundle_artifact,
-    )
-    from factory_app.workflows.AppGenerator.tools.platform.build_lifecycle import (
-        _persist_app_bundle_artifact,
-    )
-
-    await _persist_workflow_bundle_artifact(
+    artifacts = importlib.import_module("mozaiksai.core.artifacts")
+    workflow_writer = importlib.import_module("factory_app.workflows.AgentGenerator.tools.generate_and_download")
+    app_writer = importlib.import_module("factory_app.workflows.AppGenerator.tools.generate_and_download")
+    monkeypatch.setattr(artifacts, "get_artifact_store", lambda: store)
+    context = {
+        "run_build_binding": {
+            "build_registry_id": "registry_smoke", "target_app_id": app_id,
+            "build_id": "build_smoke", "phase": "genesis",
+        },
+        "app_bundle_acceptance_status": "passed",
+    }
+    archive = tmp_path / "bundle.zip"
+    archive.write_bytes(b"archive fixture")
+    await workflow_writer._register_workflow_bundle_artifact_version(
         app_id=app_id,
         chat_id="chat_agentgenerator",
         user_id="user_1",
         workflow_name="AgentGenerator",
-        build_mode=None,
-        artifact_store=store,
+        bundle_name="workflow_bundle", zip_path=archive, context_variables=context,
     )
-    await _persist_app_bundle_artifact(
+    await app_writer._register_app_bundle_artifact_version(
         app_id=app_id,
         chat_id="chat_appgenerator",
         user_id="user_1",
         workflow_name="AppGenerator",
-        build_mode=None,
-        artifact_store=store,
+        bundle_name="bundle", zip_path=archive, context_variables=context,
     )
 
     workflow_call = next(call for call in store.create_calls if call["build_family"] == "workflow_bundle")
@@ -193,7 +194,7 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
     assert app_inputs["workflow_bundle"] == workflow_bundle.id
     assert "brand" not in app_inputs
     assert app_call["lifecycle_status"] == ArtifactLifecycleStatus.CURRENT
-    assert app_call["validation_status"] == ArtifactValidationStatus.SKIPPED
+    assert app_call["validation_status"] == ArtifactValidationStatus.PASSED
 
 
 @pytest.mark.asyncio

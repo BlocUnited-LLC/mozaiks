@@ -3302,7 +3302,7 @@ async def start_chat(
     reuse_cutoff = datetime.now(UTC) - timedelta(seconds=idempotency_window_sec)
     coll = await runtime_app._chat_coll()
 
-    if not force_new:
+    if not force_new and client_request_id:
         base_query = {
             "user_id": user_id,
             "workflow_name": workflow_name,
@@ -3313,8 +3313,6 @@ async def start_chat(
         reused_doc = None
         if client_request_id:
             reused_doc = await coll.find_one({**base_query, "client_request_id": client_request_id}, {"chat_id": 1})
-        if not reused_doc:
-            reused_doc = await coll.find_one(base_query, {"chat_id": 1})
         if reused_doc:
             chat_id = reused_doc.get("chat_id") or reused_doc.get("_id")
             try:
@@ -3348,37 +3346,20 @@ async def start_chat(
         extra_fields["trigger_meta"] = {key: value for key, value in trigger_meta.items() if key in allowed_trigger_keys}
     extra_fields.update(context_variables)
 
-    try:
-        platform_fields = await get_platform_hooks().call_chat_session_fields(
-            app_id=app_id,
-            user_id=user_id,
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-        )
-        if platform_fields:
-            extra_fields.update(platform_fields)
-    except Exception as exc:
-        logger.debug("platform session fields skipped: %s", exc)
+    from mozaiksai.core.session import get_session_router
 
-    await persistence_manager.create_chat_session(
+    await create_routed_chat_session(
+        persistence_manager=persistence_manager,
         chat_id=chat_id,
         app_id=app_id,
-        workflow_name=workflow_name,
+        workflow_id=workflow_name,
         user_id=user_id,
-        extra_fields=extra_fields or None,
+        context_variables=extra_fields,
+        trigger_meta=extra_fields.get("trigger_meta") or {},
+        session_router=get_session_router(),
+        build_registry_id=data.get("build_registry_id"),
+        source_chat_id=data.get("source_chat_id"),
     )
-
-    try:
-        from mozaiksai.core.session import get_session_router
-
-        await get_session_router().bind_workflow_session(
-            app_id=app_id,
-            user_id=user_id,
-            workflow_id=workflow_name,
-            chat_id=chat_id,
-        )
-    except Exception as exc:
-        logger.debug("session router bind skipped for %s: %s", chat_id, exc)
 
     try:
         cache_seed = await persistence_manager.get_or_assign_cache_seed(chat_id, app_id)
@@ -3490,26 +3471,13 @@ async def websocket_endpoint(
                 await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
                 return
             existing_workflow_name = str(existing_workflow or "").strip()
-            if existing_workflow_name:
-                if not _is_runnable_workflow_name(existing_workflow_name):
-                    logger.warning(
-                        "WS_CHAT_WORKFLOW_REPAIRED: chat_id=%s old=%s new=%s",
-                        chat_id,
-                        existing_workflow_name,
-                        workflow_name,
-                    )
-                    try:
-                        await coll.update_one(
-                            {"_id": chat_id, **build_app_scope_filter(app_id)},
-                            {"$set": {"workflow_name": workflow_name, "last_updated_at": datetime.now(UTC)}},
-                        )
-                    except Exception as repair_err:
-                        logger.debug("WS_CHAT_WORKFLOW_REPAIR_FAILED for %s: %s", chat_id, repair_err)
-                elif existing_workflow_name != workflow_name:
-                    # Allow stale client URLs by honoring persisted workflow ownership.
-                    workflow_name = existing_workflow_name
+            if existing_workflow_name != workflow_name or not _is_runnable_workflow_name(existing_workflow_name):
+                await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat workflow does not match")
+                return
     except Exception as ownership_err:
-        logger.debug("WS_CHAT_OWNERSHIP_CHECK_SKIPPED: %s", ownership_err)
+        logger.error("WS_CHAT_OWNERSHIP_CHECK_FAILED: %s", ownership_err)
+        await websocket.close(code=1011, reason="Session validation failed")
+        return
 
     if requested_workflow_name and requested_workflow_name != workflow_name:
         logger.debug(
@@ -3574,9 +3542,22 @@ async def websocket_endpoint(
     active_chat_id = chat_id
     session_state_payload: dict[str, Any] | None = None
     try:
-        from mozaiksai.core.session import get_session_router
+        from mozaiksai.core.session import create_routed_chat_session, get_session_router_for_chat
 
-        session_router = get_session_router()
+        coll = await runtime_app._chat_coll()
+        existing_doc = await coll.find_one(
+            {"_id": chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+            {"_id": 1},
+        )
+        if not existing_doc:
+            await create_routed_chat_session(
+                persistence_manager=persistence_manager,
+                chat_id=chat_id, app_id=app_id, workflow_id=workflow_name, user_id=user_id,
+                context_variables={}, trigger_meta={"trigger_source": "chat"},
+            )
+        session_router = await get_session_router_for_chat(
+            app_id=app_id, user_id=user_id, chat_id=chat_id,
+        )
         resume_resolution = await session_router.resolve_resume(
             app_id=app_id,
             user_id=user_id,
@@ -3586,24 +3567,22 @@ async def websocket_endpoint(
         resolved_chat_id = str(resume_resolution.get("chat_id") or "").strip()
         if resolved_chat_id:
             active_chat_id = resolved_chat_id
+        workflow_name = resume_resolution.get("workflow_id") or workflow_name
         session_state_payload = resume_resolution.get("session_state") or None
 
         coll = await runtime_app._chat_coll()
         existing_doc = await coll.find_one(
-            {"_id": active_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+            {"_id": active_chat_id, "user_id": user_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)},
             {"_id": 1},
         )
         if not existing_doc:
-            await persistence_manager.create_chat_session(active_chat_id, app_id, workflow_name, user_id)
-            await session_router.bind_workflow_session(
-                app_id=app_id,
-                user_id=user_id,
-                workflow_id=workflow_name,
-                chat_id=active_chat_id,
-            )
-            session_state_payload = await session_router.get_session_snapshot(app_id=app_id, user_id=user_id)
+            raise ValueError("Resolved workflow session is not available")
+        if active_chat_id != chat_id:
+            await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=active_chat_id)
     except Exception as pre_err:
         logger.error("WS_SESSION_DETERMINATION_FAILED: %s", pre_err)
+        await websocket.close(code=1011, reason="Session validation failed")
+        return
 
     async def _auto_start_if_needed() -> None:
         try:
@@ -3711,22 +3690,7 @@ async def websocket_endpoint(
             logger.debug("chat existence check failed for %s: %s", active_chat_id, chat_err)
 
         if not chat_exists_flag:
-            try:
-                await persistence_manager.create_chat_session(active_chat_id, app_id, workflow_name, user_id)
-                try:
-                    from mozaiksai.core.session import get_session_router
-
-                    await get_session_router().bind_workflow_session(
-                        app_id=app_id,
-                        user_id=user_id,
-                        workflow_id=workflow_name,
-                        chat_id=active_chat_id,
-                    )
-                except Exception as bind_err:
-                    logger.debug("WS backfill bind skipped for %s: %s", active_chat_id, bind_err)
-                chat_exists_flag = True
-            except Exception as create_err:
-                logger.debug("Failed to backfill chat session for %s: %s", active_chat_id, create_err)
+            raise ValueError("Workflow session is no longer available")
 
         try:
             from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
@@ -3738,9 +3702,7 @@ async def websocket_endpoint(
 
         if session_state_payload is None:
             try:
-                from mozaiksai.core.session import get_session_router
-
-                session_state_payload = await get_session_router().get_session_snapshot(app_id=app_id, user_id=user_id)
+                session_state_payload = await session_router.get_session_snapshot(app_id=app_id, user_id=user_id)
             except Exception as session_err:
                 logger.debug("session snapshot unavailable for %s: %s", active_chat_id, session_err)
 

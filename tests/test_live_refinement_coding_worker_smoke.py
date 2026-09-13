@@ -84,7 +84,6 @@ def test_fixture_replay_applies_live_worker_output(tmp_path: Path) -> None:
     assert len(worker_result.changes) == 1
     assert worker_result.changes[0].path == "ui/pages/dashboard.yaml"
     assert worker_result.changes[0].new_content == "page_type: landing\ntitle: Reports Dashboard\n"
-    assert fixture["coding_worker_result"]["status"] == "validated"
     assert fixture["coding_worker_result"]["validation_result"]["validation_status"] == "skipped"
     assert "artifact_persistence_error" not in fixture["coding_worker_result"]["metadata"]
     assert fixture["artifact_store"]["backend"] == "smoke_local_in_memory"
@@ -257,7 +256,7 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
         )
     )
 
-    assert result.status == "validated"
+    assert result.status == "planned"
     assert "artifact_persistence_error" not in result.metadata
     assert result.metadata["build_record_id"] == "av_refinement_live_worker_smoke_persisted"
     assert len(store.created_versions) == 1

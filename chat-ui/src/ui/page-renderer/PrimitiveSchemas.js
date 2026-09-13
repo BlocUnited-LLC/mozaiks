@@ -226,6 +226,7 @@ export const PRIMITIVE_SCHEMAS = {
     type: 'object',
     required: ['items'],
     properties: {
+      api_endpoint: { type: 'string', description: 'Endpoint returning live summary values selected by value_key.' },
       items: { type: 'array', minItems: 1, maxItems: 4, items: SHARED_DEFINITIONS.summaryItem },
     },
   },
@@ -315,6 +316,7 @@ export const PRIMITIVE_SCHEMAS = {
     type: 'object',
     required: ['label'],
     properties: {
+      api_endpoint: { type: 'string' },
       label:         { type: 'string' },
       value:         {},
       value_key:     { type: 'string' },
@@ -369,6 +371,7 @@ export const PRIMITIVE_SCHEMAS = {
     type: 'object',
     required: ['fields'],
     properties: {
+      initial_values_key: { type: 'string', enum: ['selected_row'], description: 'Prefill editable fields from the record passed to the containing modal.' },
       fields:        { type: 'array', minItems: 1, items: SHARED_DEFINITIONS.formField },
       layout:        { type: 'string', enum: ['vertical', 'horizontal', 'grid'], default: 'vertical' },
       columns:       { type: 'integer', minimum: 1, default: 2 },

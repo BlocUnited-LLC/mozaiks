@@ -19,6 +19,7 @@ from mozaiksai.core.artifacts.models import (
     ArtifactValidationStatus,
     ArtifactVersionDoc,
 )
+from tests.factory_context import factory_context
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,7 +47,7 @@ generate_and_download_module = _load_generate_and_download_module()
 
 class _Context:
     def __init__(self, initial: dict[str, Any] | None = None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key: str, value: Any) -> None:
         self.data[key] = value

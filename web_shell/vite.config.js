@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import fs from 'fs';
+import { createHash } from 'node:crypto';
 import { workflowUiPlugin } from './workflowUi.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -177,7 +178,7 @@ export default defineConfig(({ mode }) => {
     chatUiSrcRoot,
   );
 
-  // Platform UI extensions come from the active app bundle: <app>/ui/index.js
+  // Schema-only apps do not need a custom registration barrel.
   const platformExtensionsFile = path.resolve(platformAppDir, 'ui/index.js');
   const platformAppDirForward = platformAppDir.replace(/\\/g, '/');
 
@@ -232,7 +233,20 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
+  cacheDir: path.join(__dirname, 'node_modules', '.vite-apps', createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)),
   plugins: [
+    {
+      name: 'mozaiks-app-extensions',
+      resolveId(id) {
+        if (id === '@platform/extensions') return '\0mozaiks-app-extensions';
+      },
+      load(id) {
+        if (id !== '\0mozaiks-app-extensions') return undefined;
+        if (!fs.existsSync(platformExtensionsFile)) return 'export {};';
+        this.addWatchFile(platformExtensionsFile);
+        return `export * from ${JSON.stringify(platformExtensionsFile.replaceAll('\\', '/'))};`;
+      },
+    },
     workflowUiPlugin({ primaryRoot: platformWorkflowRoot, factoryRoot: factoryWorkflowsRoot }),
     // Pre-process .js files that contain JSX anywhere in the build graph.
     // Covers chat-ui/src, shared factory workflow UIs, active app workflow/module
@@ -311,7 +325,6 @@ export default defineConfig(({ mode }) => {
       // App.jsx imports: import { register } from '@platform/extensions'
       // Resolved to the active app root UI barrel, which owns any declared
       // custom routes and management surfaces for that app.
-      '@platform/extensions': platformExtensionsFile,
     },
   },
 

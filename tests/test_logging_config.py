@@ -48,6 +48,30 @@ def test_agent_transcript_logging_is_opt_in(monkeypatch) -> None:
     assert logging_config.agent_transcript_logging_enabled() is True
 
 
+def test_context_logger_exception_keeps_traceback_and_context(caplog) -> None:
+    base = logging.getLogger("tests.context_exception")
+    logger = logging_config.ContextLogger(base, {"app_id": "app-test"})
+    with caplog.at_level(logging.ERROR, logger=base.name):
+        try:
+            raise ValueError("index rejected")
+        except ValueError:
+            logger.exception("Job %s failed", "job-test", job_id="job-test")
+    record = caplog.records[-1]
+    assert record.getMessage() == "Job job-test failed"
+    assert record.exc_info and record.exc_info[0] is ValueError
+    assert record.app_id == "app-test"
+    assert record.job_id == "job-test"
+
+
+def test_context_logger_exception_honors_disabled_traceback(caplog) -> None:
+    base = logging.getLogger("tests.context_no_exception")
+    logger = logging_config.ContextLogger(base, {})
+    with caplog.at_level(logging.ERROR, logger=base.name):
+        logger.exception("Failure already handled", exc_info=False)
+    assert caplog.records[-1].getMessage() == "Failure already handled"
+    assert not caplog.records[-1].exc_info
+
+
 def test_agent_conversation_filter_keeps_summary_and_gates_full_prompt_records() -> None:
     summary_record = logging.LogRecord(
         name="mozaiks.workflow.agent_messages",

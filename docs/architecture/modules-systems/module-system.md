@@ -169,9 +169,12 @@ references a declared action.
 action. Common values include `public`, `public_readonly`, `internal`, and
 `admin_internal`. When auth is enabled, the platform requires an authenticated
 principal for every external module HTTP action unless the action is explicitly
-declared `public` or `public_readonly`. Missing or different values are
-token-required by default. Local development with auth disabled still permits
-anonymous calls, but those calls use a concrete empty permission list.
+declared `public` or `public_readonly`. Omit the field or use null for
+authenticated UI/API actions. `internal` and `admin_internal` are not
+authenticated HTTP surfaces: both reject HTTP dispatch, even for authenticated
+callers, and are reserved for trusted runtime/event calls. Local development
+with auth disabled permits anonymous calls to non-internal actions, but those
+calls use a concrete empty permission list.
 
 `internal` and `admin_internal` actions are rejected with 404 on the public
 module route, which also fails closed when the surface map was never populated

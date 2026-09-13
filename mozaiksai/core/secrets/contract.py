@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal, Self
 from urllib.parse import urlsplit
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 EnvName = Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]*$")]
@@ -94,3 +95,16 @@ def validate_secret_contract(value: object) -> AppSecretContract:
         # Pydantic's default error text includes inputs, potentially raw secrets.
         problems = sorted({error["type"] for error in exc.errors(include_input=False)})
         raise SecretContractError("Invalid names-only secret contract: " + ", ".join(problems)) from None
+
+
+def is_secret_contract_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").lower()
+    return normalized == "security/secrets.yaml" or normalized.endswith("/security/secrets.yaml")
+
+
+def validate_secret_contract_text(content: str | bytes) -> AppSecretContract:
+    try:
+        value = yaml.safe_load(content)
+    except (yaml.YAMLError, UnicodeError):
+        raise SecretContractError("Invalid names-only secret contract YAML") from None
+    return validate_secret_contract(value)

@@ -16,6 +16,15 @@ def _workspace() -> Path:
 _FACTORY_APP_PATH = str(_workspace() / "factory_app")
 
 
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n"])
+def test_validation_workspace_preserves_source_bytes(tmp_path, line_ending):
+    from factory_app.workflows.AppGenerator.tools.app_validation import _write_files_to_dir
+
+    text = line_ending.join(["first", "second", ""])
+    _write_files_to_dir(tmp_path, {"README.md": text})
+    assert (tmp_path / "README.md").read_bytes() == text.encode("utf-8")
+
+
 @pytest.fixture(autouse=True)
 def _clean_factory_app_syspath():
     """Ensure factory_app/ is on sys.path during the test and clean up imported workflow modules after."""
@@ -587,6 +596,124 @@ async def test_app_bundle_acceptance_schedules_service_agent_bundle_repair() -> 
     assert context.get("bundle_repair_attempt_count") == 1
     assert "app-local token wallet or usage ledger" in context.get("bundle_repair_request")
     assert context.get("integration_test_result")["bundle_repair"]["target_agent"] == "ServiceAgent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repair", [False, True])
+async def test_module_implementation_failure_uses_bounded_bundle_repair(repair: bool) -> None:
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    handler = "modules/support_tickets/backend/handler.py"
+    files["modules/support_tickets/backend/base_handler.py"] = files[handler].replace(
+        "class SupportTicketsModule:", "class SupportTicketsBaseModule:",
+    )
+    files[handler] = "from .base_handler import SupportTicketsBaseModule as SupportTicketsModule\n"
+    context = _Context({
+        "generated_workflow_name": integration["workflow_name"],
+        "generated_workflow_capability_id": integration["capability_id"],
+        "generated_workflow_startup_mode": integration["startup_mode"],
+        "generated_workflow_trigger_events": integration["trigger_events"],
+    })
+    first = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert first["passed"] is False
+    assert first["module_implementation"]["passed"] is False
+    assert first["bundle_repair"]["status"] == "needs_revision"
+    assert first["bundle_repair"]["target_agent"] == "ServiceAgent"
+    assert first["bundle_repair"]["attempt"] == 1
+    assert handler in context.get("bundle_repair_request")
+    assert "module_handler_class_exists" in context.get("bundle_repair_request")
+    if repair:
+        files[handler] = (
+            "from .base_handler import SupportTicketsBaseModule\n\n"
+            "class SupportTicketsModule(SupportTicketsBaseModule):\n"
+            '    """Workspace customization boundary."""\n'
+        )
+    second = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert second["passed"] is repair
+    assert second["bundle_repair"]["status"] == ("passed" if repair else "blocked")
+    assert second["bundle_repair"]["no_progress"] is (not repair)
+    assert second["bundle_repair"]["target_agent"] is None
+    assert context.get("bundle_repair_attempt_count") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repair", [False, True])
+async def test_runtime_import_failure_uses_stable_bounded_bundle_repair(repair) -> None:
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    handler = "modules/support_tickets/backend/handler.py"
+    original = files[handler]
+    files[handler] = "from .schemas import missing_detail_serializer\n" + original
+    context = _Context({
+        "generated_workflow_name": integration["workflow_name"],
+        "generated_workflow_capability_id": integration["capability_id"],
+        "generated_workflow_startup_mode": integration["startup_mode"],
+        "generated_workflow_trigger_events": integration["trigger_events"],
+    })
+    first = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert first["passed"] is False
+    assert first["app_runtime_load"]["passed"] is False
+    assert first["bundle_repair"]["target_agent"] == "ServiceAgent"
+    assert first["bundle_repair"]["attempt"] == 1
+    assert handler in context.get("bundle_repair_request")
+    assert "mozaiks-app-runtime-load-" not in context.get("bundle_repair_request")
+    if repair:
+        files[handler] = original
+    second = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert second["passed"] is repair
+    assert second["bundle_repair"]["status"] == ("passed" if repair else "blocked")
+    assert second["bundle_repair"]["no_progress"] is (not repair)
+    assert context.get("bundle_repair_attempt_count") == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_validation_cleanup_preserves_concurrent_workflow_imports(monkeypatch) -> None:
+    from types import ModuleType, SimpleNamespace
+
+    from mozaiksai.core.runtime.app.loader import AppLoader
+
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    existing = ModuleType("mozaiks_runtime_module_fixture")
+    existing.__file__ = str(_workspace() / "factory_app/app/modules/fixture/backend/handler.py")
+    concurrent = ModuleType("concurrent_workflow_fixture")
+    concurrent.__file__ = str(_workspace() / "factory_app/workflows/Fixture/__init__.py")
+    marker = "concurrent-workflow-path"
+    monkeypatch.setitem(sys.modules, existing.__name__, existing)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    async def load(root):
+        transient = ModuleType(existing.__name__)
+        transient.__file__ = str(Path(root) / "modules/fixture/backend/handler.py")
+        sys.modules[existing.__name__] = transient
+        sys.modules[concurrent.__name__] = concurrent
+        sys.path.extend([root, str(Path(root).parent), marker])
+        return SimpleNamespace(
+            definition=SimpleNamespace(name="Fixture", pages=[], workflows=[]),
+            modules=[], failed_module_names=[], subscriptions_config=None,
+        )
+
+    monkeypatch.setattr(AppLoader, "load", load)
+    try:
+        result = await module._app_runtime_load_result({"app.json": "{}"})
+        assert result["passed"] is True
+        assert sys.modules[existing.__name__] is existing
+        assert sys.modules[concurrent.__name__] is concurrent
+        assert marker in sys.path
+        assert not any("mozaiks-app-runtime-load-" in entry for entry in sys.path)
+    finally:
+        sys.modules.pop(concurrent.__name__, None)
 
 
 @pytest.mark.asyncio

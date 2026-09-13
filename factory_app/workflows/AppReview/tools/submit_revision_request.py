@@ -38,6 +38,20 @@ async def submit_revision_request(
     request_text = str(revision_request or "").strip()
 
     if is_promote:
+        from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+        from factory_app.workflows._shared.platform.build_target import require_build_binding
+
+        binding = require_build_binding(ctx)
+        record = (await AppRegistryService().get_app_record(
+            build_registry_id=binding.build_registry_id, owner_user_id=str(ctx.get("user_id") or ""),
+        )).get("app")
+        if (
+            not record or record.get("chat_app_id") != ctx.get("app_id")
+            or record.get("app_id") != binding.target_app_id
+            or record.get("lifecycle_state") != "active"
+            or (record.get("current_build_run") or {}).get("build_id") != binding.build_id
+        ):
+            raise ValueError("Build promotion has not been confirmed by Studio")
         mark_review_promoted(ctx)
         return {
             "success": True,

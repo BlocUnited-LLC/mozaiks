@@ -37,6 +37,7 @@ from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,
     load_task_batches_config,
 )
+from tests.factory_context import factory_context
 
 ROOT = Path(__file__).resolve().parents[1]
 RETIRED = "agent_backend_integration"
@@ -44,7 +45,7 @@ RETIRED = "agent_backend_integration"
 
 class Context:
     def __init__(self, data: dict | None = None):
-        self.data = dict(data or {})
+        self.data = factory_context(data)
 
     def get(self, key, default=None):
         return self.data.get(key, default)
@@ -72,8 +73,10 @@ def test_retired_build_task_fails_closed(owned_paths, surface_kind, initial_agen
     context = Context()
     with pytest.raises(ValueError, match="non-materializing after module-interface retirement.*not valid AppGenerator build-task authority"):
         app_build_plan(AppBuildPlan=plan, context_variables=context)
-    assert context.get("app_plan_ready") is None
-    assert context.get("app_task_batch_items") is None
+    assert context.get("app_plan_ready") is False
+    assert context.get("app_build_plan") is None
+    assert context.get("app_task_batch_items") == []
+    assert context.get("app_task_batch_status") is None
 
 
 def test_invalid_type_remediation_and_planner_use_local_vocabulary() -> None:

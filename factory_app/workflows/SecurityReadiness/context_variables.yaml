@@ -1,46 +1,16 @@
 definitions:
-  app_id:
-    type: string
-    description: App identifier passed from AppGenerator.
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
     source:
-      type: state
-      default: null
-  build_id:
-    type: string
-    description: Build attempt identifier passed from AppGenerator.
-    source:
-      type: state
-      default: null
-  build_registry_id:
-    type: string
-    description: Hosted app registry record id for this build.
-    source:
-      type: state
-      default: null
+      type: runtime
+      required: true
   artifact_version_id:
     type: string
-    description: App bundle artifact version id being reviewed.
+    description: Optional artifact selector; must match the bound registry's current build artifact.
     source:
       type: state
       default: null
-  bundle_path:
-    type: string
-    description: Absolute path to the staged generated app bundle root.
-    source:
-      type: state
-      default: null
-  generated_files:
-    type: object
-    description: Optional generated app files map from AppGenerator context.
-    source:
-      type: state
-      default: {}
-  app_build_plan:
-    type: object
-    description: Optional AppBuildPlan context used to infer auth, deployment, and selected packs.
-    source:
-      type: state
-      default: {}
   security_readiness_mode:
     type: string
     description: Advisory by default; hosted overlays may later opt into blocking gates.
@@ -49,19 +19,28 @@ definitions:
       default: advisory
   security_readiness_findings:
     type: array
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: Findings produced by inspect_generated_app_security.
     source:
       type: computed
       default: []
   security_readiness_summary:
     type: object
-    description: Summary written by SecurityReadiness and surfaced by AppReview.
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Bound artifact assessment, source diagnostics, and persistence outcome surfaced by AppReview.
     source:
       type: computed
       default: {}
   security_readiness_recorded:
     type: boolean
-    description: True when record_security_findings has completed for this run.
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: True only when a valid source was assessed and any findings were saved.
     source:
       type: computed
       default: false
@@ -75,13 +54,7 @@ definitions:
 agents:
   SecurityReadinessAgent:
     variables:
-      - app_id
-      - build_id
-      - build_registry_id
       - artifact_version_id
-      - bundle_path
-      - generated_files
-      - app_build_plan
       - security_readiness_mode
       - security_readiness_findings
       - security_readiness_summary

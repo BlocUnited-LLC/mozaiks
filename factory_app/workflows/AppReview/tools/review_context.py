@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
+
 _VALIDATION_STATUSES = {"passed", "failed", "skipped", "pending"}
 _LIFECYCLE_STATES = {
     "draft",
@@ -99,15 +101,14 @@ def build_review_summary_payload(context_variables: Any | None) -> dict[str, Any
         _context_get(context_variables, "integration_tests_passed")
     )
 
-    build_registry_id = _text(_context_get(context_variables, "build_registry_id"))
+    binding = require_build_binding(context_variables)
+    build_registry_id = binding.build_registry_id
     bundle_path = _text(_context_get(context_variables, "bundle_path"))
     artifact_version_id = _text(_context_get(context_variables, "artifact_version_id"))
 
     promotion_blockers: list[str] = []
     revision_blockers: list[str] = []
 
-    if not build_registry_id:
-        promotion_blockers.append("missing_build_registry_id")
     if not artifact_version_id:
         promotion_blockers.append("missing_artifact_version_id")
     if lifecycle_state != "review":
@@ -135,7 +136,8 @@ def build_review_summary_payload(context_variables: Any | None) -> dict[str, Any
 
     return {
         "app_id": _text(_context_get(context_variables, "app_id")),
-        "build_id": _text(_context_get(context_variables, "build_id")),
+        "target_app_id": binding.target_app_id,
+        "build_id": binding.build_id,
         "build_registry_id": build_registry_id,
         "artifact_kind": artifact_kind,
         "artifact_key": artifact_key,

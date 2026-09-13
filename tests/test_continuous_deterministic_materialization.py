@@ -20,6 +20,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
 from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.validation import GeneratedAppValidationRequest, validate_generated_app_bundle
+from tests.factory_context import factory_context
 from tests.import_utils import import_module_directly
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -38,7 +39,7 @@ PACK_OUTPUT_PATHS = frozenset(
 
 class _Context:
     def __init__(self, initial: dict[str, Any] | None = None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
@@ -358,8 +359,14 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
                     "roles": None,
                     "navigation": None,
                     "meta": None,
-                    "sections": [],
-                        }
+                    "sections": [{
+                        "id": "reports-table", "primitive": "DataTable",
+                        "config": {
+                            "columns": [{"key": key, "label": key.title(), "type": "text", "width": None} for key in ("id", "title", "status")],
+                            "api_endpoint": "/api/modules/reports/list_reports", "search": True,
+                        },
+                    }],
+                }
             ],
             "custom_route_bundle": None,
             "theme_config_patch": {
@@ -451,6 +458,7 @@ async def test_materializer_rejects_path_traversal() -> None:
     context.set(
         "code_files",
         [
+            *[{"filename": path, "content": content} for path, content in files.items()],
             {"filename": "../../outside.txt", "content": "escape"},
             {"filename": "config/safe.txt", "content": "inside"},
         ],
@@ -462,6 +470,18 @@ async def test_materializer_rejects_path_traversal() -> None:
     assert "config/safe.txt" in paths
     assert all(not Path(path).is_absolute() and ".." not in Path(path).parts for path in paths)
     assert files
+
+
+def test_basic_table_config_does_not_acquire_resource_table_fields() -> None:
+    models = _load_models()
+    for name in ("AppPageSection", "AppPageChildSection"):
+        section = models[name].model_validate({
+            "id": "reports-table", "primitive": "DataTable",
+            "config": {"columns": [{"key": "title", "label": "Title", "type": "text", "width": None}]},
+        })
+        config = section.model_dump(mode="json")["config"]
+        assert "filters" not in config
+        assert "search_keys" not in config
 
 
 def test_operator_readiness_registers_only_declared_safe_pack_outputs() -> None:

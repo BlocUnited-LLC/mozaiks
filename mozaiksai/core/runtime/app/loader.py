@@ -90,6 +90,7 @@ class AppLoadResult:
     provenance: AppProvenance | None = None
     page_schemas: dict[str, AppPageSchema] = field(default_factory=dict)
     failed_module_names: list[str] = field(default_factory=list)
+    module_load_errors: dict[str, str] = field(default_factory=dict)
 
 
 class AppLoader:
@@ -234,6 +235,7 @@ class AppLoader:
             provenance=provenance,
             page_schemas=page_schemas,
             failed_module_names=failed_module_names,
+            module_load_errors=dict(module_loader.load_errors),
         )
 
     @classmethod

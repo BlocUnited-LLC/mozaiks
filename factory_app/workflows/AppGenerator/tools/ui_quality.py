@@ -16,6 +16,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
     custom_route_bundle_page_files,
     dedupe,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 
 
 def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
@@ -24,7 +25,7 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
     if hasattr(context_variables, "get"):
         try:
             value = context_variables.get(key)
-            return default if value is None else value
+            return default if value is None else detach(value)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)

@@ -3,13 +3,17 @@ from __future__ import annotations
 import importlib
 import inspect
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 from logs.logging_config import get_core_logger
-from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.data.persistence.persistence_manager import (
+    SERVER_OWNED_SESSION_FIELDS,
+    AG2PersistenceManager,
+)
+from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.workflow.context.authority import (
     CALLER_INPUT_WRITER,
     TRANSITION_ROUTER_WRITER,
@@ -20,7 +24,9 @@ from mozaiksai.core.workflow.context.authority import (
 from mozaiksai.core.workflow.pack.config import get_transition, load_global_pack_graph
 from mozaiksai.core.workflow.pack.schema import WorkflowTransition
 
+from .build_binding import RunBuildBinding
 from .model import RoutingDecision, TriggerInput
+from .trigger_routing import TriggerRoutingContribution
 
 logger = get_core_logger("session_launcher")
 _PERSISTENCE_MANAGER = AG2PersistenceManager()
@@ -38,6 +44,8 @@ class PreparedWorkflowLaunch:
     routing_decision: RoutingDecision
     session_router: Any
     journey_id: str | None = None
+    chat_id: str | None = None
+    session_fields: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -204,30 +212,59 @@ async def create_routed_chat_session(
     trigger_meta: dict[str, Any],
     session_router: Any | None = None,
     journey_id: str | None = None,
+    chat_id: str | None = None,
+    session_fields: dict[str, Any] | None = None,
+    build_registry_id: str | None = None,
+    source_chat_id: str | None = None,
+    persistence_manager: Any | None = None,
 ) -> str:
-    chat_id = str(uuid4())
+    persistence = persistence_manager if persistence_manager is not None else _PERSISTENCE_MANAGER
+    chat_id = chat_id or str(uuid4())
+    if SERVER_OWNED_SESSION_FIELDS.intersection(context_variables):
+        raise ContextAuthorityError("Caller context cannot contain server-owned session fields")
+    if session_fields is None:
+        allowed, reason = await get_platform_hooks().call_chat_prereqs(
+            app_id, user_id, workflow_id, persistence,
+        )
+        if not allowed:
+            raise ValueError(reason or "Chat prerequisites not met")
+        session_fields = await get_platform_hooks().call_chat_session_fields(
+            app_id=app_id,
+            user_id=user_id,
+            workflow_name=workflow_id,
+            chat_id=chat_id,
+            trigger_source=str(trigger_meta.get("trigger_source") or "chat"),
+            build_registry_id=build_registry_id,
+            source_chat_id=source_chat_id,
+        )
     extra_fields: dict[str, Any] = {"trigger_meta": trigger_meta}
     extra_fields.update(context_variables)
+    extra_fields.update({key: value for key, value in session_fields.items() if key not in SERVER_OWNED_SESSION_FIELDS})
 
-    await _PERSISTENCE_MANAGER.create_chat_session(
+    await persistence.create_chat_session(
         chat_id=chat_id,
         app_id=app_id,
         workflow_name=workflow_id,
         user_id=user_id,
         extra_fields=extra_fields or None,
     )
+    server_fields = {key: value for key, value in session_fields.items() if key in SERVER_OWNED_SESSION_FIELDS}
+    if server_fields:
+        await persistence.persist_server_owned_session_fields(
+            chat_id=chat_id, app_id=app_id, user_id=user_id, workflow_name=workflow_id, fields=server_fields,
+        )
 
     if session_router is not None:
-        try:
-            await session_router.bind_workflow_session(
-                app_id=app_id,
-                user_id=user_id,
-                workflow_id=workflow_id,
-                chat_id=chat_id,
-                journey_id=journey_id,
-            )
-        except Exception as exc:
-            logger.warning("Failed to bind SessionRouter chat session: %s", exc)
+        if server_fields.get("run_build_binding") is not None:
+            binding = RunBuildBinding.model_validate(server_fields["run_build_binding"])
+            session_router = session_router.for_target(binding.target_app_id)
+        await session_router.bind_workflow_session(
+            app_id=app_id,
+            user_id=user_id,
+            workflow_id=workflow_id,
+            chat_id=chat_id,
+            journey_id=journey_id,
+        )
     return chat_id
 
 
@@ -263,10 +300,31 @@ async def prepare_routed_workflow_launch(
     journey_id: str | None = None,
     session_router: Any | None = None,
     extra_trigger_meta: dict[str, Any] | None = None,
+    build_registry_id: str | None = None,
+    source_chat_id: str | None = None,
+    routing_contribution: TriggerRoutingContribution | None = None,
 ) -> PreparedWorkflowLaunch:
     from .router import get_session_router
 
+    chat_id = str(uuid4())
+    allowed, reason = await get_platform_hooks().call_chat_prereqs(
+        app_id, user_id, workflow_id or "", _PERSISTENCE_MANAGER,
+    )
+    if not allowed:
+        raise ValueError(reason or "Chat prerequisites not met")
+    session_fields = await get_platform_hooks().call_chat_session_fields(
+        app_id=app_id,
+        user_id=user_id,
+        workflow_name=workflow_id or "",
+        chat_id=chat_id,
+        trigger_source=trigger_source,
+        build_registry_id=build_registry_id,
+        source_chat_id=source_chat_id,
+    )
     router = session_router or get_session_router()
+    if session_fields.get("run_build_binding") is not None:
+        binding = RunBuildBinding.model_validate(session_fields["run_build_binding"])
+        router = router.for_target(binding.target_app_id)
     routing_decision = await router.route_trigger(
         TriggerInput(
             app_id=app_id,
@@ -276,9 +334,15 @@ async def prepare_routed_workflow_launch(
             journey_id=journey_id,
             context_variables=context_variables or {},
             trigger_payload=trigger_payload or {},
-        )
+        ),
+        **({"contribution": routing_contribution} if routing_contribution is not None else {}),
     )
     resolved_workflow_id = routing_decision.workflow_id
+    if routing_contribution is not None:
+        # A trusted router seed must not upgrade the authority of browser input.
+        validate_context_for_workflow(
+            resolved_workflow_id, dict(context_variables or {}), writer_id=CALLER_INPUT_WRITER,
+        )
     merged_context = {**dict(routing_decision.context_seed), **dict(context_variables or {})}
     merged_context = await apply_launch_context_provider(
         workflow_id=resolved_workflow_id,
@@ -291,7 +355,9 @@ async def prepare_routed_workflow_launch(
         journey_id=routing_decision.journey_id,
     )
     launch_writer: ContextWriterId = (
-        TRANSITION_ROUTER_WRITER if trigger_source == "transition" else CALLER_INPUT_WRITER
+        TRANSITION_ROUTER_WRITER
+        if trigger_source == "transition" or routing_contribution is not None
+        else CALLER_INPUT_WRITER
     )
     validated_context = validate_context_for_workflow(
         resolved_workflow_id,
@@ -314,6 +380,8 @@ async def prepare_routed_workflow_launch(
         routing_decision=routing_decision,
         session_router=router,
         journey_id=routing_decision.journey_id,
+        chat_id=chat_id,
+        session_fields=session_fields,
     )
 
 
@@ -326,6 +394,8 @@ async def launch_prepared_workflow(launch: PreparedWorkflowLaunch) -> WorkflowLa
         trigger_meta=launch.trigger_meta,
         session_router=launch.session_router,
         journey_id=launch.journey_id,
+        chat_id=launch.chat_id,
+        session_fields=launch.session_fields,
     )
     return WorkflowLaunchResult(
         chat_id=chat_id,
@@ -355,6 +425,8 @@ async def launch_routed_workflow(
     journey_id: str | None = None,
     session_router: Any | None = None,
     extra_trigger_meta: dict[str, Any] | None = None,
+    build_registry_id: str | None = None,
+    source_chat_id: str | None = None,
 ) -> WorkflowLaunchResult:
     launch = await prepare_routed_workflow_launch(
         workflow_id=workflow_id,
@@ -366,6 +438,8 @@ async def launch_routed_workflow(
         journey_id=journey_id,
         session_router=session_router,
         extra_trigger_meta=extra_trigger_meta,
+        build_registry_id=build_registry_id,
+        source_chat_id=source_chat_id,
     )
     return await launch_prepared_workflow(launch)
 
@@ -380,10 +454,23 @@ async def launch_transition(
     journey_id: str | None = None,
     session_router: Any | None = None,
     extra_trigger_meta: dict[str, Any] | None = None,
+    build_registry_id: str | None = None,
+    source_chat_id: str | None = None,
 ) -> TransitionLaunchResult:
-    from .router import get_session_router
+    from .router import get_session_router, get_session_router_for_chat
 
     router = session_router or get_session_router()
+    if source_chat_id is not None:
+        router = await get_session_router_for_chat(
+            app_id=app_id, user_id=user_id, chat_id=source_chat_id, session_router=router,
+        )
+    elif build_registry_id is not None:
+        fields = await get_platform_hooks().call_chat_session_fields(
+            app_id=app_id, user_id=user_id, workflow_name="", chat_id=str(uuid4()),
+            trigger_source="transition", build_registry_id=build_registry_id,
+        )
+        binding = RunBuildBinding.model_validate(fields.get("run_build_binding"))
+        router = router.for_target(binding.target_app_id)
 
     pack = load_global_pack_graph()
     source_transition = get_transition(pack, transition_id) if pack is not None else None
@@ -429,6 +516,8 @@ async def launch_transition(
         context_variables=dict(resolution.context_seed),
         journey_id=route_decision.journey_id,
         session_router=router,
+        build_registry_id=build_registry_id,
+        source_chat_id=source_chat_id,
         extra_trigger_meta={
             "transition_id": transition_id,
             "option_id": resolution.option_id,

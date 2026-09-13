@@ -345,7 +345,6 @@ export class DynamicUIHandler {
             tool_name: toolName,
             tool_call_id: toolCallId,
             workflow_name: workflowName,
-            payload,
             response,
           });
         }
@@ -469,7 +468,6 @@ export class DynamicUIHandler {
             tool_name: toolName,
             tool_call_id: toolCallId,
             workflow_name,
-            payload,
             response
           });
         } else {

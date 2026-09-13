@@ -332,6 +332,9 @@ async def test_confirmed_loss_guards_all_session_ui_mutation_seams(monkeypatch) 
 # ---------------------------------------------------------------------------
 
 class _FakePersistenceManager:
+    async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+        pass
+
     def __init__(self) -> None:
         self.pending_lookups: list[dict[str, str]] = []
         self.pending_clears: list[dict[str, str]] = []

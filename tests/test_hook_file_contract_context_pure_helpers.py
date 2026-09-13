@@ -120,13 +120,12 @@ class TestBuildContractBlock:
         result = _build_contract_block("module_contract", contract)
         assert "schemas.py" in result
 
-    def test_hard_constraints_capped_at_five(self):
+    def test_hard_constraints_are_not_silently_truncated(self):
         constraints = [f"constraint_{i}" for i in range(8)]
         contract = {"hard_constraints": constraints}
         result = _build_contract_block("module_contract", contract)
-        for i in range(5):
+        for i in range(8):
             assert f"constraint_{i}" in result
-        assert "constraint_5" not in result
 
     def test_whitespace_items_filtered(self):
         contract = {"required_outputs": ["  ", "handler.py", ""]}

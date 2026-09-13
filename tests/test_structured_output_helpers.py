@@ -46,7 +46,7 @@ Covers:
     - str/int/None → False
     - issubclass exception swallowed → False
 
-  _find_open_ended_object_path:
+  _find_open_ended_type_path:
     - Dict annotation → returns path
     - List[str] → None
     - List[Dict] → returns "path[]"
@@ -80,7 +80,7 @@ from mozaiksai.core.workflow.outputs.structured import (
     _add_additional_properties,
     _build_field,
     _build_literal_enum,
-    _find_open_ended_object_path,
+    _find_open_ended_type_path,
     _inline_schema_refs,
     _is_pydantic_model,
     _resolve_named_type,
@@ -366,36 +366,40 @@ class TestIsPydanticModel:
 
 
 # ---------------------------------------------------------------------------
-# 6. _find_open_ended_object_path
+# 6. _find_open_ended_type_path
 # ---------------------------------------------------------------------------
 
-class TestFindOpenEndedObjectPath:
+class TestFindOpenEndedTypePath:
+    @pytest.mark.parametrize("annotation", [Any, list, dict, tuple, set, list[Any], list[list]])
+    def test_untyped_values_are_rejected(self, annotation):
+        assert _find_open_ended_type_path(annotation, path="root") is not None
+
     def test_dict_annotation_returns_path(self):
-        result = _find_open_ended_object_path(dict[str, Any], path="root")
+        result = _find_open_ended_type_path(dict[str, Any], path="root")
         assert result == "root"
 
     def test_plain_str_returns_none(self):
-        assert _find_open_ended_object_path(str, path="root") is None
+        assert _find_open_ended_type_path(str, path="root") is None
 
     def test_plain_int_returns_none(self):
-        assert _find_open_ended_object_path(int, path="root") is None
+        assert _find_open_ended_type_path(int, path="root") is None
 
     def test_list_of_str_returns_none(self):
-        assert _find_open_ended_object_path(list[str], path="root") is None
+        assert _find_open_ended_type_path(list[str], path="root") is None
 
     def test_list_of_dict_returns_path_with_bracket(self):
-        result = _find_open_ended_object_path(list[dict[str, Any]], path="items")
+        result = _find_open_ended_type_path(list[dict[str, Any]], path="items")
         assert result == "items[]"
 
     def test_optional_str_returns_none(self):
-        assert _find_open_ended_object_path(str | None, path="root") is None
+        assert _find_open_ended_type_path(str | None, path="root") is None
 
     def test_optional_dict_returns_path(self):
-        result = _find_open_ended_object_path(dict[str, Any] | None, path="data")
+        result = _find_open_ended_type_path(dict[str, Any] | None, path="data")
         assert result == "data"
 
     def test_union_str_dict_returns_path(self):
-        result = _find_open_ended_object_path(str | dict[str, Any], path="field")
+        result = _find_open_ended_type_path(str | dict[str, Any], path="field")
         assert result == "field"
 
     def test_pydantic_model_no_dict_fields_returns_none(self):
@@ -403,13 +407,13 @@ class TestFindOpenEndedObjectPath:
             name: str
             count: int
 
-        assert _find_open_ended_object_path(Simple, path="Simple") is None
+        assert _find_open_ended_type_path(Simple, path="Simple") is None
 
     def test_pydantic_model_with_dict_field_returns_path(self):
         class WithDict(BaseModel):
             data: dict[str, Any]
 
-        result = _find_open_ended_object_path(WithDict, path="WithDict")
+        result = _find_open_ended_type_path(WithDict, path="WithDict")
         assert result == "WithDict.data"
 
     def test_pydantic_model_cycle_handled(self):
@@ -418,7 +422,7 @@ class TestFindOpenEndedObjectPath:
             name: str
 
         visited = {SelfRef}
-        result = _find_open_ended_object_path(SelfRef, path="SelfRef", visited_models=visited)
+        result = _find_open_ended_type_path(SelfRef, path="SelfRef", visited_models=visited)
         assert result is None
 
 
@@ -460,6 +464,12 @@ class TestBuildField:
 # ---------------------------------------------------------------------------
 
 class TestSupportsProviderResponseFormat:
+    def test_nested_untyped_index_array_is_rejected(self):
+        class Index(BaseModel):
+            keys: list[list]
+
+        assert supports_provider_response_format(Index) == (False, "Index.keys[]")
+
     def test_model_with_only_str_fields(self):
         class Simple(BaseModel):
             name: str

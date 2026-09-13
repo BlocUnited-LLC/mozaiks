@@ -22,7 +22,7 @@ async def load_context_graph_for_tool(
 ) -> dict[str, Any]:
     """Load artifact workspace and merge current app-context graph with code graph."""
     tool_context = normalize_context(context)
-    app_id = str(tool_context.app_id or "").strip()
+    app_id = str(tool_context.artifact_app_id or "").strip()
     build_record_id = str(tool_context.build_record_id or "").strip()
     if not app_id or not build_record_id:
         return {"present": False, "reason": "missing_app_id_or_build_record"}

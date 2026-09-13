@@ -135,7 +135,7 @@ class _FakeArtifactStore:
 
 
 class _FakeSessionStore:
-    async def load(self, *, app_id: str, user_id: str):
+    async def load(self, *, app_id: str, user_id: str, target_app_id: str | None = None):
         return SessionState(
             session_id=f"session_router::{app_id}::{user_id}",
             app_id=app_id,

@@ -3,10 +3,12 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = get_workflow_logger("design_docs")
 
@@ -113,15 +115,10 @@ def _extract_bundle(context_variables: Any) -> dict[str, Any] | None:
     if context_variables is None:
         return None
 
-    raw = _cv_get(context_variables, "structured_output")
-    if not isinstance(raw, dict):
-        raw = _cv_get(context_variables, "DesignDocsBundle")
+    raw = detach(_cv_get(context_variables, "structured_output"))
     if not isinstance(raw, dict):
         return None
 
-    nested = raw.get("DesignDocsBundle")
-    if isinstance(nested, dict):
-        return nested
     return raw
 
 
@@ -234,7 +231,7 @@ def _inject_backend_surface_map(backend_markdown: str, surface_map: dict[str, An
         flags=re.MULTILINE | re.DOTALL,
     )
     if pattern.search(doc):
-        return pattern.sub(block + "\n\n", doc, count=1).strip()
+        return pattern.sub(lambda _: block + "\n\n", doc, count=1).strip()
     return doc.rstrip() + "\n\n" + block
 
 
@@ -305,7 +302,7 @@ async def save_design_doc(
     content: str,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    app_id = _cv_get(context_variables, "app_id")
+    app_id = require_build_binding(context_variables).target_app_id
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
 
@@ -365,13 +362,14 @@ async def save_design_docs_bundle(
     *,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    app_id = _cv_get(context_variables, "app_id")
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
     artifact_version_id = _cv_get(context_variables, "artifact_version_id")
-    build_id = _cv_get(context_variables, "build_id") or chat_id
+    build_id = binding.build_id
     revision_scope = _cv_get(context_variables, "revision_scope")
-    build_mode = _cv_get(context_variables, "build_mode")
+    build_mode = "revision" if binding.phase == "refinement" else "genesis"
 
     if not app_id or not isinstance(app_id, str):
         return {"ok": False, "reason": "missing_app_id"}
@@ -491,6 +489,7 @@ async def save_design_docs_bundle(
         "app_id": app_id,
         "stage": normalized_stage,
         "kinds": list(_DOC_KINDS),
+        "outcome": "saved",
         "surface_count": len(surface_map.get("surfaces", [])),
         "page_count": len(experience_spec.get("pages", [])),
         "data_surface_count": len(data_contract.get("surfaces", [])),

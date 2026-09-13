@@ -138,8 +138,8 @@ def test_app_review_summary_promotes_reviewed_artifact_version() -> None:
     assert "/api/modules/app_registry/promote_build" not in source
     assert "No artifact version available. Cannot promote." in source
     assert "encodeURIComponent(payload.artifact_version_id)" in source
-    assert "const appIdQuery = payload?.app_id ? `?app_id=${encodeURIComponent(payload.app_id)}` : '';" in source
+    assert "const appIdQuery = `?build_registry_id=${encodeURIComponent(payload.build_registry_id)}`;" in source
     assert "/api/studio/build/artifacts/${encodeURIComponent(payload.artifact_version_id)}/promote${appIdQuery}" in source
-    assert "body: JSON.stringify({ build_registry_id: payload.build_registry_id || null })" in source
+    assert "body: JSON.stringify({})" in source
     assert "Boolean(payload?.artifact_version_id)" in source
 

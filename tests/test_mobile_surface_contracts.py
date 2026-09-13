@@ -32,6 +32,17 @@ def test_data_table_uses_stable_empty_array_defaults() -> None:
     assert "actions = EMPTY_ARRAY" in source
 
 
+def test_mobile_table_and_navigation_follow_app_theme() -> None:
+    table = _read("chat-ui/src/ui/primitives/DataTable.jsx")
+    css = _read("chat-ui/src/components/layout/header-styles.css")
+    bar = css.split(".shell-mobile-bottom-bar {", 1)[1].split("}", 1)[0]
+    assert "background: var(--color-surface)" in bar
+    assert "color: var(--color-text-primary)" in bar
+    assert "box-shadow" not in bar
+    assert "overflow-wrap:anywhere" in table
+    assert 'aria-label="Select record"' in table
+
+
 def test_summary_strip_compacts_on_mobile() -> None:
     source = _read("chat-ui/src/ui/primitives/SummaryStrip.jsx")
 
@@ -124,7 +135,9 @@ def test_dialog_and_overlay_primitives_use_mobile_sheet_layout() -> None:
     transition_source = _read("chat-ui/src/ui/screens/TransitionOverlayFrame.jsx")
     surface_source = _read("chat-ui/src/ui/primitives/Surface.jsx")
 
-    assert 'fixed inset-x-0 bottom-0 z-50 grid w-full' in dialog_source
+    assert 'fixed inset-x-0 bottom-0 z-50 grid' in dialog_source
+    assert 'max-h-[calc(100dvh-1rem)] w-full' in dialog_source
+    assert 'overflow-y-auto' in dialog_source
     assert 'rounded-t-[1.75rem] border-b-0' in dialog_source
     assert 'sm:left-[50%] sm:top-[50%]' in dialog_source
 
@@ -259,6 +272,7 @@ def test_factory_app_react_files_are_classified() -> None:
         and page["component"] not in _non_admin_page_components
     }
     support_files = {
+        "factory_app/workflows/AgentGenerator/ui/WorkflowPlanReview.jsx",
         "factory_app/app/admin/pages/AppStudioChrome.jsx",
         "factory_app/app/admin/pages/CreateAppRedirectPage.jsx",
         "factory_app/app/admin/pages/RefinementControls.jsx",

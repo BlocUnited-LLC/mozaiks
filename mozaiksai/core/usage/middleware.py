@@ -17,6 +17,7 @@ from ag2.events import BaseEvent, ModelResponse
 from ag2.middleware import BaseMiddleware, LLMCall, Middleware
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.tokens.guard import TokenUsageGuard
 from mozaiksai.core.tokens.manager import TokenManager
 
@@ -109,6 +110,8 @@ class MozaiksUsageMiddleware(BaseMiddleware):
         events: Sequence[BaseEvent],
         context: Context,
     ) -> ModelResponse:
+        raw_binding = _ctx_get(self._context_variables, "run_build_binding")
+        binding = RunBuildBinding.model_validate(raw_binding) if raw_binding is not None else None
         await TokenUsageGuard().check_or_raise(
             app_id=_text(_ctx_get(self._context_variables, "app_id", "")),
             user_id=_text(_ctx_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
@@ -144,7 +147,7 @@ class MozaiksUsageMiddleware(BaseMiddleware):
                 tenant_id=_text(_ctx_get(self._context_variables, "tenant_id", "")) or None,
                 workspace_id=_text(_ctx_get(self._context_variables, "workspace_id", "")) or None,
                 workflow_name=_text(_ctx_get(self._context_variables, "workflow_name", self._workflow_name)),
-                build_id=_text(_ctx_get(self._context_variables, "build_id", "")) or None,
+                build_id=binding.build_id if binding else None,
                 agent_name=self._agent_name,
                 model_name=str(model_name) if model_name else self._model_name,
                 prompt_tokens=prompt_tokens,

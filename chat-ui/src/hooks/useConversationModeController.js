@@ -775,6 +775,8 @@ export function useConversationModeController({
             const params = new URLSearchParams();
             params.set('app_id', String(currentAppId));
             params.set('user_id', String(currentUserId));
+            const sourceChatId = activeChatId || currentChatId || getStoredActiveChatId();
+            if (sourceChatId) params.set('source_chat_id', String(sourceChatId));
             const response = await api.get(`/api/session/state?${params.toString()}`);
             return response?.session_state && typeof response.session_state === 'object'
               ? response.session_state

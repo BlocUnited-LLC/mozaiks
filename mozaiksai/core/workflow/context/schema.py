@@ -94,7 +94,7 @@ class ContextTriggerSpec(ContextModel):
 class ContextVariableSource(ContextModel):
     """Source metadata for resolving a context variable."""
 
-    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context"]
+    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context", "runtime"]
 
     env_var: str | None = None
     default: Any | None = None

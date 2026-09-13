@@ -1,6 +1,25 @@
 transition_rules:
 - source_agent: DesignDocsAgent
   target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: design_docs_save_outcome
+  condition_value: saved
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+
+- source_agent: DesignDocsAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: design_docs_save_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: DesignDocsAgent
+  target_agent: terminate
   transition_type: after_turn
   transition_target: TerminateTarget
+  termination_reason: workflow_failed
 

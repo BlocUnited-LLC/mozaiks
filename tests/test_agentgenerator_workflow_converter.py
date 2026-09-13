@@ -56,14 +56,20 @@ def test_generated_extra_file_paths_stay_workflow_local() -> None:
 def test_workflow_output_dir_uses_generated_artifact_root(monkeypatch, tmp_path: Path) -> None:
     generated_root = tmp_path / "generated"
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
-    context = _Context({"app_id": "app/one", "chat_id": "chat one"})
+    context = _Context({
+        "app_id": "factory", "chat_id": "chat-one",
+        "run_build_binding": {
+            "build_registry_id": "registry-one", "target_app_id": "target-one",
+            "build_id": "build-one", "phase": "genesis",
+        },
+    })
 
     output_dir = workflow_converter._resolve_workflow_output_dir(
         "Review Workflow",
         context_variables=context,
     )
 
-    assert output_dir == generated_root / "workflows" / "app-one" / "chat-one" / "Review-Workflow"
+    assert output_dir == generated_root / "workflows" / "target-one" / "build-one" / "Review-Workflow"
 
 
 def test_workflow_output_dir_defaults_to_repo_generated(monkeypatch) -> None:

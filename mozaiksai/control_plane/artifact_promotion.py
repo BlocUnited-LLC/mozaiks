@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -44,6 +45,8 @@ from mozaiksai.core.artifacts import (
     get_artifact_store,
 )
 from mozaiksai.core.runtime.persistence.artifact_signer import sign_artifact
+from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
+from mozaiksai.core.session.build_binding import RunBuildBinding
 
 
 class DraftAppBundleArtifactVersionResult(BaseModel):
@@ -169,7 +172,7 @@ def _normalize_relative_path(path: str) -> tuple[str | None, str | None]:
 
     relative_path = "/".join(parts)
     lowered = relative_path.lower()
-    if any(term in lowered for term in _SECRET_PATH_TERMS):
+    if not is_secret_contract_path(relative_path) and any(term in lowered for term in _SECRET_PATH_TERMS):
         return relative_path, "Secret-sensitive paths are not bundled."
     if any(char in relative_path for char in _GLOB_CHARS):
         return relative_path, "Glob paths are not bundled."
@@ -310,11 +313,15 @@ def _bundle_workspace(
     *,
     workspace_root: Path,
     bundle_path: Path,
+    baseline_root: Path | None = None,
+    snapshot_root: Path | None = None,
 ) -> tuple[list[ArtifactFileManifestEntry], str, int]:
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_entries: list[ArtifactFileManifestEntry] = []
+    entries = dict(_workspace_entries(baseline_root)) if baseline_root is not None else {}
+    entries.update(_workspace_entries(workspace_root))
     with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for relative_path, file_path in _workspace_entries(workspace_root):
+        for relative_path, file_path in sorted(entries.items()):
             normalized_path, skip_reason = _normalize_relative_path(relative_path)
             if normalized_path is None or skip_reason is not None:
                 continue
@@ -323,6 +330,12 @@ def _bundle_workspace(
             if not file_path.exists() or not file_path.is_file():
                 continue
             raw = file_path.read_bytes()
+            if is_secret_contract_path(normalized_path):
+                validate_secret_contract_text(raw)
+            if snapshot_root is not None:
+                destination = snapshot_root / normalized_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(raw)
             zipf.writestr(normalized_path, raw)
             manifest_entries.append(
                 ArtifactFileManifestEntry(
@@ -450,6 +463,7 @@ async def create_draft_app_bundle_from_staged_refinement(
     generated_artifacts_root: Path | str | None = None,
     promotion_result: RefinementPromotionResult | None = None,
     policy_decisions: Sequence[PromotionPolicyDecision | Mapping[str, Any]] | None = None,
+    run_build_binding: RunBuildBinding | None = None,
 ) -> DraftAppBundleArtifactVersionResult | DraftAppBundleBuildRecordResult:
     """Create a draft app bundle from a staged refinement workspace.
 
@@ -475,6 +489,7 @@ async def create_draft_app_bundle_from_staged_refinement(
             generated_artifacts_root=generated_artifacts_root,
             promotion_result=promotion_result,
             policy_decisions=policy_decisions,
+            run_build_binding=run_build_binding,
         )
     if str(plan.build_family or "").strip() != "app_bundle":
         raise DraftAppBundleArtifactVersionError("Draft app bundle creation only supports build_family='app_bundle'.")
@@ -517,6 +532,8 @@ async def create_draft_app_bundle_from_staged_refinement(
     resolved_app_id = str(app_id or plan.app_id or "").strip()
     if not resolved_app_id:
         raise DraftAppBundleArtifactVersionError("app_id is required to create a draft artifact version.")
+    if run_build_binding is not None and run_build_binding.target_app_id != resolved_app_id:
+        raise DraftAppBundleArtifactVersionError("Refinement app does not match its server build binding.")
 
     artifact_store = artifact_store or get_artifact_store()
     source_version = await _resolve_source_artifact_version(
@@ -546,14 +563,15 @@ async def create_draft_app_bundle_from_staged_refinement(
 
     bundle_root = _resolve_generated_artifacts_root(generated_artifacts_root)
     safe_app_id = _safe_path_segment(resolved_app_id, fallback="local-app")
-    safe_request_id = _safe_path_segment(plan.request_id, fallback="refinement")
-    artifact_dir = bundle_root / "apps" / safe_app_id / "refinements" / safe_request_id / "app"
+    artifact_dir = bundle_root / "apps" / safe_app_id / "refinements" / uuid4().hex
     artifact_dir.mkdir(parents=True, exist_ok=True)
     artifact_path = artifact_dir / "artifact.zip"
 
     files_manifest, bundle_sha256, bundle_size_bytes = _bundle_workspace(
         workspace_root=workspace_area,
         bundle_path=artifact_path,
+        baseline_root=Path(resolved_source_bundle_path) if resolved_source_bundle_path else None,
+        snapshot_root=artifact_dir / "workspace",
     )
 
     bundle_bytes = artifact_path.read_bytes()
@@ -574,7 +592,7 @@ async def create_draft_app_bundle_from_staged_refinement(
         source_artifact_version_id=resolved_source_artifact_version_id,
         canonical_inputs_version=resolved_canonical_inputs_version,
         bundle_path=artifact_path,
-        workspace_dir=workspace_area,
+        workspace_dir=artifact_dir / "workspace",
         bundle_sha256=bundle_sha256,
         bundle_size_bytes=bundle_size_bytes,
         content_ref=None,
@@ -583,6 +601,8 @@ async def create_draft_app_bundle_from_staged_refinement(
         files_manifest=files_manifest,
         bundle_hmac_sha256=bundle_hmac_sha256,
     )
+    if run_build_binding is not None:
+        metadata.update(run_build_binding.model_dump())
 
     artifact_version = await artifact_store.create_build_record(
         app_id=resolved_app_id,
@@ -634,7 +654,7 @@ async def create_draft_app_bundle_from_staged_refinement(
                 source_artifact_version_id=resolved_source_artifact_version_id,
                 canonical_inputs_version=resolved_canonical_inputs_version,
                 bundle_path=artifact_path,
-                workspace_dir=workspace_area,
+                workspace_dir=artifact_dir / "workspace",
                 bundle_sha256=bundle_sha256,
                 bundle_size_bytes=bundle_size_bytes,
                 content_ref=content_ref,
@@ -643,6 +663,8 @@ async def create_draft_app_bundle_from_staged_refinement(
                 files_manifest=files_manifest,
                 bundle_hmac_sha256=bundle_hmac_sha256,
             )
+            if run_build_binding is not None:
+                refreshed_metadata.update(run_build_binding.model_dump())
             try:
                 await artifact_store.set_validation_status(
                     app_id=resolved_app_id,
@@ -964,6 +986,7 @@ async def _create_draft_app_bundle_build_record(
     generated_artifacts_root: Path | str | None = None,
     promotion_result: RefinementPromotionResult | None = None,
     policy_decisions: Sequence[PromotionPolicyDecision | Mapping[str, Any]] | None = None,
+    run_build_binding: RunBuildBinding | None = None,
 ) -> DraftAppBundleBuildRecordResult:
     """Create a draft build record from a staged refinement workspace (new BuildRecord API)."""
     resolved_build_family = str(plan.build_family or "").strip()
@@ -1009,6 +1032,8 @@ async def _create_draft_app_bundle_build_record(
     if not resolved_app_id:
         raise DraftAppBundleBuildRecordError("app_id is required to create a draft build record.")
 
+    if run_build_binding is not None and run_build_binding.target_app_id != resolved_app_id:
+        raise DraftAppBundleBuildRecordError("Refinement app does not match its server build binding.")
     resolved_build_key = str(build_key or artifact_key or "app_bundle").strip()
 
     # Resolve record store (new API) or fall back to default store
@@ -1041,14 +1066,15 @@ async def _create_draft_app_bundle_build_record(
 
     bundle_root = _resolve_generated_artifacts_root(generated_artifacts_root)
     safe_app_id = _safe_path_segment(resolved_app_id, fallback="local-app")
-    safe_request_id = _safe_path_segment(plan.request_id, fallback="refinement")
-    artifact_dir = bundle_root / "apps" / safe_app_id / "refinements" / safe_request_id / "app"
+    artifact_dir = bundle_root / "apps" / safe_app_id / "refinements" / uuid4().hex
     artifact_dir.mkdir(parents=True, exist_ok=True)
     artifact_path = artifact_dir / "artifact.zip"
 
     files_manifest, bundle_sha256, bundle_size_bytes = _bundle_workspace(
         workspace_root=workspace_area,
         bundle_path=artifact_path,
+        baseline_root=Path(resolved_source_bundle_path) if resolved_source_bundle_path else None,
+        snapshot_root=artifact_dir / "workspace",
     )
 
     bundle_bytes = artifact_path.read_bytes()
@@ -1069,7 +1095,7 @@ async def _create_draft_app_bundle_build_record(
         source_artifact_version_id=resolved_source_id,
         canonical_inputs_version=resolved_canonical_inputs_version,
         bundle_path=artifact_path,
-        workspace_dir=workspace_area,
+        workspace_dir=artifact_dir / "workspace",
         bundle_sha256=bundle_sha256,
         bundle_size_bytes=bundle_size_bytes,
         content_ref=None,
@@ -1080,6 +1106,8 @@ async def _create_draft_app_bundle_build_record(
     )
     # Embed artifact_path in top-level metadata for workspace loading
     metadata["artifact_path"] = artifact_path.as_posix()
+    if run_build_binding is not None:
+        metadata.update(run_build_binding.model_dump())
 
     build_record = await effective_record_store.create_build_record(
         app_id=resolved_app_id,
@@ -1131,7 +1159,7 @@ async def _create_draft_app_bundle_build_record(
                 source_artifact_version_id=resolved_source_id,
                 canonical_inputs_version=resolved_canonical_inputs_version,
                 bundle_path=artifact_path,
-                workspace_dir=workspace_area,
+                workspace_dir=artifact_dir / "workspace",
                 bundle_sha256=bundle_sha256,
                 bundle_size_bytes=bundle_size_bytes,
                 content_ref=content_ref,
@@ -1143,6 +1171,8 @@ async def _create_draft_app_bundle_build_record(
             refreshed_metadata["artifact_path"] = artifact_path.as_posix()
             refreshed_metadata["content_ref"] = content_ref
             refreshed_metadata["content_backend"] = content_store.backend_name
+            if run_build_binding is not None:
+                refreshed_metadata.update(run_build_binding.model_dump())
             try:
                 await effective_record_store.set_validation_status(
                     app_id=resolved_app_id,

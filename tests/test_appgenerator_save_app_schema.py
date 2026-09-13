@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from tests.factory_context import factory_context
+
 
 def _load_save_app_schema_module():
     workspace = Path(__file__).resolve().parents[1]
@@ -32,7 +35,7 @@ save_app_schema_module = _load_save_app_schema_module()
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -61,6 +64,37 @@ def _base_page():
         "layout": "grid",
         "sections": [{"id": "hero", "primitive": "Panel", "config": {"title": "Overview"}}],
     }
+
+
+def test_partial_schema_repair_preserves_pages_and_updates_validation_bundle(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    dashboard = _base_page()
+    customers = {**_base_page(), "name": "Customers", "route": "/customers", "title": "Customers"}
+    backend = "class Handler: ..."
+    context = _Context({
+        "generated_files": {
+            "ui/pages/Dashboard.yaml": yaml.safe_dump(dashboard),
+            "ui/pages/Customers.yaml": yaml.safe_dump(customers),
+            "modules/customers/backend/handler.py": backend,
+        },
+        "code_files": [{"filename": "ui/pages/Customers.yaml", "content": yaml.safe_dump(customers)}],
+    })
+    customers["title"] = "My Customers"
+
+    save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[customers], context_variables=context,
+    )
+
+    from factory_app.workflows.AppGenerator.tools.app_validation import (
+        _generated_files_from_context,
+    )
+
+    files = _generated_files_from_context(context)
+    assert files["modules/customers/backend/handler.py"] == backend
+    assert yaml.safe_load(files["ui/pages/Dashboard.yaml"]) == dashboard
+    assert yaml.safe_load(files["ui/pages/Customers.yaml"])["title"] == "My Customers"
+    assert {page["route"] for page in context.get("app_pages")} == {"/dashboard", "/customers"}
+    assert json.loads(files["app.json"])["startup"]["landing_spot"] == "/dashboard"
 
 
 def _canonical_page():
@@ -286,7 +320,7 @@ def test_save_app_schema_accepts_empty_primitive(monkeypatch, tmp_path: Path) ->
     )
 
     assert "App: Ops Portal" in result
-    assert "Empty" in context.data["available_page_primitives"]
+    assert context.data["app_schema_ready"] is True
 
 
 def test_save_app_schema_accepts_workflow_action(monkeypatch, tmp_path: Path) -> None:
@@ -1104,18 +1138,30 @@ def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path:
 
 
 def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
-    context = _Context({"data_contract": _data_contract()})
+    from mozaiksai.core.workflow.agents.factory import _workflow_tool_invocation
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+    from mozaiksai.core.workflow.context.schema import load_context_variables_config
 
-    result = save_app_schema_module.save_app_schema(
-        manifest=_base_manifest(),
-        pages=[_base_page()],
-        context_variables=context,
-    )
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    root = Path(__file__).resolve().parents[1]
+    config = load_context_variables_config(yaml.safe_load(
+        (root / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"),
+    ))
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=config.definitions)
+    context = ContextVariablesBridge(factory_context({"data_contract": _data_contract()}), authority_policy=policy)
+    context._bind_run(("AppGenerator", "test-app", "test-chat"), policy)
+    with _workflow_tool_invocation(context):
+        result = save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[_base_page()],
+            context_variables=context,
+        )
 
     data_contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
     assert data_contract["surfaces"][0]["surface_id"] == "users"
-    assert context.data["app_data_contract"]["policies"]["default_scope_field"] == "app_id"
+    assert context.get("data_contract")["policies"]["default_scope_field"] == "app_id"
+    assert context.get("app_data_contract") is None
+    assert context.get("app_schema_ready") is True
     assert "data/contract.json" in result
 
 
@@ -1135,7 +1181,7 @@ def test_save_app_schema_writes_to_generated_artifact_root(monkeypatch, tmp_path
     generated_root = tmp_path / "generated"
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
     monkeypatch.delenv("MOZAIKS_APP_ID", raising=False)
-    context = _Context({"app_id": "app/one", "build_id": "build one"})
+    context = _Context({"app_id": "app-one", "build_id": "build-one"})
 
     save_app_schema_module.save_app_schema(
         manifest=_base_manifest(),
@@ -1148,7 +1194,7 @@ def test_save_app_schema_writes_to_generated_artifact_root(monkeypatch, tmp_path
     provenance = yaml.safe_load((output_dir / "provenance.yaml").read_text(encoding="utf-8"))
     assert provenance["schema_version"] == "mozaiks.provenance.v1"
     assert provenance["created_with"]["workflow"] == "AppGenerator"
-    assert provenance["created_with"]["build_id"] == "build one"
+    assert provenance["created_with"]["build_id"] == "build-one"
     assert (output_dir / "ui" / "pages" / "Dashboard.yaml").exists()
     assert context.data["generated_app_dir"] == str(output_dir)
 

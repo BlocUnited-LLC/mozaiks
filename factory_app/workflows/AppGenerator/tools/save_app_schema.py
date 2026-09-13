@@ -18,6 +18,10 @@ from factory_app.workflows._shared.generated_ui_contract import (
     custom_route_bundle_page_files,
     dedupe,
 )
+from factory_app.workflows._shared.platform.build_target import require_build_binding
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    extract_code_file_map_from_payload,
+)
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
     load_default_ai_config,
 )
@@ -29,8 +33,8 @@ from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.ui_primitives import (
-    get_page_ui_primitive_names,
     validate_page_ui_primitives,
 )
 
@@ -111,24 +115,8 @@ def _resolve_artifact_ids(
     context_variables: Any | None,
     manifest_dict: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
-    manifest_dict = manifest_dict or {}
-    app_id = (
-        _context_get(context_variables, "app_id")
-        or os.getenv("MOZAIKS_APP_ID")
-        or manifest_dict.get("app_id")
-        or manifest_dict.get("app_name")
-        or "local-app"
-    )
-    build_id = (
-        _context_get(context_variables, "build_id")
-        or _context_get(context_variables, "chat_id")
-        or os.getenv("MOZAIKS_BUILD_ID")
-        or "local-build"
-    )
-    return (
-        _safe_path_segment(app_id, fallback="local-app"),
-        _safe_path_segment(build_id, fallback="local-build"),
-    )
+    binding = require_build_binding(context_variables)
+    return binding.target_app_id, binding.build_id
 
 
 def _normalize_list(value: Any) -> list[Any]:
@@ -138,17 +126,8 @@ def _normalize_list(value: Any) -> list[Any]:
 
 
 def _to_plain(value: Any) -> Any:
-    """Convert Pydantic-style structured output objects to plain containers."""
-    if hasattr(value, "model_dump"):
-        try:
-            return value.model_dump()
-        except Exception:
-            pass
-    if isinstance(value, dict):
-        return {key: _to_plain(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_to_plain(item) for item in value]
-    return value
+    """Detach structured output and immutable runtime views for serialization."""
+    return detach(value)
 
 
 def _strip_none(value: Any) -> Any:
@@ -413,6 +392,17 @@ def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
         else:
             merged[key] = value
     return merged
+
+
+def resolve_app_theme_config(captured_theme_config: Any, theme_config_patch: Any) -> dict[str, Any] | None:
+    """Apply explicit visual deltas without losing the approved ThemeCapture base."""
+    captured = detach(captured_theme_config)
+    patch = _strip_none(_to_plain(theme_config_patch))
+    if captured is not None and not isinstance(captured, dict):
+        raise ValueError("captured_theme_config must be an object or null")
+    if patch is not None and not isinstance(patch, dict):
+        raise ValueError("theme_config_patch must be an object or null")
+    return _deep_merge_dicts(captured or {}, patch or {}) or None
 
 
 def _resolve_output_dir(
@@ -1454,6 +1444,7 @@ def _persist_to_filesystem(
     default_route = manifest_dict.get("default_route") or "/"
     auth_strategy = manifest_dict.get("auth_strategy")
     app_json = {
+        "appId": require_build_binding(context_variables).target_app_id,
         "appName": manifest_dict["app_name"],
         "startup": {"landing_spot": default_route},
         "targets": {"web": True, "mobile": False},
@@ -1474,7 +1465,7 @@ def _persist_to_filesystem(
     written.append("app.json")
 
     workflow_sequence = _context_text(context_variables, "workflow_sequence")
-    build_id = _context_text(context_variables, "build_id")
+    build_id = require_build_binding(context_variables).build_id
     generated_artifact_id = _context_text(context_variables, "generated_artifact_id")
     artifact_version_id = _context_text(context_variables, "artifact_version_id")
     app_context_version_id = _context_text(context_variables, "app_context_version_id")
@@ -1706,7 +1697,7 @@ def save_app_schema(
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
-        app_asset_manifest, app_data_contract, app_custom_route_bundle,
+        app_asset_manifest, data_contract, app_custom_route_bundle,
         app_schema_ready
 
     Tools are dumb — no reasoning, no transformation. AppSchemaAgent already
@@ -1724,11 +1715,31 @@ def save_app_schema(
         if isinstance(page, dict) and "extensions" in page:
             raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
     page_list = [_normalize_page_schema(page) for page in raw_page_list]
+    baseline_files = detach(_context_get(context_variables, "generated_files")) or {}
+    code_files = extract_code_file_map_from_payload(
+        {"code_files": detach(_context_get(context_variables, "code_files")) or []}
+    )
+    baseline_files = {**baseline_files, **code_files}
+    if baseline_files:
+        # Repairs are partial typed outputs; unchanged pages still own their routes.
+        baseline_pages = {}
+        for path, content in baseline_files.items():
+            parts = Path(path).parts
+            if len(parts) == 3 and parts[:2] == ("ui", "pages") and path.endswith(".yaml"):
+                page = yaml.safe_load(content)
+                baseline_pages[page["name"]] = page
+        baseline_pages.update({page["name"]: page for page in page_list})
+        page_list = list(baseline_pages.values())
+        if custom_route_bundle is None:
+            custom_route_bundle = detach(_context_get(context_variables, "app_custom_route_bundle"))
     if page_list and not isinstance(page_list, list):
         raise ValueError("save_app_schema: pages must be a list")
     _repair_missing_submit_hrefs(page_list, context_variables)
 
     theme_config_patch = _strip_none(_to_plain(theme_config_patch))
+    resolved_theme_config = resolve_app_theme_config(
+        _context_get(context_variables, "captured_theme_config"), theme_config_patch,
+    )
     shell_config = _normalize_shell_config(shell_config)
     asset_manifest = _strip_none(_to_plain(asset_manifest))
     data_contract = _strip_none(_to_plain(data_contract))
@@ -1795,7 +1806,7 @@ def save_app_schema(
     _validate_asset_manifest(asset_manifest)
     resolved_data_contract = data_contract
     if resolved_data_contract is None:
-        resolved_data_contract = _context_get(context_variables, "data_contract")
+        resolved_data_contract = detach(_context_get(context_variables, "data_contract"))
     _validate_data_contract(resolved_data_contract)
     app_ui_quality_warnings = dedupe(
         audit_page_schemas(page_list)
@@ -1823,14 +1834,13 @@ def save_app_schema(
             context_variables.set("app_theme_config_patch", theme_config_patch)
             context_variables.set("app_shell_config", shell_config)
             context_variables.set("app_asset_manifest", asset_manifest)
-            context_variables.set("app_data_contract", resolved_data_contract)
+            context_variables.set("data_contract", resolved_data_contract)
             context_variables.set("app_custom_route_bundle", custom_route_bundle)
             context_variables.set("app_schema_ready", True)
-            context_variables.set("available_page_primitives", list(get_page_ui_primitive_names()))
             context_variables.set("app_ui_quality_warnings", app_ui_quality_warnings)
         except Exception as exc:
             _logger.error("Failed to store app schema in context_variables: %s", exc)
-            return f"Error persisting app schema to context: {exc}"
+            raise RuntimeError("Failed to persist app schema state") from exc
     else:
         _logger.warning("context_variables not available or missing 'set' method")
 
@@ -1849,7 +1859,7 @@ def save_app_schema(
             output_dir,
             manifest_dict,
             page_list,
-            theme_config_patch,
+            resolved_theme_config,
             shell_config,
             asset_manifest,
             resolved_data_contract,
@@ -1864,6 +1874,15 @@ def save_app_schema(
         )
         if context_variables and hasattr(context_variables, "set"):
             context_variables.set("generated_app_dir", str(output_dir))
+            rendered_files = {
+                path: (output_dir / path).read_text(encoding="utf-8") for path in written
+            }
+            code_files.update(rendered_files)
+            context_variables.set("code_files", [
+                {"filename": path, "content": content}
+                for path, content in sorted(code_files.items())
+            ])
+            context_variables.set("generated_files", {**baseline_files, **rendered_files})
     except Exception as exc:
         _logger.exception("Could not write schema files to disk")
         raise RuntimeError("Could not write schema files to disk") from exc

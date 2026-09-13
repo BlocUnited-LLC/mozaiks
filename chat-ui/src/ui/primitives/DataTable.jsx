@@ -86,7 +86,7 @@ function MobileRowCard({
   return (
     <article
       className={cn(
-        'rounded-[1.2rem] border border-border/45 bg-card/34 shadow-sm shadow-black/5 space-y-3 p-4 md:hidden',
+        'min-w-0 rounded border border-border bg-card space-y-3 p-4 md:hidden',
         selection !== 'none' && 'cursor-pointer',
         isSelected && 'ring-2 ring-primary/25',
       )}
@@ -95,11 +95,11 @@ function MobileRowCard({
       {selection !== 'none' && (
         <div className="flex items-center justify-between gap-3 border-b border-border/32 pb-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Selection</div>
-            <div className="mt-1 text-sm font-medium text-foreground">{isSelected ? 'Included' : 'Tap to select'}</div>
+            <div className="text-sm font-medium text-foreground">{isSelected ? 'Selected' : 'Select record'}</div>
           </div>
           <input
             type={selection === 'multi' ? 'checkbox' : 'radio'}
+            aria-label="Select record"
             checked={isSelected}
             onChange={() => onToggle(rowKey)}
             onClick={(event) => event.stopPropagation()}
@@ -110,10 +110,10 @@ function MobileRowCard({
 
       {columns.map((col) => (
         <div key={col.key} className="space-y-1.5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+          <div className="text-xs font-semibold text-muted-foreground">
             {col.label}
           </div>
-          <div className="text-sm text-foreground">
+          <div className="break-words [overflow-wrap:anywhere] text-sm text-foreground">
             <CellContent column={col} value={row[col.key]} />
           </div>
         </div>
@@ -130,10 +130,13 @@ export function DataTable({
   pagination = true,
   page_size = 20,
   search = true,
+  search_placeholder = 'Search...',
+  search_keys,
   actions = EMPTY_ARRAY,
   onAction,
   onRefresh,
   loading: initialLoading = false,
+  error = null,
   empty,
   className,
 }) {
@@ -170,10 +173,14 @@ export function DataTable({
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return data;
     const q = searchQuery.toLowerCase();
+    const keys = search_keys ?? columns.map((column) => column.key);
     return data.filter((row) =>
-      columns.some((col) => String(row[col.key] ?? '').toLowerCase().includes(q))
+      keys.some((key) => String(row[key] ?? '').toLowerCase().includes(q))
     );
-  }, [data, searchQuery, columns]);
+  }, [data, searchQuery, columns, search_keys]);
+
+  // Row identity must survive sorting, filtering, and pagination.
+  const rowKeys = useMemo(() => new Map(data.map((row, index) => [row, getRowKey(row, index)])), [data]);
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
@@ -207,8 +214,8 @@ export function DataTable({
   }, [selection]);
 
   const selectedRows = useMemo(
-    () => sorted.filter((row, rowIndex) => selected.has(getRowKey(row, rowIndex))),
-    [selected, sorted],
+    () => sorted.filter((row) => selected.has(rowKeys.get(row))),
+    [selected, sorted, rowKeys],
   );
 
   return (
@@ -219,9 +226,10 @@ export function DataTable({
           {search && (
             <input
               type="search"
-              placeholder="Search…"
+              placeholder={search_placeholder}
+              aria-label={search_placeholder}
               value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); setSelected(new Set()); }}
               className="h-11 w-full max-w-md rounded-[var(--shell-control-radius,1rem)] border border-border/48 bg-card/34 px-4 text-sm text-foreground shadow-sm shadow-black/5 outline-none transition placeholder:text-muted-foreground/68 hover:border-border/70 focus:border-primary/42 focus:ring-2 focus:ring-primary/16"
             />
           )}
@@ -245,6 +253,14 @@ export function DataTable({
       {/* Table */}
       {loading ? (
         <Skeleton rows={5} height="h-10" />
+      ) : error ? (
+        <div role="alert">
+          <Empty
+            title={empty?.error_title || 'Unable to load records'}
+            message={empty?.error_message || String(error)}
+            action={onRefresh ? { label: empty?.retry_label || 'Retry', onClick: onRefresh } : undefined}
+          />
+        </div>
       ) : paged.length === 0 ? (
         <Empty
           title={empty?.title ?? 'No results'}
@@ -255,11 +271,8 @@ export function DataTable({
       ) : (
         <>
           <div className="space-y-3 md:hidden">
-            {paged.map((row, rowIdx) => {
-              const rowKey = getRowKey(
-                row,
-                pagination ? ((page - 1) * page_size) + rowIdx : rowIdx,
-              );
+            {paged.map((row) => {
+              const rowKey = rowKeys.get(row);
               return (
                 <MobileRowCard
                   key={rowKey}
@@ -294,11 +307,8 @@ export function DataTable({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paged.map((row, rowIdx) => {
-                  const rowKey = getRowKey(
-                    row,
-                    pagination ? ((page - 1) * page_size) + rowIdx : rowIdx,
-                  );
+                {paged.map((row) => {
+                  const rowKey = rowKeys.get(row);
                   const isSelected = selected.has(rowKey);
                   return (
                     <TableRow

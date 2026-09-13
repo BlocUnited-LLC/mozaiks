@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import tempfile
 import uuid
 import zipfile
 
@@ -141,6 +142,17 @@ class ScopedRefinementCodingWorker:
                 {"provider": proposal.provider_id, "status": proposal.status, "reason": selection.reason}
             )
 
+        return await self.finalize_proposal(request, proposal, provider_attempts=provider_attempts)
+
+    async def finalize_proposal(
+        self,
+        request: CodingWorkerRequest,
+        proposal: StagedPatchProposal,
+        *,
+        provider_attempts: list[dict[str, str]] | None = None,
+    ) -> CodingWorkerResult:
+        """Validate and persist scoped output without making another model call."""
+        provider_attempts = list(provider_attempts or [])
         if proposal.status != "completed":
             return CodingWorkerResult(
                 eligible=True,
@@ -176,7 +188,7 @@ class ScopedRefinementCodingWorker:
                     "coding_provider_attempts": provider_attempts,
                 },
             )
-        merged_files = dict(request.files)
+        merged_files = dict(request.baseline_files if request.baseline_files is not None else request.files)
         merged_files.update(applied_files)
 
         # Resolve aliased artifact kinds so validation and persistence use the
@@ -186,14 +198,21 @@ class ScopedRefinementCodingWorker:
         validation_result = None
         status = "planned"
         if resolved_artifact_kind == "app_bundle" and merged_files:
-            validation_result = await self._run_source_validation(
-                request=request,
-                plan=resolved_plan,
-                merged_files=merged_files,
-                validation_strategy=resolved_strategy,
-            )
+            try:
+                validation_result = await self._run_source_validation(
+                    request=request,
+                    plan=resolved_plan,
+                    merged_files=merged_files,
+                    validation_strategy=resolved_strategy,
+                )
+            except Exception as exc:
+                return CodingWorkerResult(
+                    eligible=True, status="failed", provider=proposal.provider_id,
+                    error=f"SOURCE_VALIDATION_FAILED: {exc}",
+                    metadata={"coding_provider_attempts": provider_attempts},
+                )
             validation_status = str((validation_result or {}).get("validation_status") or "").strip().lower()
-            if validation_status in {"passed", "skipped", "warning"}:
+            if validation_status == "passed":
                 status = "validated"
             elif validation_status == "failed":
                 status = "failed"
@@ -225,7 +244,7 @@ class ScopedRefinementCodingWorker:
         if isinstance((request.metadata or {}).get("scope_proposal"), dict):
             metadata["scope_proposal"] = dict(request.metadata["scope_proposal"])
         persistence_error: str | None = None
-        if status in {"validated", "failed"} and validation_result is not None:
+        if validation_result is not None:
             try:
                 metadata.update(
                     await self._persist_refinement_artifact(
@@ -318,17 +337,23 @@ class ScopedRefinementCodingWorker:
             plan=plan,
             validation_strategy=validation_strategy,
         )
-        result = await self._source_validation_runner(
-            app_id=request.app_id,
-            artifact_store=self._artifact_store,
-            overlay_files=merged_files,
-            allowed_kinds=options["allowed_kinds"],
-            include_install=options["include_install"],
-            max_commands=options["max_commands"],
-            timeout_seconds=options["timeout_seconds"],
-            confirm_execution=options["confirm_execution"],
-            copy_workspace=True,
-        )
+        # Validate the selected artifact plus patch, not an unrelated or absent
+        # brownfield indexing workspace.
+        self._output_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="validation-", dir=self._output_root.resolve()) as root:
+            staged = materialize_coding_workspace(merged_files, workspace_root=Path(root))
+            result = await self._source_validation_runner(
+                app_id=request.artifact_app_id,
+                artifact_store=self._artifact_store,
+                workspace_root=staged.workspace_root,
+                overlay_files=merged_files,
+                allowed_kinds=options["allowed_kinds"],
+                include_install=options["include_install"],
+                max_commands=options["max_commands"],
+                timeout_seconds=options["timeout_seconds"],
+                confirm_execution=options["confirm_execution"],
+                copy_workspace=True,
+            )
         if hasattr(result, "model_dump"):
             payload = cast(dict[str, Any], result.model_dump(mode="json"))
         elif isinstance(result, dict):
@@ -392,7 +417,7 @@ class ScopedRefinementCodingWorker:
         bundle_token = uuid.uuid4().hex[:12]
         # Use the resolved (aliased) kind for file system layout so theme patches
         # land alongside app_bundle artifacts, not in a separate tree.
-        bundle_root = self._output_root / request.app_id / resolved_artifact_kind / build_key / bundle_token
+        bundle_root = self._output_root / request.artifact_app_id / resolved_artifact_kind / build_key / bundle_token
         workspace_dir = bundle_root / "workspace"
 
         try:
@@ -424,6 +449,7 @@ class ScopedRefinementCodingWorker:
 
         # Persist to content store if a non-local backend is configured.
         commit_content_metadata: dict[str, Any] = {
+            **(request.run_build_binding.model_dump() if request.run_build_binding else {}),
             "artifact_path": str(zip_path.resolve()),
             "workspace_dir": str(workspace_dir.resolve()),
             "bundle_mode": "staged_refinement_bundle",
@@ -442,7 +468,7 @@ class ScopedRefinementCodingWorker:
             try:
                 content_ref = await content_store.put_bundle(
                     zip_bytes,
-                    app_id=request.app_id,
+                    app_id=request.artifact_app_id,
                     artifact_version_id=f"pending_{zip_sha[:16]}",
                 )
                 commit_content_metadata["content_ref"] = content_ref
@@ -458,7 +484,7 @@ class ScopedRefinementCodingWorker:
         validation_status = self._artifact_validation_status(validation_result)
         commit_content_metadata["validation_status"] = validation_status.value
         artifact_version = await artifact_store.create_build_record(
-            app_id=request.app_id,
+            app_id=request.artifact_app_id,
             build_family=resolved_artifact_kind,
             build_key=build_key,
             parent_build_record_id=request.build_record_id,

@@ -18,6 +18,7 @@ from mozaiksai.core.runtime.composition.module_authority import (
 )
 from mozaiksai.core.runtime.composition.module_executor import (
     ModuleExecutor,
+    ModuleInputValidationError,
     ModuleRequest,
     _validate_schema,
 )
@@ -135,6 +136,24 @@ class TestModuleActionResolution:
 # ---------------------------------------------------------------------------
 
 class TestActionErrorHandling:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("asynchronous", [False, True])
+    async def test_expected_business_input_error_is_not_an_execution_failure(self, asynchronous):
+        class Handler:
+            def reject(self, ctx, **params):
+                raise ModuleInputValidationError("private input value must not reach client")
+
+            async def reject_async(self, ctx, **params):
+                self.reject(ctx, **params)
+
+        ex = ModuleExecutor()
+        ex.register("contacts", Handler(), action_method_map={"create": "reject_async" if asynchronous else "reject"})
+        result = await ex.execute(_request(action="create", params={"name": "   "}))
+        assert result.success is False
+        assert result.error_code == "INVALID_PARAMS"
+        assert result.error == "Invalid parameters for action 'create'"
+        assert result.data is None
+
     @pytest.mark.asyncio
     async def test_exception_in_action_returns_execution_error(self):
         ex = ModuleExecutor()

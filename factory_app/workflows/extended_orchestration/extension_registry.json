@@ -773,7 +773,7 @@
       "options": [
         {
           "id": "autonomous",
-          "route_to": "DesignDocs",
+          "route_to": "database_setup_selector",
           "context_variables": {
             "coding_participation": "autonomous",
             "design_docs_hitl": false
@@ -781,7 +781,7 @@
         },
         {
           "id": "guided",
-          "route_to": "DesignDocs",
+          "route_to": "database_setup_selector",
           "context_variables": {
             "coding_participation": "guided",
             "design_docs_hitl": true

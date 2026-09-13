@@ -21,13 +21,15 @@ class _Context:
 
 
 @pytest.mark.asyncio
-async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch) -> None:
+@pytest.mark.parametrize("target_app_id", [None, "generated-tracker"])
+async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch, target_app_id) -> None:
     ui_calls = []
     metadata_calls = []
     store_calls = []
 
     async def fake_inventory(*, scope, scope_id, required_services=None, store=None):
         del store
+        assert scope_id == (target_app_id or "app-test")
         ready = []
         if store_calls:
             ready = [call["service"] for call in store_calls]
@@ -126,7 +128,9 @@ async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch)
         }
     )
 
-    result = await connector_request.collect_missing_connector_needs(context_variables=context)
+    result = await connector_request.collect_missing_connector_needs(
+        context_variables=context, target_app_id=target_app_id,
+    )
 
     assert result["status"] == "ready"
     assert result["unresolved_required_services"] == []
@@ -143,6 +147,9 @@ async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch)
     assert payload["integration_requests"][0]["non_secret_fields"][0]["name"] == "sender_domain"
     assert "secret-inline-value" not in repr(payload)
     assert metadata_calls[0]["service"] == "email_provider"
+    assert metadata_calls[0]["scope_id"] == (target_app_id or "app-test")
+    assert store_calls[0]["scope_id"] == (target_app_id or "app-test")
+    assert context.data["app_id"] == "app-test"
     assert metadata_calls[0]["provider"] == "email_provider"
     assert metadata_calls[0]["integration_id"] == "email_provider"
     assert metadata_calls[0]["public_config"] == {

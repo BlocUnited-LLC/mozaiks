@@ -578,6 +578,11 @@ def _minimal_page() -> dict:
 
 
 class TestPersistProfileLayout:
+    @staticmethod
+    def _binding_context():
+        from tests.factory_context import factory_context
+
+        return factory_context()
     def test_profile_yaml_written_when_layout_set(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
@@ -586,6 +591,7 @@ class TestPersistProfileLayout:
                 _minimal_manifest(),
                 [_minimal_page()],
                 None, None, None, None, None,
+                context_variables=self._binding_context(),
                 profile_layout="sidebar_left",
             )
             assert "config/profile.yaml" in written
@@ -601,6 +607,7 @@ class TestPersistProfileLayout:
                 _minimal_manifest(),
                 [_minimal_page()],
                 None, None, None, None, None,
+                context_variables=self._binding_context(),
                 profile_layout=None,
             )
             assert "config/profile.yaml" not in written
@@ -615,6 +622,7 @@ class TestPersistProfileLayout:
                     _minimal_manifest(),
                     [_minimal_page()],
                     None, None, None, None, None,
+                    context_variables=self._binding_context(),
                     profile_layout=layout,
                 )
                 assert "config/profile.yaml" in written

@@ -130,6 +130,7 @@ class StructuredOutputCodingProvider:
         context = ControlPlaneToolContext(
             checkpoint=_CHECKPOINT_EVENT,
             app_id=request.app_id,
+            target_app_id=request.target_app_id,
             user_id=request.user_id,
             build_family=request.build_family,
             build_key=request.build_key,

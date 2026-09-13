@@ -50,6 +50,20 @@ class _FakePersistenceManager:
         self.run_assistant_messages: list[dict[str, object]] = []
         self.persisted_context: list[dict[str, object]] = []
         self.completed: list[dict[str, str]] = []
+        self.failed: list[dict[str, str]] = []
+        self.status = 0
+
+    async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+        from mozaiksai.core.data.models import WorkflowStatus
+        from mozaiksai.core.data.persistence.persistence_manager import ChatSessionTerminalError
+
+        if self.status:
+            raise ChatSessionTerminalError(WorkflowStatus(self.status))
+
+    async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+        self.failed.append({"chat_id": chat_id, "app_id": app_id})
+        self.status = 2
+        return True
 
     async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
         self.pending_lookups.append(kwargs)

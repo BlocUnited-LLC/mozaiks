@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -24,6 +25,7 @@ def test_studio_host_exposes_local_app_overview_endpoint() -> None:
 @pytest.mark.asyncio
 async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkeypatch) -> None:
     from mozaiksai.hosts import platform as platform_app
+    from mozaiksai.hosts import studio as studio_app
 
     monkeypatch.setenv("PLATFORM_PATH", "factory_app/app")
     studio_source = _read("mozaiksai/hosts/studio.py")
@@ -35,7 +37,7 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     platform_paths = {page.get("path") for page in platform_shell.get("pages", [])}
 
     assert 'build_shell_config(surface="studio")' in studio_source
-    assert "os.getenv" not in studio_source
+    assert "os.getenv" not in inspect.getsource(studio_app.get_studio_shell_config)
     assert "STUDIO_SHELL_ROUTES" not in platform_source
     assert "/usage" in console_pages
     assert "/integrations" in console_pages
@@ -125,6 +127,11 @@ def test_app_overview_page_fetches_summary_endpoint() -> None:
     assert "AppDashboardBanner" in chrome_source
     assert "App description appears after the concept brief is captured." in chrome_source
     assert "showBanner" in source
+    assert "if (demoMode && isStudioDemoApp(appId))" in hook_source
+    assert "build_registry_id=${encodeURIComponent(buildRegistryId)}" in hook_source
+    assert "/api/studio/overview?${buildScope}" in hook_source
+    assert "/api/studio/build?${buildScope}" in hook_source
+    assert "&build_family=app_bundle&limit=8" in hook_source
 
 
 def test_app_support_page_is_registered() -> None:

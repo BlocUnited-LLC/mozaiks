@@ -79,6 +79,7 @@ class SessionState:
     session_id: str
     app_id: str
     user_id: str
+    target_app_id: str | None = None
     sequence_status: SequenceStatus = SequenceStatus.IN_PROGRESS
     sequence_completed_at: datetime | None = None
     active_revision_id: str | None = None
@@ -110,6 +111,7 @@ class TriggerInput:
     app_id: str
     user_id: str
     trigger_source: str
+    target_app_id: str | None = None
     workflow_id: str | None = None
     journey_id: str | None = None
     context_variables: dict[str, Any] = field(default_factory=dict)

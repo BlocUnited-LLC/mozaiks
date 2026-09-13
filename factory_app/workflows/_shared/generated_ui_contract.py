@@ -42,7 +42,6 @@ COPY_FLAGS = (
     "handoff",
     "control room",
     "kpi wall",
-    "dashboard",
 )
 FONT_FLAGS = ("rajdhani", "orbitron", "fagrak")
 DEEP_IMPORT_FLAGS = (
@@ -480,7 +479,6 @@ def audit_generated_react_files(
         code_files,
         include_ui_index=include_ui_index,
     ):
-        component_name = PurePosixPath(filename).stem
         suffix = PurePosixPath(filename).suffix.lower()
         lower = content.lower()
 
@@ -585,11 +583,6 @@ def audit_generated_react_files(
         if summary_strip_count > 1:
             warnings.append(
                 f"{filename} renders multiple SummaryStrip components; keep generated UI compact."
-            )
-
-        if component_name.endswith("Dashboard"):
-            warnings.append(
-                f"{filename} uses dashboard-style naming ({component_name}); generated UI should describe the actual task or product surface."
             )
 
         # Layout shell contract: admin/pages/ files are workspace/app Studio
@@ -724,12 +717,6 @@ def audit_page_schemas(
                 "express the route."
             )
 
-        title = str(page.get("title") or page.get("name") or "")
-        if "dashboard" in title.lower():
-            warnings.append(
-                f"{page_path} uses dashboard-style page naming; use the actual product surface name."
-            )
-
         for text in _strings_from_value(page):
             lower = text.lower()
             matched_copy_flags = [flag for flag in COPY_FLAGS if flag in lower]
@@ -806,6 +793,24 @@ def audit_page_schemas(
                 "checkout_success pages must be custom React routes declared via "
                 "custom_route_bundle, not YAML primitive pages. Remove sections "
                 "and declare this page through custom_route_bundle in the build plan."
+            )
+
+        if (
+            page_type == "record_list"
+            and page.get("layout") == "grid"
+            and isinstance(sections, list)
+            and sections
+            and isinstance(sections[0], dict)
+            and sections[0].get("primitive") == "PageHeader"
+            and any(
+                isinstance(section, dict)
+                and section.get("primitive") in {"DataTable", "ResourceTable"}
+                for section in sections
+            )
+        ):
+            warnings.append(
+                f"{page_path} places a primary record table beside its PageHeader; "
+                "use layout='full-width' to stack these sections."
             )
 
         summary_count = primitive_counts.get("SummaryStrip", 0)

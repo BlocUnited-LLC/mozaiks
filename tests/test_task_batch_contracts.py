@@ -829,7 +829,7 @@ async def test_execute_task_batches_materializes_typed_worker_files_before_valid
 
 
 @pytest.mark.asyncio
-async def test_page_bundle_task_normalizes_owned_pages_from_app_plan() -> None:
+async def test_page_bundle_task_preserves_valid_worker_sections_and_plan_identity() -> None:
     config = parse_task_batches_config(
         {
             "version": 1,
@@ -866,14 +866,19 @@ async def test_page_bundle_task_normalizes_owned_pages_from_app_plan() -> None:
                             {
                                 "name": "Tickets",
                                 "route": "/tickets",
+                                "schema_version": "mozaiks.app_page.v1",
+                                "title": "Tickets",
+                                "page_type": "record_list",
+                                "layout": "full-width",
                                 "sections": [
                                     {
-                                        "id": "bad-table",
+                                        "id": "worker-table",
                                         "primitive": "DataTable",
-                                        "config": {"api_endpoint": "/api/tickets"},
+                                        "config": {"columns": ["subject"], "api_endpoint": "/api/modules/tickets/list_tickets", "search": True},
                                     }
                                 ],
-                            }
+                            },
+                            {"schema_version": "mozaiks.app_page.v1", "name": "Settings", "route": "/settings", "title": "Settings", "page_type": "settings", "layout": "full-width", "sections": [{"id": "settings-header", "primitive": "PageHeader", "config": {"title": "Queue Settings"}}]},
                         ],
                         "agent_message": "Generated pages.",
                     }
@@ -881,6 +886,7 @@ async def test_page_bundle_task_normalizes_owned_pages_from_app_plan() -> None:
             )
 
     context = {
+        "build_timestamp": "2026-09-12T00:00:00Z",
         "app_build_plan": {
             "pages": [
                 {
@@ -933,13 +939,16 @@ async def test_page_bundle_task_normalizes_owned_pages_from_app_plan() -> None:
     output = context["app_task_batch_results"]["pages"]
     file_map = {entry["filename"]: entry["content"] for entry in code_files}
     assert set(file_map) >= {"provenance.yaml", "ui/pages/tickets.yaml", "ui/pages/settings.yaml"}
-    assert output["_page_materialization_source"] == "app_build_plan.pages"
+    assert "2026-09-12T00:00:00" in file_map["provenance.yaml"]
+    assert output["_page_materialization_source"] == "app_schema_output"
     assert output["_page_materialized_paths"] == [
         "ui/pages/tickets.yaml",
         "ui/pages/settings.yaml",
     ]
     tickets_page = yaml.safe_load(file_map["ui/pages/tickets.yaml"])
-    assert tickets_page["sections"][0]["primitive"] == "ResourceTable"
+    assert tickets_page["sections"][0]["primitive"] == "DataTable"
+    assert tickets_page["sections"][0]["id"] == "worker-table"
+    assert tickets_page["sections"][0]["config"]["search"] is True
     assert tickets_page["sections"][0]["config"]["api_endpoint"] == "/api/modules/tickets/list_tickets"
     assert yaml.safe_load(file_map["ui/pages/settings.yaml"])["route"] == "/settings"
 
@@ -1081,3 +1090,84 @@ async def test_execute_task_batches_rejects_worker_output_outside_owned_paths() 
             context_variables=context,
             fresh_agents_per_task=False,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repair", [False, True])
+@pytest.mark.parametrize("failure_kind", ["ownership", "null_manifest", "task_identity", "form_payload"])
+async def test_task_output_validation_uses_the_declared_retry_budget(repair: bool, failure_kind: str) -> None:
+    payload = _valid_payload()
+    batch = payload["batches"][0]
+    batch["execution"]["retry_limit"] = 1
+    batch["result"]["require_owned_paths"] = True
+    config = parse_task_batches_config(payload)
+    valid = {"code_files": [{"filename": "modules/profiles/module.yaml", "content": "id: profiles"}]}
+    if failure_kind == "ownership":
+        invalid = {"code_files": [{"filename": "modules/other/module.yaml", "content": "id: other"}]}
+        error = "outside owned_paths"
+    elif failure_kind == "null_manifest":
+        invalid = {
+            "module_contract": {"module_id": "profiles", "events_yaml": None},
+            "code_files": [{"filename": "modules/profiles/contracts/events.yaml", "content": "events: []"}],
+        }
+        error = "events_yaml is null"
+    elif failure_kind == "task_identity":
+        invalid = {**valid, "task_id": "another_task"}
+        error = "mismatched task_id"
+    else:
+        from tests.test_page_schema_runtime_validation import _valid_page
+
+        page = _valid_page(sections=[{
+            "id": "edit", "primitive": "Form", "config": {
+                "fields": [{"name": "name", "label": "Name", "type": "text"},
+                           {"name": "notes", "label": "Notes", "type": "textarea"}],
+                "submit_action": {"label": "Save", "action_type": "submit",
+                                  "href": "/api/modules/profiles/update",
+                                  "payload": {"record_id": "{selected_row.id}"}},
+            },
+        }])
+        invalid = {"code_files": [{"filename": "ui/pages/home.yaml", "content": yaml.safe_dump(page)}]}
+        page["sections"][0]["config"]["submit_action"]["payload"].update({
+            "name": "{form.name}", "notes": "{form.notes}",
+        })
+        valid = {"code_files": [{"filename": "ui/pages/home.yaml", "content": yaml.safe_dump(page)}]}
+        error = "page_schema.incomplete_form_payload"
+
+    class RepairAgent(_RunnerAgent):
+        async def ask(self, message, **kwargs):
+            self.ask_calls.append({"message": message, "kwargs": kwargs})
+            return _Reply(json.dumps(valid if repair and len(self.ask_calls) == 2 else invalid))
+
+    agent = RepairAgent("")
+    context = {"review_plan": {"tasks": [{
+        "task_id": "profiles", "initial_agent": "WorkerAgent", "initial_message": "Build profiles.",
+        "owned_paths": ["modules/profiles/module.yaml"],
+    }]}}
+    if failure_kind == "form_payload":
+        context["review_plan"]["tasks"][0].update({
+            "task_type": "page_bundle", "owned_paths": ["ui/pages/home.yaml"],
+        })
+        context["app_build_plan"] = {"pages": [{"name": "home", "route": "/home"}]}
+
+    async def execute():
+        return await execute_task_batches_for_trigger(
+            workflow_name="TaskBatchWorkflow", trigger_agent="TriageAgent", batches_config=config,
+            agents={"WorkerAgent": agent}, context_variables=context, fresh_agents_per_task=False,
+        )
+
+    if repair:
+        await execute()
+        assert context["document_review_status"] == "completed"
+        assert context["document_review_results"]["profiles"]["code_files"] == valid["code_files"]
+    else:
+        with pytest.raises(RuntimeError, match=error):
+            await execute()
+        assert context["document_review_status"] == "failed"
+        assert "profiles" not in context["document_review_results"]
+    assert len(agent.ask_calls) == 2
+    assert "[TASK VALIDATION FEEDBACK]" not in agent.ask_calls[0]["message"]
+    assert "[TASK VALIDATION FEEDBACK]" in agent.ask_calls[1]["message"]
+    assert error in agent.ask_calls[1]["message"]
+    assert "[REJECTED TASK OUTPUT]" not in agent.ask_calls[0]["message"]
+    rejected_json = agent.ask_calls[1]["message"].split("complete task output.\n", 1)[1]
+    assert json.loads(rejected_json) == invalid

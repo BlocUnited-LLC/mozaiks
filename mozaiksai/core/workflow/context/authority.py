@@ -129,6 +129,9 @@ _IMMUTABLE_EXACT = {
     "entitlement_state",
     "entitlements",
     "build_registry_id",
+    "run_build_binding",
+    "workflow_run_id",
+    "build_terminal_receipt",
 }
 _IMMUTABLE_SUFFIXES = ("_app_id", "_user_id", "_tenant_id", "_workspace_id")
 _IMMUTABLE_PARTS = ("credential", "secret", "token", "password", "api_key")
@@ -467,6 +470,8 @@ def infer_context_authority(
     )
 
     authority_class = metadata.authority_class
+    if source_type == "runtime" and authority_class not in {None, ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY}:
+        raise ValueError(f"runtime context '{clean_key}' must be immutable_runtime_authority")
     if authority_class is None:
         authority_class = _infer_authority_class(clean_key, source_type, trigger_types, routing_keys, task_keys)
 
@@ -570,7 +575,7 @@ def _infer_authority_class(
     routing_keys: frozenset[str],
     task_batch_context_keys: set[str],
 ) -> ContextAuthorityClass:
-    if _is_immutable_key(key):
+    if _is_immutable_key(key) or source_type == "runtime":
         return ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY
     if _is_quality_key(key):
         return ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE

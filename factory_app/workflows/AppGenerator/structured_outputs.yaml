@@ -727,7 +727,7 @@ models:
     fields:
       capability_pack_id:
         type: str
-        description: Stable identifier for the capability pack.
+        description: Stable implementation identity. For generated_module use the approved module surface_id, matching modules/{surface_id}/ paths. Product categories such as crud_pack belong only in pack_type.
       surface_id:
         type: str
         description: Realization surface this capability pack maps to.
@@ -778,6 +778,10 @@ models:
         type: optional_list
         items: str
         description: Domain entities primarily owned by this pack.
+      user_data_scope:
+        type: bool
+        default: false
+        description: For generated_module packs, true when records belong to individual users (including private customer/contact records). This is the planned module.user_data_scope value. True requires backend/account_data_handler.py in the business_services task and its declared account_data_handler stub. False for app-wide/system records or packs that do not generate an app-owned module.
       primary_pages:
         type: optional_list
         items: str
@@ -799,15 +803,27 @@ models:
         items: str
         description: Optional AI-driven behaviors layered on top of the pack.
       capability_source:
-        type: optional_str
+        type: literal
+        values:
+        - config_file
+        - external_adapter
+        - framework_pack
+        - generated_module
+        - host_universal
+        - managed_capability
+        - operator_extension
+        - operator_pack
         description: >
           Implementation origin of this capability pack. Use one of:
           managed_capability (provided by a hosted platform capability — do not generate
           a module_contract for the managed capability id itself; generate app-owned
           facade module_contract tasks when UI/pages need local app actions),
           host_universal (provided universally by the platform host — no scaffold needed),
-          framework_pack (provided by an OSS or operator framework pack — generate only
-          the declared app-specific wiring),
+          framework_pack (must exist in the injected capability_packs registry —
+          generate only the declared app-specific wiring; product categories are not installed packs),
+          config_file (registered pack emitting declarative app configuration),
+          operator_extension (registered operator-provided extension),
+          operator_pack (registered operator build-context pack; preserve its declared origin and outputs),
           generated_module (app-owned generated module — generate full module contracts),
           external_adapter (third-party external service adapter — api_surface only).
   BuildTaskBase:
@@ -1121,11 +1137,14 @@ models:
       pages:
         type: optional_list
         items: AppBuildPage
-        description: Ordered pages planned for the app. AppSchemaAgent materializes each page into a full AppPageSchema.
+        description: >
+          Complete ordered page inventory for the resulting app, including unchanged
+          pages in a revision. Never empty for an app with existing pages.
+          Only build_tasks determines which page files AppSchemaAgent regenerates.
       entities:
         type: optional_list
         items: AppBuildEntity
-        description: Canonical entities and required operations.
+        description: Canonical entities and required operations, including unchanged entities retained during a revision.
       roles:
         type: optional_list
         items: str
@@ -1297,7 +1316,10 @@ models:
       build_tasks:
         type: list
         items: AppBuildTask
-        description: Explicit execution-oriented build tasks derived from the plan.
+        description: >
+          Explicit execution-oriented tasks for this run. In a revision this is
+          only the changed-file delta; pages, entities, capability_packs, and
+          data_contract still describe the complete resulting app.
       data_contract:
         type: union
         variants:
@@ -2224,7 +2246,7 @@ models:
       required:
         type: optional_list
         items: str
-        description: Required property names for object contracts.
+        description: Required property names for object contracts; must match the properties whose required flag is true.
       properties:
         type: optional_list
         items: JsonSchemaProperty
@@ -2235,6 +2257,14 @@ models:
         - str
         - 'null'
         description: Array item type when type=array.
+
+  ModuleApiSurface:
+    type: literal
+    values:
+    - public
+    - public_readonly
+    - internal
+    - admin_internal
 
   ModuleAction:
     type: model
@@ -2249,19 +2279,17 @@ models:
         type: str
         description: Method exposed by backend/handler.py for this action. The handler may delegate to service, policy, repo, and schema layers.
       api_surface:
-        type: literal
+        type: union
         default: null
-        values:
-        - public
-        - public_readonly
-        - internal
-        - admin_internal
+        variants:
+        - ModuleApiSurface
         - 'null'
         description: >
           External HTTP exposure posture for this action. Use public or
-          public_readonly only for anonymous-safe HTTP actions. Omit (null) or use
-          internal/admin_internal for actions that require an authenticated token
-          when AUTH_ENABLED=true. Does not bypass permissions or entitlement_gate checks.
+          public_readonly only for anonymous-safe HTTP actions. Use null for
+          authenticated UI/API actions. Internal/admin_internal disable HTTP dispatch
+          even with authentication and are only for trusted runtime/event calls.
+          Does not bypass permissions or entitlement_gate checks.
       input_schema:
         type: JsonSchemaContract
         description: Typed JSON-schema-like input contract.
@@ -3065,20 +3093,35 @@ models:
         type: ModuleManifest
         description: module.yaml contract object.
       events_yaml:
-        type: ModuleEventsManifest
-        description: events.yaml contract object.
+        type: union
+        variants:
+          - ModuleEventsManifest
+          - 'null'
+        description: Optional contracts/events.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       reactions_yaml:
-        type: ModuleReactionsManifest
-        description: reactions.yaml contract object.
+        type: union
+        variants:
+          - ModuleReactionsManifest
+          - 'null'
+        description: Optional contracts/reactions.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       notifications_yaml:
-        type: ModuleNotificationsManifest
-        description: notifications.yaml contract object.
+        type: union
+        variants:
+          - ModuleNotificationsManifest
+          - 'null'
+        description: Optional contracts/notifications.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       settings_yaml:
-        type: ModuleSettingsManifest
-        description: settings.yaml contract object.
+        type: union
+        variants:
+          - ModuleSettingsManifest
+          - 'null'
+        description: Optional contracts/settings.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       admin_yaml:
-        type: ModuleAdminManifest
-        description: admin.yaml contract object for feature panels mounted inside semantic /admin sections.
+        type: union
+        variants:
+          - ModuleAdminManifest
+          - 'null'
+        description: Optional contracts/admin.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       profile_yaml:
         type: union
         variants:
@@ -3501,7 +3544,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Route or API/module endpoint. Required for navigate, submit, and delete actions; supports {field} interpolation.
+        description: Safe absolute route or API/module endpoint starting with /. Required for navigate, submit, and delete actions; supports {field} interpolation. Use null for event/workflow actions that do not use a URL, never an empty string or a modal id.
       event_type:
         type: union
         variants:
@@ -3764,9 +3807,20 @@ models:
         - 'null'
         description: Optional empty-state copy/action.
 
+  AppFormInitialValuesKey:
+    type: literal
+    values:
+    - selected_row
+
   AppFormConfig:
     type: model
     fields:
+      initial_values_key:
+        type: union
+        variants:
+        - AppFormInitialValuesKey
+        - 'null'
+        description: Use selected_row to prefill an edit form from the record passed to its modal. Null starts a blank create form.
       fields:
         type: list
         items: AppFormField
@@ -3851,7 +3905,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional modal copy.
+        description: "Optional modal copy. Supports {selected_row.field} text for named confirmations."
       size:
         type: union
         variants:
@@ -3874,7 +3928,7 @@ models:
         description: Optional alert title.
       message:
         type: str
-        description: Alert message.
+        description: "Alert message. Supports {selected_row.field} text inside record modals."
       variant:
         type: union
         variants:
@@ -4256,6 +4310,12 @@ models:
   AppSummaryStripConfig:
     type: model
     fields:
+      api_endpoint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Canonical module read endpoint providing live summary values. Use value_key to select response fields.
       items:
         type: list
         items: AppSummaryItem
@@ -4391,6 +4451,12 @@ models:
   AppMetricConfig:
     type: model
     fields:
+      api_endpoint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Canonical module read endpoint providing the metric value selected by value_key.
       label:
         type: str
         description: Metric label.
@@ -4474,6 +4540,7 @@ models:
     type: union
     variants:
     - AppPageHeaderConfig
+    - AppDataTableConfig
     - AppResourceTableConfig
     - AppSummaryStripConfig
     - AppInlineEmptyStateConfig
@@ -4484,7 +4551,6 @@ models:
     - AppStatusPillConfig
     - AppMetricConfig
     - AppSegmentedBarConfig
-    - AppDataTableConfig
     - AppFormConfig
     - AppButtonConfig
     - AppModalLeafConfig
@@ -4605,6 +4671,7 @@ models:
     type: union
     variants:
     - AppPageHeaderConfig
+    - AppDataTableConfig
     - AppResourceTableConfig
     - AppSummaryStripConfig
     - AppInlineEmptyStateConfig
@@ -4615,7 +4682,6 @@ models:
     - AppStatusPillConfig
     - AppMetricConfig
     - AppSegmentedBarConfig
-    - AppDataTableConfig
     - AppFormConfig
     - AppGridConfig
     - AppButtonConfig
@@ -5921,9 +5987,17 @@ models:
         type: str
         description: Short summary of the schema produced.
       manifest:
-        type: AppManifest
+        type: union
+        variants:
+        - AppManifest
+        - 'null'
         description: >
           App metadata used to persist app.json startup and validate page routes.
+          In task-batch execution, emit AppManifest only when current_build_task.owned_paths
+          includes app.json; otherwise explicitly emit null. Null emits neither app.json
+          nor provenance.yaml. Standalone save_app_schema still requires AppManifest.
+          Final assembly must contain the complete app manifest from its owning task
+          or the verified revision baseline before app-bundle acceptance.
           Persistent routes are derived from the emitted ui/pages/*.yaml schemas.
       pages:
         type: list
@@ -5931,8 +6005,11 @@ models:
         description: >
           One AppPageSchema per page. Each is persisted as ui/pages/{name}.yaml and
           rendered by the platform shell's RouteRenderer using the primitive system.
-          Prefer this declarative lane by default; emit an empty list only when every
-          persistent page is owned by custom_route_bundle.
+          In task-batch execution, emit only pages whose ui/pages/*.yaml paths are owned
+          by current_build_task; other pages remain owned by other tasks or the baseline.
+          Prefer this declarative lane by default; emit an empty list only when the
+          current scope owns no declarative pages (for example, a manifest-only task
+          or pages owned by custom_route_bundle).
       custom_route_bundle:
         type: union
         variants:
@@ -6498,7 +6575,7 @@ registry:
   ControllerAgent: ControllerOutput
   AssemblyAgent: CodeFilesOutput
   AppValidationAgent: AppValidationRequestCall
-  InfraScaffoldAgent: CodeFilesOutput
+  AuthScaffoldAgent: CodeFilesOutput
   DownloadAgent: DownloadRequestCall
 
 

@@ -5,6 +5,7 @@
 
 import logging
 import types as _types
+from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Literal, Optional, Union, get_args, get_origin
 
@@ -16,8 +17,8 @@ from ..llm_config import get_llm_config
 from ..workflow_manager import workflow_manager
 
 # Workflow-specific model cache
-_workflow_models: dict[str, dict[str, type]] = {}
-_workflow_registries: dict[str, dict[str, type]] = {}
+_workflow_models: dict[str, dict[str, type[BaseModel]]] = {}
+_workflow_registries: dict[str, dict[str, type[BaseModel]]] = {}
 # Cache of workflow -> set(agent_names) that have structured output models
 _workflow_structured_agents: dict[str, set[str]] = {}
 _provider_response_model_cache: dict[type[BaseModel], type[BaseModel]] = {}
@@ -76,7 +77,7 @@ def _build_literal_enum(name: str, values: list[Any]) -> type[Enum]:
 
 def _resolve_named_type(
     type_name: str,
-    available_models: dict[str, type],
+    available_models: Mapping[str, type],
     alias_defs: dict[str, dict[str, Any]],
     alias_cache: dict[str, Any],
     stack: set[str] | None = None,
@@ -295,22 +296,25 @@ def get_provider_response_model(model_cls: type[BaseModel]) -> type[BaseModel]:
     return strict_model
 
 
-def _find_open_ended_object_path(
+def _find_open_ended_type_path(
     annotation: Any,
     *,
     path: str,
     visited_models: set[type[BaseModel]] | None = None,
 ) -> str | None:
-    """Return the first path that contains a freeform object/dict annotation."""
+    """Return the first path with an untyped value or open-ended object."""
     visited_models = visited_models or set()
 
     origin = get_origin(annotation)
-    if origin in (dict, dict):
+    if annotation is Any or annotation in (dict, list, set, tuple) or origin is dict:
         return path
 
-    if origin in (list, list, set, tuple):
-        for arg in get_args(annotation):
-            found = _find_open_ended_object_path(
+    if origin in (list, set, tuple):
+        args = get_args(annotation)
+        if not args:
+            return path
+        for arg in args:
+            found = _find_open_ended_type_path(
                 arg,
                 path=f"{path}[]",
                 visited_models=visited_models,
@@ -323,7 +327,7 @@ def _find_open_ended_object_path(
         for arg in get_args(annotation):
             if arg is type(None):
                 continue
-            found = _find_open_ended_object_path(
+            found = _find_open_ended_type_path(
                 arg,
                 path=path,
                 visited_models=visited_models,
@@ -343,7 +347,7 @@ def _find_open_ended_object_path(
             model_fields = {}
         for field_name, field_info in model_fields.items():
             field_annotation = getattr(field_info, "annotation", None)
-            found = _find_open_ended_object_path(
+            found = _find_open_ended_type_path(
                 field_annotation,
                 path=f"{path}.{field_name}",
                 visited_models=visited_models,
@@ -358,11 +362,10 @@ def _find_open_ended_object_path(
 def supports_provider_response_format(model_cls: type[BaseModel]) -> tuple[bool, str | None]:
     """Return whether a model is safe for provider-enforced strict response_format.
 
-    OpenAI strict structured outputs do not support open-ended object blobs like
-    Dict[str, Any]. Those remain valid for Mozaiks runtime-side parsing and
-    validation, but they should not be sent as provider response_format schemas.
+    Open-ended objects, untyped arrays, and Any values must not be sent as
+    provider response_format schemas. Runtime-side parsing may still use them.
     """
-    offending_path = _find_open_ended_object_path(model_cls, path=model_cls.__name__)
+    offending_path = _find_open_ended_type_path(model_cls, path=model_cls.__name__)
     if offending_path:
         return False, offending_path
     return True, None
@@ -377,7 +380,7 @@ def _build_field(field_kwargs: dict[str, Any]) -> Any:
 
 def resolve_field_type(
     field_def: dict[str, Any],
-    available_models: dict[str, type],
+    available_models: Mapping[str, type],
     alias_defs: dict[str, dict[str, Any]] | None = None,
     alias_cache: dict[str, Any] | None = None,
 ) -> tuple[Any, Any]:
@@ -464,7 +467,7 @@ def resolve_field_type(
 
 def build_models_from_config(
     models_config: dict[str, Any], *, exact_model_ids: frozenset[str] = frozenset(),
-) -> dict[str, type]:
+) -> dict[str, type[BaseModel]]:
     """Compile provider-neutral acceptance models from workflow declarations.
 
     Declared defaults and optional fields remain truthful in the model and
@@ -475,7 +478,7 @@ def build_models_from_config(
     """
     if not models_config:
         return {}
-    models: dict[str, type] = {}
+    models: dict[str, type[BaseModel]] = {}
     alias_defs: dict[str, dict[str, Any]] = {
         name: mdef
         for name, mdef in models_config.items()
@@ -534,7 +537,7 @@ def build_models_from_config(
         raise ValueError(f"Unresolved model dependencies: {[n for n,_ in pending]}")
     return models
 
-def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type], dict[str, type]]:
+def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type[BaseModel]], dict[str, type[BaseModel]]]:
     """Load structured outputs configuration for a workflow."""
     if workflow_name in _workflow_models:
         # Ensure structured agents cache is initialized before returning cached models.
@@ -655,7 +658,7 @@ def get_structured_output_model_fields(workflow_name: str, agent_name: str) -> d
         except Exception:
             return {}
 
-def build_dynamic_models(spec_models: list[dict[str, Any]], existing_models: dict[str, type]) -> dict[str, type]:
+def build_dynamic_models(spec_models: list[dict[str, Any]], existing_models: dict[str, type]) -> dict[str, type[BaseModel]]:
     """Build dynamic models from runtime specifications."""
     if not spec_models:
         return {}
@@ -770,7 +773,7 @@ async def get_llm_for_workflow(
                 )
 
             logger.warning(
-                "[STRUCTURED_OUTPUTS] Provider strict response_format disabled for %s/%s (%s uses open-ended object fields)",
+                "[STRUCTURED_OUTPUTS] Provider strict response_format disabled for %s/%s (%s uses an untyped value or open-ended object)",
                 workflow_name,
                 lookup_key,
                 offending_path,

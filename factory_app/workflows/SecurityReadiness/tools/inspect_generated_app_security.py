@@ -2,30 +2,25 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 import yaml
 
 from factory_app.app.modules.security_readiness.backend.schemas import summarize_findings
-from mozaiksai.core.workflow.context.frozen import detach
+from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 
-_TEXT_FILE_SUFFIXES = {
-    ".css",
-    ".env",
-    ".js",
-    ".json",
-    ".jsx",
-    ".md",
-    ".py",
-    ".toml",
-    ".ts",
-    ".tsx",
-    ".txt",
-    ".yaml",
-    ".yml",
-}
-_SKIP_PARTS = {".git", ".venv", "node_modules", "__pycache__", "dist", "build"}
+from .build_artifact import (
+    context_get as _context_get,
+)
+from .build_artifact import (
+    context_set as _context_set,
+)
+from .build_artifact import (
+    resolve_security_artifact,
+    source_exception,
+    source_failure,
+)
+
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |)?PRIVATE KEY-----"),
     re.compile(r"(?i)(?:api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[A-Za-z0-9_./+=-]{24,}"),
@@ -33,70 +28,6 @@ _SECRET_VALUE_PATTERNS = (
 )
 
 
-def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
-    if context_variables is None:
-        return default
-    if isinstance(context_variables, dict):
-        return context_variables.get(key, default)
-    if hasattr(context_variables, "get"):
-        try:
-            return detach(context_variables.get(key, default))
-        except TypeError:
-            try:
-                return detach(context_variables.get(key))
-            except Exception:
-                return default
-        except Exception:
-            return default
-    return default
-
-
-def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
-    if context_variables is None:
-        return
-    if isinstance(context_variables, dict):
-        context_variables[key] = value
-        return
-    if hasattr(context_variables, "set"):
-        try:
-            context_variables.set(key, value)
-        except Exception:
-            return
-
-
-def _normalize_path(path: str) -> str:
-    return path.replace("\\", "/").lstrip("/")
-
-
-def _iter_context_files(context_variables: Any | None) -> dict[str, str]:
-    raw = _context_get(context_variables, "generated_files", {})
-    if isinstance(raw, dict):
-        return {str(k): str(v) for k, v in raw.items() if isinstance(k, str)}
-    return {}
-
-
-def _iter_bundle_files(bundle_path: str | None) -> dict[str, str]:
-    if not bundle_path:
-        return {}
-    root = Path(bundle_path)
-    if not root.exists() or not root.is_dir():
-        return {}
-    files: dict[str, str] = {}
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        rel_parts = set(path.relative_to(root).parts)
-        if rel_parts & _SKIP_PARTS:
-            continue
-        if path.suffix.lower() not in _TEXT_FILE_SUFFIXES:
-            continue
-        try:
-            files[_normalize_path(str(path.relative_to(root)))] = path.read_text(
-                encoding="utf-8", errors="ignore"
-            )
-        except OSError:
-            continue
-    return files
 
 
 def _finding(
@@ -146,28 +77,18 @@ def _yaml_file(files: dict[str, str], path: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _declares_auth_required(files: dict[str, str], context_variables: Any | None) -> bool:
+def _declares_auth_required(files: dict[str, str]) -> bool:
     app = _app_json(files)
     for key in ("authRequired", "auth_required", "requiresAuth", "requires_auth"):
         if app.get(key) is True:
             return True
-    plan = _context_get(context_variables, "app_build_plan", {})
-    if isinstance(plan, dict):
-        auth = plan.get("auth") or plan.get("authentication") or plan.get("auth_config")
-        if isinstance(auth, dict):
-            return any(bool(auth.get(key)) for key in ("enabled", "required", "auth_required"))
     return False
 
 
-def _declares_deployment(files: dict[str, str], context_variables: Any | None) -> bool:
-    if any(
+def _declares_deployment(files: dict[str, str]) -> bool:
+    return any(
         path in files
         for path in ("Dockerfile", "deployment.manifest.json", ".github/workflows/deploy.yml")
-    ):
-        return True
-    plan = _context_get(context_variables, "app_build_plan", {})
-    return isinstance(plan, dict) and bool(
-        plan.get("deployment_profile") or plan.get("deploymentProfile")
     )
 
 
@@ -254,7 +175,7 @@ def _scan_secret_contract(files: dict[str, str]) -> list[dict[str, Any]]:
 def _scan_module_contracts(files: dict[str, str]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     module_paths = sorted(
-        path for path in files if path.startswith("app/modules/") and path.endswith("/module.yaml")
+        path for path in files if path.startswith(("app/modules/", "modules/")) and path.endswith("/module.yaml")
     )
     for path in module_paths:
         try:
@@ -336,15 +257,21 @@ def _scan_module_contracts(files: dict[str, str]) -> list[dict[str, Any]]:
 async def inspect_generated_app_security(context_variables: Any | None = None) -> dict[str, Any]:
     """Inspect the generated app bundle for baseline advisory security readiness."""
 
-    files = _iter_context_files(context_variables)
+    _context_set(context_variables, "security_readiness_recorded", False)
+    try:
+        binding, artifact = await resolve_security_artifact(context_variables)
+        files, diagnostics = await read_artifact_bundle(artifact)
+    except Exception as exc:
+        return source_exception(context_variables, exc)
+    if any(item["blocking"] for item in diagnostics):
+        return source_failure(context_variables, "security_source_incomplete", diagnostics)
     if not files:
-        files = _iter_bundle_files(str(_context_get(context_variables, "bundle_path", "") or ""))
-    files = {_normalize_path(path): content for path, content in files.items()}
+        return source_failure(context_variables, "security_source_empty", diagnostics)
 
     findings: list[dict[str, Any]] = []
     findings.extend(_scan_raw_secret_values(files))
     findings.extend(_scan_secret_contract(files))
-    if _declares_auth_required(files, context_variables) and "app/config/auth.yaml" not in files:
+    if _declares_auth_required(files) and not {"app/config/auth.yaml", "config/auth.yaml"}.intersection(files):
         findings.append(
             _finding(
                 finding_id="auth_contract:missing_auth_yaml",
@@ -357,8 +284,8 @@ async def inspect_generated_app_security(context_variables: Any | None = None) -
             )
         )
     if (
-        _declares_deployment(files, context_variables)
-        and "app/security/production_operations.yaml" not in files
+        _declares_deployment(files)
+        and not {"app/security/production_operations.yaml", "security/production_operations.yaml"}.intersection(files)
     ):
         findings.append(
             _finding(
@@ -375,6 +302,7 @@ async def inspect_generated_app_security(context_variables: Any | None = None) -
 
     summary = summarize_findings(findings)
     result = {
+        "success": True,
         "status": "not_assessed" if not files else "passed" if summary["open"] == 0 else "attention_required",
         "mode": str(
             _context_get(context_variables, "security_readiness_mode", "advisory") or "advisory"
@@ -382,6 +310,9 @@ async def inspect_generated_app_security(context_variables: Any | None = None) -
         "checked_file_count": len(files),
         "findings": findings,
         "summary": summary,
+        "artifact_version_id": artifact.id,
+        **binding.model_dump(),
+        "source_diagnostics": diagnostics,
     }
     _context_set(context_variables, "security_readiness_findings", findings)
     _context_set(context_variables, "security_readiness_summary", result)

@@ -4,7 +4,6 @@ Code generation pure helper unit tests.
 Covers helpers from:
   - refinement_harness_codegen.py: _dump_yaml, _safe_prompt_id, _safe_prompt_path
   - app_backend_admin_codegen.py: _indent_block, _render_admin_config_module
-  - orchestration_patterns.py: _next_agent_after_trigger
 
   _dump_yaml:
     - dict with keys → valid YAML string
@@ -37,12 +36,6 @@ Covers helpers from:
     - payload dict appears in output
     - returns module as a string (not bytes)
 
-  _next_agent_after_trigger:
-    - no matching rule → None
-    - matching rule → target_agent returned
-    - matching rule with "terminate" target → skipped
-    - multiple rules, first non-terminate returned
-    - empty rules list → None
 """
 from __future__ import annotations
 
@@ -57,9 +50,6 @@ from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import 
     _dump_yaml,
     _safe_prompt_id,
     _safe_prompt_path,
-)
-from mozaiksai.core.workflow.orchestration_patterns import (
-    _next_agent_after_trigger,
 )
 
 # ---------------------------------------------------------------------------
@@ -229,70 +219,3 @@ class TestRenderAdminConfigModule:
         result = _render_admin_config_module({"section": {"key": "value"}})
         assert "section" in result
         assert "value" in result
-
-
-# ---------------------------------------------------------------------------
-# 6. _next_agent_after_trigger
-# ---------------------------------------------------------------------------
-
-class TestNextAgentAfterTrigger:
-    def _rules(self, source, target):
-        return [{"source_agent": source, "target_agent": target}]
-
-    def test_no_rules_returns_none(self):
-        result = _next_agent_after_trigger(transition_rules=[], trigger_agent="EntryAgent")
-        assert result is None
-
-    def test_matching_rule_returns_target(self):
-        result = _next_agent_after_trigger(
-            transition_rules=self._rules("EntryAgent", "PlannerAgent"),
-            trigger_agent="EntryAgent",
-        )
-        assert result == "PlannerAgent"
-
-    def test_no_matching_source_returns_none(self):
-        result = _next_agent_after_trigger(
-            transition_rules=self._rules("OtherAgent", "PlannerAgent"),
-            trigger_agent="EntryAgent",
-        )
-        assert result is None
-
-    def test_terminate_target_skipped(self):
-        rules = [
-            {"source_agent": "EntryAgent", "target_agent": "terminate"},
-        ]
-        result = _next_agent_after_trigger(
-            transition_rules=rules,
-            trigger_agent="EntryAgent",
-        )
-        assert result is None
-
-    def test_first_non_terminate_returned(self):
-        rules = [
-            {"source_agent": "EntryAgent", "target_agent": "terminate"},
-            {"source_agent": "EntryAgent", "target_agent": "PlannerAgent"},
-        ]
-        result = _next_agent_after_trigger(
-            transition_rules=rules,
-            trigger_agent="EntryAgent",
-        )
-        assert result == "PlannerAgent"
-
-    def test_whitespace_stripped_from_source(self):
-        rules = [{"source_agent": "  EntryAgent  ", "target_agent": "NextAgent"}]
-        result = _next_agent_after_trigger(
-            transition_rules=rules,
-            trigger_agent="EntryAgent",
-        )
-        assert result == "NextAgent"
-
-    def test_empty_target_skipped(self):
-        rules = [
-            {"source_agent": "EntryAgent", "target_agent": ""},
-            {"source_agent": "EntryAgent", "target_agent": "ValidAgent"},
-        ]
-        result = _next_agent_after_trigger(
-            transition_rules=rules,
-            trigger_agent="EntryAgent",
-        )
-        assert result == "ValidAgent"

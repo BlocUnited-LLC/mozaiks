@@ -5,6 +5,7 @@ import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -451,8 +452,7 @@ def _research_files() -> dict[str, str]:
                     self.collection = ctx.persistence.collection("research", "research_results")
 
                 async def list_results(self):
-                    cursor = self.collection.find({})
-                    return await cursor.to_list(length=100)
+                    return await self.collection.find_many({}, limit=100)
 
                 async def save(self, record):
                     await self.collection.insert_one(record)
@@ -595,6 +595,10 @@ async def test_ai_research_workspace_offline_golden_path(
         {
             "workflow_name": "SubscriptionContractDesigner",
             "app_id": "research",
+            "run_build_binding": {
+                "build_registry_id": "registry_research", "target_app_id": "research",
+                "build_id": "build_golden", "phase": "genesis",
+            },
             "chat_id": "golden",
             "user_id": "offline-test-user",
             "product_request": product_request,
@@ -708,7 +712,9 @@ async def test_ai_research_workspace_offline_golden_path(
     monkeypatch.setattr(download_module, "AG2PersistenceManager", lambda: _Persistence())
     monkeypatch.setattr(download_module, "get_latest_workflow_export", no_op)
     monkeypatch.setattr(download_module, "_register_app_bundle_artifact_version", no_op)
-    monkeypatch.setattr(download_module, "update_build_status", no_op)
+    monkeypatch.setattr(download_module, "AppRegistryService", lambda: SimpleNamespace(
+        update_build_status=AsyncMock(return_value={"success": True}),
+    ))
     monkeypatch.setattr(download_module, "use_ui_tool", download_ui)
 
     exported = await download_module.generate_and_download(

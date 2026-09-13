@@ -1,4 +1,123 @@
 definitions:
+  app_bundle_acceptance_status:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: pending
+  app_bundle_acceptance_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_bundle_validation_evidence:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_runtime_load_passed:
+    type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: false
+  app_runtime_load_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  bundle_scan_passed:
+    type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: false
+  bundle_scan_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  generated_app_functional_completeness_passed:
+    type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: false
+  generated_app_functional_completeness_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  module_contract_quality_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_context_artifact_version_id:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_context_registration_warning:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  app_context_version_id:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
+  greenfield_app_context_registered:
+    type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: false
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
   app_bundle_export_outcome:
     type: string
     authority_class: closed_writer_routing_state
@@ -32,16 +151,6 @@ definitions:
       Used by scaffold/config agents to populate `app/app.json` `admins` without
       prompting the user. Falls back to null in OSS / unauthenticated contexts, in
       which case InterviewAgent captures the email during the intake interview.
-    source:
-      type: state
-      default: null
-  build_registry_id:
-    type: string
-    description: >
-      ID of the hosted app_registry record created at pipeline start by ValueEngine's
-      create_app_record lifecycle tool. Flows through the full pipeline so
-      generate_and_download can update the record to 'generated' once the bundle
-      is written. Null in OSS/unauthenticated runs where app_registry is not installed.
     source:
       type: state
       default: null
@@ -402,7 +511,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - ConceptOverview
       default: null
@@ -415,7 +524,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - ApiEndpoints
       default: []
@@ -428,7 +537,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - Blueprint
       default: null
@@ -440,7 +549,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: frontend
         status: succeeded
       fields:
@@ -456,7 +565,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -470,7 +579,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: database
         status: succeeded
       fields:
@@ -487,7 +596,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -505,7 +614,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -525,7 +634,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -542,7 +651,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -559,7 +668,7 @@ definitions:
       database_name: mozaiksai
       collection: DataContracts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - data_contract
       default: null
@@ -573,7 +682,7 @@ definitions:
       database_name: mozaiksai
       collection: ThemeCaptures
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
       - theme_config
       default: null
@@ -598,7 +707,7 @@ definitions:
       database_name: mozaiksai
       collection: ArtifactVersions
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         build_family: subscription_contract
         build_key: subscription_contract
         lifecycle_status: current
@@ -637,7 +746,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - agent_websocket_url
@@ -651,7 +760,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - agent_api_url
@@ -664,7 +773,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - repo_url
@@ -678,7 +787,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - agent_names
@@ -692,7 +801,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - tool_names
@@ -705,7 +814,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - available_agents
@@ -718,7 +827,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - available_tools
@@ -765,7 +874,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - workflow_name
@@ -782,7 +891,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - capability_id
@@ -800,7 +909,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - workflow_startup_mode
@@ -818,7 +927,7 @@ definitions:
       database_name: mozaiksai
       collection: WorkflowExports
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
       - trigger_events
@@ -876,7 +985,7 @@ definitions:
   bundle_repair_status:
     type: string
     description: >
-      Bounded repair status for deterministic generated-bundle scanner failures.
+      Bounded repair status for deterministic generated-bundle validation failures.
       One of not_applicable | needs_revision | passed | blocked.
     source:
       type: computed
@@ -891,25 +1000,25 @@ definitions:
       default: null
   bundle_repair_attempt_count:
     type: integer
-    description: Number of generated-bundle scanner repair passes already scheduled.
+    description: Number of generated-bundle validation repair passes already scheduled.
     source:
       type: computed
       default: 0
   bundle_repair_max_attempts:
     type: integer
-    description: Maximum automated generated-bundle scanner repair attempts before blocking.
+    description: Maximum automated generated-bundle validation repair attempts before blocking.
     source:
       type: computed
       default: 2
   bundle_repair_request:
     type: string
-    description: Focused repair instruction derived from generated-bundle scanner failures.
+    description: Focused repair instruction derived from generated-bundle validation failures.
     source:
       type: computed
       default: null
   bundle_repair_errors:
     type: array
-    description: Raw generated-bundle scanner errors that caused the repair pass.
+    description: Generated-bundle validation errors that caused the repair pass.
     source:
       type: computed
       default: []
@@ -927,7 +1036,7 @@ definitions:
       default: false
   bundle_repair_result:
     type: object
-    description: Full generated-bundle scanner repair scheduling result.
+    description: Full generated-bundle validation repair scheduling result.
     source:
       type: computed
       default: null
@@ -944,6 +1053,24 @@ definitions:
         ui_hidden: true
         match:
           equals: NEXT
+  app_plan_feedback:
+    type: string
+    description: Exact deterministic errors to repair in the next complete AppBuildPlan.
+    source: {type: computed, default: ''}
+  app_plan_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Validated plan outcome used by the existing AG2 transition graph.
+    source: {type: state, default: blocked}
+  app_plan_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Runtime-owned count of complete plan validation attempts.
+    source: {type: state, default: 0}
   app_build_plan:
     type: object
     description: Canonical app build plan derived from the brief and design documents.
@@ -1427,7 +1554,10 @@ definitions:
       default: []
   generated_files:
     type: object
-    description: Canonical generated app bundle file map assembled from schema and task-batch outputs.
+    description: >-
+      Canonical app bundle file map. Partial revisions preload the verified
+      selected app-bundle archive; assembly overlays schema/task outputs and
+      explicit deletions while preserving unchanged files.
     source:
       type: computed
       default: {}
@@ -1486,6 +1616,8 @@ agents:
     - brownfield_registration
   AppPlanAgent:
     variables:
+    - app_plan_feedback
+    - generated_files
     - platform_user_email
     - app_backend_url
     - build_mode
@@ -1614,6 +1746,11 @@ agents:
     - missing_connector_services
   DatabaseAgent:
     variables:
+    - generated_files
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_errors
     - build_mode
     - revision_scope
     - change_request_id
@@ -1696,6 +1833,7 @@ agents:
     - module_runtime_quality_revision_request
   ModelAgent:
     variables:
+    - generated_files
     - concept_overview
     - design_surface_map
     - data_contract
@@ -1730,6 +1868,7 @@ agents:
     - bundle_repair_errors
   ControllerAgent:
     variables:
+    - generated_files
     - app_backend_url
     - concept_overview
     - concept_api_endpoints
@@ -1781,7 +1920,6 @@ agents:
     - bundle_repair_errors
   DownloadAgent:
     variables:
-    - build_registry_id
     - integration_readiness_status
     - integration_readiness_result
     - app_validation_status

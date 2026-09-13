@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.factory_context import factory_context
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -25,7 +27,7 @@ save_app_schema_module = _load_save_app_schema_module()
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -120,7 +122,7 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
     contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
     assert contract["mode"] == "app_data_contract"
     assert contract["aliases"][0]["alias"] == "orders.lifecycle"
-    assert context.data["app_data_contract"]["aliases"][0]["collection"] == "orders"
+    assert context.data["data_contract"]["aliases"][0]["collection"] == "orders"
     assert "data/contract.json" in result
     assert "Data contract: yes" in result
 

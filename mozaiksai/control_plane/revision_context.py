@@ -198,15 +198,18 @@ async def assemble_revision_context(
     tool_context = (
         context if isinstance(context, ControlPlaneToolContext) else ControlPlaneToolContext.model_validate(dict(context or {}))
     )
-    app_id = str(tool_context.app_id or "").strip()
+    app_id = str(tool_context.artifact_app_id or "").strip()
     user_id = str(tool_context.user_id or "").strip()
     if not app_id:
         return {"present": False, "reason": "missing_app_id"}
 
     pack = _load_pack(pack_loader)
     session_state = None
-    if user_id:
-        session_state = await (session_store or SessionStateStore()).load(app_id=app_id, user_id=user_id)
+    host_app_id = tool_context.app_id
+    if user_id and host_app_id:
+        session_state = await (session_store or SessionStateStore()).load(
+            app_id=host_app_id, user_id=user_id, target_app_id=tool_context.target_app_id,
+        )
 
     store = artifact_store or get_artifact_store()
     current_artifact, current_artifact_source = await _resolve_current_artifact(

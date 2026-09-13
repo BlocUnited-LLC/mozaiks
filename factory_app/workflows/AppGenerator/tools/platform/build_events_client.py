@@ -136,10 +136,6 @@ class BuildEventsClient:
                         if resp.status in (200, 201, 202, 204):
                             return BuildEventResult(ok=True, status_code=last_status)
 
-                        # 409 often means "already processed" under idempotent write semantics.
-                        if resp.status == 409:
-                            return BuildEventResult(ok=True, status_code=last_status)
-
                         body = await resp.text()
                         body = (body or "").strip()
                         if len(body) > 2000:
@@ -150,7 +146,7 @@ class BuildEventsClient:
                         if resp.status == 429 or resp.status >= 500:
                             raise RuntimeError(last_err)
 
-                        # For 4xx (except 429/409), do not retry.
+                        # Replays must return success explicitly; a conflict is not delivery.
                         return BuildEventResult(ok=False, status_code=last_status, error=last_err)
 
             except asyncio.CancelledError:

@@ -11,13 +11,13 @@
     {
       "contains": "final tweaks",
       "reply": "No final tweaks. Proceed to workflow planning."
-    },
-    {
-      "contains": "Review the agent flow below",
-      "reply": "Approved. The sequence diagram looks good. Proceed with implementation."
     }
   ],
   "tool_responses": {
+    "WorkflowPlanReview": {
+      "action": "approve",
+      "approved": true
+    },
     "DownloadCenter": {
       "status": "submitted",
       "action": "download_complete",

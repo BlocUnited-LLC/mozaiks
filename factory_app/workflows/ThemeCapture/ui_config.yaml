@@ -1,4 +1,3 @@
 visual_agents:
   - ThemeInterviewAgent
   - user
-  - ThemeAnalysisAgent

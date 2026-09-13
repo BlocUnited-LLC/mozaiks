@@ -30,10 +30,9 @@ export function buildAppDashboardHref(routePattern, appId) {
   return String(routePattern).replace(':appId', encodeURIComponent(appId))
 }
 
-export async function fetchDashboardConfig({ scope = null, appId = null, signal } = {}) {
+export async function fetchDashboardConfig({ scope = null, signal } = {}) {
   const params = new URLSearchParams()
   if (scope) params.set('scope', scope)
-  if (appId) params.set('app_id', appId)
   const suffix = params.toString() ? `?${params.toString()}` : ''
   const response = await studioFetch(`/api/studio/dashboard${suffix}`, {
     headers: {

@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from tests.factory_context import factory_context
 from tests.import_utils import import_module_directly
 
 design_docs_module = import_module_directly(
@@ -13,13 +14,14 @@ design_docs_module = import_module_directly(
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value
 
     def get(self, key, default=None):
-        return self.data.get(key, default)
+        from mozaiksai.core.workflow.context.frozen import freeze
+        return freeze(self.data.get(key, default))
 
 
 class _FakeCursor:
@@ -142,7 +144,7 @@ def _bundle():
                                 {"name": "user_id", "type": "string", "required": True},
                             ],
                             "indexes": [
-                                {"keys": [["app_id", 1], ["user_id", 1]], "unique": True}
+                                {"keys": [{"field": "app_id", "order": 1}, {"field": "user_id", "order": 1}], "unique": True}
                             ],
                             "search_by": "user_id",
                             "lifecycle": {

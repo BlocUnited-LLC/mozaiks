@@ -25,6 +25,24 @@ from mozaiksai.core.workflow.execution.network_graph import (
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
 
+@pytest.mark.parametrize("repair_target,next_agent", [
+    ("ServiceAgent", "AppValidationAgent"), (None, "ModuleRuntimeQualityAgent"),
+])
+def test_appgenerator_backend_repair_returns_directly_to_acceptance(repair_target, next_agent):
+    root = Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator"
+    rules = yaml.safe_load((root / "transition_graph.yaml").read_text(encoding="utf-8"))["transition_rules"]
+    config = yaml.safe_load((root / "agents.yaml").read_text(encoding="utf-8"))
+    graph = compile_transition_rules_to_graph(
+        rules, initial_agent_name="ServiceAgent",
+        agent_id_by_name={agent["name"]: agent["name"] for agent in config["agents"]},
+        max_turns=10,
+    )
+    assert resolve_next_agent(
+        graph, current_agent_name="ServiceAgent",
+        context_variables={"bundle_repair_target": repair_target, "task_run_mode": False},
+    ) == next_agent
+
+
 def test_transition_graph_uses_only_canonical_terminate_literal():
     graph = compile_transition_rules_to_graph(
         [
@@ -563,6 +581,62 @@ def test_factory_workflow_transition_rules_compile_to_ag2_network_graphs():
         assert isinstance(graph, TransitionGraph), transition_path
 
 
+def test_theme_capture_user_reply_returns_to_interview():
+    path = Path("factory_app/workflows/ThemeCapture/transition_graph.yaml")
+    rules = yaml.safe_load(path.read_text(encoding="utf-8"))["transition_rules"]
+    names = ["ThemeInterviewAgent", "ThemeAnalysisAgent", "ThemeConfigAssemblerAgent"]
+    graph = compile_transition_rules_to_graph(
+        rules,
+        initial_agent_name=names[0],
+        agent_id_by_name={name: name for name in names},
+    )
+    assert resolve_next_agent(
+        graph,
+        current_agent_name="user",
+        context_variables={"interview_outcome": "needs_input"},
+        agent_name_by_id={name: name for name in names},
+        participant_order=[*names, "user"],
+    ) == "ThemeInterviewAgent"
+
+
+def test_theme_analysis_advances_without_model_routing_marker():
+    path = Path("factory_app/workflows/ThemeCapture/transition_graph.yaml")
+    rules = yaml.safe_load(path.read_text(encoding="utf-8"))["transition_rules"]
+    names = ["ThemeInterviewAgent", "ThemeAnalysisAgent", "ThemeConfigAssemblerAgent"]
+    graph = compile_transition_rules_to_graph(
+        rules,
+        initial_agent_name=names[0],
+        agent_id_by_name={name: name for name in names},
+    )
+    assert resolve_next_agent(
+        graph,
+        current_agent_name="ThemeAnalysisAgent",
+        context_variables={"interview_outcome": "ready"},
+        agent_name_by_id={name: name for name in names},
+        participant_order=[*names, "user"],
+    ) == "ThemeConfigAssemblerAgent"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [("needs_input", "user"), ("ready", "ThemeAnalysisAgent"), ("blocked", "terminate")],
+)
+def test_theme_interview_routes_validated_readiness(outcome, expected):
+    path = Path("factory_app/workflows/ThemeCapture/transition_graph.yaml")
+    rules = yaml.safe_load(path.read_text(encoding="utf-8"))["transition_rules"]
+    names = ["ThemeInterviewAgent", "ThemeAnalysisAgent", "ThemeConfigAssemblerAgent"]
+    graph = compile_transition_rules_to_graph(
+        rules, initial_agent_name=names[0], agent_id_by_name={name: name for name in names},
+    )
+    assert resolve_next_agent(
+        graph,
+        current_agent_name="ThemeInterviewAgent",
+        context_variables={"interview_outcome": outcome},
+        agent_name_by_id={name: name for name in names},
+        participant_order=[*names, "user"],
+    ) == expected
+
+
 def test_appgenerator_validation_routes_repair_context_before_user_fallback():
     workflow_dir = Path("factory_app/workflows/AppGenerator")
     transitions = yaml.safe_load((workflow_dir / "transition_graph.yaml").read_text(encoding="utf-8")) or {}
@@ -599,7 +673,7 @@ def test_appgenerator_validation_routes_repair_context_before_user_fallback():
     assert route({"bundle_repair_status": "blocked"}) == "user"
     assert route({"workflow_integration_repair_status": "blocked"}) == "user"
     assert route({"app_validation_status": "failed"}) == "user"
-    assert route({"integration_tests_passed": True}) == "InfraScaffoldAgent"
+    assert route({"integration_tests_passed": True}) == "DownloadAgent"
     assert route({}) == "user"
 
 

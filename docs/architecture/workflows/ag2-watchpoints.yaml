@@ -34,6 +34,7 @@ watchpoints:
     verification_tests:
       - tests/test_ag2_network_execution_alignment.py
       - tests/test_workflow_network_graph.py
+      - tests/test_ag2_network_tool_routing.py
 
   - watchpoint_id: AG2-WP-004
     ag2_surface: Source-scoped transition condition composition
@@ -95,10 +96,11 @@ watchpoints:
     status: DEFERRED
     last_verified_version: "1.0.3"
     trigger: AG2 preserves context, WAL lineage, cancellation, and observation across child workflows.
-    replacement_condition: Delete the split planning, task-batch, and continuation execution path.
+    replacement_condition: Replace standalone task lifecycle observation with parent/child channel lineage; parent graph progression already stays in one AG2 channel.
     verification_tests:
       - tests/test_runtime_task_batch_smoke.py
       - tests/test_refinement_task_batch_smoke.py
+      - tests/test_ag2_network_execution_alignment.py
 
   - watchpoint_id: AG2-WP-010
     ag2_surface: Typed one-shot Consulting channel

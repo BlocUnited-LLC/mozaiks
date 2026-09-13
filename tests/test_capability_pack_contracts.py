@@ -121,9 +121,10 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
     assert "domain-specific profile records" in content
     assert "host-owned `/api/me` account/profile contract" in content
-    assert '"capability_packs": [' in content
-    assert '"capability_pack_id": null' in content
-    assert '\n        "workflows": [' in content
+    assert "minimum complete set of `capability_packs`" in content
+    assert "surface_id for capability_pack_id" in content
+    assert "AppBuildPlanOutput JSON" in content
+    assert '\n        "workflows": [' not in content
 
 
 def test_docs_do_not_describe_required_integrations_as_string_list() -> None:
@@ -1007,6 +1008,8 @@ def test_app_build_plan_tool_rejects_refinement_harness_non_yaml_prompt() -> Non
 
 
 def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(monkeypatch) -> None:
+    from tests.factory_context import factory_context
+
     module = _load_module(
         "factory_app/workflows/ValueEngine/tools/manifest.py",
         "tests.valueengine_manifest_direct",
@@ -1032,6 +1035,7 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(m
     context = _Context(
         chat_id="chat_value_123",
         app_id="app_123",
+        run_build_binding=factory_context({"app_id": "app_123"})["run_build_binding"],
         user_id="user_123",
         workflow_name="ValueEngine",
         structured_output={

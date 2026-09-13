@@ -8,6 +8,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from tests.factory_context import factory_context
+
 
 def _load_generate_and_download_module():
     workspace = Path(__file__).resolve().parents[1]
@@ -33,7 +36,7 @@ generate_and_download_module = _load_generate_and_download_module()
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -78,7 +81,7 @@ class _FakeArtifactStore:
 
 def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_deletions() -> None:
     forbidden_path = "modules/billing/backend/token_wallet_ledger.py"
-    context = _Context(
+    context = ContextVariablesBridge(
         {
             "generated_files": {
                 "app.json": '{"id":"billing-app"}',
@@ -95,12 +98,12 @@ def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_de
         }
     )
     collected = {
-        "InfraScaffoldAgent": {
+        "ServiceAgent": {
             "code_files": [
-                {"filename": "Dockerfile", "content": "FROM python:3.13-slim\n"}
-            ]
+                {"filename": "modules/billing/backend/helper.py", "content": "VALUE = 1\n"}
+            ],
+            "deleted_files": [forbidden_path],
         },
-        "ServiceAgent": {"deleted_files": [forbidden_path]},
     }
 
     files_map = generate_and_download_module._merge_bundle_sources(
@@ -110,7 +113,7 @@ def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_de
 
     assert files_map["app.json"] == '{"id":"billing-app"}'
     assert "async def list_products" in files_map["modules/billing/backend/service.py"]
-    assert files_map["Dockerfile"].startswith("FROM python")
+    assert files_map["modules/billing/backend/helper.py"] == "VALUE = 1\n"
     assert forbidden_path not in files_map
 
 
@@ -255,7 +258,9 @@ def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypat
 
     monkeypatch.setattr(generate_and_download_module, "AG2PersistenceManager", lambda: _FakePersistence())
     monkeypatch.setattr(generate_and_download_module, "_inject_agent_context_env", noop)
-    monkeypatch.setattr(generate_and_download_module, "update_build_status", fail_if_called)
+    from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+
+    monkeypatch.setattr(AppRegistryService, "update_build_status", fail_if_called)
     monkeypatch.setattr(generate_and_download_module, "use_ui_tool", fail_if_called)
 
     context = _Context(
@@ -282,9 +287,11 @@ def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypat
     assert result["bundle_errors"]
 
 
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n"])
 def test_generate_and_download_uses_canonical_build_root_and_propagates_registration_failure(
     monkeypatch,
     tmp_path: Path,
+    line_ending: str,
 ) -> None:
     class _FakePersistence:
         async def gather_latest_agent_jsons(self, **_kwargs):
@@ -317,9 +324,12 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
     context = _Context(
         {
             "chat_id": "chat_123",
-            "app_id": "app/123",
-            "build_id": "build 123",
-            "generated_files": {"app.json": '{"app_id":"app-123"}'},
+            "app_id": "app-123",
+            "build_id": "build-123",
+            "generated_files": {
+                "app.json": '{"app_id":"app-123"}',
+                "README.md": line_ending.join(["First line", "Second line", ""]),
+            },
         }
     )
 
@@ -334,6 +344,8 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
 
     expected_app_dir = tmp_path / "generated" / "apps" / "app-123" / "build-123" / "app"
     assert (expected_app_dir / "app.json").exists()
+    expected_bytes = line_ending.join(["First line", "Second line", ""]).encode("utf-8")
+    assert (expected_app_dir / "README.md").read_bytes() == expected_bytes
     assert not (tmp_path / "generated_apps").exists()
 
 
@@ -343,8 +355,11 @@ def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_
     persistence = type("Persistence", (), {"gather_latest_agent_jsons": AsyncMock(return_value={})})()
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
     monkeypatch.setattr(module, "AG2PersistenceManager", lambda: persistence)
-    for name in ("_inject_agent_context_env", "_register_app_bundle_artifact_version", "update_build_status"):
+    for name in ("_inject_agent_context_env", "_register_app_bundle_artifact_version"):
         monkeypatch.setattr(module, name, AsyncMock(return_value=None))
+    from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+
+    monkeypatch.setattr(AppRegistryService, "update_build_status", AsyncMock(return_value={"success": True}))
     monkeypatch.setattr(module, "run_app_bundle_acceptance_gate", AsyncMock(return_value={
         "passed": True, "status": "passed", "bundle_scan": {"errors": []},
         "validation_evidence": {"completed": ["bundle_scan"], "failed": []},

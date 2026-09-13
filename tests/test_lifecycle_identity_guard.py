@@ -57,7 +57,7 @@ def test_missing_authority_is_not_equivalent_to_null():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("container_kind", ["runtime", "dict"])
-@pytest.mark.parametrize("mutation", ["replace", "delete", "nested", "caught_error", "factory_hook"])
+@pytest.mark.parametrize("mutation", ["replace", "delete", "nested", "caught_error", "build_binding"])
 async def test_startup_identity_change_stops_before_agent_creation(
     monkeypatch, container_kind, mutation,
 ):
@@ -67,13 +67,22 @@ async def test_startup_identity_change_stops_before_agent_creation(
     from mozaiksai.core.workflow.execution import lifecycle
     from mozaiksai.core.workflow.outputs import structured
 
-    initial = {"app_id": "factory-host", "permissions": ["read"]}
+    initial = {
+        "app_id": "factory-host", "permissions": ["read"],
+        "run_build_binding": {
+            "build_registry_id": "appreg-one", "target_app_id": "target-one",
+            "build_id": "build-one", "phase": "genesis",
+        },
+    }
     policy = build_context_authority_policy(workflow_name="GuardSmoke", definitions={
         "permissions": {"type": "array", "source": {"type": "state", "default": []}},
+        "run_build_binding": {"type": "object", "source": {"type": "runtime", "required": True}},
     })
     context = (create_context_container(initial, authority_policy=policy)
                if container_kind == "runtime" else detach(initial))
     persistence = SimpleNamespace(
+        assert_chat_resumable=AsyncMock(),
+        mark_chat_failed=AsyncMock(),
         load_run_events=AsyncMock(return_value=[]),
         create_chat_session=AsyncMock(),
         get_or_assign_cache_seed=AsyncMock(return_value=1),
@@ -94,6 +103,9 @@ async def test_startup_identity_change_stops_before_agent_creation(
                 del context_variables["app_id"]
             return
         key, value = ("permissions", ["read", "admin"]) if mutation == "nested" else ("app_id", "target-app")
+        if mutation == "build_binding":
+            key = "run_build_binding"
+            value = {**initial[key], "target_app_id": "other-target"}
         if container_kind == "runtime":
             context_variables.set(key, value)
         elif mutation == "nested":
@@ -103,20 +115,10 @@ async def test_startup_identity_change_stops_before_agent_creation(
         if mutation == "caught_error":
             raise RuntimeError("hook error swallowed by LifecycleToolManager")
 
-    hook = mutate
-    if mutation == "factory_hook":
-        from factory_app.workflows.ValueEngine.tools import create_app_record
-
-        monkeypatch.setattr(create_app_record, "_create_studio_app", AsyncMock(return_value={
-            "success": True,
-            "app": {"build_registry_id": "build-one", "app_id": "target-app"},
-        }))
-        hook = create_app_record.create_app_record
-
     manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT] = [lifecycle.LifecycleTool(
         trigger=lifecycle.LifecycleTrigger.BEFORE_CHAT, agent=None,
         file="mutate.py", function="mutate", description=None,
-        callable=hook, accepts_context=True,
+        callable=mutate, accepts_context=True,
     )]
     monkeypatch.setattr(orchestration, "AG2PersistenceManager", lambda: persistence)
     monkeypatch.setattr(SimpleTransport, "get_instance", AsyncMock(return_value=transport))
@@ -140,6 +142,7 @@ async def test_startup_identity_change_stops_before_agent_creation(
     agents_factory.assert_not_awaited()
     network_phase.assert_not_awaited()
     persistence.mark_chat_completed.assert_not_awaited()
+    persistence.mark_chat_failed.assert_awaited_once_with("chat-one", app_id="factory-host")
     assert persistence.create_chat_session.await_args.kwargs["app_id"] == "factory-host"
     events = [call.args[0] for call in transport.send_event_to_ui.await_args_list]
     assert [event["kind"] for event in events] == ["error", "run_complete"]

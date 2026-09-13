@@ -5,6 +5,7 @@ from pathlib import Path
 
 from factory_app.workflows.ExistingAppDiscovery.tools import app_context_mapping
 from mozaiksai.core.app_context.models import GraphEdgeType, GraphNodeType, OwnershipClass
+from tests.factory_context import factory_context
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -106,7 +107,7 @@ def _discovery_output() -> dict:
 
 def _context() -> dict:
     return {
-        "app_id": "ops_studio",
+        **factory_context({"app_id": "ops_studio"}),
         "chat_id": "chat_ops_001",
         "repo_summary": {
             "repo_path": "repos/ops-studio",

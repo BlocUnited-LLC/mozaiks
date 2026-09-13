@@ -294,7 +294,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
 
     # Coding worker result assertions
     assert result.eligible is True
-    assert result.status == "validated"
+    assert result.status == "planned"
     assert result.applied_files[_DASHBOARD_PATH] == _DASHBOARD_UPDATED
     assert result.metadata["build_record_id"] == "av_child_promotion_001"
     assert "artifact_persistence_error" not in result.metadata
@@ -305,7 +305,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
     assert call["build_family"] == "app_bundle"
     assert call["build_key"] == "app_bundle"
     assert call["lifecycle_status"].value == "draft"
-    assert call["validation_status"].value in {"passed", "skipped"}
+    assert call["validation_status"].value == "skipped"
     applied = call["commit_metadata"]["metadata"]["applied_paths"]
     assert _DASHBOARD_PATH in applied
 
@@ -418,7 +418,7 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
         )
     )
 
-    assert result.status == "validated"
+    assert result.status == "planned"
     assert result.metadata["build_record_id"] == "av_child_promo_contract"
 
     call = artifact_store.last_call
