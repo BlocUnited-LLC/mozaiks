@@ -95,6 +95,15 @@ runtime `app_id` or persistence scope. Support clients send their access token
 with module actions. A failed ticket insert or list read is surfaced as an
 error, so the UI does not claim that an unsaved ticket exists or show an
 unavailable queue as empty.
+The profile support panel groups tickets by `subject_app_id`, keeping the
+authenticated runtime `app_id` separate from the app the ticket concerns. If a
+listed ticket has no accessible linked message thread, its `error` field tells
+the profile and operator panels to show the failure and withhold the reply
+control. Clients do not submit `sender_role`; the authenticated module derives
+the role from server-side authority.
+Profile page hydration resolves module scope through the same host hook as
+HTTP module actions, so hosted membership can supply workspace scope and
+permissions when they are absent from the login token.
 
 Escalation UI should create a support request and navigate users to
 `/me?tab=support-tickets`, optionally with `request_id` and `app_id` query

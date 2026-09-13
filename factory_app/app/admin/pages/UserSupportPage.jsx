@@ -46,7 +46,7 @@ function normalizeSupportRequest(record) {
     id,
     ticketId: String(record.request_id || record.ticketId || id || 'SUP').toUpperCase(),
     appId,
-    appName: record.app_name || record.appName || record.app_label || appId,
+    appName: record.subject_app_label || record.subject_app_name || record.subject_app_id || record.app_name || record.appName || record.app_label || appId,
     subject,
     status: record.status || 'open',
     severity: record.severity || 'low',

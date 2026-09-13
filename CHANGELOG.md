@@ -60,6 +60,7 @@ This project follows a practical pre-1.0 changelog format:
   actually allocated. Native AG2 schema-correction turns retain usage and retry
   middleware, and the auxiliary config adapter preserves provider controls.
   This does not account for every attempt or establish unknown provider cost.
+- Profile and operator support tickets now group under the app they concern, show unavailable conversations instead of empty threads, send replies without a client-supplied sender role, and resolve hosted workspace scope during profile hydration.
 - Preserve the original Factory build-event envelope across re-emission and
   lost acknowledgements. Successful delivery cannot be revoked by a late failed
   attempt, and already acknowledged events are not posted again by lifecycle hooks.

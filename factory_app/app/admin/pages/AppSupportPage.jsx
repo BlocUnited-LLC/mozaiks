@@ -159,7 +159,7 @@ function ThreadPanel({ run, onMessageSent, onDeleted, onStatusUpdated }) {
         const response = await studioFetch('/api/modules/workspace_support/add_support_message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ request_id: run.request_id, message: text, sender_role: 'operator' }),
+          body: JSON.stringify({ request_id: run.request_id, message: text }),
         })
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
         const body = await response.json()
@@ -255,12 +255,17 @@ function ThreadPanel({ run, onMessageSent, onDeleted, onStatusUpdated }) {
         </div>
       </div>
 
+      {run.error && (
+        <div role="alert" className="border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+          {run.error}
+        </div>
+      )}
       {/* ChatThread primitive handles messages + input */}
       <ChatThread
         messages={messages}
-        onSend={run.status === 'resolved' ? undefined : handleSend}
+        onSend={run.status === 'resolved' || run.error ? undefined : handleSend}
         inputPlaceholder="Reply to this ticket…"
-        emptyText="No messages yet."
+        emptyText={run.error ? 'Support conversation unavailable.' : 'No messages yet.'}
         className="flex-1 min-h-0"
       />
       {sendError && (
@@ -290,9 +295,10 @@ function supportRequestToRun(req) {
   const rid = req.request_id || req.id
   const subject = req.subject || req.page_title || String(req.message || 'Support request').slice(0, 80)
   const appId = req.subject_app_id || req.app_id || 'workspace'
+  const error = typeof req.error === 'string' ? req.error.trim() : null
   const messages = Array.isArray(req.messages) && req.messages.length > 0
     ? req.messages
-    : req.message
+    : !error && req.message
       ? [{ role: 'user', content: req.message }]
       : []
   const lastMessageByRole = req.last_message_by_role || messages[messages.length - 1]?.role || 'user'
@@ -313,6 +319,7 @@ function supportRequestToRun(req) {
     support_status: isResolved ? 'resolved' : lastMessageByRole === 'operator' ? 'responded' : 'needs-reply',
     awaiting_operator: !isResolved && lastMessageByRole !== 'operator',
     last_message_by_role: lastMessageByRole,
+    error,
     messages,
   }
 }
