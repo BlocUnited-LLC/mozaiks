@@ -37,6 +37,7 @@ This project follows a practical pre-1.0 changelog format:
 - The Studio workspace mobile navigation trigger is a sticky top-of-content
   control (matching the admin layout) instead of a floating pill overlapping
   the shell bottom bar.
+- Restore the Studio support desk in user profiles and authenticated operator dashboards; support requests now use a subject app reference without changing runtime scope and report storage failures instead of appearing saved or empty.
 - Contextual workflow logging supports exception tracebacks so an error handler
   can persist failed indexing/build state instead of raising a logging error.
 - Studio app/build summaries select owned generated targets through their build

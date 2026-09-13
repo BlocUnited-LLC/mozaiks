@@ -1156,6 +1156,61 @@ test('workspace support route stays responsive across desktop and mobile widths'
   }
 });
 
+test('profile support page loads tickets on a same-origin Studio host', async ({ page }) => {
+  let profilePageRequests = 0;
+  await page.route('**/api/me/profile-pages**', async (route) => {
+    profilePageRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        pages: [{
+          id: 'overview',
+          label: 'Profile',
+          section: 'overview',
+          renderer: 'custom_component',
+          component: 'ProfileOverview',
+          visibility: 'public',
+        }, {
+          id: 'support-tickets',
+          label: 'Support',
+          section: 'overview',
+          renderer: 'custom_component',
+          component: 'UserSupportPanel',
+          visibility: 'owner_only',
+          data: {
+            requests: [{
+              request_id: 'sr_browser',
+              subject_app_id: APP_ID,
+              user_id: 'user_1',
+              message: 'Need help with my app',
+              status: 'open',
+              created_at: '2026-01-01T00:00:00Z',
+            }],
+            total: 1,
+          },
+        }],
+      }),
+    });
+  });
+
+  await page.goto('/me?tab=support-tickets');
+
+  await expect(page.getByText('Need help with my app').first()).toBeVisible();
+  expect(profilePageRequests).toBeGreaterThan(0);
+
+  await page.route('**/api/users/test-person', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ username: 'test-person', display_name: 'Public Profile Name' }),
+    });
+  });
+  await page.goto('/u/test-person?tab=support-tickets');
+  await expect(page.getByText('Public Profile Name').first()).toBeVisible();
+  await expect(page.getByText('Need help with my app')).toHaveCount(0);
+});
+
 test('app Studio root redirects to manifest default portal', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}`);
 
@@ -1359,7 +1414,7 @@ test('app support route stays responsive across desktop and mobile widths', asyn
   await expect(main.getByText('Needs reply').first()).toBeVisible();
   await expect(main.getByText('Responded').first()).toBeVisible();
   await expect(main.getByText('Running')).toHaveCount(0);
-  expect(supportModuleRequests.some(({ postData }) => postData.includes(`"app_id":"${APP_ID}"`))).toBeTruthy();
+  expect(supportModuleRequests.some(({ postData }) => postData.includes(`"subject_app_id":"${APP_ID}"`))).toBeTruthy();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();

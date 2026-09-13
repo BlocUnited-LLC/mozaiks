@@ -78,10 +78,23 @@ canonical path for "operator replied" notifications.
 are not plain message-recipient delivery: new support requests, ticket-owner
 replies, and negative feedback. These rules target principals with
 `workspace_support.read`, so a user who is also an admin can see operator alerts
-when their active principal has that scope. The profile support panel remains
-user-scoped by default and lists only the current user's tickets; admin/support
-queues must request `scope=app` or `scope=workspace` and carry support read or
-manage permission.
+when their active principal has that scope. The profile support page remains
+user-scoped by default and lists only the current user's tickets, including
+resolved tickets. Admin/support queues must request `scope=app` or
+`scope=workspace` and carry support read or manage permission. Support actions
+require an authenticated caller when auth is enabled; the service checks ticket
+ownership for user replies and mutations. Hosted products grant operator
+permissions through their own validated identity policy. The Studio queue routes
+also require the `admin` role for navigation, but that role alone does not grant
+the module's read or manage permission. An OIDC operator token needs those
+permissions from its identity policy or a host-owned permission resolver.
+
+The `subject_app_id` action input identifies the app a request or feedback item
+is about, or filters an operator queue. It does not change the authenticated
+runtime `app_id` or persistence scope. Support clients send their access token
+with module actions. A failed ticket insert or list read is surfaced as an
+error, so the UI does not claim that an unsaved ticket exists or show an
+unavailable queue as empty.
 
 Escalation UI should create a support request and navigate users to
 `/me?tab=support-tickets`, optionally with `request_id` and `app_id` query

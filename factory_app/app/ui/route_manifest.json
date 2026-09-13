@@ -108,7 +108,7 @@
       "order": 9,
       "meta": {
         "surfaces": ["studio"],
-        "requiresAuth": true,
+        "requiresRole": "admin",
         "title": "Support",
         "appShell": true,
         "ai_context": "The user is on the workspace Support page. It lists apps with support activity and links each row to the app support dashboard for chat details.",
