@@ -130,9 +130,11 @@ fabrication in live mode.
 
 ## Known gaps
 
-- No shipped system records `kpi.mrr` snapshots yet; hosted billing
-  (mozaiks-app) is the natural writer. Until then revenue metrics render as
-  pending in live mode.
+- Revenue metrics render as pending until a billing integration records
+  `kpi.*` snapshots for the app. Writing them does **not** make the app count
+  as usage-instrumented: the active-users gate gates on the usage events
+  specifically, so a revenue-only app still reports active users as pending
+  rather than zero.
 - `retention`/`churn_rate` are period ratios from churned-user snapshots,
   not cohort retention curves.
 - Portfolio trend series render for metrics with daily data (MRR, net new

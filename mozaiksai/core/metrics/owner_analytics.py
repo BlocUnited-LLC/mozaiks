@@ -25,7 +25,11 @@ import logging
 from types import SimpleNamespace
 from typing import Any, Protocol
 
-from mozaiksai.core.metrics.app_metrics import AppMetrics
+from mozaiksai.core.metrics.app_metrics import (
+    USAGE_ACTION_EVENT,
+    USAGE_PAGE_VIEW_EVENT,
+    AppMetrics,
+)
 from mozaiksai.core.metrics.definitions import (
     MetricRegistry,
     build_default_metric_registry,
@@ -166,7 +170,14 @@ class OwnerAnalyticsService:
 
         # Activity-derived active users: distinct actors over the window, with
         # "never instrumented" distinguished from "no activity this period".
-        ever = await metrics.summarize()
+        # The gate counts usage events specifically, not every row in the
+        # store: an app whose billing integration records kpi.* snapshots has
+        # a non-empty metric store while still having no usage instrumentation
+        # at all, and reporting 0 active users for it would fabricate a figure
+        # the app never measured.
+        ever = await metrics.summarize(
+            event_names=[USAGE_PAGE_VIEW_EVENT, USAGE_ACTION_EVENT]
+        )
         if int(ever.get("total") or 0) > 0:
             signals.current["active_users"] = float(
                 await metrics.active_subjects(since=window.since, until=window.until)
