@@ -4880,6 +4880,13 @@ models:
           when the page route carries tenant, workspace, ownership, membership,
           invitation, or other scoped resource identifiers that require an
           app-owned authorize_*_route module action before render.
+      ask_context:
+        type: optional_list
+        items: AppAskContextAction
+        description: >
+          Optional read-only module actions whose results ground ask-mode answers
+          on this page. References must resolve before acceptance to actions with
+          ask_context_safe: true and permissions: []; declare at most 3.
 
   AppPageSchema:
     type: model

@@ -420,6 +420,7 @@ def run_app_validation_fallback_checks(workspace_root: str | Path) -> list[AppVa
         try:
             load_app_page_schemas(
                 app_root, action_index=build_page_action_index_from_module_contracts(app_root),
+                ask_context_index=build_page_action_index_from_module_contracts(app_root, ask_context_only=True),
             )
         except Exception as exc:
             checks.append(AppValidationFallbackCheckResult(

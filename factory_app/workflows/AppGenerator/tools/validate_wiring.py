@@ -25,6 +25,7 @@ capability_packs nor module.yaml files can be found, the check is advisory
 (cannot confirm or deny validity without a registry).
 """
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -32,6 +33,11 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+
+from mozaiksai.core.runtime.app.page_schema import (
+    validate_ask_context_references,
+)
+from mozaiksai.core.workflow.context.frozen import detach
 
 _logger = logging.getLogger("tools.validate_wiring")
 
@@ -53,14 +59,14 @@ def _context_get(context_variables: dict[str, Any] | None, key: str) -> Any | No
         try:
             v = context_variables.get(key)
             if v is not None:
-                return v
+                return detach(v)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key)
+        return detach(data.get(key))
     if isinstance(context_variables, dict):
-        return context_variables.get(key)
+        return detach(context_variables.get(key))
     return None
 
 
@@ -273,8 +279,8 @@ def _actions_from_module_yamls(app_dir: Path) -> set[str]:
     return valid
 
 
-def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
-    valid: set[str] = set()
+def _generated_module_action_contracts(files: dict[str, str]) -> dict[str, dict[str, Any]]:
+    contracts: dict[str, dict[str, Any]] = {}
     for path, content in sorted(files.items()):
         if not path.startswith("modules/") or not path.endswith("/module.yaml"):
             continue
@@ -300,9 +306,44 @@ def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
             else:
                 continue
             if action_id:
-                valid.add(f"{module_id}/{action_id}")
-                valid.add(action_id)
-    return valid
+                contracts[f"{module_id}/{action_id}"] = action if isinstance(action, dict) else {}
+    return contracts
+
+
+def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
+    contracts = _generated_module_action_contracts(files)
+    return set(contracts) | {key.split("/", 1)[1] for key in contracts}
+
+
+def _ask_context_binding_errors(pages: list[Any], contracts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    modules = {key.split("/", 1)[0] for key in contracts}
+    action_index = {
+        module: frozenset(key.split("/", 1)[1] for key in contracts if key.startswith(f"{module}/"))
+        for module in modules
+    }
+    eligible_index = {
+        module: frozenset(
+            key.split("/", 1)[1] for key, action in contracts.items()
+            if key.startswith(f"{module}/")
+            and action.get("ask_context_safe") is True and action.get("permissions", []) == []
+        ) for module in modules
+    }
+    failures: list[dict[str, Any]] = []
+    for page in pages:
+        meta = page.get("meta") if isinstance(page, dict) else None
+        raw = meta.get("ask_context") if isinstance(meta, dict) else None
+        if raw is None:
+            continue
+        errors = [(item.location, item.message) for item in validate_ask_context_references(
+            raw, action_index=action_index, ask_context_index=eligible_index,
+        )]
+        for location, message in errors:
+            failures.append({
+                "test": "wiring_ask_context", "page": page.get("name") or page.get("path") or "<unnamed>",
+                "section": location, "error": message,
+                "fix_suggestion": "Reference an existing read-only action with ask_context_safe: true and permissions: [].",
+            })
+    return failures
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +432,32 @@ async def validate_wiring(
     if generated_files:
         known_actions.update(_actions_from_generated_module_files(generated_files))
 
+    # Ask declarations require actual module contracts, never plan-only names.
+    # A supplied saved-file snapshot is authoritative over stale pages/on-disk files.
+    contract_files = generated_files
+    ask_pages = _pages_from_generated_files(generated_files) if _context_get(
+        context_variables, "generated_files",
+    ) is not None else list(app_pages)
+    if _context_get(context_variables, "generated_files") is None and app_dir and app_dir.is_dir():
+        contract_files = {
+            path.relative_to(app_dir).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted((app_dir / "modules").glob("*/module.yaml"))
+        }
+        manifest_path = app_dir / "ui/route_manifest.json"
+        if manifest_path.is_file():
+            contract_files["ui/route_manifest.json"] = manifest_path.read_text(encoding="utf-8")
+        if not ask_pages:
+            ask_pages = [yaml.safe_load(path.read_text(encoding="utf-8")) for path in sorted(
+                (app_dir / "ui/pages").glob("*.yaml"),
+            )]
+    if "ui/route_manifest.json" in contract_files:
+        manifest = json.loads(contract_files["ui/route_manifest.json"])
+        if isinstance(manifest, dict) and isinstance(manifest.get("pages"), list):
+            ask_pages.extend(manifest["pages"])
+    ask_context_failures = _ask_context_binding_errors(
+        ask_pages, _generated_module_action_contracts(contract_files),
+    )
+
     # ── 3. Cross-reference ────────────────────────────────────────────────
     wired: list[dict[str, str]] = []
     platform_endpoints: list[dict[str, str]] = []
@@ -423,11 +490,11 @@ async def validate_wiring(
     has_invalid_endpoints = bool(invalid_endpoints)
 
     # Block only when we have a registry to validate against.
-    blocking_pass: bool = not has_invalid_endpoints and (not has_orphaned_pages or no_registry)
+    blocking_pass: bool = not ask_context_failures and not has_invalid_endpoints and (not has_orphaned_pages or no_registry)
 
     # ── 5. Build human-readable output ───────────────────────────────────
     warnings: list[str] = []
-    failed_tests: list[dict[str, Any]] = []
+    failed_tests: list[dict[str, Any]] = list(ask_context_failures)
 
     for item in invalid_endpoints:
         failed_tests.append({
@@ -484,7 +551,9 @@ async def validate_wiring(
             "actions — review intent."
         )
 
-    if has_invalid_endpoints:
+    if ask_context_failures:
+        message = f"{len(ask_context_failures)} page ask-context declaration(s) do not resolve to eligible actions."
+    elif has_invalid_endpoints:
         message = f"{len(invalid_endpoints)} page endpoint(s) have invalid api_endpoint syntax."
     elif not blocking_pass:
         message = (
@@ -509,7 +578,8 @@ async def validate_wiring(
         "passed": blocking_pass,
         "message": message,
         "details": {
-            "blocking": not no_registry,
+            "blocking": bool(ask_context_failures) or not no_registry,
+            "ask_context_failures": ask_context_failures,
             "total_endpoints_referenced": len(endpoint_refs),
             "wired_count": len(wired),
             "platform_endpoint_count": len(platform_endpoints),

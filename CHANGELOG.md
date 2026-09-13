@@ -45,6 +45,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Ask-context contracts now round-trip through generated schema-native page
+  metadata. App loading and Factory acceptance reject unknown or ineligible
+  ask actions against actual module contracts, including custom-route metadata;
+  ask eligibility remains independent of HTTP exposure.
+
 - Auxiliary refinement agents now emit measured response usage through the
   existing runtime collector and configured token-wallet ingest. Trusted host
   app/user attribution is required; chat/build identity is attached only when
