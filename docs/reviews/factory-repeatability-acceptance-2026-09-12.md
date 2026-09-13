@@ -110,8 +110,10 @@ checks use real persistence and authentication, not browser API mocks.
 
 ## Remaining Limits
 
-- The built-in Docker preview was not exercised. A separately served platform
-  host and production web build are not proof of that preview or deployment.
+- The built-in Docker preview was attempted but did not succeed: its default
+  image lacked Python, and its launch path assumed a `main.py` application.
+  A separately served platform host and production web build are not proof of
+  that preview or deployment.
 - Runtime build validation was reported as skipped where it did not execute.
   Static archive checks found no raw-secret or module-contract findings, but
   they are not a full SecurityReadiness workflow or a production clearance.

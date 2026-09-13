@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Preserve the original Factory build-event envelope across re-emission and
+  lost acknowledgements. Successful delivery cannot be revoked by a late failed
+  attempt, and already acknowledged events are not posted again by lifecycle hooks.
 - Contextual workflow logging supports exception tracebacks so an error handler
   can persist failed indexing/build state instead of raising a logging error.
 - Studio app/build summaries select owned generated targets through their build
