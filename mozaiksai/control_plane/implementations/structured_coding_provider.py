@@ -20,6 +20,7 @@ from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
 from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
+from mozaiksai.core.usage.context import resolve_auxiliary_usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,10 @@ class StructuredOutputCodingProvider:
             tool_context_loaded = bool(control_plane_context)
             user_prompt = self._build_user_prompt(request=request, control_plane_context=control_plane_context)
             plan = await self._agent_runner.run(
+                usage_context=resolve_auxiliary_usage_context(
+                    app_id=request.app_id, user_id=request.user_id, context=request.usage_context,
+                    target_app_id=request.artifact_app_id, run_build_binding=request.run_build_binding,
+                ),
                 agent_name="CodingWorker",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,

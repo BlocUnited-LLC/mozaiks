@@ -11,10 +11,13 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import ValidationError
+
 from logs.logging_config import get_core_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
+from mozaiksai.core.usage.context import UsageReceiptScope
 from mozaiksai.core.usage.pricing import estimate_token_cost, pricing_catalog_health
 
 logger = get_core_logger("runtime_usage_ledger")
@@ -90,10 +93,21 @@ class RuntimeUsageLedger:
         app_id = coalesce_app_id(app_id=payload.get("app_id"))
         chat_id = _text(payload.get("chat_id"))
         workflow_name = _text(payload.get("workflow_name"))
-        user_id = _text(payload.get("user_id")) or "anonymous"
+        execution_kind = payload.get("execution_kind", "workflow")
+        user_id = _text(payload.get("user_id"))
+        if execution_kind == "workflow":
+            user_id = user_id or "anonymous"
         tenant_id = _text(payload.get("tenant_id"))
         workspace_id = _text(payload.get("workspace_id"))
-        if not app_id or not chat_id or not workflow_name:
+        try:
+            scope = UsageReceiptScope.model_validate({
+                "execution_kind": execution_kind, "app_id": app_id, "user_id": user_id,
+                "chat_id": chat_id, "workflow_name": workflow_name,
+                "agent_name": _text(payload.get("agent_name")),
+            })
+        except ValidationError:
+            return
+        if execution_kind == "auxiliary" and not _text(payload.get("event_id")):
             return
 
         prompt_tokens = _int_value(payload.get("prompt_tokens") or payload.get("input_tokens"))
@@ -131,6 +145,7 @@ class RuntimeUsageLedger:
             "event_id": event_id,
             "event_ts": parsed_ts,
             "source": source,
+            "execution_kind": scope.execution_kind,
             "app_id": str(app_id),
             "chat_id": chat_id,
             "user_id": user_id,
@@ -268,20 +283,23 @@ def summarize_usage_events(
         elif cost_source == "default_table":
             default_table_models.add(model_name)
 
-        workflow = str(doc.get("workflow_name") or "Unknown")
-        wf = by_workflow[workflow]
-        wf["workflow_name"] = workflow
-        wf["prompt_tokens"] += prompt
-        wf["completion_tokens"] += completion
-        wf["total_tokens"] += total
-        wf["cached_prompt_tokens"] += cached_prompt
-        wf["estimated_cost_usd"] += cost
-        wf["llm_calls"] += 1
+        workflow = _text(doc.get("workflow_name"))
+        if not workflow and doc.get("execution_kind") != "auxiliary":
+            workflow = "Unknown"
         app_scope = str(doc.get("app_id") or "")
         chat_id = str(doc.get("chat_id") or "")
-        if chat_id:
-            wf_run_key = f"{app_scope}:{chat_id}" if app_scope else chat_id
-            wf["runs"].add(wf_run_key)
+        if workflow:
+            wf = by_workflow[workflow]
+            wf["workflow_name"] = workflow
+            wf["prompt_tokens"] += prompt
+            wf["completion_tokens"] += completion
+            wf["total_tokens"] += total
+            wf["cached_prompt_tokens"] += cached_prompt
+            wf["estimated_cost_usd"] += cost
+            wf["llm_calls"] += 1
+            if chat_id:
+                wf_run_key = f"{app_scope}:{chat_id}" if app_scope else chat_id
+                wf["runs"].add(wf_run_key)
 
         if chat_id:
             run_key = f"{app_scope}:{chat_id}" if app_scope else chat_id

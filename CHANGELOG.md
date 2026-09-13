@@ -30,6 +30,12 @@ This project follows a practical pre-1.0 changelog format:
 
 - Factory planning receives exact materializer page paths and actionable
   case-sensitive filename feedback, avoiding repeated display-name/path mismatches.
+- Factory form-action retries report known required-field errors and receive
+  fixed-endpoint create/edit guidance without weakening runtime page contracts.
+- Bundle acceptance validates the exact generated files and module actions,
+  including frozen workflow context, instead of passing empty or stale wiring.
+- Studio offers a fresh, owner-bound launch for failed workflows, with
+  acknowledgement checks and disabled terminal-session input.
 - Factory live previews boot saved, owner-bound app artifacts through the real
   platform host, shared frontend, and disposable Mongo database. Failed startup,
   expiry, and artifact changes clear stale preview URLs. A local Docker image
@@ -39,11 +45,19 @@ This project follows a practical pre-1.0 changelog format:
 - SecurityReadiness preserves its inspected artifact identity and review summary
   through declared chat transitions. Explicit internal-only actions with empty
   permissions no longer produce a false missing-permissions finding.
+  Build validation evidence and registered staged paths survive the full review
+  handoff; missing results stay missing, and zero findings are not mislabeled as
+  a failed persistence operation.
 - Workflow review components receive rejected response acknowledgements as errors,
   rather than showing an unaccepted or stale decision as submitted.
 - UI review responses verify the saved session owner and app/chat scope before
   completing or buffering an interaction, over both HTTP and WebSocket.
-
+- Auxiliary refinement agents now emit measured response usage through the
+  existing runtime collector and configured token-wallet ingest. Trusted host
+  app/user attribution is required; chat/build identity is attached only when
+  actually allocated. Native AG2 schema-correction turns retain usage and retry
+  middleware, and the auxiliary config adapter preserves provider controls.
+  This does not account for every attempt or establish unknown provider cost.
 - Preserve the original Factory build-event envelope across re-emission and
   lost acknowledgements. Successful delivery cannot be revoked by a late failed
   attempt, and already acknowledged events are not posted again by lifecycle hooks.

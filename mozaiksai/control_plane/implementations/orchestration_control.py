@@ -38,6 +38,7 @@ from mozaiksai.core.artifacts import ArtifactStore
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
+from mozaiksai.core.usage.context import AuxiliaryUsageContext, resolve_auxiliary_usage_context
 
 from .coding_worker import ScopedRefinementCodingWorker, get_coding_worker
 from .contract_surface_planner import ContractSurfacePlanner, get_contract_surface_planner
@@ -142,6 +143,7 @@ class OrchestrationControlHarness:
         user_id: str | None = None,
         requested_workflow_id: str | None = None,
         default_source_surface: str | None = None,
+        usage_context: AuxiliaryUsageContext | None = None,
     ) -> RefinementRequest | None:
         """Normalize a builder refinement payload into the typed request contract."""
 
@@ -152,6 +154,7 @@ class OrchestrationControlHarness:
             user_id=user_id,
             requested_workflow_id=requested_workflow_id,
             default_source_surface=default_source_surface,
+            usage_context=usage_context,
         )
 
     async def route_refinement_request(
@@ -320,6 +323,7 @@ class OrchestrationControlHarness:
             app_id=str(refinement_request.app_id or "").strip(),
             target_app_id=refinement_request.target_app_id,
             user_id=str(refinement_request.user_id or "").strip() or None,
+            usage_context=refinement_request.usage_context,
             build_family=refinement_request.build_family,
             build_key=refinement_request.normalized_build_key(),
             build_record_id=refinement_request.build_record_id,
@@ -375,6 +379,15 @@ class OrchestrationControlHarness:
             metadata["explicit_file_count"] = len(request.files)
             return request.model_copy(update={"metadata": metadata}), decision
 
+        refinement_request = refinement_request.model_copy(update={
+            "app_id": request.app_id,
+            "user_id": request.user_id,
+            "target_app_id": request.target_app_id,
+            "usage_context": resolve_auxiliary_usage_context(
+                app_id=request.app_id, user_id=request.user_id, context=request.usage_context,
+                target_app_id=request.artifact_app_id, run_build_binding=request.run_build_binding,
+            ),
+        })
         proposal = await self._scope_proposer.propose(
             refinement_request=refinement_request,
             routing_decision=routing_decision,

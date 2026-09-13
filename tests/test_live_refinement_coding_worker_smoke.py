@@ -228,7 +228,7 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
         plan=_build_plan(request_id=REQUEST_ID, staging_root=tmp_path / ".refinement_staging", request=REQUEST_TEXT, app_id=APP_ID),
     )
     worker = ScopedRefinementCodingWorker(
-        agent_factory=lambda sp, lc: _FakeAgent(),
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(),
         tool_executor=executor,
         source_validation_runner=_manual_validation_runner,
         artifact_store=store,
@@ -238,6 +238,7 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
     result = await worker.execute(
         CodingWorkerRequest(
             app_id=APP_ID,
+            user_id="smoke-owner",
             artifact_kind="app_bundle",
             artifact_key="app_bundle",
             artifact_version_id="av_refinement_live_worker_smoke_001",

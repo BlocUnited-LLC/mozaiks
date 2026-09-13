@@ -142,6 +142,18 @@ watchpoints:
     verification_tests:
       - tests/test_ag2_network_execution_alignment.py
 
+  - watchpoint_id: AG2-WP-014
+    ag2_surface: Agent-level middleware across native schema-correction turns
+    mozaiks_surface: mozaiksai/core/adapters/ag2_agent_runner.py
+    status: WATCH
+    last_verified_version: "1.0.3"
+    trigger: AG2 changes correction middleware inheritance or exposes complete attempt usage.
+    replacement_condition: Keep one native response-accounting path; adopt attempt provenance only after coverage and deduplication proof.
+    verification_tests:
+      - tests/test_auxiliary_usage_accounting.py
+      - tests/test_ag2_usage_middleware.py
+      - tests/test_ag2_model_call_limits.py
+
 private_api_register:
   - private_api_id: AG2-PRI-001
     ag2_surface: HubClient durable human reattachment internals
