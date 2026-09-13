@@ -14,8 +14,8 @@ description: >
   Runtime truth remains the structured outputs, build_tasks, owned_paths, and
   runtime loaders — not this catalog.
 
-  Authenticated app scaffolds are emitted by AuthScaffoldAgent through
-  save_auth_scaffold outside AppBuildPlan build_tasks. config/auth.yaml
+  Authenticated app scaffolds are emitted through save_auth_scaffold outside
+  AppBuildPlan build_tasks. config/auth.yaml
   validates against the shared mozaiks.auth.v1 model; ui/auth/authAdapter.js
   delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
   local demo identity implementations. Backend configuration selects auth mode.
@@ -23,7 +23,7 @@ description: >
 task_contracts:
   page_bundle:
     owner_agent: AppSchemaAgent
-    summary: Declarative persistent app UI bundle owned by AppSchemaAgent.
+    summary: Declarative persistent app UI bundle for the page_bundle task.
     required_outputs:
       - ui/pages/*.yaml
     optional_outputs:
@@ -346,13 +346,13 @@ backend_helper_files:
       - workflow or agent orchestration logic
       - arbitrary file splitting to break up long files
     rules:
-      - must be declared in current_build_task.owned_paths or python_stubs before ServiceAgent generates it
+      - must be declared in current_build_task.owned_paths or python_stubs before the business_services task generates it
       - must be imported by at least one canonical backend layer (handler.py, service.py) or referenced by runtime_extensions.yaml
       - must be module-local — no cross-module imports except to managed capability service interfaces
       - must not create new public module actions or bypass the handler dispatch contract
-      - AppPlanAgent must declare it with a short rationale in the build task initial_message
-      - ConfigMiddlewareAgent must add it to python_stubs before ServiceAgent runs
-      - ServiceAgent must not invent helper files that do not appear in python_stubs
+      - The build task initial_message must declare it with a short rationale
+      - The module contract output must include it in python_stubs before backend implementation
+      - Backend implementation must not invent helper files that do not appear in python_stubs
 
   runtime_extension_entrypoints:
     description: >
@@ -363,11 +363,11 @@ backend_helper_files:
     api_router:
       required_stub: backend/{router_file}.py
       factory_function: get_router
-      note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
+      note: Must be declared in python_stubs before backend implementation generates it.
     startup_service:
       required_stub: backend/{worker_file}.py
       service_class: "{ServiceClass}"
-      note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
+      note: Must be declared in python_stubs before backend implementation generates it.
 
   event_pipeline_conventions:
     description: >
@@ -481,4 +481,3 @@ backend_helper_files:
     - backend/verification_poller.py # startup_service — background DNS/state poller (event_pipeline)
     - backend/ssl_status_poller.py   # startup_service — background certificate poller (event_pipeline)
     - backend/account_data_handler.py # AccountDataHandler — GDPR delete + export for user-scoped modules
-

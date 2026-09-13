@@ -41,6 +41,11 @@ Do not describe one of these as another.
 
 ## Change Rules
 
+- For prompt changes, apply the shared
+  [Workflow Prompt Input Rule](../../docs/agent-engineering-contract.md#workflow-prompt-input-rule)
+  and verify input delivery using the
+  [Semantic Prompt Inputs](../../docs/architecture/workflows/workflow-authoring-contracts.md#semantic-prompt-inputs)
+  authoring checklist.
 - When a sequence changes, inspect the owning workflow list, dependencies,
   entrypoints, transitions, and affected declarative families together.
 - If a `workflow_sequence` id changes, update any `control_plane.yaml` routes,

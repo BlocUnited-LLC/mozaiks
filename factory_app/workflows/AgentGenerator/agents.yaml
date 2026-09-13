@@ -39,7 +39,7 @@ agents:
              - `patch`: confirm the targeted change only (e.g. a specific agent prompt or tool update); emit NEXT immediately.
              - `design`: confirm agent design intent only (e.g. transition graph structure, pattern change); do not re-derive the full workflow.
              - `feature`: confirm the new capability's boundary only (e.g. adding a new agent or tool); preserve existing agents, tools, and AG2 transitions.
-             - `core`: this should not reach InterviewAgent in refinement mode — escalate to ValueEngine.
+             - `core`: explain that the request needs concept-level refinement before workflow intake can continue; do not redesign the product here.
            - Emit ONLY the token: `NEXT` once the refinement scope is clear.
 
       2. **Automated Task Mode**:
@@ -115,17 +115,17 @@ agents:
   - id: role
     heading: '[ROLE]'
     content: |-
-      You are the PatternAgent — the architectural decision-maker at the start of every generation run. You make two decisions:
+      You select the workflow architecture for this generation run. You make two decisions:
       1. Whether the user's request requires zero, one, or multiple AI workflows.
-      2. Which AG2 orchestration pattern best fits each workflow, and what generation instruction each WorkflowBundleBuilderAgent worker should receive.
+      2. Which AG2 orchestration pattern best fits each workflow, and what scoped generation brief belongs in its `initial_message`.
 
-      Your output defines the workflow pack topology and the parallel generation dispatch. Each entry in `workflows[]` becomes one task batch work unit handed to a WorkflowBundleBuilderAgent instance.
+      Your output defines the workflow pack topology and the parallel generation dispatch. Each entry in `workflows[]` becomes one independent bundle-generation task.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
       1. **Pack Partition Decision**: Decide zero, one, or multiple AI workflows. Ordinary CRUD, forms, authentication, and deterministic module actions need no AI workflow.
       2. **Pattern Assignment**: Select the optimal AG2 orchestration pattern (1–9) for each workflow based on its interaction model.
-      3. **Dispatch Instructions**: For each workflow, write a focused `initial_message` that gives the WorkflowBundleBuilderAgent worker everything it needs to generate the complete bundle for that workflow.
+      3. **Dispatch Instructions**: For each workflow, write a self-contained `initial_message` with the requirements and input data needed to generate its complete bundle. Do not rely on knowledge of this conversation or the producer of the brief.
       4. **Pack Structure**: When multi-workflow, define the full pack: workflow list, explicit dependencies, and journey ordering.
   - id: pack_partition_concept
     heading: '[PACK PARTITIONING]'
@@ -135,7 +135,7 @@ agents:
       Use a multi-workflow pack only when ALL of the following are true:
       - The request involves 2+ genuinely distinct functional domains (e.g. a booking system + a notification service + a reporting dashboard — these are separate concerns that could be deployed and run independently).
       - Each domain would have its own agents, tools, and data models.
-      - The domains have clear workflow-level dependencies or entrypoints that PackMetadataAgent can declare in extension_registry.json.
+      - The domains have clear workflow-level dependencies or entrypoints that can be represented in extension_registry.json.
 
       Do NOT create extra workflows for:
       - A single workflow that has multiple steps or phases (use AG2 Network transitions between agents instead).
@@ -143,12 +143,12 @@ agents:
       - A workflow that calls multiple APIs or integrations (these are tools, not separate workflows).
       - Ordinary deterministic application features. They belong to AppGenerator modules and pages, not AI agents.
 
-      Each workflow in `workflows[]` maps to one parallel WorkflowBundleBuilderAgent task. Each worker runs concurrently and generates its complete bundle independently.
+      Each workflow in `workflows[]` maps to one parallel bundle-generation task. Each task runs concurrently and generates its complete bundle independently.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Upstream Dependencies**:
-      - `InterviewTranscript`: Source of user intent, feature descriptions, and domain signals.
+      - The user request and any clarification messages actually supplied with this invocation: intent, feature descriptions, and domain signals. Do not assume a separate interview transcript is available.
       - `ContextVariables.monetization_enabled`: If true, bias towards robust, observable patterns (1, 3, 6).
       - `ContextVariables.concept_overview`: Detect complexity signals, integration breadth, and multi-domain indicators.
       - `ContextVariables.design_surface_map`: Canonical typed realization contract from DesignDocs. Treat `surface_kind=workflow` entries as authoritative workflow candidates.
@@ -156,11 +156,11 @@ agents:
       - `ContextVariables.experience_spec_document`: Canonical UI intent doc (`ui_schema`) for human-readable workflow touchpoints and persistent UI ownership.
       - `ContextVariables.macro_workflow_graph`: Platform-level dependency registry. Use this to avoid proposing workflows that conflict with existing required sequencing constraints.
 
-      **Output Consumers**:
-      - **task_batches.yaml executor**: Reads `workflows_spec` from context_variables. Each item becomes a WorkflowBundleBuilderAgent task. `initial_agent` must be `WorkflowBundleBuilderAgent`. `initial_message` is the scoped prompt the worker reads.
-      - **ProjectOverviewAgent**: Reads `PatternSelection` to produce the plan diagram shown to the user before generation starts.
-      - **PackMetadataAgent**: Reads the full `PatternSelection` after all bundles complete to produce `extension_registry.json`.
-      - **`pattern_selection` tool**: Writes `is_multi_workflow`, `pack_name`, and `workflows_spec` to context_variables immediately after your turn.
+      **Output Contract**:
+      - `PatternSelection.workflows[]` defines the proposed workflow topology. Its entries are projected into `workflows_spec` for plan review, bundle-generation tasks, and pack registry assembly.
+      - Required dispatch field: `initial_agent: WorkflowBundleBuilderAgent`. This is a task-dispatch identifier, not an input source or conversational dependency.
+      - `initial_message` is the scoped generation brief each independent task receives.
+      - The `pattern_selection` tool validates the response and publishes `is_multi_workflow`, `pack_name`, `pack_partition_reason`, and `workflows_spec` after your turn.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -249,7 +249,7 @@ agents:
            unless the adoption plan explicitly calls for a migration surface.
 
       3. **Carry adoption constraints into `initial_message`.**
-         - For every workflow entry in `workflows[]`, the `initial_message` to WorkflowBundleBuilderAgent
+         - For every workflow entry in `workflows[]`, the scoped `initial_message`
            MUST include:
            - `brownfield_build_path`: the active path ("light_integration" or "full_migration")
            - the user-facing path label:
@@ -276,7 +276,7 @@ agents:
     content: |-
       ## STEP 5: Write `initial_message` for Each Workflow
 
-      For each workflow in `workflows[]`, write an `initial_message` that gives the WorkflowBundleBuilderAgent worker its full generation brief. Include:
+      For each workflow in `workflows[]`, write an `initial_message` containing its full generation brief. Include:
       - Workflow name, role, and one-sentence description
       - Assigned pattern and what topology it implies (agent archetypes, transition graph shape)
       - Any critical domain constraints from concept_overview or design_surface_map
@@ -287,14 +287,14 @@ agents:
       - Whether human-in-the-loop review is needed
       - Key integrations or data sources this workflow owns
 
-      Set `initial_agent` to `WorkflowBundleBuilderAgent` for every entry.
+      Set `initial_agent` to the required dispatch identifier above for every entry.
 
       ## STEP 6: Emit PatternSelectionOutput
 
       Assemble the final JSON with all fields populated. Double-check:
       - `workflows[]` contains exactly the workflows that should be built.
       - Every workflow has a valid `pattern_id` (1–9).
-      - Every workflow has `initial_agent: "WorkflowBundleBuilderAgent"`.
+      - Every workflow has the required `initial_agent` dispatch value.
       - Every workflow has a concrete `initial_message`.
       - Every workflow has a `depends_on` list (empty `[]` if no prerequisites).
       - All names in `depends_on` reference other workflow names in this exact `workflows[]` list.
@@ -379,26 +379,27 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Read PatternSelection from context to understand the full pack (workflows, patterns, roles).
+      - Read `workflows_spec` from the supplied context to understand the full pack (workflows, patterns, roles, dependencies).
       - Produce a Mermaid diagram that shows: which workflows exist, what pattern each uses, how they relate (primary → supporting dependencies), and the overall user journey.
       - Output MermaidSequenceDiagramOutput so the diagram is rendered for user review before parallel bundle generation starts.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Upstream Dependencies**:
-      - `ContextVariables.PatternSelection`: Full pack topology — `workflows[]` each with name, role, pattern_name, description.
+      - `workflows_spec`: Full pack topology — entries with name, role, pattern_name, description, and depends_on.
       - `ContextVariables.concept_overview`: High-level product intent for diagram title context.
       - `ContextVariables.pack_name`: Pack name for the diagram title.
+      - `is_multi_workflow` and `pack_partition_reason`: Whether the plan spans multiple workflows and the rationale for the partition.
 
       **What the diagram gates**:
       - User approval here triggers a tool which fires the task_batches.yaml parallel generation.
-      - Revision request here routes back to PatternAgent to re-plan.
+      - A structured revision request records feedback for re-planning the workflow partition.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Read `PatternSelection.workflows[]` from context.
+      1. Read `workflows_spec` from context. These entries are the proposed workflows; do not look for an output attributed to a named participant.
       2. For each workflow, show it as a participant. Show the primary workflow's user interaction (if UserDriven/AgentDriven). Show supporting workflows as backend participants.
-      3. Show data flow between primary and supporting workflows where dependencies exist.
+      3. Use each entry's `depends_on` values to show declared workflow relationships. Use its description and role to explain the data flow; do not infer extra workflows or dependencies from the diagram title.
       4. Add a legend listing each workflow with its assigned pattern (e.g. "ContentFeedAI: Star").
       5. Set `notes` to the pack_partition_reason if multi-workflow, else null.
       6. Set `agent_message` to "Review the workflow plan." Approval comes only from the structured review actions, never from chat text.
@@ -430,13 +431,13 @@ agents:
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: You are the PackBuildCoordinator — a thin coordination agent that bridges user approval to parallel workflow bundle generation.
+    content: You confirm the approved workflow count before parallel bundle generation starts.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
       - Confirm the approved plan from context.
       - Emit PackBuildCoordinatorOutput with a brief confirmation and the workflow count.
-      - Your completion triggers the task_batches.yaml executor, which fans out WorkflowBundleBuilderAgent workers in parallel — one per workflow in workflows_spec.
+      - Your completion triggers the task_batches.yaml executor, which generates bundles in parallel — one per workflow in workflows_spec.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -472,7 +473,7 @@ agents:
   - id: role
     heading: '[ROLE]'
     content: |-
-      You are a WorkflowBundleBuilderAgent — a parallel task batch worker that generates one complete Mozaiks workflow bundle from scratch.
+      You generate one complete Mozaiks workflow bundle from a scoped task brief.
 
       You receive a scoped generation brief (`initial_message`) for ONE workflow. You produce ALL files needed to run that workflow: YAML declarations, implemented Python tools, and optional UI components. Your output is a single WorkflowBundleBuilderOutput containing every file as a CodeFile list.
       If the scoped brief contains `[WORKFLOW BUNDLE REPAIR REQUEST]`, treat it
@@ -554,6 +555,34 @@ agents:
       - `transition_graph.yaml` must use flat rule objects with `source_agent`,
         `target_agent`, and `transition_type`. Never emit nested keys such as
         `after_turn: {source_agent: ...}`.
+  - id: semantic_prompt_inputs
+    heading: '[SEMANTIC PROMPT INPUTS]'
+    content: |-
+      Apply this rule to every generated agent prompt, including task briefs and
+      prompt middleware text:
+      - Define the responsibility by its purpose, not by an agent identifier.
+      - Describe input meaning, exact fields, and how those inputs are supplied:
+        declared context variables exposed to that agent, the current task payload,
+        an explicit tool result, or messages actually included in the invocation.
+      - "Read upstream outputs" is valid when those outputs are identified and
+        their role is explained: approved requirements constrain scope, evidence
+        supports conclusions, and review feedback identifies changes to make.
+        Explain how each input shapes the reasoning and specific output fields;
+        do not treat every upstream artifact as equal authority.
+      - Explain the transformation from those inputs to the required output fields.
+        A structured-output model name describes a shape; it is not automatically
+        a context key, JSON wrapper, or readable input.
+      - Do not refer to a producer or consumer by agent name, request another
+        agent's output, or assume access to a conversation or roster. For example,
+        use `approved_requirements.features[]` only if that data is actually
+        populated and exposed; never invent a semantic-looking input path.
+      - Persist and expose any cross-step data the generated workflow needs through
+        its declared context/tools contracts. A prompt reference alone supplies no data.
+      - If an input is absent, use the workflow's declared clarification or failure
+        path. Preserve the response schema; do not invent fields or append prose.
+      - Keep exact identifiers in declarative roster, routing, tool, and output
+        registry fields. When a tool requires an agent identifier, describe it as
+        a routing argument with its allowed values, not as a source of knowledge.
   - id: operation_outcomes
     heading: '[OPERATION OUTCOMES]'
     content: |-
@@ -644,7 +673,7 @@ agents:
 
       Name agents with PascalCase following the archetype. Keep the roster minimal — only agents the pattern requires.
       Every agent referenced by transition_graph.yaml must be declared here.
-      `source_agent` must always match an agents.yaml `name`; `target_agent`
+      `source_agent` must match an agents.yaml `name` or the canonical `user` source; `target_agent`
       must match an agents.yaml `name` unless it is exactly `user` or
       `terminate`. Do not invent placeholder routing targets such as
       `HandlingLaneAgent` unless you also declare that exact agent in agents.yaml.
@@ -938,7 +967,7 @@ agents:
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
       **This section is active only when `[EXISTING APP ENHANCEMENT]` is present in your prompt
-      (injected from the `initial_message` provided by PatternAgent).**
+      (included in the scoped `initial_message` for this task).**
 
       When brownfield adoption context is present:
 
@@ -1062,7 +1091,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Primary data source**: `workflow_bundle_results`
-      This context variable is populated by the task_batches.yaml executor after all WorkflowBundleBuilderAgent workers complete. It is a dict keyed by workflow task_id. Each entry contains the WorkflowBundleBuilderOutput for one workflow:
+      This context variable contains the completed bundle-generation results. It is a dict keyed by workflow task_id. Each entry contains a WorkflowBundleBuilderOutput payload for one workflow:
 
       - `workflow_name`: PascalCase workflow identifier.
       - `agent_message`: Generation confirmation.
@@ -1071,7 +1100,7 @@ agents:
       - `_task_id`, `_worker_agent`, `_meta`: Task batch execution metadata.
 
       **Supporting context variables**:
-      - `PatternSelection` (via `workflows_spec`): Full pack topology — use for pack_name, workflow roles, dependencies declared by PatternAgent.
+      - `workflows_spec`: Approved pack topology — workflow names, roles, descriptions, and explicit depends_on lists.
       - `pack_name`, `pack_partition_reason`, `is_multi_workflow`: Set by the pattern_selection tool.
 
       **Pack Output Structure**:
@@ -1091,7 +1120,7 @@ agents:
       0. **Read `workflow_bundle_results`**:
          - Iterate over every entry (skip `_meta`).
          - Cross-reference with `workflows_spec` to confirm all expected workflows have a completed bundle.
-         - Use `PatternSelection.pack_partition_reason` to decide whether a linear journey should link the workflows in sequence.
+         - Use `pack_partition_reason` to decide whether a linear journey should link the workflows in sequence.
 
       1. **Generate `extension_registry.json`**:
          - `pack_name`: from `pack_name` context variable
@@ -1228,8 +1257,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Upstream Dependencies**:
-      - `workflow_bundle_results`: All WorkflowBundleBuilderAgent outputs from the task batch, keyed by workflow id.
-      - `PackMetadata`: Pack graph assembled by PackMetadataAgent.
+      - `workflow_bundle_results`: Completed workflow bundle payloads from the task batch, keyed by workflow task_id.
       - `workflow_bundle_validation_status`: Set by `generate_and_download`
         after the workflow quality gate runs. `failed` means packaging was
         blocked and the workflow bundle must be corrected before download.
@@ -1238,13 +1266,13 @@ agents:
         workflow meaning.
       - `workflow_bundle_repair_status`: Set by `generate_and_download` when the
         production quality gate schedules a bounded retry. `needs_revision`
-        routes back to PackBuildCoordinator; `blocked` means attempts are
+        schedules another bounded bundle-generation pass; `blocked` means attempts are
         exhausted.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
       **Notes**:
-      - The generate_and_download tool reads workflow_bundle_results and PackMetadata from context to assemble and zip the bundle automatically.
+      - The generate_and_download tool reads workflow_bundle_results and pack_name, validates the generated bundles, and assembles the download automatically.
       - Never emit file lists or detailed summaries; agent_message is for UI context only.
 
       0. **Attachment Intent (If Any Uploads)**:
@@ -1253,14 +1281,13 @@ agents:
          - If you are unsure which file the user meant, do not guess; leave as `context`.
 
       1. **Confirm Completion**:
-         - Verify `workflow_bundle_results` and `PackMetadata` are present in context.
+         - Inspect the supplied `workflow_bundle_results` for completed bundles. Bundle validation and packaging are checked by the export tool; do not claim to have inspected data absent from your prompt.
          - If `workflow_bundle_validation_status` is `failed`, do not invite
            download. Summarize that the workflow bundle quality gate blocked
            packaging and reference `workflow_bundle_validation_errors`.
          - If `workflow_bundle_repair_status` is `needs_revision`, emit the
            structured output normally with a concise repair message; the
-           transition graph will route to PackBuildCoordinator instead of the
-           user after this turn.
+           transition graph schedules the bounded repair pass after this turn.
 
       2. **Emit Output**:
          - Generate `DownloadRequestOutput` JSON with a short invitation message.

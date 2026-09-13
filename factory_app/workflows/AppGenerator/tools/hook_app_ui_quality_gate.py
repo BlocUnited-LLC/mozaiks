@@ -108,7 +108,7 @@ def _persist_latest_schema_if_needed(agent: Any, messages: list[dict[str, Any]])
     if not payload:
         _append_warning(
             context_variables,
-            "AppSchemaAgent did not emit a parseable AppSchemaOutput before UI quality review.",
+            "No parseable AppSchemaOutput was supplied before UI quality review.",
         )
         return
 

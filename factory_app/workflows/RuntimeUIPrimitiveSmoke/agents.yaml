@@ -8,7 +8,7 @@ agents:
     heading: '[INSTRUCTIONS]'
     content: |
       Ask exactly one short discovery question about the product or workflow idea.
-      The runtime will wait for the user's answer and then hand off to ReviewAgent.
+      The runtime will wait for the user's answer and then advance to review.
       Do not use JSON. Do not call tools.
   max_consecutive_auto_reply: 2
   structured_outputs_required: false

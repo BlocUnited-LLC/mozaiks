@@ -4,15 +4,11 @@ Repository-level guidance for coding agents working in this repo.
 
 ## Shared Engineering Contract
 
-The rules below are canonical for every agent and live in one place:
+Shared rules are canonical for every agent and live in one place:
 [docs/agent-engineering-contract.md](docs/agent-engineering-contract.md). Read it before
 changing code. Do not restate its rules here — a second copy drifts, and two agents then
 follow two different contracts.
 
-It covers: working path constraint, ADR authoring context, AG2 ownership boundary, release
-hold, contributor guidance operating system, generated deployment artifact contract,
-generated persistence contract, structured-output-first contract rule, contract-declared
-customization rule, and decision rules.
 ## Required Pre-Edit Architecture Check
 
 Before editing Mozaiks OSS:
@@ -45,21 +41,13 @@ Generated-app reliability takes precedence over maximum schema expressiveness.
 - When a schema/taxonomy changes, update the structured-output model, Factory prompts/hooks, deterministic materializer/templates, runtime loader/consumer, validation, docs, fixtures, and acceptance tests together.
 - `factory_app` and/or generated-app acceptance must dogfood generic schema/taxonomy changes where applicable.
 
-This repo is pre-1.0 and not in production. **Replace obsolete internal contracts directly by default.** Remove stale shapes, aliases, shims, fallback branches, dual-read/dual-write behavior, normalization of retired names, obsolete prompt guidance, and retired tests in the same migration. Preserve an older shape only when an explicit current external contract or user-approved migration requirement proves it is necessary.
+Apply the shared [Pre-Production Replacement Policy](docs/agent-engineering-contract.md#pre-production-replacement-policy).
 
 The detailed implementation policy is
 [Canonical Schema Generation Policy](docs/architecture/CANONICAL_SCHEMA_GENERATION_POLICY.md).
 
-This repo uses layered FastAPI hosts as the canonical OSS server composition:
-- `mozaiksai.hosts.runtime`
-- `mozaiksai.hosts.platform`
-- `mozaiksai.hosts.studio`
-
-`mozaiksai.hosts.runtime` is the execution substrate. `mozaiksai.hosts.platform`
-is the headless app host. `mozaiksai.hosts.studio` is the Studio management
-interface host — the shared management layer for both local and hosted
-deployments. Hosted product repos compose their own app-local hosts on top of
-Studio; this OSS repo does not own a hosted-product FastAPI host.
+Host ownership, CLI/Studio separation, and workspace shell boundaries live in
+the shared [Host and Interface Boundaries](docs/agent-engineering-contract.md#host-and-interface-boundaries).
 
 Start via the CLI:
 
@@ -67,32 +55,6 @@ Start via the CLI:
 mozaiks serve ./my-app                  # platform host (no factory dependency)
 mozaiks serve ./my-app --host studio    # Studio management host (requires factory_app)
 ```
-
-
-CLI and Studio are **parallel interfaces** over shared system capabilities, not a
-superset chain. Studio is not the CLI's UI. CLI owns developer tooling (filesystem,
-scaffolding, process management). Studio owns the management interface (workspace
-status, build lifecycle, artifacts, run history, config).
-
-Profile stays person-scoped. Studio / Workspace Shell is the org/workspace home
-base. App shells remain separate and brandable per app; do not collapse org
-management into `/me`.
-
-The current repo layout is transitional. The canonical target is documented in
-[docs/architecture/foundations/distribution-and-workspace-model.md](docs/architecture/foundations/distribution-and-workspace-model.md).
-Do not reintroduce a hybrid root that mixes the starter app bundle with shared
-factory workflows.
-
-## Repo Status
-
-This codebase is **not in production**.
-
-That means optimization goals are different from a typical enterprise codebase:
-
-- Prefer the cleanest canonical implementation.
-- Prefer replacement over preservation.
-- Remove stale logic when a better contract or architecture is introduced.
-- Do not keep shims, aliases, wrappers, fallback branches, or duplicate schemas unless explicitly requested.
 
 ## No Paid Infrastructure Until Launch
 
@@ -113,24 +75,6 @@ Rules for agents:
   placeholder — it is not currently provisioned.
 - If a task requires a cloud service that costs money, note it as a
   pre-launch prerequisite and stop — do not provision it.
-
-## Replacement Policy
-
-When adjusting behavior:
-
-- Replace outdated logic instead of layering new logic on top of it.
-- Delete obsolete prompt guidance, docs, tests, config fields, and dead code paths that no longer match the current contract.
-- Do not leave temporary outdated branches behind.
-- Do not preserve outdated shapes without an explicit current contract reason.
-
-If a new contract is introduced, update all affected layers together:
-
-- runtime behavior
-- generator prompts/hooks
-- declarative schemas
-- validation
-- docs
-- tests
 
 ## Clean Code Standard
 
@@ -485,6 +429,9 @@ generated/workflows/{app_id}/{build_id}/{workflow_name}/
 Only explicit promotion may copy validated artifacts into an active app root.
 
 ## Workflow Contract Rule
+
+Apply the shared [Workflow Prompt Input Rule](docs/agent-engineering-contract.md#workflow-prompt-input-rule)
+when authoring Factory prompts or generated workflow guidance.
 
 When working in or generating workflows:
 

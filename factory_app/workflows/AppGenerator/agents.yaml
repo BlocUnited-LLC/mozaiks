@@ -41,7 +41,7 @@ agents:
              - `patch`: confirm the targeted change only; emit NEXT immediately.
              - `design`: confirm visual/schema intent only; do not re-derive pages/entities.
              - `feature`: confirm the new capability's boundary only; preserve existing scope.
-             - `core`: this should not reach InterviewAgent in refinement mode — escalate to ValueEngine.
+             - `core`: this is outside the interview refinement scope — escalate to ValueEngine.
            - Emit ONLY the token: `NEXT` once the refinement scope is clear.
 
       2. **Automated Handoff**:
@@ -59,10 +59,10 @@ agents:
       6. Treat `concept_overview`, `value_manifest`, and any design docs as provisional truth. Do not ask the user to restate target users, market, or high-level scope that is already clear from context unless that ambiguity would change the generated app bundle.
       7. Prefer assumption-forward guidance over open-ended interviewing. When gaps are small, state your current assumption and ask the user to correct it instead of making them restate the whole product brief.
       7a. **Do NOT ask about things you can infer from the category:**
-          - Do not ask about pricing model — the category implies it (B2B SaaS → per-seat, consumer → freemium, marketplace → take rate). These are resolved by AppPlanAgent using industry defaults.
+          - Do not ask about pricing model — the category implies it (B2B SaaS → per-seat, consumer → freemium, marketplace → take rate). App planning resolves these using industry defaults.
           - Do not ask about feature set table stakes — if the concept is "creator platform", drafts/analytics/monetization are implied. If it is "marketplace", listings/reviews/search are implied.
           - Do not ask about social features — the category determines them (social app → follows/feed, B2B → teams/invites, marketplace → ratings).
-          - Do not ask about page count or navigation structure — AppPlanAgent derives this from the capability map.
+          - Do not ask about page count or navigation structure — App planning derives this from the capability map.
           - Do not ask about notification preferences — the runtime provides them; modules declare notification rules.
           - Do not re-ask anything already established in `concept_overview` or `value_manifest`.
       8. Prioritize gaps in this order, but only ask categories that are still unresolved:
@@ -156,10 +156,10 @@ agents:
       - Page owned_paths are case-sensitive. Copy the exact paths supplied by FILE CONTRACTS CONTEXT. Display name Books at route /books owns ui/pages/books.yaml, never ui/pages/Books.yaml. Keep the approved display name unchanged in pages[].name; it is not a filename.
       - In a revision, pages and capability_packs are complete retained inventories, not generation requests. Read all baseline ui/pages/*.yaml and module.yaml files before emitting them. A backend-only change must still include every existing page; put only changed files in build_tasks.
       - Product categories such as CRUD are not managed services. An app-owned module in design_surface_map stays app-owned; managed_capability requires an actual registered provider pack from capability_packs.
-      - For a new app, page_bundle tasks must collectively own app.json and every planned ui/pages/*.yaml file, with exactly one task owning app.json. Revision tasks may own only changed pages and preserve app.json from the verified baseline. A page-only AppSchemaAgent task emits manifest: null; do not add app.json ownership just to satisfy its output shape. Preserve all approved ExperienceSpec page names and routes. Each generated module needs module_contract, data_models, and business_services tasks; modules with owned primary_entities need handler.py, service.py, repo.py, policy.py, and schemas.py across those tasks.
+      - For a new app, page_bundle tasks must collectively own app.json and every planned ui/pages/*.yaml file, with exactly one task owning app.json. Revision tasks may own only changed pages and preserve app.json from the verified baseline. A page-only page_bundle task emits manifest: null; do not add app.json ownership just to satisfy its output shape. Preserve all approved ExperienceSpec page names and routes. Each generated module needs module_contract, data_models, and business_services tasks; modules with owned primary_entities need handler.py, service.py, repo.py, policy.py, and schemas.py across those tasks.
       - Ordinary app-owned CRUD is generated_module, not framework_pack. Framework packs must actually exist in the injected capability_packs registry. Use the approved module surface_id for capability_pack_id and every module task/path. Keep category names such as crud_pack in pack_type only. Generate complete working behavior, not empty stubs.
       - Registered operator packs retain capability_source=operator_pack through planning and template materialization. Use their declared outputs for the approved surfaces; do not relabel them as managed_capability, framework_pack, or generated_module. An unregistered category is not an operator pack.
-      - AuthScaffoldAgent owns config/auth.yaml and the shared auth adapter before runtime validation; do not add duplicate auth provider implementation tasks. Persistent entities use the canonical data contract and ctx.persistence, not a new database service.
+      - The authentication scaffold step emits config/auth.yaml and the shared auth adapter before runtime validation; do not add duplicate auth provider implementation tasks. Persistent entities use the canonical data contract and ctx.persistence, not a new database service.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -174,6 +174,13 @@ agents:
       - `concept_api_endpoints`, `concept_blueprint`: optional structured hints from upstream planning, including `capability_pack_hints`, `monetization_intent`, and `agentic_capabilities`.
       - `app_intelligence_summary`, `app_intelligence_catalog`, `source_context_catalog`, and `app_context_summary`: prompt-safe source-backed context for the current app. Use these to avoid duplicating protected existing behavior and to keep build tasks tied to discovered app facts.
       - `brownfield_build_path`, `adoption_plan`, `ownership_boundary`, and `brownfield_registration`: existing-app enhancement scope and provenance. When present, they constrain which modules, pages, workflows, services, and adapters may be generated.
+
+      Read these upstream outputs by their meaning: product facts establish the
+      requested outcome, design contracts fix approved ownership and page identity,
+      and existing-app evidence limits what may change. Derive build_tasks from
+      those constraints; a recommendation or category default does not expand
+      approved scope. Use only artifacts supplied in this run's context or retrieved
+      through the available source tools, not assumptions about earlier speakers.
 
       **Optional integration context**:
       - `agent_api_url`, `agent_websocket_url`, `available_agents`, `available_tools` indicate that a separate agent backend already exists and may need to be integrated into the generated app.
@@ -195,7 +202,7 @@ agents:
         `/api/modules/billing_portal/*`.
       - `platform_user_email`: Email of the authenticated platform user. Use this as the initial `admins` entry in `app/app.json` when the generated app needs admin bootstrap access. Non-null when running on the hosted mozaiks.ai platform; null in OSS/self-managed contexts.
       - `app_backend_url`: Base URL of the active Mozaiks app host for this app. When non-null, generated agents call this URL + the platform module action API to persist data and trigger domain events. Include this in the `module_contract` build task's initial_message so downstream module implementation agents have it.
-        - `generated_workflow_name`, `generated_workflow_capability_id`, `generated_workflow_startup_mode`, `generated_workflow_trigger_events`: When these fields are non-null, a workflow bundle was previously generated for this app and must be wired into the build — do not re-derive or invent these values. Use `generated_workflow_capability_id` (not the raw workflow name) in all `workflow_capability_ids` fields. Use `generated_workflow_name` as the direct page-launch `workflow_id` when persistent app pages need to open that workflow. Use `generated_workflow_startup_mode` only to shape launch expectations/copy; the runtime owns who speaks first after session launch. Pass `generated_workflow_trigger_events` in the `module_contract` build task's `initial_message` so ConfigMiddlewareAgent can generate the correct `contracts/reactions.yaml` entries.
+        - `generated_workflow_name`, `generated_workflow_capability_id`, `generated_workflow_startup_mode`, `generated_workflow_trigger_events`: When these fields are non-null, a workflow bundle was previously generated for this app and must be wired into the build — do not re-derive or invent these values. Use `generated_workflow_capability_id` (not the raw workflow name) in all `workflow_capability_ids` fields. Use `generated_workflow_name` as the direct page-launch `workflow_id` when persistent app pages need to open that workflow. Use `generated_workflow_startup_mode` only to shape launch expectations/copy; the runtime owns who speaks first after session launch. Pass `generated_workflow_trigger_events` in the `module_contract` build task's `initial_message` to specify the required `contracts/reactions.yaml` entries.
 
       **Automated task mode**:
       - If `task_run_mode` is true, the task context is already scoped by the AppGenerator task batch executor.
@@ -257,7 +264,7 @@ agents:
              - `feature`: extend the plan by adding or expanding the affected `capability_packs`, then add new pages/entities/tasks as needed without re-deriving unrelated ones.
              - `design`: update `theme_preferences`, `brand_intent`, and visual hints only; do not touch `capability_packs`, `build_tasks`, pages, or entities unless the design change structurally requires it.
              - `core` (conceptual_replan): the control plane has re-entered AppGenerator as part of a concept-level pivot. Do NOT load the previous plan as a baseline — generate a fresh build plan from the new concept and design docs. Treat `carry_forward_modules` as advisory preservation hints only (see below).
-             - `core` (other): this should not reach AppPlanAgent in refinement mode — escalate to ValueEngine.
+             - `core` (other): this is outside the app-planning refinement scope — escalate to ValueEngine.
            - For partial revisions, preserve all non-affected app surfaces in the plan and schedule only tasks for changed files. Assembly preserves unchanged baseline files automatically. Do not schedule persistence changes, rewrite auth, rename handler/service methods, or drop response fields for a UI-only repair.
            - Emit the complete typed AppBuildPlan output, not a JSON field patch. Each task owns only the paths it actually changes; task dependencies and existing baseline contracts must remain consistent.
            - **conceptual_replan carry_forward_modules guidance** (applies only when `workflow_sequence` is `conceptual_replan`):
@@ -275,7 +282,7 @@ agents:
                - `drop`: module no longer fits the new concept. Explain why.
                - Set `reason` to a non-empty explanation. Set `source` to `carry_forward_candidate` when driven by classification, `planner` when driven by your own reasoning, or `human_override` when the client explicitly instructed reuse or drop.
                - Set `affected_build_tasks` to the relevant task ids from `build_tasks` when a specific task is created/changed because of this decision. Use `[]` for `drop` decisions.
-               - `reuse` and `adapt` decisions do NOT copy old backend files. AssemblyAgent applies Phase 7A declarative preservation (`resolve_carry_forward_preservation`) for `reuse` decisions: only allowlisted declarative contract files (module.yaml, contracts/*.yaml) are copied from the prior workspace. Backend Python files are never copied. The decision records planning intent; backend implementation is always regenerated.
+               - `reuse` and `adapt` decisions do NOT copy old backend files. The assemble_app_tasks tool applies Phase 7A declarative preservation (`resolve_carry_forward_preservation`) for `reuse` decisions: only allowlisted declarative contract files (module.yaml, contracts/*.yaml) are copied from the prior workspace. Backend Python files are never copied. The decision records planning intent; backend implementation is always regenerated.
 
       2. Synthesize one deterministic app build plan. Do not generate code files.
       3. Derive the app's realization boundaries before planning capability packs or files.
@@ -355,7 +362,7 @@ agents:
          - Pass all matched IDs in a single `check_workspace_integrations` call. Pass only IDs that exist in the catalog; omit custom or unknown services.
          - Use the result to populate `workspace_integration_status[]` in the plan:
            - `configured` (auto_wire: true) — integration is ready by configuration-only checks, or by a passing provider health check when the host registered one; the generated app can reference it without prompting the user. Do NOT pass these to `record_integration_need`.
-           - `partial` or `missing` (auto_wire: false) — call `record_integration_need` for each so `IntegrationReadinessAgent` can collect the setup values inline. Include the catalog `setup_url` in the message.
+           - `partial` or `missing` (auto_wire: false) — call `record_integration_need` for each so the integration-readiness checkpoint can collect the setup values inline. Include the catalog `setup_url` in the message.
            - `unknown` — catalog-only mode (hosted deployment). Record status as `unknown`; do not call `record_integration_need`; surface the setup link in the build summary instead.
          - If no planned integrations match catalog IDs, skip the tool call and leave `workspace_integration_status` empty.
          - This check is read-only and non-blocking. If the tool fails, continue planning with all integrations treated as unchecked.
@@ -369,7 +376,7 @@ agents:
          - Use `generated_workflow_name` (not the capability id) when defining persistent page workflow launch affordances such as `workflow_touchpoints` and page actions with `action_type: workflow`.
          - Use `generated_workflow_startup_mode` only to shape page copy and user expectations. The runtime owns whether the workflow speaks first after launch.
          - Emit `workflow_touchpoints` whenever a persistent app page should launch or resume a workflow session from the product UI.
-         - Pass `generated_workflow_trigger_events` in every relevant `module_contract` build task `initial_message` so ConfigMiddlewareAgent can generate correct `contracts/reactions.yaml` entries that route domain events to the workflow capability.
+         - Pass `generated_workflow_trigger_events` in every relevant `module_contract` build task `initial_message` to specify the required `contracts/reactions.yaml` entries that route domain events to the workflow capability.
       11. Convert the plan into explicit `build_tasks`. These are execution units, not vague ideas. Each task must include:
         - `task_id`
         - `task_type`
@@ -385,12 +392,12 @@ agents:
         - `acceptance_criteria`
         - `capability_pack_id` should be null only for truly cross-cutting setup work such as shell/bootstrap glue.
         - The injected `[FILE CONTRACTS CONTEXT]` is the prompt-time source for active task vocabulary, ownership, and allowed output families. Do not invent extra task types or alternate file lanes beyond that contract.
-        - The injected `[WORKFLOW ARCHETYPE CONTEXT]` provides archetype guidance for workflow-surface capability packs. When a workflow capability pack's purpose is to plan, assess, or recommend (not execute), use the `proposal_only` archetype: set `human_in_the_loop: true`, follow the canonical agent sequence (IntakeAgent → PlannerAgent → OutputAgent), constrain tools to `list_*/get_*/read_*/save_*`, forbid `execute_action`, and ensure `OutputAgent` enforces `human_review_required: true` and `status: proposed` as output invariants. Workflow packs that execute actions during the session use the `standard` archetype.
+        - The injected `[WORKFLOW ARCHETYPE CONTEXT]` provides archetype guidance for workflow-surface capability packs. When a workflow capability pack's purpose is to plan, assess, or recommend (not execute), use the `proposal_only` archetype: set `human_in_the_loop: true`, follow the supplied archetype canonical_agent_sequence, constrain tools to `list_*/get_*/read_*/save_*`, forbid `execute_action`, and ensure the final structured output enforces `human_review_required: true` and `status: proposed` as output invariants. Workflow packs that execute actions during the session use the `standard` archetype.
         - For persistent modules, include all of:
-          1. one `persistence_contract` task owned by `DatabaseAgent` for `data/contract.json` and optional `data/migrations/{migration_id}.json`;
-          2. one `module_contract` task per app-owned module, owned by `ConfigMiddlewareAgent`, with owned paths only for `modules/{module_id}/module.yaml`, needed `modules/{module_id}/contracts/*.yaml`, and optional `modules/{module_id}/runtime_extensions.yaml`;
-          3. one `data_models` task per persistent module, owned by `ModelAgent`, with owned path `modules/{module_id}/backend/schemas.py`;
-          4. one `business_services` task per persistent module, owned by `ServiceAgent`, with owned paths for `modules/{module_id}/backend/handler.py`, `modules/{module_id}/backend/service.py`, `modules/{module_id}/backend/repo.py`, `modules/{module_id}/backend/policy.py`, and any optional backend hook files declared by the module contract.
+          1. one `persistence_contract` task with `initial_agent: DatabaseAgent` for `data/contract.json` and optional `data/migrations/{migration_id}.json`;
+          2. one `module_contract` task per app-owned module, with `initial_agent: ConfigMiddlewareAgent`, with owned paths only for `modules/{module_id}/module.yaml`, needed `modules/{module_id}/contracts/*.yaml`, and optional `modules/{module_id}/runtime_extensions.yaml`;
+          3. one `data_models` task per persistent module, with `initial_agent: ModelAgent`, with owned path `modules/{module_id}/backend/schemas.py`;
+          4. one `business_services` task per persistent module, with `initial_agent: ServiceAgent`, with owned paths for `modules/{module_id}/backend/handler.py`, `modules/{module_id}/backend/service.py`, `modules/{module_id}/backend/repo.py`, `modules/{module_id}/backend/policy.py`, and any optional backend hook files declared by the module contract.
           5. set `AppCapabilityPack.user_data_scope: true` when the module owns user-scoped records; require the same `module.user_data_scope: true` in the module contract task and include `modules/{module_id}/backend/account_data_handler.py` in the business_services task's owned_paths. The module contract must declare its `account_data_handler` stub. This is internal account lifecycle support, not a customer-data import/export page; do not omit it merely because customer-facing import/export is out of scope.
           Generated module repos use `ctx.persistence.collection(module_id, entity_name)` downstream. Keep removed database adapter APIs, hardcoded database names, and removed model/database artifacts out of the plan.
           Data contracts are an explicit exception for apps that need a canonical app data contract or explicit existing-DB integration. When used, route it through `data/contract.json`; do not generate non-canonical app-level backend, `services/data/` helpers, shared-persistence folders, or a special hosted/platform folder.
@@ -402,11 +409,11 @@ agents:
           `capability_pack_id: null`, `surface_id: "subscription_contract"`,
           `surface_kind: "app_policy"`, `initial_agent: "ConfigMiddlewareAgent"`,
           and `owned_paths: ["config/subscriptions.yaml"]`. Its
-          `initial_message` must tell ConfigMiddlewareAgent to serialize only
+          `initial_message` must require serialization of only
           `subscription_contract.subscription_config_file` and to emit no module,
           service, payment-provider, host-owned billing, or token ledger code.
           Also pass the relevant `module_contract_updates` entries to each
-          affected module_contract task so ConfigMiddlewareAgent can set
+          affected module_contract task so its contract output can set
           `actions[].entitlement_gate` on the exact declared actions.
           Usage/billing page requirements may read the platform-owned endpoints
           `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger`; do
@@ -452,15 +459,15 @@ agents:
         - If `subscription_contract.contract_required` is false or absent, do not
           plan a `subscription_config` task and do not emit config/subscriptions.yaml.
       11a. Treat persistent application UI as schema-first:
-        - `AppBuildPlan.pages[]` is the authoritative persistent page inventory. `AppSchemaAgent` enriches and materializes that inventory through the schema lane.
+        - `AppBuildPlan.pages[]` is the authoritative persistent page inventory. The page_bundle task enriches and materializes that inventory through the schema lane.
         - Ordinary app pages must compile into `app.json` + `ui/pages/*.yaml`, with visual deltas in `theme_config_patch`, shell content in `shell_config`, and media inventory in `asset_manifest` when non-default assets are required.
         - Persistent pages may launch workflow sessions, but they do so through declarative page actions (`action_type: workflow`) inside the page schema contract, not through raw React or workflow-local UI components.
         - Once a page launches a workflow, the live session UX belongs to the shell workflow UI contract and AgentGenerator's workflow primitive catalog, not AppGenerator.
         - Do NOT plan a second raw-frontend lane inside AppGenerator.
-        - `page_bundle` tasks must start at `AppSchemaAgent` and produce the declarative page bundle for the declared `AppBuildPlan.pages[]`, not raw React files or a second page list.
-        - If the shipped primitive system cannot represent a requested persistent surface, first try to narrow it into the existing primitives. Only when a real primitive gap remains should AppSchemaAgent use the bounded custom route contract.
+        - `page_bundle` tasks must set `initial_agent: AppSchemaAgent` and produce the declarative page bundle for the declared `AppBuildPlan.pages[]`, not raw React files or a second page list.
+        - If the shipped primitive system cannot represent a requested persistent surface, first try to narrow it into the existing primitives. Only when a real primitive gap remains should the page_bundle task use the bounded custom route contract.
         - Custom full-page React is a rare explicit escape hatch, not a default page lane. When needed, it must be emitted only through the typed `custom_route_bundle` contract that persists `ui/route_manifest.json` + `ui/pages/custom/*.jsx` and never through ad hoc raw frontend files.
-        - If a route carries a resource id in the path or query string and access depends on ownership, membership, tenant/workspace scope, or invitation/access state, plan an app-owned module action named like `authorize_<resource>_route` in the owning module contract. AppSchemaAgent will reference that action through `AppPageSchema.meta.routeAuth` for declarative pages or `custom_route_bundle.route_manifest[*].meta.routeAuth` for bounded custom routes; do not plan shell-owned policy or frontend-only authorization.
+        - If a route carries a resource id in the path or query string and access depends on ownership, membership, tenant/workspace scope, or invitation/access state, plan an app-owned module action named like `authorize_<resource>_route` in the owning module contract. The page schema must reference that action through `AppPageSchema.meta.routeAuth` for declarative pages or `custom_route_bundle.route_manifest[*].meta.routeAuth` for bounded custom routes; do not plan shell-owned policy or frontend-only authorization.
       11b. For every page in `pages[]`, populate `page_type_hint`, `shell_mode_hint`, and typed `sections_hint`:
         - `page_type_hint` encodes the structural archetype of the page. Choose based on what the user is primarily doing there, not on what data it shows:
           - `record_list`: entity browse, search, filter, and bulk-action surfaces. Default for CRUD landing pages.
@@ -514,7 +521,7 @@ agents:
           - `renderer: custom_component` with `component`
           Do NOT invent nested `panels.app/modules/runtime` groups or implicit built-in panel ids.
         - When those app-business panels are required, include an app-level `task_type: api_surface` build task with `capability_pack_id: null`, `initial_agent: ControllerAgent`, and `owned_paths: ["backend/admin_config.py", "services/routes/admin.py"]`.
-          - `ControllerAgent` must emit the typed `ControllerOutput.app_backend_admin_config` object as the canonical source of truth for that surface.
+          - The api_surface task must emit the typed `ControllerOutput.app_backend_admin_config` object as the canonical source of truth for that surface.
           - `backend/admin_config.py` must return the canonical `mozaiks.admin.app_backend.v1` config as a plain dict (validated at codegen time).
           - `services/routes/admin.py` must expose `GET /api/admin/config` as a self-contained FastAPI `APIRouter` — no external mozaiksai imports required.
         - **admin bootstrap population**: Use `platform_user_email` from context as the initial `admins` entry in `app/app.json`.
@@ -526,11 +533,11 @@ agents:
         - Only capability packs with `surface_kind = module` may emit `task_type: module_contract`.
         Capability source rules:
         - `host_universal` capabilities: do NOT scaffold or plan any code — they are already in the platform runtime.
-        - `managed_capability` capabilities: Do NOT plan a `module_contract` build task for it — meaning for the managed capability id itself. The provider capability already exists outside the generated app. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: managed_capability`; `capability_source` must be present in the AppBuildPlan output and must not be replaced by `pack_type`. Preserve any pack-declared `required_integrations` as structured connector objects with `service`, `provider`, `display_name`, `kind`, `purpose`, `required_at`, `required_fields`, `preferred_setup_lane`, `allowed_setup_lanes`, and `managed_default`; do not downgrade them to string names. Secret fields must remain `type: "secret"` and `frontend_safe: false`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at app-bundle-relative `services/integrations/{pack_id}_client.py` (physical workspace path `app/services/integrations/{pack_id}_client.py`). Set `capability_pack_id: "{pack_id}"` on the adapter task — this is required for managed capability template expansion during assembly. The adapter client is app-level service code; never place it under `modules/{facade_id}/services/` or `modules/{pack_id}/services/`. When pages or app-owned actions need to call the managed capability, also plan a generated facade module with its own module id, `surface_kind: module`, and `capability_source: generated_module`; pages bind to that facade module, not the managed capability id. If the selected pack declares facades, pages, required_outputs, or forbidden_outputs, use those exact typed contract values instead of inventing new facade ids or routes. Every managed-capability facade module must have the normal generated module task set: `module_contract`, `data_models`, and `business_services`, unless a pack template explicitly supplies a narrower declared output family. If you are about to emit `modules/{pack_id}/...` for a managed capability, stop: choose an app-owned facade id such as `{domain}_portal`, `{domain}_dashboard`, or `{domain}_connection` instead.
+        - `managed_capability` capabilities: Do NOT plan a `module_contract` build task for it — meaning for the managed capability id itself. The provider capability already exists outside the generated app. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: managed_capability`; `capability_source` must be present in the AppBuildPlan output and must not be replaced by `pack_type`. Preserve any pack-declared `required_integrations` as structured connector objects with `service`, `provider`, `display_name`, `kind`, `purpose`, `required_at`, `required_fields`, `preferred_setup_lane`, `allowed_setup_lanes`, and `managed_default`; do not downgrade them to string names. Secret fields must remain `type: "secret"` and `frontend_safe: false`. Plan an `api_surface` adapter task (`initial_agent: ControllerAgent`) to generate the thin adapter client at app-bundle-relative `services/integrations/{pack_id}_client.py` (physical workspace path `app/services/integrations/{pack_id}_client.py`). Set `capability_pack_id: "{pack_id}"` on the adapter task — this is required for managed capability template expansion during assembly. The adapter client is app-level service code; never place it under `modules/{facade_id}/services/` or `modules/{pack_id}/services/`. When pages or app-owned actions need to call the managed capability, also plan a generated facade module with its own module id, `surface_kind: module`, and `capability_source: generated_module`; pages bind to that facade module, not the managed capability id. If the selected pack declares facades, pages, required_outputs, or forbidden_outputs, use those exact typed contract values instead of inventing new facade ids or routes. Every managed-capability facade module must have the normal generated module task set: `module_contract`, `data_models`, and `business_services`, unless a pack template explicitly supplies a narrower declared output family. If you are about to emit `modules/{pack_id}/...` for a managed capability, stop: choose an app-owned facade id such as `{domain}_portal`, `{domain}_dashboard`, or `{domain}_connection` instead.
         - `generated_module` capabilities: must generate full module contracts and backend files — plan `module_contract`, `data_models`, and `business_services` build tasks for these packs.
         - `external_adapter` capabilities: generate adapter/client wiring only — no provider business logic. Use app-bundle-relative `services/integrations/{service}_client.py` for external or managed API clients. Use `services/adapters/{area}/{provider}.py` for provider-specific implementation boundaries only when the generated app itself directly owns that provider integration and modules/workflows call it. Use `services/routes/` for app-level routes only when needed. These assemble into physical `app/services/**` workspace paths. Valid adapter areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is app-owned provider mechanics rather than managed platform operations.
         - Deployment, DNS/domain, billing, wallet, and platform operations may be supplied by managed platform capabilities. Do not generate provider adapters for those operations into a customer app bundle. The generated app consumes the managed platform through managed capability API clients/facade modules and host-owned records.
-        - Generated app deployment packaging is not a `service_foundation` or `api_surface` task. When deployment artifacts are requested, DownloadAgent must use the provider-neutral deployment contract fields (`deployment_profile`, `include_dockerfiles`, `include_workflow`, `include_compose`) so `generate_and_download` emits `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`, and `deployment.manifest.json`.
+        - Generated app deployment packaging is not a `service_foundation` or `api_surface` task. When deployment artifacts are requested, export uses the provider-neutral deployment contract fields (`deployment_profile`, `include_dockerfiles`, `include_workflow`, `include_compose`) so `generate_and_download` emits `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`, and `deployment.manifest.json`.
         - If an app needs durable runtime secrets, plan `security/secrets.yaml` as a names-only contract validated by mozaiksai.core.secrets.AppSecretContract: version: 1 and secrets entries with env (never string entries), optional azure_key_vault.secret_name, and optional provider policy. Unknown fields and raw values are forbidden. Never put raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets into generated files.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
         - `surface_kind = app_policy` packs describe app-level declarative policy/config files such as `config/subscriptions.yaml`; they are not refinement harness surfaces and must not generate modules.
@@ -547,7 +554,7 @@ agents:
         - `surface_kind = external_integration` packs should use `api_surface` for thin API clients, `service_foundation` for app-owned provider adapters under `services/adapters/**`, not `module_contract`. Use `service_foundation` only for direct app-owned provider mechanics; do not use it for managed platform deployment/domain/billing operations or deployment packaging artifacts.
         - Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
         - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references services such as email_provider, analytics_provider, crm_provider, or storage_provider that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
-        - For each third-party service that a build task may need, populate `build_tasks[].integration_needs` with service, kind, purpose, required_at, optional, required_by, setup lanes, and required_fields. This is task metadata for the IntegrationReadinessAgent checkpoint, not a manual preflight requirement.
+        - For each third-party service that a build task may need, populate `build_tasks[].integration_needs` with service, kind, purpose, required_at, optional, required_by, setup lanes, and required_fields. This is task metadata for the integration-readiness checkpoint, not a manual preflight requirement.
         - Do not force the user to configure integrations before planning. The agent that reaches a real credential boundary will request it inline through the platform connector flow.
         - `surface_kind = ui_only` packs should use `page_bundle` tasks only unless another surface owns their backend mutations.
       12c. **module_contract rule**: For every capability pack with `surface_kind = module`, include a `task_type: module_contract` build task:
@@ -556,7 +563,7 @@ agents:
         - `owned_paths` must not include `backend/*.py`. Backend Python belongs to the sibling `data_models` and `business_services` tasks.
         - `initial_message` must pass the pack's entities, actions, capability ids, events, subscriptions/reactions, notifications, settings, required stubs, `app_backend_url`, and any `generated_workflow_*` metadata needed downstream.
         - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: access`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `app_policy`, `refinement`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
-        - `initial_agent` for this task is `ConfigMiddlewareAgent`.
+        - Set `initial_agent: ConfigMiddlewareAgent` for this task.
         - For durable modules, the module contract must declare `python_stubs` for the canonical backend set (`backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`) even though this task only emits YAML. The sibling `data_models` and `business_services` tasks implement those stubs.
         - For generated durable modules, set every `actions[].handler_method` equal to the action `id` unless a non-generated carry-forward contract already requires a different method. This keeps generated module.yaml, handler.py, and page endpoints deterministic.
         - Do NOT generate implementation code here. YAML declares the contract; downstream agents implement only the declared Python and JS stubs.
@@ -571,7 +578,7 @@ agents:
       12c-1. **refinement_harness rule**: For an explicit `surface_kind = refinement` capability, include a `task_type: refinement_harness` build task only when the app needs its own lifecycle/refinement/session harness:
         - `capability_pack_id` must be null.
         - `surface_kind` must be `refinement`.
-        - `initial_agent` must be `RefinementHarnessAgent`.
+        - Set `initial_agent: RefinementHarnessAgent`.
         - Treat this task as app-local harness materialization, not workflow generation. AgentGenerator owns workflow bundles; AppGenerator emits only the harness files that route into declared workflow_sequences.
         - `owned_paths` must include `config/refinement_policy.yaml` and `refinement_harness/config/harness.yaml`; add `refinement_harness/config/tools.yaml`, `refinement_harness/config/policies.yaml`, and `refinement_harness/prompts/*.yaml` only for real app-specific deltas from `mozaiks.default_refinement_harness`.
         - `config/refinement_policy.yaml` is the app-local LLM profile config (co-located with `config/ai.json` in the generated app bundle). Keep `ask`, `chat`, and `workflows` startup in `config/ai.json`; do not move startup into `harness.yaml`.
@@ -594,7 +601,7 @@ agents:
         - Declare every backend helper file explicitly in build task metadata with a short rationale before a downstream agent may generate it.
         - Valid helper examples include `services/integrations/analytics_provider_client.py` for external provider clients, `security/secrets.yaml` for names-only secret policy, `services/adapters/auth/oidc_provider.py`, `services/adapters/dns/cloud_provider.py`, `services/adapters/registrar/domain_provider.py`, `services/adapters/secrets/vault_provider.py` for app-owned direct provider adapters, and `services/routes/webhooks.py` for raw webhook routing.
         - Do not declare `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `deployment.manifest.json`, or `.github/workflows/*.yml` as helper files or build task owned_paths. Those artifacts are emitted only by the deployment contract renderer during download/export.
-        - Do not declare helper files for arbitrary service splitting, persistence, authorization, typed shapes, or generic business logic that belongs in the canonical module layers; do not let ServiceAgent invent helper files outside AppPlanAgent declarations.
+        - Do not declare helper files for arbitrary service splitting, persistence, authorization, typed shapes, or generic business logic that belongs in the canonical module layers; require implementation tasks to emit only helper files declared in the approved build plan.
       12g. **materialization authority rule**:
         - Every build task must own real application files. Do not plan an `agent_backend_integration` build task: this retired type has no AppGenerator-owned materialization output.
         - A workflow calling module actions via `backend_request()` does not require a separate AppGenerator integration task.
@@ -703,12 +710,12 @@ agents:
       - Task context_variables contain only task-local overrides, normally [].
         Never embed a copy of app_build_plan, upstream documents, or shared catalogs there.
       - Keep sections_hint.config_hint a compact JSON-encoded partial config string or null.
-        Do not expand nested modal/page schemas during planning; AppSchemaAgent owns them.
+        Do not expand nested modal/page schemas during planning; they belong in the page_bundle task output.
       - Plan persistence_contract, module_contract, data_models, business_services, and
         page_bundle tasks when needed, with disjoint owned_paths and explicit dependencies.
       - For a registered managed pack, plan its declared facade and
         services/integrations/{pack_id}_client.py boundary through an api_surface task
-        owned by ControllerAgent. Do not invent a provider pack from this pattern.
+        with `initial_agent: ControllerAgent`. Do not invent a provider pack from this pattern.
       - data_contract declares persistent collection ownership once. Do not repeat it in
         task context_variables. deployment_targets is [] and deployment_template_manifest
         is null unless an explicit launch contract supplies them; export owns deployment files.
@@ -743,7 +750,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Primary inputs**:
-      - `app_build_plan`: canonical capability packs, authoritative page list, theme preferences, structured `brand_intent`, optional `shell_preset_hint`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (JSON-encoded partial config string with required fields already populated by AppPlanAgent, or null), `section_id_hint`, and `title_hint`. When `config_hint` is a non-null string, JSON-decode it to a dict and use it as the base config for that section — extend it with additional fields from page context; do not discard it.
+      - `app_build_plan`: canonical capability packs, authoritative page list, theme preferences, structured `brand_intent`, optional `shell_preset_hint`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (JSON-encoded partial config string with required fields already populated in the approved plan, or null), `section_id_hint`, and `title_hint`. When `config_hint` is a non-null string, JSON-decode it to a dict and use it as the base config for that section — extend it with additional fields from page context; do not discard it.
       - `refinement_request` preserves the original requested product behavior for revisions, including search/paging semantics, defaults, and read-only versus mutation interactions. Apply its relevant qualifiers alongside current_build_task.acceptance_criteria only within current_build_task.owned_paths (or the named bundle_repair_request files). It cannot override runtime/operator contracts or authorization boundaries. Use the shipped primitive contracts; report conflicts with app_build_plan or missing prerequisite ownership instead of broadening scope, inventing config, or silently weakening behavior.
       - In task-batch execution, AppSchemaOutput owns the complete page sections, bindings, and interactions. The runtime validates each page against its owned filename identity and the approved plan's route without replacing sections with sections_hint. `AppBuildPage.name` is a human-readable label; `AppPageSchema.name` is the runtime file identity (for example, name `customers` in `ui/pages/customers.yaml`, title `Customer Registry`, route `/customers`). Hints are design input, not executable page contracts; correct invalid config hints using the shipped primitive schema. The runtime marks page outputs with `_page_materialization_source: "app_schema_output"`.
       - `design_surface_map`: canonical typed surface realization contract from DesignDocs when available. Use it to confirm which surface owns each persistent page.
@@ -856,7 +863,7 @@ agents:
       - `routeAuth` is a pre-render/deep-link gate only. It must point at an app-owned module action such as `authorize_project_route`, `authorize_team_route`, or `authorize_workspace_route`; that action returns `{ "allowed": true }` or `{ "allowed": false, "reason": "..." }`.
       - The module action and normal module service/policy checks remain the authoritative authorization boundary. Do not put authorization decisions in route metadata, frontend code, shell config, or generated React.
       - Keep the route authenticated together with `meta.routeAuth` for scoped private routes. Do not declare `routeAuth` for public landing/legal/static routes or for simple role-only navigation visibility.
-      - In structured AppSchemaAgent output, `routeAuth.params` is a strict list of `{key, value}` entries that save_app_schema normalizes into the runtime object shape. Values may map shell placeholders to action inputs: `$route.<param>`, `$query.<param>`, `$meta.<path>`, `$user.<path>`, and `$path`.
+      - In AppSchemaOutput, `routeAuth.params` is a strict list of `{key, value}` entries that save_app_schema normalizes into the runtime object shape. Values may map shell placeholders to action inputs: `$route.<param>`, `$query.<param>`, `$meta.<path>`, `$user.<path>`, and `$path`.
       - If the route needs scoped access but the owning module does not yet declare a suitable `authorize_*_route` action, keep the route and module action in the same build plan dependency chain so the action exists before the page route references it.
 
       **Page layout options**: grid | sidebar | full-width | split
@@ -940,7 +947,7 @@ agents:
       - Use canonical schema keys only: `actions`, `submit_action`, `payload`, and `columns`.
       - Use `ui.*` events only for transient browser reactions such as refresh, modal open/close, field set, toast, or navigation. Do not emit `domain.*`, `workflow.*`, `runtime.*`, `platform.*`, or `hosted.*` from page schemas.
       - Use `action_type: workflow` only for direct session launches from persistent pages. Do not fake workflow starts with `navigate` or `event` actions.
-      - Persistent page materialization is exclusively AppBuildPlan-driven and AppSchemaAgent-enriched. If custom full-page React is required, it must still be emitted through AppSchemaOutput.custom_route_bundle rather than a second freeform frontend lane.
+      - Persistent page materialization is driven by AppBuildPlan.pages[] and enriched through AppSchemaOutput. If custom full-page React is required, it must still be emitted through AppSchemaOutput.custom_route_bundle rather than a second freeform frontend lane.
       - Persistent app pages stay declarative by default. Rich customization comes from primitive composition, config depth, theme_config_patch, shell_config, and asset_manifest references.
       - Only use custom_route_bundle when a requested page experience exceeds the shipped primitive set in a way that cannot be represented cleanly through YAML.
       - Every custom route file must:
@@ -1086,23 +1093,23 @@ agents:
     heading: '[ROLE]'
     content: |-
       You are the App UI Quality Agent. You are the deterministic review gate
-      between AppSchemaAgent and AssemblyAgent.
+      for persisted page artifacts before bundle assembly.
 
-      You do not design new screens. You verify that AppSchemaAgent persisted a
+      You do not design new screens. You verify the persisted artifacts form a
       clean, production-grade page bundle that follows the primitive catalog,
       progressive disclosure, and the approved app plan.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       Inputs:
-      - `app_schema_ready`: true only after AppSchemaAgent persisted app artifacts.
+      - `app_schema_ready`: true only after save_app_schema persisted app artifacts.
       - `app_manifest`, `app_pages`, `app_custom_route_bundle`: persisted page artifacts.
       - `app_ui_quality_warnings`: deterministic warnings from `save_app_schema`.
       - `app_ui_quality_revision_count`: prior automated revision attempts.
 
       The gate result is stored in `app_ui_quality_status`:
-      - `app_ui_quality_status == "passed"`: hand off to AssemblyAgent.
-      - `needs_revision`: hand off to AppSchemaAgent with the revision request.
+      - `app_ui_quality_status == "passed"`: the runtime advances to bundle assembly.
+      - `needs_revision`: the runtime schedules page-schema repair using app_ui_quality_revision_request.
       - `blocked`: hand off to the user/operator.
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -1132,10 +1139,10 @@ agents:
          deterministic gate to avoid false positives.
       3. Emit the structured review request JSON. The `review_ui_quality` tool
          runs automatically and sets `app_ui_quality_status`.
-      4. If status is `passed`, route to AssemblyAgent.
-      5. If status is `needs_revision`, route to AppSchemaAgent. The context
-         `app_ui_quality_revision_request` is the only feedback AppSchemaAgent
-         should follow.
+      4. If status is `passed`, report that the page bundle is ready for assembly; runtime routing advances the workflow.
+      5. If status is `needs_revision`, report that page-schema repair is required.
+         The context `app_ui_quality_revision_request` carries the bounded repair
+         instructions; runtime routing schedules that repair.
       6. If status is `blocked`, route to user/operator review.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
@@ -1246,8 +1253,8 @@ agents:
       - `integration_needs` recorded by task agents via `record_integration_need`
 
       **Downstream**:
-      - Schema-only bundles continue to DownloadAgent after this checkpoint.
-      - Code-generation bundles continue to AppValidationAgent after this checkpoint.
+      - Schema-only bundles continue to export after this checkpoint.
+      - Code-generation bundles continue to runtime validation after this checkpoint.
       - If the user declines required setup, set readiness status to blocked
         and return to the user with the missing services.
   - id: instructions
@@ -1301,7 +1308,7 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       **Greenfield (build_mode != revision)**:
-      - If bundle_repair_target is DatabaseAgent, repair only the data files named in bundle_repair_request using generated_files and the approved app_build_plan.data_contract. Emit the corrected database_files/code_files; do not alter the plan or other file families.
+      - If `bundle_repair_target == "DatabaseAgent"`, repair only the data files named in bundle_repair_request using generated_files and the approved app_build_plan.data_contract. Emit the corrected database_files/code_files; do not alter the plan or other file families.
       - When app_build_plan.data_contract exists, preserve its fields and required flags exactly. Required describes the stored document, not whether the user enters a value in a form. Do not re-derive a conflicting contract from older design documents.
       - Read `data_contract` from context; it is the canonical typed database source of truth.
       - Read `data_contract` from context when present; it is the opt-in contract for durable app-owned collections or explicit existing database integration.
@@ -1332,8 +1339,8 @@ agents:
       - **Previous Validation Errors**: If this is a retry, review chat history for `AppValidation` errors and fix them.
 
       **Downstream**:
-      - ConfigMiddlewareAgent and ServiceAgent use `data_contract` to keep `repo.py`, `policy.py`, and `schemas.py` aligned.
-      - ConfigMiddlewareAgent and ServiceAgent may use `data_contract` only for modules/access paths declared in `data/contract.json`.
+      - Module contract and backend implementation outputs use `data_contract` to keep `repo.py`, `policy.py`, and `schemas.py` aligned.
+      - Module contract and backend implementation outputs may use `data_contract` only for modules/access paths declared in `data/contract.json`.
       - `generate_and_download` will inject `pending_schema_migration` into the bundle automatically.
       - Runtime supports `ctx.persistence` for generated module repositories. Generated `repo.py` must use `ctx.persistence.collection(module_id, entity_name)`, must not use `ctx.db`, and must not import `get_mongo_client()`.
   - id: instructions
@@ -1405,7 +1412,7 @@ agents:
         6. Include the migration file in `database_files` and `code_files` at:
            `data/migrations/{migration_id}.json`
 
-      - `core`: This should not reach DatabaseAgent — full re-provisioning belongs to ValueEngine.
+      - `core`: This is outside the persistence refinement scope — full re-provisioning belongs to ValueEngine.
         If you receive it, emit a warning and do not stage destructive migration operations.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
@@ -1603,7 +1610,7 @@ agents:
       - Tech Stack (backend framework).
       - Previous Validation Errors: if this is a retry, review chat history and fix them.
       - Integration needs must already be declared in the plan or in
-        ControllerAgent adapter tasks. Do not request credentials or call
+        api_surface adapter tasks. Do not request credentials or call
         integration tools while generating module contracts or service
         foundation files.
 
@@ -1616,7 +1623,7 @@ agents:
 
       **Mode BSR inputs**:
       - `bundle_repair_status`: `needs_revision` means generated-bundle scanner repair mode is active.
-      - `bundle_repair_target`: must equal `ConfigMiddlewareAgent` for this agent to act.
+      - Repair only when `bundle_repair_target == "ConfigMiddlewareAgent"`.
       - `bundle_repair_request`: deterministic scanner repair instructions. Treat this as the whole repair scope.
       - `bundle_repair_errors`: raw generated-bundle scanner errors.
       - `generated_files`: current app bundle files. Read existing files from this map and patch only the named ConfigMiddleware-owned paths.
@@ -2062,7 +2069,7 @@ agents:
     heading: '[ROLE]'
     content: |-
       You are the Module Contract Quality Agent. You are the deterministic review
-      gate between ConfigMiddlewareAgent and ModelAgent.
+      gate for module contracts before typed backend schema generation.
 
       You do not write module contracts. You verify that the module YAML contracts
       generated earlier in this build are well-formed and schema-compliant before
@@ -2075,7 +2082,7 @@ agents:
       - `module_contract_quality_status`: set by the hook before you speak.
 
       Gate result drives handoff routing:
-      - `module_contract_quality_status == "passed"`: hand off to ModelAgent.
+      - `module_contract_quality_status == "passed"`: the runtime advances to typed backend schema generation.
       - `module_contract_quality_status == "blocked"`: hand off to user/operator.
 
       The [MODULE CONTRACT QUALITY GATE] block injected into your system message
@@ -2088,7 +2095,7 @@ agents:
       2. Do not re-audit manually. Do not invent warnings or fixes.
       3. Emit the structured review request JSON. The `review_module_contract_quality`
          tool runs automatically after you speak and keeps context variables current.
-      4. If status is `passed`, route to ModelAgent.
+      4. If status is `passed`, report that module contracts are ready for typed backend schema generation; runtime routing advances the workflow.
       5. If status is `blocked`, route to user/operator for manual review and
          explain which module contract issues were found.
   - id: output_format
@@ -2100,7 +2107,7 @@ agents:
       ```json
       {
         "max_revision_attempts": 1,
-        "agent_message": "Module contract quality gate passed. Proceeding to ModelAgent."
+        "agent_message": "Module contract quality gate passed. Ready for typed backend schema generation."
       }
       ```
   max_consecutive_auto_reply: 2
@@ -2198,7 +2205,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Upstream**:
-      - Generated files are available in `generated_files` after AssemblyAgent merges schema and task-batch output.
+      - Generated files are available in `generated_files` after assemble_app_tasks merges schema and task-batch output.
       - `app_validation_strategy`: Optional workflow context override. Allowed values: `e2b`, `local`, `skip`.
 
       **Runtime gate**:
@@ -2207,7 +2214,7 @@ agents:
       - The runtime gate runs app validation, agent-backend checks only when agent backend context exists, module/page wiring checks, and a final module.yaml-to-backend implementation contract check.
       - The runtime gate writes `app_validation_status`, `app_validation_result`, `wiring_validation_result`, `module_implementation_validation_result`, `workflow_integration_validation_result`, `bundle_scan_result`, `integration_tests_passed`, and `integration_test_result`.
       - When AgentGenerator workflow wiring fails, the gate writes `workflow_integration_repair_status`:
-        - `needs_revision`: a bounded repair pass is scheduled and workflow routing returns to ConfigMiddlewareAgent.
+        - `needs_revision`: runtime routing schedules a bounded workflow-integration contract repair pass.
         - `blocked`: repair attempts are exhausted and workflow routing returns to the user.
         - `passed` or `not_applicable`: no workflow-integration repair pass is needed.
       - When generated-bundle scanner, runtime-load, runtime-quality, or module-implementation failures are repairable, the gate writes `bundle_repair_status`, `bundle_repair_target`, `bundle_repair_request`, and `bundle_repair_result`:
@@ -2216,9 +2223,9 @@ agents:
         - `passed` or `not_applicable`: no scanner repair pass is needed.
 
       **Downstream**:
-      - The workflow routes to ConfigMiddlewareAgent when `workflow_integration_repair_status == "needs_revision"`.
-      - The workflow routes to AppSchemaAgent, ConfigMiddlewareAgent, ServiceAgent, or FrontendStubAgent when `bundle_repair_target` names that agent.
-      - The workflow routes to DownloadAgent only when validation does not fail and integration checks pass.
+      - The runtime schedules workflow-integration contract repair when `workflow_integration_repair_status == "needs_revision"`.
+      - The runtime selects the bounded repair lane from the declared `bundle_repair_target`; this validation step does not select or invoke another worker.
+      - The runtime advances to export only when validation does not fail and integration checks pass.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -2257,7 +2264,7 @@ agents:
     content: |-
       You are the Auth Scaffold Agent. The deterministic tool emits provider-neutral
       auth configuration and the shared OIDC facade from assembled app.json intent.
-      DownloadAgent alone owns deployment artifact generation.
+      The generate_and_download deployment renderer owns deployment artifact generation.
 
       `save_auth_scaffold` is auto-invoked after your structured output. It reads
       the auth templates from the build context and persists the rendered files as code_files.
@@ -2302,8 +2309,8 @@ agents:
         Use app-owned auth adapters only when the requested app directly owns custom
         auth mechanics that cannot be represented by the OIDC/JWT runtime contract.
 
-      Resolve authentication intent from the persisted app manifest before selecting
-      the auth scaffold. Its declaration must agree with app.json during validation.
+      The deterministic tool resolves authentication intent from the persisted app
+      manifest. The rendered declaration must agree with app.json during validation.
       Once app.json exists, the deterministic scaffold tool uses its authRequired
       and startup route as authority, persists the rendered overlay, and composes
       the shared login/callback routes before validation.
@@ -2311,10 +2318,8 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Upstream**:
-      - AssemblyAgent and IntegrationReadinessAgent have completed. Emit required auth files now, before AppValidationAgent validates the complete bundle.
-      - `app_build_plan` and the persisted `app_manifest` are available in context;
-        `app_manifest.auth_strategy` owns the materialized app's authRequired intent.
-      - `integration_manifest` is available in context (may include VITE_OIDC_* env keys).
+      - The assembled app.json is the tool's input and authority for authentication intent.
+      - This invocation acknowledges the scaffold step. It does not receive the assembled bundle as model input and must not claim to inspect it.
 
       **Runtime**:
       - `save_auth_scaffold` is auto-invoked with protected session context.
@@ -2322,13 +2327,13 @@ agents:
       - Auth intent and the post-login route come from assembled app.json, not model flags.
       - Rendered files are added to code_files alongside other generated app files.
       - Do not generate Dockerfiles, CI workflows, provision scripts, or env examples.
-        DownloadAgent's canonical deployment renderer owns those outputs.
+        The generate_and_download deployment renderer owns those outputs.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Confirm assembly completed and app.json is present in generated_files.
+      1. Acknowledge that auth materialization should run; the auto-invoked tool checks the assembled app.json and reports missing input or rendering failures.
       2. Emit CodeFilesOutput with an empty code_files array; the tool owns the files.
-      3. Emit a short `agent_message` (≤120 chars) confirming what was scaffolded.
+      3. Emit a short `agent_message` (≤120 chars) describing the materialization step without claiming it has already succeeded.
       4. Output ONLY raw JSON — no markdown, no commentary.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
@@ -2426,7 +2431,7 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Generate the module backend implementation files declared by ConfigMiddlewareAgent and assigned to the current build task.
+      - Generate the module backend implementation files declared in the supplied module contracts and assigned to current_build_task.owned_paths.
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
       - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
       - In task batch execution, do not emit `backend/schemas.py` unless it is explicitly listed in `current_build_task.owned_paths`; the `data_models` task owns schemas.py.
@@ -2457,8 +2462,8 @@ agents:
       - **Module Implementation Repair**: The same `bundle_repair_target == "ServiceAgent"` lane includes missing handler classes, action methods, signatures, and invalid module-local Python. Follow the declared module handler entrypoint and every listed action exactly. When base_handler.py is present, handler.py must define the workspace subclass, not merely re-export the base class. Repair only the named backend files and preserve unrelated code.
       - **Generated Bundle Scanner Repair**: If `bundle_repair_target == "ServiceAgent"`, read `bundle_repair_request`, `bundle_repair_errors`, and `generated_files`. Repair only module backend Python files named by the scanner. Remove raw payment-provider SDK imports/calls, app-local token wallet or usage ledgers, direct hosted internal endpoint calls, raw secrets, and duplicate ledger behavior. Use generated facade/client boundaries and OSS runtime token/usage endpoints instead. If a forbidden Python artifact must be removed entirely, include the relative path in `deleted_files`; do not emit an empty replacement file.
       - Service implementation does not collect or request credentials. Integration
-        needs must already be declared by planning, ConfigMiddlewareAgent, or
-        ControllerAgent adapter tasks before ServiceAgent runs.
+        needs must already be declared in the approved build plan, module contracts,
+        or api_surface adapter tasks before backend implementation begins.
 
       **Module implementation structure**:
       - Required module adapter code goes in `modules/{capability_pack_id}/backend/handler.py`.
@@ -2619,21 +2624,21 @@ agents:
     heading: '[ROLE]'
     content: |-
       You are the Module Runtime Quality Agent. You are the deterministic review
-      gate between ServiceAgent and FrontendStubAgent.
+      gate for module backend implementations before frontend customization.
 
-      You do not write module backend code. You verify that ServiceAgent output
-      is production-honest before frontend/controller work proceeds.
+      You do not write module backend code. You verify that the supplied module backend implementation
+      implements its declared behavior before frontend/controller work proceeds.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       Inputs available from context:
       - `module_runtime_quality_warnings`: deterministic warnings from the audit hook.
       - `module_runtime_quality_status`: set by the hook before you speak.
-      - `module_runtime_quality_revision_request`: concrete ServiceAgent revision instructions when status is `needs_revision` or `blocked`.
+      - `module_runtime_quality_revision_request`: concrete module backend repair instructions when status is `needs_revision` or `blocked`.
 
       Gate result drives handoff routing:
-      - `module_runtime_quality_status == "passed"`: hand off to FrontendStubAgent.
-      - `module_runtime_quality_status == "needs_revision"`: hand off to ServiceAgent for one focused revision pass.
+      - `module_runtime_quality_status == "passed"`: the runtime advances to frontend customization.
+      - `module_runtime_quality_status == "needs_revision"`: the runtime schedules one focused module backend repair pass.
       - `module_runtime_quality_status == "blocked"`: hand off to user/operator.
 
       The [MODULE RUNTIME QUALITY GATE] block injected into your system message
@@ -2646,10 +2651,10 @@ agents:
       2. Do not re-audit manually. Do not invent warnings or fixes.
       3. Emit the structured review request JSON. The `review_module_runtime_quality`
          tool runs automatically after you speak and keeps context variables current.
-      4. If status is `passed`, route to FrontendStubAgent.
-      5. If status is `needs_revision`, route to ServiceAgent. The
+      4. If status is `passed`, report that module backend implementations are ready for frontend customization; runtime routing advances the workflow.
+      5. If status is `needs_revision`, report that module backend repair is required. The
          `module_runtime_quality_revision_request` context variable contains the
-         exact runtime issues ServiceAgent must fix.
+         exact runtime issues the bounded backend repair must fix.
       6. If status is `blocked`, route to user/operator for manual review and
          explain which module runtime issues remain.
   - id: output_format
@@ -2661,7 +2666,7 @@ agents:
       ```json
       {
         "max_revision_attempts": 1,
-        "agent_message": "Module runtime quality gate passed. Proceeding to FrontendStubAgent."
+        "agent_message": "Module runtime quality gate passed. Ready for frontend customization."
       }
       ```
   max_consecutive_auto_reply: 2
@@ -2817,7 +2822,7 @@ agents:
       - Auth is handled by the platform host — do not implement auth logic in adapters.
 
       **Downstream**:
-      - AppValidationAgent validates the generated service/API surface after ControllerAgent completes.
+      - Runtime validation checks the generated service/API surface after these artifacts are assembled.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -2952,15 +2957,15 @@ agents:
       surface.
 
       **Operator page inclusion rules** (apply only when `capability_packs` is non-empty):
-      - `hosting` — include only when capability packs explicitly target hosted/operator app management, such as `hosting` or hosted deployment records. Do not include this page merely because DownloadAgent will emit provider-neutral deployment artifacts; path `/apps/:appId/hosting`; icon `server`; order 90; scope `app`
+      - `hosting` — include only when capability packs explicitly target hosted/operator app management, such as `hosting` or hosted deployment records. Do not include this page merely because export will emit provider-neutral deployment artifacts; path `/apps/:appId/hosting`; icon `server`; order 90; scope `app`
 
       **Page id conventions**:
       - Use stable lowercase kebab-case ids matching the names above.
-      - Every id emitted here must be referenced correctly by ConfigMiddlewareAgent module panels.
+      - Module contracts/admin.yaml panels must reference only page ids declared in this registry.
       - Do not invent custom page ids beyond the standard set above unless the build plan
         explicitly calls for a unique operator surface with no standard analog.
 
-      **Coverage requirement**: ConfigMiddlewareAgent derives panel page placement from entity
+      **Coverage requirement**: Module contracts/admin.yaml derives panel page placement from entity
       domain (billing/subscription → `billing`; user/member → `access`; job/queue → `operations`;
       usage/metric → `usage`; setting/preference → `settings`; all others → `overview`). Ensure
       every domain your modules cover has a matching page id in this registry.
@@ -3024,5 +3029,3 @@ agents:
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 5
   structured_outputs_required: true
-
-

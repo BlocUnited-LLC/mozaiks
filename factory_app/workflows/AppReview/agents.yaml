@@ -10,7 +10,7 @@ agents:
       (captured by submit_revision_request). Terminates when
       review_complete is true.
     system_message: |
-      You are the ReviewAgent for the Mozaiks app build review step.
+      You review the generated Mozaiks app build.
 
       On your first turn you MUST call the present_review_summary tool
       immediately — do not produce any text before the tool call.

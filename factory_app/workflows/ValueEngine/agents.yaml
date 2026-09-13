@@ -90,7 +90,7 @@ agents:
 
       Do NOT search on the opening turn — let the user speak first.
       Search after the user's first substantive message.
-      Keep searches fast (1-2 queries max). Deep research is ResearchAgent's job.
+      Keep searches fast (1-2 queries max). Deeper research is a separate workflow step.
   - id: how_to_follow_up
     heading: '[FOLLOWING UP]'
     content: |-
@@ -168,14 +168,14 @@ agents:
   - id: research_boundary
     heading: '[WHAT NOT TO ASK — RESEARCH BOUNDARY]'
     content: |-
-      These questions belong to ResearchAgent, not the interview. Never ask them:
+      These questions require market research, not user clarification. Never ask them:
       - "What challenges do your users face?"
       - "What problems exist in this space?"
       - "What specific pain points are you targeting?"
       - "What uncertainties do users face?"
       - "What problem do you see for users?"
       - Any question about competitive landscape, market gaps, or why the product is better than alternatives.
-      Competitor/market depth belongs to ResearchAgent.
+      Competitor/market depth belongs in the research findings.
 
       You have domain knowledge. Use it. A prediction market platform's user challenges are well-understood (liquidity, information asymmetry, trust, market creation). A marketplace's problems are well-understood. Infer them and move on.
 
@@ -191,7 +191,7 @@ agents:
       - ONE question per turn. Never ask two questions at once.
       - Never re-ask something the user already answered.
       - Never ask something you can already answer from your own knowledge of the product category.
-      - Never ask a research question — challenges, pain points, competitive gaps, and market problems belong to ResearchAgent.
+      - Never ask a research question — challenges, pain points, competitive gaps, and market problems belong in the research findings.
       - Never invent a new direction after the user has confirmed one.
       - Never re-present the same direction multiple times — if the user says "ok", "sure", "great", "ya", or any affirmation, that means they agree; emit NEXT.
       - If the user defers ("you decide", "I don't know", "you figure it out"), stop asking and either make the call yourself or emit NEXT.
@@ -223,11 +223,11 @@ agents:
       For light_integration, identify 3-5 high-value AI workflow opportunities that fit the existing app features and preserve protected surfaces.
       For full_migration, identify 3-5 high-value feature-extension opportunities that can be built as Mozaiks-owned surfaces within approved scope.
 
-      End with a concise handoff naming the strongest enhancement wedge, why it matters to users, and any protected boundaries GapAnalysisAgent must preserve.
+      End with a concise findings summary naming the strongest enhancement wedge, why it matters to users, and any protected boundaries the ConceptBlueprint must preserve.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      Use live web search tools when the runtime exposes them. If live web tools are not available, synthesize from the interview, App Intelligence context, and product knowledge instead of blocking.
+      Use live web search tools when the runtime exposes them. If live web tools are not available, synthesize from interview facts explicitly supplied in the current messages, App Intelligence context, and product knowledge instead of blocking. Distinguish supplied facts from assumptions and unverified market knowledge.
 
       Research workflow:
       1. When live web tools are available, run 2–4 targeted searches: competitors by name, "[category] app pricing", "[category] market size", "[category] gaps site:reddit.com OR site:ycombinator.com".
@@ -237,7 +237,7 @@ agents:
          - 3–6 concrete gaps or underserved angles with evidence from what you found
          - 3–6 risks grounded in what competitors have already tried
          - Confirmed pricing benchmarks for the category (real numbers from real products)
-      4. End with a short handoff note so GapAnalysisAgent can synthesize.
+      4. End with a short findings summary that states the evidence, recommended concept direction, and unresolved assumptions explicitly.
 
       Do not summarize from memory when live data is available. Search first when the runtime provides those tools.
   web_search: true
@@ -282,7 +282,13 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      Synthesize the interview + research into a refined, differentiated concept.
+      Read upstream interview facts and research findings explicitly supplied in
+      your current messages or declared context. Interview facts establish user
+      intent and scope; research findings support differentiation and risk judgments.
+      Synthesize them into a refined, differentiated concept without treating a
+      research recommendation as user approval. If evidence is absent, record the
+      uncertainty in the existing ConceptBlueprint narrative fields rather than
+      implying that an earlier conversation confirmed it.
       Output a ConceptBlueprint JSON that captures:
       - App name and value proposition
       - Target user (primary persona)

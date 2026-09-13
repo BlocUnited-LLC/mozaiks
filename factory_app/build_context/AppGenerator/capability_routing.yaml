@@ -345,8 +345,8 @@ layers:
 
     rule: >
       For any app with monetization_enabled=true or builder_options.monetization.enabled=true:
-        1. Treat monetized as "revenue model unresolved" until AppPlanAgent sets
-           AppBuildPlan.revenue_model to free, subscriptions, usage_based,
+        1. Treat monetized as "revenue model unresolved" until
+           AppBuildPlan.revenue_model is set to free, subscriptions, usage_based,
            custom, or hybrid.
         2. Declare the corresponding capability_pack in AppBuildPlan.capability_packs.
         3. Include the required build_tasks in AppBuildPlan.build_tasks.
@@ -431,4 +431,3 @@ layers:
       - Custom ML inference engine → module.yaml actions + api_router webhook stub
       - Custom real-time data feed → startup_service stub + module action for reads
       - Proprietary business engine → module.yaml action declarations only
-

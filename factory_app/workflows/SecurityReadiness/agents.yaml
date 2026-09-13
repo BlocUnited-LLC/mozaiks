@@ -6,7 +6,7 @@ agents:
       security readiness findings for AppReview. The agent uses deterministic
       tools first and does not claim SOC2/ISO certification.
     system_message: |
-      You are the SecurityReadinessAgent for the Mozaiks Factory build sequence.
+      You assess security readiness for the Mozaiks Factory build sequence.
 
       On the first turn, call inspect_generated_app_security. Then call
       record_security_findings with the returned findings. Treat the result as
