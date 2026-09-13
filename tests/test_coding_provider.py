@@ -128,6 +128,7 @@ def _pack() -> LoadedControlPlanePack:
 def _request(**overrides: Any) -> CodingWorkerRequest:
     payload: dict[str, Any] = {
         "app_id": "app_1",
+        "user_id": "user_1",
         "artifact_kind": "app_bundle",
         "artifact_key": "app_bundle",
         "artifact_version_id": "av_123",
@@ -143,7 +144,7 @@ def _request(**overrides: Any) -> CodingWorkerRequest:
 
 def _provider(plan: CodingWorkerPlan) -> StructuredOutputCodingProvider:
     return StructuredOutputCodingProvider(
-        agent_factory=lambda sp, lc: _FakeAgent(sp, lc, plan),
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc, plan),
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -173,6 +174,35 @@ async def test_structured_provider_returns_completed_scoped_proposal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_structured_provider_uses_current_binding_and_host_owner() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from mozaiksai.core.session.build_binding import RunBuildBinding
+    from mozaiksai.core.usage.context import AuxiliaryUsageContext
+
+    context = AuxiliaryUsageContext(app_id="factory", user_id="owner", tenant_id="tenant")
+    binding = RunBuildBinding(
+        target_app_id="app_1", build_registry_id="registry", build_id="revision", phase="refinement",
+    )
+    runner = SimpleNamespace(run=AsyncMock(return_value=_GOOD_PLAN))
+    provider = StructuredOutputCodingProvider(
+        agent_runner=runner, config_loader=_enabled_control_plane, pack_loader=_pack,
+        tool_executor=_FakeToolExecutor(),
+    )
+    proposal = await provider.execute(_request(
+        app_id="factory", target_app_id="app_1", user_id="owner", usage_context=context,
+        run_build_binding=binding, metadata={"build_id": "forged", "user_id": "forged"},
+    ))
+    assert proposal.status == "completed"
+    usage = runner.run.await_args.kwargs["usage_context"]
+    assert (usage.app_id, usage.user_id, usage.tenant_id) == ("factory", "owner", "tenant")
+    assert usage.run_build_binding == binding
+    assert usage.chat_id is usage.workflow_name is None
+    assert "usage_context" not in runner.run.await_args.kwargs["user_prompt"]
+
+
+@pytest.mark.asyncio
 async def test_structured_provider_fails_closed_on_out_of_scope_edit() -> None:
     proposal = await _provider(_OUT_OF_SCOPE_PLAN).execute(_request())
 
@@ -184,7 +214,7 @@ async def test_structured_provider_fails_closed_on_out_of_scope_edit() -> None:
 @pytest.mark.asyncio
 async def test_structured_provider_fails_closed_on_model_error() -> None:
     class _ExplodingAgent:
-        def __init__(self, system_prompt: str, llm_config: dict[str, Any]) -> None:
+        def __init__(self, system_prompt: str, llm_config: dict[str, Any], *, middleware: list) -> None:
             pass
 
         async def ask(self, user_prompt: str, **kwargs: Any) -> _FakeReply:

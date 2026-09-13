@@ -10,7 +10,7 @@ middleware keeps a separate, queryable runtime ledger by emitting neutral
 import os
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 from ag2 import Context
 from ag2.events import BaseEvent, ModelResponse
@@ -94,15 +94,17 @@ class MozaiksUsageMiddleware(BaseMiddleware):
         context: Context,
         *,
         agent_name: str,
-        workflow_name: str,
+        workflow_name: str | None,
         context_variables: Any,
         model_name: str | None = None,
+        execution_kind: Literal["workflow", "auxiliary"] = "workflow",
     ) -> None:
         super().__init__(event, context)
         self._agent_name = agent_name
         self._workflow_name = workflow_name
         self._context_variables = context_variables
         self._model_name = model_name
+        self._execution_kind = execution_kind
 
     async def on_llm_call(
         self,
@@ -157,6 +159,7 @@ class MozaiksUsageMiddleware(BaseMiddleware):
                 cached_tokens=cached_tokens,
                 duration_sec=duration,
                 invocation_id=getattr(response, "id", None),
+                execution_kind=self._execution_kind,
             )
         except Exception as exc:  # pragma: no cover - usage must not break runs
             logger.debug("usage middleware emit skipped: %s", exc)
@@ -166,9 +169,10 @@ class MozaiksUsageMiddleware(BaseMiddleware):
 def build_ag2_usage_middleware(
     *,
     agent_name: str,
-    workflow_name: str,
+    workflow_name: str | None,
     context_variables: Any,
     model_name: str | None = None,
+    execution_kind: Literal["workflow", "auxiliary"] = "workflow",
 ) -> Middleware:
     """Build AG2 1.0 middleware for neutral runtime usage metering."""
 
@@ -178,6 +182,7 @@ def build_ag2_usage_middleware(
         workflow_name=workflow_name,
         context_variables=context_variables,
         model_name=model_name,
+        execution_kind=execution_kind,
     )
 
 

@@ -40,6 +40,7 @@ from mozaiksai.control_plane.contracts import (
 from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
+from mozaiksai.core.usage.context import resolve_auxiliary_usage_context
 
 from .refinement_router import RefinementRequest, RefinementRoutingDecision
 
@@ -213,6 +214,11 @@ class SurfaceRegenerationWorker:
         )
         try:
             response = await self._agent_runner.run(
+                usage_context=resolve_auxiliary_usage_context(
+                    app_id=refinement_request.app_id, user_id=refinement_request.user_id,
+                    context=refinement_request.usage_context,
+                    target_app_id=refinement_request.artifact_app_id,
+                ),
                 agent_name="SurfaceRegenerationWorker",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,

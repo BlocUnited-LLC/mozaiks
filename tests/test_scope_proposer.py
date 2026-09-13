@@ -154,7 +154,7 @@ def _request() -> RefinementRequest:
         build_record_id="av_123",
         raw_user_request="Change the dashboard title copy to say Builder Workspace.",
         source_surface="app_workbench",
-        app_id="app_1",
+        app_id="app_1", user_id="user_1",
         requested_workflow_id="AppGenerator",
     )
 

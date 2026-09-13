@@ -225,7 +225,7 @@ def _planner_request() -> RefinementRequest:
         artifact_key="app_bundle",
         artifact_version_id="av_123",
         raw_user_request="Add exports to the projects module and page.",
-        app_id="app_1",
+        app_id="app_1", user_id="user_1",
         requested_workflow_id="AppGenerator",
     )
 

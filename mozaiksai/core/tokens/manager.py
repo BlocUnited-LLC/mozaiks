@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from logs.logging_config import get_workflow_logger
 
@@ -42,8 +42,7 @@ def _count_emission(reason: str) -> None:
             "Further drops for this reason are counted silently; inspect "
             "get_usage_emission_stats() for totals. For reason=dropped_disabled "
             "set USAGE_EVENTS_ENABLED=true to record; for "
-            "reason=dropped_missing_context supply chat_id/app_id/user_id/"
-            "workflow_name in context variables.",
+            "reason=dropped_missing_context supply a valid workflow or auxiliary receipt scope.",
             reason,
         )
 
@@ -65,10 +64,10 @@ class TokenManager:
     @staticmethod
     async def emit_usage_delta(
         *,
-        chat_id: str,
+        chat_id: str | None,
         app_id: str,
         user_id: str,
-        workflow_name: str,
+        workflow_name: str | None,
         tenant_id: str | None = None,
         workspace_id: str | None = None,
         build_id: str | None = None,
@@ -82,13 +81,23 @@ class TokenManager:
         duration_sec: float = 0.0,
         invocation_id: str | None = None,
         event_ts: datetime | None = None,
+        execution_kind: Literal["workflow", "auxiliary"] = "workflow",
     ) -> None:
         # Advisory measurement only. Do not add enforcement or billing logic here.
         if not _usage_events_enabled():
             _count_emission("dropped_disabled")
             return
 
-        if not chat_id or not app_id or not user_id or not workflow_name:
+        from pydantic import ValidationError
+
+        from mozaiksai.core.usage.context import UsageReceiptScope
+
+        try:
+            scope = UsageReceiptScope(
+                execution_kind=execution_kind, app_id=app_id, user_id=user_id,
+                chat_id=chat_id or None, workflow_name=workflow_name or None, agent_name=agent_name or None,
+            )
+        except ValidationError:
             _count_emission("dropped_missing_context")
             logger.debug(
                 "usage_delta_missing_context",
@@ -109,14 +118,10 @@ class TokenManager:
         payload: dict[str, Any] = {
             "event_id": uuid.uuid4().hex[:12],
             "event_ts": (event_ts or datetime.now(UTC)).isoformat(),
-            "chat_id": chat_id,
-            "app_id": app_id,
-            "user_id": user_id,
+            **scope.model_dump(),
             "tenant_id": tenant_id or None,
             "workspace_id": workspace_id or None,
-            "workflow_name": workflow_name,
             "build_id": build_id or None,
-            "agent_name": agent_name or None,
             "model_name": model_name or None,
             "prompt_tokens": prompt,
             "completion_tokens": completion,

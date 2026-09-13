@@ -22,6 +22,41 @@ from pydantic import BaseModel, ConfigDict
 from pydantic import ValidationError as PydanticValidationError
 
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
+from mozaiksai.core.usage.context import AuxiliaryUsageContext
+
+_USAGE_CONTEXT = AuxiliaryUsageContext(app_id="host", user_id="owner")
+
+
+@pytest.mark.parametrize("flat", [False, True])
+def test_auxiliary_config_preserves_responses_api_and_provider_controls(monkeypatch, flat):
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    from ag2.config import OpenAIResponsesConfig
+
+    from mozaiksai.core.adapters import ag2_agent_runner
+
+    monkeypatch.setattr(
+        ag2_agent_runner, "Agent",
+        lambda name, prompt, **kwargs: SimpleNamespace(**kwargs),
+    )
+    source = {
+        "config_list": [{"model": "test-model", "api_key": "test"}],
+        "use_responses_api": True, "streaming": False,
+        "max_output_tokens": 128, "max_retries": 0, "timeout": 7,
+    }
+    if flat:
+        source = {**source.pop("config_list")[0], **source}
+    original = deepcopy(source)
+    agent = AG2StructuredAgentRunner()._make_agent(
+        agent_name="Agent", system_prompt="system", llm_config=source, middleware=[],
+    )
+    assert isinstance(agent.config, OpenAIResponsesConfig)
+    assert agent.config.max_output_tokens == 128
+    assert agent.config.max_retries == 0
+    assert agent.config.timeout == 7
+    assert agent.config.streaming is False
+    assert source == original
 
 # ---------------------------------------------------------------------------
 # Shared response model
@@ -112,8 +147,9 @@ def _make_runner(reply: _FakeReply) -> tuple[AG2StructuredAgentRunner, list[_Fak
     """Helper: build a runner whose factory captures the created agent."""
     created: list[_FakeAgent] = []
 
-    def factory(system_prompt: str, llm_config: dict[str, Any]) -> _FakeAgent:
+    def factory(system_prompt: str, llm_config: dict[str, Any], *, middleware: list) -> _FakeAgent:
         agent = _FakeAgent(system_prompt, llm_config, reply)
+        agent.middleware = middleware
         created.append(agent)
         return agent
 
@@ -126,7 +162,7 @@ def _make_runner(reply: _FakeReply) -> tuple[AG2StructuredAgentRunner, list[_Fak
 
 @pytest.mark.asyncio
 async def test_ag2_structured_agent_runner_calls_agent_with_schema_and_defaults() -> None:
-    """Original contract: agent.ask() receives stream, response_schema, middleware, observers."""
+    """Agent middleware is persistent; ask receives stream, schema, and observers."""
     reply = _FakeReply(_RunnerResponse(status="ok"))
     runner, created = _make_runner(reply)
 
@@ -136,6 +172,7 @@ async def test_ag2_structured_agent_runner_calls_agent_with_schema_and_defaults(
         user_prompt="user",
         llm_config={"model": "gpt-test", "temperature": 0.0},
         response_schema=_RunnerResponse,
+        usage_context=_USAGE_CONTEXT,
     )
 
     assert result == _RunnerResponse(status="ok")
@@ -145,7 +182,8 @@ async def test_ag2_structured_agent_runner_calls_agent_with_schema_and_defaults(
     assert created[0].calls[0]["user_prompt"] == "user"
     assert created[0].calls[0]["stream"] == "stream"
     assert created[0].calls[0]["response_schema"] is _RunnerResponse
-    assert created[0].calls[0]["middleware"]
+    assert "middleware" not in created[0].calls[0]
+    assert len(created[0].middleware) == 2
     assert created[0].calls[0]["observers"]
 
 
@@ -161,6 +199,7 @@ async def test_ag2_structured_agent_runner_validates_dict_result() -> None:
         user_prompt="user",
         llm_config={},
         response_schema=_RunnerResponse,
+        usage_context=_USAGE_CONTEXT,
     )
 
     assert result == _RunnerResponse(status="ok")
@@ -182,6 +221,7 @@ async def test_valid_first_response_succeeds_without_retry() -> None:
         user_prompt="u",
         llm_config={},
         response_schema=_RunnerResponse,
+        usage_context=_USAGE_CONTEXT,
         schema_validation_retries=2,
     )
 
@@ -203,6 +243,7 @@ async def test_schema_validation_retry_is_triggered_on_invalid_output() -> None:
         user_prompt="u",
         llm_config={},
         response_schema=_RunnerResponse,
+        usage_context=_USAGE_CONTEXT,
         schema_validation_retries=1,
     )
 
@@ -223,6 +264,7 @@ async def test_corrected_retry_output_succeeds() -> None:
         user_prompt="u",
         llm_config={},
         response_schema=_RunnerResponse,
+        usage_context=_USAGE_CONTEXT,
         schema_validation_retries=2,
     )
 
@@ -244,6 +286,7 @@ async def test_schema_validation_retries_stop_at_configured_limit() -> None:
             user_prompt="u",
             llm_config={},
             response_schema=_RunnerResponse,
+            usage_context=_USAGE_CONTEXT,
             schema_validation_retries=1,
         )
 
@@ -262,6 +305,7 @@ async def test_zero_schema_validation_retries_performs_no_correction_turn() -> N
             user_prompt="u",
             llm_config={},
             response_schema=_RunnerResponse,
+            usage_context=_USAGE_CONTEXT,
             schema_validation_retries=0,
         )
 
@@ -282,6 +326,7 @@ async def test_empty_output_raises_regardless_of_retry_config() -> None:
             user_prompt="u",
             llm_config={},
             response_schema=_RunnerResponse,
+            usage_context=_USAGE_CONTEXT,
             schema_validation_retries=3,
         )
 
@@ -298,6 +343,7 @@ async def test_dict_result_validated_into_pydantic_model() -> None:
         user_prompt="u",
         llm_config={},
         response_schema=_RunnerResponse,
+        usage_context=_USAGE_CONTEXT,
     )
 
     assert isinstance(result, _RunnerResponse)
@@ -317,6 +363,7 @@ async def test_already_instantiated_model_passes_through() -> None:
         user_prompt="u",
         llm_config={},
         response_schema=_RunnerResponse,
+        usage_context=_USAGE_CONTEXT,
     )
 
     assert result is instance
@@ -344,15 +391,15 @@ async def test_retry_middleware_and_content_retries_are_configured_separately() 
         user_prompt="u",
         llm_config={},
         response_schema=_RunnerResponse,
+        usage_context=_USAGE_CONTEXT,
         retry_count=3,
         schema_validation_retries=5,
     )
 
     # Verify RetryMiddleware received retry_count=3
-    call = created[0].calls[0]
-    middleware_list = call["middleware"]
-    assert len(middleware_list) == 1
-    retry_mw = middleware_list[0]
+    middleware_list = created[0].middleware
+    assert len(middleware_list) == 2
+    retry_mw = middleware_list[1]
     assert isinstance(retry_mw, RetryMiddleware)
     assert retry_mw._max_retries == 3  # noqa: SLF001
 
@@ -372,11 +419,11 @@ async def test_schema_validation_retries_passed_correctly_with_default_retry_cou
         user_prompt="u",
         llm_config={},
         response_schema=_RunnerResponse,
+        usage_context=_USAGE_CONTEXT,
         schema_validation_retries=4,
     )
 
-    call = created[0].calls[0]
-    retry_mw = call["middleware"][0]
+    retry_mw = created[0].middleware[1]
     assert retry_mw._max_retries == 2  # default retry_count  # noqa: SLF001
     assert reply.retries_received == 4  # schema_validation_retries is independent
 
@@ -407,6 +454,7 @@ async def test_retry_limits_reject_invalid_values(
         "user_prompt": "u",
         "llm_config": {},
         "response_schema": _RunnerResponse,
+        "usage_context": _USAGE_CONTEXT,
         field_name: bad_value,
     }
 
@@ -432,6 +480,7 @@ async def test_no_retry_becomes_unbounded() -> None:
             user_prompt="u",
             llm_config={},
             response_schema=_RunnerResponse,
+            usage_context=_USAGE_CONTEXT,
             schema_validation_retries=n,
         )
 
@@ -460,6 +509,7 @@ async def test_provider_error_not_exposed_through_schema_validation_path() -> No
             user_prompt="u",
             llm_config={},
             response_schema=_RunnerResponse,
+            usage_context=_USAGE_CONTEXT,
             schema_validation_retries=0,
         )
 
@@ -485,4 +535,5 @@ async def test_invalid_dict_result_raises_pydantic_validation_error() -> None:
             user_prompt="u",
             llm_config={},
             response_schema=_RunnerResponse,
+            usage_context=_USAGE_CONTEXT,
         )

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mozaiksai.core.session.model import SessionLifecycle, TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
+from mozaiksai.core.usage.context import AuxiliaryUsageContext
 from mozaiksai.core.workflow.pack.config import (
     get_workflow_sequence,
     load_global_pack_graph,
@@ -271,6 +272,7 @@ class RefinementRequest(BaseModel):
     app_id: str | None = None
     target_app_id: str | None = None
     user_id: str | None = None
+    usage_context: AuxiliaryUsageContext | None = Field(default=None, exclude=True, repr=False)
     requested_workflow_id: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
@@ -1469,6 +1471,7 @@ class RefinementTriggerRouteResolver:
             app_id=request.app_id,
             target_app_id=request.target_app_id,
             user_id=request.user_id,
+            usage_context=request.usage_context,
             requested_workflow_id=request.requested_workflow_id,
             extra=request.extra,
         )
@@ -1899,11 +1902,13 @@ class RefinementTriggerRouteResolver:
         user_id: str | None = None,
         requested_workflow_id: str | None = None,
         default_source_surface: str | None = None,
+        usage_context: AuxiliaryUsageContext | None = None,
     ) -> RefinementRequest | None:
         nested_request = payload.get("refinement_request")
         if not isinstance(nested_request, dict):
             return None
         request_payload = dict(nested_request)
+        request_payload["usage_context"] = usage_context
         request_payload.setdefault("extra", {})
         if not isinstance(request_payload["extra"], dict):
             request_payload["extra"] = {}
