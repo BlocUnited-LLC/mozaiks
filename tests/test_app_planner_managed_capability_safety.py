@@ -1130,5 +1130,5 @@ class TestPlannerOutputContract:
 
     def test_managed_adapter_uses_canonical_owner_and_path(self):
         assert "services/integrations/{pack_id}_client.py" in self.output
-        assert "api_surface task owned by ControllerAgent" in " ".join(self.output.split())
+        assert "api_surface task with `initial_agent: ControllerAgent`" in " ".join(self.output.split())
 
