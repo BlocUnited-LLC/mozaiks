@@ -52,7 +52,7 @@ export class DynamicUIHandler {
   /**
    * Process incoming UI event from transport layer
    * @param {Object} eventData - Event data from backend
-   * @param {Function} sendResponse - Optional response callback (for WebSocket)
+   * @param {Function} sendResponse - Optional acknowledged response callback
    */
   async processUIEvent(eventData, sendResponse = null) {
     if (!eventData) return;
@@ -119,7 +119,7 @@ export class DynamicUIHandler {
     }
 
     try {
-      if (type === 'tool_call') {
+      if (type === 'tool_call' || type === UI_RENDER) {
         await handler(data, sendResponse);
       } else {
         await handler(data, eventData);
@@ -463,7 +463,6 @@ export class DynamicUIHandler {
       // Create response handler that sends data back to backend
       const onResponse = async (response) => {
         const tlog = createToolsLogger({ tool: toolName, toolCallId, workflowName: workflow_name, agentMessageId: payload?.agent_message_id });
-        tlog.event('ui_response', response?.status || 'unknown');
         
         if (responseCallback && typeof responseCallback === 'function') {
           const accepted = await responseCallback({
@@ -477,6 +476,7 @@ export class DynamicUIHandler {
         } else {
           throw new Error('The workflow response connection is unavailable.');
         }
+        tlog.event('ui_response', response?.status || 'unknown');
       };
 
   // Determine display mode ('composer', 'inline', or 'artifact') with robust fallbacks

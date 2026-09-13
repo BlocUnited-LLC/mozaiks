@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Alert, Button, StatusPill, SurfaceCard } from '../../ui/primitives/index.js';
 import { normalizePrimitiveActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 import { authFetch } from '../../adapters/api.js';
@@ -45,6 +45,9 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
   );
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadErrors, setDownloadErrors] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState('');
+  const submissionInFlight = useRef(false);
 
   async function triggerBrowserDownloads() {
     const downloadableFiles = files.filter(Boolean);
@@ -88,32 +91,48 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
   }
 
   async function handleAction(action) {
-    if (!onResponse) {
-      return;
-    }
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
+    setIsSubmitting(true);
+    setSubmissionError('');
+    try {
+      if (typeof onResponse !== 'function') {
+        throw new Error('The workflow response connection is unavailable.');
+      }
+      const respond = async (response) => {
+        if (await onResponse(response) === false) {
+          throw new Error('The server has not accepted this response.');
+        }
+      };
 
-    if (action.id === 'download_complete') {
-      const errors = await triggerBrowserDownloads();
-      setDownloadErrors(errors);
-      if (errors.length) return;
-      await sendPrimitiveResponse(onResponse, action, {
-        files,
-        download_accepted: errors.length === 0,
-        errors,
-      });
-      return;
-    }
+      if (action.id === 'download_complete') {
+        const errors = await triggerBrowserDownloads();
+        setDownloadErrors(errors);
+        if (errors.length) return;
+        await sendPrimitiveResponse(respond, action, {
+          files,
+          download_accepted: errors.length === 0,
+          errors,
+        });
+        return;
+      }
 
-    if (action.id === 'export_to_github') {
-      await sendPrimitiveResponse(onResponse, action, {
-        files,
-        repo_name: repoName.trim() || null,
-        commit_message: commitMessage.trim() || 'Initial code generation from Mozaiks AI',
-      });
-      return;
-    }
+      if (action.id === 'export_to_github') {
+        await sendPrimitiveResponse(respond, action, {
+          files,
+          repo_name: repoName.trim() || null,
+          commit_message: commitMessage.trim() || 'Initial code generation from Mozaiks AI',
+        });
+        return;
+      }
 
-    await sendPrimitiveResponse(onResponse, action, { files });
+      await sendPrimitiveResponse(respond, action, { files });
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : 'The server did not confirm your decision.');
+    } finally {
+      submissionInFlight.current = false;
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -129,6 +148,7 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
             variant="warning"
           />
         ) : null}
+        {submissionError ? <Alert message={submissionError} variant="destructive" /> : null}
 
         <div className="space-y-2">
           {files.map((file, index) => (
@@ -186,7 +206,7 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
               key={action.id}
               label={isDownloading && action.id === 'download_complete' ? 'Downloading…' : action.label}
               variant={action.variant}
-              disabled={isDownloading && action.id === 'download_complete'}
+              disabled={isSubmitting}
               onClick={() => handleAction(action)}
             />
           ))}
@@ -194,11 +214,12 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
             <Button
               label={exportAction.label}
               variant={exportAction.variant}
+              disabled={isSubmitting}
               onClick={() => handleAction(exportAction)}
             />
           ) : null}
           {onCancel ? (
-            <Button label="Cancel" variant="ghost" onClick={() => onCancel({ status: 'cancelled', action: 'cancel' })} />
+            <Button label="Cancel" variant="ghost" disabled={isSubmitting} onClick={() => onCancel({ status: 'cancelled', action: 'cancel' })} />
           ) : null}
         </div>
       </div>

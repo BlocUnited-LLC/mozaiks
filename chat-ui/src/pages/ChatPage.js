@@ -2981,12 +2981,9 @@ const ChatPage = () => {
           const resolvedWorkflowName = envelope.workflow_name || detail.workflow_name || basePayload.workflow_name || currentWorkflowName;
           const interactionType = envelope.interaction_type || detail.interaction_type || basePayload.interaction_type || (awaiting ? 'ui_tool' : 'ui_surface');
           const sendResponse = (responseData) => {
-            const activeWs = wsRef.current;
-            if (activeWs && activeWs.send) {
-              return activeWs.send(responseData);
-            }
-            console.warn('⚠️ No WebSocket connection available for UI tool response (tool_call)');
-            return false;
+            return submitToolCallResponse(responseData.tool_call_id, responseData.response, {
+              baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
+            });
           };
           dynamicUIHandler.processUIEvent({
             type: 'tool_call',
@@ -3053,10 +3050,9 @@ const ChatPage = () => {
 
 
         const sendResponse = (responseData) => {
-          const activeWs = wsRef.current;
-          if (activeWs && activeWs.send) return activeWs.send(responseData);
-          console.warn('⚠️ No WebSocket available for ui.render response');
-          return false;
+          return submitToolCallResponse(responseData.tool_call_id, responseData.response, {
+            baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
+          });
         };
 
         dynamicUIHandler.processUIEvent({
@@ -5771,7 +5767,9 @@ const ChatPage = () => {
           if (artifactMsg) {
             if (artifactMsg.toolCall && !artifactMsg.toolCall.onResponse) {
               artifactMsg.toolCall.onResponse = (response) => {
-                console.warn('⚠️ This is a restored artifact - responses may not work until next interaction');
+                return submitToolCallResponse(artifactMsg.toolCall.tool_call_id, response, {
+                  baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
+                });
               };
             }
 
