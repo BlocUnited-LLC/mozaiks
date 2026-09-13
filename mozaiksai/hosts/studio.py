@@ -672,12 +672,26 @@ configure_session_router(
     trigger_route_resolver=get_orchestration_control_harness(),
 )
 
+from factory_app.workflows._shared.platform.ask_context import studio_ask_context
 from factory_app.workflows._shared.platform.build_target import bind_factory_session
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 
-get_platform_hooks().register_bundle(
-    {"chat_session_fields": bind_factory_session}, source="mozaiks.studio", prepend=True,
-)
+
+def register_studio_platform_hooks(registry: Any | None = None) -> None:
+    """Install Studio's platform extension hooks.
+
+    Called once at import time. Exposed as a named function so the wiring is
+    assertable without depending on import side effects surviving a registry
+    reset.
+    """
+    (registry or get_platform_hooks()).register_bundle(
+        {"chat_session_fields": bind_factory_session, "ask_context": studio_ask_context},
+        source="mozaiks.studio",
+        prepend=True,
+    )
+
+
+register_studio_platform_hooks()
 
 def _resolve_studio_scope(
     principal: UserPrincipal,

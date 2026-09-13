@@ -6,9 +6,12 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
-from mozaiksai.core.transport.session_registry import session_registry
-
 logger = logging.getLogger("simple_transport.general_mode")
+
+# Session lifecycle states that must not be described to the ask agent as a
+# live workflow. `completed` sessions retain current_workflow_id on the session
+# document, and `stale` sessions are no longer resumable.
+_INACTIVE_SESSION_STATES = frozenset({"completed", "stale"})
 
 
 def _load_general_agent_service():
@@ -125,23 +128,49 @@ class GeneralModeMixin:
         if not general_chat_id:
             raise RuntimeError("Failed to resolve general chat identifier")
 
+        # Workspace truth comes from server-side state, not the per-connection
+        # registry: an ask-only connection has no workflow contexts of its own,
+        # and the user's real session lives on another socket entirely.
+        #
+        # This reads the default (target-unscoped) session document, which is
+        # the app's own session lane. Target-scoped sessions — a Studio build
+        # bound to a generated app — live under a separate scoped document and
+        # are reported by the host's `ask_context` hook instead, because only
+        # the host knows which build targets belong to the user.
         workflows_payload: list[dict[str, Any]] = []
-        if ws_id:
-            contexts = session_registry.get_all_workflows(ws_id)
-            for ctx in contexts:
-                if hasattr(ctx, "to_dict"):
-                    workflows_payload.append(ctx.to_dict())
-                else:
-                    workflows_payload.append(
-                        {
-                            "chat_id": getattr(ctx, "chat_id", None),
-                            "workflow_name": getattr(ctx, "workflow_name", None),
-                            "status": getattr(ctx, "status", None),
-                            "artifact_id": getattr(ctx, "artifact_id", None),
-                            "app_id": getattr(ctx, "app_id", None),
-                            "user_id": getattr(ctx, "user_id", None),
-                        }
-                    )
+        try:
+            from mozaiksai.core.session import get_session_router
+
+            snapshot = await get_session_router().get_session_snapshot(
+                app_id=str(app_id),
+                user_id=str(user_id) if user_id else "anonymous",
+            )
+            current_workflow_id = str((snapshot or {}).get("current_workflow_id") or "").strip()
+            lifecycle_state = str((snapshot or {}).get("lifecycle_state") or "").strip().lower()
+            # A finished journey keeps current_workflow_id on the session
+            # document; reporting it as active would have the agent insist a
+            # run is in flight days after it ended.
+            if current_workflow_id and lifecycle_state not in _INACTIVE_SESSION_STATES:
+                workflows_payload.append(
+                    {
+                        "workflow_name": current_workflow_id,
+                        "chat_id": (snapshot or {}).get("current_chat_id"),
+                        "status": lifecycle_state or None,
+                    }
+                )
+        except Exception as snapshot_err:
+            logger.debug("Ask workspace snapshot unavailable: %s", snapshot_err)
+
+        workspace_context: dict[str, Any] = {}
+        try:
+            from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+
+            workspace_context = await get_platform_hooks().call_ask_context(
+                app_id=str(app_id),
+                user_id=str(user_id) if user_id else "anonymous",
+            )
+        except Exception as ask_context_err:
+            logger.debug("Ask host context unavailable: %s", ask_context_err)
 
         metadata_base = {
             "source": "general_agent",
@@ -188,6 +217,7 @@ class GeneralModeMixin:
                 app_id=str(app_id),
                 user_id=str(user_id) if user_id else None,
                 ui_context=ui_context,
+                workspace_context=workspace_context or None,
             )
         except Exception as exc:
             if exc.__class__.__name__ == "TokenUsageDenied":
