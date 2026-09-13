@@ -139,7 +139,7 @@ function ColumnPicker({ open, onClose, registry, selected, onChange }) {
                 onChange={() =>
                   onChange(checked ? selected.filter((id) => id !== metricId) : [...selected, metricId])
                 }
-                className="h-4 w-4 shrink-0 accent-[hsl(var(--mz-primary))]"
+                className="h-4 w-4 shrink-0 accent-primary"
               />
             </label>
           )
