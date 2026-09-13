@@ -45,7 +45,7 @@ Current implemented workflow-run persistence contract:
 - A closed chat-scoped AG2 channel also blocks opening a replacement channel,
   even for older session projections left at `0`. This uses AG2's existing WAL,
   not Factory build receipts or a second runtime state store. A receipt-only
-  legacy failure with no terminal AG2 state cannot be inferred generically;
+  historical failure with no terminal AG2 state cannot be inferred generically;
   this change does not migrate historical records or inspect product outcomes.
 - AG2 run history is persisted separately through the AG2 stream storage adapters and is the source of truth for execution re-entry and UI replay.
 - While the backend process still owns a paused AG2 workflow channel, user

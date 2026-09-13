@@ -144,4 +144,14 @@ build validation was marked skipped rather than represented as executed.
 Studio summary reads now use the same owner- and host-checked build registry
 selection as artifact reads. Dashboard manifests remain host-owned UI contracts,
 not customer app identities. Build review requests only app-bundle records so
-App Intelligence projections cannot displace the actual reviewable output.
+non-bundle App Intelligence projections do not displace reviewable output.
+Workspace-index snapshots are also app-bundle records and remain visible.
+
+Normal UI acceptance and local promotion subsequently restored the final
+Contact Desk into a separate workspace and marked its registry record active.
+All 35 restored files matched the committed ZIP; restore policy excluded the
+three environment-example templates. Browser acceptance passed against the
+promoted backend with the production-built frontend, including a separate
+restart persistence check. See the
+[acceptance report](../reviews/factory-repeatability-acceptance-2026-09-12.md)
+for evidence, repair history, and remaining limitations.

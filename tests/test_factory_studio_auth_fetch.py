@@ -61,7 +61,9 @@ def test_app_studio_data_uses_authenticated_fetch_for_studio_and_admin_routes() 
     source = _read(PAGES / "useAppStudioData.js")
 
     assert "import { studioFetch } from './studioApi.js'" in source
-    assert "studioFetch(`/api/studio/overview?app_id=${encodeURIComponent(appId)}`)" in source
+    assert "studioFetch(`/api/studio/overview?${buildScope}`)" in source
+    assert "studioFetch(`/api/studio/build?${buildScope}`)" in source
+    assert "`build_registry_id=${encodeURIComponent(buildRegistryId)}`" in source
     assert "studioFetch(`/api/admin/stats?app_id=${encodeURIComponent(appId)}`)" in source
     assert "studioFetch(`/api/studio/apps/${encodeURIComponent(appId)}/context`)" in source
     assert "fetch(`${API_BASE}/api/studio/" not in source
