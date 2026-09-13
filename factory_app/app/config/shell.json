@@ -34,10 +34,32 @@
   "shortcuts": {
     "profile": ["profile", "signout"],
     "mobile": ["create", "profile"],
-    "footer": ["legal", "terms", "cookies"],
     "footerHideOnMobile": true
   },
   "navigation": {
+    "items": [
+      {
+        "id": "privacy",
+        "label": "Privacy Policy",
+        "href": "https://www.mozaiks.ai/privacy",
+        "scope": "footer",
+        "order": 10
+      },
+      {
+        "id": "terms",
+        "label": "Terms of Service",
+        "href": "https://www.mozaiks.ai/terms",
+        "scope": "footer",
+        "order": 20
+      },
+      {
+        "id": "cookies",
+        "label": "Cookie Policy",
+        "href": "https://www.mozaiks.ai/cookies",
+        "scope": "footer",
+        "order": 30
+      }
+    ],
     "policy": {
       "desktop": {
         "global": "header",

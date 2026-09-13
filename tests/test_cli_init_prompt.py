@@ -54,7 +54,6 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     assert (target_dir / "app" / "config" / "shell.json").exists()
     assert shell_json["header"]["actions"]
     assert shell_json["notifications"]["show"] is True
-    assert shell_json["shortcuts"]["footer"] == ["legal", "terms", "cookies"]
     assert (target_dir / "app" / "brand" / "theme_config.json").exists()
     assert (target_dir / "app" / "ui" / "route_manifest.json").exists()
     assert (target_dir / "requirements.txt").exists()
