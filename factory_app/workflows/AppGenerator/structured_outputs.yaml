@@ -3797,11 +3797,9 @@ models:
         description: Whether pagination is enabled.
         default: false
       pagination_mode:
-        type: union
-        variants:
-        - AppPaginationMode
-        - 'null'
-        description: Select server when the list endpoint returns a bounded page. Null omits the field and uses the runtime client default. Server requires pagination=true, page_size (1-100), api_endpoint, data_key, and total_key; requests canonical page/page_size/search inputs. Client operates only on loaded rows. Server owns search and stable ordering; column sorting is disabled.
+        type: AppPaginationMode
+        default: client
+        description: Select server when the list endpoint returns a bounded page. Omitted input defaults to client; explicit null is invalid. Server requires pagination=true, page_size (1-100), api_endpoint, data_key, and total_key; requests canonical page/page_size/search inputs. Client operates only on loaded rows. Server owns search and stable ordering; column sorting is disabled.
       total_key:
         type: optional_str
         description: Required response path to a nonnegative integer total in server mode; null in client mode. Count all rows matching the same owner scope and literal search, before paging.
@@ -4222,11 +4220,9 @@ models:
         description: Whether pagination is enabled.
         default: false
       pagination_mode:
-        type: union
-        variants:
-        - AppPaginationMode
-        - 'null'
-        description: ResourceTable requires client or null (runtime client default); server is rejected by page validation. Use DataTable for server pagination; resource filters and sorts are not a server query contract.
+        type: AppPaginationMode
+        default: client
+        description: ResourceTable requires client, the default for omitted input; explicit null is invalid and server is rejected by page validation. Use DataTable for server pagination; resource filters and sorts are not a server query contract.
       page_size:
         type: union
         variants:
