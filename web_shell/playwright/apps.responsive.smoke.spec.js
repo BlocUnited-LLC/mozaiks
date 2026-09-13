@@ -1165,6 +1165,13 @@ test('profile support page loads tickets on a same-origin Studio host', async ({
       contentType: 'application/json',
       body: JSON.stringify({
         pages: [{
+          id: 'overview',
+          label: 'Profile',
+          section: 'overview',
+          renderer: 'custom_component',
+          component: 'ProfileOverview',
+          visibility: 'public',
+        }, {
           id: 'support-tickets',
           label: 'Support',
           section: 'overview',
@@ -1191,6 +1198,17 @@ test('profile support page loads tickets on a same-origin Studio host', async ({
 
   await expect(page.getByText('Need help with my app').first()).toBeVisible();
   expect(profilePageRequests).toBeGreaterThan(0);
+
+  await page.route('**/api/users/test-person', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ username: 'test-person', display_name: 'Public Profile Name' }),
+    });
+  });
+  await page.goto('/u/test-person?tab=support-tickets');
+  await expect(page.getByText('Public Profile Name').first()).toBeVisible();
+  await expect(page.getByText('Need help with my app')).toHaveCount(0);
 });
 
 test('app Studio root redirects to manifest default portal', async ({ page }) => {

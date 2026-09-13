@@ -753,8 +753,8 @@ export default function ProfilePage() {
     for (const [s, pages] of Object.entries(pagesBySection)) {
       if (!SECTION_ORDER.includes(s)) flat.push(...(pages || []));
     }
-    return flat;
-  }, [pagesBySection]);
+    return isOwner ? flat : flat.filter(page => page.visibility !== 'owner_only');
+  }, [pagesBySection, isOwner]);
 
   // Sync active page when pages load or URL param changes
   useEffect(() => {
