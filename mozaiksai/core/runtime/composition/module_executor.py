@@ -67,6 +67,11 @@ from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
 logger = get_workflow_logger("module_executor")
 
+# Strong references to in-flight audit emissions: the event loop holds only
+# weak references to tasks, so a fire-and-forget audit could be collected
+# before it runs.
+_PENDING_AUDIT_TASKS: set[asyncio.Task] = set()
+
 # Timeout for async module action dispatch (default 30 s, 0 = disabled).
 # Prevents a misbehaving module from blocking platform request handling indefinitely.
 # Sync actions are not timed out here (they block the event loop anyway and should
@@ -361,6 +366,10 @@ class ModuleExecutor:
         )
         handler = self._modules.get(request.module)
         if handler is None:
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="denied", reason="module not found"),
+                error="MODULE_NOT_FOUND",
+            )
             return ModuleResult(
                 success=False,
                 error=f"Module not found: {request.module!r}",
@@ -385,16 +394,14 @@ class ModuleExecutor:
                 safe_action,
                 request.user_id,
             )
-            asyncio.create_task(
-                self._emit_dispatch_audit(
-                    replace(
-                        dispatch_audit,
-                        action=safe_action,
-                        outcome="denied",
-                        reason="undeclared action",
-                    ),
-                    error="ACTION_NOT_FOUND",
-                )
+            await self._finalize_dispatch_audit(
+                replace(
+                    dispatch_audit,
+                    action=safe_action,
+                    outcome="denied",
+                    reason="undeclared action",
+                ),
+                error="ACTION_NOT_FOUND",
             )
             return ModuleResult(
                 success=False,
@@ -410,6 +417,10 @@ class ModuleExecutor:
                 request.action,
                 handler_method,
                 type(handler).__name__,
+            )
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="failed", reason="declared handler missing"),
+                error="ACTION_NOT_FOUND",
             )
             return ModuleResult(
                 success=False,
@@ -431,7 +442,7 @@ class ModuleExecutor:
                 reason="permission denied",
                 permission_check=permission_check,
             )
-            asyncio.create_task(self._emit_dispatch_audit(denied_audit, error="PERMISSION_DENIED"))
+            await self._finalize_dispatch_audit(denied_audit, error="PERMISSION_DENIED")
             return ModuleResult(
                 success=False,
                 error=(
@@ -470,7 +481,7 @@ class ModuleExecutor:
                         reason="entitlement required",
                         entitlement_check=entitlement_check,
                     )
-                    asyncio.create_task(self._emit_dispatch_audit(denied_audit, error="ENTITLEMENT_REQUIRED"))
+                    await self._finalize_dispatch_audit(denied_audit, error="ENTITLEMENT_REQUIRED")
                     return ModuleResult(
                         success=False,
                         error=f"Entitlement required for {request.module}.{request.action}: {capability_id}",
@@ -500,9 +511,15 @@ class ModuleExecutor:
                 dispatch_audit,
                 outcome="denied",
                 reason=reason,
-                audit_tags=policy_decision.audit_tags,
+                # Merge, never replace: the provenance tags (dispatch surface,
+                # params digest) must survive policy denial; policy tags win
+                # on key collision.
+                audit_tags={
+                    **dict(dispatch_audit.audit_tags),
+                    **dict(policy_decision.audit_tags),
+                },
             )
-            asyncio.create_task(self._emit_dispatch_audit(denied_audit, error="MODULE_POLICY_DENIED"))
+            await self._finalize_dispatch_audit(denied_audit, error="MODULE_POLICY_DENIED")
             return ModuleResult(
                 success=False,
                 error=reason,
@@ -519,6 +536,10 @@ class ModuleExecutor:
                 logger.warning(
                     "MODULE_INPUT_INVALID: module=%s action=%s error=%s",
                     request.module, request.action, input_error)
+                await self._finalize_dispatch_audit(
+                    replace(dispatch_audit, outcome="failed", reason="INVALID_PARAMS"),
+                    error="INVALID_PARAMS",
+                )
                 return ModuleResult(
                     success=False,
                     error=f"Input validation failed for {request.module}.{request.action}: {input_error}",
@@ -536,6 +557,10 @@ class ModuleExecutor:
                 logger.warning(
                     "MODULE_PARAMS_TOO_LARGE: module=%s action=%s size=%d limit=%d",
                     request.module, request.action, params_size, max_params,
+                )
+                await self._finalize_dispatch_audit(
+                    replace(dispatch_audit, outcome="failed", reason="PAYLOAD_TOO_LARGE"),
+                    error="PAYLOAD_TOO_LARGE",
                 )
                 return ModuleResult(
                     success=False,
@@ -588,6 +613,10 @@ class ModuleExecutor:
                 "MODULE_ACTION_TIMEOUT: module=%s action=%s timeout=%.1fs user=%s",
                 request.module, request.action, timeout, request.user_id,
             )
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="failed", reason="ACTION_TIMEOUT"),
+                error="ACTION_TIMEOUT",
+            )
             return ModuleResult(
                 success=False,
                 error=f"Action '{request.action}' timed out",
@@ -606,6 +635,10 @@ class ModuleExecutor:
         except TypeError as exc:
             logger.warning(
                 "MODULE_ACTION_BAD_PARAMS: module=%s action=%s error=%s", request.module, request.action, exc)
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="failed", reason="INVALID_PARAMS"),
+                error="INVALID_PARAMS",
+            )
             return ModuleResult(
                 success=False,
                 error=f"Invalid parameters for action '{request.action}'",
@@ -615,6 +648,10 @@ class ModuleExecutor:
             logger.warning(
                 "MODULE_ACTION_PERMISSION_DENIED: module=%s action=%s user=%s error=%s",
                 request.module, request.action, request.user_id, exc,
+            )
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="denied", reason="handler permission denied"),
+                error="PERMISSION_DENIED",
             )
             return ModuleResult(
                 success=False,
@@ -631,11 +668,9 @@ class ModuleExecutor:
                 exc.diagnostic.message,
                 extra={"module_event_payload_validation": exc.to_dict()},
             )
-            asyncio.create_task(
-                self._emit_dispatch_audit(
-                    replace(dispatch_audit, outcome="failed", reason="MODULE_EVENT_PAYLOAD_INVALID"),
-                    error="MODULE_EVENT_PAYLOAD_INVALID",
-                )
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="failed", reason="MODULE_EVENT_PAYLOAD_INVALID"),
+                error="MODULE_EVENT_PAYLOAD_INVALID",
             )
             return ModuleResult(
                 success=False,
@@ -647,11 +682,9 @@ class ModuleExecutor:
                 "MODULE_ACTION_ERROR: module=%s action=%s error=%s", request.module, request.action, exc,
                 exc_info=True,
             )
-            asyncio.create_task(
-                self._emit_dispatch_audit(
-                    replace(dispatch_audit, outcome="failed", reason=type(exc).__name__),
-                    error=type(exc).__name__,
-                )
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="failed", reason=type(exc).__name__),
+                error=type(exc).__name__,
             )
             return ModuleResult(
                 success=False,
@@ -672,11 +705,9 @@ class ModuleExecutor:
                 "MODULE_RESULT_NOT_JSON_SAFE: module=%s action=%s error=%s",
                 request.module, request.action, exc,
             )
-            asyncio.create_task(
-                self._emit_dispatch_audit(
-                    replace(dispatch_audit, outcome="failed", reason="MODULE_RESULT_NOT_JSON_SAFE"),
-                    error="MODULE_RESULT_NOT_JSON_SAFE",
-                )
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="failed", reason="MODULE_RESULT_NOT_JSON_SAFE"),
+                error="MODULE_RESULT_NOT_JSON_SAFE",
             )
             return ModuleResult(
                 success=False,
@@ -693,11 +724,9 @@ class ModuleExecutor:
                     "MODULE_OUTPUT_INVALID: module=%s action=%s error=%s",
                     request.module, request.action, output_diagnostic.message)
                 if output_diagnostic.category == "schema_invalid":
-                    asyncio.create_task(
-                        self._emit_dispatch_audit(
-                            replace(dispatch_audit, outcome="failed", reason="INVALID_OUTPUT_SCHEMA"),
-                            error="INVALID_OUTPUT_SCHEMA",
-                        )
+                    await self._finalize_dispatch_audit(
+                        replace(dispatch_audit, outcome="failed", reason="INVALID_OUTPUT_SCHEMA"),
+                        error="INVALID_OUTPUT_SCHEMA",
                     )
                     return ModuleResult(
                         success=False,
@@ -725,6 +754,10 @@ class ModuleExecutor:
                     "MODULE_RESULT_NOT_JSON_SAFE: module=%s action=%s strict serialization failed: %s",
                     request.module, request.action, exc,
                 )
+                await self._finalize_dispatch_audit(
+                    replace(dispatch_audit, outcome="failed", reason="MODULE_RESULT_NOT_JSON_SAFE"),
+                    error="MODULE_RESULT_NOT_JSON_SAFE",
+                )
                 return ModuleResult(
                     success=False,
                     error=f"Action {request.action!r} returned a result that is not JSON-safe",
@@ -737,6 +770,10 @@ class ModuleExecutor:
                     "MODULE_RESPONSE_TOO_LARGE: module=%s action=%s size=%d limit=%d",
                     request.module, request.action, result_size, max_response,
                 )
+                await self._finalize_dispatch_audit(
+                    replace(dispatch_audit, outcome="failed", reason="RESPONSE_TOO_LARGE"),
+                    error="RESPONSE_TOO_LARGE",
+                )
                 return ModuleResult(
                     success=False,
                     error=f"Response too large for action '{request.action}'",
@@ -746,10 +783,9 @@ class ModuleExecutor:
         logger.debug(
             "MODULE_ACTION_OK: module=%s action=%s app_id=%s",
             request.module, request.action, request.app_id)
-        # Audit trail — fire-and-forget; never blocks the action response.
-        asyncio.create_task(
-            self._emit_dispatch_audit(replace(dispatch_audit, outcome="ok"))
-        )
+        # Audit trail — admin-lane dispatches await the write; other lanes
+        # emit fire-and-forget with a strong task reference.
+        await self._finalize_dispatch_audit(replace(dispatch_audit, outcome="ok"))
         return ModuleResult(success=True, data=result)
 
     async def health(self) -> dict[str, Any]:
@@ -761,6 +797,26 @@ class ModuleExecutor:
 
     def can_handle(self, target: str) -> bool:
         return target in self._modules
+
+    async def _finalize_dispatch_audit(
+        self,
+        audit: ModuleDispatchAudit,
+        *,
+        error: str | None = None,
+    ) -> None:
+        """Emit the dispatch audit for a terminal outcome, exactly once per path.
+
+        Admin-lane dispatches await the write before the response returns —
+        ADR-0001 expects operator actions to carry their audit record; other
+        lanes stay fire-and-forget with a strong task reference so a pending
+        audit cannot be garbage-collected before it runs.
+        """
+        if audit.audit_tags.get("surface") == "http_admin_module_dispatch":
+            await self._emit_dispatch_audit(audit, error=error)
+            return
+        task = asyncio.create_task(self._emit_dispatch_audit(audit, error=error))
+        _PENDING_AUDIT_TASKS.add(task)
+        task.add_done_callback(_PENDING_AUDIT_TASKS.discard)
 
     def _build_permission_check(
         self,
@@ -791,6 +847,15 @@ class ModuleExecutor:
         outcome: str,
         reason: str | None = None,
     ) -> ModuleDispatchAudit:
+        # Provenance facts that belong in the audit record: the dispatch
+        # surface, and a content digest of the params when the surface
+        # supplied one (admin dispatch) — never raw params.
+        audit_tags: dict[str, str] = {}
+        if provenance.surface:
+            audit_tags["surface"] = str(provenance.surface)
+        digest = (provenance.metadata or {}).get("params_digest")
+        if digest:
+            audit_tags["params_digest"] = str(digest)
         return ModuleDispatchAudit(
             app_id=request.app_id or None,
             tenant_id=request.tenant_id,
@@ -806,6 +871,7 @@ class ModuleExecutor:
             causation_id=provenance.causation_id,
             outcome=outcome,  # type: ignore[arg-type]
             reason=reason,
+            audit_tags=audit_tags,
         )
 
     async def _emit_dispatch_audit(

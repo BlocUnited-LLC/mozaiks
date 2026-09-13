@@ -176,6 +176,17 @@ callers, and are reserved for trusted runtime/event calls. Local development
 with auth disabled permits anonymous calls to non-internal actions, but those
 calls use a concrete empty permission list.
 
+`internal` and `admin_internal` actions are rejected with 404 on the public
+module route, which also fails closed when the surface map was never populated
+by platform assembly. `admin_internal` actions are reachable only through the
+admin dispatch boundary (`/api/admin/modules/{module}/{action}`): a
+token-validated principal carrying an operator role/scope from the
+deny-by-default `MOZAIKS_ADMIN_DISPATCH_ROLES` allowlist, dispatched with an
+enforce-mode authority (declared `permissions` always checked; never
+`trusted_bypass` over HTTP, including local development) and an audit record
+carrying the dispatch surface and a params digest. `internal` actions have no
+HTTP path at all.
+
 `api_surface` does not replace authorization. Runtime permission checks still
 use `actions[].permissions`, entitlement checks still use
 `actions[].entitlement_gate`, and the caller's granted permissions still come

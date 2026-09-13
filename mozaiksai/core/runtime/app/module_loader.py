@@ -215,6 +215,7 @@ class ActionDef(ModuleContractModel):
     def _entitlement_gate(cls, value: Any) -> str | None:
         return _optional_text(value)
 
+
 class ModuleCapability(ModuleContractModel):
     capability_id: str
     kind: Literal["action", "workflow", "page", "transition", "hosted"]

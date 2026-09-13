@@ -110,6 +110,12 @@ from mozaiksai.core.runtime.composition.module_authority import ModuleExecutionP
 
 logger = get_workflow_logger("platform_hooks")
 
+
+class ModuleScopeResolutionError(RuntimeError):
+    """A scope/permission resolver hook failed while fail-closed resolution
+    was requested. Callers on privileged lanes deny the dispatch instead of
+    proceeding with the pre-hook (unnarrowed) permission set."""
+
 PLATFORM_EXTENSION_SCHEMA_VERSION = "mozaiks.platform_extensions.v1"
 
 
@@ -426,12 +432,16 @@ class PlatformHookRegistry:
         params: dict[str, Any],
         request: Any = None,
         default_permissions: list[str] | None = None,
+        fail_closed: bool = False,
     ) -> list[str] | None:
         """Resolve module permissions through optional host hooks.
 
         ``None`` retains the trusted/internal bypass semantics used by
         ModuleExecutor.  A hook may return an empty list to require enforcement
-        with no permissions granted.
+        with no permissions granted. With ``fail_closed`` a hook exception
+        raises ModuleScopeResolutionError instead of being swallowed — a
+        product hook that NARROWS permissions must not be bypassable by
+        crashing it with crafted params.
         """
 
         current = list(default_permissions) if default_permissions is not None else None
@@ -455,6 +465,11 @@ class PlatformHookRegistry:
                 if isinstance(res, (list, tuple, set)):
                     current = [str(item) for item in res if str(item).strip()]
             except Exception as exc:
+                if fail_closed:
+                    raise ModuleScopeResolutionError(
+                        f"module permission resolver hook failed for "
+                        f"{module_name}.{action_name}"
+                    ) from exc
                 logger.warning("PLATFORM_HOOKS_MODULE_PERMISSIONS_ERROR: %s", exc)
         return current
 
@@ -468,8 +483,13 @@ class PlatformHookRegistry:
         params: dict[str, Any],
         request: Any = None,
         default_permissions: list[str] | None = None,
+        fail_closed: bool = False,
     ) -> dict[str, Any]:
-        """Resolve canonical module dispatch scope through optional host hooks."""
+        """Resolve canonical module dispatch scope through optional host hooks.
+
+        With ``fail_closed`` a hook exception raises
+        ModuleScopeResolutionError instead of being swallowed.
+        """
 
         app_id = str(requested_scope.get("app_id") or "")
         user_id = _clean_optional(requested_scope.get("user_id"))
@@ -509,6 +529,11 @@ class PlatformHookRegistry:
                     if isinstance(raw_permissions, (list, tuple, set)):
                         permissions = [str(item) for item in raw_permissions if str(item).strip()]
             except Exception as exc:
+                if fail_closed:
+                    raise ModuleScopeResolutionError(
+                        f"module scope resolver hook failed for "
+                        f"{module_name}.{action_name}"
+                    ) from exc
                 logger.warning("PLATFORM_HOOKS_MODULE_SCOPE_ERROR: %s", exc)
 
         permissions = await self.call_module_permissions(
@@ -521,6 +546,7 @@ class PlatformHookRegistry:
             params=params,
             request=request,
             default_permissions=list(permissions),
+            fail_closed=fail_closed,
         ) or []
         return {
             "app_id": app_id,
