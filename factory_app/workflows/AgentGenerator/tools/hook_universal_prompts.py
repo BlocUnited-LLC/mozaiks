@@ -195,6 +195,27 @@ Copy supplied contract identifiers exactly, preserving case and spelling:
 - Context references must resolve to declared variables exposed to the consumer.
 - Tool arguments must use the exact identifiers and allowed values in their schema.
 
+Copy character-for-character. Casing and spelling are part of the identifier:
+
+**Roster identifiers** (PascalCase preserved)
+  ✅ the roster you declared contains "RouterAgent" → routing uses "RouterAgent"
+  ❌ the roster you declared contains "RouterAgent" → routing uses "Router" or "routerAgent"
+
+**Tool names** (snake_case preserved)
+  ✅ the tool contract declares "classify_request" → the binding uses "classify_request"
+  ❌ the tool contract declares "classify_request" → the binding uses "ClassifyRequest"
+
+**Context variable names** (snake_case preserved)
+  ✅ the exposed variable is "current_domain" → the reference uses "current_domain"
+  ❌ the exposed variable is "current_domain" → the reference uses "currentDomain"
+
+**Supplied workflow names** (copied verbatim, including any prefix)
+  ✅ the specification names "Stage 1: Intake" → your output uses "Stage 1: Intake"
+  ❌ the specification names "Stage 1: Intake" → your output uses "Intake Module"
+
+**WHY**: The runtime resolves these by exact string match. Any deviation in
+casing, spelling, or abbreviation causes a load or dispatch failure.
+
 Declare new identifiers only when designing artifacts within the scoped task.
 Do not infer extra input objects from schema names, prior participants, or examples.
 Reasoning prompts describe data dependencies by semantic fields; declarative

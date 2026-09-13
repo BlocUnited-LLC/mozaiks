@@ -42,23 +42,38 @@ _FACTORY_AGENT_DOCUMENTS = {
 _FACTORY_AGENT_NAMES = {
     agent["name"]
     for document in _FACTORY_AGENT_DOCUMENTS.values()
-    for agent in document["agents"]
+    for agent in (document.get("agents") or [])
+    if isinstance(agent, dict) and agent.get("name")
 }
 _FACTORY_AGENT_PATTERN = re.compile(
     r"\b(?:" + "|".join(re.escape(name) for name in sorted(_FACTORY_AGENT_NAMES)) + r")\b"
 )
 
 
+# Declarative shapes where the identifier IS the machine reference rather than a
+# reasoning dependency. Each stays exempt so a prompt may show a real bundle
+# example without tripping the prose guard.
+_MACHINE_FIELD_KEYS = (
+    "name|agent|initial_agent|execution_agent|bundle_repair_target|"
+    "source_agent|target_agent|trigger_agent"
+)
+_MACHINE_REFERENCE_PATTERNS = (
+    # keyed field:  initial_agent: PatternAgent  /  bundle_repair_target == "X"
+    r"(?<!\w)[\"'`]?(?:" + _MACHINE_FIELD_KEYS + r")[\"'`]?\s*(?::|==)\s*[\"'`]?"
+    + _FACTORY_AGENT_PATTERN.pattern + r"[\"'`]?",
+    # ui_config.yaml visual_agents: the identifier is the whole list member
+    r"(?m)^[ \t]*-[ \t]*[\"'`]?" + _FACTORY_AGENT_PATTERN.pattern + r"[\"'`]?[ \t]*,?[ \t]*$",
+    # structured_outputs.yaml registry: the identifier is the mapping key
+    r"(?m)^[ \t]*[\"'`]?" + _FACTORY_AGENT_PATTERN.pattern + r"[\"'`]?[ \t]*:[ \t]*\S",
+)
+
+
 def _prompt_identity_dependencies(content: str) -> set[str]:
     # Exempt machine field values, including those inside generated YAML/JSON,
     # while still inspecting reasoning text inside code fences and task briefs.
-    prose = re.sub(
-        r"(?<!\w)[\"'`]?(?:name|agent|initial_agent|execution_agent|bundle_repair_target|"
-        r"source_agent|target_agent|trigger_agent)[\"'`]?\s*(?::|==)\s*[\"'`]?"
-        + _FACTORY_AGENT_PATTERN.pattern + r"[\"'`]?",
-        "",
-        content,
-    )
+    prose = content
+    for pattern in _MACHINE_REFERENCE_PATTERNS:
+        prose = re.sub(pattern, "", prose)
     return set(_FACTORY_AGENT_PATTERN.findall(prose))
 
 
@@ -70,6 +85,12 @@ def _prompt_identity_dependencies(content: str) -> set[str]:
     ('Set `execution_agent: ModuleTaskWorkerAgent` for module tasks.', set()),
     ('Use `bundle_repair_target == "ConfigMiddlewareAgent"` as the repair condition.', set()),
     ('```yaml\nsource_agent: PatternAgent\ntarget_agent: ProjectOverviewAgent\n```', set()),
+    # ui_config.yaml exposes visual agents as a bare list, not a keyed field.
+    ('```yaml\nvisual_agents:\n  - PatternAgent\n  - ProjectOverviewAgent\n```', set()),
+    # structured_outputs.yaml registers outputs under the agent id as map key.
+    ('```yaml\nregistry:\n  PatternAgent: PatternOutput\n```', set()),
+    # A bare identifier inside prose is still a reasoning dependency.
+    ('Hand the brief to PatternAgent when research completes.', {'PatternAgent'}),
 ])
 def test_prompt_identity_guard_distinguishes_reasoning_from_machine_references(content, dependencies):
     assert _prompt_identity_dependencies(content) == dependencies
@@ -78,7 +99,7 @@ def test_prompt_identity_guard_distinguishes_reasoning_from_machine_references(c
 @pytest.mark.parametrize("path,agent", [
     pytest.param(path, agent, id=f"{path.parent.name}/{agent['name']}")
     for path, document in _FACTORY_AGENT_DOCUMENTS.items()
-    for agent in document["agents"]
+    for agent in (document.get("agents") or [])
 ])
 def test_factory_prompt_prose_uses_semantic_inputs_instead_of_agent_identities(path, agent):
     """Protect first-party reasoning prompts without banning routing declarations."""
