@@ -6,6 +6,9 @@ export default {
   ],
   theme: {
     extend: {
+      maxWidth: {
+        content: 'var(--mz-content-max, 96rem)',
+      },
       colors: {
         background: 'hsl(var(--mz-background))',
         foreground: 'hsl(var(--mz-foreground))',

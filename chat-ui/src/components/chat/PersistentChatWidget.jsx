@@ -7,6 +7,7 @@ import {
   applyBrandImageFallback,
   getBrandLogoSrc,
 } from '../../styles/brandAssets';
+import { authFetch } from '../../adapters/api';
 import { useWidgetAskWS } from '../../hooks/useWidgetAskWS';
 import {
   buildSupportConversationTranscript,
@@ -143,7 +144,7 @@ const PersistentChatWidget = ({
     if (!isExpanded || !effectiveAppId || !effectiveUserId) return undefined;
     let cancelled = false;
     const params = new URLSearchParams({ app_id: effectiveAppId, user_id: effectiveUserId });
-    fetch(`/api/session/state?${params.toString()}`)
+    authFetch(`/api/session/state?${params.toString()}`, {}, config)
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (cancelled) return;
@@ -160,7 +161,7 @@ const PersistentChatWidget = ({
     return () => {
       cancelled = true;
     };
-  }, [isExpanded, effectiveAppId, effectiveUserId]);
+  }, [isExpanded, effectiveAppId, effectiveUserId, config]);
 
   useEffect(() => {
     if (wsStatus !== 'connected' || !generalModeReady || pendingWidgetSendsRef.current.length === 0) {
@@ -176,7 +177,29 @@ const PersistentChatWidget = ({
     });
   }, [generalModeReady, wsSend, wsStatus]);
 
-  // Workflow session exists → show the "Back to workspace" button
+  // Every in-progress workflow session this user owns. The widget is ask-only,
+  // so this list is the user's route back into any build they have running —
+  // not just the one this browser last touched.
+  const [workflowSessions, setWorkflowSessions] = useState([]);
+  const [showWorkflowPicker, setShowWorkflowPicker] = useState(false);
+  useEffect(() => {
+    if (!isExpanded || !effectiveAppId || !effectiveUserId) return undefined;
+    let cancelled = false;
+    authFetch(`/api/sessions/list/${encodeURIComponent(effectiveAppId)}/${encodeURIComponent(effectiveUserId)}`, {}, config)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (cancelled) return;
+        const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+        setWorkflowSessions(sessions.filter((session) => session?.chat_id && session?.workflow_name));
+      })
+      .catch(() => {
+        if (!cancelled) setWorkflowSessions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isExpanded, effectiveAppId, effectiveUserId, config]);
+
   const storedWorkflowNameForWidget = workflowName || activeWorkflowName || getStoredActiveWorkflowName();
   const storedWorkflowChatIdForWidget = storedWorkflowNameForWidget
     ? getStoredWorkflowChatId({
@@ -309,21 +332,27 @@ const PersistentChatWidget = ({
     navigate(`/chat?${params.toString()}`);
   };
 
-  // Navigate back to the active workflow session
-  const handleBackToWorkspace = () => {
-    const resolvedWorkflowName = workflowName
+  // Navigate into a workflow session. With no explicit target this resolves the
+  // session this browser last used; `target` carries an explicit pick from the
+  // session list so the user can reach any build they have running.
+  const handleBackToWorkspace = (target = null) => {
+    const resolvedWorkflowName = target?.workflow_name
+      || workflowName
       || activeWorkflowName
       || getStoredActiveWorkflowName()
       || serverWorkflowSession?.workflowName
       || null;
-    const scopedWorkflowChatId = resolvedWorkflowName
-      ? getStoredWorkflowChatId({
-          appId: effectiveAppId || resolvedAppId,
-          userId: effectiveUserId || resolvedUserId,
-          workflowName: resolvedWorkflowName,
-        })
-      : null;
-    const resolvedChatId = scopedWorkflowChatId
+    const scopedWorkflowChatId = target
+      ? null
+      : (resolvedWorkflowName
+        ? getStoredWorkflowChatId({
+            appId: effectiveAppId || resolvedAppId,
+            userId: effectiveUserId || resolvedUserId,
+            workflowName: resolvedWorkflowName,
+          })
+        : null);
+    const resolvedChatId = target?.chat_id
+      || scopedWorkflowChatId
       || chatId
       || activeChatId
       || getStoredActiveChatId()
@@ -349,11 +378,34 @@ const PersistentChatWidget = ({
 
     setConversationMode('workflow');
     setIsExpanded(false);
+    setShowWorkflowPicker(false);
 
     const params = new URLSearchParams({ mode: 'workflow' });
     if (resolvedChatId) params.set('chat_id', resolvedChatId);
     if (resolvedWorkflowName) params.set('workflow', resolvedWorkflowName);
     navigate(`/chat?${params.toString()}`);
+  };
+
+  // The workspace button is always available: the widget is ask-only, so it is
+  // the user's only route back into a workflow from a non-chat page. One
+  // running session goes straight there, several open a picker, and none sends
+  // the user to the workflow surface to start one.
+  const handleWorkflowAccess = () => {
+    if (workflowSessions.length > 1) {
+      setShowWorkflowPicker((open) => !open);
+      return;
+    }
+    if (workflowSessions.length === 1) {
+      handleBackToWorkspace(workflowSessions[0]);
+      return;
+    }
+    if (hasActiveWorkflow) {
+      handleBackToWorkspace();
+      return;
+    }
+    setConversationMode('workflow');
+    setIsExpanded(false);
+    navigate('/chat?mode=workflow');
   };
 
   // Support form handlers
@@ -494,23 +546,25 @@ const PersistentChatWidget = ({
         <button
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
-          className="group relative flex flex-col items-center gap-1.5 rounded-l-2xl border border-r-0 border-primary/40 bg-card px-2.5 py-4 shadow-lg shadow-black/25 transition-all duration-200 hover:border-primary/70 hover:px-3.5"
+          className="group relative flex flex-col items-center gap-2 rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card px-3 py-5 shadow-[0_8px_28px_rgba(0,0,0,0.45)] ring-1 ring-primary/25 transition-all duration-200 hover:border-primary hover:bg-muted hover:px-4"
           title="Open assistant"
+          aria-label="Open assistant"
         >
           <img
             src={brandLogoSrc}
-            alt="Open assistant"
-            className="h-6 w-6 opacity-90 transition-opacity group-hover:opacity-100"
+            alt=""
+            aria-hidden="true"
+            className="h-9 w-9 transition-transform group-hover:scale-110"
             onError={applyBrandImageFallback}
           />
           <svg
-            className="h-3.5 w-3.5 text-primary transition-colors group-hover:text-foreground"
+            className="h-4 w-4 text-primary transition-colors group-hover:text-foreground"
             fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
           {unreadChatCount > 0 && (
-            <span className="absolute -top-1 -left-1 h-2.5 w-2.5 rounded-full bg-primary" />
+            <span className="absolute -top-1.5 -left-1.5 h-3.5 w-3.5 rounded-full border-2 border-card bg-primary" />
           )}
         </button>
       </div>
@@ -590,24 +644,58 @@ const PersistentChatWidget = ({
                 <span role="img" aria-label="Get help from an operator">🛟</span>
               </button>
 
-              {/* Back to workspace — only when a workflow session is active */}
-              {hasActiveWorkflow && !inSupportMode && (
+              {/* Workflow access — always available; the widget never enters
+                  workflow mode itself, so this is the way back into a build. */}
+              {!inSupportMode && (
                 <button
-                  onClick={handleBackToWorkspace}
+                  onClick={handleWorkflowAccess}
                   className="group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.1)] to-[rgba(var(--color-secondary-rgb),0.1)] border border-[rgba(var(--color-primary-light-rgb),0.3)] hover:border-[rgba(var(--color-primary-light-rgb),0.6)] transition-all duration-300 backdrop-blur-sm"
-                  title="Back to workspace"
+                  title={workflowSessions.length > 1
+                    ? `Go to a workflow (${workflowSessions.length} running)`
+                    : workflowSessions.length === 1
+                      ? `Go to ${workflowSessions[0].workflow_name}`
+                      : 'Go to workflows'}
+                  aria-haspopup={workflowSessions.length > 1 ? 'menu' : undefined}
+                  aria-expanded={workflowSessions.length > 1 ? showWorkflowPicker : undefined}
                 >
                   <img
                     src={brandLogoSrc}
                     className="w-8 h-8 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
-                    alt="Back to workspace"
+                    alt="Go to workflows"
                     onError={applyBrandImageFallback}
                   />
+                  {workflowSessions.length > 1 && (
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+                      {workflowSessions.length}
+                    </span>
+                  )}
                 </button>
               )}
             </div>
           </div>
         </div>
+
+        {/* Workflow picker — shown when several builds are running */}
+        {showWorkflowPicker && !inSupportMode && workflowSessions.length > 1 && (
+          <div className="flex-shrink-0 max-h-44 overflow-y-auto border-b border-[rgba(var(--color-primary-light-rgb),0.15)] bg-[rgba(0,0,0,0.35)] px-2 py-2">
+            <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+              Your running workflows
+            </div>
+            {workflowSessions.map((session) => (
+              <button
+                key={session.chat_id}
+                type="button"
+                onClick={() => handleBackToWorkspace(session)}
+                className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-[rgba(var(--color-primary-rgb),0.12)]"
+              >
+                <span className="min-w-0 truncate text-xs font-semibold text-white">
+                  {session.workflow_name}
+                </span>
+                <span className="flex-shrink-0 text-[10px] text-gray-400">Resume</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Sub-header: compose link */}
         {!inSupportMode && (

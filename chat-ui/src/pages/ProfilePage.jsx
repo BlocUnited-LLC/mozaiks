@@ -784,8 +784,10 @@ export default function ProfilePage() {
   if (profileLoading) return <Spinner />;
   if (profileError && !profile) return <ErrorState message={`Could not load profile: ${profileError}`} />;
 
-  const hasSidebar = layout === 'sidebar_left' || layout === 'icon_rail';
-  const containerClass = `mx-auto pb-16 ${hasSidebar ? 'max-w-5xl' : 'max-w-3xl'}`;
+  // Align to the shared content measure (--mz-content-max, theme-configurable
+  // per app) so this route fills wide viewports like the workspace surfaces
+  // instead of stranding large empty gutters.
+  const containerClass = 'mx-auto w-full max-w-content px-4 pb-16 md:px-6 lg:px-8';
 
   const layoutProps = { allPages, pagesBySection, activePage: currentPage, onSelect: handleSelect, isOwner };
 

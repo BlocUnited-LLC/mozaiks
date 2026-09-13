@@ -76,7 +76,11 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert "top-24 w-[min" not in layout_source
 
     assert 'fixed right-0 bottom-6 z-50 widget-safe-bottom' in widget_source
-    assert 'rounded-l-2xl border border-r-0 border-primary/40' in widget_source
+    # The collapsed toggle is the only entry point to the assistant on a
+    # non-chat route, so it must stay high-contrast against the page: an opaque
+    # card surface with a solid primary edge, never a faint translucent tab.
+    assert 'rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card' in widget_source
+    assert 'h-9 w-9' in widget_source
     assert 'w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px]' in widget_source
 
 
@@ -328,3 +332,57 @@ def test_factory_app_react_files_are_classified() -> None:
     for component in APP_AUTH_COMPONENTS:
         assert f"export function {component}(" in shared_auth_source
 
+
+
+def test_widget_always_offers_workflow_access() -> None:
+    """The widget is ask-only, so its workspace button is the user's only route
+    back into a running build from a non-chat route. It must never be hidden
+    behind an active-session check, and it must reach *any* running session —
+    not only the one this browser last touched."""
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+
+    # Rendered unconditionally (support mode swaps the panel, not the button).
+    assert "{!inSupportMode && (" in widget_source
+    assert "hasActiveWorkflow && !inSupportMode" not in widget_source
+
+    # Server-side session list, not just this browser's stored pointers.
+    assert "/api/sessions/list/" in widget_source
+    assert "const [workflowSessions, setWorkflowSessions] = useState([]);" in widget_source
+
+    # One session resumes directly, several open a picker, none starts one.
+    assert "const handleWorkflowAccess = () => {" in widget_source
+    assert "if (workflowSessions.length > 1) {" in widget_source
+    assert "handleBackToWorkspace(workflowSessions[0]);" in widget_source
+    assert "navigate('/chat?mode=workflow');" in widget_source
+
+    # An explicit pick must win over the stored per-browser chat id.
+    assert "const handleBackToWorkspace = (target = null) => {" in widget_source
+    assert "target?.chat_id" in widget_source
+
+
+def test_page_surfaces_share_one_content_measure() -> None:
+    """Page routes align to the themeable content measure instead of each
+    picking a max-width, which is what left wide viewports with uneven gutters."""
+    tokens_source = _read("chat-ui/src/ui/theme/tokens.js")
+    tailwind_source = _read("chat-ui/tailwind.config.js")
+    profile_source = _read("chat-ui/src/pages/ProfilePage.jsx")
+
+    assert "const contentWidthScale = {" in tokens_source
+    assert "'--mz-content-max'" in tokens_source
+    assert "content_width = 'wide'" in tokens_source
+    assert "content: 'var(--mz-content-max, 96rem)'," in tailwind_source
+    assert "max-w-content" in profile_source
+    assert "max-w-3xl" not in profile_source.split("const containerClass")[1].split("\n")[0]
+
+
+def test_widget_session_reads_carry_credentials() -> None:
+    """Both widget session reads must send the bearer token. A bare fetch works
+    only while auth is disabled and silently 401s the moment an app enables it,
+    which would quietly strip the widget's workflow access."""
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+
+    assert "import { authFetch } from '../../adapters/api';" in widget_source
+    assert "authFetch(`/api/session/state?" in widget_source
+    assert "authFetch(`/api/sessions/list/" in widget_source
+    assert "fetch(`/api/session/state?" not in widget_source.replace("authFetch(`/api/session/state?", "")
+    assert "fetch(`/api/sessions/list/" not in widget_source.replace("authFetch(`/api/sessions/list/", "")
