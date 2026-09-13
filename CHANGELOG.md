@@ -14,6 +14,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Factory live previews boot saved, owner-bound app artifacts through the real
+  platform host, shared frontend, and disposable Mongo database. Failed startup,
+  expiry, and artifact changes clear stale preview URLs. A local Docker image
+  supplies the canonical runtime without inheriting Factory credentials.
+- Page-derived shell routes use the loader's exact file key, avoiding Linux
+  404s when generated display names differ in case from page filenames.
+- SecurityReadiness preserves its inspected artifact identity and review summary
+  through declared chat transitions. Explicit internal-only actions with empty
+  permissions no longer produce a false missing-permissions finding.
+- Workflow review components receive rejected response acknowledgements as errors,
+  rather than showing an unaccepted or stale decision as submitted.
+
 - Preserve the original Factory build-event envelope across re-emission and
   lost acknowledgements. Successful delivery cannot be revoked by a late failed
   attempt, and already acknowledged events are not posted again by lifecycle hooks.

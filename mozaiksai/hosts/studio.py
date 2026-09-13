@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import (
     AcceptedStagedAppBundleBuildRecordError,
@@ -82,6 +83,7 @@ from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.dashboard import load_dashboard_manifest
 from mozaiksai.core.data.persistence import ConnectorStore
+from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
     build_apps_summary,
@@ -122,11 +124,10 @@ from mozaiksai.hosts.platform import (
     build_shell_config,
     resolve_app_root,
 )
-from mozaiksai.hosts.routers.sandbox import router as _sandbox_router
+from mozaiksai.hosts.routers.sandbox import create_sandbox_router
 
 app = platform_app.app
 register_repo_host_bootstrap(app, "studio")
-app.include_router(_sandbox_router)
 logger = get_workflow_logger("studio_app")
 
 _BUNDLE_MAX_TEXT_FILES = 200
@@ -458,7 +459,7 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path, workspace_lay
         for info, safe_name in planned:
             safe_name = restore_names.get(safe_name, safe_name)
             if workspace_layout:
-                safe_name = _workspace_bundle_path(safe_name)
+                safe_name = app_bundle_workspace_path(safe_name)
             if _contains_symlink_component(target_root, safe_name):
                 raise HTTPException(status_code=400, detail="Restore target contains a symlinked component")
             destination = (target_root / safe_name).resolve()
@@ -477,29 +478,6 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path, workspace_lay
             restored.append(safe_name)
 
     return {"restored": sorted(restored), "skipped": sorted(skipped)}
-
-
-def _workspace_bundle_path(path: str) -> str:
-    from mozaiksai.core.runtime.app.layout_registry import (
-        ArtifactKind,
-        PathScope,
-        validate_registered_path,
-    )
-
-    if path.startswith(("app/", "workflows/", "build_context/")):
-        return path
-    try:
-        validate_registered_path(path, None, PathScope.DEPLOYMENT_DERIVED)
-        return path
-    except ValueError:
-        pass
-    try:
-        match = validate_registered_path(path, None, PathScope.APP_BUNDLE_ROOT)
-        if match.family.kind == ArtifactKind.APP_ROOT_SUPPORT:
-            return path
-    except ValueError:
-        pass
-    return f"app/{path}"
 
 
 def _build_diff_preview(*, path: str, before: str | None, after: str | None) -> str:
@@ -2888,6 +2866,35 @@ async def trigger_workflow(
         "rerouted_by_dependency": workflow_launch.rerouted_by_dependency,
         "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
     }
+
+
+async def _resolve_preview_artifact(
+    principal: UserPrincipal, artifact_version_id: str, build_registry_id: str,
+) -> tuple[str, dict[str, str | bytes]]:
+    target_app_id, _ = await _resolve_studio_artifact_scope(principal, build_registry_id=build_registry_id)
+    version = await get_artifact_store().get_build_record(app_id=target_app_id, build_record_id=artifact_version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if version.build_family != "app_bundle":
+        raise HTTPException(status_code=422, detail="Preview requires an app bundle")
+    try:
+        binding = RunBuildBinding.model_validate({
+            key: _version_metadata(version).get(key) for key in RunBuildBinding.model_fields
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Artifact has no verified build identity") from exc
+    if binding.build_registry_id != build_registry_id or binding.target_app_id != target_app_id:
+        raise HTTPException(status_code=409, detail="Artifact identity does not match its build target")
+    try:
+        files, diagnostics = await read_artifact_bundle(version, include_binary=True)
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=422, detail="Artifact archive is unavailable or failed integrity validation") from exc
+    if any(item.get("blocking") for item in diagnostics):
+        raise HTTPException(status_code=422, detail="Artifact contains unsafe or oversized preview files")
+    return target_app_id, files
+
+
+app.include_router(create_sandbox_router(resolve_scope=_resolve_studio_scope, resolve_artifact=_resolve_preview_artifact))
 
 
 app.router.routes[:] = sorted(

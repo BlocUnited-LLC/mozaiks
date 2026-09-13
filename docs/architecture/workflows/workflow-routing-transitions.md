@@ -214,8 +214,19 @@ revision interaction where the user must be able to type freely in the chat.
    filtered `context_variables` from the active journey.
 4. The shell switches the active chat session in-place to the launched
    workflow — no navigation away, no overlay, no blocked input.
-5. The target workflow receives the accumulated journey `context_variables`
-   filtered against its own `context_variables.yaml` declarations.
+5. For a `chat_session` step, JourneyOrchestrator projects the completed source
+   session's context into `chat.transition_requested.context_variables` using
+   the declared `route_to` workflow. Only same-name target `source.type: state`
+   inputs writable by `transition_router` are carried. Server-owned identity,
+   undeclared fields, and the target's computed progress state are excluded.
+   This is the same launch-input projection used for direct workflow steps;
+   there is no all-context copy or inferred field mapping.
+6. The shell submits that projection with `source_chat_id`. The server resolves
+   the owned build binding again and validates the target launch context.
+   SecurityReadiness populates `artifact_version_id` from its verified current
+   artifact even when the optional launch selector was omitted, so AppReview
+   receives the assessment and its artifact identity together. The advisory
+   summary does not authorize promotion or replace server artifact validation.
 
 **When to use:**
 

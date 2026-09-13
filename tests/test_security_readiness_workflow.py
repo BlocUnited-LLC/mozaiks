@@ -24,6 +24,51 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action_contract", "expected_rule"),
+    [
+        ({"api_surface": "internal", "permissions": []}, None),
+        ({"api_surface": "internal"}, "missing"),
+        ({"api_surface": "internal", "permissions": None}, "missing"),
+        ({"api_surface": "internal", "permissions": ""}, "missing"),
+        ({"api_surface": "internal", "permissions": {}}, "missing"),
+        ({"api_surface": "internal", "permissions": [""]}, "missing"),
+        ({"api_surface": "internal", "permissions": ["orders.undeclared"]}, "undeclared"),
+        ({"api_surface": " internal ", "permissions": []}, "missing"),
+        ({"api_surface": "admin_internal", "permissions": []}, "missing"),
+        ({"permissions": []}, "missing"),
+    ],
+)
+async def test_only_explicit_internal_empty_permissions_are_exempt(
+    security_build, action_contract, expected_rule,
+) -> None:
+    module = {
+        "schema_version": "mozaiks.module.v1",
+        "module": {"id": "orders"},
+        "permissions": [],
+        "actions": [
+            {"id": "react", **action_contract},
+            {"id": "private_action", "permissions": []},
+            {"id": "public_action", "api_surface": "public", "permissions": []},
+            {"id": "public_read", "api_surface": "public_readonly", "permissions": []},
+        ],
+    }
+    build = security_build.add({
+        "app/app.json": json.dumps({"authRequired": False}),
+        "app/modules/orders/module.yaml": yaml.safe_dump(module),
+        "app/modules/orders/backend/repo.py": "# Persistent module without a scoping helper.\n",
+    })
+
+    result = await invoke(inspect_generated_app_security, build.bridge)
+
+    finding_ids = {item["finding_id"] for item in result["findings"]}
+    expected = {"module_permissions:missing:orders:private_action", "tenant_scope:missing_policy:orders"}
+    if expected_rule:
+        expected.add(f"module_permissions:{expected_rule}:orders:react")
+    assert finding_ids == expected
+
+
+@pytest.mark.asyncio
 async def test_security_readiness_detects_secret_and_contract_findings(security_build) -> None:
     build = security_build.add({
             "app/app.json": json.dumps({"authRequired": True}),

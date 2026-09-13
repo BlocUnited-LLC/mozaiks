@@ -64,20 +64,12 @@ const AppWorkbench = ({
     payload?.artifact_version_id || payload?.artifactVersionId || null
   );
 
-  // Derive artifact identity first — useSandbox depends on these values.
+  // Preview ownership follows the persisted artifact version and build target.
   const artifactVersionId = activeArtifactVersionId;
   const buildRegistryId = payload?.build_registry_id;
   const artifactQuery = `?build_registry_id=${encodeURIComponent(buildRegistryId || '')}`;
   const artifactKind = payload?.artifact_kind || payload?.artifactKind || 'app_bundle';
   const artifactKey = payload?.artifact_key || payload?.artifactKey || artifactKind;
-
-  // Build a stable, app-scoped sandbox key so sandboxes are never shared
-  // across different users' apps. Sanitised to match the backend id regex.
-  const sandboxArtifactId = useMemo(() => {
-    const appId = payload?.target_app_id || '';
-    const raw = appId ? `${appId}_${artifactKey}` : artifactKey;
-    return raw.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
-  }, [payload?.target_app_id, artifactKey]);
 
   const {
     filesMap,
@@ -86,7 +78,6 @@ const AppWorkbench = ({
     setSelectedPath,
     currentContent,
     updateFileContent,
-    previewUrl,
     validationResult,
     validationStatus,
     validationStrategy,
@@ -100,7 +91,7 @@ const AppWorkbench = ({
     sandboxError: sandboxSyncError,
     syncing: sandboxSyncing,
     syncAndRestart,
-  } = useSandbox(sandboxArtifactId);
+  } = useSandbox(artifactVersionId, buildRegistryId);
 
   useEffect(() => {
     setActiveArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
@@ -227,7 +218,7 @@ const AppWorkbench = ({
   };
 
   // Shared handler for any refinement response. Handles coding_worker patches
-  // (updates filesMap, syncs sandbox, advances artifact version) and
+  // (updates filesMap and advances the persisted artifact version) and
   // harness_decision responses (routes user to a confirmation action).
   const handleRefinementResponse = (response) => {
     if (!response) {
@@ -239,11 +230,6 @@ const AppWorkbench = ({
       if (typeof appliedFiles === 'object' && Object.keys(appliedFiles).length > 0) {
         const mergedFilesMap = { ...(filesMap || {}), ...appliedFiles };
         setFilesMap(mergedFilesMap);
-        // Sync to the e2b sandbox whenever one is active (either from the
-        // initial build or from a previous refinement sync).
-        if (previewUrl || livePreviewUrl) {
-          syncAndRestart(mergedFilesMap);
-        }
       }
       const nextVersionId = response?.coding_worker?.metadata?.artifact_version_id || null;
       if (nextVersionId) setActiveArtifactVersionId(nextVersionId);
@@ -385,13 +371,13 @@ const AppWorkbench = ({
           {(showSplit || showPreview) && (
             <div className={showSplit ? 'col-span-4' : 'col-span-12'}>
               <PreviewPane
-                previewUrl={livePreviewUrl || previewUrl}
+                previewUrl={livePreviewUrl}
                 sandboxStatus={sandboxStatus}
                 sandboxSyncing={sandboxSyncing}
                 sandboxError={sandboxSyncError}
                 config={config}
                 onStartPreview={() => syncAndRestart(filesMap)}
-                canStartPreview={Object.keys(filesMap || {}).length > 0}
+                canStartPreview={Boolean(artifactVersionId && buildRegistryId && Object.keys(filesMap || {}).length > 0)}
               />
             </div>
           )}
@@ -401,9 +387,6 @@ const AppWorkbench = ({
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-sm font-semibold text-white">Refine your app</div>
-              <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Describe a change and the agents will patch your app, then refresh the preview.
-              </div>
             </div>
             <div className="text-right text-[10px] text-[var(--color-text-muted)]">
               <div>{limitToSelectedFile && selectedPath ? selectedPath : 'Entire app'}</div>

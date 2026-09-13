@@ -19,6 +19,21 @@ const bundle = await build({
 const { DynamicUIHandler } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 
 for (const method of ['handleToolCall', 'handleUIRender']) {
+  for (const result of [false, true, 'missing']) {
+    test(`${method} propagates review acceptance (${result})`, async () => {
+      const handler = new DynamicUIHandler();
+      let update;
+      handler.uiUpdateCallbacks.add(value => { update = value; });
+      await handler[method]({
+        tool_name: 'ConceptBlueprint', component: 'ConceptBlueprint', component_type: 'ConceptBlueprint',
+        tool_call_id: 'review-event', workflow_name: 'ValueEngine', display: 'artifact',
+        display_mode: 'artifact', awaiting_response: true, interaction_type: 'ui_tool', payload: {},
+      }, result === 'missing' ? undefined : async () => result);
+      if (result === true) await assert.doesNotReject(update.onResponse({ action: 'approve' }));
+      else await assert.rejects(update.onResponse({ action: 'approve' }), /not accepted|unavailable/);
+    });
+  }
+
   test(`${method} returns only the user response, not the displayed artifact`, async () => {
     const handler = new DynamicUIHandler();
     let update;

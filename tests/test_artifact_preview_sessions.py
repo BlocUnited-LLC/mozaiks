@@ -1,19 +1,16 @@
-"""Artifact preview sessions: manager behavior + mounted Studio API routes.
-
-The preview session manager (`mozaiksai.core.sandbox.preview_sessions`) backs
-the AppWorkbench live-preview loop: create/reuse a sandbox per artifact, sync
-files, start the dev server, stream status. These tests drive it through a
-fake SandboxPort adapter and exercise the HTTP router with auth overridden.
-"""
+"""Canonical artifact preview lifecycle and HTTP/WebSocket owner boundaries."""
 
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
+from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
 from mozaiksai.core.sandbox.preview_sessions import (
     ArtifactPreviewSessionManager,
@@ -21,63 +18,56 @@ from mozaiksai.core.sandbox.preview_sessions import (
     is_valid_artifact_id,
     is_valid_sandbox_id,
 )
+from mozaiksai.hosts.routers.sandbox import create_sandbox_router
+
+IDENTITY = dict(app_id="factory", user_id="tester", target_app_id="preview-app", build_registry_id="appreg-a")
+MANIFEST = '{"appId":"preview-app","appName":"Preview","authRequired":false}'
 
 
 class FakeSandboxAdapter:
-    """Minimal SandboxPort implementation recording every call."""
-
-    def __init__(self, *, preview_url: str | None = "https://preview.example") -> None:
-        self.calls: list[tuple[str, dict]] = []
+    def __init__(self, *, preview_url="https://preview.example"):
+        self.calls = []
         self.preview_url = preview_url
         self.install_result = SandboxRunResult(success=True, exit_code=0)
+        self.background_result = SandboxRunResult(success=True, exit_code=0)
+        self.command_results = {}
 
     async def create_session(self, **kwargs):
         self.calls.append(("create_session", kwargs))
-        return SandboxSessionInfo(session_id="sess-1", provider="docker")
-
-    async def connect(self, **kwargs):
-        self.calls.append(("connect", kwargs))
-        return SandboxSessionInfo(session_id="sess-1", provider="docker")
+        return SandboxSessionInfo(session_id=f"sess-{len(self.calls)}", provider="docker")
 
     async def write_files(self, **kwargs):
         self.calls.append(("write_files", kwargs))
-        return {"written": list(kwargs.get("files", {})), "count": len(kwargs.get("files", {}))}
-
-    async def read_file(self, **kwargs):
-        self.calls.append(("read_file", kwargs))
-        return ""
+        return {"written": list(kwargs["files"]), "count": len(kwargs["files"])}
 
     async def run_command(self, **kwargs):
         self.calls.append(("run_command", kwargs))
-        if kwargs.get("background"):
-            return SandboxRunResult(success=True, process_id=42)
-        return self.install_result
+        for fragment, result in self.command_results.items():
+            if fragment in kwargs["command"]:
+                return result
+        return self.background_result if kwargs.get("background") else self.install_result
 
     async def get_preview_url(self, **kwargs):
         self.calls.append(("get_preview_url", kwargs))
         return self.preview_url
 
-    async def extend_session(self, **kwargs):
-        self.calls.append(("extend_session", kwargs))
-        return SandboxSessionInfo(session_id="sess-1", provider="docker")
-
     async def terminate_session(self, **kwargs):
         self.calls.append(("terminate_session", kwargs))
         return True
 
-    def capabilities(self):
-        return {"provider": "docker", "supports_preview": True}
+
+def _manager(adapter):
+    manager = ArtifactPreviewSessionManager(provider_resolver=lambda: ("docker", adapter), startup_timeout_seconds=0)
+    manager._broadcast = AsyncMock()
+    return manager
 
 
-def _manager(adapter: FakeSandboxAdapter) -> ArtifactPreviewSessionManager:
-    mgr = ArtifactPreviewSessionManager(provider_resolver=lambda: ("docker", adapter))
-    mgr._broadcast = AsyncMock()
-    return mgr
+async def _create(manager, artifact_id="artifact-a", **identity):
+    return await manager.create_or_reuse(artifact_id, **{**IDENTITY, **identity})
 
 
-# ---------------------------------------------------------------------------
-# Validators / path safety
-# ---------------------------------------------------------------------------
+async def _sync_manifest(manager, state, **files):
+    await manager.sync(state.sandbox_id, [{"path": key, "content": value} for key, value in {"app.json": MANIFEST, **files}.items()], [])
 
 
 def test_id_validators():
@@ -88,221 +78,285 @@ def test_id_validators():
     assert not is_valid_sandbox_id("a" * 129)
 
 
-def test_safe_relpath_rejects_traversal_and_absolute():
-    assert _safe_relpath("src/App.jsx") == "src/App.jsx"
-    assert _safe_relpath("/etc/passwd") == "etc/passwd"
-    assert _safe_relpath("../outside") is None
-    assert _safe_relpath("a/../../outside") is None
-    assert _safe_relpath("") is None
+@pytest.mark.parametrize("path", ["/etc/passwd", "C:/outside", "../outside", "a/../../outside", "", ".", "a\x00b"])
+def test_safe_relpath_rejects_unsafe_paths(path):
+    assert _safe_relpath(path) is None
 
 
-# ---------------------------------------------------------------------------
-# Manager lifecycle
-# ---------------------------------------------------------------------------
+def test_safe_relpath_normalizes_relative_separator():
+    assert _safe_relpath("src\\App.jsx") == "src/App.jsx"
 
 
 @pytest.mark.asyncio
-async def test_create_then_reuse_same_artifact(monkeypatch):
-    monkeypatch.setenv("SANDBOX_TTL_MINUTES", "30")
+async def test_reuse_is_per_owner_host_and_artifact():
     adapter = FakeSandboxAdapter()
-    mgr = _manager(adapter)
-
-    first = await mgr.create_or_reuse("artifact-a")
-    second = await mgr.create_or_reuse("artifact-a")
-
-    assert first.sandbox_id == second.sandbox_id
-    creates = [c for c in adapter.calls if c[0] == "create_session"]
-    assert len(creates) == 1
+    manager = _manager(adapter)
+    first = await _create(manager)
+    assert (await _create(manager)).sandbox_id == first.sandbox_id
+    assert (await _create(manager, user_id="someone-else")).sandbox_id != first.sandbox_id
+    assert (await _create(manager, app_id="another-host")).sandbox_id != first.sandbox_id
+    assert (await _create(manager, "artifact-b")).sandbox_id != first.sandbox_id
+    assert len([call for call in adapter.calls if call[0] == "create_session"]) == 4
 
 
 @pytest.mark.asyncio
-async def test_sync_writes_files_and_removes_deleted(monkeypatch):
-    monkeypatch.setenv("SANDBOX_TTL_MINUTES", "30")
+async def test_only_explicit_preview_environment_is_forwarded(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "host-secret")
+    monkeypatch.setenv("MONGO_URI", "host-database")
+    monkeypatch.setenv("MOZAIKS_PREVIEW_ENV_VITE_OIDC_AUTHORITY", "http://local-idp")
     adapter = FakeSandboxAdapter()
-    mgr = _manager(adapter)
-    st = await mgr.create_or_reuse("artifact-a")
-
-    await mgr.sync(
-        st.sandbox_id,
-        files=[
-            {"path": "package.json", "content": "{}"},
-            {"path": "../escape.js", "content": "nope"},
-        ],
-        deleted=["old.js"],
-    )
-
-    writes = [c for c in adapter.calls if c[0] == "write_files"]
-    assert len(writes) == 1
-    written = writes[0][1]["files"]
-    assert "package.json" in written
-    assert all("escape" not in p for p in written)
-    removes = [c for c in adapter.calls if c[0] == "run_command" and "rm -f" in c[1]["command"]]
-    assert len(removes) == 1
-    assert st.last_files == {"package.json": "{}"}
+    await _create(_manager(adapter))
+    env = adapter.calls[0][1]["envs"]
+    assert env["VITE_OIDC_AUTHORITY"] == "http://local-idp"
+    assert "OPENAI_API_KEY" not in env
+    assert "MONGO_URI" not in env
 
 
 @pytest.mark.asyncio
-async def test_start_node_runs_install_and_dev_server(monkeypatch):
-    monkeypatch.setenv("SANDBOX_TTL_MINUTES", "30")
+async def test_sync_rejects_invalid_paths_before_any_write():
     adapter = FakeSandboxAdapter()
-    mgr = _manager(adapter)
-    st = await mgr.create_or_reuse("artifact-a")
-    await mgr.sync(
-        st.sandbox_id,
-        files=[{"path": "package.json", "content": '{"scripts": {"dev": "vite"}}'}],
-        deleted=[],
-    )
+    manager = _manager(adapter)
+    state = await _create(manager)
+    with pytest.raises(ValueError, match="Invalid preview"):
+        await _sync_manifest(manager, state, **{"../escape.js": "bad"})
+    assert not any(call[0] == "write_files" for call in adapter.calls)
 
-    result = await mgr.start(st.sandbox_id)
 
+@pytest.mark.asyncio
+async def test_sync_checks_build_target_before_any_write():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    with pytest.raises(ValueError, match="appId"):
+        await _sync_manifest(manager, state, **{"app.json": '{"appId":"foreign-app"}'})
+    assert not any(call[0] == "write_files" for call in adapter.calls)
+
+
+@pytest.mark.asyncio
+async def test_sync_uses_the_same_workspace_layout_as_promotion():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    await _sync_manifest(manager, state, **{
+        "workflows/Inbox/orchestrator.yaml": "name: Inbox", "requirements.txt": "httpx",
+        "brand/icon.png": b"\x89PNG\x00",
+    })
+    written = next(data for kind, data in adapter.calls if kind == "write_files")
+    assert written["cwd"] == "/workspace"
+    assert written["files"]["app/app.json"] == MANIFEST
+    assert written["files"]["app/brand/icon.png"] == b"\x89PNG\x00"
+    assert written["files"]["workflows/Inbox/orchestrator.yaml"] == "name: Inbox"
+    assert written["files"]["requirements.txt"] == "httpx"
+
+
+@pytest.mark.asyncio
+async def test_sync_quotes_deleted_paths_and_updates_snapshot():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    await _sync_manifest(manager, state, **{"$(touch stolen).js": "old"})
+    await manager.sync(state.sandbox_id, [], ["$(touch stolen).js"])
+    commands = [data["command"] for kind, data in adapter.calls if kind == "run_command"]
+    assert commands == ["rm -f -- 'app/$(touch stolen).js'"]
+    assert state.last_files == {"app.json": MANIFEST}
+
+
+@pytest.mark.asyncio
+async def test_sync_failure_clears_live_url_and_recreates_session():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    await _sync_manifest(manager, state)
+    await manager.start(state.sandbox_id)
+    adapter.write_files = AsyncMock(side_effect=RuntimeError("disk error"))
+    with pytest.raises(RuntimeError):
+        await _sync_manifest(manager, state)
+    assert state.status == "error" and state.preview_url is None
+    assert (await _create(manager)).sandbox_id != state.sandbox_id
+
+
+@pytest.mark.asyncio
+async def test_start_uses_canonical_runtime_and_real_health_check():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    await _sync_manifest(manager, state, **{"requirements.txt": "httpx"})
+    result = await manager.start(state.sandbox_id)
     assert result.status == "running"
     assert result.preview_url == "https://preview.example"
-    commands = [c[1]["command"] for c in adapter.calls if c[0] == "run_command"]
-    assert any("npm install" in c for c in commands)
-    assert any("npm run dev" in c for c in commands)
+    commands = [data["command"] for kind, data in adapter.calls if kind == "run_command"]
+    assert commands[0].endswith("preview_runtime stop")
+    assert "preview-constraints.txt" in commands[1]
+    assert "preview_runtime start --app-root /workspace/app" in commands[2]
+    assert commands[3].endswith("preview_runtime check --port 3000 --app-root /workspace/app")
+
+
+@pytest.mark.parametrize("fragment,message", [("pip install", "dependency"), ("preview_runtime start", "process"), ("preview_runtime check", "healthy")])
+@pytest.mark.asyncio
+async def test_failed_runtime_stage_never_reports_a_preview(fragment, message):
+    adapter = FakeSandboxAdapter()
+    adapter.command_results[fragment] = SandboxRunResult(success=False, exit_code=1, stderr="secret-must-not-be-returned")
+    manager = _manager(adapter)
+    state = await _create(manager)
+    await _sync_manifest(manager, state, **{"requirements.txt": "httpx"})
+    result = await manager.start(state.sandbox_id)
+    assert result.status == "error" and result.preview_url is None
+    assert message in result.last_error
+    assert "secret" not in result.last_error
 
 
 @pytest.mark.asyncio
-async def test_start_without_runtime_reports_error(monkeypatch):
-    monkeypatch.setenv("SANDBOX_TTL_MINUTES", "30")
-    adapter = FakeSandboxAdapter()
-    mgr = _manager(adapter)
-    st = await mgr.create_or_reuse("artifact-a")
-
-    result = await mgr.start(st.sandbox_id)
-
-    assert result.status == "error"
-    assert "No runtime detected" in (result.last_error or "")
+async def test_missing_manifest_fails_start():
+    manager = _manager(FakeSandboxAdapter())
+    state = await _create(manager)
+    assert (await manager.start(state.sandbox_id)).status == "error"
+    assert "app.json" in state.last_error
 
 
 @pytest.mark.asyncio
-async def test_failed_install_surfaces_stderr(monkeypatch):
-    monkeypatch.setenv("SANDBOX_TTL_MINUTES", "30")
+async def test_dead_runtime_clears_an_existing_url():
     adapter = FakeSandboxAdapter()
-    adapter.install_result = SandboxRunResult(
-        success=False, exit_code=1, stderr="npm ERR! boom"
-    )
-    mgr = _manager(adapter)
-    st = await mgr.create_or_reuse("artifact-a")
-    await mgr.sync(
-        st.sandbox_id,
-        files=[{"path": "package.json", "content": '{"scripts": {"dev": "vite"}}'}],
-        deleted=[],
-    )
-
-    result = await mgr.start(st.sandbox_id)
-
-    assert result.status == "error"
-    assert "npm ERR! boom" in (result.last_error or "")
+    manager = _manager(adapter)
+    state = await _create(manager)
+    await _sync_manifest(manager, state)
+    await manager.start(state.sandbox_id)
+    adapter.install_result = SandboxRunResult(success=False, exit_code=1)
+    assert (await manager.status(state.sandbox_id)).status == "error"
+    assert state.preview_url is None
 
 
 @pytest.mark.asyncio
-async def test_stop_terminates_provider_session_and_clears_state(monkeypatch):
-    monkeypatch.setenv("SANDBOX_TTL_MINUTES", "30")
+async def test_expiry_is_absolute_even_after_status_polling():
+    manager = _manager(FakeSandboxAdapter())
+    state = await _create(manager)
+    await manager.status(state.sandbox_id)
+    state.created_at -= timedelta(minutes=31)
+    with pytest.raises(KeyError, match="expired"):
+        await manager.status(state.sandbox_id)
+    assert state.sandbox_id not in manager._sessions
+
+
+@pytest.mark.asyncio
+async def test_unknown_owner_cannot_even_expire_someone_elses_container():
     adapter = FakeSandboxAdapter()
-    mgr = _manager(adapter)
-    st = await mgr.create_or_reuse("artifact-a")
-
-    await mgr.stop(st.sandbox_id)
-
-    assert any(c[0] == "terminate_session" for c in adapter.calls)
+    manager = _manager(adapter)
+    state = await _create(manager)
+    state.created_at -= timedelta(minutes=31)
     with pytest.raises(KeyError):
-        await mgr.status(st.sandbox_id)
-    # A new create after stop provisions a fresh provider session
-    await mgr.create_or_reuse("artifact-a")
-    creates = [c for c in adapter.calls if c[0] == "create_session"]
-    assert len(creates) == 2
+        await manager.require_owner(state.sandbox_id, app_id="factory", user_id="outsider")
+    assert not any(kind == "terminate_session" for kind, _ in adapter.calls)
 
 
 @pytest.mark.asyncio
-async def test_no_provider_available_raises_clear_error():
-    def _no_provider():
-        raise RuntimeError("No preview sandbox provider available.")
+async def test_failed_create_does_not_poison_retry():
+    adapter = FakeSandboxAdapter()
+    original = adapter.create_session
+    adapter.create_session = AsyncMock(side_effect=RuntimeError("unavailable"))
+    manager = _manager(adapter)
+    with pytest.raises(RuntimeError):
+        await _create(manager)
+    assert not manager._sessions and not manager._artifact_to_sandbox
+    adapter.create_session = original
+    assert (await _create(manager)).session_id
 
-    mgr = ArtifactPreviewSessionManager(provider_resolver=_no_provider)
-    mgr._broadcast = AsyncMock()
-    with pytest.raises(RuntimeError, match="No preview sandbox provider"):
-        await mgr.create_or_reuse("artifact-a")
 
-
-# ---------------------------------------------------------------------------
-# Mounted API routes (auth overridden)
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_stop_cleans_up_even_when_websocket_is_already_closed():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    socket = AsyncMock()
+    socket.close.side_effect = RuntimeError("closed")
+    manager._ws_clients[state.sandbox_id] = {socket}
+    await manager.stop(state.sandbox_id)
+    assert not manager._sessions and not manager._artifact_to_sandbox
+    assert any(kind == "terminate_session" for kind, _ in adapter.calls)
 
 
 @pytest.fixture
 def api_client(monkeypatch):
-    import mozaiksai.core.sandbox.preview_sessions as ps
-    from mozaiksai.core.auth import require_user_scope
-    from mozaiksai.hosts.routers.sandbox import router
+    import mozaiksai.core.sandbox.preview_sessions as sessions
+    from mozaiksai.core.auth.websocket_auth import WebSocketUser
 
-    monkeypatch.setenv("SANDBOX_TTL_MINUTES", "30")
     adapter = FakeSandboxAdapter()
-    mgr = _manager(adapter)
-    monkeypatch.setattr(ps, "_manager", mgr)
+    manager = _manager(adapter)
+    monkeypatch.setattr(sessions, "_manager", manager)
+    principal = UserPrincipal(user_id="tester", app_id="factory", email=None, name=None, roles=[], scopes=[], raw_claims={})
 
+    async def resolve_artifact(user, artifact_id, registry_id):
+        if (user.app_id, user.user_id, artifact_id, registry_id) != ("factory", "tester", "artifact-a", "appreg-a"):
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        return "preview-app", {"app.json": MANIFEST}
+
+    async def websocket_auth(_socket):
+        return WebSocketUser(user_id=principal.user_id, app_id=principal.app_id, email=None, name=None, roles=[], scopes=[], raw_claims={}, provider="test")
+
+    monkeypatch.setattr("mozaiksai.hosts.routers.sandbox.authenticate_websocket", websocket_auth)
     app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[require_user_scope] = lambda: {"user_id": "tester"}
+    app.include_router(create_sandbox_router(resolve_scope=lambda user: (user.app_id, user.user_id), resolve_artifact=resolve_artifact))
+    app.dependency_overrides[require_user_scope] = lambda: principal
     with TestClient(app) as client:
-        yield client, adapter
+        yield client, adapter, principal
+
+
+CREATE_URL = "/api/artifacts/artifact-a/sandbox?build_registry_id=appreg-a"
 
 
 def test_router_create_sync_start_status_stop(api_client):
-    client, adapter = api_client
-
-    created = client.post("/api/artifacts/artifact-a/sandbox")
-    assert created.status_code == 200
+    client, adapter, _ = api_client
+    created = client.post(CREATE_URL)
+    assert created.status_code == 200, created.text
     sid = created.json()["sandboxId"]
-
-    synced = client.post(
-        f"/api/sandbox/{sid}/sync",
-        json={"files": [{"path": "package.json", "content": '{"scripts": {"dev": "vite"}}'}], "deleted": []},
-    )
-    assert synced.status_code == 200
-
-    started = client.post(f"/api/sandbox/{sid}/start")
-    assert started.status_code == 200
-    body = started.json()
-    assert body["status"] == "running"
-    assert body["previewUrl"] == "https://preview.example"
-
-    status = client.get(f"/api/sandbox/{sid}/status")
-    assert status.status_code == 200
-    assert status.json()["previewUrl"] == "https://preview.example"
-
-    stopped = client.post(f"/api/sandbox/{sid}/stop")
-    assert stopped.status_code == 200
+    assert any(kind == "write_files" for kind, _ in adapter.calls)
+    assert client.post(f"/api/sandbox/{sid}/sync", json={"files": [], "deleted": []}).status_code == 200
+    assert client.post(f"/api/sandbox/{sid}/start").json()["status"] == "running"
+    assert client.get(f"/api/sandbox/{sid}/status").json()["previewUrl"] == "https://preview.example"
+    assert client.post(f"/api/sandbox/{sid}/stop").status_code == 200
     assert client.get(f"/api/sandbox/{sid}/status").status_code == 404
 
 
-def test_router_rejects_invalid_ids(api_client):
-    client, _adapter = api_client
-    assert client.post("/api/artifacts/bad%20id!/sandbox").status_code == 400
+def test_router_requires_persisted_owned_artifact_before_allocating(api_client):
+    client, adapter, _ = api_client
+    assert client.post("/api/artifacts/artifact-a/sandbox").status_code == 422
+    assert client.post("/api/artifacts/invented/sandbox?build_registry_id=appreg-a").status_code == 404
+    assert client.post("/api/artifacts/artifact-a/sandbox?build_registry_id=foreign").status_code == 404
+    assert not adapter.calls
+
+
+@pytest.mark.parametrize("field,value", [("user_id", "outsider"), ("app_id", "foreign-host")])
+def test_all_http_operations_enforce_owner(api_client, field, value):
+    client, adapter, principal = api_client
+    sid = client.post(CREATE_URL).json()["sandboxId"]
+    setattr(principal, field, value)
+    count = len(adapter.calls)
+    for path in ("start", "stop", "sync"):
+        assert client.post(f"/api/sandbox/{sid}/{path}", json={"files": [], "deleted": []}).status_code == 404
+    assert client.get(f"/api/sandbox/{sid}/status").status_code == 404
+    assert len(adapter.calls) == count
+
+
+def test_websocket_owner_receives_status_foreign_owner_is_rejected(api_client):
+    client, _, principal = api_client
+    sid = client.post(CREATE_URL).json()["sandboxId"]
+    with client.websocket_connect(f"/ws/sandbox/{sid}") as socket:
+        assert socket.receive_json()["status"] == "starting"
+    principal.user_id = "outsider"
+    with pytest.raises(WebSocketDisconnect) as raised, client.websocket_connect(f"/ws/sandbox/{sid}"):
+        pass
+    assert raised.value.code == 1008
+
+
+def test_router_invalid_paths_and_identifiers(api_client):
+    client, _, _ = api_client
+    assert client.post("/api/artifacts/bad%20id!/sandbox?build_registry_id=appreg-a").status_code == 400
     assert client.get(f"/api/sandbox/{'a' * 129}/status").status_code == 400
+    sid = client.post(CREATE_URL).json()["sandboxId"]
+    assert client.post(f"/api/sandbox/{sid}/sync", json={"deleted": ["../outside"]}).status_code == 422
 
 
-def test_router_unknown_sandbox_404(api_client):
-    client, _adapter = api_client
-    assert client.get("/api/sandbox/unknown123/status").status_code == 404
-
-
-def test_router_no_provider_returns_503(monkeypatch):
-    import mozaiksai.core.sandbox.preview_sessions as ps
-    from mozaiksai.core.auth import require_user_scope
-    from mozaiksai.hosts.routers.sandbox import router
-
-    def _no_provider():
-        raise RuntimeError("No preview sandbox provider available. Set E2B_API_KEY or Docker.")
-
-    mgr = ArtifactPreviewSessionManager(provider_resolver=_no_provider)
-    mgr._broadcast = AsyncMock()
-    monkeypatch.setattr(ps, "_manager", mgr)
-
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[require_user_scope] = lambda: {"user_id": "tester"}
-    with TestClient(app) as client:
-        response = client.post("/api/artifacts/artifact-a/sandbox")
+def test_provider_failure_is_503_without_raw_error(api_client):
+    client, adapter, _ = api_client
+    adapter.create_session = AsyncMock(side_effect=RuntimeError("secret-value"))
+    response = client.post(CREATE_URL)
     assert response.status_code == 503
-    assert "provider" in response.json()["detail"]
+    assert "secret-value" not in response.text

@@ -18,6 +18,7 @@ from mozaiksai.core.workflow.context.authority import (
     TRANSITION_ROUTER_WRITER,
     build_context_authority_policy,
 )
+from mozaiksai.core.workflow.pack.config import get_transition, load_global_pack_graph
 
 logger = get_core_logger("journey_orchestrator")
 
@@ -162,6 +163,15 @@ class JourneyOrchestrator:
             return
 
         if advance.next_transition_id:
+            pack = load_global_pack_graph()
+            transition = get_transition(pack, advance.next_transition_id) if pack is not None else None
+            if transition is None:
+                raise ValueError(f"Journey transition is not declared: {advance.next_transition_id}")
+            transition_context = {}
+            if transition.transition_type == "chat_session":
+                if not transition.route_to:
+                    raise ValueError("Chat-session transition has no target workflow")
+                transition_context = _project_launch_context(source_chat_doc, transition.route_to)
             await transport.send_event_to_ui(
                 {
                     "schema_version": "mozaiks.ui.event.v1",
@@ -173,6 +183,7 @@ class JourneyOrchestrator:
                         "journey_id": advance.journey_instance_id,
                         "journey_key": advance.journey_key,
                         "journey_position": advance.next_group_index,
+                        "context_variables": transition_context,
                     },
                     "timestamp": datetime.now(UTC).isoformat(),
                 },

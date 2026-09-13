@@ -7,7 +7,9 @@ definitions:
       required: true
   artifact_version_id:
     type: string
-    description: Optional artifact selector; must match the bound registry's current build artifact.
+    description: >
+      Optional launch selector; must match the bound registry's current build artifact.
+      The inspector populates the verified artifact id for the AppReview handoff.
     source:
       type: state
       default: null

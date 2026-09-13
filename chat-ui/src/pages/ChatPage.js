@@ -17,6 +17,7 @@ import resolveWorkflow from '../utils/resolveWorkflow';
 import { dynamicUIHandler } from '../core/dynamicUIHandler';
 import platform from '../platform/index.js';
 import { authFetch } from '../adapters/api';
+import { submitToolCallResponse } from '../adapters/uiToolResponse';
 import LoadingSpinner from '../utils/AgentChatLoadingSpinner';
 import useTheme from "../styles/useTheme";
 import {
@@ -751,12 +752,8 @@ const ChatPage = () => {
             workflow_name: cached.workflow_name || cachedToolCall.workflow_name || fallbackWorkflowName || currentWorkflowName,
             onResponse: async (response) => {
               const toolCallId = cached.tool_call_id || cachedToolCall.tool_call_id;
-              if (!toolCallId || !wsRef.current?.send) {
-                throw new Error('Reconnect to the workflow before submitting this response.');
-              }
-              return wsRef.current.send({
-                type: 'tool_call_response', tool_call_id: toolCallId,
-                tool_name: cachedToolName, response,
+              return submitToolCallResponse(toolCallId, response, {
+                baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
               });
             },
             display: cachedDisplay,
@@ -793,7 +790,7 @@ const ChatPage = () => {
       console.warn('💾 [RESTORE] Failed to restore artifact from stored session:', e);
       return false;
     }
-  }, [currentWorkflowName, dispatchSurfaceEvent, setIsSidePanelOpen, setLayoutMode]);
+  }, [api, currentWorkflowName, dispatchSurfaceEvent, setIsSidePanelOpen, setLayoutMode]);
 
   useEffect(() => {
     if (typeof setCurrentArtifactContext !== 'function') {
@@ -5594,27 +5591,13 @@ const ChatPage = () => {
       if (action.type === 'tool_call_response') {
         // Keep the review available until the server accepts this decision.
         if (action.tool_call_id) {
-          const submitPath = '/api/tool-call/respond';
-          const baseUrl = api && typeof api.getHttpBaseUrl === 'function'
-            ? api.getHttpBaseUrl()
-            : null;
-          const headers = { 'Content-Type': 'application/json' };
-          const token = getAccessToken();
-          if (token) headers.Authorization = `Bearer ${token}`;
           let failure = null;
           try {
-            const response = await fetch(baseUrl ? `${baseUrl}${submitPath}` : submitPath, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({ event_id: action.tool_call_id, response_data: action.response }),
+            await submitToolCallResponse(action.tool_call_id, action.response, {
+              baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
             });
-            if (!response.ok) {
-              failure = response.status === 404
-                ? 'This review is no longer active. Your decision was not applied. Reopen the workflow to load its current review.'
-                : 'Your decision was not accepted. Please retry after reconnecting to the workflow.';
-            }
-          } catch (_) {
-            failure = 'The server did not confirm your decision. Reconnect to check the current review before retrying.';
+          } catch (error) {
+            failure = error.message;
           }
           if (failure) {
             dynamicUIHandler.notifyUIUpdate({

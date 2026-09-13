@@ -54,6 +54,7 @@ from mozaiksai.core.runtime.app.auth_contract import (
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.app.module_loader import ModuleLoadError
+from mozaiksai.core.runtime.app.page_schema import discover_page_schema_paths
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.extensions import (
     mount_module_routers,
@@ -2436,31 +2437,15 @@ def _load_ui_route_manifest_pages(app_root: Path) -> list[dict]:
 
 
 def _load_page_schema_routes(app_root: Path) -> list[dict]:
-    pages_dir = app_root / "ui" / "pages"
-    if not pages_dir.exists():
-        return []
-
-    candidates: list[tuple[Path, str]] = []
-    for child in sorted(pages_dir.iterdir(), key=lambda item: item.name.lower()):
-        if child.is_file() and child.suffix.lower() in {".yaml", ".yml"}:
-            candidates.append((child, child.stem))
-        elif child.is_dir():
-            page_yaml = child / "page.yaml"
-            page_yml = child / "page.yml"
-            if page_yaml.exists():
-                candidates.append((page_yaml, child.name))
-            elif page_yml.exists():
-                candidates.append((page_yml, child.name))
-
     pages: list[dict] = []
-    for index, (page_path, default_name) in enumerate(candidates):
+    for index, (page_key, page_path) in enumerate(discover_page_schema_paths(app_root).items()):
         raw = yaml.safe_load(page_path.read_text(encoding="utf-8")) or {}
         if not isinstance(raw, dict):
             continue
         route = raw.get("route")
         if not isinstance(route, str) or not route.startswith("/"):
             continue
-        name = str(raw.get("name") or default_name).strip() or default_name
+        name = str(raw.get("name") or page_key).strip() or page_key
         title = str(raw.get("title") or name).strip()
         raw_meta = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
         raw_requires_role = raw_meta.get("requiresRole")
@@ -2493,7 +2478,7 @@ def _load_page_schema_routes(app_root: Path) -> list[dict]:
             "path": route,
             "label": title,
             "component": "SchemaPage",
-            "schema": name,
+            "schema": page_key,
             "order": 100 + index,
             "meta": meta,
         })

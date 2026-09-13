@@ -340,13 +340,16 @@ export class DynamicUIHandler {
 
       const onResponse = async (response) => {
         if (responseCallback && typeof responseCallback === 'function') {
-          await responseCallback({
+          const accepted = await responseCallback({
             type: 'tool_call_response',
             tool_name: toolName,
             tool_call_id: toolCallId,
             workflow_name: workflowName,
             response,
           });
+          if (accepted === false) throw new Error('The server has not accepted this response.');
+        } else {
+          throw new Error('The workflow response connection is unavailable.');
         }
       };
 
@@ -463,15 +466,16 @@ export class DynamicUIHandler {
         tlog.event('ui_response', response?.status || 'unknown');
         
         if (responseCallback && typeof responseCallback === 'function') {
-          await responseCallback({
+          const accepted = await responseCallback({
             type: 'tool_call_response',
             tool_name: toolName,
             tool_call_id: toolCallId,
             workflow_name,
             response
           });
+          if (accepted === false) throw new Error('The server has not accepted this response.');
         } else {
-          console.warn('⚠️ No response callback available for UI tool response');
+          throw new Error('The workflow response connection is unavailable.');
         }
       };
 

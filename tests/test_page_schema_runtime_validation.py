@@ -407,6 +407,31 @@ def test_shell_endpoint_serves_validated_page(tmp_path: Path, monkeypatch: pytes
     assert body["layout"] == "full-width"
 
 
+@pytest.mark.parametrize("folder", [False, True])
+def test_shell_route_uses_exact_discovered_page_key(tmp_path, monkeypatch, folder):
+    from mozaiksai.core.runtime.app.page_schema import load_app_page_schemas
+    from mozaiksai.hosts.platform import _load_page_schema_routes
+
+    _write_app(tmp_path, _valid_page(name="CustomerList", route="/customers"), page_name="customer_list")
+    if folder:
+        page_dir = tmp_path / "ui/pages/customer_list"
+        page_dir.mkdir()
+        (page_dir.parent / "customer_list.yaml").rename(page_dir / "page.yaml")
+    pages = load_app_page_schemas(tmp_path)
+    route = _load_page_schema_routes(tmp_path)[0]
+    assert route["schema"] == "customer_list"
+    assert route["schema"] in pages
+
+    # A cache miss must not pass only because Windows ignores filename case.
+    monkeypatch.setattr(shell, "_resolve_page_schema_path", lambda name: tmp_path / "missing")
+    app = FastAPI()
+    app.state.page_schemas = {name: page.model_dump(mode="json", exclude_none=True) for name, page in pages.items()}
+    app.include_router(shell.router)
+    response = TestClient(app).get(f"/api/pages/{route['schema']}")
+    assert response.status_code == 200
+    assert response.json()["name"] == "CustomerList"
+
+
 def test_shell_endpoint_rejects_invalid_page_without_internal_leaks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
