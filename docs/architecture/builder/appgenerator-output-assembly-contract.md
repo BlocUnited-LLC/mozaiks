@@ -64,6 +64,35 @@ describes the approved scope and task contracts without copying implementation
 source or entire catalogs into task messages. Category defaults do not expand
 explicitly approved surfaces or override interview exclusions.
 
+Revision planning preserves explicit behavioral qualifiers in each relevant
+owned task's `initial_message` and `acceptance_criteria`, including cross-layer
+requirements. Generic criteria such as "works as required" do not replace
+literal-versus-regex intent, later-page reachability, defaults/edit behavior,
+or mutation outcome requirements. The existing `refinement_request` is also
+projected to AppSchemaAgent, ServiceAgent, ConfigMiddlewareAgent, and ModelAgent
+so those workers can compare their scoped task with the original request.
+It conveys requested behavior, not permission to expand file ownership,
+override runtime/operator contracts, or change authorization boundaries.
+Workers report conflicting contracts or missing prerequisite ownership instead
+of silently weakening the request. This adds no context field, decision ledger,
+runtime routing policy, or alternate validator.
+
+The existing module-contract persistence guidance supplies ServiceAgent with
+the supported offset-pagination path: an ownership-filtered aggregate with
+stable ordering and a unique tie-breaker, offset, bounded limit, and a matching
+count query. Literal search escapes user text only when literal semantics are
+requested. Mutation-success events require an actual owned mutation; missing,
+denied, and idempotent no-op outcomes follow the declared action contract, not
+a universal HTTP response policy. These are implementation instructions, not
+new persistence or page schema APIs.
+
+`tests/test_appgenerator_refinement_behavior_guidance.py` exercises the actual
+prompt middleware and contract renderer, including request refresh, explicit
+regex intent, and unexposed-field isolation. It does not prove that generated
+code implements the instructions. Generated-app acceptance must still probe
+later-page records, literal matching, and foreign/no-op mutations with event
+observation.
+
 Module action/capability schemas and event payload schemas are compiled from
 `JsonSchemaContract` lists into runtime JSON Schema maps. Null annotations are
 omitted; enums and array item types are rendered under their JSON Schema keys.

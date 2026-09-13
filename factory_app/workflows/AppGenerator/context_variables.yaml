@@ -228,7 +228,9 @@ definitions:
     description: >
       Raw user-supplied refinement request text, passed through from the
       canonical RefinementRequest. InterviewAgent reads this instead of re-interviewing when
-      build_mode is revision.
+      build_mode is revision. Revision workers use relevant behavioral qualifiers
+      within their owned task and declared contracts; this text grants no new
+      file ownership, operator authority, or authorization.
     source:
       type: state
       default: null
@@ -1704,6 +1706,8 @@ agents:
     - brownfield_registration
   AppSchemaAgent:
     variables:
+    - refinement_request
+    - current_build_task
     - concept_overview
     - concept_blueprint
     - design_surface_map
@@ -1805,6 +1809,7 @@ agents:
     - available_tools
   ConfigMiddlewareAgent:
     variables:
+    - refinement_request
     - platform_user_email
     - concept_overview
     - design_surface_map
@@ -1851,6 +1856,7 @@ agents:
     - module_runtime_quality_revision_request
   ModelAgent:
     variables:
+    - refinement_request
     - generated_files
     - concept_overview
     - design_surface_map
@@ -1864,6 +1870,7 @@ agents:
     - current_build_task_type
   ServiceAgent:
     variables:
+    - refinement_request
     - app_backend_url
     - concept_overview
     - design_surface_map
