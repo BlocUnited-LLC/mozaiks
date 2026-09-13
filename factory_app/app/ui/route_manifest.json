@@ -130,6 +130,14 @@
         "title": "Support",
         "appShell": true,
         "ai_context": "The user is on the workspace Support page. It lists apps with support activity and links each row to the app support dashboard for chat details.",
+        "ask_context": [
+          {
+            "module": "workspace_support",
+            "action": "list_support_requests",
+            "params": { "limit": 10 },
+            "label": "The user's recent support requests"
+          }
+        ],
         "navigation": {
           "group": "workspace-studio",
           "scope": "local",

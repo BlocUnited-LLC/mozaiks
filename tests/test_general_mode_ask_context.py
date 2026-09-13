@@ -79,9 +79,18 @@ async def test_general_exchange_uses_session_snapshot_and_ask_context_hook(monke
             return dict(snapshot)
 
     class _FakeHooks:
-        async def call_ask_context(self, *, app_id: str, user_id: str) -> dict[str, Any]:
+        async def call_ask_context(
+            self,
+            *,
+            app_id: str,
+            user_id: str,
+            page_path: str | None = None,
+            page_context: str | None = None,
+        ) -> dict[str, Any]:
             assert app_id == "app_1"
             assert user_id == "user_1"
+            assert page_path == "/apps"
+            assert page_context == "Apps page"
             return {"Workspace apps": "8 total — 8 draft"}
 
     service = _CapturingService()
@@ -99,7 +108,7 @@ async def test_general_exchange_uses_session_snapshot_and_ask_context_hook(monke
         chat_id="carrier_1",
         ws_id=42,
         user_message="how many apps do I have?",
-        ui_context={"page_context": "Apps page"},
+        ui_context={"page_context": "Apps page", "page_path": "/apps"},
     )
 
     assert len(service.calls) == 1
@@ -108,7 +117,7 @@ async def test_general_exchange_uses_session_snapshot_and_ask_context_hook(monke
         {"workflow_name": "ValueEngine", "chat_id": "chat_real_build", "status": "active"}
     ]
     assert call["workspace_context"] == {"Workspace apps": "8 total — 8 draft"}
-    assert call["ui_context"] == {"page_context": "Apps page"}
+    assert call["ui_context"] == {"page_context": "Apps page", "page_path": "/apps"}
     assert transport.sent_messages and transport.sent_messages[-1]["content"] == "grounded answer"
 
 

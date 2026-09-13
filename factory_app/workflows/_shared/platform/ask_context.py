@@ -18,14 +18,20 @@ _RECENT_APP_LIMIT = 5
 _IN_FLIGHT_STATES = frozenset({"building", "configuring", "deploying"})
 
 
-async def studio_ask_context(*, app_id: str, user_id: str) -> dict[str, Any]:
+async def studio_ask_context(
+    *,
+    app_id: str,
+    user_id: str,
+    page_path: str | None = None,
+    page_context: str | None = None,
+) -> dict[str, Any]:
     """Summarize the user's app registry for ask-mode workspace context.
 
     Registered on the Studio host through the platform ``ask_context`` hook.
     Best-effort: any failure is handled by the hook registry (logged, skipped),
     so this function only needs to describe what the registry actually holds.
     """
-    _ = app_id  # workspace apps are owner-scoped, not host-app-scoped
+    _ = app_id, page_path, page_context  # workspace apps are owner-scoped; page context is handled by the platform page hook
     from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 
     apps = (await AppRegistryService().list_apps(owner_user_id=user_id)).get("apps") or []

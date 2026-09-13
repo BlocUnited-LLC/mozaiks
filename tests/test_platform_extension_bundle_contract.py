@@ -109,14 +109,14 @@ def test_ask_context_hook_registers_from_dict_and_typed_bundle() -> None:
 
 @pytest.mark.asyncio
 async def test_call_ask_context_merges_first_wins_and_fails_open() -> None:
-    async def first_hook(*, app_id: str, user_id: str):
+    async def first_hook(*, app_id: str, user_id: str, **_):
         _ = app_id, user_id
         return {"Workspace apps": "2 total", "Shared": "from-first"}
 
-    def failing_hook(*, app_id: str, user_id: str):
+    def failing_hook(*, app_id: str, user_id: str, **_):
         raise RuntimeError("registry offline")
 
-    def second_hook(*, app_id: str, user_id: str):
+    def second_hook(*, app_id: str, user_id: str, **_):
         _ = app_id, user_id
         return {"Shared": "from-second", "Extra": "value"}
 
@@ -138,3 +138,29 @@ async def test_call_ask_context_merges_first_wins_and_fails_open() -> None:
 async def test_call_ask_context_without_hooks_returns_empty_dict() -> None:
     reg = _fresh()
     assert await reg.call_ask_context(app_id="app_1", user_id="user_1") == {}
+
+
+@pytest.mark.asyncio
+async def test_call_ask_context_forwards_page_identity_to_hooks() -> None:
+    seen: dict = {}
+
+    def hook(**kwargs):
+        seen.update(kwargs)
+        return {}
+
+    reg = _fresh()
+    reg._register_bundle({"ask_context": hook})
+
+    await reg.call_ask_context(
+        app_id="app_1",
+        user_id="user_1",
+        page_path="/support",
+        page_context="The user is on the Support page.",
+    )
+
+    assert seen == {
+        "app_id": "app_1",
+        "user_id": "user_1",
+        "page_path": "/support",
+        "page_context": "The user is on the Support page.",
+    }

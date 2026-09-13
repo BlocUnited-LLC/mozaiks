@@ -51,6 +51,7 @@ const PersistentChatWidget = ({
   chatId,
   workflowName,
   pageContext = null,
+  pagePath = null,
 }) => {
   const {
     setConversationMode,
@@ -131,6 +132,7 @@ const PersistentChatWidget = ({
     onAgentMessage: (msg) => setAskMessages(prev => [...prev, msg]),
     enabled: wsEnabled,
     pageContext,
+    pagePath,
   });
   const pendingWidgetSendsRef = useRef([]);
 
