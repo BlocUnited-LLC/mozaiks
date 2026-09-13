@@ -14,12 +14,19 @@ SERVICE_PACKAGE_MARKER_PATHS = frozenset({
     "services/adapters/{adapter_area}/__init__.py",
 })
 
+# Registry families added after the historical corpus captures. Excluded with
+# the package markers so pinned migration proofs keep reconstructing exactly
+# the registry they were captured against.
+POST_BASELINE_FAMILY_PATHS = SERVICE_PACKAGE_MARKER_PATHS | frozenset({
+    "config/metrics.yaml",
+})
+
 
 def registry_before_service_package_markers() -> AppLayoutRegistry:
     current = build_app_layout_registry(())
     families = tuple(
         family for family in current.families
-        if family.path_template not in SERVICE_PACKAGE_MARKER_PATHS
+        if family.path_template not in POST_BASELINE_FAMILY_PATHS
     )
     return AppLayoutRegistry(
         families=families,

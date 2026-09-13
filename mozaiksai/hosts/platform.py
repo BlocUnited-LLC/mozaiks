@@ -99,6 +99,7 @@ logger = get_workflow_logger("platform_app")
 executor_registry = ExecutorRegistry()
 app.state.executor_registry = executor_registry
 app.state.subscriptions_config = None
+app.state.metrics_config = None
 app.state.startup_degraded = False
 app.state.startup_degraded_reason: str | None = None
 app.state.failed_module_names: list[str] = []
@@ -283,6 +284,7 @@ async def _platform_startup() -> None:
         load_options = {"module_defaults_path": module_defaults_path} if module_defaults_path else {}
         load_result = await AppLoader.load(str(app_root), **load_options)
         app.state.subscriptions_config = load_result.subscriptions_config
+        app.state.metrics_config = load_result.metrics_config
         app.state.page_schemas = {
             name: schema.model_dump(mode="json", exclude_none=True)
             for name, schema in sorted(load_result.page_schemas.items())

@@ -63,6 +63,7 @@ class ArtifactKind(StrEnum):
     APP_TARGETS_CONFIG = "app_targets_config"
     APP_REFINEMENT_POLICY = "app_refinement_policy"
     APP_SUBSCRIPTION_CONFIG = "app_subscription_config"
+    APP_METRICS_CONFIG = "app_metrics_config"
     APP_PROVENANCE = "app_provenance"
     APP_BRAND_THEME = "app_brand_theme"
     APP_DASHBOARD = "app_dashboard"
@@ -206,6 +207,7 @@ class ValidatorIdentifier(StrEnum):
     GENERATED_APP_VALIDATOR = "generated_app_validator"
     DATA_CONTRACT_LOADER = "data_contract_loader"
     SUBSCRIPTIONS_LOADER = "subscriptions_loader"
+    METRICS_LOADER = "metrics_loader"
     PROVENANCE_LOADER = "provenance_loader"
     APP_PATHS = "app_paths"
     NONE = "none"
@@ -660,6 +662,7 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_SHELL_CONFIG, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "config/shell.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_SHELL_SELECTED, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_SUBSCRIPTION_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/subscriptions.yaml", ValidatorIdentifier.SUBSCRIPTIONS_LOADER, RuntimeConsumerIdentifier.ENTITLEMENT_ADAPTER, condition=ConditionIdentifier.WHEN_SUBSCRIPTIONS_REQUIRED, assignment=(AssignmentKind.SUBSCRIPTION_CONFIG,), inputs=subscription_inputs),
         _family(ArtifactKind.APP_TARGETS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, "config/targets.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST),
+        _family(ArtifactKind.APP_METRICS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, "config/metrics.yaml", ValidatorIdentifier.METRICS_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST),
         _family(ArtifactKind.APP_DATA_CONTRACT, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "data/contract.json", ValidatorIdentifier.DATA_CONTRACT_LOADER, RuntimeConsumerIdentifier.APP_LOADER, condition=ConditionIdentifier.WHEN_DATA_CONTRACT_REQUIRED, assignment=(AssignmentKind.PERSISTENCE_CONTRACT,), inputs=data_inputs),
         _family(ArtifactKind.APP_DATA_MIGRATION, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "data/migrations/{migration_id}.json", ValidatorIdentifier.DATA_CONTRACT_LOADER, RuntimeConsumerIdentifier.APP_LOADER, condition=ConditionIdentifier.WHEN_MIGRATION_DECLARED, multiplicity=Multiplicity.MANY, inputs=("artifact_declaration", "application")),
         _family(ArtifactKind.APP_SECRET_REFERENCES, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "security/secrets.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_APP_DECLARED, security=SecurityClass.SECRET_REFERENCE_NAMES, assignment=(AssignmentKind.SERVICE_FOUNDATION,)),

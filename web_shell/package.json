@@ -8,6 +8,7 @@
     "test:auth-browser": "playwright test -c playwright.auth.config.js",
     "test:workflow-ui": "node --test tests/workflowUi.test.js",
     "test:concept-review": "node --test tests/conceptReview.browser.test.js",
+    "test:analytics-model": "node --test tests/analyticsModel.test.js",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

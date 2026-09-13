@@ -91,6 +91,21 @@ task_contracts:
       - Token wallets and token_allowances are only for apps selling AI usage, credits, quotas, token packs, or usage-charge estimates; access-only SaaS plans must omit those fields.
       - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
 
+  metrics_config:
+    owner_agent: ConfigMiddlewareAgent
+    summary: >
+      Optional app analytics configuration declaring product-specific lifecycle
+      funnels for the owner analytics surfaces. Present only when the app has
+      meaningful lifecycle stages to declare.
+    required_outputs: []
+    optional_outputs:
+      - config/metrics.yaml
+    hard_constraints:
+      - Schema version must be mozaiks.metrics.v1.
+      - Funnel steps bind to metric event names the app actually records through ctx.metrics.track; do not declare stages no module emits.
+      - Do not hard-code one product's funnel into shared templates; stages are app-specific.
+      - Metric definitions (MRR, active users, conversion, and so on) are OSS runtime primitives; this file must not redefine metric math or introduce a parallel analytics store.
+
 
   module_contract:
     owner_agent: ConfigMiddlewareAgent
