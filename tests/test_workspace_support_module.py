@@ -661,6 +661,30 @@ async def test_list_support_requests_surfaces_storage_failure():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("thread_id", [None, "thr_missing"])
+async def test_list_support_requests_marks_missing_conversations_unavailable(thread_id):
+    persistence = _FakePersistence()
+    persistence.collections[("workspace_support", "requests")].rows.append({
+        "request_id": "sr_missing_thread",
+        "app_id": "app_1",
+        "subject_app_id": "customer_app_1",
+        "user_id": "user_1",
+        "message": "I need help",
+        "status": "open",
+        "created_at": "2026-01-01T00:00:00Z",
+        "message_thread_id": thread_id,
+    })
+    ctx = SimpleNamespace(app_id="app_1", user_id="user_1", permissions=[], persistence=persistence)
+
+    result = await WorkspaceSupportService().list_support_requests(ctx, status="all")
+
+    request = result["requests"][0]
+    assert request["subject_app_id"] == "customer_app_1"
+    assert request["messages"] == []
+    assert request["error"] == "Support conversation unavailable."
+
+
+@pytest.mark.asyncio
 async def test_list_support_requests_user_scope_can_filter_subject_app():
     persistence = _FakePersistence()
     persistence.collections[("workspace_support", "requests")].rows.extend(

@@ -2076,6 +2076,7 @@ async def get_profile_tabs(
 
 @app.get("/api/me/profile-pages")
 async def get_profile_pages(
+    request: Request,
     app_id: str | None = None,
     user_id: str | None = None,
     username: str | None = None,
@@ -2131,13 +2132,29 @@ async def get_profile_pages(
                     app_id=app_id,
                     subject_user_id=subject_user_id,
                 )
+                dispatch_scope = await get_platform_hooks().call_module_scope(
+                    principal=principal,
+                    module_name=module_name,
+                    action_name=action,
+                    requested_scope={
+                        "app_id": resolved_app_id,
+                        "user_id": viewer_user_id,
+                        "tenant_id": str(principal.tenant_id) if principal.tenant_id else None,
+                        "workspace_id": str(principal.workspace_id) if principal.workspace_id else None,
+                    },
+                    params=action_params,
+                    request=request,
+                    default_permissions=list(principal.scopes),
+                    fail_closed=True,
+                )
                 req = ModuleRequest(
                     module=module_name,
                     action=action,
                     params=action_params,
-                    app_id=resolved_app_id,
-                    user_id=viewer_user_id,
-                    tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+                    app_id=str(dispatch_scope.get("app_id") or resolved_app_id),
+                    user_id=str(dispatch_scope.get("user_id") or viewer_user_id),
+                    tenant_id=str(dispatch_scope.get("tenant_id")) if dispatch_scope.get("tenant_id") else None,
+                    workspace_id=str(dispatch_scope.get("workspace_id")) if dispatch_scope.get("workspace_id") else None,
                     auth_token=None,
                     correlation_id=None,
                     authority=ModuleDispatchAuthority(
@@ -2145,7 +2162,7 @@ async def get_profile_pages(
                         permission_mode="enforce",
                         reason="platform profile page hydration",
                         actor_id=viewer_user_id,
-                        permissions=tuple(principal.scopes) if principal else (),
+                        permissions=tuple(dispatch_scope.get("permissions") or ()),
                     ),
                     provenance=ModuleDispatchProvenance(surface="profile_page"),
                 )

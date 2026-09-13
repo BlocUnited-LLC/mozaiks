@@ -300,6 +300,9 @@ jobs:
       - name: Workflow UI inheritance contract
         run: npm run test:workflow-ui
 
+      - name: Support profile panel contract
+        run: npm run test:support-panel
+
       - name: Browser auth contract
         run: npm run test:auth
 
