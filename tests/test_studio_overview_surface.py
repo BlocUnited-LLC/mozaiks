@@ -127,6 +127,11 @@ def test_app_overview_page_fetches_summary_endpoint() -> None:
     assert "AppDashboardBanner" in chrome_source
     assert "App description appears after the concept brief is captured." in chrome_source
     assert "showBanner" in source
+    assert "if (demoMode && isStudioDemoApp(appId))" in hook_source
+    assert "build_registry_id=${encodeURIComponent(buildRegistryId)}" in hook_source
+    assert "/api/studio/overview?${buildScope}" in hook_source
+    assert "/api/studio/build?${buildScope}" in hook_source
+    assert "&build_family=app_bundle&limit=8" in hook_source
 
 
 def test_app_support_page_is_registered() -> None:

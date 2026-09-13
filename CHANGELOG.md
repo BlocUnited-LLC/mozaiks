@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Studio app/build summaries select owned generated targets through their build
+  registry without changing the authenticated host scope. Build review filters
+  app bundles instead of showing internal App Intelligence records as builds;
+  demo data no longer replaces unavailable real apps.
+- Mobile record cards wrap long values, and bottom navigation uses the app's
+  light/dark theme. Dashboard run labels distinguish failed runs from completed.
+
 - Preserve source line endings during app validation and export so Windows
   refinement does not repeatedly insert blank lines into unchanged files.
 - Honor ResourceTable search fields and placeholder, preserve selected record identity

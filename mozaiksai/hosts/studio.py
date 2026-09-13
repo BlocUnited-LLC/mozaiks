@@ -722,9 +722,15 @@ async def get_studio_dashboard_config(
 @app.get("/api/studio/overview")
 async def get_app_overview(
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    if build_registry_id is not None:
+        resolved_app_id, user_id = await _resolve_studio_artifact_scope(
+            principal, build_registry_id=build_registry_id, app_id=app_id,
+        )
+    else:
+        resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
     missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
@@ -2138,9 +2144,15 @@ async def restore_artifact_version(
 @app.get("/api/studio/build")
 async def get_build_surface(
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    if build_registry_id is not None:
+        app_id, user_id = await _resolve_studio_artifact_scope(
+            principal, build_registry_id=build_registry_id, app_id=app_id,
+        )
+    else:
+        app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
     missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:

@@ -127,3 +127,21 @@ complete integrated generation acceptance remains open.
 SecurityReadiness target/artifact ownership and App Zero commercial correlation,
 dependency installation, refinement continuity, and final integrated regression
 acceptance must be verified before closing this ADR's implementation.
+
+The fresh Contact Desk journey subsequently completed through the normal Factory
+browser UI, including real model-backed Genesis and scoped refinements. Artifact
+`av_c9d94c76c73f415092b7f5e5` passed browser create/read/update/delete, optional
+field clearing, required-only requests, owner isolation, search, pagination,
+dashboard refresh, desktop/mobile use, and restart persistence. All 38 exported
+source files match the running bundle. Authenticated download matched the saved
+ZIP digest; anonymous and wrong-registry downloads were rejected.
+
+This required nine explicit refinement attempts while repairing the builder.
+It is not first-try or unattended generation evidence. The built-in Docker
+preview is not covered by the separate locally served application, and runtime
+build validation was marked skipped rather than represented as executed.
+
+Studio summary reads now use the same owner- and host-checked build registry
+selection as artifact reads. Dashboard manifests remain host-owned UI contracts,
+not customer app identities. Build review requests only app-bundle records so
+App Intelligence projections cannot displace the actual reviewable output.

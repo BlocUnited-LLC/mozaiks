@@ -23,10 +23,15 @@ function load(file, namedExports, imports = {}) {
 }
 
 const overview = load('../factory_app/app/admin/pages/AppOverviewPage.jsx', ['runStatusTone', 'runStatusLabel']);
+const portal = load('../factory_app/app/admin/pages/DashboardPortalPage.jsx', ['runTone', 'runLabel']);
 for (const [status, label, tone] of [[0, 'Running', 'primary'], [1, 'Completed', 'success'], [2, 'Failed', 'destructive']]) {
   test(`overview status ${status} is ${label}`, () => {
     assert.equal(overview.runStatusLabel(status), label);
     assert.equal(overview.runStatusTone(status), tone);
+  });
+  test(`dashboard status ${status} is ${label}`, () => {
+    assert.equal(portal.runLabel(status), label);
+    assert.equal(portal.runTone(status), tone);
   });
 }
 

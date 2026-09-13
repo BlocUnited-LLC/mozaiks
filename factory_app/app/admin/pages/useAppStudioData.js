@@ -135,7 +135,11 @@ export function useAppStudioData(appId) {
         if (!appsResponse.ok) throw new Error('App registry unavailable.')
         const appsPayload = await appsResponse.json()
         const registeredApp = appsPayload.apps?.find((entry) => entry.app_id === appId)
+        if (!registeredApp) throw new Error('App not found.')
         const buildRegistryId = registeredApp?.build_registry_id || null
+        const buildScope = buildRegistryId
+          ? `build_registry_id=${encodeURIComponent(buildRegistryId)}`
+          : `app_id=${encodeURIComponent(appId)}`
 
         const [
           overviewRes,
@@ -149,14 +153,14 @@ export function useAppStudioData(appId) {
           contextRes,
           runtimeMetricsRes,
         ] = await Promise.allSettled([
-          studioFetch(`/api/studio/overview?app_id=${encodeURIComponent(appId)}`),
+          studioFetch(`/api/studio/overview?${buildScope}`),
           studioFetch(`/api/admin/stats?app_id=${encodeURIComponent(appId)}`),
           studioFetch(`/api/admin/runs?app_id=${encodeURIComponent(appId)}&limit=12`),
           studioFetch(`/api/admin/sessions?app_id=${encodeURIComponent(appId)}&limit=12`),
           studioFetch(`/api/admin/usage?app_id=${encodeURIComponent(appId)}&limit=500`),
-          studioFetch(`/api/studio/build?app_id=${encodeURIComponent(appId)}`),
+          studioFetch(`/api/studio/build?${buildScope}`),
           buildRegistryId
-            ? studioFetch(`/api/studio/build/history?build_registry_id=${encodeURIComponent(buildRegistryId)}&limit=8`)
+            ? studioFetch(`/api/studio/build/history?build_registry_id=${encodeURIComponent(buildRegistryId)}&build_family=app_bundle&limit=8`)
             : Promise.resolve(null),
           studioFetch(`/api/studio/integrations?app_id=${encodeURIComponent(appId)}`),
           studioFetch(`/api/studio/apps/${encodeURIComponent(appId)}/context`),
@@ -198,7 +202,7 @@ export function useAppStudioData(appId) {
         }
       } catch (err) {
         if (!cancelled) {
-          if (demoMode) {
+          if (demoMode && isStudioDemoApp(appId)) {
             setData(buildDemoPayload(appId))
             setDataMode('demo')
             setError(null)

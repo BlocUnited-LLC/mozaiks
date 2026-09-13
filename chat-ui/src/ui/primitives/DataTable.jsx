@@ -86,7 +86,7 @@ function MobileRowCard({
   return (
     <article
       className={cn(
-        'rounded-[1.2rem] border border-border/45 bg-card/34 shadow-sm shadow-black/5 space-y-3 p-4 md:hidden',
+        'min-w-0 rounded border border-border bg-card space-y-3 p-4 md:hidden',
         selection !== 'none' && 'cursor-pointer',
         isSelected && 'ring-2 ring-primary/25',
       )}
@@ -95,11 +95,11 @@ function MobileRowCard({
       {selection !== 'none' && (
         <div className="flex items-center justify-between gap-3 border-b border-border/32 pb-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Selection</div>
-            <div className="mt-1 text-sm font-medium text-foreground">{isSelected ? 'Included' : 'Tap to select'}</div>
+            <div className="text-sm font-medium text-foreground">{isSelected ? 'Selected' : 'Select record'}</div>
           </div>
           <input
             type={selection === 'multi' ? 'checkbox' : 'radio'}
+            aria-label="Select record"
             checked={isSelected}
             onChange={() => onToggle(rowKey)}
             onClick={(event) => event.stopPropagation()}
@@ -110,10 +110,10 @@ function MobileRowCard({
 
       {columns.map((col) => (
         <div key={col.key} className="space-y-1.5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+          <div className="text-xs font-semibold text-muted-foreground">
             {col.label}
           </div>
-          <div className="text-sm text-foreground">
+          <div className="break-words [overflow-wrap:anywhere] text-sm text-foreground">
             <CellContent column={col} value={row[col.key]} />
           </div>
         </div>

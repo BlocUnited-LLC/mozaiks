@@ -31,6 +31,34 @@ async def test_artifact_scope_resolves_owned_target_not_host(studio):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["get_app_overview", "get_build_surface"])
+async def test_build_summaries_use_owned_target_without_changing_host_scope(studio, monkeypatch, endpoint):
+    module, service = studio
+    monkeypatch.setattr(module, "get_missing_studio_surfaces", lambda root: [])
+    monkeypatch.setattr(module, "build_app_overview_summary", lambda *args, **kwargs: {
+        "app": kwargs["app_record"], "studio": {},
+    })
+    monkeypatch.setattr(module, "load_build_state_from_db", AsyncMock(return_value={}))
+    monkeypatch.setattr(module, "build_build_section", lambda *args: {})
+    result = await getattr(module, endpoint)(build_registry_id="registry_tracker", principal=None)
+    assert result["app"]["app_id"] == "tracker"
+    assert service.get_app_record.await_args_list[0].kwargs == {
+        "build_registry_id": "registry_tracker", "owner_user_id": "owner",
+    }
+    assert service.get_app_record.await_args_list[1].kwargs == {
+        "app_id": "tracker", "owner_user_id": "owner",
+    }
+    service.get_app_record.reset_mock()
+    service.get_app_record.return_value = {"app": None}
+    with pytest.raises(HTTPException) as caught:
+        await getattr(module, endpoint)(build_registry_id="foreign_registry", principal=None)
+    assert caught.value.status_code == 404
+    service.get_app_record.assert_awaited_once_with(
+        build_registry_id="foreign_registry", owner_user_id="owner",
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("record", [None, {"app_id": "tracker", "chat_app_id": "foreign_host"}])
 async def test_artifact_scope_rejects_missing_or_foreign_target(studio, record):
     module, service = studio
