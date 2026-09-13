@@ -82,6 +82,17 @@ from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.dashboard import load_dashboard_manifest
 from mozaiksai.core.data.persistence import ConnectorStore
+from mozaiksai.core.metrics import (
+    OwnerAnalyticsService,
+    PeriodError,
+    PeriodWindow,
+    resolve_period,
+)
+from mozaiksai.core.metrics.funnels import FunnelDef
+from mozaiksai.core.runtime.app.metrics_loader import (
+    MetricsConfigLoadError,
+    load_metrics_config,
+)
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
     build_apps_summary,
@@ -834,6 +845,168 @@ async def delete_workspace_app(
     except Exception as exc:
         logger.exception("Failed to delete app record")
         raise HTTPException(status_code=500, detail="Failed to delete app record") from exc
+
+
+_owner_analytics_service: OwnerAnalyticsService | None = None
+
+
+def _get_owner_analytics_service() -> OwnerAnalyticsService:
+    global _owner_analytics_service
+    if _owner_analytics_service is None:
+        _owner_analytics_service = OwnerAnalyticsService()
+    return _owner_analytics_service
+
+
+def _analytics_period(period: str) -> PeriodWindow:
+    try:
+        return resolve_period(period)
+    except PeriodError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _analytics_app_row(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "app_id": record.get("app_id"),
+        "name": record.get("name") or record.get("app_id"),
+        "lifecycle_state": record.get("lifecycle_state"),
+    }
+
+
+async def _analytics_owned_app(app_id: str, user_id: str) -> dict[str, Any]:
+    """Resolve one app record through the ownership boundary or 404."""
+
+    try:
+        result = await _get_app_registry_service().get_app_record(
+            app_id=app_id, owner_user_id=user_id
+        )
+        record = result.get("app")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Analytics app record lookup failed")
+        raise HTTPException(status_code=500, detail="Failed to resolve app record") from exc
+    if not isinstance(record, dict):
+        raise HTTPException(status_code=404, detail=f"App record not found: {app_id}")
+    return record
+
+
+def _analytics_funnel_for_record(record: dict[str, Any]) -> FunnelDef | None:
+    """Load the app-declared funnel from the app's bundle, when present.
+
+    Registered apps carry their bundle path; the Studio host's own app falls
+    back to the resolved app root. A declared-but-invalid config is treated
+    as no funnel here (the bundle's own load path is where it fails closed).
+    """
+
+    roots: list[Path] = []
+    bundle_path = record.get("bundle_path")
+    if bundle_path:
+        roots.append(Path(str(bundle_path)))
+    elif record.get("app_id") == platform_app._resolve_default_app_id():
+        roots.append(resolve_app_root())
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            config = load_metrics_config(root)
+        except MetricsConfigLoadError:
+            logger.warning(
+                "ANALYTICS_METRICS_CONFIG_INVALID app_id=%s root=%s",
+                record.get("app_id"),
+                root,
+                exc_info=True,
+            )
+            return None
+        if config is not None:
+            return config.default_funnel
+    return None
+
+
+@app.get("/api/studio/analytics/portfolio")
+async def get_studio_analytics_portfolio(
+    period: str = "30d",
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """World View analytics across every app the caller owns."""
+
+    _, user_id = _resolve_studio_scope(principal)
+    window = _analytics_period(period)
+    try:
+        records = (await _get_app_registry_service().list_apps(owner_user_id=user_id)).get(
+            "apps"
+        ) or []
+    except Exception as exc:
+        logger.exception("Analytics portfolio app listing failed")
+        raise HTTPException(status_code=500, detail="Failed to list apps for analytics") from exc
+
+    rows = [
+        _analytics_app_row(record)
+        for record in records
+        if isinstance(record, dict) and record.get("app_id")
+    ]
+    try:
+        return await _get_owner_analytics_service().portfolio(rows, window)
+    except Exception as exc:
+        logger.exception("Analytics portfolio assembly failed")
+        raise HTTPException(status_code=500, detail="Failed to build portfolio analytics") from exc
+
+
+@app.get("/api/studio/analytics/apps/{app_id}")
+async def get_studio_analytics_app(
+    app_id: str,
+    period: str = "30d",
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """App View analytics for one owned app, including movement and funnel."""
+
+    _, user_id = _resolve_studio_scope(principal)
+    window = _analytics_period(period)
+    record = await _analytics_owned_app(app_id, user_id)
+    funnel = _analytics_funnel_for_record(record)
+    try:
+        return await _get_owner_analytics_service().app_analytics(
+            _analytics_app_row(record), window, funnel=funnel
+        )
+    except Exception as exc:
+        logger.exception("Analytics app assembly failed")
+        raise HTTPException(status_code=500, detail="Failed to build app analytics") from exc
+
+
+@app.get("/api/studio/analytics/apps/{app_id}/metrics/{metric_id}")
+async def get_studio_analytics_metric_detail(
+    app_id: str,
+    metric_id: str,
+    period: str = "30d",
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Drill-down detail for one metric on one owned app."""
+
+    _, user_id = _resolve_studio_scope(principal)
+    window = _analytics_period(period)
+    record = await _analytics_owned_app(app_id, user_id)
+    try:
+        peers = (await _get_app_registry_service().list_apps(owner_user_id=user_id)).get(
+            "apps"
+        ) or []
+    except Exception:
+        peers = []
+    peer_rows = [
+        _analytics_app_row(peer)
+        for peer in peers
+        if isinstance(peer, dict) and peer.get("app_id")
+    ]
+    try:
+        return await _get_owner_analytics_service().metric_detail(
+            metric_id,
+            window,
+            app=_analytics_app_row(record),
+            peer_apps=peer_rows,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown metric: {metric_id}") from exc
+    except Exception as exc:
+        logger.exception("Analytics metric detail assembly failed")
+        raise HTTPException(status_code=500, detail="Failed to build metric detail") from exc
 
 
 @app.get("/api/studio/integrations")

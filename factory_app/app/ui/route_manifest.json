@@ -48,10 +48,28 @@
       }
     },
     {
+      "path": "/performance",
+      "component": "WorkspacePerformancePage",
+      "label": "Performance",
+      "order": 5,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Performance",
+        "appShell": true,
+        "ai_context": "The user is on the Performance page, the portfolio command center. It shows revenue and user metrics across all their apps, a portfolio trend, deterministic attention insights, and a comparable applications table. Clicking an app drills into that app's analytics.",
+        "navigation": {
+          "group": "workspace-studio",
+          "scope": "local",
+          "icon": "pulse"
+        }
+      }
+    },
+    {
       "path": "/usage",
       "component": "WorkspaceUsagePage",
       "label": "Token Usage",
-      "order": 5,
+      "order": 6,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -69,7 +87,7 @@
       "path": "/users",
       "component": "WorkspaceUsersPage",
       "label": "Users",
-      "order": 6,
+      "order": 7,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -87,7 +105,7 @@
       "path": "/integrations",
       "component": "WorkspaceIntegrationsPage",
       "label": "Integrations",
-      "order": 7,
+      "order": 8,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -155,10 +173,46 @@
       }
     },
     {
+      "path": "/apps/:appId/revenue",
+      "component": "AppRevenuePage",
+      "label": "Revenue",
+      "order": 21,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "App Revenue",
+        "appShell": true,
+        "ai_context": "The user is on the App Revenue page. It shows recurring-revenue metrics (MRR, ARR, growth, NRR, ARPPU), one revenue trend, and an MRR movement bridge explaining why revenue changed. Every metric can be clicked for deeper detail.",
+        "navigation": {
+          "group": "app-studio",
+          "scope": "local",
+          "icon": "billing"
+        }
+      }
+    },
+    {
+      "path": "/apps/:appId/audience",
+      "component": "AppUsersPage",
+      "label": "Users",
+      "order": 22,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "App User Analytics",
+        "appShell": true,
+        "ai_context": "The user is on the App Users analytics page. It shows acquisition, engagement, conversion, and retention metrics, one user trend, and the app's configurable lifecycle funnel with stage-to-stage conversion. Every metric can be clicked for deeper detail.",
+        "navigation": {
+          "group": "app-studio",
+          "scope": "local",
+          "icon": "users"
+        }
+      }
+    },
+    {
       "path": "/apps/:appId/building",
       "component": "DashboardPortalPage",
       "label": "Building",
-      "order": 21,
+      "order": 23,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -175,14 +229,14 @@
     {
       "path": "/apps/:appId/access",
       "component": "AppAccessPage",
-      "label": "Users",
-      "order": 22,
+      "label": "Access",
+      "order": 24,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "App Users",
+        "title": "App Access",
         "appShell": true,
-        "ai_context": "The user is on the App Users page. It shows accounts, access status, subscription plan assignment, and last-activity for this app's users.",
+        "ai_context": "The user is on the App Access page. It shows accounts, access status, subscription plan assignment, and last-activity for this app's users.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
@@ -194,7 +248,7 @@
       "path": "/apps/:appId/usage",
       "component": "AppUsagePage",
       "label": "Token Usage",
-      "order": 23,
+      "order": 25,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -212,7 +266,7 @@
       "path": "/apps/:appId/health",
       "component": "AppHealthPage",
       "label": "Health",
-      "order": 24,
+      "order": 26,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -249,7 +303,7 @@
       "path": "/apps/:appId/support",
       "component": "AppSupportPage",
       "label": "Support",
-      "order": 25,
+      "order": 27,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",

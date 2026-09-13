@@ -12,6 +12,7 @@ APP_DATA_MIGRATIONS_GLOB = "data/migrations/*.json"
 APP_SECURITY_SECRETS_PATH = "security/secrets.yaml"
 APP_AUTH_CONFIG_PATH = "config/auth.yaml"
 APP_REFINEMENT_POLICY_CONFIG_PATH = "config/refinement_policy.yaml"
+APP_METRICS_CONFIG_PATH = "config/metrics.yaml"
 APP_PROVENANCE_PATH = "provenance.yaml"
 
 CANONICAL_APP_CONFIG_FILES = frozenset(
@@ -20,6 +21,7 @@ CANONICAL_APP_CONFIG_FILES = frozenset(
         APP_AUTH_CONFIG_PATH,
         "config/asset_manifest.json",
         "config/integrations.yaml",
+        APP_METRICS_CONFIG_PATH,
         APP_REFINEMENT_POLICY_CONFIG_PATH,
         "config/shell.json",
         "config/subscriptions.yaml",

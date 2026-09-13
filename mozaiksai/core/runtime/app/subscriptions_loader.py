@@ -543,6 +543,31 @@ class UsageChargePolicyDef(BaseModel):
         return self
 
 
+class PlanPriceDef(TokenTopUpPriceDef):
+    """Provider-neutral recurring cash price for a subscription plan.
+
+    Declaring a plan price makes recurring-revenue metrics (MRR/ARR)
+    deterministically computable: active assignments per plan multiplied by
+    the plan's monthly-normalized price. It intentionally omits payment
+    provider price ids, taxes, and settlement details.
+    """
+
+    interval: Literal["month", "year", "week", "day"] = "month"
+
+    _DAYS_PER_MONTH = 365.0 / 12.0
+
+    def monthly_amount_cents(self) -> float:
+        """The price normalized to a monthly recurring amount in cents."""
+
+        if self.interval == "month":
+            return float(self.amount_cents)
+        if self.interval == "year":
+            return self.amount_cents / 12.0
+        if self.interval == "week":
+            return self.amount_cents * (self._DAYS_PER_MONTH / 7.0)
+        return self.amount_cents * self._DAYS_PER_MONTH
+
+
 class PlanDef(BaseModel):
     """A single subscription plan with its granted capabilities."""
 
@@ -551,6 +576,7 @@ class PlanDef(BaseModel):
     plan_id: str
     label: str
     description: str | None = None
+    price: PlanPriceDef | None = None
     capabilities: list[str] = Field(default_factory=list)
     usage_limits: list[UsageLimitDef] = Field(default_factory=list)
     token_allowances: list[TokenAllowanceDef] = Field(default_factory=list)
@@ -1294,6 +1320,7 @@ __all__ = [
     "AddOnProductDef",
     "AddOnProductPriceDef",
     "PlanDef",
+    "PlanPriceDef",
     "PricingCatalogDef",
     "PricingCatalogGroupDef",
     "ProductDef",

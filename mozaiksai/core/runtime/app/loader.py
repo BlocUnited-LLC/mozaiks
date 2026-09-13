@@ -33,6 +33,11 @@ from mozaiksai.core.runtime.app.auth_contract import (
     load_app_auth_contract,
 )
 from mozaiksai.core.runtime.app.definition import AppDefinition
+from mozaiksai.core.runtime.app.metrics_loader import (
+    MetricsConfig,
+    MetricsConfigLoadError,
+    load_metrics_config,
+)
 from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
 from mozaiksai.core.runtime.app.page_schema import (
     AppPageSchema,
@@ -76,6 +81,7 @@ class AppLoadResult:
         data_contract:        Parsed data contract, or None
         data_entities_by_key: Data entities indexed by (module_id, entity_name)
         subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
+        metrics_config:       Parsed analytics config, or None when not declared
         auth_contract:        Validated app auth behavior, or None for public apps
         provenance:           Parsed app provenance, or None when not declared
         page_schemas:         Validated declarative page schemas indexed by page name
@@ -86,6 +92,7 @@ class AppLoadResult:
     data_contract: dict[str, Any] | None = None
     data_entities_by_key: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     subscriptions_config: SubscriptionsConfig | None = None
+    metrics_config: MetricsConfig | None = None
     auth_contract: AppAuthContract | None = None
     provenance: AppProvenance | None = None
     page_schemas: dict[str, AppPageSchema] = field(default_factory=dict)
@@ -187,6 +194,19 @@ class AppLoader:
                 [p.plan_id for p in subscriptions_config.plans],
                 [p.product_id for p in subscriptions_config.products])
 
+        # Same fail-closed posture as subscriptions: a declared-but-invalid
+        # analytics config is a load error, an absent file is a valid app.
+        metrics_config: MetricsConfig | None = None
+        try:
+            metrics_config = load_metrics_config(base_path)
+        except MetricsConfigLoadError as exc:
+            raise AppLoadError(f"Invalid config/metrics.yaml: {exc}") from exc
+        if metrics_config is not None:
+            logger.info(
+                "METRICS_CONFIG_LOADED: funnels=%s",
+                [f.funnel_id for f in metrics_config.funnels],
+            )
+
         logger.info(
             "APP_LOADED: name=%s version=%s mode=%s workflows=%s modules=%s",
             app_def.name, app_def.version, app_def.execution_mode.value,
@@ -231,6 +251,7 @@ class AppLoader:
             data_contract=data_contract,
             data_entities_by_key=data_entities_by_key,
             subscriptions_config=subscriptions_config,
+            metrics_config=metrics_config,
             auth_contract=auth_contract,
             provenance=provenance,
             page_schemas=page_schemas,

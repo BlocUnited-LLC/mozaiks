@@ -82,7 +82,12 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # Optional service package markers add five registry rows and five explicit
 # input gaps in this incomplete corpus. The proof below recovers the previous
 # hash and proves all 61 unit bodies and all earlier gaps remain identical.
-_GOLDEN_PLAN_DIGEST = "ef4e2418c02c6a3bf9be7fd64f975b0717eb14532c023208d86fb75d7833aa1a"
+# The optional app metrics config (config/metrics.yaml) adds one registry row
+# and one input gap, matching the existing input-less config family shape
+# (config/targets.json). Aggregate identity moves because the registry digest
+# is part of it; test_service_package_markers_preserve_existing_units_and_gaps
+# proves all 61 unit bodies and all earlier gaps are still byte-identical.
+_GOLDEN_PLAN_DIGEST = "206d747ce24af3720e8155aa316005bc77aaeb25174ab15699424d1e1e282994"
 
 
 def _registry():
@@ -158,6 +163,7 @@ def test_cross_process_canonical_equality() -> None:
 
 def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
     from tests.service_package_marker_migration_helpers import (
+        POST_BASELINE_FAMILY_PATHS,
         SERVICE_PACKAGE_MARKER_PATHS,
         corpus_plan_before_service_package_markers,
         registry_before_service_package_markers,
@@ -173,24 +179,32 @@ def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
     restored = current.canonical_payload(include_digest=False)
     restored["registry_digest"] = previous.registry_digest
     added_gaps = [gap for gap in current.gaps if gap not in previous.gaps]
-    assert len(added_gaps) == 5
-    assert {gap.path_template for gap in added_gaps} == SERVICE_PACKAGE_MARKER_PATHS
-    assert all(gap.family_kind == "app_service_support" for gap in added_gaps)
-    assert {gap.code.value for gap in added_gaps} == {
+    marker_gaps = [gap for gap in added_gaps if gap.path_template in SERVICE_PACKAGE_MARKER_PATHS]
+    assert len(marker_gaps) == 5
+    assert {gap.path_template for gap in marker_gaps} == SERVICE_PACKAGE_MARKER_PATHS
+    assert all(gap.family_kind == "app_service_support" for gap in marker_gaps)
+    assert {gap.code.value for gap in marker_gaps} == {
         "renderer_input_incomplete", "placeholder_underivable",
     }
+    # Families added after this migration carry their own addition proofs; they
+    # must not smuggle in any other change to the historical plan.
+    assert {gap.path_template for gap in added_gaps} <= POST_BASELINE_FAMILY_PATHS
     restored["gaps"] = [
         gap for gap in restored["gaps"]
-        if gap["path_template"] not in SERVICE_PACKAGE_MARKER_PATHS
+        if gap["path_template"] not in POST_BASELINE_FAMILY_PATHS
     ]
     assert restored == previous.canonical_payload(include_digest=False)
     assert canonical_digest(restored) == previous.plan_digest
 
     before_paths = {row.path_template for row in registry_before_service_package_markers().families}
     added = [row for row in _registry().families if row.path_template not in before_paths]
-    assert {row.path_template for row in added} == SERVICE_PACKAGE_MARKER_PATHS
-    assert len(added) == 5
-    assert all(row.kind.value == "app_service_support" and row.requirement.value == "optional" for row in added)
+    assert {row.path_template for row in added} == POST_BASELINE_FAMILY_PATHS
+    marker_rows = [row for row in added if row.path_template in SERVICE_PACKAGE_MARKER_PATHS]
+    assert len(marker_rows) == 5
+    assert all(
+        row.kind.value == "app_service_support" and row.requirement.value == "optional"
+        for row in marker_rows
+    )
 
 
 def test_inputs_are_never_mutated() -> None:

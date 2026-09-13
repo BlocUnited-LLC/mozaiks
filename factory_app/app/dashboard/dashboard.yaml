@@ -13,6 +13,17 @@ workspace:
       icon: apps
       order: 0
 
+    - id: performance
+      label: Performance
+      route: /performance
+      icon: pulse
+      order: 10
+      description: Portfolio revenue and user performance with attention insights.
+      panels:
+        - id: performance
+          type: workspace_usage_summary
+          title: Performance
+
     - id: usage
       label: Usage
       route: /usage
@@ -32,6 +43,28 @@ app:
       route: /apps/:appId/overview
       icon: dashboard
       order: 0
+
+    - id: revenue
+      label: Revenue
+      route: /apps/:appId/revenue
+      icon: billing
+      order: 4
+      description: Recurring-revenue metrics, trend, and MRR movement drivers.
+      panels:
+        - id: revenue
+          type: kpi_grid
+          title: Revenue
+
+    - id: audience
+      label: Users
+      route: /apps/:appId/audience
+      icon: users
+      order: 6
+      description: Acquisition, engagement, conversion, and the app lifecycle funnel.
+      panels:
+        - id: audience
+          type: kpi_grid
+          title: Users
 
     - id: building
       label: Building
@@ -58,7 +91,7 @@ app:
       order: 40
 
     - id: users
-      label: Users
+      label: Access
       route: /apps/:appId/access
       icon: users
       order: 50
