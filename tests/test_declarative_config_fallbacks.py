@@ -117,9 +117,9 @@ def test_prompt_middleware_updates_current_turn_prompt() -> None:
     asyncio.run(middleware.on_llm_call(call_next, [], context))
 
 
-def test_agent_tools_loader_reads_yaml_only(tmp_path: Path) -> None:
-    _tools_mod.workflow_manager.workflows_base_path = tmp_path
-    _tools_mod.workflow_manager._workflow_paths = {}
+def test_agent_tools_loader_reads_yaml_only(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(_tools_mod.workflow_manager, "workflows_base_path", tmp_path)
+    monkeypatch.setattr(_tools_mod.workflow_manager, "_workflow_paths", {})
 
     flow_yaml = tmp_path / "FlowToolsYaml"
     flow_yaml.mkdir(parents=True)
@@ -171,9 +171,9 @@ def test_agent_tools_loader_reads_yaml_only(tmp_path: Path) -> None:
     assert mapping_json == {}
 
 
-def test_agent_tools_loader_rebinds_workflows_package_to_active_root(tmp_path: Path) -> None:
-    _tools_mod.workflow_manager.workflows_base_path = tmp_path
-    _tools_mod.workflow_manager._workflow_paths = {}
+def test_agent_tools_loader_rebinds_workflows_package_to_active_root(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(_tools_mod.workflow_manager, "workflows_base_path", tmp_path)
+    monkeypatch.setattr(_tools_mod.workflow_manager, "_workflow_paths", {})
 
     flow = tmp_path / "FlowIsolated"
     tools_dir = flow / "tools"

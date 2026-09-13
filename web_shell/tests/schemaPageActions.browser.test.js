@@ -11,6 +11,8 @@ import tailwindcss from '@tailwindcss/postcss';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = path.dirname(shell);
+const screenshotDir = process.env.MOZAIKS_TEST_SCREENSHOTS;
+if (screenshotDir) await fs.mkdir(screenshotDir, { recursive: true });
 const styles = postcss([tailwindcss()]).process(
   (await fs.readFile(path.join(shell, 'styles.css'), 'utf8'))
     + `\n@source "${path.join(root, 'chat-ui/src/ui').replaceAll('\\', '/')}";`,
@@ -32,8 +34,9 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
         { id: 'add', label: 'Add record', action_type: 'event', event_type: 'ui.modal.open', payload: { modal_id: 'create' } },
       ] } },
       { id: 'table', primitive: tablePrimitive, config: {
-        api_endpoint: modulePath + 'list', data_key: 'records', columns: [{ key: 'name', label: 'Name', sortable: true }], selection: 'single',
+        api_endpoint: modulePath + 'list', data_key: 'records', columns: [{ key: 'name', label: 'Name', sortable: true }, { key: 'notes', label: 'Notes' }], selection: 'single',
         search: true,
+        search_keys: ['name', 'email'],
         ...(tablePrimitive === 'ResourceTable' ? { search_placeholder: 'Find records', search_keys: ['email'] } : {}),
         actions: [
           { id: 'details', label: 'Details', requires_selection: true, action_type: 'event', event_type: 'ui.modal.open', payload: { modal_id: 'details' } },
@@ -48,7 +51,13 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
       ...['create', 'edit'].map((id) => ({ id, primitive: 'Modal', config: { title: id === 'create' ? 'Create record' : 'Edit record', children: [
         { id: id + '-form', primitive: 'Form', config: {
           initial_values_key: id === 'edit' ? 'selected_row' : null,
-          fields: [{ name: 'name', label: 'Name', type: 'text', required: true }, { name: 'notes', label: 'Notes', type: 'textarea' }],
+          fields: [
+            { name: 'name', label: 'Name', type: 'text', required: true },
+            { name: 'notes', label: 'Notes', type: 'textarea', default_value: '' },
+            { name: 'status', label: 'Status', type: 'select', default_value: 'planned', options: [{ value: 'planned', label: 'Planned' }, { value: 'complete', label: 'Complete' }] },
+            { name: 'count', label: 'Count', type: 'number', default_value: 0 },
+            { name: 'notify', label: 'Notify', type: 'checkbox', default_value: true },
+          ],
           submit_label: 'Save', submit_action: { label: 'Save', action_type: 'submit', href: modulePath + id, closes_modal: true,
             payload: id === 'create' ? null : { record_id: '{selected_row.record_id}', name: '{form.name}', notes: '{form.notes}' } },
         } },
@@ -90,7 +99,7 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
       if (req.url.endsWith('/list') && rejectList) { res.statusCode = 404; rejectList = false; res.end('{}'); return; }
       if (req.url.endsWith('/delete') && rejectDelete) { res.statusCode = 409; rejectDelete = false; res.end('{}'); return; }
       res.end(JSON.stringify(req.url.endsWith('/list') ? { records: [
-        { record_id: 'r1', name: 'Ada', notes: 'Original note', email: 'first@example.test' },
+        { record_id: 'r1', name: 'Ada', notes: 'Original note', email: 'first@example.test', status: 'complete', count: 4, notify: false },
         { record_id: 'r2', name: 'Zoe', notes: 'Another note', email: 'zoe@example.test' },
       ] } : req.url.endsWith('/summary') ? { total: 7 } : { success: true }));
       return;
@@ -117,6 +126,11 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
     throw error;
   }
   await page.getByRole('button', { name: 'Add record', exact: true }).click();
+  assert.equal(await page.getByRole('dialog').getByLabel('Status', { exact: true }).getByText('Planned', { exact: true }).isVisible(), true);
+  assert.equal(await page.getByRole('dialog').getByLabel('Count', { exact: true }).inputValue(), '0');
+  assert.equal(await page.getByRole('dialog').getByLabel('Notify', { exact: true }).isChecked(), true);
+  assert.equal(await page.getByRole('dialog').getByLabel('Notes', { exact: true }).inputValue(), '');
+  if (screenshotDir) await page.screenshot({ path: path.join(screenshotDir, `${tablePrimitive}-defaults-desktop.png`) });
   await page.getByRole('dialog').getByLabel('Name').fill('   ');
   await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByText('Name is required', { exact: true }).waitFor();
@@ -125,13 +139,16 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
   await page.getByRole('dialog').getByLabel('Notes').fill('Line one\nLine two');
   await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  assert.deepEqual(requests.find(r => r.path.endsWith('/create')).body, { name: 'Grace', notes: 'Line one\nLine two' });
+  assert.deepEqual(requests.find(r => r.path.endsWith('/create')).body, { name: 'Grace', notes: 'Line one\nLine two', status: 'planned', count: 0, notify: true });
   await page.getByRole('cell', { name: 'Ada', exact: true }).click();
   await page.getByRole('columnheader', { name: 'Name', exact: true }).click();
   await page.getByRole('columnheader', { name: /^Name/ }).click();
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
   assert.equal(await page.getByRole('dialog').getByLabel('Name').inputValue(), 'Ada');
   assert.equal(await page.getByRole('dialog').getByLabel('Notes').inputValue(), 'Original note');
+  assert.equal(await page.getByRole('dialog').getByLabel('Status', { exact: true }).getByText('Complete', { exact: true }).isVisible(), true);
+  assert.equal(await page.getByRole('dialog').getByLabel('Count', { exact: true }).inputValue(), '4');
+  assert.equal(await page.getByRole('dialog').getByLabel('Notify', { exact: true }).isChecked(), false);
   await page.getByRole('dialog').getByLabel('Name').fill('Ada updated');
   await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
@@ -153,6 +170,10 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
   assert.equal(deletes.length, 2);
   assert.ok(deletes.every(r => r.method === 'POST' && r.body.record_id === 'r1'));
   const search = page.getByRole('searchbox', { name: tablePrimitive === 'ResourceTable' ? 'Find records' : 'Search...' });
+  const listRequests = requests.filter(r => r.path.endsWith('/list')).length;
+  await search.fill('Original note');
+  await page.getByText('No results', { exact: true }).waitFor();
+  if (screenshotDir) await page.screenshot({ path: path.join(screenshotDir, `${tablePrimitive}-excluded-notes.png`) });
   if (tablePrimitive === 'ResourceTable') {
     await search.fill('first@example.test');
     await page.getByRole('cell', { name: 'Ada', exact: true }).waitFor();
@@ -160,16 +181,24 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
     await search.fill('Ada');
     await page.getByText('No results', { exact: true }).waitFor();
   } else {
+    await search.fill('first@example.test');
+    await page.getByRole('cell', { name: 'Ada', exact: true }).waitFor();
+    assert.equal(await page.getByRole('cell', { name: 'Zoe', exact: true }).count(), 0);
     await search.fill('Zoe');
     await page.getByRole('cell', { name: 'Zoe', exact: true }).waitFor();
     assert.equal(await page.getByRole('cell', { name: 'Ada', exact: true }).count(), 0);
   }
+  assert.equal(requests.filter(r => r.path.endsWith('/list')).length, listRequests);
   assert.equal(await page.getByRole('button', { name: 'Delete', exact: true }).isDisabled(), true);
   await search.fill('');
   for (const height of [844, 500]) {
     await page.setViewportSize({ width: 390, height });
     await page.getByRole('button', { name: 'Add record', exact: true }).click();
     const dialog = page.getByRole('dialog');
+    assert.equal(await dialog.getByLabel('Status', { exact: true }).getByText('Planned', { exact: true }).isVisible(), true);
+    assert.equal(await dialog.getByLabel('Count', { exact: true }).inputValue(), '0');
+    assert.equal(await dialog.getByLabel('Notify', { exact: true }).isChecked(), true);
+    if (screenshotDir) await page.screenshot({ path: path.join(screenshotDir, `${tablePrimitive}-defaults-mobile-${height}.png`) });
     await dialog.getByLabel('Name').fill('Mobile');
     await dialog.getByLabel('Notes').fill('Mobile notes');
     const bounds = await dialog.boundingBox();

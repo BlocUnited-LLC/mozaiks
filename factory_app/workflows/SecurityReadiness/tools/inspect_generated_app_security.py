@@ -211,6 +211,9 @@ def _scan_module_contracts(files: dict[str, str]) -> list[dict[str, Any]]:
             ]
             if api_surface in {"public", "public_mutation", "public_readonly"}:
                 continue
+            # Reaction-only internal actions are authorized by the event bus.
+            if action.get("api_surface") == "internal" and action.get("permissions") == []:
+                continue
             if not permissions:
                 findings.append(
                     _finding(
@@ -314,6 +317,7 @@ async def inspect_generated_app_security(context_variables: Any | None = None) -
         **binding.model_dump(),
         "source_diagnostics": diagnostics,
     }
+    _context_set(context_variables, "artifact_version_id", artifact.id)
     _context_set(context_variables, "security_readiness_findings", findings)
     _context_set(context_variables, "security_readiness_summary", result)
     return result

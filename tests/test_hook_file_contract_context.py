@@ -117,6 +117,32 @@ class TestInjectCookieCutterContractsContext:
         assert "page_bundle:" in msg
         assert "action_type: workflow" in msg
 
+    def test_planner_receives_exact_materializer_page_paths(self):
+        from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+
+        agent = _FakeAgent(name="AppPlanAgent")
+        agent.context_variables = ContextVariablesBridge({"experience_spec": {"pages": [
+            {"name": "Book List", "route": "/library/books"},
+            {"name": "Start Here", "route": "/"},
+        ]}})
+        self.mod.inject_cookie_cutter_contracts_context(agent, [])
+        assert "`Book List` (`/library/books`) -> `ui/pages/books.yaml`" in agent.system_message
+        assert "`Start Here` (`/`) -> `ui/pages/start_here.yaml`" in agent.system_message
+        assert "case-sensitive" in agent.system_message
+
+        agent.context_variables.set("experience_spec", {"pages": [{"name": "Archive", "route": "/archive"}]})
+        self.mod.inject_cookie_cutter_contracts_context(agent, [])
+        assert "`Archive` (`/archive`) -> `ui/pages/archive.yaml`" in agent.system_message
+        assert "`ui/pages/books.yaml`" not in agent.system_message
+
+    @pytest.mark.parametrize("name", ["AppPlanAgent", "AppSchemaAgent"])
+    def test_page_contract_distinguishes_design_hints_from_runtime_bindings(self, name):
+        agent = _FakeAgent(name=name)
+        self.mod.inject_cookie_cutter_contracts_context(agent, [])
+        assert "not executable API authority" in agent.system_message
+        assert "/api/modules/{module_id}/{action_id}" in agent.system_message
+        assert "A ui_only page does not create that action" in agent.system_message
+
     def test_config_middleware_agent_gets_module_contract_and_archetypes(self):
         agent = _FakeAgent(
             name="ConfigMiddlewareAgent",

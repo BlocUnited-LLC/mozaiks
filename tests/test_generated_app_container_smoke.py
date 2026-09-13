@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     generate_deployment_artifacts,
@@ -53,12 +54,22 @@ def _request_json(
 
 
 @pytest.mark.asyncio
+async def test_container_fixture_materializes_before_docker() -> None:
+    files, _ = await _assemble_from_payload()
+    page = yaml.safe_load(files["ui/pages/reports.yaml"])
+    config = page["sections"][0]["config"]
+    assert config["pagination_mode"] == "client"
+    assert config["api_endpoint"] == "/api/modules/reports/list_reports"
+
+
+@pytest.mark.asyncio
 async def test_materialized_generated_app_image_boots_and_serves_runtime(
     tmp_path: Path,
 ) -> None:
     if os.environ.get("MOZAIKS_RUN_GENERATED_APP_DOCKER_SMOKE") != "1":
         pytest.skip("set MOZAIKS_RUN_GENERATED_APP_DOCKER_SMOKE=1 for the Docker smoke")
 
+    files, _ = await _assemble_from_payload()
     repo_root = Path(__file__).parents[1]
     wheel_dir = tmp_path / "wheel"
     wheel_dir.mkdir()
@@ -91,9 +102,12 @@ async def test_materialized_generated_app_image_boots_and_serves_runtime(
     container = f"mozaiks-generated-app-smoke-{token}"
     host_port = _free_port()
     app_root = tmp_path / "generated-app"
+    mongo_uri = os.environ.get(
+        "MOZAIKS_GENERATED_APP_SMOKE_MONGO_URI",
+        "mongodb://host.docker.internal:27017/ci_generated_app",
+    )
     logs = ""
     try:
-        files, _ = await _assemble_from_payload()
         requirements = scan_requirements(files).splitlines()
         requirements[requirements.index("mozaiks")] = (
             f"http://host.docker.internal:{package_port}/{wheels[0].name}"
@@ -131,7 +145,7 @@ async def test_materialized_generated_app_image_boots_and_serves_runtime(
                 container,
                 "--add-host=host.docker.internal:host-gateway",
                 "--publish",
-                f"{host_port}:8000",
+                f"127.0.0.1:{host_port}:8000",
                 "--env",
                 "AUTH_ENABLED=false",
                 "--env",
@@ -139,7 +153,13 @@ async def test_materialized_generated_app_image_boots_and_serves_runtime(
                 "--env",
                 "OPENAI_API_KEY=sk-test-placeholder",
                 "--env",
-                "MONGO_URI=mongodb://host.docker.internal:27017/ci_generated_app",
+                "PYTHON_DOTENV_DISABLED=1",
+                "--env",
+                f"MONGO_URI={mongo_uri}",
+                "--env",
+                f"MOZAIKS_APP_DATABASE_NAME=ci_generated_app_{token}",
+                "--env",
+                f"MOZAIKS_APP_DATA_DATABASE_NAME=ci_generated_app_{token}",
                 image,
             ],
             check=True,

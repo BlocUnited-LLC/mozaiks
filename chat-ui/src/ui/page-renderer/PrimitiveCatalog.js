@@ -14,8 +14,8 @@ export const PRIMITIVE_CATALOG = {
   },
   ResourceTable: {
     tier: 'default',
-    use: 'Use for collection/index pages that need search, filters, sorting, status, updated time, and row actions.',
-    avoid: 'Do not wrap ResourceTable in decorative cards or add fake analytics around it.',
+    use: 'Use for bounded, fully loaded collection/index pages with client-local controls and row actions. For a paged list endpoint, choose DataTable with pagination_mode=server.',
+    avoid: 'Do not use ResourceTable for server pagination or pretend local resource filters query the whole dataset. Do not wrap it in decorative cards or add fake analytics.',
   },
   Form: {
     tier: 'default',
@@ -96,8 +96,8 @@ export const PRIMITIVE_CATALOG = {
 
   DataTable: {
     tier: 'specialized',
-    use: 'Use only when ResourceTable is not appropriate for dense operational data.',
-    avoid: 'Do not use as the default collection page primitive; prefer ResourceTable.',
+    use: 'Use pagination_mode=server for ordinary CRUD lists whose module returns a bounded page. Declare page/page_size/search inputs and data_key/total_key response paths. The module owns literal search, tenant/user filtering, stable ordering and bounded aggregate pagination. Client mode is for fully loaded rows.',
+    avoid: 'Do not fetch an unbounded collection or paginate only a capped first batch. Never fake totals or apply local search/sorting to a server page. ResourceTable server filters are unsupported.',
   },
   Grid: {
     tier: 'specialized',

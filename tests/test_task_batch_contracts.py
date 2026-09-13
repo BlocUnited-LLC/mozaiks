@@ -1094,7 +1094,7 @@ async def test_execute_task_batches_rejects_worker_output_outside_owned_paths() 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("repair", [False, True])
-@pytest.mark.parametrize("failure_kind", ["ownership", "null_manifest", "task_identity", "form_payload"])
+@pytest.mark.parametrize("failure_kind", ["ownership", "null_manifest", "task_identity", "form_payload", "submit_href"])
 async def test_task_output_validation_uses_the_declared_retry_budget(repair: bool, failure_kind: str) -> None:
     payload = _valid_payload()
     batch = payload["batches"][0]
@@ -1132,6 +1132,10 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
         })
         valid = {"code_files": [{"filename": "ui/pages/home.yaml", "content": yaml.safe_dump(page)}]}
         error = "page_schema.incomplete_form_payload"
+        if failure_kind == "submit_href":
+            page["sections"][0]["config"]["submit_action"]["href"] = None
+            invalid = {"code_files": [{"filename": "ui/pages/home.yaml", "content": yaml.safe_dump(page)}]}
+            error = "submit actions require href"
 
     class RepairAgent(_RunnerAgent):
         async def ask(self, message, **kwargs):
@@ -1143,7 +1147,7 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
         "task_id": "profiles", "initial_agent": "WorkerAgent", "initial_message": "Build profiles.",
         "owned_paths": ["modules/profiles/module.yaml"],
     }]}}
-    if failure_kind == "form_payload":
+    if failure_kind in {"form_payload", "submit_href"}:
         context["review_plan"]["tasks"][0].update({
             "task_type": "page_bundle", "owned_paths": ["ui/pages/home.yaml"],
         })

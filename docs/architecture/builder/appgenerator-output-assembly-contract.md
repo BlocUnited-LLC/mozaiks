@@ -1,5 +1,23 @@
 # AppGenerator Output Assembly Contract
 
+## Server Table Binding Acceptance
+
+Opt-in server-paged DataTable sections must close against the actual generated
+module action contract during the existing `validate_wiring` acceptance gate.
+Action names in a plan alone are insufficient. The action declares integer
+`page` and `page_size`, string `search`, and accepts the table's initial and
+next-page query, including empty search and a representative nonempty query when
+search is enabled. Extra required inputs cannot be supplied
+by this fixed query contract. Internal-only actions are not browser endpoints.
+
+`data_key` and `total_key` resolve through required inline object properties to
+an array of explicitly typed objects and an integer respectively. Schema references are not supported in this
+bounded binding contract and are never fetched. Missing or incompatible bindings
+fail the existing wiring check; they do not create another routing or retry
+system. Client-paged tables retain their current input contract. At runtime,
+the data-fetch owner separately validates actual rows and counts; declaration
+closure does not prove that generated backend behavior implements the query.
+
 **Status:** Canonical contract
 **Purpose:** Define exactly how AppGenerator turns persistent UI intent into bundle artifacts.
 
@@ -26,6 +44,11 @@ model, registered pack origins, approved app-owned module identities, page
 inventory, and complete genesis task ownership. Capability sources use the
 build-context registry vocabulary plus `host_universal` for built-in host
 surfaces. A product category is not a registered managed service.
+The planner receives exact case-sensitive page paths projected from the approved
+ExperienceSpec through the materializer's existing page-stem helper. Display
+names do not become filenames: `Books` at `/books` owns `ui/pages/books.yaml`.
+Review rejects differently cased paths and returns the required and received
+paths as repair feedback; it never silently renames planned files.
 The existing plan cache preserves all typed plan fields. Frozen context values
 are detached before catalog lookup and validation.
 
@@ -58,6 +81,35 @@ the shared section updater replaces only standalone bracketed headings. Planning
 describes the approved scope and task contracts without copying implementation
 source or entire catalogs into task messages. Category defaults do not expand
 explicitly approved surfaces or override interview exclusions.
+
+Revision planning preserves explicit behavioral qualifiers in each relevant
+owned task's `initial_message` and `acceptance_criteria`, including cross-layer
+requirements. Generic criteria such as "works as required" do not replace
+literal-versus-regex intent, later-page reachability, defaults/edit behavior,
+or mutation outcome requirements. The existing `refinement_request` is also
+projected to AppSchemaAgent, ServiceAgent, ConfigMiddlewareAgent, and ModelAgent
+so those workers can compare their scoped task with the original request.
+It conveys requested behavior, not permission to expand file ownership,
+override runtime/operator contracts, or change authorization boundaries.
+Workers report conflicting contracts or missing prerequisite ownership instead
+of silently weakening the request. This adds no context field, decision ledger,
+runtime routing policy, or alternate validator.
+
+The existing module-contract persistence guidance supplies ServiceAgent with
+the supported offset-pagination path: an ownership-filtered aggregate with
+stable ordering and a unique tie-breaker, offset, bounded limit, and a matching
+count query. Literal search escapes user text only when literal semantics are
+requested. Mutation-success events require an actual owned mutation; missing,
+denied, and idempotent no-op outcomes follow the declared action contract, not
+a universal HTTP response policy. These are implementation instructions, not
+new persistence or page schema APIs.
+
+`tests/test_appgenerator_refinement_behavior_guidance.py` exercises the actual
+prompt middleware and contract renderer, including request refresh, explicit
+regex intent, and unexposed-field isolation. It does not prove that generated
+code implements the instructions. Generated-app acceptance must still probe
+later-page records, literal matching, and foreign/no-op mutations with event
+observation.
 
 Module action/capability schemas and event payload schemas are compiled from
 `JsonSchemaContract` lists into runtime JSON Schema maps. Null annotations are

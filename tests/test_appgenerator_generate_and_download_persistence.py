@@ -7,8 +7,13 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+import yaml
 
-from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _wrap_tool_with_context
+from mozaiksai.core.workflow.context.authority import (
+    ContextAuthorityError,
+    build_context_authority_policy,
+)
 from tests.factory_context import factory_context
 
 
@@ -381,4 +386,49 @@ def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_
     assert result["status"] == ("success" if succeeded else "error")
     assert result["outcome"] == ("ready" if succeeded else "blocked")
     assert Path(result["bundle_zip"]).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reject_handoff", [False, True])
+async def test_packaging_publishes_registered_review_path_under_real_context_authority(monkeypatch, tmp_path, reject_handoff):
+    from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+
+    module = generate_and_download_module
+    root = Path(__file__).resolve().parents[1]
+    definitions = yaml.safe_load((root / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
+    if reject_handoff:
+        definitions.pop("bundle_path")
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=definitions)
+    context = ContextVariablesBridge(factory_context({
+        "chat_id": "chat", "app_id": "host", "build_id": "build", "user_id": "owner",
+        "generated_files": {"app.json": '{"app_id":"target"}'},
+    }), authority_policy=policy)
+    context._bind_run(("AppGenerator", "host", "chat"), policy)
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    persistence = type("Persistence", (), {"gather_latest_agent_jsons": AsyncMock(return_value={})})()
+    monkeypatch.setattr(module, "AG2PersistenceManager", lambda: persistence)
+    for name in ("_inject_agent_context_env", "_register_app_bundle_artifact_version"):
+        monkeypatch.setattr(module, name, AsyncMock(return_value=None))
+    update = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(AppRegistryService, "update_build_status", update)
+    monkeypatch.setattr(module, "run_app_bundle_acceptance_gate", AsyncMock(return_value={
+        "passed": True, "status": "passed", "bundle_scan": {"errors": []},
+        "validation_evidence": {"completed": ["bundle_scan"], "failed": []},
+    }))
+    ui = AsyncMock(return_value={"status": "completed", "action": "continue"})
+    monkeypatch.setattr(module, "use_ui_tool", ui)
+    tool = _wrap_tool_with_context(module.generate_and_download, context)
+    if reject_handoff:
+        with pytest.raises(ContextAuthorityError, match="key=bundle_path"):
+            await tool({}, "Bundle ready.")
+        ui.assert_not_awaited()
+        return
+    result = await tool({}, "Bundle ready.")
+    assert result["status"] == "success"
+    staged = update.call_args.kwargs["current_build_run"]["bundle_path"]
+    assert context.get("bundle_path") == staged == result["bundle_dir"]
+    assert context.get("lifecycle_state") == "review"
+    assert context.consume_authorized_context_updates(
+        policy=policy, run_identity=("AppGenerator", "host", "chat"),
+    )["set"]["bundle_path"] == staged
 

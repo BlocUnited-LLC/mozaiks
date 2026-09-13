@@ -274,7 +274,7 @@ async def test_app_relative_modules_and_auth_contract_are_scanned(security_build
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ["new_artifact", "changed_findings", "not_inspected"])
+@pytest.mark.parametrize("fault", ["new_artifact", "changed_selector", "changed_findings", "not_inspected"])
 async def test_recording_cannot_relabel_or_invent_an_assessment(security_build, monkeypatch, fault):
     from factory_app.workflows.SecurityReadiness.tools import record_security_findings as recorder
     build = security_build.add()
@@ -282,16 +282,21 @@ async def test_recording_cannot_relabel_or_invent_an_assessment(security_build, 
     if fault != "not_inspected":
         await invoke(inspect_generated_app_security, build.bridge)
     kwargs = {}
-    if fault == "new_artifact":
+    if fault in {"new_artifact", "changed_selector"}:
         artifact = build.artifact.model_copy(update={"id": "new_artifact", "version_number": 2})
         security_build.artifacts[artifact.id] = artifact
         build.record["current_build_run"]["artifact_version_id"] = artifact.id
+        if fault == "changed_selector":
+            build.bridge.set("artifact_version_id", artifact.id)
     elif fault == "changed_findings":
         kwargs["findings"] = []
     dispatch = AsyncMock()
     monkeypatch.setattr(recorder, "dispatch_workflow_module_action", dispatch)
     result = await invoke(record_security_findings, build.bridge, **kwargs)
-    expected = {"new_artifact": "assessment_stale", "changed_findings": "findings_mismatch", "not_inspected": "not_inspected"}
+    expected = {
+        "new_artifact": "artifact_not_current", "changed_selector": "assessment_stale",
+        "changed_findings": "findings_mismatch", "not_inspected": "not_inspected",
+    }
     assert result["source_error"] == f"security_source_{expected[fault]}"
     assert build.bridge.get("security_readiness_recorded") is False
     dispatch.assert_not_awaited()

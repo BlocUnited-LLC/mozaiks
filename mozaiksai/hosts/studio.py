@@ -19,12 +19,14 @@ from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, ValidationError
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import (
     AcceptedStagedAppBundleBuildRecordError,
+    RefinementRequest,
     SourceImportRequest,
     accept_staged_refinement_build_record,
     build_refinement_review_package,
@@ -93,6 +95,7 @@ from mozaiksai.core.runtime.app.metrics_loader import (
     MetricsConfigLoadError,
     load_metrics_config,
 )
+from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
     build_apps_summary,
@@ -133,11 +136,10 @@ from mozaiksai.hosts.platform import (
     build_shell_config,
     resolve_app_root,
 )
-from mozaiksai.hosts.routers.sandbox import router as _sandbox_router
+from mozaiksai.hosts.routers.sandbox import create_sandbox_router
 
 app = platform_app.app
 register_repo_host_bootstrap(app, "studio")
-app.include_router(_sandbox_router)
 logger = get_workflow_logger("studio_app")
 
 _BUNDLE_MAX_TEXT_FILES = 200
@@ -469,7 +471,7 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path, workspace_lay
         for info, safe_name in planned:
             safe_name = restore_names.get(safe_name, safe_name)
             if workspace_layout:
-                safe_name = _workspace_bundle_path(safe_name)
+                safe_name = app_bundle_workspace_path(safe_name)
             if _contains_symlink_component(target_root, safe_name):
                 raise HTTPException(status_code=400, detail="Restore target contains a symlinked component")
             destination = (target_root / safe_name).resolve()
@@ -488,29 +490,6 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path, workspace_lay
             restored.append(safe_name)
 
     return {"restored": sorted(restored), "skipped": sorted(skipped)}
-
-
-def _workspace_bundle_path(path: str) -> str:
-    from mozaiksai.core.runtime.app.layout_registry import (
-        ArtifactKind,
-        PathScope,
-        validate_registered_path,
-    )
-
-    if path.startswith(("app/", "workflows/", "build_context/")):
-        return path
-    try:
-        validate_registered_path(path, None, PathScope.DEPLOYMENT_DERIVED)
-        return path
-    except ValueError:
-        pass
-    try:
-        match = validate_registered_path(path, None, PathScope.APP_BUNDLE_ROOT)
-        if match.family.kind == ArtifactKind.APP_ROOT_SUPPORT:
-            return path
-    except ValueError:
-        pass
-    return f"app/{path}"
 
 
 def _build_diff_preview(*, path: str, before: str | None, after: str | None) -> str:
@@ -2447,6 +2426,101 @@ class WorkflowTriggerRequest(BaseModel):
     user_id: str | None = None
     build_registry_id: BuildIdentity | None = None
     source_chat_id: BuildIdentity | None = None
+    retry_failed: StrictBool = False
+
+
+async def _failed_workflow_retry_contribution(
+    body: WorkflowTriggerRequest, *, app_id: str, user_id: str,
+) -> TriggerRoutingContribution:
+    from mozaiksai.core.multitenant import build_app_scope_filter
+    from mozaiksai.core.session.launcher import _PERSISTENCE_MANAGER, validate_context_for_workflow
+
+    if body.trigger_source != "manual" or not body.source_chat_id or not body.workflow_id:
+        raise ValueError("Failed-workflow retry requires a manual trigger and source workflow session")
+    if (body.context_variables or body.trigger_payload or body.journey_id is not None
+            or body.action_id is not None or body.artifact_key is not None):
+        raise ValueError("Failed-workflow retry cannot override saved launch intent")
+    source = await (await _PERSISTENCE_MANAGER._coll()).find_one(
+        {"_id": body.source_chat_id, "user_id": user_id, "workflow_name": body.workflow_id,
+         **build_app_scope_filter(app_id)},
+        {"status": 1, "run_build_binding": 1, "trigger_meta": 1, "change_request_id": 1, "revision_id": 1},
+    )
+    if not source or source.get("status") != 2:
+        raise ValueError("Source workflow session is not an owned failed run")
+    binding = await _get_app_registry_service().resolve_build_binding(
+        owner_user_id=user_id, app_id=app_id, chat_id=body.source_chat_id, workflow_name=body.workflow_id,
+        build_registry_id=body.build_registry_id, source_chat_id=body.source_chat_id,
+        persisted_binding=source.get("run_build_binding"),
+    )
+    trigger_meta = source.get("trigger_meta") or {}
+    if binding.phase == "genesis":
+        return TriggerRoutingContribution(
+            workflow_id=body.workflow_id, journey_id=trigger_meta.get("journey_id"),
+            explanation="Retry failed workflow", require_exact_route=True,
+        )
+
+    change_id = TypeAdapter(BuildIdentity).validate_python(source.get("change_request_id"))
+    revision_id = TypeAdapter(BuildIdentity).validate_python(source.get("revision_id"))
+    store = get_artifact_store()
+    change = await store.get_change_request(app_id=binding.target_app_id, change_request_id=change_id)
+    if (change is None or change.id != change_id or change.app_id != binding.target_app_id
+            or change.created_by_user_id != user_id):
+        raise ValueError("Saved refinement request is not available to this owner")
+    request = RefinementRequest.model_validate(change.refinement_request.model_dump(mode="python"))
+    journey_id = trigger_meta.get("workflow_sequence") or trigger_meta.get("journey_id")
+    if not journey_id or journey_id != change.impact_set.workflow_sequence:
+        raise ValueError("Saved refinement journey does not match the failed run")
+    if (change.router_decision.get("is_full_restart")
+            or journey_id in {"full_rebuild", "conceptual_replan"} or request.request_kind != "refinement"):
+        raise ValueError("Failed-workflow retry does not support saved rebuild or restart intent")
+    baseline_id = TypeAdapter(BuildIdentity).validate_python(request.build_record_id)
+    if (
+        not request.raw_user_request.strip() or request.raw_user_request != change.raw_user_request
+        or request.app_id not in {None, app_id} or request.user_id not in {None, user_id}
+        or request.target_app_id not in {None, binding.target_app_id}
+        or request.build_record_id != change.build_record_id
+        or request.build_record_id != trigger_meta.get("build_record_id")
+        or request.build_family != change.build_family or request.normalized_build_key() != change.build_key
+        or change.classification != change.change_intent.change_class
+        or change.classification != trigger_meta.get("change_class")
+    ):
+        raise ValueError("Saved refinement request does not match the failed run")
+    baseline = await store.get_build_record(app_id=binding.target_app_id, build_record_id=baseline_id)
+    if (
+        baseline is None or baseline.id != request.build_record_id or baseline.app_id != binding.target_app_id
+        or baseline.build_family != request.build_family or baseline.build_key != request.normalized_build_key()
+        or baseline.lifecycle_status in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}
+        or baseline.commit_metadata.author_user_id != user_id
+    ):
+        raise ValueError("Selected retry baseline is unavailable or retired")
+    metadata = _version_metadata(baseline)
+    if metadata.get("build_registry_id") != binding.build_registry_id or metadata.get("target_app_id") != binding.target_app_id:
+        raise ValueError("Selected retry baseline does not belong to the registered target")
+
+    # Reuse the accepted request and routing facts, never the failed run's
+    # generated output, validation, counters, or mutable workspace copy.
+    extra = {"change_request_id": change_id, "revision_id": revision_id,
+             "files_manifest": [entry.model_dump(mode="python") for entry in baseline.files_manifest]}
+    if metadata.get("workspace_dir"):
+        extra.update(lifecycle_state="review", bundle_path=metadata["workspace_dir"])
+    request = request.model_copy(update={"app_id": app_id, "user_id": user_id, "target_app_id": binding.target_app_id, "extra": extra})
+    seed = {
+        "build_mode": "revision", "revision_scope": change.classification.value,
+        "artifact_kind": request.build_family, "artifact_version_id": baseline.id,
+        "refinement_request": request.raw_user_request, "refinement_request_meta": request.model_dump(mode="python"),
+        "change_intent": change.change_intent.model_dump(mode="python"), "impact_set": change.impact_set.model_dump(mode="python"),
+        "change_request_id": change_id, "revision_id": revision_id,
+        "revision_origin_workflow": request.requested_workflow_id or body.workflow_id,
+        "workflow_sequence": journey_id, "screen": request.source_surface,
+    }
+    if extra.get("lifecycle_state"):
+        seed["lifecycle_state"] = extra["lifecycle_state"]
+    return TriggerRoutingContribution(
+        workflow_id=body.workflow_id, journey_id=journey_id,
+        context_seed=validate_context_for_workflow(body.workflow_id, seed),
+        explanation="Retry failed workflow with its saved refinement request and selected baseline",
+        require_exact_route=True,
+    )
 
 
 async def _complete_inline_refinement(*, binding: RunBuildBinding, user_id: str, result: Any) -> None:
@@ -2491,6 +2565,12 @@ async def trigger_workflow(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=body.app_id, user_id=body.user_id)
+    retry_contribution = None
+    if body.retry_failed:
+        try:
+            retry_contribution = await _failed_workflow_retry_contribution(body, app_id=app_id, user_id=user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     build_registry_id = body.build_registry_id
     artifact_app_id = app_id
     session_router = get_session_router()
@@ -3030,14 +3110,14 @@ async def trigger_workflow(
                     explanation=refinement_decision.explanation,
                     is_full_restart=refinement_decision.is_full_restart,
                     lifecycle_state=SessionLifecycle.STALE if refinement_decision.is_full_restart else SessionLifecycle.ACTIVE,
-                ) if refinement_decision is not None else None
+                ) if refinement_decision is not None else retry_contribution
             ),
             extra_trigger_meta={
                 "action_id": body.action_id,
-                "change_class": resolved_change_class,
-                "build_record_id": resolved_artifact_version_id,
-                "build_family": resolved_artifact_kind,
-                "workflow_sequence": refinement_decision.workflow_sequence if refinement_decision is not None else None,
+                "change_class": resolved_change_class or (retry_contribution.context_seed.get("revision_scope") if retry_contribution else None),
+                "build_record_id": resolved_artifact_version_id or (retry_contribution.context_seed.get("artifact_version_id") if retry_contribution else None),
+                "build_family": resolved_artifact_kind or (retry_contribution.context_seed.get("artifact_kind") if retry_contribution else None),
+                "workflow_sequence": refinement_decision.workflow_sequence if refinement_decision is not None else (retry_contribution.journey_id if retry_contribution else None),
             },
         )
     except ValueError as route_err:
@@ -3084,6 +3164,35 @@ async def trigger_workflow(
         "rerouted_by_dependency": workflow_launch.rerouted_by_dependency,
         "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
     }
+
+
+async def _resolve_preview_artifact(
+    principal: UserPrincipal, artifact_version_id: str, build_registry_id: str,
+) -> tuple[str, dict[str, str | bytes]]:
+    target_app_id, _ = await _resolve_studio_artifact_scope(principal, build_registry_id=build_registry_id)
+    version = await get_artifact_store().get_build_record(app_id=target_app_id, build_record_id=artifact_version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if version.build_family != "app_bundle":
+        raise HTTPException(status_code=422, detail="Preview requires an app bundle")
+    try:
+        binding = RunBuildBinding.model_validate({
+            key: _version_metadata(version).get(key) for key in RunBuildBinding.model_fields
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Artifact has no verified build identity") from exc
+    if binding.build_registry_id != build_registry_id or binding.target_app_id != target_app_id:
+        raise HTTPException(status_code=409, detail="Artifact identity does not match its build target")
+    try:
+        files, diagnostics = await read_artifact_bundle(version, include_binary=True)
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=422, detail="Artifact archive is unavailable or failed integrity validation") from exc
+    if any(item.get("blocking") for item in diagnostics):
+        raise HTTPException(status_code=422, detail="Artifact contains unsafe or oversized preview files")
+    return target_app_id, files
+
+
+app.include_router(create_sandbox_router(resolve_scope=_resolve_studio_scope, resolve_artifact=_resolve_preview_artifact))
 
 
 app.router.routes[:] = sorted(

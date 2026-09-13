@@ -48,6 +48,38 @@ the runtime validates the bearer token and checks that the requested scope
 matches the authenticated principal. Local no-auth operation remains governed
 by runtime configuration, not by a browser-side bypass.
 
+### Failed Workflow Retry
+
+Studio's existing `POST /api/workflows/trigger` accepts `retry_failed: true`
+with `trigger_source: "manual"`, the execution `app_id`, `workflow_id`, and
+`source_chat_id`. The source must be that principal's failed session (status
+`2`) for the same host and workflow, with a current registered build binding.
+The optional `build_registry_id` is a selector, not target authority. Retry
+rejects context, trigger payload, journey, action, and artifact-key overrides.
+Ordinary source-chat launches without this flag retain their existing behavior.
+
+A genesis retry starts fresh. A refinement retry uses the saved typed change
+request, selected baseline record, and journey through
+`TriggerRoutingContribution`; it does not reclassify the request or allocate a
+new build. Missing, foreign, retired, or inconsistent baseline records fail
+closed. Rebuild/full-restart intent is unsupported by this retry path and is
+rejected rather than converted to a partial revision. The trusted contribution's
+`require_exact_route` constraint runs after dependency checks but before router
+state persistence or chat creation. Unmet dependencies or workflow/journey
+drift reject the retry; dependency checks are not bypassed.
+
+AppGenerator retains its declared InterviewAgent entry and revision prompt.
+Its existing first `before_chat` hook verifies the committed baseline archive
+and hydrates `generated_files`; it does not read a mutable workspace fallback.
+Lifecycle hook errors are logged, and assembly repeats the verification and
+rejects missing, changed, retired, or unsupported content. Archive integrity
+is verified by that loader, not by the trigger's record-scope checks.
+
+Each retry gets a fresh chat with default execution state. Saved intent IDs and
+baseline/journey provenance survive a subsequent retry, while generated output,
+validation, counters, messages, and the failed source session are not copied or
+reset. An idle same-build chat does not itself supersede the current binding.
+
 ## Contract
 
 `extension_registry.json` has three concerns:
@@ -214,8 +246,38 @@ revision interaction where the user must be able to type freely in the chat.
    filtered `context_variables` from the active journey.
 4. The shell switches the active chat session in-place to the launched
    workflow — no navigation away, no overlay, no blocked input.
-5. The target workflow receives the accumulated journey `context_variables`
-   filtered against its own `context_variables.yaml` declarations.
+5. For a `chat_session` step, JourneyOrchestrator projects the completed source
+   session's context into `chat.transition_requested.context_variables` using
+   the declared `route_to` workflow. Only same-name target `source.type: state`
+   inputs writable by `transition_router` are carried. Server-owned identity,
+   undeclared fields, and the target's computed progress state are excluded.
+   This is the same launch-input projection used for direct workflow steps;
+   there is no all-context copy or inferred field mapping.
+6. The shell submits that projection with `source_chat_id`. The server resolves
+   the owned build binding again and validates the target launch context.
+   SecurityReadiness populates `artifact_version_id` from its verified current
+   artifact even when the optional launch selector was omitted, so AppReview
+   receives the assessment and its artifact identity together. The advisory
+   summary does not authorize promotion or replace server artifact validation.
+
+AppGenerator declares and publishes `bundle_path` and `lifecycle_state` after
+registering the staged app directory on the current build run. The path is the
+existing `generated/apps/{app_id}/{build_id}/app` location, not a new path
+inferred by the browser or SecurityReadiness. SecurityReadiness declares these
+same-name review inputs together with `app_validation_status`,
+`app_validation_strategy_used`, `app_validation_preview_url`,
+`integration_tests_passed`, and `app_bundle_acceptance_status`. These inputs are
+router-writable, not caller-writable. AppReview also explicitly permits the
+router to seed its closed validation fields. Evidence is carried unchanged;
+missing evidence remains missing and blocks the existing review checks rather
+than becoming a successful or skipped check. The review UI labels absent
+results **Missing** and reserves **Skipped** for an explicit skipped result.
+
+A successful SecurityReadiness assessment with zero findings sets
+`security_readiness_recorded=true` without dispatching finding-row writes.
+`persisted=false` in that case is expected, not a permission or availability
+failure. Only an actual unsuccessful recording with `persistence_error`
+supports that failure message.
 
 **When to use:**
 

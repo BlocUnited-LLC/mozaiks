@@ -31,6 +31,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- DataTable can opt into bounded server paging and search through declared
+  module action inputs and required row/count response fields. ResourceTable
+  keeps client paging; unsupported server bindings fail validation.
+- Revision workers receive the original requested behavior within their owned
+  tasks and operator contracts, including precise search, paging, default and
+  mutation-outcome requirements.
+
 - Ask-mode answers are grounded in server-side workspace truth. The general-mode
   exchange now reads the user's current workflow session from the session router
   (instead of the per-connection registry, which reported the ask carrier itself
@@ -45,6 +52,45 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Fix cold imports of auxiliary usage attribution and session binding contracts
+  without requiring consumers to preload AG2 adapters.
+- Factory account-data guidance uses the runtime's canonical collection naming,
+  explicit app/user query scope, and JSON-safe exports for generated persistence.
+- Generated form defaults and explicit table search fields survive the strict
+  page contracts and materialization into the existing shared UI primitives.
+- Summary metric columns adapt to their container width and wrap complete labels
+  instead of truncating short labels in narrow dashboard panels.
+- Factory planning receives exact materializer page paths and actionable
+  case-sensitive filename feedback, avoiding repeated display-name/path mismatches.
+- Factory form-action retries report known required-field errors and receive
+  fixed-endpoint create/edit guidance without weakening runtime page contracts.
+- Bundle acceptance validates the exact generated files and module actions,
+  including frozen workflow context, instead of passing empty or stale wiring.
+- Studio offers a fresh, owner-bound launch for failed workflows, with
+  acknowledgement checks and disabled terminal-session input.
+  Refinement retries recover the saved request and baseline without copying
+  failed execution state, and reject routing drift before persisting a launch.
+- Factory live previews boot saved, owner-bound app artifacts through the real
+  platform host, shared frontend, and disposable Mongo database. Failed startup,
+  expiry, and artifact changes clear stale preview URLs. A local Docker image
+  supplies the canonical runtime without inheriting Factory credentials.
+  Preview account export and deletion use the same private app database as
+  generated module actions, so they can reach the user's saved records.
+- Page-derived shell routes use the loader's exact file key, avoiding Linux
+  404s when generated display names differ in case from page filenames.
+- SecurityReadiness preserves its inspected artifact identity and review summary
+  through declared chat transitions. Explicit internal-only actions with empty
+  permissions no longer produce a false missing-permissions finding.
+  Build validation evidence and registered staged paths survive the full review
+  handoff; missing results stay missing, and zero findings are not mislabeled as
+  a failed persistence operation.
+- Workflow review components receive rejected response acknowledgements as errors,
+  rather than showing an unaccepted or stale decision as submitted.
+- UI review responses verify the saved session owner and app/chat scope before
+  completing or buffering an interaction, over both HTTP and WebSocket.
+- Live and restored artifact decisions use authenticated HTTP acknowledgement;
+  download controls display rejected submissions and prevent duplicate in-flight
+  decisions instead of treating a socket send as acceptance.
 - Ask-context contracts now round-trip through generated schema-native page
   metadata. App loading and Factory acceptance reject unknown or ineligible
   ask actions against actual module contracts, including custom-route metadata;

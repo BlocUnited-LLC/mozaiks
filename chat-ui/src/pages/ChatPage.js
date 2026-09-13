@@ -17,6 +17,7 @@ import resolveWorkflow from '../utils/resolveWorkflow';
 import { dynamicUIHandler } from '../core/dynamicUIHandler';
 import platform from '../platform/index.js';
 import { authFetch } from '../adapters/api';
+import { submitToolCallResponse } from '../adapters/uiToolResponse';
 import LoadingSpinner from '../utils/AgentChatLoadingSpinner';
 import useTheme from "../styles/useTheme";
 import {
@@ -32,6 +33,7 @@ import { useEmbeddedViewController } from '../hooks/useEmbeddedViewController';
 import { useConversationModeController } from '../hooks/useConversationModeController';
 import { useChatStartupEffects } from '../hooks/useChatStartupEffects';
 import { useWorkflowStart } from '../hooks/useWorkflowStart';
+import { isFailedWorkflowSession, useFailedWorkflowRetry } from '../hooks/useFailedWorkflowRetry';
 import {
   clearStoredArtifactState,
   clearStoredChatCacheSeed,
@@ -752,12 +754,8 @@ const ChatPage = () => {
             workflow_name: cached.workflow_name || cachedToolCall.workflow_name || fallbackWorkflowName || currentWorkflowName,
             onResponse: async (response) => {
               const toolCallId = cached.tool_call_id || cachedToolCall.tool_call_id;
-              if (!toolCallId || !wsRef.current?.send) {
-                throw new Error('Reconnect to the workflow before submitting this response.');
-              }
-              return wsRef.current.send({
-                type: 'tool_call_response', tool_call_id: toolCallId,
-                tool_name: cachedToolName, response,
+              return submitToolCallResponse(toolCallId, response, {
+                baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
               });
             },
             display: cachedDisplay,
@@ -794,7 +792,7 @@ const ChatPage = () => {
       console.warn('💾 [RESTORE] Failed to restore artifact from stored session:', e);
       return false;
     }
-  }, [currentWorkflowName, dispatchSurfaceEvent, setIsSidePanelOpen, setLayoutMode]);
+  }, [api, currentWorkflowName, dispatchSurfaceEvent, setIsSidePanelOpen, setLayoutMode]);
 
   useEffect(() => {
     if (typeof setCurrentArtifactContext !== 'function') {
@@ -1103,6 +1101,12 @@ const ChatPage = () => {
     'MozaiksAI'
   ).trim() || 'MozaiksAI';
   const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
+  const failedWorkflowRetry = useFailedWorkflowRetry({
+    appId: currentAppId, userId: currentUserId, chatId: currentChatId,
+    workflowName: currentWorkflowName, surface: navContext?.surface, mode: conversationMode,
+    blocked: Boolean(pendingTransitionId || pendingHarnessDecision || pendingWorkflowReply),
+  });
+  const { observeSessionMeta } = failedWorkflowRetry;
   const rememberWorkflowChatSession = useCallback((chatId, workflowName = null) => {
     const resolvedWorkflowName =
       workflowConfig.resolveKnownWorkflowName(workflowName)
@@ -2034,7 +2038,7 @@ const ChatPage = () => {
   ]);
 
   const chatMetaHydratedRef = useRef(new Set());
-  const chatMetaHydrationInFlightRef = useRef(new Set());
+  const chatMetaHydrationInFlightRef = useRef(new Map());
   const chatMetaHydrationMissedAtRef = useRef(new Map());
   const hydrateServerArtifactForChat = useCallback(async (options = {}) => {
     if (!api || typeof api.get !== 'function') {
@@ -2051,7 +2055,7 @@ const ChatPage = () => {
       return false;
     }
 
-    const metaKey = `${currentAppId}:${targetWorkflowName}:${targetChatId}`;
+    const metaKey = JSON.stringify([currentAppId, currentUserId, targetWorkflowName, targetChatId]);
     if (!options?.force && chatMetaHydratedRef.current.has(metaKey)) {
       return false;
     }
@@ -2061,7 +2065,7 @@ const ChatPage = () => {
         return false;
       }
     }
-    if (chatMetaHydrationInFlightRef.current.has(metaKey)) {
+    if (!options?.force && chatMetaHydrationInFlightRef.current.has(metaKey)) {
       return false;
     }
 
@@ -2069,7 +2073,8 @@ const ChatPage = () => {
     const encodedWorkflow = encodeURIComponent(targetWorkflowName);
     const encodedChatId = encodeURIComponent(targetChatId);
 
-    chatMetaHydrationInFlightRef.current.add(metaKey);
+    const requestId = {};
+    chatMetaHydrationInFlightRef.current.set(metaKey, requestId);
     logChatPersistence('server_artifact_hydrate_requested', {
       reason: options?.reason || null,
       chatId: targetChatId,
@@ -2079,9 +2084,13 @@ const ChatPage = () => {
 
     try {
       const meta = await api.get(`/api/chats/meta/${encodedAppId}/${encodedWorkflow}/${encodedChatId}`);
+      // A forced terminal-status refresh supersedes older metadata, including its cleanup.
+      if (chatMetaHydrationInFlightRef.current.get(metaKey) !== requestId) return false;
       if (!meta) {
         return false;
       }
+      observeSessionMeta(meta);
+      if (isFailedWorkflowSession(meta.status)) setLoading(false);
 
       if (meta.cache_seed !== undefined && meta.cache_seed !== null) {
         setCacheSeed(meta.cache_seed);
@@ -2139,9 +2148,11 @@ const ChatPage = () => {
       });
       return false;
     } finally {
-      chatMetaHydrationInFlightRef.current.delete(metaKey);
+      if (chatMetaHydrationInFlightRef.current.get(metaKey) === requestId) {
+        chatMetaHydrationInFlightRef.current.delete(metaKey);
+      }
     }
-  }, [api, cacheServerLastArtifact, currentAppId, currentChatId, currentWorkflowName, resolveKnownWorkflowName]);
+  }, [api, cacheServerLastArtifact, currentAppId, currentUserId, currentChatId, currentWorkflowName, resolveKnownWorkflowName, observeSessionMeta]);
 
   useEffect(() => {
     if (conversationMode !== 'workflow' || !currentAppId || !currentWorkflowName || !currentChatId) {
@@ -2172,6 +2183,7 @@ const ChatPage = () => {
     }
     const showSystemMessages = debugFlag('mozaiks.show_system_messages') || debugFlag('mozaiks.debug_pipeline');
     const applyWorkflowSessionMeta = (metaData = {}) => {
+      observeSessionMeta(metaData);
       const metaChatId = String(metaData.chat_id || '').trim() || currentChatId || null;
       const rawWorkflowName = String(
         metaData.workflow_name
@@ -2969,12 +2981,9 @@ const ChatPage = () => {
           const resolvedWorkflowName = envelope.workflow_name || detail.workflow_name || basePayload.workflow_name || currentWorkflowName;
           const interactionType = envelope.interaction_type || detail.interaction_type || basePayload.interaction_type || (awaiting ? 'ui_tool' : 'ui_surface');
           const sendResponse = (responseData) => {
-            const activeWs = wsRef.current;
-            if (activeWs && activeWs.send) {
-              return activeWs.send(responseData);
-            }
-            console.warn('⚠️ No WebSocket connection available for UI tool response (tool_call)');
-            return false;
+            return submitToolCallResponse(responseData.tool_call_id, responseData.response, {
+              baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
+            });
           };
           dynamicUIHandler.processUIEvent({
             type: 'tool_call',
@@ -3041,10 +3050,9 @@ const ChatPage = () => {
 
 
         const sendResponse = (responseData) => {
-          const activeWs = wsRef.current;
-          if (activeWs && activeWs.send) return activeWs.send(responseData);
-          console.warn('⚠️ No WebSocket available for ui.render response');
-          return false;
+          return submitToolCallResponse(responseData.tool_call_id, responseData.response, {
+            baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
+          });
         };
 
         dynamicUIHandler.processUIEvent({
@@ -3488,11 +3496,17 @@ const ChatPage = () => {
         const reason = data.reason || data.data?.reason || 'finished';
         const status = data.status ?? data.data?.status ?? 1;
         const normalizedStatus = String(status).trim().toLowerCase();
-        const isFailureCompletion = ['failed', 'failure', 'error', 'errored'].includes(normalizedStatus);
+        const isFailureCompletion = isFailedWorkflowSession(status) || ['failed', 'failure', 'error', 'errored'].includes(normalizedStatus);
         if (isFailureCompletion) {
           const errorMessage = data.error || data.data?.error || data.message || data.data?.message || `Workflow failed (${reason})`;
           setLoading(false);
           setPendingWorkflowReply(null);
+          // Reuse persisted metadata; a run event alone is not session authority.
+          void hydrateServerArtifactForChat({
+            chatId: data.chat_id || data.data?.chat_id || currentChatId,
+            workflowName: data.workflow || data.data?.workflow || currentWorkflowName,
+            force: true, reason: 'workflow_failed',
+          });
           setMessagesWithLogging(prev => [...prev, {
             id:`run-failed-${Date.now()}`,
             sender:'system',
@@ -3678,7 +3692,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName]);
+  }, [activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -5607,27 +5621,13 @@ const ChatPage = () => {
       if (action.type === 'tool_call_response') {
         // Keep the review available until the server accepts this decision.
         if (action.tool_call_id) {
-          const submitPath = '/api/tool-call/respond';
-          const baseUrl = api && typeof api.getHttpBaseUrl === 'function'
-            ? api.getHttpBaseUrl()
-            : null;
-          const headers = { 'Content-Type': 'application/json' };
-          const token = getAccessToken();
-          if (token) headers.Authorization = `Bearer ${token}`;
           let failure = null;
           try {
-            const response = await fetch(baseUrl ? `${baseUrl}${submitPath}` : submitPath, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({ event_id: action.tool_call_id, response_data: action.response }),
+            await submitToolCallResponse(action.tool_call_id, action.response, {
+              baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
             });
-            if (!response.ok) {
-              failure = response.status === 404
-                ? 'This review is no longer active. Your decision was not applied. Reopen the workflow to load its current review.'
-                : 'Your decision was not accepted. Please retry after reconnecting to the workflow.';
-            }
-          } catch (_) {
-            failure = 'The server did not confirm your decision. Reconnect to check the current review before retrying.';
+          } catch (error) {
+            failure = error.message;
           }
           if (failure) {
             dynamicUIHandler.notifyUIUpdate({
@@ -5767,7 +5767,9 @@ const ChatPage = () => {
           if (artifactMsg) {
             if (artifactMsg.toolCall && !artifactMsg.toolCall.onResponse) {
               artifactMsg.toolCall.onResponse = (response) => {
-                console.warn('⚠️ This is a restored artifact - responses may not work until next interaction');
+                return submitToolCallResponse(artifactMsg.toolCall.tool_call_id, response, {
+                  baseUrl: api?.getHttpBaseUrl?.(), token: getAccessToken(),
+                });
               };
             }
 
@@ -5864,6 +5866,7 @@ const ChatPage = () => {
       pendingHarnessDecision={pendingHarnessDecision}
       pendingHarnessDecisionBusy={pendingHarnessDecisionBusy}
       pendingHarnessDecisionError={pendingHarnessDecisionError}
+      failedWorkflowRetry={failedWorkflowRetry.available ? failedWorkflowRetry : null}
       onPendingHarnessDecisionAction={handlePendingHarnessDecisionAction}
     />
   );
@@ -6100,6 +6103,7 @@ const ChatPage = () => {
         pendingHarnessDecision={pendingHarnessDecision}
         pendingHarnessDecisionBusy={pendingHarnessDecisionBusy}
         pendingHarnessDecisionError={pendingHarnessDecisionError}
+        failedWorkflowRetry={failedWorkflowRetry.available ? failedWorkflowRetry : null}
         onPendingHarnessDecisionAction={handlePendingHarnessDecisionAction}
         hasUnseenArtifact={hasUnseenArtifact}
       />

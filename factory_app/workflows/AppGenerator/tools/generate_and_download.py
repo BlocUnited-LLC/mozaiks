@@ -1120,15 +1120,9 @@ async def generate_and_download(
     )
     if not registry_update["success"]:
         raise ValueError("Registered build target is no longer available")
-    # Persist lifecycle_state and bundle_path into context_variables so the
-    # refinement router can read them when the user submits a revision request
-    # from the app_review transition without the bundle having been promoted yet.
-    if context_variables is not None and hasattr(context_variables, "set"):
-        try:
-            context_variables.set("lifecycle_state", "review")
-            context_variables.set("bundle_path", resolved_bundle_path)
-        except Exception:
-            pass
+    # Publish the same staged location as the registry for the review handoff.
+    _context_set(context_variables, "lifecycle_state", "review")
+    _context_set(context_variables, "bundle_path", resolved_bundle_path)
 
     ui_files = [
         {

@@ -45,6 +45,100 @@ Shared foundations:
 Use the same primitives where possible.
 Do not collapse the producers that use them.
 
+### Form defaults and table search
+
+`Form.config.fields[].default_value` declares a literal scalar default: string,
+number, boolean, or null. For example, a status select can declare
+`default_value: planned` with a matching select option. Objects, arrays,
+expressions, and top-level form defaults are not supported. In edit forms,
+`initial_values_key: selected_row` supplies existing non-null field values ahead
+of defaults, preserving `false`, `0`, and empty strings. An omitted or null
+default falls back to the primitive's empty value (false for checkboxes, an empty
+string otherwise).
+
+Both `DataTable` and `ResourceTable` accept `config.search_keys`, an optional
+list of row keys. With `search: true`, `search_keys: [title, author]` searches
+only those keys, even when notes are also displayed. Omitted or null keys search
+all declared column keys; an empty list searches no fields. Keys may refer to
+non-displayed fields present in the loaded rows. These are client-mode search
+semantics. Server paging delegates search to the module as described below.
+
+These fields pass through the strict runtime page model, AppGenerator structured
+output, and `save_app_schema` YAML materialization. `SectionRenderer` forwards
+them to the existing primitives. Generator prompt guidance comes from the shared
+primitive catalog; regenerate it with `node scripts/export-primitive-schemas.js`
+after changing `PrimitiveSchemas.js`.
+
+### Server-paged lists
+
+`DataTable.config.pagination_mode` is `client` (default) or `server`.
+For both `DataTable` and `ResourceTable`, structured outputs default omitted
+input to `client`; explicit `null` is invalid. Provider-facing strict output
+schemas require the mode explicitly. Ordinary JSON dumps must retain a
+runtime-valid mode without relying on null omission or normalization.
+Use server mode whenever the list endpoint returns a bounded page, including
+ordinary CRUD lists. Client mode retains local filtering, sorting, and slicing
+of fully loaded rows; it sends no paging query. Never fetch an unbounded dataset
+to make client pagination appear complete.
+
+Server mode requires `pagination: true`, a canonical module `api_endpoint`, an
+explicit positive integer `page_size` from 1 through 100, and explicit response
+paths `data_key` and `total_key`. Paths are dot-separated object keys, not
+expressions. `total_key` is not valid in client mode. ResourceTable supports
+client mode only: its resource filters/sorts are not a server query contract,
+and server mode is rejected before materialization or fetch. Use DataTable for
+server-paged lists.
+
+```yaml
+primitive: DataTable
+config:
+  columns: [{key: title}, {key: author}]
+  api_endpoint: /api/modules/books/list_books
+  data_key: items
+  total_key: total
+  pagination: true
+  pagination_mode: server
+  page_size: 20
+  search: true
+```
+
+The existing module GET route receives exactly `page` (1-based integer),
+`page_size` (integer), and `search` (literal string, including an empty string).
+The action must declare these inputs in its module schema, validate their
+bounds, and return rows plus a nonnegative integer total for the same authorized
+filter **before** paging. The GET boundary decodes only schema-declared integer
+strings matching `-?(0|[1-9][0-9]*)`, at most 16 characters including any minus
+sign. Invalid or longer values remain strings and fail the existing integer
+schema validation; this transport bound is not a new limit on JSON integers.
+It does not coerce search text, accept query aliases, or bypass module
+authorization/input validation. POST input typing is unchanged: numeric strings
+are not decoded and JSON integers remain subject to the declared schema bounds.
+
+The module owns tenant/user policy, allowed search fields, literal matching,
+and stable ordering with a unique tie-breaker. For Mongo-backed modules, use
+the existing `ctx.persistence` collection `aggregate()` with the module policy
+filter, fixed `$sort`, `$skip: (page - 1) * page_size`, and bounded `$limit`.
+Compute the total with the same policy/search filter. Escape literal text when
+using a regex predicate. Do not accept caller-supplied pipeline stages or field
+selectors. `find_many()` has no offset; repeated first-page results are not
+pagination. No additional persistence adapter is needed.
+
+`usePageData` owns per-section page/search state and abortable requests.
+`PageRenderer` and `SectionRenderer` pass that state into DataTable. Server-mode
+DataTable never filters, sorts, or slices the returned page; interactive column
+sorting is disabled. `search_keys` is client-only and is not a backend search
+policy. Page changes clear selection; search changes immediately update the
+input, invalidate rows/selection, and return to page 1. Only changed server
+searches wait for a 250ms quiet interval before fetching; the request controller
+cancels superseded search timers as well as in-flight requests. Initial loads,
+page changes, and explicit refetches have no debounce delay. Refetch after
+mutations preserves the query. If deletion invalidates
+the final page, the hook clamps to the last valid page and fetches once again,
+never relabeling stale rows. Further inconsistent results fail with retryable
+error state. Missing/invalid totals, non-object rows, and page lengths inconsistent
+with the requested page and total fail closed, not as a successful empty list.
+Superseded/unmounted requests cannot publish success, errors, or loading state.
+
 ### Brand-driven visual identity
 
 `app/brand/theme_config.json` is the canonical visual identity source for an

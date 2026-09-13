@@ -18,7 +18,7 @@
  *   type         {string}    — "text" | "email" | "password" | "number" | "textarea" | "select" | "checkbox"
  *   required     {boolean}
  *   placeholder  {string}
- *   default_value {any}
+ *   default_value {string|number|boolean|null}
  *   options      {Array<{value, label}>}  — for select
  *
  * Agent event: ui.form.set_field

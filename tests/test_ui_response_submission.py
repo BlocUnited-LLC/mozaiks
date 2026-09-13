@@ -15,9 +15,11 @@ def test_review_is_only_dismissed_after_server_accepts(status):
     callback = source.split("const handleAgentAction = ", 1)[1].split(
         "\n\n  const handleAppClick", 1,
     )[0].strip().removesuffix(";")
+    helper = (ROOT / "chat-ui/src/adapters/uiToolResponse.js").read_text(encoding="utf-8").removeprefix("export ")
     script = r"""
 const assert = require('node:assert/strict');
-const { callback, status } = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const { callback, helper, status } = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const submitToolCallResponse = eval('(' + helper + ')');
 const changes = [];
 const updates = [];
 let messages = [];
@@ -42,7 +44,7 @@ const fetch = async (url, options) => {
   });
   await new Promise(resolve => { release = resolve; });
   if (status === 'network') throw new Error('Untrusted provider details');
-  return { ok: status === 200 || status === 'new_review', status };
+  return { ok: status === 200 || status === 'new_review', status, json: async () => ({ status: 'success' }) };
 };
 const handle = eval('(' + callback + ')');
 (async () => {
@@ -85,7 +87,7 @@ const handle = eval('(' + callback + ')');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
     result = subprocess.run(
-        ["node", "--eval", script], input=json.dumps({"callback": callback, "status": status}),
+        ["node", "--eval", script], input=json.dumps({"callback": callback, "helper": helper, "status": status}),
         cwd=ROOT, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr

@@ -42,11 +42,19 @@ from mozaiksai.core.adapters.ag2_network_runner import (
     _resume_pending_agent_turns,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
 from mozaiksai.core.workflow.task_batches import parse_task_batches_config
+
+
+@pytest.fixture(autouse=True)
+def _isolated_runtime_platform_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These execution tests use synthetic sessions, not Studio build bindings.
+    registry = PlatformHookRegistry()
+    monkeypatch.setattr(orchestration_patterns_module, "get_platform_hooks", lambda: registry)
 
 
 class _Reply:

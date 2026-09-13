@@ -184,7 +184,32 @@ def noncanonical_app_root_paths(paths: Iterable[str]) -> list[str]:
     return sorted(invalid)
 
 
+def app_bundle_workspace_path(path: str) -> str:
+    """Map an exported bundle member into the canonical standalone workspace."""
+    from mozaiksai.core.runtime.app.layout_registry import (
+        ArtifactKind,
+        PathScope,
+        validate_registered_path,
+    )
+
+    if path.startswith(("app/", "workflows/", "build_context/")):
+        return path
+    try:
+        validate_registered_path(path, None, PathScope.DEPLOYMENT_DERIVED)
+        return path
+    except ValueError:
+        pass
+    try:
+        match = validate_registered_path(path, None, PathScope.APP_BUNDLE_ROOT)
+        if match.family.kind == ArtifactKind.APP_ROOT_SUPPORT:
+            return path
+    except ValueError:
+        pass
+    return f"app/{path}"
+
+
 __all__ = [
+    "app_bundle_workspace_path",
     "APP_DATA_CONTRACT_PATH",
     "APP_DATA_MIGRATIONS_DIR",
     "APP_DATA_MIGRATIONS_GLOB",

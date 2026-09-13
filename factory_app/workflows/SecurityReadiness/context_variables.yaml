@@ -7,7 +7,9 @@ definitions:
       required: true
   artifact_version_id:
     type: string
-    description: Optional artifact selector; must match the bound registry's current build artifact.
+    description: >
+      Optional launch selector; must match the bound registry's current build artifact.
+      The inspector populates the verified artifact id for the AppReview handoff.
     source:
       type: state
       default: null
@@ -17,6 +19,55 @@ definitions:
     source:
       type: state
       default: advisory
+  bundle_path:
+    type: string
+    writer_ids: [transition_router]
+    description: AppGenerator's registered staged app directory, carried unchanged for AppReview revision.
+    source:
+      type: state
+      default: null
+  lifecycle_state:
+    type: string
+    writer_ids: [transition_router]
+    description: Registered bundle lifecycle state carried from AppGenerator to AppReview.
+    source:
+      type: state
+      default: null
+  app_validation_status:
+    type: string
+    writer_ids: [transition_router]
+    description: Actual AppGenerator validation result, not inferred from the security assessment.
+    source:
+      type: state
+      default: null
+  app_validation_strategy_used:
+    type: string
+    writer_ids: [transition_router]
+    description: Validation strategy used by AppGenerator, carried unchanged to AppReview.
+    source:
+      type: state
+      default: null
+  app_validation_preview_url:
+    type: string
+    writer_ids: [transition_router]
+    description: Optional preview URL from AppGenerator validation.
+    source:
+      type: state
+      default: null
+  integration_tests_passed:
+    type: boolean
+    writer_ids: [transition_router]
+    description: Actual AppGenerator integration result; missing evidence remains null.
+    source:
+      type: state
+      default: null
+  app_bundle_acceptance_status:
+    type: string
+    writer_ids: [transition_router]
+    description: Actual deterministic acceptance result from AppGenerator.
+    source:
+      type: state
+      default: null
   security_readiness_findings:
     type: array
     authority_class: closed_writer_quality_state

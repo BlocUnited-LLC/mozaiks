@@ -9,6 +9,7 @@
     "test:workflow-ui": "node --test tests/workflowUi.test.js",
     "test:support-panel": "node --test tests/userSupportPanel.test.js tests/appSupportPage.test.js",
     "test:concept-review": "node --test tests/conceptReview.browser.test.js",
+    "test:factory-contracts": "node --test --test-concurrency=1 tests/uiToolResponse.test.js tests/uiResponseEnvelope.test.js tests/appReviewSummary.test.js tests/failedWorkflowRetryIntent.test.js tests/failedWorkflowRetry.browser.test.js tests/sandboxPreview.browser.test.js tests/schemaPageActions.browser.test.js tests/summaryStrip.browser.test.js tests/schemaPageServerPagination.browser.test.js tests/downloadCenter.browser.test.js",
     "test:analytics-model": "node --test tests/analyticsModel.test.js",
     "dev": "vite",
     "build": "vite build",

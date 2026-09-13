@@ -39,6 +39,7 @@ task_contracts:
       - config/asset_manifest.json
     hard_constraints:
       - Persistent app pages stay declarative by default.
+      - Page filenames are case-sensitive lowercase identities derived by the canonical materializer from the final route segment (or the page name for /), with non-alphanumeric runs replaced by underscores. Copy exact planner-injected paths into owned_paths; display titles are not filenames. Never emit both uppercase and lowercase variants.
       - Emit exactly the current task's owned_paths. Required page outputs apply only to pages in that scope; a manifest-only task may emit pages as an empty list.
       - AppSchemaOutput.manifest is AppManifest or explicit null. A task owning app.json must emit AppManifest; otherwise emit null, which materializes neither app.json nor provenance.yaml. Do not emit a placeholder manifest or silently discard out-of-scope files.
       - New-app page_bundle tasks collectively own app.json and every planned page, with one manifest owner. Page-only revisions preserve app.json and unchanged pages from the verified baseline; full-bundle acceptance still requires a complete valid app. Standalone save_app_schema requires a non-null manifest.
@@ -56,6 +57,8 @@ task_contracts:
       - Use shell_mode=conversation for DM/chat/thread routes, workspace for dense module/profile/admin-like work surfaces, focused for setup/review flows, immersive for full-viewport experiences, public for public/legal routes, and standard for ordinary pages.
       - Use explicit shell arrays only when labels, icons, role gates, or custom paths differ from the shortcut catalog.
       - Durable page mutations bind through declared api_endpoint values or canonical module actions.
+      - Design documents and ExperienceSpec describe approved product intent, not executable API authority. Replace illustrative endpoint hints with exact /api/modules/{module_id}/{action_id} bindings from planned and generated module contracts; never copy a placeholder URL into task initial_message or page output. Preserve the approved behavior, fields, and layout.
+      - Every data-backed summary needs a declared backend action returning its value_key fields. A ui_only page does not create that action. Plan the owning module contract and business_services implementation before the dependent page task; do not invent an endpoint or replace live counts with constants.
       - Do not emit raw frontend source outside the bounded custom route bundle.
       - Pages that require reading URL query params on mount, polling an endpoint until state changes, or rendering conditional sections based on API response value must use custom_route_bundle; they cannot be expressed as declarative AppPageSchema.
       - A post-redirect confirmation page must not display confirmed/success state from the redirect URL alone. Confirmation must come from querying an app-owned module action after the backend has processed the event.
@@ -158,6 +161,11 @@ task_contracts:
       - backend/policy.py owns scope query helpers.
       - backend/policy.py should derive tenant/workspace/user resource filters from ctx.app_id, ctx.tenant_id, ctx.workspace_id, ctx.user_id, and ctx.permissions. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
       - backend/repo.py may use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
+      - For offset pagination, PersistenceCollection.find_many has no skip argument and returns a list, not a cursor. In repo.py use aggregate with an ownership-scoped $match, a stable $sort including a unique tie-breaker, then the requested $skip and a bounded $limit. Validate the declared page/offset inputs and limit before querying; never compute an offset and leave it unused or fetch an unbounded collection for client slicing.
+      - Pagination totals must count the same query as the page, including ownership, search, and all other active filters. Use count(query) with that matching query or a matching aggregate count; do not count unrelated or foreign records.
+      - When literal search is requested, search only the declared fields and use re.escape on user text before placing it in a Mongo $regex. Preserve the requested case behavior. Do not reinterpret literal metacharacters as regex operators or silently escape explicitly requested regex search; explicit regex intent requires its declared validation and bounds.
+      - repo.py must return the actual write result needed by service.py to distinguish an owned mutation from a missing/foreign record, concurrent deletion, or unchanged state. A pre-read or a write call without checking its outcome is not proof of mutation. Emit mutation-success events only after confirmed writes; when no owned mutation happened, do not emit such an event.
+      - A not-found, denied, or idempotent no-op response must follow the declared action contract. Do not invent a global HTTP status or success response for all modules. Keep caller-safe outcomes consistent with the module's authorization boundary and never disclose a foreign record.
       - backend/repo.py must use module_id/entity_name values aligned with data_contract and data/contract.json.
       - Generated repo code must not use ctx.db.
       - Generated repo code must not import or call get_mongo_client().
@@ -414,12 +422,50 @@ backend_helper_files:
     required_methods:
       - "async delete_user_data(*, app_id: str, user_id: str) -> dict  # returns {deleted_count: int, ...}"
       - "async export_user_data(*, app_id: str, user_id: str) -> dict  # returns module-namespaced records"
-    constructor_signature: "__init__(self, db: Any) -> None  # receives motor db from loader"
+    constructor_signature: "__init__(self, db: Any) -> None  # receives raw Motor database from account registry"
+    database_contract: >
+      This handler receives a raw Motor database, NOT ModuleContext or
+      PersistenceCollection. Use db[physical_collection_name], find(...).to_list(...),
+      and delete_many(query) when the declared deletion policy permits deletion.
+      Do not call ctx.persistence methods such as find_many on this raw collection,
+      or db.get_collection(module_id, entity_name). Raw database access adds no scope.
+    collection_resolution: >
+      For entities stored by repo.py through ctx.persistence.collection(module_id,
+      entity_name), import collection_name_for from
+      mozaiksai.core.runtime.persistence.naming and resolve
+      db[collection_name_for(app_id=app_id, module_id=module_id, entity_name=entity_name)].
+      Use the exact module_id and entity_name from that repo, not a bare entity name,
+      hand-built physical name, or a scan of database collections. The standard
+      module executor omits app_slug, so omit it here too; do not substitute a
+      display name or app slug. This rule is not universal for literal collections,
+      alias bindings, externally bound storage, or a custom persistence context:
+      follow their existing declared database, physical collection, naming inputs,
+      and ownership contract instead. In every case, both export and deletion must
+      explicitly filter by app_id and the requested user's ownership using the
+      same owner fields as the repo. Physical collection isolation alone is insufficient.
+    export_example: |
+      # For a user_id-owned entity using standard generated-module persistence.
+      # module_id and entity_name must match the existing repo's collection call.
+      from bson import ObjectId
+      from fastapi.encoders import jsonable_encoder
+      from mozaiksai.core.runtime.persistence.naming import collection_name_for
+
+      collection = db[collection_name_for(
+          app_id=app_id, module_id=module_id, entity_name=entity_name,
+      )]
+      query = {"app_id": app_id, "user_id": user_id}
+      records = await collection.find(query, {"_id": 0}).to_list(length=None)
+      if not records:
+          return {}
+      return {f"{module_id}_{entity_name}": jsonable_encoder(
+          records, custom_encoder={ObjectId: str},
+      )}
     hard_constraints:
       - Must be named AccountDataHandler (the loader discovers it by this name first).
       - Both methods must scope ALL queries through app_id AND user_id. Never delete or export records across tenants.
       - delete_user_data must be idempotent — calling it twice must not raise an error.
       - export_user_data must return an empty dict (not None or raise) when the user has no records.
+      - Export payloads must already be JSON-safe because the account route uses JSONResponse directly. Exclude storage _id or convert ObjectId values to strings, and serialize datetimes as ISO 8601 strings, including nested values. Do not return raw Motor documents with BSON values.
       - For financial/ledger modules (transactional archetype), anonymise rather than delete user_id on ledger entries to preserve audit integrity. Document this in the method docstring.
       - "Return key names in export_user_data must be namespaced with the module_id to avoid collisions when the platform merges all module exports (e.g. {\"messages_threads\": [...], \"messages_dms\": [...]})."
       - Do not call service.py or handler.py from the handler — access the db directly for simplicity and to avoid ctx dependencies.

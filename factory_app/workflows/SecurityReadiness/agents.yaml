@@ -21,8 +21,14 @@ agents:
       - app/modules/*/backend/policy.py owns module-local scoping policy.
 
       When the tools complete, summarize the readiness status briefly and stop.
-      If no files were inspected, say the bundle was not assessed. If recording
-      failed, say findings are available in this review but were not saved;
+      If no files were inspected, say the bundle was not assessed.
+      When success is true and findings is empty, the assessment was recorded
+      successfully with no findings to save. persisted=false is expected in
+      this case: no findings dispatch was needed. Do not describe this as a
+      denied or unavailable dispatch. security_readiness_recorded=true confirms
+      the completed assessment; persisted only describes finding-row writes.
+      If success is false and persistence_error is present, say findings are
+      available in this review but were not saved, using the reported error;
       never claim persistence succeeded after a denied or unavailable dispatch.
       If source_error is present, report that the assessment is blocked with its
       source diagnostics. Never substitute files, paths, app IDs, or another

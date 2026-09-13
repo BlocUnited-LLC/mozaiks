@@ -214,7 +214,7 @@ export default defineConfig(({ mode }) => {
   const appConfig = fs.existsSync(appConfigPath)
     ? require(appConfigPath)
     : {};
-  const apiUrl = process.env.VITE_API_URL || rootEnv.VITE_API_URL || appConfig.apiUrl || 'http://localhost:8000';
+  const apiUrl = process.env.MOZAIKS_BACKEND_URL || rootEnv.MOZAIKS_BACKEND_URL || process.env.VITE_API_URL || rootEnv.VITE_API_URL || appConfig.apiUrl || 'http://localhost:8000';
   const hostMode = process.env.VITE_MOZAIKS_HOST || rootEnv.VITE_MOZAIKS_HOST || process.env.MOZAIKS_HOST || rootEnv.MOZAIKS_HOST || 'studio';
   const resolveFavicon = () => {
     const themeConfigPath = path.join(platformBrandDir, 'theme_config.json');

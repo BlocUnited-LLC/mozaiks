@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1
+# Local, disposable app previews. This image is not a deployment artifact.
+FROM node:24-bookworm-slim AS node
+FROM mongo:7 AS mongo
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MOZAIKS_WEB_SHELL_PATH=/opt/mozaiks/web_shell \
+    MOZAIKS_CHAT_UI_PATH=/opt/mozaiks/chat-ui \
+    MOZAIKS_FACTORY_APP_PATH=/opt/mozaiks/factory_app \
+    LOGS_BASE_DIR=/workspace/logs
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=mongo /usr/bin/mongod /usr/local/bin/mongod
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends libcurl4 libgssapi-krb5-2 libssl3 liblzma5 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mongod --version && node --version
+
+WORKDIR /opt/mozaiks
+COPY pyproject.toml setup.py MANIFEST.in README.md LICENSE ./
+COPY mozaiks/ ./mozaiks/
+COPY mozaiksai/ ./mozaiksai/
+COPY mozaiks_cli/ ./mozaiks_cli/
+COPY logs/ ./logs/
+COPY factory_app/ ./factory_app/
+COPY web_shell/ ./web_shell/
+COPY chat-ui/ ./chat-ui/
+RUN pip install --no-cache-dir . \
+    && pip list --format=freeze > /opt/mozaiks/preview-constraints.txt \
+    && npm ci --prefix web_shell --no-audit --no-fund \
+    && useradd --create-home --uid 10001 sandbox \
+    && mkdir -p /workspace/app /workspace/logs \
+    && chown -R sandbox:sandbox /workspace /opt/mozaiks/web_shell
+
+USER sandbox
+WORKDIR /workspace
+EXPOSE 3000 8000
+CMD ["sleep", "1800"]

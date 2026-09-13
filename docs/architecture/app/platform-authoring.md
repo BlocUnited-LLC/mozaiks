@@ -165,6 +165,12 @@ Optional:
 Shared page-level UI should live under `app/ui/pages/_shared/`, not inside a
 module by default.
 
+Schema routes reference the exact discovered file key: `customers` for
+`customers.yaml`, or the directory name for `customers/page.yaml`. The shell
+uses the same discovery function as the page loader. A page's `name` or `title`
+must not replace that file key in a `SchemaPage` route; this matters on
+case-sensitive deployment filesystems.
+
 ### `workflows/{workflow}/`
 
 Required:

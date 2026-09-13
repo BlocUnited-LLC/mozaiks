@@ -1,4 +1,4 @@
-"""Verified text files from a committed Factory app-bundle archive."""
+"""Verified source and optional binary assets from a committed app bundle."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import io
 import stat
 import zipfile
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Literal, overload
 
 from mozaiksai.control_plane.contracts import safe_artifact_relpath
 from mozaiksai.core.artifacts.content_store import (
@@ -22,7 +22,27 @@ _MAX_TOTAL_BYTES = 32_000_000
 _MAX_FILES = 4096
 
 
-async def read_artifact_bundle(artifact: BuildRecord) -> tuple[dict[str, str], list[dict[str, Any]]]:
+@overload
+async def read_artifact_bundle(
+    artifact: BuildRecord, *, include_binary: Literal[False] = False,
+) -> tuple[dict[str, str], list[dict[str, Any]]]: ...
+
+
+@overload
+async def read_artifact_bundle(
+    artifact: BuildRecord, *, include_binary: Literal[True],
+) -> tuple[dict[str, str | bytes], list[dict[str, Any]]]: ...
+
+
+@overload
+async def read_artifact_bundle(
+    artifact: BuildRecord, *, include_binary: bool,
+) -> tuple[dict[str, str | bytes], list[dict[str, Any]]]: ...
+
+
+async def read_artifact_bundle(
+    artifact: BuildRecord, *, include_binary: bool = False,
+) -> tuple[dict[str, str], list[dict[str, Any]]] | tuple[dict[str, str | bytes], list[dict[str, Any]]]:
     metadata = artifact.commit_metadata.metadata
     entry = resolve_canonical_bundle_entry(artifact)
     if metadata.get("content_ref"):
@@ -41,7 +61,7 @@ async def read_artifact_bundle(artifact: BuildRecord) -> tuple[dict[str, str], l
     if len(raw) > _MAX_TOTAL_BYTES:
         raise ValueError("artifact_bundle_archive_too_large")
     prefix = f"{metadata['bundle_name']}/"
-    files: dict[str, str] = {}
+    files: dict[str, str | bytes] = {}
     diagnostics: list[dict[str, Any]] = []
     seen: set[str] = set()
     total_bytes = 0
@@ -73,7 +93,10 @@ async def read_artifact_bundle(artifact: BuildRecord) -> tuple[dict[str, str], l
             total_bytes += info.file_size
             data = archive.read(info)
             if PurePosixPath(path).suffix.lower() in _BINARY_ASSET_SUFFIXES:
-                diagnostics.append({"path": path, "code": "binary_asset", "blocking": False})
+                if include_binary:
+                    files[path] = data
+                else:
+                    diagnostics.append({"path": path, "code": "binary_asset", "blocking": False})
                 continue
             try:
                 text = data.decode("utf-8")

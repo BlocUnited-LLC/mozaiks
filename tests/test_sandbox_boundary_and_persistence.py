@@ -29,9 +29,9 @@ def test_preview_ports_default_and_env(monkeypatch):
     monkeypatch.delenv("SANDBOX_PREVIEW_PORT", raising=False)
     assert _preview_ports() == [3000, 8000]
     monkeypatch.setenv("SANDBOX_PREVIEW_PORT", "5173")
-    assert _preview_ports() == [5173, 8000]
+    assert _preview_ports() == [5173, 3000, 8000]
     monkeypatch.setenv("SANDBOX_PREVIEW_PORT", "8000")
-    assert _preview_ports() == [8000]
+    assert _preview_ports() == [8000, 3000]
 
 
 @pytest.mark.asyncio
@@ -213,7 +213,9 @@ async def test_artifact_preview_manager_tags_and_bounds_sessions(monkeypatch):
     )
     manager._broadcast = AsyncMock()
 
-    state = await manager.create_or_reuse("artifact-123")
+    state = await manager.create_or_reuse(
+        "artifact-123", app_id="factory", user_id="user-a", target_app_id="generated-app", build_registry_id="appreg-a",
+    )
 
     assert state.session_id == "fake-session"
     assert created["timeout_seconds"] == 15 * 60

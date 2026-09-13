@@ -30,6 +30,8 @@ def inject_primitive_catalog(agent: Any, messages: list[dict[str, Any]]) -> None
             "\n- Table actions pass the selected record into the modal as selected_row. Edit forms declare initial_values_key: selected_row."
             "\n- Do not render editable identifier, ownership, or server timestamp fields. For update/delete payloads bind identifiers with {selected_row.<id_field>}."
             "\n- An explicit submit payload must include each editable field using {form.<field_name>}; null payload sends the form values."
+            "\n- submit actions require href: one fixed /api/modules/{module_id}/{action_id} on the action itself. A payload or table endpoint never supplies a missing href."
+            "\n- Use separate create/edit forms or modals when the module declares different create/update actions; never a null or conditional href for combined mode. Create forms omit selected-row prefill; edit forms use initial_values_key: selected_row."
             "\n- A module delete action uses the runtime POST command endpoint, not a REST DELETE route."
             "\n- data_key must exactly match the response array path; metric value_key must match the response field."
         )

@@ -21,6 +21,14 @@ while the first-party factory pack stays declarative under
 SessionRouter through a trigger-route resolver seam. SessionRouter does not
 import factory pack policy directly.
 
+Session package imports keep contract models independent of execution imports.
+Importing `mozaiksai.core.session.build_binding` must not eagerly load the
+launcher, workflow task batches, or AG2 adapters. Public launcher exports resolve
+lazily through the session package's existing `__getattr__`; their names,
+`__all__` membership, and canonical object identity remain unchanged. This avoids
+cold-import cycles with typed auxiliary usage attribution without changing launch
+execution or requiring consumers to preload adapters.
+
 ---
 
 ## Why This Layer Exists

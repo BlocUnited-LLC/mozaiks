@@ -1,20 +1,18 @@
-"""Artifact preview sandbox API.
-
-Studio-facing endpoints that let the AppWorkbench create, sync, start, and
-watch an ephemeral preview session for a generated app artifact. Backed by
-`mozaiksai.core.sandbox.preview_sessions` over the SandboxPort seam
-(e2b or local Docker).
-"""
+"""Studio-owned artifact previews; all operations require the artifact owner."""
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from mozaiksai.core.auth import (
     WS_CLOSE_POLICY_VIOLATION,
+    UserPrincipal,
     accept_websocket,
     authenticate_websocket,
     require_user_scope,
@@ -26,8 +24,7 @@ from mozaiksai.core.sandbox import (
 )
 
 _logger = logging.getLogger(__name__)
-
-router = APIRouter()
+_Status = Literal["starting", "running", "error"]
 
 
 class _SandboxCreateResponse(BaseModel):
@@ -49,139 +46,120 @@ class _OkResponse(BaseModel):
 
 
 class _StartResponse(BaseModel):
-    status: str
+    status: _Status
     previewUrl: str | None = None
     message: str | None = None
 
 
 class _StatusResponse(BaseModel):
-    status: str
+    status: _Status
     previewUrl: str | None = None
     lastError: str | None = None
 
 
-@router.post("/api/artifacts/{artifactId}/sandbox", response_model=_SandboxCreateResponse)
-async def artifacts_create_or_reuse_sandbox(
-    artifactId: str,
-    _principal=Depends(require_user_scope),
-):
-    if not is_valid_artifact_id(artifactId):
-        raise HTTPException(status_code=400, detail="Invalid artifactId")
-    mgr = get_artifact_preview_sessions()
-    try:
-        st = await mgr.create_or_reuse(artifactId)
-        return {"sandboxId": st.sandbox_id}
-    except RuntimeError as exc:
-        _logger.warning("sandbox_unavailable: artifactId=%s error=%s", artifactId, exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        _logger.error(
-            "sandbox_create_failed: artifactId=%s error=%s", artifactId, exc, exc_info=True
-        )
-        raise HTTPException(status_code=500, detail="Failed to create sandbox") from exc
+def create_sandbox_router(
+    *,
+    resolve_scope: Callable[[UserPrincipal], tuple[str, str]],
+    resolve_artifact: Callable[[UserPrincipal, str, str], Awaitable[tuple[str, dict[str, str | bytes]]]],
+) -> APIRouter:
+    router = APIRouter()
 
+    async def owned_session(sandboxId: str, principal: UserPrincipal = Depends(require_user_scope)):
+        if not is_valid_sandbox_id(sandboxId):
+            raise HTTPException(status_code=400, detail="Invalid sandboxId")
+        app_id, user_id = resolve_scope(principal)
+        manager = get_artifact_preview_sessions()
+        try:
+            await manager.require_owner(sandboxId, app_id=app_id, user_id=user_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Sandbox not found") from exc
+        return manager
 
-@router.post("/api/sandbox/{sandboxId}/sync", response_model=_OkResponse)
-async def sandbox_sync_files(
-    sandboxId: str,
-    req: _SyncRequest,
-    _principal=Depends(require_user_scope),
-):
-    if not is_valid_sandbox_id(sandboxId):
-        raise HTTPException(status_code=400, detail="Invalid sandboxId")
-    mgr = get_artifact_preview_sessions()
-    try:
-        await mgr.sync(
-            sandboxId,
-            files=[f.model_dump() for f in (req.files or [])],
-            deleted=req.deleted or [],
-        )
+    @router.post("/api/artifacts/{artifactId}/sandbox", response_model=_SandboxCreateResponse)
+    async def create_preview(
+        artifactId: str, build_registry_id: str,
+        principal: UserPrincipal = Depends(require_user_scope),
+    ):
+        if not is_valid_artifact_id(artifactId):
+            raise HTTPException(status_code=400, detail="Invalid artifactId")
+        app_id, user_id = resolve_scope(principal)
+        target_app_id, files = await resolve_artifact(principal, artifactId, build_registry_id)
+        manager = get_artifact_preview_sessions()
+        try:
+            state = await manager.create_or_reuse(
+                artifactId, app_id=app_id, user_id=user_id,
+                target_app_id=target_app_id, build_registry_id=build_registry_id,
+            )
+            if not state.last_files:
+                try:
+                    await manager.sync(state.sandbox_id, files=[{"path": path, "content": content} for path, content in files.items()], deleted=[])
+                except Exception:
+                    await manager.stop(state.sandbox_id)
+                    raise
+            return {"sandboxId": state.sandbox_id}
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            # Provider exceptions can contain command arguments or credentials.
+            _logger.warning("preview_create_failed artifact=%s exception=%s", artifactId, type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Preview sandbox unavailable; check the local provider and configured preview image") from exc
+
+    @router.post("/api/sandbox/{sandboxId}/sync", response_model=_OkResponse)
+    async def sync_preview(sandboxId: str, req: _SyncRequest, manager=Depends(owned_session)):
+        try:
+            await manager.sync(sandboxId, files=[file.model_dump() for file in req.files], deleted=req.deleted)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Sandbox not found") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Preview file sync failed") from exc
         return {"ok": True}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Sandbox not found") from exc
-    except Exception as exc:
-        _logger.error(
-            "sandbox_sync_failed: sandboxId=%s error=%s", sandboxId, exc, exc_info=True
-        )
-        raise HTTPException(status_code=500, detail="Sandbox sync failed") from exc
 
+    @router.post("/api/sandbox/{sandboxId}/start", response_model=_StartResponse)
+    async def start_preview(sandboxId: str, manager=Depends(owned_session)):
+        try:
+            state = await manager.start(sandboxId)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Sandbox not found") from exc
+        return {"status": state.status, "previewUrl": state.preview_url, "message": state.last_error}
 
-@router.post("/api/sandbox/{sandboxId}/start", response_model=_StartResponse)
-async def sandbox_start_app(
-    sandboxId: str,
-    _principal=Depends(require_user_scope),
-):
-    if not is_valid_sandbox_id(sandboxId):
-        raise HTTPException(status_code=400, detail="Invalid sandboxId")
-    mgr = get_artifact_preview_sessions()
-    try:
-        st = await mgr.start(sandboxId)
-        msg = st.last_error if st.status == "error" else None
-        return {"status": st.status, "previewUrl": st.preview_url, "message": msg}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Sandbox not found") from exc
-    except Exception as exc:
-        _logger.error(
-            "sandbox_start_failed: sandboxId=%s error=%s", sandboxId, exc, exc_info=True
-        )
-        raise HTTPException(status_code=500, detail="Failed to start sandbox") from exc
+    @router.get("/api/sandbox/{sandboxId}/status", response_model=_StatusResponse)
+    async def preview_status(sandboxId: str, manager=Depends(owned_session)):
+        try:
+            state = await manager.status(sandboxId)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Sandbox not found") from exc
+        return {"status": state.status, "previewUrl": state.preview_url, "lastError": state.last_error}
 
-
-@router.get("/api/sandbox/{sandboxId}/status", response_model=_StatusResponse)
-async def sandbox_status(
-    sandboxId: str,
-    _principal=Depends(require_user_scope),
-):
-    if not is_valid_sandbox_id(sandboxId):
-        raise HTTPException(status_code=400, detail="Invalid sandboxId")
-    mgr = get_artifact_preview_sessions()
-    try:
-        st = await mgr.status(sandboxId)
-        return {"status": st.status, "previewUrl": st.preview_url, "lastError": st.last_error}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Sandbox not found") from exc
-    except Exception as exc:
-        _logger.error(
-            "sandbox_status_failed: sandboxId=%s error=%s", sandboxId, exc, exc_info=True
-        )
-        raise HTTPException(status_code=500, detail="Failed to get sandbox status") from exc
-
-
-@router.post("/api/sandbox/{sandboxId}/stop", response_model=_OkResponse)
-async def sandbox_stop(
-    sandboxId: str,
-    _principal=Depends(require_user_scope),
-):
-    if not is_valid_sandbox_id(sandboxId):
-        raise HTTPException(status_code=400, detail="Invalid sandboxId")
-    mgr = get_artifact_preview_sessions()
-    try:
-        await mgr.stop(sandboxId)
+    @router.post("/api/sandbox/{sandboxId}/stop", response_model=_OkResponse)
+    async def stop_preview(sandboxId: str, manager=Depends(owned_session)):
+        await manager.stop(sandboxId)
         return {"ok": True}
-    except Exception as exc:
-        _logger.error(
-            "sandbox_stop_failed: sandboxId=%s error=%s", sandboxId, exc, exc_info=True
-        )
-        raise HTTPException(status_code=500, detail="Failed to stop sandbox") from exc
 
+    @router.websocket("/ws/sandbox/{sandboxId}")
+    async def stream_preview(websocket: WebSocket, sandboxId: str):
+        if not is_valid_sandbox_id(sandboxId):
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Invalid sandbox ID")
+            return
+        ws_user = await authenticate_websocket(websocket)
+        if ws_user is None:
+            return
+        manager = get_artifact_preview_sessions()
+        try:
+            app_id, user_id = resolve_scope(UserPrincipal(**asdict(ws_user)))
+            await manager.require_owner(sandboxId, app_id=app_id, user_id=user_id)
+        except (KeyError, HTTPException):
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Sandbox not found")
+            return
+        await accept_websocket(websocket)
+        try:
+            await manager.register_ws(sandboxId, websocket)
+            while True:
+                await websocket.receive_text()
+        except (WebSocketDisconnect, KeyError):
+            pass
+        finally:
+            await manager.unregister_ws(sandboxId, websocket)
 
-@router.websocket("/ws/sandbox/{sandboxId}")
-async def ws_sandbox_stream(websocket: WebSocket, sandboxId: str):
-    if not is_valid_sandbox_id(sandboxId):
-        await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Invalid sandbox ID")
-        return
-
-    ws_user = await authenticate_websocket(websocket)
-    if ws_user is None:
-        return  # Connection already closed with 1008
-
-    mgr = get_artifact_preview_sessions()
-    await accept_websocket(websocket)
-    await mgr.register_ws(sandboxId, websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except Exception:
-        pass
-    finally:
-        await mgr.unregister_ws(sandboxId, websocket)
+    return router

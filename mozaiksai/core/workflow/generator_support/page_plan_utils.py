@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.page_schema import PageSchemaValidationError, validate_page_schema
 
@@ -46,6 +47,22 @@ def validate_planned_page(content: str, planned: dict[str, Any], path: str) -> N
             raise ValueError(f"route must preserve approved {planned['route']!r}")
     except PageSchemaValidationError as error:
         details = "; ".join(f"{item.location}: {item.code}: {item.message}" for item in error.diagnostics)
+        if isinstance(error.__cause__, ValidationError):
+            # Only relay known input-free runtime messages, never rejected values or arbitrary validator text.
+            action_messages = {
+                "Value error, navigate actions require href",
+                "Value error, submit actions require href",
+                "Value error, delete actions require href",
+                "Value error, event actions require event_type",
+                "Value error, workflow actions require workflow_id",
+            }
+            reasons = sorted({
+                item["msg"].removeprefix("Value error, ")
+                for item in error.__cause__.errors(include_input=False, include_context=False, include_url=False)
+                if item["type"] == "value_error" and item["msg"] in action_messages
+            })
+            if reasons:
+                details += " Action requirements: " + "; ".join(reasons) + "."
         if any(item.code == "page_schema.name_mismatch" for item in error.diagnostics):
             details += f" Runtime page name must match file identity {expected_name!r}; keep the display label in title."
         raise ValueError(f"{path}: {details}") from error

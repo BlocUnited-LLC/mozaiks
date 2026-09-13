@@ -28,21 +28,105 @@ persist into build records; the sandbox itself is disposable.
 ## Live preview sessions (AppWorkbench)
 
 Beyond one-shot validation, the Studio host mounts an artifact preview session
-API so the AppWorkbench can boot (and re-boot) a generated bundle on demand —
-this is what refreshes the preview iframe after a scoped refinement patch:
+API so the AppWorkbench can boot and restart a saved generated bundle on demand.
+A refinement selects a new artifact version and clears the old preview; the
+user starts the new version explicitly.
 
 - Manager: `mozaiksai/core/sandbox/preview_sessions.py`
   (`ArtifactPreviewSessionManager` over `SandboxPort`; one session per
-  artifact, TTL'd via `SANDBOX_TTL_MINUTES`, identity-tagged).
+  host/user/artifact version, with an absolute `SANDBOX_TTL_MINUTES` deadline).
 - Routes (Studio host, `mozaiksai/hosts/routers/sandbox.py`):
-  `POST /api/artifacts/{artifactId}/sandbox` (create/reuse),
+  `POST /api/artifacts/{artifactId}/sandbox?build_registry_id=...` (create/reuse),
   `POST /api/sandbox/{id}/sync`, `POST /api/sandbox/{id}/start`,
   `GET /api/sandbox/{id}/status`, `POST /api/sandbox/{id}/stop`,
-  `WS /ws/sandbox/{id}` (status stream). All authenticated.
+  `WS /ws/sandbox/{id}` (status stream). Every operation checks the authenticated
+  host and owner, including the WebSocket before acceptance. Creation resolves
+  the registry's target and verifies the saved app-bundle binding and archive
+  digest before allocating a sandbox. Binary assets are retained.
 - Provider resolution mirrors the validation ladder's preview-capable rungs:
   e2b when `E2B_API_KEY` is set, otherwise local Docker. With neither, the
   create call returns 503 with a clear message (`local`/`skip` builds have no
   live preview).
+
+The canonical supervisor runs the existing platform host, shared web shell,
+and a private MongoDB in the sandbox. App files mount under `app/`, workflows
+remain beside `app/`, and deployment support files stay at workspace root.
+The preview URL is returned only after backend, frontend, and the frontend's
+shell-config proxy pass health and target-identity checks. Status checks clear
+the URL after failure or expiry. A health check is not functional acceptance:
+exercise the generated screens, actions, permissions, and persistence too.
+
+Preview pins both `MOZAIKS_APP_DATABASE_NAME` and
+`MOZAIKS_APP_DATA_DATABASE_NAME` to `mozaiks_preview` inside its private Mongo.
+Generated module `ctx.persistence` reads the first setting; account export and
+deletion resolve their database through `app_data_from_context(None, contract={})`,
+which prefers the second. Different values silently send account handlers to an
+empty database instead of the app's records. This is preview-only composition;
+normal host database precedence and explicitly bound app-data contracts remain
+unchanged. The standard module executor does not supply `app_slug`, so account
+handlers using the same module/entity IDs with `collection_name_for` also use
+its default slug. Custom naming inputs are not inferred from app display names.
+
+The preview regression writes through the executor's real scoped persistence
+context, then calls the account routes through a registered canonical handler
+against an in-memory Mongo substitute. It checks export, owned deletion, repeat
+deletion, and preservation of other users/apps. Direct helper tests with a
+preselected database do not cover this environment-resolution boundary. Existing
+preview images must be rebuilt to pick up supervisor changes; live functional
+acceptance must recheck account routes against stored app data.
+
+File synchronization rejects destination aliases before provider writes. Docker
+extracts files as its configured sandbox user so later replacement and deletion
+work without root privileges. A partial or cancelled sync invalidates the session;
+recreate it rather than launching a partially updated app. Cleanup retains state
+unless the provider confirms termination or that the sandbox is already absent.
+
+### Local Docker setup
+
+Build the preview image from the same checkout as the Factory host:
+
+```bash
+docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
+```
+
+The image includes the installed OSS runtime, frontend dependencies, and Mongo.
+Generated `requirements.txt` installs against the image's dependency constraints.
+Containers use an unprivileged user, dropped capabilities, resource limits, and
+random loopback-only frontend/backend ports. No Docker socket, host workspace,
+or Factory database is mounted into the app.
+
+Only explicitly configured `MOZAIKS_PREVIEW_ENV_<NAME>` values become preview
+environment variables. Factory API keys, credentials, and database URLs are not
+inherited. Public apps may declare `authRequired: false`; authenticated apps
+cannot silently disable authentication. Configure their existing OIDC provider
+and register each target app client with the published preview callback origin.
+For local JWT validation, a typical explicit configuration is:
+
+```dotenv
+MOZAIKS_PREVIEW_ENV_AUTH_PROVIDER=jwt
+MOZAIKS_PREVIEW_ENV_AUTH_ISSUER=http://localhost:8080/realms/local-preview
+MOZAIKS_PREVIEW_ENV_AUTH_JWKS_URL=http://host.docker.internal:8080/realms/local-preview/protocol/openid-connect/certs
+MOZAIKS_PREVIEW_ENV_VITE_OIDC_AUTHORITY=http://localhost:8080/realms/local-preview
+```
+
+These are example addresses, not provisioned services. Audience and frontend
+client ID are the generated app ID; callback paths follow its auth contract.
+Additional claims and app-owned AI credentials must be explicitly configured
+for the chosen provider and app. Test data survives a runtime restart within
+one session, but is discarded when that sandbox stops or expires.
+
+For a provider whose JWT carries permissions in the space-delimited `scope`
+claim, set `MOZAIKS_PREVIEW_ENV_AUTH_SCOPES_CLAIM=scope`; the generic JWT
+adapter otherwise defaults to `scp`. Configure the role and app-identity claim
+names to match the actual token too. Register only the target app's declared
+permissions on its test client. A successful sign-in does not prove module
+authorization: test an ordinary app user, a second user, and anonymous requests.
+
+Keep live Factory acceptance and automated regression tests on separate MongoDB
+instances, not merely different URI database suffixes: runtime system collections
+use their canonical database name. Supply `MONGO_URI` explicitly and disable
+implicit dotenv loading for tests. Do not point a broad test suite at a development
+database containing builds or user records.
 
 ## What persists
 
@@ -64,30 +148,24 @@ this is what refreshes the preview iframe after a scoped refinement patch:
 | `E2B_API_KEY` | unset | enables the e2b strategy |
 | `E2B_TEMPLATE` | provider default | e2b adapter template |
 | `E2B_TIMEOUT` | `300` (seconds) | e2b adapter session/default validation timeout |
-| `SANDBOX_PREVIEW_PORT` | `3000` | dev-server port started + published for previews |
-| `DOCKER_SANDBOX_IMAGE` | `node:20-alpine` | docker adapter image |
+| `SANDBOX_PREVIEW_PORT` | `3000` | additional provider port; canonical app previews use frontend `3000` and backend `8000` |
+| `DOCKER_SANDBOX_IMAGE` | `mozaiks-sandbox:local` | locally built Docker adapter image |
 | `DOCKER_SANDBOX_TIMEOUT` | `300` | docker container lifetime (seconds) |
 | `SANDBOX_TTL_MINUTES` | `30` | artifact preview-session TTL (also the e2b kill deadline) |
 | `SANDBOX_TEMPLATE` | provider default | artifact preview-session e2b template |
-| `SANDBOX_WORKDIR` | `/home/user/app` | artifact preview-session workdir |
+| `SANDBOX_WORKDIR` | `/home/user/app` | e2b workspace root; Docker uses `/workspace` |
+| `MOZAIKS_PREVIEW_ENV_<NAME>` | unset | explicit preview-only environment, never implicit host inheritance |
 | `APP_VALIDATION_BUILD_OUTPUT_MAX_CHARS` | `20000` | persisted build-output trim |
 
-## Hosted e2b activation
+## Hosted provider boundary
 
-For the hosted product (users have no local Docker):
-
-1. Set `E2B_API_KEY` on the platform environment. Strategy auto-resolves to
-   `e2b`; the Studio conversation renders the preview iframe
-   (the `PreviewPane` inside the `AppWorkbench` artifact) from the validation
-   result's preview URL.
-2. **Cost posture:** e2b bills per sandbox-minute. Sessions carry a kill
-   deadline (`E2B_TIMEOUT` for validation runs, `SANDBOX_TTL_MINUTES` for
-   artifact preview sessions) and identity metadata — audit orphans by
-   listing provider sandboxes and matching `purpose`/`app_id` tags. Review
-   spend after the first month; introduce per-user session caps before
-   opening to outside users.
-3. Local/OSS development needs none of this: a running Docker daemon gives
-   the same preview for free.
+Paid hosted sandboxes are not a pre-launch prerequisite and are not provisioned
+by this setup. An operator choosing e2b must supply a compatible template with
+the canonical runtime, frontend, private database, and dependency constraints;
+setting an API key alone is insufficient. Hosted isolation, authenticated
+ingress, per-user concurrency quotas, and billing admission need verification
+before allowing external users. A local Docker preview is not a hardened
+multi-tenant execution service.
 
 ## Non-goals
 

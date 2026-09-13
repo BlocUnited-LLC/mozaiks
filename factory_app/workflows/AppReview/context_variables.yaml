@@ -64,6 +64,7 @@ definitions:
 
   app_validation_status:
     type: string
+    writer_ids: [transition_router]
     description: >
       Result of the build validation step run by AppGenerator.
       One of: passed, failed, skipped. Displayed in the review summary.
@@ -92,6 +93,7 @@ definitions:
 
   integration_tests_passed:
     type: boolean
+    writer_ids: [transition_router]
     description: >
       Whether integration checks passed during the build. Null when
       integration checks were not run.
@@ -101,6 +103,7 @@ definitions:
 
   app_bundle_acceptance_status:
     type: string
+    writer_ids: [transition_router]
     description: >
       Deterministic AppGenerator acceptance gate result for the staged app
       bundle. Expected AppReview entry value is passed.

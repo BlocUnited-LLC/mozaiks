@@ -11,9 +11,13 @@ from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
 logger = get_core_logger("e2b_sandbox")
 
 try:
+    from e2b.exceptions import NotFoundException
     from e2b_code_interpreter import Sandbox
 except Exception:  # pragma: no cover
     Sandbox = None  # type: ignore[assignment]
+    _NOT_FOUND_ERRORS: tuple[type[Exception], ...] = ()
+else:
+    _NOT_FOUND_ERRORS = (NotFoundException,)
 
 
 class E2BSandboxAdapter:
@@ -185,8 +189,12 @@ class E2BSandboxAdapter:
         return self._session_info(sandbox)
 
     async def terminate_session(self, *, session_id: str) -> bool:
-        sandbox = await self._connect_sandbox(session_id)
-        await asyncio.to_thread(sandbox.kill)
+        try:
+            sandbox = await self._connect_sandbox(session_id)
+            # E2B kill() returns False only for HTTP 404; other API failures raise.
+            await asyncio.to_thread(sandbox.kill)
+        except _NOT_FOUND_ERRORS:
+            pass
         return True
 
     def capabilities(self) -> dict[str, Any]:

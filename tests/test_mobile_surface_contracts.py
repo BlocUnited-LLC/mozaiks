@@ -43,10 +43,13 @@ def test_mobile_table_and_navigation_follow_app_theme() -> None:
     assert 'aria-label="Select record"' in table
 
 
-def test_summary_strip_compacts_on_mobile() -> None:
+def test_summary_strip_fits_its_container_without_clipping_labels() -> None:
     source = _read("chat-ui/src/ui/primitives/SummaryStrip.jsx")
 
-    assert 'grid grid-cols-2 gap-px bg-border/35 md:grid-cols-4' in source
+    assert 'grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))]' in source
+    assert 'whitespace-normal' in source
+    assert 'overflow-wrap:anywhere' in source
+    assert 'truncate' not in source
     assert 'min-h-[5.75rem]' in source
     assert 'text-xl font-semibold' in source
 

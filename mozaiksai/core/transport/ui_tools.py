@@ -22,6 +22,9 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from mozaiksai.core.auth import UserPrincipal, WebSocketUser
+from mozaiksai.core.auth.adapters import registry as auth_registry
+from mozaiksai.core.auth.websocket_auth import verify_user_owns_resource
 from mozaiksai.core.transport.ui_events import UIDisplayMode, UIUpdateData
 
 if TYPE_CHECKING:
@@ -58,11 +61,16 @@ class UIToolsMixin:
             return
         registry = self._get_resolved_tool_call_registry()
         registry[event_id] = None
+        metadata = self._ui_tool_metadata.get(event_id)
+        if metadata:
+            # Keep the session binding for authorized, idempotent retries.
+            self._ui_tool_metadata[event_id] = {"chat_id": metadata.get("chat_id")}
         while len(registry) > 1024:
             oldest = next(iter(registry), None)
             if oldest is None:
                 break
             registry.pop(oldest, None)
+            self._ui_tool_metadata.pop(oldest, None)
 
     def _is_tool_call_response_resolved(self, event_id: str) -> bool:
         if not event_id:
@@ -356,13 +364,71 @@ class UIToolsMixin:
             except Exception as dismiss_err:
                 logger.debug("[UI_TOOL] Failed to emit ui.dismiss event for %s: %s", event_id, dismiss_err)
 
-    async def submit_tool_call_response(self, event_id: str, response_data: dict[str, Any]) -> bool:
-        """
-        Submit response data for a pending UI tool event.
+    def _tool_call_chat_id(self, event_id: str) -> str | None:
+        """Resolve one server-owned chat binding, including composer requests."""
+        metadata = self._ui_tool_metadata.get(event_id) or {}
+        chat_ids = {
+            chat_id for chat_id, registry in self._input_request_registries.items()
+            if event_id in registry
+        }
+        if metadata.get("chat_id"):
+            chat_ids.add(metadata["chat_id"])
+        if len(chat_ids) != 1:
+            return None
+        chat_id = next(iter(chat_ids))
+        return chat_id if isinstance(chat_id, str) and chat_id else None
 
-        This method is called by an API endpoint when the frontend submits data
-        from an interactive UI component.
+    async def submit_tool_call_response_for_user(
+        self,
+        event_id: str,
+        response_data: dict[str, Any],
+        *,
+        principal: UserPrincipal | WebSocketUser,
+        chat_id: str | None = None,
+        app_id: str | None = None,
+    ) -> bool:
+        """Authorize HTTP/WS input against the event's persisted session owner.
+
+        Caller-supplied payload identity is never authority. Optional chat/app
+        constraints come from the WebSocket's server-selected session context.
         """
+        if not isinstance(event_id, str) or not event_id:
+            return False
+        if not isinstance(principal, (UserPrincipal, WebSocketUser)):
+            return False
+        event_chat_id = self._tool_call_chat_id(event_id)
+        if not event_chat_id or (chat_id is not None and chat_id != event_chat_id):
+            return False
+
+        try:
+            collection = await self._get_or_create_persistence_manager()._coll()
+            session = await collection.find_one(
+                {"_id": event_chat_id}, {"user_id": 1, "app_id": 1},
+            )
+        except Exception as exc:
+            logger.warning("[UI_TOOL] Session ownership lookup failed: %s", type(exc).__name__)
+            return False
+        if not session or not session.get("user_id") or not session.get("app_id"):
+            return False
+        if not verify_user_owns_resource(principal.user_id, session["user_id"]):
+            # HTTP permits anonymous local/demo access; WS identities stay path-bound.
+            if (
+                not isinstance(principal, UserPrincipal)
+                or principal.user_id != "anonymous"
+                or auth_registry.is_auth_enabled()
+            ):
+                return False
+        if not principal.validate_app_id(session["app_id"]) or not principal.validate_chat_id(event_chat_id):
+            return False
+        if app_id is not None and app_id != session["app_id"]:
+            return False
+        # The awaited lookup must not authorize an event rebound to another chat.
+        if self._tool_call_chat_id(event_id) != event_chat_id:
+            return False
+        return await self.submit_tool_call_response(event_id, response_data)
+
+    async def submit_tool_call_response(self, event_id: str, response_data: dict[str, Any]) -> bool:
+        """Submit a trusted in-process response; HTTP/WS use the owner-checked entry point."""
         if self._is_tool_call_response_resolved(event_id):
             logger.debug("[UI_TOOL] Ignoring duplicate response for already resolved event %s", event_id)
             return True
@@ -372,7 +438,7 @@ class UIToolsMixin:
             if not future.done():
                 self._complete_tool_call_future(future, response_data)
                 logger.debug("[UI_TOOL] Submitted response for event %s", event_id)
-                metadata = self._ui_tool_metadata.pop(event_id, None)
+                metadata = self._ui_tool_metadata.get(event_id)
                 self._mark_tool_call_response_resolved(event_id)
                 await self._finalize_tool_call_response(
                     event_id=event_id,
@@ -381,14 +447,12 @@ class UIToolsMixin:
                 )
                 return True
             else:
-                self._ui_tool_metadata.pop(event_id, None)
                 self._mark_tool_call_response_resolved(event_id)
                 logger.debug("[UI_TOOL] Ignoring duplicate response for completed event %s", event_id)
                 return True
         metadata = self._ui_tool_metadata.get(event_id)
         if metadata is not None:
             self._buffered_tool_call_responses[event_id] = response_data
-            self._ui_tool_metadata.pop(event_id, None)
             self._mark_tool_call_response_resolved(event_id)
             logger.debug("[UI_TOOL] Buffered early response for event %s", event_id)
             await self._finalize_tool_call_response(
@@ -399,9 +463,12 @@ class UIToolsMixin:
             return True
         input_request_text = self._coerce_input_request_response_text(response_data)
         if self._has_pending_input_request(event_id):
+            input_chat_id = self._tool_call_chat_id(event_id)
             logger.debug("[UI_TOOL] Routing response-required interaction through submit_user_input for %s", event_id)
             submitted = await self.submit_user_input(event_id, input_request_text)
             if submitted:
+                if input_chat_id:
+                    self._ui_tool_metadata[event_id] = {"chat_id": input_chat_id}
                 self._mark_tool_call_response_resolved(event_id)
             return submitted
 

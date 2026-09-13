@@ -32,7 +32,7 @@ workflow tool
   -> ChatPage stores a `toolCall` render object in message/artifact state
   -> WorkflowUIRouter resolves the workflow component
   -> generated React component renders and calls onResponse(...)
-  -> websocket tool_call_response
+  -> authenticated POST /api/tool-call/respond
   -> submit_tool_call_response(...)
   -> pending future resolves inside use_ui_tool(...)
 ```
@@ -184,10 +184,19 @@ surfaces. They are transport/telemetry events, not component-mount requests.
 
 ### Response contract
 
-Generated React components answer through:
+Generated React components answer through `onResponse(...)`. ChatPage binds
+both live and restored tool responses to the existing authenticated
+`POST /api/tool-call/respond` helper. Only a successful response containing
+`status: success` acknowledges the decision; an open WebSocket or a successful
+socket write does not. This submission path does not require a connected
+workflow WebSocket. The WebSocket `tool_call_response` endpoint remains available
+to other transport consumers, with its existing owner checks and acknowledgement.
 
-- websocket `tool_call_response`
-- or REST `POST /api/tool-call/respond`
+DownloadCenter disables actions while awaiting acknowledgement, displays
+submission failures, and keeps the decision available after rejection. It does
+not automatically retry a response after a network failure, which may leave
+acceptance uncertain. ChatPage reads the current access token when the user
+submits, not when the artifact first renders.
 
 The response is correlated by the UI interaction id, not by raw message text.
 
