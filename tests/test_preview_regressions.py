@@ -79,6 +79,20 @@ async def test_manifest_alias_rejected_before_initial_provider_write(alias):
     assert state.last_files == {}
 
 
+@pytest.mark.asyncio
+async def test_binary_file_path_rejected_before_provider_write():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    before = list(adapter.calls)
+
+    with pytest.raises(ValueError, match="Invalid preview file path"):
+        await manager.sync(state.sandbox_id, [{"path": b"app.json", "content": MANIFEST}], [])
+
+    assert adapter.calls == before
+    assert state.last_files == {}
+
+
 @pytest.mark.parametrize("path", ["app.json", "ui/pages/home.yaml"])
 @pytest.mark.parametrize("operation", ["write", "delete"])
 @pytest.mark.asyncio

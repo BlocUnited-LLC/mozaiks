@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from mozaiksai.core.runtime.app.auth_contract import load_app_auth_contract
 from mozaiksai.resources import (
@@ -148,6 +149,7 @@ def run_runtime(*, app_root: Path, preview_url: str) -> int:
             from pymongo.errors import PyMongoError
 
             deadline = time.monotonic() + 30
+            client: MongoClient[dict[str, Any]]
             with MongoClient(env["MONGO_URI"], serverSelectionTimeoutMS=1000) as client:
                 while not stopping:
                     try:

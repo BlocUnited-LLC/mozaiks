@@ -187,17 +187,21 @@ class ArtifactPreviewSessionManager:
                 raise KeyError("Sandbox stopped")
             if state.status == "error":
                 raise ValueError("Preview failed; recreate the preview before syncing files")
-            next_files = {}
+            next_files: dict[str, str | bytes] = {}
             for entry in files:
-                path = _safe_relpath(entry.get("path", ""))
+                raw_path = entry.get("path", "")
+                path = _safe_relpath(raw_path) if isinstance(raw_path, str) else None
                 if path is None or not isinstance(entry.get("content"), (str, bytes)):
                     raise ValueError("Invalid preview file path or content")
                 if path in next_files:
                     raise ValueError("Duplicate preview file path")
                 next_files[path] = entry["content"]
-            deleted_paths = [_safe_relpath(path) for path in deleted]
-            if any(path is None for path in deleted_paths):
-                raise ValueError("Invalid deleted preview file path")
+            deleted_paths: list[str] = []
+            for raw_path in deleted:
+                path = _safe_relpath(raw_path)
+                if path is None:
+                    raise ValueError("Invalid deleted preview file path")
+                deleted_paths.append(path)
             destinations: dict[str, str] = {}
             for path in (*state.last_files, *next_files, *deleted_paths):
                 destination = app_bundle_workspace_path(path)
@@ -205,7 +209,7 @@ class ArtifactPreviewSessionManager:
                     raise ValueError("Conflicting preview file destinations")
             merged = {**state.last_files, **next_files}
             for path in deleted_paths:
-                merged.pop(str(path), None)
+                merged.pop(path, None)
             self._validate_identity(state, merged)
             adapter = self._adapter(state.provider)
             try:
@@ -217,7 +221,7 @@ class ArtifactPreviewSessionManager:
                     )
                 for path in deleted_paths:
                     result = await adapter.run_command(
-                        session_id=self._session_id(state), command=f"rm -f -- {shlex.quote(app_bundle_workspace_path(str(path)))}",
+                        session_id=self._session_id(state), command=f"rm -f -- {shlex.quote(app_bundle_workspace_path(path))}",
                         cwd=self._workdir(state.provider), timeout_seconds=15,
                     )
                     if not result.success:

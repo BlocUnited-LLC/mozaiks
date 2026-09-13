@@ -7,7 +7,7 @@ import io
 import stat
 import zipfile
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Literal, overload
 
 from mozaiksai.control_plane.contracts import safe_artifact_relpath
 from mozaiksai.core.artifacts.content_store import (
@@ -22,9 +22,27 @@ _MAX_TOTAL_BYTES = 32_000_000
 _MAX_FILES = 4096
 
 
+@overload
+async def read_artifact_bundle(
+    artifact: BuildRecord, *, include_binary: Literal[False] = False,
+) -> tuple[dict[str, str], list[dict[str, Any]]]: ...
+
+
+@overload
+async def read_artifact_bundle(
+    artifact: BuildRecord, *, include_binary: Literal[True],
+) -> tuple[dict[str, str | bytes], list[dict[str, Any]]]: ...
+
+
+@overload
+async def read_artifact_bundle(
+    artifact: BuildRecord, *, include_binary: bool,
+) -> tuple[dict[str, str | bytes], list[dict[str, Any]]]: ...
+
+
 async def read_artifact_bundle(
     artifact: BuildRecord, *, include_binary: bool = False,
-) -> tuple[dict[str, str | bytes], list[dict[str, Any]]]:
+) -> tuple[dict[str, str], list[dict[str, Any]]] | tuple[dict[str, str | bytes], list[dict[str, Any]]]:
     metadata = artifact.commit_metadata.metadata
     entry = resolve_canonical_bundle_entry(artifact)
     if metadata.get("content_ref"):
