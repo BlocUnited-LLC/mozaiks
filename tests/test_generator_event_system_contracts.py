@@ -96,7 +96,8 @@ def test_agentgenerator_bundle_builder_prompt_uses_current_workflow_contract_ter
 def test_agentgenerator_universal_prompt_hook_uses_current_agents_and_transition_graph() -> None:
     source = _read("factory_app/workflows/AgentGenerator/tools/hook_universal_prompts.py")
 
-    assert "transition_graph.yaml exists in the agents list" in source
+    assert "Every transition source resolves to the roster or the canonical user source" in source
+    assert "each target resolves to the roster or an allowed terminal/user target" in source
     assert "WorkflowBundleBuilderAgent" in source
     assert "PackMetadataAgent" in source
     assert "HandoffsAgent" not in source
