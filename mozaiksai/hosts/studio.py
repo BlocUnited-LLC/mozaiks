@@ -2513,6 +2513,7 @@ async def trigger_workflow(
     if body.trigger_source == "refinement":
         from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
         from mozaiksai.core.session.launcher import _PERSISTENCE_MANAGER
+        from mozaiksai.core.usage.context import AuxiliaryUsageContext
 
         protected_context = {
             "run_build_binding", "build_registry_id", "build_id", "target_app_id",
@@ -2566,8 +2567,13 @@ async def trigger_workflow(
                     ).strip()
                     if active_revision_id:
                         trigger_payload["revision_id"] = active_revision_id
+        usage_context = AuxiliaryUsageContext(
+            app_id=app_id, user_id=user_id,
+            tenant_id=principal.tenant_id, workspace_id=principal.workspace_id,
+        )
         try:
             refinement_request = orchestration_control.request_from_payload(
+                usage_context=usage_context,
                 payload=trigger_payload,
                 app_id=app_id,
                 target_app_id=artifact_app_id,
@@ -2652,6 +2658,9 @@ async def trigger_workflow(
                         owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
                         workflow_name=refinement_decision.workflow_id,
                     )
+                    refinement_request = refinement_request.model_copy(update={
+                        "usage_context": usage_context.model_copy(update={"run_build_binding": inline_binding}),
+                    })
                     surface_result = await orchestration_control.execute_surface_plan(
                         plan=contract_surface_plan,
                         refinement_request=refinement_request,

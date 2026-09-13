@@ -158,6 +158,32 @@ it does not justify retaining both paths.
 | `AG2-WP-012` | WAL polling for product event projection | Native subscriptions do not carry Mozaiks app/transport persistence scope. | App-scoped listener contract; shrink to event conversion. | Runtime alignment |
 | `AG2-WP-013` | Private human-client reattachment fallback | No public durable human attach API exists. | Public `attach_human(...)`; delete all three private-member accesses together. | AG2 compatibility |
 
+## Auxiliary Usage Provenance
+
+`AG2-WP-014` (`WATCH`, verified against installed `ag2==1.0.3` on
+September 13, 2026): `ag2/agent.py` implements schema correction in
+`AgentReply.content` via `AgentReply.ask`. Per-ask middleware is not
+inherited, but agent-level middleware is reapplied. The auxiliary runner
+therefore registers existing Mozaiks usage middleware and native AG2
+`RetryMiddleware` on the agent. Mozaiks does not implement a correction loop.
+
+The evidence is the real AG2/OpenAI adapter exercised by
+`tests/test_auxiliary_usage_accounting.py` with HTTP MockTransport, together
+with `tests/test_ag2_usage_middleware.py` and
+`tests/test_ag2_model_call_limits.py`. Source baseline for this bounded
+Mozaiks change: `d5e7e13fab23449fa9399db76e6f8a62d9ec101f`.
+Recheck native correction inheritance, guard ordering, provider controls,
+receipt count, and collector/debit identity on upgrades.
+
+`ag2/events/types.py` permits absent usage fields; `ModelResponse` is not a
+guaranteed provider-attempt identity. Middleware sees returned responses, not
+SDK-hidden attempts or exhausted provider exceptions. The September 1 history
+below describes an earlier observer integration, not current complete runtime
+coverage. Current ownership is the existing usage middleware and collector.
+Do not add a second TokenMonitor/UsageEvent collector that duplicates receipts.
+If AG2 supplies complete attempt provenance, require a coverage and
+deduplication proof before replacing this response-only projection.
+
 ## AG2 Ownership Guard
 
 Before adding any Mozaiks abstraction involving agents, `Task`, Network,

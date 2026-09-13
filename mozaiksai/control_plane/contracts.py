@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mozaiksai.core.session.build_binding import BuildIdentity, RunBuildBinding
+from mozaiksai.core.usage.context import AuxiliaryUsageContext
 
 
 class RefinementLane(StrEnum):
@@ -178,6 +179,7 @@ class CodingWorkerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     app_id: str
+    usage_context: AuxiliaryUsageContext | None = Field(default=None, exclude=True, repr=False)
     target_app_id: BuildIdentity | None = None
     run_build_binding: RunBuildBinding | None = None
     baseline_files: dict[str, str] | None = None

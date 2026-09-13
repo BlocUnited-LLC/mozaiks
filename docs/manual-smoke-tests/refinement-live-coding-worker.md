@@ -10,9 +10,9 @@ through the scoped execution boundary.
 
 ```bash
 python scripts/smoke_refinement_live_coding_worker.py
-python scripts/smoke_refinement_live_coding_worker.py --run-live
+python scripts/smoke_refinement_live_coding_worker.py --run-live --user-id <owner-id>
 python scripts/smoke_refinement_live_coding_worker.py --save-fixture
-python scripts/smoke_refinement_live_coding_worker.py --run-live --scenario all --save-fixture
+python scripts/smoke_refinement_live_coding_worker.py --run-live --user-id <owner-id> --scenario all --save-fixture
 ```
 
 ## Required environment
@@ -21,6 +21,7 @@ python scripts/smoke_refinement_live_coding_worker.py --run-live --scenario all 
 - The standard Refinement Engine configuration must resolve a coding LLM config.
 - No model settings are changed by the smoke.
 - The script stays in skip mode unless `--run-live` is provided.
+- Live calls require an explicit `--user-id` for usage attribution.
 
 If `OPENAI_API_KEY` is missing, the script exits cleanly without calling the
 live worker.

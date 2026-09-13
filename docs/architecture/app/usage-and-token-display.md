@@ -11,6 +11,51 @@ These are three distinct concerns. Do not conflate them.
 
 ## Background: What the OSS Runtime Tracks
 
+### Auxiliary Response Coverage
+
+`AG2StructuredAgentRunner` uses the same `MozaiksUsageMiddleware`,
+`TokenManager`, `chat.usage_delta`, `RuntimeUsageLedger`, and configured
+token-wallet ingest as workflow agents. Covered callers are ChangeClassifier,
+ContractSurfacePlanner, ScopeProposer, CodingWorker, and
+SurfaceRegenerationWorker. This is returned-response accounting, not all-call
+or all-attempt accounting.
+
+The host supplies an `AuxiliaryUsageContext` with nonempty app/user ownership
+and optional principal tenant/workspace scope. It is excluded from request
+serialization and is never derived from caller payloads, prompt content,
+requested workflow names, or historical build IDs. An actual chat/workflow or
+server `RunBuildBinding` may be supplied when one exists. Classification and
+planning before allocation deliberately have null chat/build fields; surface
+and coding execution receive the new refinement binding, not the baseline.
+
+Receipts explicitly distinguish `execution_kind: workflow` from
+`execution_kind: auxiliary`. Workflow receipts still require chat/workflow
+identity. Auxiliary receipts require app/user/agent identity and a collector
+event ID, but do not invent runs. They contribute to app/user totals and raw
+events; absent workflow/chat fields do not create synthetic grouped rows.
+Wallet debits reuse that same event ID and trusted owner.
+
+The live coding-worker smoke requires an explicit operator `--user-id`
+for auxiliary calls. It does not synthesize an owner from the app or build ID.
+
+Usage and retry middleware are registered on the AG2 agent so native
+`AgentReply.content(retries=...)` correction turns retain both. Usage remains
+outside RetryMiddleware, with admission checked once per logical LLM call;
+SDK and provider retry controls are preserved through the existing config
+adapter. No global retry defaults or workflow middleware ordering change.
+
+Limits: only returned responses with nonzero measured token usage emit deltas.
+Invalid-schema responses with usage are recorded even when validation later
+exhausts. Provider errors without returned usage, SDK-hidden retries, missing
+usage, and zero usage do not produce these receipts. Zero displayed estimates
+with unknown cost are not evidence of no cost. Emission and downstream ingest
+remain best-effort, not an atomic receipt/debit transaction. Existing query
+limits still apply. A failed/unknown-attempt completeness contract is separate
+follow-up work; this patch makes no completeness claim.
+
+Compatibility provenance and upgrade checks:
+[AG2-WP-014](../workflows/ag2-update-watchpoints.md#auxiliary-usage-provenance).
+
 The OSS runtime maintains two independent stores:
 
 | Store | What it records | Key |

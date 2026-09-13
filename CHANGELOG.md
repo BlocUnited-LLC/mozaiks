@@ -28,6 +28,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Auxiliary refinement agents now emit measured response usage through the
+  existing runtime collector and configured token-wallet ingest. Trusted host
+  app/user attribution is required; chat/build identity is attached only when
+  actually allocated. Native AG2 schema-correction turns retain usage and retry
+  middleware, and the auxiliary config adapter preserves provider controls.
+  This does not account for every attempt or establish unknown provider cost.
 - Preserve the original Factory build-event envelope across re-emission and
   lost acknowledgements. Successful delivery cannot be revoked by a late failed
   attempt, and already acknowledged events are not posted again by lifecycle hooks.

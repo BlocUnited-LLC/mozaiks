@@ -783,6 +783,11 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
 
     async def _fake_execute(request):  # noqa: ANN001
         assert request.files == {"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"}
+        assert request.usage_context.app_id == "factory"
+        assert request.usage_context.user_id == "demo-user"
+        assert request.usage_context.chat_id is None
+        assert request.run_build_binding == _BINDING
+        assert "usage_context" not in request.context_seed["refinement_request"]
         assert request.metadata["scope_proposal"]["selected_paths"] == ["app/ui/pages/Dashboard.jsx"]
         child = _BaselineStore.versions[request.build_record_id].model_copy(deep=True, update={"id": "av_child_multi_1"})
         child.commit_metadata.metadata.update(request.run_build_binding.model_dump())
@@ -1887,9 +1892,16 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     )
 
     async def _fake_prepare_contract_surface(**kwargs):
+        usage = kwargs["refinement_request"].usage_context
+        assert usage.app_id == "factory" and usage.user_id == "demo-user"
+        assert usage.run_build_binding is None
         return _plan, _harness_decision
 
     async def _fake_execute_surface_plan(**kwargs):
+        usage = kwargs["refinement_request"].usage_context
+        assert usage.app_id == "factory" and usage.user_id == "demo-user"
+        assert usage.run_build_binding == _BINDING
+        assert usage.chat_id is usage.workflow_name is None
         assert kwargs["workspace_files"]["app/modules/product/backend/handler.py"] == "# product handler"
         return _surface_result
 
