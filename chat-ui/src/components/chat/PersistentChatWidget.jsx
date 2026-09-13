@@ -546,7 +546,7 @@ const PersistentChatWidget = ({
         <button
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
-          className="group relative flex flex-col items-center gap-2 rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card px-3 py-5 shadow-[0_8px_28px_rgba(0,0,0,0.45)] ring-1 ring-primary/25 transition-all duration-200 hover:border-primary hover:bg-muted hover:px-4"
+          className="group relative flex flex-col items-center gap-2 rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card px-2 py-5 shadow-[0_8px_28px_rgba(0,0,0,0.45)] ring-1 ring-primary/25 transition-all duration-200 hover:border-primary hover:bg-muted md:px-2.5"
           title="Open assistant"
           aria-label="Open assistant"
         >
@@ -554,7 +554,7 @@ const PersistentChatWidget = ({
             src={brandLogoSrc}
             alt=""
             aria-hidden="true"
-            className="h-9 w-9 transition-transform group-hover:scale-110"
+            className="h-7 w-7 transition-transform group-hover:scale-110 md:h-9 md:w-9"
             onError={applyBrandImageFallback}
           />
           <svg
