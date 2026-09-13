@@ -34,7 +34,7 @@ def resolve_auxiliary_usage_context(
     run_build_binding: RunBuildBinding | None = None,
 ) -> AuxiliaryUsageContext:
     """Validate attribution against explicit execution inputs at an internal boundary."""
-    resolved = context or AuxiliaryUsageContext(app_id=app_id, user_id=user_id)
+    resolved = context or AuxiliaryUsageContext.model_validate({"app_id": app_id, "user_id": user_id})
     if resolved.app_id != app_id or resolved.user_id != user_id:
         raise ValueError("Auxiliary usage owner does not match execution owner")
     binding = run_build_binding or resolved.run_build_binding

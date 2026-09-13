@@ -100,11 +100,11 @@ class RuntimeUsageLedger:
         tenant_id = _text(payload.get("tenant_id"))
         workspace_id = _text(payload.get("workspace_id"))
         try:
-            scope = UsageReceiptScope(
-                execution_kind=execution_kind, app_id=app_id, user_id=user_id,
-                chat_id=chat_id, workflow_name=workflow_name,
-                agent_name=_text(payload.get("agent_name")),
-            )
+            scope = UsageReceiptScope.model_validate({
+                "execution_kind": execution_kind, "app_id": app_id, "user_id": user_id,
+                "chat_id": chat_id, "workflow_name": workflow_name,
+                "agent_name": _text(payload.get("agent_name")),
+            })
         except ValidationError:
             return
         if execution_kind == "auxiliary" and not _text(payload.get("event_id")):
