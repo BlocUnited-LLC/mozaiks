@@ -54,6 +54,11 @@ the backend from the promoted workspace, including the second user's inability
 to access it. Authenticated download returned the exact ZIP digest; anonymous
 download returned 401 and an unrelated registry returned 404.
 
+A separate real-token check verified the host boundary in both directions:
+the Factory token was rejected by the generated app with 401, and the app token
+was rejected by Factory artifact download with 401. Each token succeeded on its
+own host with 200. The check used independent OIDC browser contexts.
+
 ## Regression Evidence
 
 - Integrated OSS run: 17,247 passed, 98 skipped, two failures. Both failures were
@@ -76,6 +81,13 @@ download returned 401 and an unrelated registry returned 404.
   exposed a missing contextual logger `exception()` method, now implemented and
   covered together with failed-job persistence. The combined CI-fix slice passed
   100 tests; the control-plane identity slice passed 301 tests.
+- The integration merged as PR 524 with all CI checks green. A subsequent
+  consumer review exposed mutable retry payloads in the existing build-events
+  outbox. Eight new real-Mongo regression cases failed before the fix; all nine
+  new cases and a 34-test lifecycle slice passed afterward. The complete
+  follow-up run passed 17,273 tests with 98 skipped and four warnings. Event
+  envelopes and acknowledgements are now preserved across re-emission and
+  late delivery failures, without changing the wire contract or AG2 execution.
 - Whole-tree Ruff and `git diff --check` passed. A redacted Gitleaks scan of this
   branch's commit patches found no leaks.
 - App Zero installed a local wheel built from OSS checkpoint `9c1078eb`, without
