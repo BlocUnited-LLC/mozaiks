@@ -175,6 +175,25 @@ def test_global_workflow_catalog_survives_a_workspace_scoped_reinitialization() 
     )
 
 
+def test_workflow_catalog_survives_tool_loader_then_persistence_policy_restore() -> None:
+    """A temporary tool-loader root must not become the next fixture's restore root."""
+    for polluter in (
+        "test_agent_tools_loader_reads_yaml_only",
+        "test_agent_tools_loader_rebinds_workflows_package_to_active_root",
+    ):
+        result = _run_pytest([
+            "--reruns=0",
+            f"tests/test_declarative_config_fallbacks.py::{polluter}",
+            "tests/test_persistence_initial_messages.py"
+            "::test_context_variable_persistence_resume_round_trip_honors_authority_policy",
+            "tests/test_workflow_catalog_contract.py",
+        ])
+        assert result.returncode == 0, (
+            f"{polluter} leaked the workflow manager root into persistence/catalog tests:\n"
+            f"{result.stdout}\n{result.stderr}"
+        )
+
+
 def test_workspace_resolution_identical_before_and_after_host_import() -> None:
     """The resolved workspace root must not change when a host import precedes it."""
     probe = (
