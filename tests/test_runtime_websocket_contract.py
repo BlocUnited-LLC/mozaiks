@@ -178,6 +178,7 @@ def _patch_runtime_websocket_harness(
     monkeypatch.setattr(runtime_app.persistence_manager, "create_chat_session", fake_create_chat_session)
     monkeypatch.setattr(runtime_app.persistence_manager, "get_or_assign_cache_seed", fake_get_or_assign_cache_seed)
     monkeypatch.setattr(runtime_app.persistence_manager, "load_run_history", fake_load_run_history)
+    monkeypatch.setattr(runtime_app.persistence_manager, "get_session_version", AsyncMock(return_value=None))
     monkeypatch.setattr(runtime_app.asyncio, "create_task", fake_create_task)
 
     monkeypatch.setattr(session_router_module, "get_session_router", lambda: session_router)

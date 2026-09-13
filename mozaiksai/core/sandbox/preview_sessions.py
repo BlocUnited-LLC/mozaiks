@@ -41,7 +41,7 @@ def _utcnow() -> datetime:
 def _safe_relpath(raw: str) -> str | None:
     value = str(raw or "").replace("\\", "/")
     path = PurePosixPath(value)
-    if not value or value.startswith("/") or ":" in value or "\x00" in value:
+    if not value or value != value.strip() or value.startswith("/") or ":" in value or "\x00" in value:
         return None
     if ".." in path.parts or str(path) == ".":
         return None
@@ -185,6 +185,8 @@ class ArtifactPreviewSessionManager:
         async with state.operation_lock:
             if self._sessions.get(sandbox_id) is not state:
                 raise KeyError("Sandbox stopped")
+            if state.status == "error":
+                raise ValueError("Preview failed; recreate the preview before syncing files")
             next_files = {}
             for entry in files:
                 path = _safe_relpath(entry.get("path", ""))
@@ -196,6 +198,11 @@ class ArtifactPreviewSessionManager:
             deleted_paths = [_safe_relpath(path) for path in deleted]
             if any(path is None for path in deleted_paths):
                 raise ValueError("Invalid deleted preview file path")
+            destinations: dict[str, str] = {}
+            for path in (*state.last_files, *next_files, *deleted_paths):
+                destination = app_bundle_workspace_path(path)
+                if destinations.setdefault(destination, path) != path:
+                    raise ValueError("Conflicting preview file destinations")
             merged = {**state.last_files, **next_files}
             for path in deleted_paths:
                 merged.pop(str(path), None)
@@ -215,7 +222,7 @@ class ArtifactPreviewSessionManager:
                     )
                     if not result.success:
                         raise RuntimeError("Failed to remove a preview file")
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 await self._fail(state, "Preview file sync failed; recreate the preview")
                 raise
             state.last_files = merged
@@ -247,6 +254,8 @@ class ArtifactPreviewSessionManager:
         async with state.operation_lock:
             if self._sessions.get(sandbox_id) is not state:
                 raise KeyError("Sandbox stopped")
+            if state.status == "error":
+                return state
             state.status, state.preview_url, state.last_error = "starting", None, None
             await self._broadcast(sandbox_id, {"type": "status", "status": "starting", "previewUrl": None})
             try:
@@ -325,7 +334,9 @@ class ArtifactPreviewSessionManager:
             return
         async with state.operation_lock:
             if state.session_id:
-                await self._adapter(state.provider).terminate_session(session_id=state.session_id)
+                stopped = await self._adapter(state.provider).terminate_session(session_id=state.session_id)
+                if not stopped:
+                    raise RuntimeError("Preview provider could not confirm the sandbox stopped")
             state.status, state.preview_url, state.last_error = "error", None, "Preview stopped"
             await self._broadcast(sandbox_id, {"type": "status", "status": "error", "error": "Preview stopped", "previewUrl": None})
             self._sessions.pop(sandbox_id, None)

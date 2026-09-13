@@ -28,6 +28,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Factory planning receives exact materializer page paths and actionable
+  case-sensitive filename feedback, avoiding repeated display-name/path mismatches.
 - Factory live previews boot saved, owner-bound app artifacts through the real
   platform host, shared frontend, and disposable Mongo database. Failed startup,
   expiry, and artifact changes clear stale preview URLs. A local Docker image
@@ -39,6 +41,8 @@ This project follows a practical pre-1.0 changelog format:
   permissions no longer produce a false missing-permissions finding.
 - Workflow review components receive rejected response acknowledgements as errors,
   rather than showing an unaccepted or stale decision as submitted.
+- UI review responses verify the saved session owner and app/chat scope before
+  completing or buffering an interaction, over both HTTP and WebSocket.
 
 - Preserve the original Factory build-event envelope across re-emission and
   lost acknowledgements. Successful delivery cannot be revoked by a late failed

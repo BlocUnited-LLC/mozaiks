@@ -845,7 +845,7 @@ models:
       owned_paths:
         type: optional_list
         items: str
-        description: Canonical file paths this task exclusively owns.
+        description: Canonical case-sensitive file paths this task exclusively owns. Page filenames use the materializer's lowercase route-derived identity, not the display name; copy exact paths from FILE CONTRACTS CONTEXT.
       depends_on:
         type: optional_list
         items: str
@@ -968,7 +968,7 @@ models:
       owned_paths:
         type: optional_list
         items: str
-        description: Canonical file paths this task exclusively owns.
+        description: Canonical case-sensitive file paths this task exclusively owns. Page filenames use the materializer's lowercase route-derived identity, not the display name; copy exact paths from FILE CONTRACTS CONTEXT.
       depends_on:
         type: optional_list
         items: str

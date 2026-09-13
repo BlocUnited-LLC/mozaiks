@@ -11,6 +11,7 @@ from factory_app.workflows._shared.hook_utils import update_agent_section, workf
 from factory_app.workflows.AppGenerator.tools.app_build_plan import _ALLOWED_TASK_TYPES
 from mozaiksai.core.runtime.persistence.adapter import PersistenceCollection
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,15 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
     ]
 
     if agent_name == "AppPlanAgent":
+        context = getattr(agent, "context_variables", None)
+        experience = _context_get(context, "experience_spec", {}) or {}
+        pages = experience.get("pages") or []
+        if pages:
+            lines.append("Exact case-sensitive page paths from the approved ExperienceSpec; copy these into page_bundle owned_paths, preserving display names separately:")
+            lines.extend(
+                f"- `{page['name']}` (`{page['route']}`) -> `ui/pages/{_page_file_stem(page)}.yaml`"
+                for page in pages
+            )
         lines.append("")
         lines.append(
             "Plan only with the active AppGenerator task vocabulary: "

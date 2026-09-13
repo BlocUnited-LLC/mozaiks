@@ -79,6 +79,18 @@ def test_approved_page_cannot_disappear():
         validate_plan_coverage(_plan(), context)
 
 
+def test_page_case_mismatch_reports_received_and_expected_paths_without_rewriting():
+    plan = _plan()
+    task = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    task["owned_paths"] = [path.replace("ui/pages/reports.yaml", "ui/pages/Reports.yaml") for path in task["owned_paths"]]
+    with pytest.raises(ValueError) as error:
+        validate_plan_coverage(plan, _context())
+    assert "case-sensitive" in str(error.value)
+    assert "ui/pages/Reports.yaml" in str(error.value)
+    assert "ui/pages/reports.yaml" in str(error.value)
+    assert "ui/pages/Reports.yaml" in task["owned_paths"]
+
+
 def test_user_scoped_module_requires_planned_account_data_handler():
     plan = _plan()
     plan["capability_packs"][0]["user_data_scope"] = True

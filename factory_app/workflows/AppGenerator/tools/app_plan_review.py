@@ -92,6 +92,11 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
     missing = {"app.json", *page_paths} - page_owned
     if missing:
         errors.append(f"page_bundle/AppSchemaAgent must own all page files and app.json; missing {sorted(missing)}")
+        errors.append(
+            "Page paths are case-sensitive and use the materializer's lowercase route-derived stem, "
+            f"not the display name. Required page paths: {page_paths}; received page_bundle paths: {sorted(page_owned)}. "
+            "Replace differently cased filenames; do not add both spellings."
+        )
 
     for pack in plan.get("capability_packs") or []:
         if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":

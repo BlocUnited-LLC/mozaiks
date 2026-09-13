@@ -26,6 +26,11 @@ model, registered pack origins, approved app-owned module identities, page
 inventory, and complete genesis task ownership. Capability sources use the
 build-context registry vocabulary plus `host_universal` for built-in host
 surfaces. A product category is not a registered managed service.
+The planner receives exact case-sensitive page paths projected from the approved
+ExperienceSpec through the materializer's existing page-stem helper. Display
+names do not become filenames: `Books` at `/books` owns `ui/pages/books.yaml`.
+Review rejects differently cased paths and returns the required and received
+paths as repair feedback; it never silently renames planned files.
 The existing plan cache preserves all typed plan fields. Frozen context values
 are detached before catalog lookup and validation.
 

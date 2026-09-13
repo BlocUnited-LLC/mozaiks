@@ -56,6 +56,12 @@ shell-config proxy pass health and target-identity checks. Status checks clear
 the URL after failure or expiry. A health check is not functional acceptance:
 exercise the generated screens, actions, permissions, and persistence too.
 
+File synchronization rejects destination aliases before provider writes. Docker
+extracts files as its configured sandbox user so later replacement and deletion
+work without root privileges. A partial or cancelled sync invalidates the session;
+recreate it rather than launching a partially updated app. Cleanup retains state
+unless the provider confirms termination or that the sandbox is already absent.
+
 ### Local Docker setup
 
 Build the preview image from the same checkout as the Factory host:
@@ -89,6 +95,19 @@ client ID are the generated app ID; callback paths follow its auth contract.
 Additional claims and app-owned AI credentials must be explicitly configured
 for the chosen provider and app. Test data survives a runtime restart within
 one session, but is discarded when that sandbox stops or expires.
+
+For a provider whose JWT carries permissions in the space-delimited `scope`
+claim, set `MOZAIKS_PREVIEW_ENV_AUTH_SCOPES_CLAIM=scope`; the generic JWT
+adapter otherwise defaults to `scp`. Configure the role and app-identity claim
+names to match the actual token too. Register only the target app's declared
+permissions on its test client. A successful sign-in does not prove module
+authorization: test an ordinary app user, a second user, and anonymous requests.
+
+Keep live Factory acceptance and automated regression tests on separate MongoDB
+instances, not merely different URI database suffixes: runtime system collections
+use their canonical database name. Supply `MONGO_URI` explicitly and disable
+implicit dotenv loading for tests. Do not point a broad test suite at a development
+database containing builds or user records.
 
 ## What persists
 

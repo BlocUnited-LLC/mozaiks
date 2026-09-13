@@ -14,11 +14,12 @@ Resolution order (see app_validation_strategy.py):
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import re
 import shutil
-import tempfile
-from pathlib import Path, PurePosixPath
+import tarfile
+from pathlib import PurePosixPath
 
 _ENV_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$", re.IGNORECASE)
 from typing import Any
@@ -77,14 +78,15 @@ class DockerSandboxAdapter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _run(args: list[str], *, timeout: float = 30.0) -> tuple[int, str, str]:
+    async def _run(args: list[str], *, timeout: float = 30.0, input_data: bytes | None = None) -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.PIPE if input_data is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input_data), timeout=timeout)
         except TimeoutError as exc:
             proc.kill()
             await proc.communicate()
@@ -170,33 +172,33 @@ class DockerSandboxAdapter:
         base = cwd or _DEFAULT_WORKDIR
         written: list[str] = []
 
-        with tempfile.TemporaryDirectory(prefix="mozaiks-docker-staging-") as staging:
-            staging_root = Path(staging)
+        archive_bytes = io.BytesIO()
+        with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
             for rel_path, content in files.items():
                 safe = _safe_relpath(rel_path)
-                if not safe:
-                    continue
-                dest = staging_root / safe
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                if isinstance(content, bytes):
-                    dest.write_bytes(content)
-                else:
-                    dest.write_text(str(content), encoding="utf-8")
+                if not safe or safe in written:
+                    raise ValueError("Invalid or duplicate sandbox file path")
+                data = content if isinstance(content, bytes) else str(content).encode("utf-8")
+                member = tarfile.TarInfo(safe)
+                member.size = len(data)
+                member.mode = 0o644
+                archive.addfile(member, io.BytesIO(data))
                 written.append(safe)
 
-            if written:
-                # Ensure workdir exists inside container
-                await self._run(
-                    ["docker", "exec", session_id, "mkdir", "-p", base],
-                    timeout=10.0,
-                )
-                # Copy the staging dir tree into the container
-                rc, _, stderr = await self._run(
-                    ["docker", "cp", f"{staging}/.", f"{session_id}:{base}"],
-                    timeout=30.0,
-                )
-                if rc != 0:
-                    raise RuntimeError(f"docker cp failed: {stderr.strip()}")
+        if written:
+            rc, _, _ = await self._run(
+                ["docker", "exec", session_id, "mkdir", "-p", base],
+                timeout=10.0,
+            )
+            if rc != 0:
+                raise RuntimeError("Docker sandbox workspace is unavailable")
+            # Extract as the container user so subsequent edits and deletes retain access.
+            rc, _, _ = await self._run(
+                ["docker", "exec", "-i", session_id, "tar", "--no-same-owner", "--no-same-permissions", "-xf", "-", "-C", base],
+                input_data=archive_bytes.getvalue(), timeout=30.0,
+            )
+            if rc != 0:
+                raise RuntimeError("Docker sandbox file extraction failed")
 
         return {"written": written, "count": len(written)}
 
@@ -318,7 +320,13 @@ class DockerSandboxAdapter:
             ["docker", "stop", session_id],
             timeout=15.0,
         )
-        return rc == 0
+        if rc == 0:
+            return True
+        rc, stdout, _ = await self._run(
+            ["docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", f"id={session_id}"],
+            timeout=15.0,
+        )
+        return rc == 0 and not stdout.strip()
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -331,11 +339,11 @@ class DockerSandboxAdapter:
 
 
 def _safe_relpath(raw: str) -> str | None:
-    path = raw.replace("\\", "/").strip()
-    if not path or path.startswith("/"):
+    path = raw.replace("\\", "/")
+    if not path or path != path.strip() or path.startswith("/") or ":" in path or "\x00" in path:
         return None
     p = PurePosixPath(path)
-    if any(part == ".." for part in p.parts):
+    if str(p) == "." or any(part == ".." for part in p.parts):
         return None
     return str(p)
 

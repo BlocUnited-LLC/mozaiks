@@ -1277,7 +1277,6 @@ async def submit_tool_call_response(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     """Submit a response from a runtime UI tool component."""
-    _ = principal
     if simple_transport is None:
         raise HTTPException(status_code=503, detail="Transport service is not available")
 
@@ -1293,7 +1292,9 @@ async def submit_tool_call_response(
     if not response_data:
         raise HTTPException(status_code=400, detail="response_data is required")
 
-    success = await simple_transport.submit_tool_call_response(event_id, response_data)
+    success = await simple_transport.submit_tool_call_response_for_user(
+        event_id, response_data, principal=principal,
+    )
     if not success:
         raise HTTPException(status_code=404, detail="UI tool event not found or already completed")
     return {"status": "success"}

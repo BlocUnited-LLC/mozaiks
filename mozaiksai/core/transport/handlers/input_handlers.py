@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
+from mozaiksai.core.auth import WebSocketUser
 from mozaiksai.core.transport.event_contract import send_event_envelope
 from mozaiksai.core.transport.session_registry import session_registry
 
@@ -175,7 +176,21 @@ async def handle_tool_call_response(
     if not event_id:
         return
     try:
-        ok = await transport.submit_tool_call_response(event_id, response_data)
+        conn = transport._get_conn_meta(chat_id)
+        principal = getattr(websocket.state, "user", None)
+        ok = False
+        if (
+            isinstance(principal, WebSocketUser)
+            and conn.get("websocket") is websocket
+            and conn.get("user_id") == principal.user_id
+            and conn.get("app_id")
+        ):
+            active = session_registry.get_active_workflow(conn["ws_id"]) if conn.get("ws_id") else None
+            target_chat_id = active.chat_id if active else chat_id
+            ok = await transport.submit_tool_call_response_for_user(
+                event_id, response_data, principal=principal,
+                chat_id=target_chat_id, app_id=conn["app_id"],
+            )
         logger.debug("TOOL_CALL_RESPONSE_RECEIVED event=%s accepted=%s", event_id, ok)
         await send_event_envelope(websocket, {
             "schema_version": "mozaiks.ui.event.v1",

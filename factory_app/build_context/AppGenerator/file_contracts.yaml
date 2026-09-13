@@ -39,6 +39,7 @@ task_contracts:
       - config/asset_manifest.json
     hard_constraints:
       - Persistent app pages stay declarative by default.
+      - Page filenames are case-sensitive lowercase identities derived by the canonical materializer from the final route segment (or the page name for /), with non-alphanumeric runs replaced by underscores. Copy exact planner-injected paths into owned_paths; display titles are not filenames. Never emit both uppercase and lowercase variants.
       - Emit exactly the current task's owned_paths. Required page outputs apply only to pages in that scope; a manifest-only task may emit pages as an empty list.
       - AppSchemaOutput.manifest is AppManifest or explicit null. A task owning app.json must emit AppManifest; otherwise emit null, which materializes neither app.json nor provenance.yaml. Do not emit a placeholder manifest or silently discard out-of-scope files.
       - New-app page_bundle tasks collectively own app.json and every planned page, with one manifest owner. Page-only revisions preserve app.json and unchanged pages from the verified baseline; full-bundle acceptance still requires a complete valid app. Standalone save_app_schema requires a non-null manifest.
@@ -56,6 +57,8 @@ task_contracts:
       - Use shell_mode=conversation for DM/chat/thread routes, workspace for dense module/profile/admin-like work surfaces, focused for setup/review flows, immersive for full-viewport experiences, public for public/legal routes, and standard for ordinary pages.
       - Use explicit shell arrays only when labels, icons, role gates, or custom paths differ from the shortcut catalog.
       - Durable page mutations bind through declared api_endpoint values or canonical module actions.
+      - Design documents and ExperienceSpec describe approved product intent, not executable API authority. Replace illustrative endpoint hints with exact /api/modules/{module_id}/{action_id} bindings from planned and generated module contracts; never copy a placeholder URL into task initial_message or page output. Preserve the approved behavior, fields, and layout.
+      - Every data-backed summary needs a declared backend action returning its value_key fields. A ui_only page does not create that action. Plan the owning module contract and business_services implementation before the dependent page task; do not invent an endpoint or replace live counts with constants.
       - Do not emit raw frontend source outside the bounded custom route bundle.
       - Pages that require reading URL query params on mount, polling an endpoint until state changes, or rendering conditional sections based on API response value must use custom_route_bundle; they cannot be expressed as declarative AppPageSchema.
       - A post-redirect confirmation page must not display confirmed/success state from the redirect URL alone. Confirmation must come from querying an app-owned module action after the backend has processed the event.
