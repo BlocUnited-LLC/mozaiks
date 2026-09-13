@@ -74,6 +74,7 @@ import {
   buildSupportConversationTranscript,
   buildSupportRequestPayload,
   buildUserSupportPath,
+  getSupportApiBaseUrl,
   resolveSupportRequestScope,
   shouldOfferHumanSupport,
 } from '../utils/supportLinks';
@@ -5555,20 +5556,24 @@ const ChatPage = () => {
             fallbackAppId: currentAppId,
             fallbackUserId: currentUserId,
           });
-          const response = await fetch('/api/modules/workspace_support/create_support_request', {
+          const supportToken = getAccessToken();
+          const response = await fetch(`${getSupportApiBaseUrl(api, config)}/api/modules/workspace_support/create_support_request`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(supportToken ? { Authorization: `Bearer ${supportToken}` } : {}),
+            },
             body: JSON.stringify(buildSupportRequestPayload({
               message: supportMessage,
-              appId: supportScope.appId || currentAppId,
-              userId: supportScope.userId || currentUserId,
+              appId: currentAppId || supportScope.appId,
               severity: 'low',
               pageUrl: window.location.href,
               pageTitle: 'Chat session',
               conversationTranscript,
             })),
           });
-          const created = response.ok ? await response.json().catch(() => ({})) : {};
+          if (!response.ok) throw new Error(`Support request failed with ${response.status}`);
+          const created = await response.json();
           const requestId = created?.request_id || created?.request?.request_id || created?.result?.request_id || created?.data?.request_id;
           const createdAppId =
             created?.app_id ||
@@ -5585,8 +5590,16 @@ const ChatPage = () => {
             navigate(buildUserSupportPath({ requestId, appId: createdAppId }));
             return;
           }
-        } catch (_) {}
-        navigate(buildUserSupportPath({ appId: currentAppId }));
+          throw new Error('Support request response had no request ID');
+        } catch (_) {
+          setMessagesWithLogging(prev => [...prev, {
+            id: `support-error-${Date.now()}`,
+            sender: 'agent',
+            agentName: 'Support',
+            content: 'Your support request could not be sent. Please try again.',
+            isStreaming: false,
+          }]);
+        }
         return;
       }
 

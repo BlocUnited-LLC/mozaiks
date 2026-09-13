@@ -91,6 +91,22 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert "return `/me?${params.toString()}`;" in support_links_source
     assert "buildSupportRequestPayload" in widget_source
     assert "buildSupportRequestPayload" in chat_page_source
+    assert "payload.subject_app_id = cleanAppId" in support_links_source
+    assert "payload.app_id = cleanAppId" not in support_links_source
+    assert "payload.user_id = cleanUserId" not in support_links_source
+    assert "Authorization: `Bearer ${supportToken}`" in widget_source
+    assert "Authorization: `Bearer ${supportToken}`" in chat_page_source
+    assert "getSupportApiBaseUrl(api, config)" in widget_source
+    assert "getSupportApiBaseUrl(api, config)" in chat_page_source
+    assert "appId: resolvedAppId || supportScope.appId" in widget_source
+    assert "appId: currentAppId || supportScope.appId" in chat_page_source
+    assert "Your support request could not be sent. Please try again." in chat_page_source
+    assert "navigate(buildUserSupportPath({ appId: currentAppId }))" not in chat_page_source
+    assert "getAccessToken?.()" in profile_source
+    assert "window.location.origin" in profile_source
+    assert "getToken?.()" not in profile_source
+    assert "studioModuleAction('workspace_support'" in profile_panel_source
+    assert "if (page?.error)" in profile_panel_source
     assert "supportError" in widget_source
     assert "page_title:" not in widget_source
     assert "page_url:" not in widget_source

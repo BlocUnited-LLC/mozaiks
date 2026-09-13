@@ -12,6 +12,7 @@ import {
   buildSupportConversationTranscript,
   buildSupportRequestPayload,
   buildUserSupportPath,
+  getSupportApiBaseUrl,
   resolveSupportRequestScope,
   shouldOfferHumanSupport,
   supportTrace,
@@ -424,25 +425,27 @@ const PersistentChatWidget = ({
     });
     const payload = buildSupportRequestPayload({
       message,
-      appId: supportScope.appId || resolvedAppId,
-      userId: supportScope.userId || resolvedUserId,
+      appId: resolvedAppId || supportScope.appId,
       pageUrl: pageUrl || (typeof window !== 'undefined' ? window.location.href : null),
       pageTitle: pageTitle || pageContext || null,
       severity,
       conversationTranscript,
     });
     supportTrace('support_request:create:start', {
-      appId: payload.app_id || null,
-      userId: payload.user_id || null,
+      appId: payload.subject_app_id || null,
       severity,
       pageUrl: payload.page_url || null,
       pageTitle: payload.page_title || null,
       transcriptCount: payload.conversation_transcript?.length || 0,
       message,
     });
-    const response = await fetch('/api/modules/workspace_support/create_support_request', {
+    const supportToken = await auth?.getAccessToken?.();
+    const response = await fetch(`${getSupportApiBaseUrl(api, config)}/api/modules/workspace_support/create_support_request`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(supportToken ? { Authorization: `Bearer ${supportToken}` } : {}),
+      },
       body: JSON.stringify(payload),
     });
     if (!response.ok) {

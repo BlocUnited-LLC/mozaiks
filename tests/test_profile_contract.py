@@ -722,6 +722,62 @@ tabs:
 
 
 @pytest.mark.asyncio
+async def test_factory_support_page_is_discovered_and_hydrated(monkeypatch) -> None:
+    from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.core.profile.discovery import load_profile_pages
+    from mozaiksai.core.runtime.composition.module_executor import ModuleResult
+    from mozaiksai.hosts import platform as platform_app
+
+    factory_app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
+    discovered = load_profile_pages(factory_app_root)
+    support = next(page for page in discovered if page["id"] == "support-tickets")
+    assert support["module_id"] == "workspace_support"
+    assert support["component"] == "UserSupportPanel"
+    assert support["visibility"] == "owner_only"
+    assert support["action"] == "list_support_requests"
+
+    monkeypatch.setenv("PLATFORM_PATH", str(factory_app_root))
+
+    class _Executor:
+        def __init__(self) -> None:
+            self.requests = []
+
+        async def execute(self, request, context):
+            self.requests.append(request)
+            return ModuleResult(success=True, data={"requests": [{"request_id": "ticket-1"}], "total": 1})
+
+    executor = _Executor()
+
+    class _Registry:
+        @property
+        def module_executor(self):
+            return executor
+
+    monkeypatch.setattr(platform_app, "executor_registry", _Registry())
+    principal = UserPrincipal(
+        user_id="support-user",
+        email="support@example.com",
+        name="Support User",
+        roles=[],
+        scopes=[],
+        raw_claims={},
+        app_id="mozaiks-factory",
+    )
+
+    result = await platform_app.get_profile_pages(app_id=None, principal=principal)
+    hydrated = next(page for page in result["pages"] if page["id"] == "support-tickets")
+    assert hydrated["data"] == {"requests": [{"request_id": "ticket-1"}], "total": 1}
+    assert hydrated["error"] is None
+    assert len(executor.requests) == 1
+    request = executor.requests[0]
+    assert request.module == "workspace_support"
+    assert request.action == "list_support_requests"
+    assert request.user_id == "support-user"
+    assert request.params == {}
+    assert request.authority.permissions == ()
+
+
+@pytest.mark.asyncio
 async def test_profile_pages_do_not_inject_my_apps(monkeypatch, tmp_path: Path) -> None:
     from mozaiksai.core.auth.dependencies import UserPrincipal
     from mozaiksai.hosts import platform as platform_app

@@ -57,6 +57,26 @@ def test_workspace_studio_data_uses_authenticated_fetch_for_apps_endpoint() -> N
     assert "fetch(`${API_BASE}/api/studio/apps`)" not in source
 
 
+def test_support_pages_use_authenticated_fetch_for_profile_and_module_actions() -> None:
+    for page_name in ("UserSupportPage.jsx", "AppSupportPage.jsx"):
+        source = _read(PAGES / page_name)
+        assert "import { studioFetch } from './studioApi.js'" in source
+        assert "studioFetch('/api/me')" in source
+        actions = ("list_support_requests",)
+        if page_name == "AppSupportPage.jsx":
+            actions += ("add_support_message", "update_support_request_status", "delete_support_request")
+        for action in actions:
+            assert f"studioFetch('/api/modules/workspace_support/{action}'" in source
+        assert "fetch(" not in source.replace("studioFetch(", "")
+
+
+def test_workspace_support_overview_surfaces_queue_failures() -> None:
+    source = _read(PAGES / "UserSupportPage.jsx")
+    assert "setSupportError(err?.message || 'Support chats could not be loaded.')" in source
+    assert 'message={error || supportError}' in source
+    assert "fetchSupportRequests({ scope: 'app', appId }).catch(() => null)" not in source
+
+
 def test_app_studio_data_uses_authenticated_fetch_for_studio_and_admin_routes() -> None:
     source = _read(PAGES / "useAppStudioData.js")
 

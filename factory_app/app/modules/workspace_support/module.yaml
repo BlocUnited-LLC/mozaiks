@@ -8,8 +8,6 @@ module:
   visibility: private
   handler: backend.handler:WorkspaceSupportModule
 permissions:
-  - id: access_as_user
-    description: Access the current user context.
   - id: workspace_support.read
     description: View support requests.
   - id: workspace_support.manage
@@ -39,7 +37,7 @@ actions:
           enum: [low, medium, high]
           default: low
           description: Severity level of the support request.
-        app_id:
+        subject_app_id:
           type: string
           nullable: true
           description: App this support request is about. Stored as subject_app_id so it cannot override runtime persistence scope.
@@ -73,8 +71,7 @@ actions:
         message_thread_id:
           type: string
           nullable: true
-    permissions:
-      - access_as_user
+    permissions: []
     emits:
       - domain.workspace_support.request_created
 
@@ -87,7 +84,7 @@ actions:
         status:
           type: string
           enum: [open, resolved, all]
-          default: open
+          default: all
           description: Filter by request status.
         limit:
           type: integer
@@ -98,7 +95,7 @@ actions:
           enum: [user, app, workspace]
           default: user
           description: User scope lists the current user's requests; app scope lists requests for the current app; workspace scope lists requests across apps for the workspace support overview.
-        app_id:
+        subject_app_id:
           type: string
           nullable: true
           description: Optional subject app id filter when support requests should be limited to one app dashboard. This does not override runtime persistence scope.
@@ -111,8 +108,7 @@ actions:
             type: object
         total:
           type: integer
-    permissions:
-      - access_as_user
+    permissions: []
 
   - id: add_support_message
     description: Add a message to an existing support request thread.
@@ -145,8 +141,7 @@ actions:
           type: string
         success:
           type: boolean
-    permissions:
-      - access_as_user
+    permissions: []
     emits:
       - domain.workspace_support.message_added
 
@@ -179,8 +174,7 @@ actions:
           type: integer
         deleted_reads:
           type: integer
-    permissions:
-      - access_as_user
+    permissions: []
     emits:
       - domain.workspace_support.request_deleted
 
@@ -214,8 +208,7 @@ actions:
         message_thread_id:
           type: string
           nullable: true
-    permissions:
-      - access_as_user
+    permissions: []
     emits:
       - domain.workspace_support.request_status_changed
 
@@ -238,7 +231,7 @@ actions:
           enum: [0, 1]
           default: 1
           description: "0 = poor experience, 1 = good experience."
-        app_id:
+        subject_app_id:
           type: string
           nullable: true
           description: App this feedback is about. Stored as subject_app_id.
@@ -251,7 +244,6 @@ actions:
           type: integer
         created_at:
           type: string
-    permissions:
-      - access_as_user
+    permissions: []
     emits:
       - domain.workspace_support.negative_feedback
