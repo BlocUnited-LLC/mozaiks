@@ -26,7 +26,7 @@ def bundle():
     page = {"name": "books", "sections": [{"id": "grid", "primitive": "Grid", "config": {
         "children": [{"id": "books", "primitive": "DataTable", "config": {
             "api_endpoint": "/api/modules/books/list", "pagination_mode": "server",
-            "pagination": True, "page_size": 20, "data_key": "books", "total_key": "stats.total",
+            "pagination": True, "search": True, "page_size": 20, "data_key": "books", "total_key": "stats.total",
         }}],
     }}]}
     return action, page
@@ -63,7 +63,7 @@ async def test_server_table_requires_explicit_matching_query_fields(field, failu
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["extra_required", "page_size_limit", "nonempty_search", "page_limit", "schema_ref"])
+@pytest.mark.parametrize("failure", ["extra_required", "page_size_limit", "nonempty_search", "empty_only_search", "page_limit", "schema_ref"])
 async def test_server_table_query_must_satisfy_action_schema(failure):
     action, page = bundle()
     schema = action["input_schema"]
@@ -73,6 +73,8 @@ async def test_server_table_query_must_satisfy_action_schema(failure):
         schema["properties"]["page_size"]["maximum"] = 10
     elif failure == "nonempty_search":
         schema["properties"]["search"]["minLength"] = 1
+    elif failure == "empty_only_search":
+        schema["properties"]["search"]["maxLength"] = 0
     elif failure == "page_limit":
         schema["properties"]["page"]["maximum"] = 1
     else:
@@ -81,12 +83,16 @@ async def test_server_table_query_must_satisfy_action_schema(failure):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["wrong_rows", "wrong_total", "missing_total", "optional_parent", "optional_total", "missing_output"])
+@pytest.mark.parametrize("failure", ["wrong_rows", "string_rows", "untyped_rows", "wrong_total", "missing_total", "optional_parent", "optional_total", "missing_output"])
 async def test_server_table_requires_declared_row_and_count_paths(failure):
     action, page = bundle()
     schema = action["output_schema"]
     if failure == "wrong_rows":
         schema["properties"]["books"]["type"] = "object"
+    elif failure == "string_rows":
+        schema["properties"]["books"]["items"]["type"] = "string"
+    elif failure == "untyped_rows":
+        del schema["properties"]["books"]["items"]
     elif failure == "wrong_total":
         schema["properties"]["stats"]["properties"]["total"]["type"] = "string"
     elif failure == "missing_total":
@@ -115,6 +121,13 @@ async def test_client_table_does_not_gain_server_query_requirements():
 async def test_server_table_cannot_call_internal_action(surface):
     action, page = bundle()
     action["api_surface"] = surface
+    assert not (await check(action, page))["passed"]
+
+
+@pytest.mark.asyncio
+async def test_malformed_surface_returns_a_persisted_failure_report():
+    action, page = bundle()
+    action["api_surface"] = ["public"]
     assert not (await check(action, page))["passed"]
 
 

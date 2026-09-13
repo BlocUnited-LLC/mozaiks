@@ -6,11 +6,12 @@ Opt-in server-paged DataTable sections must close against the actual generated
 module action contract during the existing `validate_wiring` acceptance gate.
 Action names in a plan alone are insufficient. The action declares integer
 `page` and `page_size`, string `search`, and accepts the table's initial and
-next-page query, including empty search. Extra required inputs cannot be supplied
+next-page query, including empty search and a representative nonempty query when
+search is enabled. Extra required inputs cannot be supplied
 by this fixed query contract. Internal-only actions are not browser endpoints.
 
 `data_key` and `total_key` resolve through required inline object properties to
-an array and integer respectively. Schema references are not supported in this
+an array of explicitly typed objects and an integer respectively. Schema references are not supported in this
 bounded binding contract and are never fetched. Missing or incompatible bindings
 fail the existing wiring check; they do not create another routing or retry
 system. Client-paged tables retain their current input contract. At runtime,

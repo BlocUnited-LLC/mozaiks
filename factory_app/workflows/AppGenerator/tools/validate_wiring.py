@@ -329,11 +329,19 @@ def _required_output_type(schema: Any, key_path: Any, expected: str) -> bool:
         if not isinstance(properties, dict) or key not in (schema.get("required") or []):
             return False
         schema = properties.get(key)
-    return isinstance(schema, dict) and schema.get("type") == expected
+    if not isinstance(schema, dict) or schema.get("type") != expected:
+        return False
+    if expected == "array":
+        items = schema.get("items")
+        return isinstance(items, dict) and items.get("type") == "object"
+    return True
 
 
 def _server_table_contract_error(config: dict[str, Any], action: dict[str, Any]) -> str | None:
-    if action.get("api_surface") in {"internal", "admin_internal"}:
+    surface = action.get("api_surface")
+    if surface is not None and not isinstance(surface, str):
+        return "Server paging requires a valid module action surface."
+    if surface in {"internal", "admin_internal"}:
         return "Server paging cannot bind an internal-only module action."
     inputs, outputs = action.get("input_schema"), action.get("output_schema")
     if not isinstance(inputs, dict) or not isinstance(outputs, dict):
@@ -349,12 +357,16 @@ def _server_table_contract_error(config: dict[str, Any], action: dict[str, Any])
             if declaration.get("type") != expected:
                 return f"Server paging requires an explicit {expected} input named {field}."
         validator = Draft202012Validator(inputs)
-        for page in (1, 2):
-            if not validator.is_valid({"page": page, "page_size": config.get("page_size"), "search": ""}):
-                return "The action schema rejects the table's initial or next-page query."
+        queries = [(1, ""), (2, "")]
+        if config.get("search"):
+            queries.append((1, "a"))
+        for page, search in queries:
+            if not validator.is_valid({"page": page, "page_size": config.get("page_size"), "search": search}):
+                return "The action schema rejects the table's initial, next-page or enabled text-search query."
         for field, expected in (("data_key", "array"), ("total_key", "integer")):
             if not _required_output_type(outputs, config.get(field), expected):
-                return f"Server paging {field} must resolve to a required {expected} response field."
+                suffix = " with explicitly typed object items" if expected == "array" else ""
+                return f"Server paging {field} must resolve to a required {expected} response field{suffix}."
     except (SchemaError, TypeError, ValueError, RecursionError, AttributeError):
         return "Server paging requires valid, inline action schemas."
     return None
