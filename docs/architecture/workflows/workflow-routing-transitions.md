@@ -228,6 +228,25 @@ revision interaction where the user must be able to type freely in the chat.
    receives the assessment and its artifact identity together. The advisory
    summary does not authorize promotion or replace server artifact validation.
 
+AppGenerator declares and publishes `bundle_path` and `lifecycle_state` after
+registering the staged app directory on the current build run. The path is the
+existing `generated/apps/{app_id}/{build_id}/app` location, not a new path
+inferred by the browser or SecurityReadiness. SecurityReadiness declares these
+same-name review inputs together with `app_validation_status`,
+`app_validation_strategy_used`, `app_validation_preview_url`,
+`integration_tests_passed`, and `app_bundle_acceptance_status`. These inputs are
+router-writable, not caller-writable. AppReview also explicitly permits the
+router to seed its closed validation fields. Evidence is carried unchanged;
+missing evidence remains missing and blocks the existing review checks rather
+than becoming a successful or skipped check. The review UI labels absent
+results **Missing** and reserves **Skipped** for an explicit skipped result.
+
+A successful SecurityReadiness assessment with zero findings sets
+`security_readiness_recorded=true` without dispatching finding-row writes.
+`persisted=false` in that case is expected, not a permission or availability
+failure. Only an actual unsuccessful recording with `persistence_error`
+supports that failure message.
+
 **When to use:**
 
 Use `chat_session` when the interaction after transition must happen

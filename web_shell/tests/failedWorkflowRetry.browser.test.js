@@ -14,6 +14,27 @@ const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = path.dirname(shell);
 const ui = path.join(root, 'chat-ui/src');
 
+for (const scenario of [
+  { name: 'failed session with stale loading', failed: true, loading: true, output: true, expected: false },
+  { name: 'failed session with tool output only', failed: true, loading: false, output: true, expected: false },
+  { name: 'retry launching', failed: true, launching: true, loading: true, output: true, expected: false },
+  { name: 'active session loading', loading: true, expected: true },
+  { name: 'active session awaiting first agent text', output: true, expected: true },
+  { name: 'idle session', expected: false },
+]) {
+  test(`typing indicator: ${scenario.name}`, async () => {
+    const source = await fs.readFile(path.join(ui, 'components/chat/ChatInterface.jsx'), 'utf8');
+    const start = source.indexOf('  const showTypingIndicator =');
+    const expression = source.slice(start, source.indexOf('  const renderedMessages =', start));
+    const visible = vm.runInNewContext(`${expression}\nshowTypingIndicator;`, {
+      loading: Boolean(scenario.loading), connectionStatus: 'connected', conversationMode: 'workflow',
+      messages: scenario.output ? [{ metadata: { event_type: 'tool_progress' } }] : [],
+      failedWorkflowRetry: scenario.failed ? { available: true, launching: Boolean(scenario.launching) } : null,
+    });
+    assert.equal(visible, scenario.expected);
+  });
+}
+
 async function metadataHarness() {
   const source = (await fs.readFile(path.join(ui, 'pages/ChatPage.js'), 'utf8')).replaceAll('\r\n', '\n');
   const start = source.indexOf('  const hydrateServerArtifactForChat =');

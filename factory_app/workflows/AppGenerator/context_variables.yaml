@@ -1412,6 +1412,24 @@ definitions:
     source:
       type: computed
       default: null
+  bundle_path:
+    type: string
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: >
+      Staged app directory registered by generate_and_download in the current
+      build run. Forwarded through SecurityReadiness to AppReview for revision.
+    source:
+      type: computed
+      default: null
+  lifecycle_state:
+    type: string
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Review state published after the staged bundle is registered.
+    source:
+      type: computed
+      default: null
   generated_app_zip:
     type: string
     description: Absolute path to the generated ZIP bundle after DownloadAgent packaging.

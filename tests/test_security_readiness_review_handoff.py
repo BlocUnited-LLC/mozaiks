@@ -14,7 +14,14 @@ from factory_app.workflows.SecurityReadiness.tools.inspect_generated_app_securit
 from factory_app.workflows.SecurityReadiness.tools.record_security_findings import (
     record_security_findings,
 )
+from mozaiksai.core.session.launcher import validate_context_for_workflow
 from mozaiksai.core.session.model import JourneyAdvanceDecision
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.authority import (
+    CALLER_INPUT_WRITER,
+    ContextAuthorityError,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.pack import journey_orchestrator
 from tests.test_security_readiness_target_binding import (
@@ -25,6 +32,96 @@ from tests.test_security_readiness_target_binding import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def workflow_config(name):
+    return {"context_variables": yaml.safe_load(
+        (ROOT / f"factory_app/workflows/{name}/context_variables.yaml").read_text(encoding="utf-8")
+    )}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("validation,integration,acceptance,preview", [
+    ("skipped", True, "passed", None),
+    ("passed", True, "passed", "https://preview.example.test/build"),
+    ("failed", False, "failed", None),
+])
+@pytest.mark.parametrize("missing", [None, "artifact_version_id", "bundle_path", "app_validation_status",
+                                    "app_bundle_acceptance_status", "integration_tests_passed"])
+async def test_three_workflow_review_facts_survive_declared_projection(
+    monkeypatch, security_build, missing, validation, integration, acceptance, preview,
+):
+    from factory_app.workflows.SecurityReadiness.tools import record_security_findings as recorder
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    monkeypatch.setattr(workflow_manager, "get_config", workflow_config)
+    dispatch = AsyncMock(side_effect=AssertionError("Zero findings must not dispatch a write"))
+    monkeypatch.setattr(recorder, "dispatch_workflow_module_action", dispatch)
+    build = security_build.add({"app.json": '{"authRequired": false}'})
+    facts = {
+        "artifact_version_id": build.artifact.id,
+        "bundle_path": str(build.archive.parent / "app"),
+        "lifecycle_state": "review",
+        "app_validation_status": validation,
+        "app_validation_strategy_used": "skip" if validation == "skipped" else "local",
+        "app_validation_preview_url": preview,
+        "app_bundle_acceptance_status": acceptance,
+        "integration_tests_passed": integration,
+    }
+    if missing:
+        facts.pop(missing)
+    config = workflow_config("AppGenerator")["context_variables"]
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=config["definitions"])
+    generator = ContextVariablesBridge({}, authority_policy=policy)
+    generator._bind_run(("AppGenerator", RUN[1], "generator_chat"), policy)
+
+    async def publish(context_variables=None):
+        for key, value in facts.items():
+            context_variables.set(key, value)
+
+    await invoke(publish, generator)
+    security_input = validate_context_for_workflow(
+        "SecurityReadiness", journey_orchestrator._project_launch_context(generator.to_dict(), "SecurityReadiness"),
+    )
+    assert security_input == facts
+    build.bridge = security_bridge(initial={**security_input, "artifact_version_id": security_input.get("artifact_version_id")})
+    await invoke(inspect_generated_app_security, build.bridge)
+    result = await invoke(record_security_findings, build.bridge)
+    assert result["success"] is True
+    assert result["persisted"] is False
+    assert "persistence_error" not in result
+    assert build.bridge.get("security_readiness_recorded") is True
+    dispatch.assert_not_awaited()
+
+    projected = validate_context_for_workflow(
+        "AppReview", journey_orchestrator._project_launch_context(build.bridge.to_dict(), "AppReview"),
+    )
+    expected = {**facts, "artifact_version_id": build.artifact.id}
+    assert {key: projected[key] for key in expected} == expected
+    assert "run_build_binding" not in projected
+    assert "security_readiness_recorded" not in projected
+    if missing and missing != "artifact_version_id":
+        assert missing not in projected
+    review = build_review_summary_payload({
+        **projected, "run_build_binding": detach(build.bridge.get("run_build_binding")),
+    })
+    for key, value in expected.items():
+        assert review[key] == value
+    assert review["security_readiness_summary"]["success"] is True
+    assert review["can_promote"] is (validation != "failed" and missing in {None, "artifact_version_id", "bundle_path"})
+    assert review["can_revise"] is (missing != "bundle_path")
+
+
+@pytest.mark.parametrize("workflow", ["SecurityReadiness", "AppReview"])
+@pytest.mark.parametrize("key", ["app_validation_status", "app_bundle_acceptance_status", "integration_tests_passed"])
+def test_review_evidence_is_router_seeded_not_caller_supplied(monkeypatch, workflow, key):
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    monkeypatch.setattr(workflow_manager, "get_config", workflow_config)
+    value = True if key == "integration_tests_passed" else "passed"
+    assert validate_context_for_workflow(workflow, {key: value}) == {key: value}
+    with pytest.raises(ContextAuthorityError):
+        validate_context_for_workflow(workflow, {key: value}, writer_id=CALLER_INPUT_WRITER)
 
 
 @pytest.mark.asyncio

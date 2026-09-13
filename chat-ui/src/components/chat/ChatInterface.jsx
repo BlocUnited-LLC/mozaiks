@@ -491,7 +491,7 @@ const ModernChatInterface = ({
   // This covers the before-chat → first-agent gap where before_chat hooks emit
   // UI surfaces, run_complete clears loading=false, and then DiscoveryHostAgent
   // (or any first agent) starts its run with no stream chunks yet.
-  const showTypingIndicator = loading || (() => {
+  const showTypingIndicator = !failedWorkflowRetry && (loading || (() => {
     if (!Array.isArray(messages) || connectionStatus === 'error') return false;
     let hasWorkflowOutput = false;
     let hasAgentText = false;
@@ -517,7 +517,7 @@ const ModernChatInterface = ({
     }
     // Only fire in workflow mode — ask mode doesn't have this gap
     return conversationMode === 'workflow' && hasWorkflowOutput && !hasAgentText;
-  })();
+  })());
   const renderedMessages = (() => {
     // Determine the last chat index with a primary content message
     let lastContentIndex = -1;

@@ -127,6 +127,17 @@ async def test_no_files_is_not_assessed_and_checked_count_survives_recording(sec
     assert clean.get("security_readiness_summary")["checked_file_count"] == 1
     assert clean.get("security_readiness_summary")["status"] == "passed"
     assert clean.get("security_readiness_summary")["persisted"] is False
+    assert clean.get("security_readiness_summary")["success"] is True
+    assert clean.get("security_readiness_recorded") is True
+    assert "persistence_error" not in clean.get("security_readiness_summary")
+
+
+def test_security_prompt_distinguishes_empty_assessment_from_persistence_failure() -> None:
+    config = yaml.safe_load((ROOT / "factory_app/workflows/SecurityReadiness/agents.yaml").read_text(encoding="utf-8"))
+    prompt = config["agents"][0]["system_message"]
+    assert "success is true and findings is empty" in prompt
+    assert "no findings to save" in prompt
+    assert "success is false and persistence_error is present" in prompt
 
 
 def test_security_readiness_is_between_app_generator_and_review(monkeypatch) -> None:
