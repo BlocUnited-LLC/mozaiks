@@ -31,7 +31,7 @@ Use it for:
 
 | Field | Purpose |
 |-------|---------|
-| `ask.ask_mode_prompt` | System prompt for ordinary ask mode. The runtime appends workspace context at call time: app id, user id, active workflows, and — when the client sends it — the current screen's `page_context`. |
+| `ask.ask_mode_prompt` | System prompt for ordinary ask mode. The runtime appends workspace context at call time: app id, user id, the user's current workflow session (from the session router), the current screen's `page_context` when the client sends it, and any host-provided workspace summary from the platform `ask_context` hook (Studio contributes app-registry counts and recent apps). |
 | `ask.ask_context_variables` | Optional default context values for ask mode. |
 | `chat.chat_startup_mode` | Which chat mode opens first, usually `ask`. |
 | `workflows.entry_point` | Default workflow id when the app launches workflow mode. |

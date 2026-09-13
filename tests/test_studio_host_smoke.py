@@ -395,3 +395,34 @@ async def test_platform_host_loads_app_zero_product_modules(monkeypatch):
         "investor_marketplace": "InvestorMarketplaceHandler",
     }
 
+
+
+def test_studio_host_registers_its_platform_hooks(monkeypatch):
+    """The Studio host must actually land its hooks in the registry.
+
+    Unit tests for the hook functions and for the registry slots both pass with
+    the wiring deleted, so assert the host's real registration function here.
+    It is asserted against a fresh registry rather than the singleton because
+    another test module resets that singleton, and a cached module import does
+    not re-run import-time registration.
+    """
+    from tests.import_utils import active_app_root
+
+    monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
+    from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+    from mozaiksai.hosts import studio as studio_app
+
+    registry = PlatformHookRegistry()
+    registry._loaded = True  # skip env-extension loading
+    studio_app.register_studio_platform_hooks(registry)
+
+    # Identify hooks by qualified name, not object identity: other test modules
+    # re-import factory_app packages under fresh module objects, so the same
+    # source function can be two distinct objects within one session.
+    def _names(hooks: list) -> set[str]:
+        return {getattr(hook, "__qualname__", repr(hook)) for hook in hooks}
+
+    assert registry.has_ask_context is True
+    assert "studio_ask_context" in _names(registry._ask_context_hooks)
+    assert registry.has_session_fields is True
+    assert "bind_factory_session" in _names(registry._chat_session_fields_hooks)

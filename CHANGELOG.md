@@ -12,6 +12,20 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- Ask-mode answers are grounded in server-side workspace truth. The general-mode
+  exchange now reads the user's current workflow session from the session router
+  (instead of the per-connection registry, which reported the ask carrier itself
+  and never the real build session) and collects a host-provided workspace
+  summary through the new platform `ask_context` hook — the Studio host
+  contributes app-registry counts, the most recently updated apps, and the build
+  currently in flight, which lives in a target-scoped session document the
+  runtime's own snapshot cannot see. Finished sessions are no longer described
+  as active workflows. The Studio `ask_mode_prompt` now describes exactly the
+  context the runtime appends, and support copy points at the widget's 🛟 help
+  button.
+
 ### Fixed
 
 - Preserve the original Factory build-event envelope across re-emission and

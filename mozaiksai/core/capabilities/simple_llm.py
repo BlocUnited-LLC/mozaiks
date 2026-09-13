@@ -44,6 +44,7 @@ class SimpleLLMCapabilityService:
         app_id: str | None,
         user_id: str | None,
         ui_context: dict[str, Any] | None = None,
+        workspace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute a single chat completion call and return content + usage."""
         from mozaiksai.core.runtime.app.ai_config import load_runtime_ai_config
@@ -66,6 +67,11 @@ class SimpleLLMCapabilityService:
             page_context = str(ui_context.get("page_context") or "").strip()
         if page_context:
             context_parts.append(f"The user is currently on this screen: {page_context}")
+        if isinstance(workspace_context, dict):
+            for label, value in workspace_context.items():
+                rendered = str(value).strip()
+                if rendered:
+                    context_parts.append(f"{label}: {rendered}")
 
         if context_parts:
             system_prompt = (system_prompt + "\n\n" if system_prompt else "") + "\n".join(context_parts)
