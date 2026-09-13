@@ -102,19 +102,23 @@ The widget is the session entry point outside the full chat surface.
 
 ### What it shows
 
-The widget follows the active context:
-
-- if a workflow is active, it defaults to `workflowMessages`
-- otherwise it shows `askMessages`
-
-The user can switch to ask context inline without navigating.
+The widget is ask-mode only. It always renders `askMessages` from its own
+general-mode connection; workflow sessions never render inside the widget.
+Its WebSocket declares `transport_purpose=ask_carrier` at connect time, so the
+backend never binds the widget's carrier chat to a workflow session,
+auto-starts a workflow on it, or replays workflow history into it. Each
+message sends the current route's `page_context` so the ask agent knows what
+screen the user is on.
 
 ### Header contract
 
-The expanded widget keeps a two-button header:
+The expanded widget keeps a fixed header:
 
-- left button: switch to ask context or open the full ask chat
-- right button: return to the active workflow chat when one exists
+- left button (brand + "mozaiksai"): opens the full ask chat page
+- support button (🛟): opens the operator support form
+- right logo button (same brand logo as the collapsed toggle): returns to the
+  active workflow workspace when one exists — resolved from stored session
+  keys or the server's `/api/session/state` snapshot
 
 The compose affordance for ask mode lives in the sub-header as `+ New conversation`.
 

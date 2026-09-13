@@ -411,9 +411,14 @@ export class WebSocketApiAdapter extends ApiAdapter {
   }
 
   createWebSocketConnection(appId, userId, callbacks = {}, workflowname = null, chatId = null, options = {}) {
-    const actualworkflowname = resolveWorkflow(workflowname);
-    
-    
+    // Ask-mode carriers never bind to a workflow. Keep the path segment literal
+    // so it can never resolve to the entry-point workflow; the backend keys the
+    // connection off transport_purpose=ask_carrier instead.
+    const actualworkflowname = options?.transportPurpose === 'ask_carrier'
+      ? 'ask'
+      : resolveWorkflow(workflowname);
+
+
     if (!chatId) {
       console.error('❌ Chat ID is required for WebSocket connection');
       return null;
@@ -446,6 +451,9 @@ export class WebSocketApiAdapter extends ApiAdapter {
     const wsUrl = new URL(`/ws/${actualworkflowname}/${appId}/${chatId}/${userId}`, wsBase);
     if (options?.suppressHistoryReplay) {
       wsUrl.searchParams.set('suppress_history_replay', '1');
+    }
+    if (options?.transportPurpose === 'ask_carrier') {
+      wsUrl.searchParams.set('transport_purpose', 'ask_carrier');
     }
 
     const socket = openAuthenticatedWebSocket(wsUrl.toString(), getAccessToken(this.config));

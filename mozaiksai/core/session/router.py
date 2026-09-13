@@ -1114,6 +1114,8 @@ class SessionRouter:
         query = {
             "user_id": str(user_id),
             **self._chat_scope(app_id),
+            # Ask-mode carrier chats are transport artifacts, never resume targets.
+            "transport_purpose": {"$ne": "ask_carrier"},
         }
         if workflow_id:
             query["workflow_name"] = str(workflow_id)

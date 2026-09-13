@@ -61,6 +61,11 @@ class SimpleLLMCapabilityService:
             active = [str(w.get("workflow_name")) for w in workflows if w.get("workflow_name")]
             if active:
                 context_parts.append(f"Active workflows: {', '.join(active)}")
+        page_context = ""
+        if isinstance(ui_context, dict):
+            page_context = str(ui_context.get("page_context") or "").strip()
+        if page_context:
+            context_parts.append(f"The user is currently on this screen: {page_context}")
 
         if context_parts:
             system_prompt = (system_prompt + "\n\n" if system_prompt else "") + "\n".join(context_parts)

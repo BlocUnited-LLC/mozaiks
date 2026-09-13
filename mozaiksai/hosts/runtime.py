@@ -900,6 +900,55 @@ async def websocket_endpoint(
     _raw_claims = getattr(ws_user, "raw_claims", None) or {}
     _token_exp: int = int(_raw_claims.get("exp", 0) or 0)
 
+    # Ask-mode carrier connections declare intent at connect time. They never
+    # bind to a workflow session: no session-router resume resolution, no
+    # workflow prereqs, no session-registry workflow context, no auto-start,
+    # and no run-history replay. The connection exists purely to carry
+    # general-mode (ask) exchanges keyed to its own carrier chat_id.
+    transport_purpose = str(websocket.query_params.get("transport_purpose", "")).strip().lower()
+    if transport_purpose == "ask_carrier":
+        from mozaiksai.core.transport.session_registry import session_registry
+
+        ws_id = id(websocket)
+        try:
+            coll = await _chat_coll()
+            query = {"_id": chat_id, **build_app_scope_filter(app_id)}
+            existing = await coll.find_one(query, {"_id": 1, "user_id": 1, "transport_purpose": 1})
+            if existing and existing.get("user_id") != user_id:
+                await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
+                return
+            if existing is None:
+                await persistence_manager.create_chat_session(
+                    chat_id,
+                    app_id,
+                    workflow_name="",
+                    user_id=user_id,
+                    extra_fields={"transport_purpose": "ask_carrier"},
+                )
+            elif existing.get("transport_purpose") != "ask_carrier":
+                # Retro-tag carriers created before connect-time intent existed so
+                # session listings stop surfacing them as resumable workflows.
+                await coll.update_one(
+                    {**query, "user_id": user_id},
+                    {"$set": {"transport_purpose": "ask_carrier", "last_updated_at": datetime.now(UTC)}},
+                )
+            await simple_transport.handle_websocket(
+                websocket=websocket,
+                chat_id=chat_id,
+                user_id=user_id,
+                workflow_name="",
+                app_id=app_id,
+                ws_id=ws_id,
+                token_exp=_token_exp,
+                suppress_history_replay=True,
+            )
+        except Exception as ask_err:
+            wf_logger.warning("WS_ASK_CARRIER_PREP_FAILED: %s", ask_err)
+            await websocket.close(code=1011, reason="Failed to prepare ask session")
+        finally:
+            session_registry.remove_session(ws_id)
+        return
+
     ws_id: int | None = None
     try:
         from mozaiksai.core.data.models import WorkflowStatus

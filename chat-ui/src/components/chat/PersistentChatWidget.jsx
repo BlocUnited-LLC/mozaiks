@@ -129,8 +129,35 @@ const PersistentChatWidget = ({
     setActiveGeneralChatId,
     onAgentMessage: (msg) => setAskMessages(prev => [...prev, msg]),
     enabled: wsEnabled,
+    pageContext,
   });
   const pendingWidgetSendsRef = useRef([]);
+
+  // Server-known workflow session (survives cleared localStorage) so the
+  // "Back to workspace" logo button stays reliable across pages and reloads.
+  const [serverWorkflowSession, setServerWorkflowSession] = useState(null);
+  useEffect(() => {
+    if (!isExpanded || !effectiveAppId || !effectiveUserId) return undefined;
+    let cancelled = false;
+    const params = new URLSearchParams({ app_id: effectiveAppId, user_id: effectiveUserId });
+    fetch(`/api/session/state?${params.toString()}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (cancelled) return;
+        const snapshot = payload?.session_state || null;
+        const workflowId = String(snapshot?.current_workflow_id || '').trim();
+        const chatIdFromState = String(snapshot?.current_chat_id || '').trim();
+        setServerWorkflowSession(workflowId && chatIdFromState
+          ? { workflowName: workflowId, chatId: chatIdFromState }
+          : null);
+      })
+      .catch(() => {
+        if (!cancelled) setServerWorkflowSession(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isExpanded, effectiveAppId, effectiveUserId]);
 
   useEffect(() => {
     if (wsStatus !== 'connected' || !generalModeReady || pendingWidgetSendsRef.current.length === 0) {
@@ -155,7 +182,7 @@ const PersistentChatWidget = ({
         workflowName: storedWorkflowNameForWidget,
       })
     : null;
-  const hasActiveWorkflow = !!(activeChatId || chatId || storedWorkflowChatIdForWidget);
+  const hasActiveWorkflow = !!(activeChatId || chatId || storedWorkflowChatIdForWidget || serverWorkflowSession);
 
   // Unread badge: count new messages that arrive while the widget is collapsed
   const prevAskLenRef = useRef(null);
@@ -281,7 +308,11 @@ const PersistentChatWidget = ({
 
   // Navigate back to the active workflow session
   const handleBackToWorkspace = () => {
-    const resolvedWorkflowName = workflowName || activeWorkflowName || getStoredActiveWorkflowName();
+    const resolvedWorkflowName = workflowName
+      || activeWorkflowName
+      || getStoredActiveWorkflowName()
+      || serverWorkflowSession?.workflowName
+      || null;
     const scopedWorkflowChatId = resolvedWorkflowName
       ? getStoredWorkflowChatId({
           appId: effectiveAppId || resolvedAppId,
@@ -289,7 +320,12 @@ const PersistentChatWidget = ({
           workflowName: resolvedWorkflowName,
         })
       : null;
-    const resolvedChatId = scopedWorkflowChatId || chatId || activeChatId || getStoredActiveChatId();
+    const resolvedChatId = scopedWorkflowChatId
+      || chatId
+      || activeChatId
+      || getStoredActiveChatId()
+      || serverWorkflowSession?.chatId
+      || null;
 
     if (resolvedChatId) {
       setActiveChatId(resolvedChatId);
@@ -453,17 +489,17 @@ const PersistentChatWidget = ({
         <button
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
-          className="group relative flex flex-col items-center gap-1.5 rounded-l-2xl border border-r-0 border-border/50 bg-card/90 px-2 py-4 shadow-md backdrop-blur-sm transition-all duration-200 hover:border-primary/40 hover:bg-card hover:px-3"
+          className="group relative flex flex-col items-center gap-1.5 rounded-l-2xl border border-r-0 border-primary/40 bg-card px-2.5 py-4 shadow-lg shadow-black/25 transition-all duration-200 hover:border-primary/70 hover:px-3.5"
           title="Open assistant"
         >
           <img
             src={brandLogoSrc}
-            alt="Chat"
-            className="h-4 w-4 opacity-60 transition-opacity group-hover:opacity-100"
+            alt="Open assistant"
+            className="h-6 w-6 opacity-90 transition-opacity group-hover:opacity-100"
             onError={applyBrandImageFallback}
           />
           <svg
-            className="h-3.5 w-3.5 text-muted-foreground transition-colors group-hover:text-foreground"
+            className="h-3.5 w-3.5 text-primary transition-colors group-hover:text-foreground"
             fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -535,18 +571,18 @@ const PersistentChatWidget = ({
 
             {/* Right actions */}
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {/* Help (?) */}
+              {/* Operator support */}
               <button
                 type="button"
                 onClick={handleOpenSupport}
                 title="Get help from an operator"
-                className={`flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-bold transition-all duration-200 ${
+                className={`flex h-9 w-9 items-center justify-center rounded-lg border text-base transition-all duration-200 ${
                   inSupportMode
                     ? 'border-warning/60 bg-warning/20 text-warning'
                     : 'border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(var(--color-primary-rgb),0.08)] text-gray-300 hover:border-[rgba(var(--color-primary-light-rgb),0.5)] hover:text-white'
                 }`}
               >
-                ?
+                <span role="img" aria-label="Get help from an operator">🛟</span>
               </button>
 
               {/* Back to workspace — only when a workflow session is active */}
