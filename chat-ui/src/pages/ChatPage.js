@@ -33,6 +33,7 @@ import { useEmbeddedViewController } from '../hooks/useEmbeddedViewController';
 import { useConversationModeController } from '../hooks/useConversationModeController';
 import { useChatStartupEffects } from '../hooks/useChatStartupEffects';
 import { useWorkflowStart } from '../hooks/useWorkflowStart';
+import { isFailedWorkflowSession, useFailedWorkflowRetry } from '../hooks/useFailedWorkflowRetry';
 import {
   clearStoredArtifactState,
   clearStoredChatCacheSeed,
@@ -1100,6 +1101,12 @@ const ChatPage = () => {
     'MozaiksAI'
   ).trim() || 'MozaiksAI';
   const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
+  const failedWorkflowRetry = useFailedWorkflowRetry({
+    appId: currentAppId, userId: currentUserId, chatId: currentChatId,
+    workflowName: currentWorkflowName, surface: navContext?.surface, mode: conversationMode,
+    blocked: Boolean(pendingTransitionId || pendingHarnessDecision || pendingWorkflowReply),
+  });
+  const { observeSessionMeta } = failedWorkflowRetry;
   const rememberWorkflowChatSession = useCallback((chatId, workflowName = null) => {
     const resolvedWorkflowName =
       workflowConfig.resolveKnownWorkflowName(workflowName)
@@ -2031,7 +2038,7 @@ const ChatPage = () => {
   ]);
 
   const chatMetaHydratedRef = useRef(new Set());
-  const chatMetaHydrationInFlightRef = useRef(new Set());
+  const chatMetaHydrationInFlightRef = useRef(new Map());
   const chatMetaHydrationMissedAtRef = useRef(new Map());
   const hydrateServerArtifactForChat = useCallback(async (options = {}) => {
     if (!api || typeof api.get !== 'function') {
@@ -2048,7 +2055,7 @@ const ChatPage = () => {
       return false;
     }
 
-    const metaKey = `${currentAppId}:${targetWorkflowName}:${targetChatId}`;
+    const metaKey = JSON.stringify([currentAppId, currentUserId, targetWorkflowName, targetChatId]);
     if (!options?.force && chatMetaHydratedRef.current.has(metaKey)) {
       return false;
     }
@@ -2058,7 +2065,7 @@ const ChatPage = () => {
         return false;
       }
     }
-    if (chatMetaHydrationInFlightRef.current.has(metaKey)) {
+    if (!options?.force && chatMetaHydrationInFlightRef.current.has(metaKey)) {
       return false;
     }
 
@@ -2066,7 +2073,8 @@ const ChatPage = () => {
     const encodedWorkflow = encodeURIComponent(targetWorkflowName);
     const encodedChatId = encodeURIComponent(targetChatId);
 
-    chatMetaHydrationInFlightRef.current.add(metaKey);
+    const requestId = {};
+    chatMetaHydrationInFlightRef.current.set(metaKey, requestId);
     logChatPersistence('server_artifact_hydrate_requested', {
       reason: options?.reason || null,
       chatId: targetChatId,
@@ -2076,9 +2084,13 @@ const ChatPage = () => {
 
     try {
       const meta = await api.get(`/api/chats/meta/${encodedAppId}/${encodedWorkflow}/${encodedChatId}`);
+      // A forced terminal-status refresh supersedes older metadata, including its cleanup.
+      if (chatMetaHydrationInFlightRef.current.get(metaKey) !== requestId) return false;
       if (!meta) {
         return false;
       }
+      observeSessionMeta(meta);
+      if (isFailedWorkflowSession(meta.status)) setLoading(false);
 
       if (meta.cache_seed !== undefined && meta.cache_seed !== null) {
         setCacheSeed(meta.cache_seed);
@@ -2136,9 +2148,11 @@ const ChatPage = () => {
       });
       return false;
     } finally {
-      chatMetaHydrationInFlightRef.current.delete(metaKey);
+      if (chatMetaHydrationInFlightRef.current.get(metaKey) === requestId) {
+        chatMetaHydrationInFlightRef.current.delete(metaKey);
+      }
     }
-  }, [api, cacheServerLastArtifact, currentAppId, currentChatId, currentWorkflowName, resolveKnownWorkflowName]);
+  }, [api, cacheServerLastArtifact, currentAppId, currentUserId, currentChatId, currentWorkflowName, resolveKnownWorkflowName, observeSessionMeta]);
 
   useEffect(() => {
     if (conversationMode !== 'workflow' || !currentAppId || !currentWorkflowName || !currentChatId) {
@@ -2169,6 +2183,7 @@ const ChatPage = () => {
     }
     const showSystemMessages = debugFlag('mozaiks.show_system_messages') || debugFlag('mozaiks.debug_pipeline');
     const applyWorkflowSessionMeta = (metaData = {}) => {
+      observeSessionMeta(metaData);
       const metaChatId = String(metaData.chat_id || '').trim() || currentChatId || null;
       const rawWorkflowName = String(
         metaData.workflow_name
@@ -3485,11 +3500,17 @@ const ChatPage = () => {
         const reason = data.reason || data.data?.reason || 'finished';
         const status = data.status ?? data.data?.status ?? 1;
         const normalizedStatus = String(status).trim().toLowerCase();
-        const isFailureCompletion = ['failed', 'failure', 'error', 'errored'].includes(normalizedStatus);
+        const isFailureCompletion = isFailedWorkflowSession(status) || ['failed', 'failure', 'error', 'errored'].includes(normalizedStatus);
         if (isFailureCompletion) {
           const errorMessage = data.error || data.data?.error || data.message || data.data?.message || `Workflow failed (${reason})`;
           setLoading(false);
           setPendingWorkflowReply(null);
+          // Reuse persisted metadata; a run event alone is not session authority.
+          void hydrateServerArtifactForChat({
+            chatId: data.chat_id || data.data?.chat_id || currentChatId,
+            workflowName: data.workflow || data.data?.workflow || currentWorkflowName,
+            force: true, reason: 'workflow_failed',
+          });
           setMessagesWithLogging(prev => [...prev, {
             id:`run-failed-${Date.now()}`,
             sender:'system',
@@ -3675,7 +3696,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName]);
+  }, [activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -5847,6 +5868,7 @@ const ChatPage = () => {
       pendingHarnessDecision={pendingHarnessDecision}
       pendingHarnessDecisionBusy={pendingHarnessDecisionBusy}
       pendingHarnessDecisionError={pendingHarnessDecisionError}
+      failedWorkflowRetry={failedWorkflowRetry.available ? failedWorkflowRetry : null}
       onPendingHarnessDecisionAction={handlePendingHarnessDecisionAction}
     />
   );
@@ -6083,6 +6105,7 @@ const ChatPage = () => {
         pendingHarnessDecision={pendingHarnessDecision}
         pendingHarnessDecisionBusy={pendingHarnessDecisionBusy}
         pendingHarnessDecisionError={pendingHarnessDecisionError}
+        failedWorkflowRetry={failedWorkflowRetry.available ? failedWorkflowRetry : null}
         onPendingHarnessDecisionAction={handlePendingHarnessDecisionAction}
         hasUnseenArtifact={hasUnseenArtifact}
       />
