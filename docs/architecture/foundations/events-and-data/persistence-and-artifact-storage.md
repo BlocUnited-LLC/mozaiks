@@ -267,6 +267,26 @@ resolve their own collection contracts and enforce app/user ownership. Factory's
 onboarding module exercises this path with canonical generated collection names;
 an alias manifest is not required merely to resolve the account database.
 
+AppGenerator's ServiceAgent owns generated `backend/account_data_handler.py`;
+the materializer preserves its `ServiceOutput.python_files` content, rather than
+generating a deletion policy from module stubs. The existing account-data file
+contract and hook supply raw Motor API guidance and the current
+`mozaiksai.core.runtime.persistence.naming.collection_name_for` signature.
+For a repo using `ctx.persistence.collection(module_id, entity_name)`, the handler
+must use those same IDs with `collection_name_for(app_id=app_id, ...)` and omit
+`app_slug`, matching the standard executor. Literal collections, aliases,
+external bindings, and custom contexts retain their declared storage contract;
+the generated-name helper is not a universal alias resolver.
+
+Raw database access does not inject scope: deletion and export queries must
+include app identity and the user's ownership fields, even in an app-specific
+physical collection. Preserve the module's existing deletion or anonymization
+policy. Account exports must also be JSON-safe before reaching `JSONResponse`:
+exclude storage `_id` or stringify ObjectId values, and encode datetimes as
+ISO 8601 strings, including nested values. The contract's export example is
+tested against real BSON values and JSON serialization; this verifies guidance
+and materialization, not arbitrary model-generated implementations.
+
 Migration history records use `in_progress`, `applied`, and `failed`. The
 `mozaiksai.AppDatabaseMigrations` collection also acts as the migration lock:
 the runtime atomically claims a migration by inserting an `in_progress` record

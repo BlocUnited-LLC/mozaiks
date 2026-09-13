@@ -10,6 +10,7 @@ from typing import Any
 from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
 from factory_app.workflows.AppGenerator.tools.app_build_plan import _ALLOWED_TASK_TYPES
 from mozaiksai.core.runtime.persistence.adapter import PersistenceCollection
+from mozaiksai.core.runtime.persistence.naming import collection_name_for
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
 
@@ -179,6 +180,11 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 import yaml
 
                 lines.append("Required account-data runtime contract:\n" + yaml.safe_dump(contract, sort_keys=False))
+                lines.append(
+                    "Account-data collection naming API:\n"
+                    "from mozaiksai.core.runtime.persistence.naming import collection_name_for\n"
+                    f"collection_name_for{inspect.signature(collection_name_for)}"
+                )
 
     if agent_name == "ServiceAgent":
         methods = [

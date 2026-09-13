@@ -422,12 +422,50 @@ backend_helper_files:
     required_methods:
       - "async delete_user_data(*, app_id: str, user_id: str) -> dict  # returns {deleted_count: int, ...}"
       - "async export_user_data(*, app_id: str, user_id: str) -> dict  # returns module-namespaced records"
-    constructor_signature: "__init__(self, db: Any) -> None  # receives motor db from loader"
+    constructor_signature: "__init__(self, db: Any) -> None  # receives raw Motor database from account registry"
+    database_contract: >
+      This handler receives a raw Motor database, NOT ModuleContext or
+      PersistenceCollection. Use db[physical_collection_name], find(...).to_list(...),
+      and delete_many(query) when the declared deletion policy permits deletion.
+      Do not call ctx.persistence methods such as find_many on this raw collection,
+      or db.get_collection(module_id, entity_name). Raw database access adds no scope.
+    collection_resolution: >
+      For entities stored by repo.py through ctx.persistence.collection(module_id,
+      entity_name), import collection_name_for from
+      mozaiksai.core.runtime.persistence.naming and resolve
+      db[collection_name_for(app_id=app_id, module_id=module_id, entity_name=entity_name)].
+      Use the exact module_id and entity_name from that repo, not a bare entity name,
+      hand-built physical name, or a scan of database collections. The standard
+      module executor omits app_slug, so omit it here too; do not substitute a
+      display name or app slug. This rule is not universal for literal collections,
+      alias bindings, externally bound storage, or a custom persistence context:
+      follow their existing declared database, physical collection, naming inputs,
+      and ownership contract instead. In every case, both export and deletion must
+      explicitly filter by app_id and the requested user's ownership using the
+      same owner fields as the repo. Physical collection isolation alone is insufficient.
+    export_example: |
+      # For a user_id-owned entity using standard generated-module persistence.
+      # module_id and entity_name must match the existing repo's collection call.
+      from bson import ObjectId
+      from fastapi.encoders import jsonable_encoder
+      from mozaiksai.core.runtime.persistence.naming import collection_name_for
+
+      collection = db[collection_name_for(
+          app_id=app_id, module_id=module_id, entity_name=entity_name,
+      )]
+      query = {"app_id": app_id, "user_id": user_id}
+      records = await collection.find(query, {"_id": 0}).to_list(length=None)
+      if not records:
+          return {}
+      return {f"{module_id}_{entity_name}": jsonable_encoder(
+          records, custom_encoder={ObjectId: str},
+      )}
     hard_constraints:
       - Must be named AccountDataHandler (the loader discovers it by this name first).
       - Both methods must scope ALL queries through app_id AND user_id. Never delete or export records across tenants.
       - delete_user_data must be idempotent — calling it twice must not raise an error.
       - export_user_data must return an empty dict (not None or raise) when the user has no records.
+      - Export payloads must already be JSON-safe because the account route uses JSONResponse directly. Exclude storage _id or convert ObjectId values to strings, and serialize datetimes as ISO 8601 strings, including nested values. Do not return raw Motor documents with BSON values.
       - For financial/ledger modules (transactional archetype), anonymise rather than delete user_id on ledger entries to preserve audit integrity. Document this in the method docstring.
       - "Return key names in export_user_data must be namespaced with the module_id to avoid collisions when the platform merges all module exports (e.g. {\"messages_threads\": [...], \"messages_dms\": [...]})."
       - Do not call service.py or handler.py from the handler — access the db directly for simplicity and to avoid ctx dependencies.
