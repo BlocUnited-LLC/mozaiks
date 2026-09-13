@@ -69,6 +69,9 @@ This project follows a practical pre-1.0 changelog format:
   rather than showing an unaccepted or stale decision as submitted.
 - UI review responses verify the saved session owner and app/chat scope before
   completing or buffering an interaction, over both HTTP and WebSocket.
+- Live and restored artifact decisions use authenticated HTTP acknowledgement;
+  download controls display rejected submissions and prevent duplicate in-flight
+  decisions instead of treating a socket send as acceptance.
 - Auxiliary refinement agents now emit measured response usage through the
   existing runtime collector and configured token-wallet ingest. Trusted host
   app/user attribution is required; chat/build identity is attached only when
