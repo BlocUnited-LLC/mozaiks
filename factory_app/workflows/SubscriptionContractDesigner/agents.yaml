@@ -42,7 +42,7 @@ agents:
             fixed customer token unit price
           - module action entitlement gates for plan-gated features
           - workflow metering declarations for AI or paid-resource workflows
-          - usage/billing page requirements for AppSchemaAgent
+          - usage/billing page requirements in page_surface_requirements
           - AppGenerator instructions that describe the exact generated files and
             runtime primitives to use
 
@@ -168,13 +168,13 @@ agents:
                at subscription_config_file.add_on_products and reference those
                ids from pricing_catalog.groups[].add_on_ids.
              - If the app has one simple subscription ladder, set pricing_catalog
-               to null and let AppSchemaAgent render the default plan cards.
+               to null so the generated pricing page uses the default plan cards.
 
           5. UI customization:
              - Do not hardcode visual layout or plan data in JSX/YAML.
              - Use page_surface_requirements and app_generator_instructions to
-               tell AppSchemaAgent which semantic pricing surface is needed.
-             - AppSchemaAgent may choose different pricing primitive variants
+               describe which semantic pricing surface is needed.
+             - Page schema materialization may choose different pricing primitive variants
                based on experience_spec and design_surface_map, but the data source
                remains the billing module's get_plans action reading
                config/subscriptions.yaml.
@@ -245,7 +245,7 @@ agents:
               billing admin actions, payment-provider product ids, price ids,
               API keys, secrets, invoices, or settlement.
           14. When contract_required is true, include an app_generator_instruction
-              targeting AppPlanAgent that says: the billing module must expose a
+              for app planning that says: the billing module must expose a
               public_readonly get_plans action (no permissions, no entitlement_gate)
               that reads config/subscriptions.yaml using load_subscriptions_config
               and returns the plan catalog. This is the canonical data source for

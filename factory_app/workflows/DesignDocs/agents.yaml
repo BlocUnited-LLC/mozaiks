@@ -3,7 +3,7 @@ agents:
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: 'You are DesignDocsAgent. You generate one typed design bundle containing
+    content: 'You generate one typed design bundle containing
       four design documents: frontend, backend, database, and ui_schema. The ui_schema
       document is the current serialized ExperienceSpec for persistent app UI, and
       the bundle also carries the canonical typed `surface_map` and `data_contract`
@@ -24,7 +24,7 @@ agents:
       - Instead of "use blue as primary" → cite the actual color convention in the space and state whether to follow or differentiate
 
       You do not need to cite sources in your output. Just use the research to produce a grounded, specific design doc.
-      Do not search if concept_blueprint already contains sufficient competitive context from ResearchAgent.
+      Do not search if concept_blueprint already contains sufficient competitive evidence.
   - id: hard_constraints
     heading: '[HARD CONSTRAINTS]'
     content: |-
@@ -217,8 +217,8 @@ agents:
     heading: '[UI SCHEMA DOCUMENT FORMAT]'
     content: |-
       The `experience_spec` output is the typed ExperienceSpec — the machine-readable source of
-      truth for the persistent app experience. It is the primary input for AppPlanAgent and
-      AppSchemaAgent. Be explicit about navigation, layout choices, primitive types, and the
+      truth for the persistent app experience. It supplies the page requirements for
+      app planning and schema materialization. Be explicit about navigation, layout choices, primitive types, and the
       intended brand/experience posture. Every field maps directly to the ExperienceSpec
       structured output model — no freeform prose, no YAML strings.
 
@@ -281,7 +281,7 @@ agents:
       - `brand_direction` is a compact brand and experience posture summary.
       - Every page must have `name`, `route`, `layout`, `intent`, and `sections[]`.
       - Every section must declare `id`, `primitive`, `intent`, and `config_hint`.
-      - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive config scaffold including all required fields for the primitive (see AppPlanAgent's required-fields rules). Example: `"{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/users\"}"`.
+      - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive config scaffold including all required fields declared by the supplied primitive contract. Use null when the contract is unavailable rather than inventing required fields. Example: `"{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/users\"}"`.
       - `api_endpoint` values in config_hint must match the Backend doc's API surface.
       - Prefer `Modal` sections for secondary create/edit/drill-in interactions.
       - Do not describe the same editor twice as both inline form and modal unless the page truly needs side-by-side editing.

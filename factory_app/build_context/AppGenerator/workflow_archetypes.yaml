@@ -1,17 +1,17 @@
 version: 1
 
 description: >
-  Advisory workflow archetypes used as prompt-time guidance for AppPlanAgent
+  Advisory workflow archetypes used as prompt-time guidance for app planning
   when planning workflow-surface capability packs. These archetypes define the
   expected orchestrator shape, canonical agent sequence, tool constraints,
   structured output field defaults, and output invariants for common workflow
   patterns.
 
   Archetypes do not change the canonical structured output models.
-  They guide AppPlanAgent and downstream workflow authors in selecting the right
+  They guide app planning and workflow authoring in selecting the right
   orchestrator shape and agent conventions for each workflow capability pack.
 
-  Injected into AppPlanAgent via [WORKFLOW ARCHETYPE CONTEXT].
+  Injected into app planning via [WORKFLOW ARCHETYPE CONTEXT].
 
 archetypes:
 
@@ -50,7 +50,7 @@ archetypes:
           structured_outputs_required: true
       - ResultAgent:
           role: >
-            Calls record_review_result on the owning module with the ReviewerAgent
+            Calls record_review_result on the owning module with the supplied structured review
             decision and feedback. Confirms the write succeeded. Emits NEXT to close.
           max_consecutive_auto_reply: 4
           structured_outputs_required: false
@@ -93,7 +93,7 @@ archetypes:
           structured_outputs_required: true
       - ResultWriterAgent:
           role: >
-            Calls store_analysis_result on the owning module with the AnalysisAgent output.
+            Calls store_analysis_result on the owning module with the supplied typed analysis_result object.
             Confirms the write succeeded.
           max_consecutive_auto_reply: 3
           structured_outputs_required: false
@@ -184,7 +184,7 @@ archetypes:
       - OutputAgent:
           role: >
             Serializes the proposal into the top-level structured output model.
-            Must enforce all output invariants regardless of prior agent output.
+            Must enforce all output invariants regardless of supplied upstream proposal content.
             Output is JSON only — no prose.
           max_consecutive_auto_reply: 4
           structured_outputs_required: true
@@ -207,7 +207,7 @@ archetypes:
     structured_output_defaults:
       description: >
         Minimum required fields for the top-level output model of a proposal_only workflow.
-        OutputAgent must enforce the invariant fields regardless of prior agent output.
+        The final structured output must enforce the invariant fields regardless of supplied intermediate results.
       required_fields:
         proposal_id:
           type: str
@@ -220,9 +220,9 @@ archetypes:
         human_review_required:
           type: bool
           description: >
-            Always true. OutputAgent must enforce this as true regardless of what
-            prior agents produced. Schema-level invariant enforcement is a future enhancement;
-            OutputAgent prompt instructions are the current enforcement mechanism.
+            Always true regardless of supplied intermediate results. Schema-level invariant
+            enforcement is a future enhancement; the final output prompt instructions
+            are the current enforcement mechanism.
         status:
           type: str
           description: >
@@ -254,8 +254,8 @@ archetypes:
             approval state machine after review.
     output_invariants:
       description: >
-        OutputAgent must enforce these invariants in the final structured output.
-        They are enforced through explicit OutputAgent prompt instructions, not through
+        The final structured output must satisfy these invariants.
+        They are enforced through explicit final-output prompt instructions, not through
         schema-level constraints. A future enhancement may add schema-level invariant
         metadata to structured_outputs.yaml when schema-level invariants are
         introduced.
@@ -286,7 +286,7 @@ archetypes:
       - "All tool functions must start with list_, get_, read_, or save_."
       - "OutputAgent must have structured_outputs_required: true."
       - "OutputAgent [OUTPUT FORMAT] section must list all output invariants explicitly."
-      - "OutputAgent must enforce invariants regardless of what prior agents produced."
+      - "The final output must enforce invariants regardless of supplied intermediate results."
       - "Blocked/deferred phases must appear in the output — never silently omitted."
     blocked_phase_pattern:
       description: >

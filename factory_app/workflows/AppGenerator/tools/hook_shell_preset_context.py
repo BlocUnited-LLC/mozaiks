@@ -103,8 +103,8 @@ def _build_shell_preset_body(presets_config: dict[str, Any]) -> str:
 
     parts = [
         "Shell presets are prompt-time guidance only, not runtime artifacts.",
-        "AppPlanAgent may set AppBuildPlan.shell_preset_hint to one preset id or null.",
-        "AppSchemaAgent compiles that hint into normal AppPageSchema.navigation, AppPageSchema.shell_mode, and optional shell_config.",
+        "AppBuildPlan.shell_preset_hint may be set to one preset id or null.",
+        "Page schema materialization compiles that hint into normal AppPageSchema.navigation, AppPageSchema.shell_mode, and optional shell_config.",
         "Do not emit preset ids into generated app files. Do not create shell actions unless product intent explicitly requires them.",
         "When shell actions need context-aware behavior, use semantic variants[].when fields rather than path or query override rules.",
         "Keep shell_config null when platform defaults are sufficient.",

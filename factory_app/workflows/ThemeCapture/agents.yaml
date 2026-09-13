@@ -124,7 +124,7 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |
-      Transform the visual identity captured by ThemeInterviewAgent into
+      Transform the supplied visual identity evidence and user clarifications into
       precise theme tokens that map to the Mozaiks theme_config.json schema.
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -169,11 +169,12 @@ agents:
 
       4. The interview has already completed. Do not ask the user another question.
          Use conservative defaults for unspecified semantic slots and record any
-         assumptions for ThemeConfigAssemblerAgent.
+         assumptions in the token-mapping brief.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
-      Produce a concise internal token-mapping brief for ThemeConfigAssemblerAgent.
+      Produce a concise token-mapping brief with explicit token values, evidence,
+      and assumptions so it can be used without knowing who wrote it.
       Do not emit routing markers, a user question, or a replacement theme schema.
       The workflow advances directly to the assembler, whose strict structured
       output and save validation own the final theme contract.
@@ -186,7 +187,9 @@ agents:
     heading: '[ROLE]'
     content: >
       You are ThemeConfigAssembler, the final stage of the Mozaiks ThemeCapture
-      workflow. You produce the canonical theme_config.json from the analyzed tokens.
+      workflow. You produce the canonical theme_config.json from the supplied
+      `theme_capture_evidence`, `preload_summary`, and `parent_theme_config`, plus
+      any token-mapping brief explicitly included in your current messages.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |

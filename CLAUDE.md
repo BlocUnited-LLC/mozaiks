@@ -4,15 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Shared Engineering Contract
 
-The rules below are canonical for every agent and live in one place:
-[docs/agent-engineering-contract.md](docs/agent-engineering-contract.md). Read it before
-changing code. Do not restate its rules here — a second copy drifts, and two agents then
-follow two different contracts.
+@docs/agent-engineering-contract.md
 
-It covers: working path constraint, ADR authoring context, AG2 ownership boundary, release
-hold, contributor guidance operating system, generated deployment artifact contract,
-generated persistence contract, structured-output-first contract rule, contract-declared
-customization rule, and decision rules.
+The imported [shared engineering contract](docs/agent-engineering-contract.md)
+is canonical for every coding agent. Do not copy its rules into this entrypoint.
+
 ## Repo Boundary
 
 This repo is the canonical runtime/platform/factory repo.
@@ -56,14 +52,7 @@ Working modes:
 
 ## Pre-Production Cleanup Policy
 
-This repo is **not in production**. Optimize for the cleanest canonical implementation, not for preserving outdated behavior.
-
-- Replace outdated logic instead of layering new branches on top of it.
-- Remove stale prompts, docs, tests, schema fields, and dead code paths when contracts change.
-- Do **not** add shims, aliases, wrappers, or fallback behavior unless the task explicitly requires it.
-- When a contract changes, update the runtime, generators, docs, and tests together.
-
-If a stale implementation conflicts with a clean architecture, prefer the clean replacement unless the user explicitly asks for preserving an existing app contract.
+Apply the shared [Pre-Production Replacement Policy](docs/agent-engineering-contract.md#pre-production-replacement-policy).
 
 ## Development Commands
 
@@ -284,6 +273,9 @@ Promotion is the only path from generated artifacts into active app roots such
 as an app workspace's `app/` bundle.
 
 ## Workflow Authoring Patterns
+
+Apply the shared [Workflow Prompt Input Rule](docs/agent-engineering-contract.md#workflow-prompt-input-rule)
+when authoring Factory prompts or generated workflow guidance.
 
 ### File Structure
 

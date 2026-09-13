@@ -745,7 +745,7 @@ behavior_patterns:
         module docstring.
       - >
         Provider-specific scheduled jobs belong to the operator or hosted deployment
-        adapter, not AuthScaffoldAgent or the generated app bundle. Do not call the
+        adapter, outside the authentication scaffold or generated app bundle. Do not call the
         tick from a user-facing request handler.
 
   file_storage:

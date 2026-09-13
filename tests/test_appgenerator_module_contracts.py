@@ -275,7 +275,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "task_type: refinement_harness" in source
     assert "shell_preset_hint" in source
     assert "[SHELL PRESET CONTEXT]" in source
-    assert "initial_agent` must be `RefinementHarnessAgent`" in source
+    assert "`initial_agent: RefinementHarnessAgent`" in source
     assert "config/refinement_policy.yaml" in source
     assert "Output MUST be a valid JSON object matching `RefinementHarnessOutput`" in source
     assert "`current_build_task_type` must equal `refinement_harness`" in source
@@ -322,7 +322,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "Do not generate provider adapters for those operations into a customer app bundle" in source
     assert "Generated app deployment packaging is not a `service_foundation` or `api_surface` task" in source
     assert "Do not declare `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `deployment.manifest.json`, or `.github/workflows/*.yml`" in source
-    assert "Do not include this page merely because DownloadAgent will emit provider-neutral deployment artifacts" in source
+    assert "Do not include this page merely because export will emit provider-neutral deployment artifacts" in source
     assert "Generated artifacts must never commit secrets" in source
     assert "ci_secret_requirements" in source
     assert "pre-deploy validation/preview only" in source

@@ -13,6 +13,7 @@ Verifies that base OSS generator prompts are host-agnostic:
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,104 @@ _PROPRIETARY_NAMES = [
     "MozaiksPay",
     "mozaikspay",
 ]
+
+_FACTORY_WORKFLOWS = _WORKSPACE / "factory_app" / "workflows"
+_FACTORY_AGENT_DOCUMENTS = {
+    path: yaml.safe_load(path.read_text(encoding="utf-8"))
+    for path in sorted(_FACTORY_WORKFLOWS.glob("*/agents.yaml"))
+}
+_FACTORY_AGENT_NAMES = {
+    agent["name"]
+    for document in _FACTORY_AGENT_DOCUMENTS.values()
+    for agent in (document.get("agents") or [])
+    if isinstance(agent, dict) and agent.get("name")
+}
+_FACTORY_AGENT_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(name) for name in sorted(_FACTORY_AGENT_NAMES)) + r")\b"
+)
+
+
+# Declarative shapes where the identifier IS the machine reference rather than a
+# reasoning dependency. Each stays exempt so a prompt may show a real bundle
+# example without tripping the prose guard.
+_MACHINE_FIELD_KEYS = (
+    "name|agent|initial_agent|execution_agent|bundle_repair_target|"
+    "source_agent|target_agent|trigger_agent"
+)
+_MACHINE_REFERENCE_PATTERNS = (
+    # keyed field:  initial_agent: PatternAgent  /  bundle_repair_target == "X"
+    r"(?<!\w)[\"'`]?(?:" + _MACHINE_FIELD_KEYS + r")[\"'`]?\s*(?::|==)\s*[\"'`]?"
+    + _FACTORY_AGENT_PATTERN.pattern + r"[\"'`]?",
+    # ui_config.yaml visual_agents: the identifier is the whole list member
+    r"(?m)^[ \t]*-[ \t]*[\"'`]?" + _FACTORY_AGENT_PATTERN.pattern + r"[\"'`]?[ \t]*,?[ \t]*$",
+    # structured_outputs.yaml registry: the identifier is the mapping key
+    r"(?m)^[ \t]*[\"'`]?" + _FACTORY_AGENT_PATTERN.pattern + r"[\"'`]?[ \t]*:[ \t]*\S",
+)
+
+
+def _prompt_identity_dependencies(content: str) -> set[str]:
+    # Exempt machine field values, including those inside generated YAML/JSON,
+    # while still inspecting reasoning text inside code fences and task briefs.
+    prose = content
+    for pattern in _MACHINE_REFERENCE_PATTERNS:
+        prose = re.sub(pattern, "", prose)
+    return set(_FACTORY_AGENT_PATTERN.findall(prose))
+
+
+@pytest.mark.parametrize("content,dependencies", [
+    ("Read PatternAgent's output to determine the workflow list.", {"PatternAgent"}),
+    ('```yaml\nprompt_sections:\n  - content: Read PatternAgent outputs.\n```', {"PatternAgent"}),
+    ('```json\n{"initial_message": "Use PackMetadataAgent output."}\n```', {"PackMetadataAgent"}),
+    ('```yaml\nagents:\n  - name: PatternAgent\ninitial_agent: PatternAgent\n```', set()),
+    ('Set `execution_agent: ModuleTaskWorkerAgent` for module tasks.', set()),
+    ('Use `bundle_repair_target == "ConfigMiddlewareAgent"` as the repair condition.', set()),
+    ('```yaml\nsource_agent: PatternAgent\ntarget_agent: ProjectOverviewAgent\n```', set()),
+    # ui_config.yaml exposes visual agents as a bare list, not a keyed field.
+    ('```yaml\nvisual_agents:\n  - PatternAgent\n  - ProjectOverviewAgent\n```', set()),
+    # structured_outputs.yaml registers outputs under the agent id as map key.
+    ('```yaml\nregistry:\n  PatternAgent: PatternOutput\n```', set()),
+    # A bare identifier inside prose is still a reasoning dependency.
+    ('Hand the brief to PatternAgent when research completes.', {'PatternAgent'}),
+])
+def test_prompt_identity_guard_distinguishes_reasoning_from_machine_references(content, dependencies):
+    assert _prompt_identity_dependencies(content) == dependencies
+
+
+@pytest.mark.parametrize("path,agent", [
+    pytest.param(path, agent, id=f"{path.parent.name}/{agent['name']}")
+    for path, document in _FACTORY_AGENT_DOCUMENTS.items()
+    for agent in (document.get("agents") or [])
+])
+def test_factory_prompt_prose_uses_semantic_inputs_instead_of_agent_identities(path, agent):
+    """Protect first-party reasoning prompts without banning routing declarations."""
+    sections = list(agent.get("prompt_sections", []))
+    if agent.get("system_message"):
+        sections.append({"id": "system_message", "content": agent["system_message"]})
+    for section in sections:
+        dependencies = _prompt_identity_dependencies(section.get("content", ""))
+        assert not dependencies, (
+            f"{path.relative_to(_WORKSPACE)} {agent['name']}/{section['id']}: "
+            f"replace named participant dependencies {sorted(dependencies)} with "
+            "the supplied input's semantic meaning, fields, and effect on the output"
+        )
+
+
+@pytest.mark.parametrize("agent_name", [
+    agent["name"] for agent in _FACTORY_AGENT_DOCUMENTS[
+        _FACTORY_WORKFLOWS / "AgentGenerator" / "agents.yaml"
+    ]["agents"]
+])
+def test_universal_prompt_injection_preserves_semantic_input_discipline(agent_name):
+    mod = _load_module(_UNIVERSAL_PROMPTS_PATH, f"test_semantic_prompts.{agent_name}")
+    agent = _FakeAgent(name=agent_name)
+    mod.inject_universal_prompts(agent, [])
+    assert not _prompt_identity_dependencies(agent.system_message)
+    assert "actual" in agent.system_message
+    assert "upstream outputs according to their stated role" in agent.system_message
+    assert "required transformation" in agent.system_message
+    assert not any(name in agent.system_message for name in (
+        "StageAgents", "ContextVariablesPlan", "WorkflowStrategy", "TechnicalBlueprint",
+    ))
 
 
 # ---------------------------------------------------------------------------

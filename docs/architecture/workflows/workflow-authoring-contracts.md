@@ -144,7 +144,7 @@ max_turns: 20
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: Pipeline
-initial_message: "Start with ExampleHostAgent."
+initial_message: "Help the user define the requested workflow."
 initial_agent: ExampleHostAgent
 triggers:
   - type: chat
@@ -181,6 +181,66 @@ Rules:
   - `prompt_sections` or `prompt_sections_custom`, or
   - `system_message`.
 - Auto-tool execution is derived from tools.yaml (agents with `auto_tool_call: true` tools); agents.yaml does not define a matching field.
+
+#### Semantic Prompt Inputs
+
+Apply the shared [Workflow Prompt Input Rule](../../agent-engineering-contract.md#workflow-prompt-input-rule)
+to first-party Factory workflows, generated workflows, prompt middleware, and
+task-batch `initial_message` content. A workflow may retain state or supply
+history; prompts must be correct for the inputs actually delivered to the
+current invocation.
+
+When authoring a prompt:
+
+1. Describe the role as a responsibility, such as "produce a diagram of the
+   proposed workflow pack." A roster identifier does not explain the task.
+2. Name each input's meaning and actual field or context key. Check the
+   recipient's `context_variables.yaml` `agents.<Agent>.variables`, prompt
+   middleware, and task-batch context delivery before claiming it is available.
+   A declared structured-output model or registry entry alone does not deliver
+   an earlier result to a later invocation.
+3. Explain each artifact's meaning and authority. Approved requirements constrain
+   scope; evidence supports conclusions; a proposed plan remains subject to its
+   review gate; validation feedback identifies contract failures to repair.
+   Use the authority assigned by the actual workflow, not an assumption that all
+   structured outputs are equally authoritative.
+4. Define how those inputs constrain or transform the reasoning and map into the
+   required structured-output fields. Describe downstream requirements in terms
+   of the artifact needed. "Read upstream outputs" is acceptable when these
+   semantic dependencies are explicit; replacing a producer name with a field
+   name alone does not explain them.
+5. Distinguish an allowed empty value from missing required evidence. Explain
+   how declared authority resolves conflicting inputs and when clarification,
+   repair, or failure is required. Do not invent prior dialogue or ask an
+   unavailable agent for its result. If the workflow cannot supply a required
+   input or handle its absence, repair the input contract before relying on it
+   in prose.
+
+For example, the Factory workflow-plan diagram consumes the projected
+`workflows_spec` as a proposed plan for user review. It preserves that plan's
+topology; `concept_overview` provides product context, not permission to add
+workflows. Its prompt can say:
+
+> Read the supplied upstream plan in `workflows_spec`. It defines the proposed
+> workflows and dependencies to present for review, not approved work to execute.
+> In `MermaidSequenceDiagramOutput`, set `MermaidSequenceDiagram.workflow_name`
+> from `pack_name`; derive `diagram` participants and links from `name` and
+> `depends_on`, and `legend` entries from `name` and `pattern_name`. Use the
+> partition rationale for `notes` when the plan spans multiple workflows.
+> An empty `workflows_spec` means no AI workflow is proposed; do not invent
+> participants. Missing or conflicting required plan evidence is an input-contract
+> failure; do not invent a plan or claim approval.
+
+The plan validation and review tools own invalid, blocked, and changes-requested
+outcomes; prompts do not acquire authority to approve a plan or write protected
+routing state by mentioning those outcomes.
+
+This identifies available data and its interpretation without requiring the
+model to locate a named participant's output. Model names and artifact field
+names remain valid vocabulary when their schemas or meanings are supplied.
+Likewise, generation instructions may require an exact `initial_agent`,
+`registry`, or transition destination value. Those are machine contract values,
+not directions to discover, remember, or contact a conversational participant.
 
 ### `transition_graph.yaml`
 

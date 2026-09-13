@@ -163,7 +163,7 @@ def _build_pattern_body(ai_surfaces: list[dict]) -> str:
         "  - workflow_startup_mode: BackendOnly (no user chat session)\n"
         "  - human_in_the_loop: false\n"
         "  - The initial_message MUST include module_id, callback_action, and callback_endpoint\n"
-        "    so the WorkflowBundleBuilderAgent worker knows the full return-path contract.\n",
+        "    so the scoped task includes the full return-path contract.\n",
     ]
 
     for s in ai_surfaces:

@@ -691,7 +691,11 @@ models:
           [BRACKETS])
       content:
         type: str
-        description: Section text content
+        description: >
+          Self-contained role, reasoning instructions, or output contract. Describe
+          inputs by meaning and exact supplied fields, never by a producer agent's
+          name or assumed conversation history. Context paths must be populated and
+          exposed to the consuming agent; model names do not imply input wrappers.
   AgentDefinition:
     type: model
     fields:
@@ -704,9 +708,10 @@ models:
       prompt_sections:
         type: list
         items: PromptSection
-        description: Agent-specific prompt sections (ordered list). Runtime hook_universal_prompts.py
-          injects universal sections (compliance, guidelines, runtime context) at
-          agent instantiation.
+        description: >
+          Ordered prompt sections describing the role, actual input delivery,
+          required reasoning, and response shape. Include all instructions needed
+          for this agent's task; do not assume an undeclared middleware injection.
       max_consecutive_auto_reply:
         type: int
         default: 10
@@ -1142,7 +1147,10 @@ models:
       content:
         type: str
         description: Complete file contents with real newlines. Do not escape code
-          fences or truncate output.
+          fences or truncate output. Generated prompts must reason over actual
+          exposed context fields, task inputs, or tool results without depending on
+          named peers or unseen conversation history. Preserve machine identifiers
+          in roster, routing, tool, and structured-output registry declarations.
       installRequirements:
         type: list
         items: str
@@ -1696,7 +1704,7 @@ models:
         description: Query/access patterns the app expects (read/write emphasis).
   DataContractOutput:
     type: model
-    description: Output for DataContractAgent (data_contract_bundle.json).
+    description: Data contract bundle output (data_contract_bundle.json).
     fields:
       DataContract:
         type: DataContractDefinition
@@ -2324,7 +2332,7 @@ models:
   WorkflowBundleBuilderOutput:
     type: model
     description: >
-      Complete workflow bundle produced by one WorkflowBundleBuilderAgent task batch worker.
+      Complete workflow bundle produced by one scoped generation task.
       Contains all files needed to run the workflow: YAML declarations, implemented Python tools,
       and optional UI components. Each file's filename is relative to the workflow root.
     fields:
@@ -2359,7 +2367,7 @@ models:
           UI components go under ui/<WorkflowName>/<Component>.jsx.
   PackBuildCoordinatorOutput:
     type: model
-    description: Thin acknowledgment emitted by PackBuildCoordinator before the task batch fires.
+    description: Thin acknowledgment confirming the workflow count before the task batch fires.
     fields:
       agent_message:
         type: str

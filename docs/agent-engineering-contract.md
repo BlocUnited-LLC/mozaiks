@@ -16,14 +16,21 @@ into an entry point.
 **Always work on `C:\Repos\BlocUnitedRepo\mozaiks` (this repo) and `C:\Repos\BlocUnitedRepo\mozaiks-app`.**
 Never read from or write to OneDrive paths (`C:\Users\...\OneDrive\...`). Those are stale copies, not the working repos.
 
-**Read [ARCHITECTURE.md](ARCHITECTURE.md) first.** That file is the source of truth for how the system works.
+**Read [ARCHITECTURE.md](../ARCHITECTURE.md) first.** That file is the source of truth for how the system works.
+
+## Host and Interface Boundaries
 
 This repo uses layered FastAPI hosts as the canonical OSS server composition:
 - `mozaiksai.hosts.runtime`
 - `mozaiksai.hosts.platform`
 - `mozaiksai.hosts.studio`
 
-`mozaiksai.hosts.studio` is the Studio management interface host and the default local run target. Studio is the shared management layer — available in both local and hosted deployments. Hosted product repos compose their own app-local hosts on top of Studio; this OSS repo does not own a hosted-product FastAPI host.
+`mozaiksai.hosts.runtime` is the execution substrate. `mozaiksai.hosts.platform`
+is the headless app host and the default `mozaiks serve` target.
+`mozaiksai.hosts.studio` is the Studio management interface host, selected with
+`--host studio`. Studio is the shared management layer, available in both local
+and hosted deployments. Hosted product repos compose their own app-local hosts
+on top of Studio; this OSS repo does not own a hosted-product FastAPI host.
 
 **CLI and Studio are parallel interfaces**, not a superset chain. CLI owns developer tooling (filesystem, scaffolding, process management). Studio owns the management interface (workspace status, build lifecycle, artifacts, run history, config). Do not conflate them.
 
@@ -33,7 +40,7 @@ Profile stays person-scoped. Studio / Workspace Shell is the org/workspace home 
 
 The current repo layout is transitional. The canonical target architecture is
 documented in
-[docs/architecture/foundations/distribution-and-workspace-model.md](docs/architecture/foundations/distribution-and-workspace-model.md).
+[Distribution and Workspace Model](architecture/foundations/distribution-and-workspace-model.md).
 Do not reintroduce a hybrid root that mixes the starter app bundle with shared
 factory workflows.
 
@@ -54,7 +61,7 @@ second authority for application meaning.
 Mozaiks uses AG2 as the long-term backbone for agentic execution. Do not build
 a parallel agent framework in this repo when AG2 already owns the concept or is
 the right upstream home for it. See
-[docs/architecture/workflows/ag2-ownership-boundary.md](docs/architecture/workflows/ag2-ownership-boundary.md)
+[AG2 Ownership Boundary](architecture/workflows/ag2-ownership-boundary.md)
 for the durable architecture contract and upgrade watchpoints.
 
 AG2 should own:
@@ -103,6 +110,21 @@ Do **not** publish this repo yet.
   explicitly says the repo is production-ready and wants to publish.
 
 Normal code pushes are fine. Public release actions are not.
+
+## Pre-Production Replacement Policy
+
+This repo is pre-1.0 and not in production. Prefer the cleanest canonical
+implementation and replace obsolete internal contracts directly.
+
+- Remove stale shapes, aliases, shims, wrappers, fallback branches,
+  dual-read/dual-write behavior, retired-name normalization, obsolete prompt
+  guidance, docs, tests, config fields, and dead code in the same migration.
+- Do not layer new behavior over an obsolete implementation or leave temporary
+  outdated branches behind.
+- Preserve an older shape only when an explicit current external contract or
+  user-approved migration requirement proves it is necessary.
+- When a contract changes, update runtime behavior, generator prompts/hooks,
+  declarative schemas, validation, docs, and tests together.
 
 ## Contributor Guidance Operating System
 
@@ -186,6 +208,38 @@ Use this standard for `module.yaml`, `contracts/events.yaml`, `contracts/reactio
 `contracts/profile.yaml`, `contracts/notifications.yaml`, `contracts/settings.yaml`,
 `contracts/admin.yaml`,
 workflow YAMLs, page schemas, and any future declarative contracts.
+
+## Workflow Prompt Input Rule
+
+First-party Factory workflows and generated workflows follow the same prompt
+contract: describe the current role semantically and reason from inputs
+actually supplied to that invocation.
+
+- Identify input artifacts by purpose and exact available context keys or
+  structured fields. Do not use agent names as a substitute for a data contract
+  (for example, "read ProjectOverviewAgent's output").
+- "Read upstream outputs" is valid when the prompt identifies the supplied
+  artifacts, explains their meaning and authority, and shows how they constrain
+  reasoning and output fields. Distinguish approved requirements from proposed
+  plans, evidence, and validation feedback; a structured output is not inherently
+  authoritative. Renaming a producer reference without explaining this semantic
+  dependency is insufficient.
+- Do not assume access to another agent's identity, instructions, output, or
+  conversation history. State and history must be explicitly supplied; a roster
+  or structured-output registry does not make them visible to the model.
+- Define the required transformation, output schema, and how conflicting or
+  missing inputs use the workflow's declared clarification, repair, or failure
+  path. Do not invent authority, a transcript, artifact, or handoff to fill a gap.
+- Agent identifiers remain canonical in identity, routing, tool bindings,
+  registries, and generated artifact fields. Prompts that author those fields
+  may specify required identifiers as schema values; they must not depend on
+  recognizing those agents as conversational participants.
+
+For authoring details and an example, see
+[Semantic Prompt Inputs](architecture/workflows/workflow-authoring-contracts.md#semantic-prompt-inputs).
+Contributor instructions here guide repository edits; workflow prompts,
+declared context projections, and generator guidance must implement this rule
+in the actual Factory and generated bundles.
 
 ## Contract-Declared Customization Rule
 

@@ -382,7 +382,7 @@ def inject_module_file_manifest_guard(agent: Any, messages: list[dict[str, Any]]
                 scope = bool(pack["user_data_scope"])
                 body += f"\nPlanned module.user_data_scope MUST be {str(scope).lower()}."
                 if scope:
-                    body += " Declare backend/account_data_handler.py with kind account_data_handler in python_stubs; ServiceAgent owns its implementation."
+                    body += " Declare backend/account_data_handler.py with kind account_data_handler in python_stubs; its implementation belongs in the business_services task output."
         update_agent_section(agent, _MANIFEST_GUARD_HEADER, body)
 
         logger.info(
@@ -400,7 +400,6 @@ __all__ = [
     "inject_domain_catalog_context",
     "inject_module_file_manifest_guard",
 ]
-
 
 
 

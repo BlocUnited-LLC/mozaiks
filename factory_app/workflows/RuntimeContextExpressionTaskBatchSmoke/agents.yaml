@@ -15,9 +15,9 @@ agents:
           - set `kind` to `module`, `page`, or `integration`;
           - set `name` to a concise human-readable task name;
           - set `objective` to one sentence describing the worker outcome;
-          - set `execution_agent` to `ModuleTaskWorkerAgent` for module/backend contract work;
-          - set `execution_agent` to `PageTaskWorkerAgent` for app/page/schema work;
-          - set `execution_agent` to `IntegrationTaskWorkerAgent` for service, adapter, or integration work;
+          - set `execution_agent: ModuleTaskWorkerAgent` for module/backend contract work;
+          - set `execution_agent: PageTaskWorkerAgent` for app/page/schema work;
+          - set `execution_agent: IntegrationTaskWorkerAgent` for service, adapter, or integration work;
           - set `task_prompt` to a scoped worker instruction;
           - include concrete `owned_paths` that resemble canonical app or workflow surfaces.
           Include at least one downstream task with `depends_on` when a later task should use an upstream task output.
@@ -88,7 +88,7 @@ agents:
       - id: instructions
         heading: "[INSTRUCTIONS]"
         content: |
-          Use the previous TaskPlannerAgent output plus `runtime_smoke_tasks_results`, `runtime_smoke_tasks_results._meta`, and `runtime_smoke_tasks_status` to populate RuntimeTaskBatchSmokeResult.
+          Use the RuntimeTaskBatchSmokeResult JSON in the injected [DETERMINISTIC TASK BATCH SYNTHESIS] block. It contains the resolved user_intent and executor results derived from `runtime_smoke_tasks_results`, `runtime_smoke_tasks_results._meta`, and `runtime_smoke_tasks_status`; copy its fields exactly.
           The task batch executor runs before your turn; do not call tools.
           Copy executor metadata exactly:
           - `work_unit_count` MUST equal `runtime_smoke_tasks_results._meta.task_count`.

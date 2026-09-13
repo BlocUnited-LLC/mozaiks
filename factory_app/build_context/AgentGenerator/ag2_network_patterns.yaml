@@ -358,7 +358,7 @@ patterns:
       - linear
     intent_signals:
       - fixed ordered stages
-      - each stage consumes previous output
+      - each stage transforms a supplied prior-stage artifact into its declared output
       - audit-friendly linear flow
     avoid_when:
       - a router must choose between specialists
