@@ -7,6 +7,7 @@ import pytest
 import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
 from mozaiksai.core.runtime.app.page_schema import (
@@ -40,6 +41,7 @@ def _page(**overrides):
     {"data_key": None}, {"api_endpoint": None}, {"api_endpoint": "/api/other"},
     {"pagination": False}, {"page_size": None}, {"page_size": 0}, {"page_size": -1},
     {"page_size": 101}, {"page_size": True}, {"page_size": 2.5}, {"page_size": "20"},
+    {"pagination_mode": None, "total_key": None},
     {"pagination_mode": "remote"}, {"pagination_mode": "client", "total_key": "total"},
 ])
 def test_invalid_server_paging_fails_before_materialization(overrides):
@@ -89,15 +91,18 @@ def test_typed_server_page_materializes_and_keeps_client_defaults(tmp_path, monk
     for name in ("AppDataTableConfig", "AppResourceTableConfig"):
         model = models[name]
         config = model.model_validate({"columns": [{"key": "title"}]})
-        assert config.pagination_mode is None
+        assert config.pagination_mode == "client"
         assert config.page_size is None
+        with pytest.raises(ValidationError, match="pagination_mode"):
+            model.model_validate({"columns": [{"key": "title"}], "pagination_mode": None})
         canonical_schema = model.model_json_schema()
-        assert canonical_schema["properties"]["pagination_mode"]["default"] is None
+        assert canonical_schema["properties"]["pagination_mode"]["default"] == "client"
         assert "pagination_mode" not in canonical_schema["required"]
         provider_schema = get_provider_response_model(model).model_json_schema()
         assert "pagination_mode" in provider_schema["required"]
         assert model.model_json_schema() == canonical_schema
-        client_page = _page(pagination_mode=None, total_key=None)
+        client_page = _page(total_key=None)
+        del client_page["sections"][0]["config"]["pagination_mode"]
         client_page["sections"][0]["primitive"] = name.removeprefix("App").removesuffix("Config")
         save_app_schema(manifest={"app_name": "Books", "pages": ["books"], "default_route": "/books"},
                         pages=[models["AppPageSchema"].model_validate(client_page)], context_variables=factory_context())

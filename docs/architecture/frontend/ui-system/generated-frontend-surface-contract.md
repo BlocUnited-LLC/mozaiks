@@ -72,8 +72,9 @@ after changing `PrimitiveSchemas.js`.
 ### Server-paged lists
 
 `DataTable.config.pagination_mode` is `client` (default) or `server`.
-Structured table outputs use that non-null enum with a `client` default for
-omitted input. Explicit `null` is invalid; ordinary JSON dumps must retain a
+For both `DataTable` and `ResourceTable`, structured outputs default omitted
+input to `client`; explicit `null` is invalid. Provider-facing strict output
+schemas require the mode explicitly. Ordinary JSON dumps must retain a
 runtime-valid mode without relying on null omission or normalization.
 Use server mode whenever the list endpoint returns a bounded page, including
 ordinary CRUD lists. Client mode retains local filtering, sorting, and slicing
