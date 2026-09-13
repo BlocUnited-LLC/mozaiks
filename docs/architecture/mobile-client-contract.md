@@ -117,8 +117,12 @@ After connection, runtime emits initial chat metadata event so clients can align
 }
 ```
 
-Optional fields:
-- none
+Optional `context` keys for ask-mode messages:
+- `page_context` — the current page's declared description (`meta.ai_context`),
+  appended to the ask system prompt.
+- `page_path` — the current page's route pattern (e.g. `/support`). The
+  runtime uses it to resolve the page's declared `meta.ask_context` read-only
+  module actions server-side; the client never names actions directly.
 
 ## UI tool response
 ```json

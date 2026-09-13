@@ -12,6 +12,23 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Pages can declare the ask-mode context they need. A page's
+  `meta.ask_context` (in `ui/route_manifest.json`, or page-YAML `meta`) lists
+  read-only module actions whose results are injected into the ask agent's
+  prompt when the user asks from that page. Resolution is server-side and
+  fail-closed: an action resolves only when its `module.yaml` opts in with
+  `ask_context_safe: true` — a separate declaration from `api_surface`, so
+  opting into ask context never widens an action's HTTP exposure. Dispatch
+  runs in enforce mode with an empty permission grant and passes through the
+  host `module_scope` resolver, exactly as HTTP and workflow dispatch do. The
+  widget now sends the current route's `page_path` with each ask message, and
+  the platform `ask_context` hook receives the page identity. AppGenerator can
+  author both halves — `ask_context_safe` on module actions and page
+  `meta.ask_context` declarations — and Studio dogfoods the contract on the
+  workspace Support page (`workspace_support.list_support_requests`).
+
 ### Changed
 
 - DataTable can opt into bounded server paging and search through declared

@@ -199,6 +199,12 @@ class ActionDef(ModuleContractModel):
     # and returns ENTITLEMENT_REQUIRED if the grant is not active.
     # When null/absent, no entitlement check is performed.
     entitlement_gate: str | None = None
+    # Opt-in eligibility for page-declared ask context. A page may name this
+    # action in meta.ask_context only when the module marks it here, and the
+    # action must be side-effect free: the resolver dispatches it with an empty
+    # permission grant to ground ask-mode answers. This is a separate decision
+    # from api_surface, which governs external HTTP exposure.
+    ask_context_safe: bool = False
 
     @field_validator("id", "description", "handler_method", mode="before")
     @classmethod
@@ -281,6 +287,11 @@ class ModuleDefinition(ModuleContractModel):
     def action_emits_map(self) -> dict[str, list[str]]:
         """Maps each action id to event types declared in module.yaml actions[].emits."""
         return {action.id: list(action.emits) for action in self.actions}
+
+    @property
+    def action_ask_context_map(self) -> dict[str, bool]:
+        """Maps each action id to its page-declared ask-context eligibility."""
+        return {action.id: bool(action.ask_context_safe) for action in self.actions}
 
     @model_validator(mode="after")
     def _validate_unique_ids(self) -> ModuleDefinition:
@@ -1106,6 +1117,10 @@ class LoadedModule:
     @property
     def action_emits_map(self) -> dict[str, list[str]]:
         return self.definition.action_emits_map
+
+    @property
+    def action_ask_context_map(self) -> dict[str, bool]:
+        return self.definition.action_ask_context_map
 
     @property
     def event_payload_schemas_map(self) -> dict[str, dict[str, Any]]:

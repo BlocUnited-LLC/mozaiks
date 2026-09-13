@@ -2313,6 +2313,17 @@ models:
            with no generated-app entitlement requirement — the no-op adapter grants
            those unconditionally. Do NOT set this on admin_internal actions, and do
            not use it to model hosted product pack-access licensing.
+      ask_context_safe:
+        type: bool
+        default: false
+        description: >
+          Set true only on side-effect-free read actions that a page may name in
+          meta.ask_context to ground ask-mode answers. The runtime dispatches
+          these with an EMPTY permission grant, so the action must also declare
+          permissions: [] and must scope its own reads to the requesting user.
+          This is independent of api_surface and never widens HTTP exposure; do
+          not set it on any action that writes, emits events, or returns another
+          user's data.
 
   ModuleCapability:
     type: model
@@ -5157,6 +5168,36 @@ models:
           the app-owned module action and renders the route only when the response
           returns allowed: true. Keep product-specific authorization decisions in
           the app module action; this metadata only names the generic hook.
+      ask_context:
+        type: optional_list
+        items: AppAskContextAction
+        description: >
+          Optional read-only module actions whose results ground ask-mode answers
+          for users on this page. Declare only what someone asking a question on
+          this page would need (at most 3), and only actions whose module declares
+          ask_context_safe: true with permissions: []. The runtime resolves these
+          server-side as the requesting user; the client never names actions.
+
+  AppAskContextAction:
+    type: model
+    fields:
+      module:
+        type: str
+        description: Module id that owns the read-only action.
+      action:
+        type: str
+        description: >
+          Action id to dispatch for page ask context. Must be declared with
+          ask_context_safe: true in that module's module.yaml.
+      params:
+        type: optional_list
+        items: AppRouteAuthParam
+        description: Optional strict key/value input mapping for the action.
+      label:
+        type: optional_str
+        description: >
+          Short human-readable label for the returned data as it appears in the
+          ask agent's context (e.g. "The user's recent support requests").
 
   AppRouteAuth:
     type: model

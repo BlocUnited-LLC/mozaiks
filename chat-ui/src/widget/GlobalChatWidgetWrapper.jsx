@@ -58,11 +58,14 @@ const GlobalChatWidgetWrapper = () => {
     conversationMode,
   } = useChatUI();
 
-  const pageContext = useMemo(() => {
+  const matchedPage = useMemo(() => {
     if (!Array.isArray(pages) || !location.pathname) return null;
-    const matched = pages.find((p) => p.path && matchRoutePattern(p.path, location.pathname));
-    return matched?.meta?.ai_context || null;
+    return pages.find((p) => p.path && matchRoutePattern(p.path, location.pathname)) || null;
   }, [pages, location.pathname]);
+  const pageContext = matchedPage?.meta?.ai_context || null;
+  // Stable page identity (the route pattern) so the backend can resolve the
+  // page's declared ask-context actions server-side.
+  const pagePath = matchedPage?.path || null;
 
   // Determine if we're on the primary chat routes (don't show widget there)
   const pathSegments = location.pathname.split('/').filter(Boolean);
@@ -101,6 +104,7 @@ const GlobalChatWidgetWrapper = () => {
         workflowName={activeWorkflowName}
         conversationMode={conversationMode}
         pageContext={pageContext}
+        pagePath={pagePath}
       />
     </>
   );

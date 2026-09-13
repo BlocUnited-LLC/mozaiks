@@ -109,6 +109,7 @@ app.state.page_schemas = {}
 # dispatch semantics; the module routers fail closed only when this map is
 # genuinely absent (router mounted without platform assembly).
 app.state.module_action_surfaces = {}
+app.state.module_ask_context_actions = {}
 _runtime_services: list[Any] = []
 
 
@@ -424,8 +425,10 @@ async def _platform_startup() -> None:
                 entitlement_checker=entitlement_checker,
             )
             module_action_surfaces: dict[str, dict[str, str | None]] = {}
+            module_ask_context_actions: dict[str, dict[str, bool]] = {}
             for loaded_module in load_result.modules:
                 module_action_surfaces[loaded_module.name] = loaded_module.action_api_surface_map
+                module_ask_context_actions[loaded_module.name] = loaded_module.action_ask_context_map
                 module_executor.register(
                     loaded_module.name,
                     loaded_module.handler,
@@ -443,6 +446,7 @@ async def _platform_startup() -> None:
                 )
             executor_registry.register(module_executor)
             app.state.module_action_surfaces = module_action_surfaces
+            app.state.module_ask_context_actions = module_ask_context_actions
             logger.info("MODULE_EXECUTOR_READY: %s module(s)", len(load_result.modules))
 
             if load_result.subscriptions_config is not None:
@@ -2477,7 +2481,7 @@ def _load_page_schema_routes(app_root: Path) -> list[dict]:
             "appShell": True,
             "requiresAuth": True,
         }
-        for key in ("authRedirect", "routeAuth", "requiresAuth", "shellMode", "shell_mode", "ai_context"):
+        for key in ("authRedirect", "routeAuth", "requiresAuth", "shellMode", "shell_mode", "ai_context", "ask_context"):
             if key in raw_meta:
                 meta_seed[key] = raw_meta[key]
         if raw_requires_role is not None:
@@ -3847,3 +3851,115 @@ app.router.routes[:] = sorted(
         else 1
     ),
 )
+
+
+# ---------------------------------------------------------------------------
+# Page-declared ask context
+# ---------------------------------------------------------------------------
+# Pages declare read-only module actions (meta.ask_context) whose results
+# ground ask-mode answers in live app data. The platform host owns the page
+# surfaces and the module executor, so it registers the resolver hook; the
+# generic eligibility/dispatch mechanics live in
+# mozaiksai.core.runtime.app.ask_page_context.
+
+
+def _find_page_ask_context_declarations(page_path: str) -> list[dict[str, Any]]:
+    """Locate meta.ask_context for the page whose route path matches exactly.
+
+    Searches the active app bundle's route manifest, the factory bundle's
+    manifest when Studio routes are merged in, and validated page schemas.
+    The declaration is read server-side from the bundle on disk — the client
+    only ever names a page path, never the actions.
+    """
+    from mozaiksai.core.runtime.app.ask_page_context import normalize_ask_context_declarations
+
+    target = str(page_path or "").strip()
+    if not target:
+        return []
+
+    manifest_roots: list[Path] = []
+    try:
+        manifest_roots.append(resolve_app_root())
+    except Exception as root_err:
+        logger.debug("ASK_PAGE_CONTEXT: app root unavailable: %s", root_err)
+    try:
+        factory_root = resolve_factory_app_root()
+        if factory_root is not None:
+            factory_bundle = factory_root / "app"
+            if not any(factory_bundle.resolve() == root.resolve() for root in manifest_roots):
+                manifest_roots.append(factory_bundle)
+    except Exception as factory_err:
+        logger.debug("ASK_PAGE_CONTEXT: factory root unavailable: %s", factory_err)
+
+    for app_root in manifest_roots:
+        manifest_path = app_root / "ui" / "route_manifest.json"
+        try:
+            if not manifest_path.exists():
+                continue
+            raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as manifest_err:
+            logger.debug("ASK_PAGE_CONTEXT: could not read %s: %s", manifest_path, manifest_err)
+            continue
+        entries = raw.get("pages") if isinstance(raw, dict) else None
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or str(entry.get("path") or "").strip() != target:
+                continue
+            meta = entry.get("meta")
+            declared = meta.get("ask_context") if isinstance(meta, dict) else None
+            declarations = normalize_ask_context_declarations(declared)
+            if declarations:
+                return declarations
+
+    page_schemas = getattr(app.state, "page_schemas", None)
+    if isinstance(page_schemas, dict):
+        for schema_dump in page_schemas.values():
+            if not isinstance(schema_dump, dict) or str(schema_dump.get("route") or "").strip() != target:
+                continue
+            meta = schema_dump.get("meta")
+            declared = meta.get("ask_context") if isinstance(meta, dict) else None
+            declarations = normalize_ask_context_declarations(declared)
+            if declarations:
+                return declarations
+    return []
+
+
+async def _page_declared_ask_context(
+    *,
+    app_id: str,
+    user_id: str,
+    page_path: str | None = None,
+    page_context: str | None = None,
+) -> dict[str, Any]:
+    """Platform ask_context hook: resolve the asking page's declared actions."""
+    _ = page_context  # the description already reaches the prompt via ui_context
+    if not page_path:
+        return {}
+    declarations = _find_page_ask_context_declarations(page_path)
+    if not declarations:
+        return {}
+    from mozaiksai.core.runtime.app.ask_page_context import resolve_page_ask_context
+
+    return await resolve_page_ask_context(
+        declarations,
+        app=app,
+        app_id=app_id,
+        user_id=user_id,
+    )
+
+
+def register_platform_ask_context_hooks(registry: Any | None = None) -> None:
+    """Install the page-declared ask-context resolver.
+
+    Called once at import time. Exposed as a named function taking an optional
+    registry so the wiring is assertable without depending on import side
+    effects surviving a registry reset.
+    """
+    (registry or get_platform_hooks()).register_bundle(
+        {"ask_context": _page_declared_ask_context},
+        source="mozaiks.platform",
+    )
+
+
+register_platform_ask_context_hooks()

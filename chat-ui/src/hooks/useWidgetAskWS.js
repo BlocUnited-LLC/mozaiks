@@ -98,6 +98,7 @@ export function useWidgetAskWS({
   onAgentMessage,
   enabled = false,
   pageContext = null,
+  pagePath = null,
 }) {
   const wsRef = useRef(null);
   const [status, setStatus] = useState('disconnected');
@@ -251,11 +252,12 @@ export function useWidgetAskWS({
         conversation_mode: 'ask',
         ...(gid ? { general_chat_id: gid } : {}),
         ...(pageContext ? { page_context: pageContext } : {}),
+        ...(pagePath ? { page_path: pagePath } : {}),
         app_id: appId,
         user_id: userId,
       },
     });
-  }, [activeGeneralChatId, appId, generalModeReady, pageContext, userId]);
+  }, [activeGeneralChatId, appId, generalModeReady, pageContext, pagePath, userId]);
 
   return { send, status, isAgentTyping, generalModeReady };
 }

@@ -78,6 +78,9 @@ actions:
   - id: list_support_requests
     description: List support requests for this workspace.
     handler_method: list_support_requests
+    # Eligible for page-declared ask context. This does not change HTTP
+    # exposure: the action stays authenticated-only over /api/modules.
+    ask_context_safe: true
     input_schema:
       type: object
       properties:

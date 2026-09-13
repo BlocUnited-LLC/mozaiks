@@ -78,8 +78,13 @@ class FakeAppMetrics:
             ],
         }
 
-    async def summarize(self, **_):
+    async def summarize(self, *, event_names=None, **_):
         self._check()
+        # Mirror the real store: only usage instrumentation events count
+        # toward the "ever instrumented" gate, never kpi.* snapshot rows.
+        names = set(event_names or [])
+        if names and not (names & {"app.page_view", "app.action_invoked"}):
+            return {"total": 0, "counts_by_event": {}}
         return {"total": len(self.usage), "counts_by_event": {}}
 
     async def active_subjects(self, *, since=None, until=None):
@@ -212,6 +217,33 @@ async def test_portfolio_missing_data_stays_none_not_zero() -> None:
     assert payload["availability"]["revenue"] == "none"
     assert payload["availability"]["users"] == "none"
     assert payload["insights"] == []
+
+
+@pytest.mark.asyncio
+async def test_billing_snapshots_alone_do_not_fabricate_zero_active_users() -> None:
+    """An app with revenue but no usage instrumentation reports no active users.
+
+    Billing integrations record kpi.* snapshots into the same per-app metric
+    store the analytics reader uses. That must not be mistaken for activity
+    instrumentation: reporting "0 active users" for an app that never measured
+    users invents a figure, where pending is the truthful answer.
+    """
+
+    revenue_only = FakeAppMetrics(
+        snapshots=[
+            ("kpi.mrr", _iso(-2), 900.0),
+            ("kpi.paying_users", _iso(-2), 30.0),
+        ],
+        usage=[],  # no app.page_view / app.action_invoked has ever been recorded
+    )
+    payload = await OwnerAnalyticsService(
+        metrics_factory=lambda app_id: revenue_only
+    ).portfolio([{"app_id": "app-a", "name": "Alpha"}], WINDOW)
+
+    assert payload["portfolio"]["mrr"]["value"] == 900.0
+    assert payload["portfolio"]["active_users"]["value"] is None
+    assert payload["portfolio"]["active_users"]["available"] is False
+    assert payload["availability"]["revenue"] == "partial"
 
 
 @pytest.mark.asyncio

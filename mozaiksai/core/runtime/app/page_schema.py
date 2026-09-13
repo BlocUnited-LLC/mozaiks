@@ -560,12 +560,26 @@ class AppRouteAuth(PageContractModel):
     params: list[AppRouteAuthParam] | PrimitiveMap | None = None
 
 
+class AppAskContextAction(PageContractModel):
+    """A read-only module action whose result grounds ask-mode answers on this page.
+
+    Only actions the module declares with ``api_surface: public_readonly`` and
+    an empty permission list resolve at runtime; everything else fails closed.
+    """
+
+    module: str
+    action: str
+    params: list[AppRouteAuthParam] | PrimitiveMap | None = None
+    label: str | None = None
+
+
 class AppPageMeta(PageContractModel):
     requiresAuth: bool | None = None
     requiresRole: str | None = None
     authRedirect: str | None = None
     shellMode: Literal["standard", "workspace", "conversation", "focused", "immersive", "public"] | None = None
     routeAuth: AppRouteAuth | None = None
+    ask_context: list[AppAskContextAction] | None = None
 
 
 class AppPageSchema(PageContractModel):

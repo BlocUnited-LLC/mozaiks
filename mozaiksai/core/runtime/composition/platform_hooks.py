@@ -79,11 +79,15 @@ Bundle keys (all optional):
         Best-effort structured event-reaction audit callback. Exceptions are
         logged and do not affect event fan-out.
 
-    ask_context           async (*, app_id: str, user_id: str) -> Dict[str, Any]
+    ask_context           async (*, app_id: str, user_id: str,
+                                  page_path: str | None,
+                                  page_context: str | None) -> Dict[str, Any]
         Workspace context lines appended to the ask-mode system prompt, as
         ``{label: value}`` (e.g. ``{"Workspace apps": "3 total — 2 draft"}``).
-        Best-effort UX context, never authority: exceptions are logged and
-        skipped, and earlier registrations win on key collisions.
+        ``page_path`` is the route pattern of the page the user is asking
+        from and ``page_context`` its declared description, when the client
+        sends them. Best-effort UX context, never authority: exceptions are
+        logged and skipped, and earlier registrations win on key collisions.
 
     on_account_delete_complete
                           async (*, app_id: str, user_id: str,
@@ -645,16 +649,30 @@ class PlatformHookRegistry:
                 return str(name)
         return None
 
-    async def call_ask_context(self, app_id: str, user_id: str) -> dict[str, Any]:
+    async def call_ask_context(
+        self,
+        app_id: str,
+        user_id: str,
+        *,
+        page_path: str | None = None,
+        page_context: str | None = None,
+    ) -> dict[str, Any]:
         """Collect host-provided workspace context for ask-mode exchanges.
 
-        Best-effort UX context, never authority: a failing hook is logged and
-        skipped, and earlier registrations win on key collisions.
+        ``page_path`` is the route pattern of the page the user is asking
+        from (when the client sends one), so hooks can resolve page-declared
+        context. Best-effort UX context, never authority: a failing hook is
+        logged and skipped, and earlier registrations win on key collisions.
         """
         merged: dict[str, Any] = {}
         for hook in self._ask_context_hooks:
             try:
-                res = hook(app_id=app_id, user_id=user_id)
+                res = hook(
+                    app_id=app_id,
+                    user_id=user_id,
+                    page_path=page_path,
+                    page_context=page_context,
+                )
                 if inspect.isawaitable(res):
                     res = await res
             except Exception as exc:
