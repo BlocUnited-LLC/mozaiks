@@ -107,8 +107,12 @@ general-mode connection; workflow sessions never render inside the widget.
 Its WebSocket declares `transport_purpose=ask_carrier` at connect time, so the
 backend never binds the widget's carrier chat to a workflow session,
 auto-starts a workflow on it, or replays workflow history into it. Each
-message sends the current route's `page_context` so the ask agent knows what
-screen the user is on.
+message sends the current route's `page_context` (the page's declared
+description) and `page_path` (the route pattern). The backend uses
+`page_path` to resolve the page's declared `meta.ask_context` actions —
+read-only module actions whose results ground the ask agent's answers in live
+page data. The client only ever names the page; the declarations and dispatch
+are server-side.
 
 ### Header contract
 

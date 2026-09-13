@@ -11,7 +11,7 @@ Shell behavior is split by owner:
 |---|---|---|
 | App-wide chrome policy | AppGenerator / app author | `app/config/shell.json` |
 | Page navigation membership | page author | `app/ui/pages/*.yaml -> navigation` |
-| Custom route metadata | route author | `app/ui/route_manifest.json -> pages[].meta` |
+| Custom route metadata | route author | `app/ui/route_manifest.json -> pages[].meta` (includes `ai_context`, the page description sent to the ask agent, and `ask_context`, the page's declared read-only module actions for ask-mode grounding) |
 | Workflow entry routes | workflow pack author | `extension_registry.json -> entrypoints[]` |
 | Visual tokens | brand author | `app/brand/theme_config.json` |
 

@@ -165,9 +165,16 @@ class GeneralModeMixin:
         try:
             from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 
+            page_path = None
+            page_context = None
+            if isinstance(ui_context, dict):
+                page_path = str(ui_context.get("page_path") or "").strip() or None
+                page_context = str(ui_context.get("page_context") or "").strip() or None
             workspace_context = await get_platform_hooks().call_ask_context(
                 app_id=str(app_id),
                 user_id=str(user_id) if user_id else "anonymous",
+                page_path=page_path,
+                page_context=page_context,
             )
         except Exception as ask_context_err:
             logger.debug("Ask host context unavailable: %s", ask_context_err)
