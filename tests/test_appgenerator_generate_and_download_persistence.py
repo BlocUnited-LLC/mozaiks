@@ -287,9 +287,11 @@ def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypat
     assert result["bundle_errors"]
 
 
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n"])
 def test_generate_and_download_uses_canonical_build_root_and_propagates_registration_failure(
     monkeypatch,
     tmp_path: Path,
+    line_ending: str,
 ) -> None:
     class _FakePersistence:
         async def gather_latest_agent_jsons(self, **_kwargs):
@@ -324,7 +326,10 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
             "chat_id": "chat_123",
             "app_id": "app-123",
             "build_id": "build-123",
-            "generated_files": {"app.json": '{"app_id":"app-123"}'},
+            "generated_files": {
+                "app.json": '{"app_id":"app-123"}',
+                "README.md": line_ending.join(["First line", "Second line", ""]),
+            },
         }
     )
 
@@ -339,6 +344,8 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
 
     expected_app_dir = tmp_path / "generated" / "apps" / "app-123" / "build-123" / "app"
     assert (expected_app_dir / "app.json").exists()
+    expected_bytes = line_ending.join(["First line", "Second line", ""]).encode("utf-8")
+    assert (expected_app_dir / "README.md").read_bytes() == expected_bytes
     assert not (tmp_path / "generated_apps").exists()
 
 

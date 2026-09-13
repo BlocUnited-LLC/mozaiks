@@ -159,14 +159,22 @@ async def _attach_human_client(
 
 async def _resume_pending_agent_turns(
     *,
+    hub: Any,
+    channel_id: str,
     agent_clients: Mapping[str, Any],
     workflow_name: str,
     chat_id: str,
 ) -> int:
     """Re-fire turns that AG2 persisted as pending before process loss."""
 
-    total = 0
+    pending_clients = []
     for name, client in agent_clients.items():
+        pending = await hub.pending_turns_for(client.agent_id)
+        if any(turn.channel_id == channel_id for turn in pending):
+            pending_clients.append((name, client))
+    total = 0
+    # Recovery must not rediscover downstream turns already receiving live delivery.
+    for name, client in pending_clients:
         replayed = int(await client.resume_pending_turns())
         total += replayed
         if replayed:
@@ -314,6 +322,25 @@ class AG2NetworkRunner:
             if len(active_channels) > 1:
                 raise RuntimeError("multiple_active_ag2_network_channels")
             existing_channel = active_channels[0] if active_channels else None
+            if existing_channel is None:
+                # Never open another channel over a settled chat-scoped WAL,
+                # including old sessions whose lifecycle projection stayed at 0.
+                for metadata in await hub.list_channels():
+                    if str((getattr(metadata, "labels", {}) or {}).get("workflow_name") or "") not in {
+                        "", request.workflow_name,
+                    }:
+                        continue
+                    closed, reason = _closed_reason_from_wal(await hub.read_wal(metadata.channel_id))
+                    if closed:
+                        return AG2NetworkRunnerResult(
+                            status=RunStatus.FAILED,
+                            workflow_name=request.workflow_name,
+                            chat_id=request.chat_id,
+                            app_id=request.app_id,
+                            channel_id=metadata.channel_id,
+                            close_reason=reason,
+                            error="ag2_network_channel_terminal",
+                        )
             if request.resume_existing_only and existing_channel is None:
                 return AG2NetworkRunnerResult(
                     status=RunStatus.FAILED,
@@ -466,6 +493,8 @@ class AG2NetworkRunner:
 
             if existing_channel is not None:
                 resumed_pending_turns = await _resume_pending_agent_turns(
+                    hub=hub,
+                    channel_id=channel.channel_id,
                     agent_clients=agent_clients,
                     workflow_name=request.workflow_name,
                     chat_id=request.chat_id,
@@ -492,12 +521,17 @@ class AG2NetworkRunner:
                     close_timeout_seconds=float(request.close_timeout_seconds or 120.0),
                     context_authority_policy=request.context_authority_policy,
                 )
-                keep_live_run = True
+                if resumed_pending_turns:
+                    recovered = await live_run._wait_for_settlement(seen_envelope_ids=set())
+                    if recovered.status is not RunStatus.PAUSED:
+                        return recovered
                 if request.initial_message:
-                    return await live_run.continue_with_user_message(
+                    result = await live_run.continue_with_user_message(
                         request.initial_message,
                         context_updates=request.resume_context_updates,
                     )
+                    keep_live_run = result.live_run is not None
+                    return result
                 if request.resume_context_updates:
                     await live_run.apply_context_updates(request.resume_context_updates)
                 result = await _snapshot_result(
@@ -505,9 +539,9 @@ class AG2NetworkRunner:
                     close_reason="awaiting_user_input",
                 )
                 if result.status is not RunStatus.PAUSED:
-                    keep_live_run = False
                     return result
                 result.live_run = live_run
+                keep_live_run = True
                 return result
 
             failure_task = asyncio.create_task(
@@ -943,7 +977,9 @@ def _install_context_update_handler(
     if bridge is None and agent_text_context_deriver is None and context_authority_policy is None and agent_output_handler is None and broadcast_audience is None:
         return
 
-    async def _handler(envelope: Any) -> None:
+    handler_lock = asyncio.Lock()
+
+    async def _handle_envelope(envelope: Any) -> None:
         if bridge is not None:
             bridge.clear_context_updates()
         original_send_envelope = client.send_envelope
@@ -1055,6 +1091,11 @@ def _install_context_update_handler(
             client.send_envelope = original_send_envelope
             if bridge is not None:
                 bridge.clear_context_updates()
+
+    async def _handler(envelope: Any) -> None:
+        # The bridge and temporary send hook are shared by this client's callbacks.
+        async with handler_lock:
+            await _handle_envelope(envelope)
 
     client.on_envelope(_handler)
 

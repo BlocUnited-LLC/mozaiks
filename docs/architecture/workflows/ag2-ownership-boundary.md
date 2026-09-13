@@ -43,6 +43,11 @@ The declared task retry budget covers response validation, deterministic file
 materialization, task identity, and file ownership. A rejected response supplies
 bounded validation feedback to the next attempt at the same task; it does not
 change the task's ownership or create an unlimited repair loop.
+For materialization/ownership failures, that retry also receives the rejected
+candidate as explicitly non-authoritative data: AG2 task attempts have independent
+streams, so error text alone cannot show the worker what needs correcting. The
+candidate is not committed as accepted output, and all original validation runs
+again. Retry limits and model-call admission still apply to the additional input.
 If an output hook fails after authorized tool or batch writes, the adapter
 commits those writes using AG2 `EV_CONTEXT_SET` without sending the failed
 reply packet. Failure evidence therefore survives WAL replay without advancing
@@ -239,6 +244,23 @@ run_workflow_orchestration(knowledge_store=...)
     → AG2NetworkRunnerRequest(knowledge_store=...)
       → Hub.open(request.knowledge_store or MemoryKnowledgeStore(), ...)
 ```
+
+## Reconnect Integration
+
+The network adapter snapshots AG2's pending participants before calling its
+`resume_pending_turns()` API. It must not discover and replay downstream turns
+that are already advancing through live delivery, or send a new user message
+before the recovered workflow settles. AG2's pending-turn state, causation
+deduplication, turn probe, and graph remain authoritative.
+
+Mozaiks serializes callbacks per attached client only while its mutable context
+bridge and temporary packet-send hook are installed. This prevents overlapping
+live/recovery notifications from nesting hooks or clearing another callback's
+context changes. It is not a workflow scheduler or a new replay ledger. Revisit
+this boundary if AG2 supplies an atomic per-client round hook or serialized
+concurrent redelivery in its default handler. See the upstream
+[client handler contract](https://docs.ag2.ai/docs/user-guide/network/agent_clients/)
+and [reconnect contract](https://docs.ag2.ai/docs/user-guide/network/distributed/).
 
 ## Review Checklist
 

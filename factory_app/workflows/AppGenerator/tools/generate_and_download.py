@@ -1060,7 +1060,7 @@ async def generate_and_download(
             continue
         out_path = app_dir / safe
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(str(content), encoding="utf-8")
+        out_path.write_text(str(content), encoding="utf-8", newline="")
         written_paths.append(safe)
 
     migration_record = await _persist_pending_schema_migration(

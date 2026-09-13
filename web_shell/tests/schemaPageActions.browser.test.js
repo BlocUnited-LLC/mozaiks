@@ -32,7 +32,9 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
         { id: 'add', label: 'Add record', action_type: 'event', event_type: 'ui.modal.open', payload: { modal_id: 'create' } },
       ] } },
       { id: 'table', primitive: tablePrimitive, config: {
-        api_endpoint: modulePath + 'list', data_key: 'records', columns: [{ key: 'name', label: 'Name' }], selection: 'single',
+        api_endpoint: modulePath + 'list', data_key: 'records', columns: [{ key: 'name', label: 'Name', sortable: true }], selection: 'single',
+        search: true,
+        ...(tablePrimitive === 'ResourceTable' ? { search_placeholder: 'Find records', search_keys: ['email'] } : {}),
         actions: [
           { id: 'details', label: 'Details', requires_selection: true, action_type: 'event', event_type: 'ui.modal.open', payload: { modal_id: 'details' } },
           { id: 'edit', label: 'Edit', requires_selection: true, action_type: 'event', event_type: 'ui.modal.open', payload: { modal_id: 'edit' } },
@@ -87,7 +89,10 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
       res.setHeader('Content-Type', 'application/json');
       if (req.url.endsWith('/list') && rejectList) { res.statusCode = 404; rejectList = false; res.end('{}'); return; }
       if (req.url.endsWith('/delete') && rejectDelete) { res.statusCode = 409; rejectDelete = false; res.end('{}'); return; }
-      res.end(JSON.stringify(req.url.endsWith('/list') ? { records: [{ id: 'r1', record_id: 'r1', name: 'Ada', notes: 'Original note' }] } : req.url.endsWith('/summary') ? { total: 7 } : { success: true }));
+      res.end(JSON.stringify(req.url.endsWith('/list') ? { records: [
+        { record_id: 'r1', name: 'Ada', notes: 'Original note', email: 'first@example.test' },
+        { record_id: 'r2', name: 'Zoe', notes: 'Another note', email: 'zoe@example.test' },
+      ] } : req.url.endsWith('/summary') ? { total: 7 } : { success: true }));
       return;
     }
     res.setHeader('Content-Type', req.url === '/fixture.js' ? 'text/javascript' : 'text/html');
@@ -122,6 +127,8 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   assert.deepEqual(requests.find(r => r.path.endsWith('/create')).body, { name: 'Grace', notes: 'Line one\nLine two' });
   await page.getByRole('cell', { name: 'Ada', exact: true }).click();
+  await page.getByRole('columnheader', { name: 'Name', exact: true }).click();
+  await page.getByRole('columnheader', { name: /^Name/ }).click();
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
   assert.equal(await page.getByRole('dialog').getByLabel('Name').inputValue(), 'Ada');
   assert.equal(await page.getByRole('dialog').getByLabel('Notes').inputValue(), 'Original note');
@@ -145,6 +152,20 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
   const deletes = requests.filter(r => r.path.endsWith('/delete'));
   assert.equal(deletes.length, 2);
   assert.ok(deletes.every(r => r.method === 'POST' && r.body.record_id === 'r1'));
+  const search = page.getByRole('searchbox', { name: tablePrimitive === 'ResourceTable' ? 'Find records' : 'Search...' });
+  if (tablePrimitive === 'ResourceTable') {
+    await search.fill('first@example.test');
+    await page.getByRole('cell', { name: 'Ada', exact: true }).waitFor();
+    assert.equal(await page.getByRole('cell', { name: 'Zoe', exact: true }).count(), 0);
+    await search.fill('Ada');
+    await page.getByText('No results', { exact: true }).waitFor();
+  } else {
+    await search.fill('Zoe');
+    await page.getByRole('cell', { name: 'Zoe', exact: true }).waitFor();
+    assert.equal(await page.getByRole('cell', { name: 'Ada', exact: true }).count(), 0);
+  }
+  assert.equal(await page.getByRole('button', { name: 'Delete', exact: true }).isDisabled(), true);
+  await search.fill('');
   for (const height of [844, 500]) {
     await page.setViewportSize({ width: 390, height });
     await page.getByRole('button', { name: 'Add record', exact: true }).click();

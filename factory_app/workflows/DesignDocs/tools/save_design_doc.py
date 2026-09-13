@@ -231,7 +231,7 @@ def _inject_backend_surface_map(backend_markdown: str, surface_map: dict[str, An
         flags=re.MULTILINE | re.DOTALL,
     )
     if pattern.search(doc):
-        return pattern.sub(block + "\n\n", doc, count=1).strip()
+        return pattern.sub(lambda _: block + "\n\n", doc, count=1).strip()
     return doc.rstrip() + "\n\n" + block
 
 

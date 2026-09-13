@@ -32,8 +32,8 @@ def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
         registered = available.get(pack_id)
         if source == "managed_capability" and not registered:
             errors.append(f"{pack_id}: managed_capability requires a registered provider pack; a product category is not a managed service")
-        if source == "framework_pack" and not registered:
-            errors.append(f"{pack_id}: framework_pack requires an installed pack in capability_packs context. For app-owned code use generated_module with capability_pack_id=surface_id={pack.get('surface_id')!r}; product categories belong only in pack_type")
+        if source in {"framework_pack", "operator_pack"} and not registered:
+            errors.append(f"{pack_id}: {source} requires an installed pack in capability_packs context. For app-owned code use generated_module with capability_pack_id=surface_id={pack.get('surface_id')!r}; product categories belong only in pack_type")
         if registered and source != registered.get("capability_source"):
             errors.append(f"{pack_id}: capability_source must match the registered pack ({registered.get('capability_source')})")
 
@@ -43,7 +43,7 @@ def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
             continue
         surface_id = surface["surface_id"]
         matching = [pack for pack in packs if pack.get("surface_id") == surface_id]
-        if len(matching) != 1 or matching[0].get("surface_kind") != "module" or matching[0].get("capability_source") not in {"generated_module", "framework_pack"}:
+        if len(matching) != 1 or matching[0].get("surface_kind") != "module" or matching[0].get("capability_source") not in {"generated_module", "framework_pack", "operator_pack"}:
             errors.append(f"{surface_id}: the approved app-owned module requires exactly one module capability, normally generated_module; preserve its surface_id")
             continue
         pack = matching[0]

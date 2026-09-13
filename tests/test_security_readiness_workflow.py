@@ -15,23 +15,24 @@ from factory_app.workflows.SecurityReadiness.tools.record_security_findings impo
 )
 from mozaiksai.core.workflow.pack.config import load_global_pack_graph
 from tests.factory_context import factory_context
+from tests.test_security_readiness_target_binding import (
+    invoke,
+    security_build_fixture,  # noqa: F401
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.asyncio
-async def test_security_readiness_detects_secret_and_contract_findings() -> None:
-    ctx = {
-        "app_id": "app_1",
-        "generated_files": {
+async def test_security_readiness_detects_secret_and_contract_findings(security_build) -> None:
+    build = security_build.add({
             "app/app.json": json.dumps({"authRequired": True}),
             "app/security/secrets.yaml": "version: 1\nsecrets:\n  - id: stripe\n    value: test_sentinel_raw_value\n",
             "app/modules/orders/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: orders\nactions:\n  - id: create_order\n    api_surface: private\n    permissions: []\n",
             "Dockerfile": "FROM python:3.13-slim\n",
-        },
-    }
+    })
 
-    result = await inspect_generated_app_security(context_variables=ctx)
+    result = await invoke(inspect_generated_app_security, build.bridge)
 
     assert result["status"] == "attention_required"
     finding_ids = {item["finding_id"] for item in result["findings"]}
@@ -39,7 +40,7 @@ async def test_security_readiness_detects_secret_and_contract_findings() -> None
     assert "auth_contract:missing_auth_yaml" in finding_ids
     assert "module_permissions:missing:orders:create_order" in finding_ids
     assert "production_operations:missing" in finding_ids
-    assert ctx["security_readiness_summary"]["summary"]["open"] >= 4
+    assert build.bridge.get("security_readiness_summary")["summary"]["open"] >= 4
 
 
 @pytest.mark.asyncio
@@ -50,9 +51,9 @@ async def test_record_security_findings_updates_context_without_persistence() ->
 
     assert result["success"] is False
     assert result["persisted"] is False
-    assert result["persistence_error"] == "workflow_tool_invocation_unavailable"
-    assert ctx["security_readiness_recorded"] is True
-    assert ctx["security_readiness_summary"]["finding_count"] == 1
+    assert result["source_error"] == "workflow_tool_invocation_unavailable"
+    assert ctx["security_readiness_recorded"] is False
+    assert ctx["security_readiness_summary"]["status"] == "not_assessed"
 
 
 def test_security_readiness_build_context_declares_workflow_assets() -> None:
@@ -70,17 +71,17 @@ def test_security_readiness_build_context_declares_workflow_assets() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_files_is_not_assessed_and_checked_count_survives_recording() -> None:
-    empty = {"app_id": "app_1"}
-    assert (await inspect_generated_app_security(context_variables=empty))["status"] == "not_assessed"
-    await record_security_findings(context_variables=empty)
-    assert empty["security_readiness_summary"]["status"] == "not_assessed"
-    clean = {"app_id": "app_1", "generated_files": {"app/app.json": '{"authRequired": false}'}}
-    await inspect_generated_app_security(context_variables=clean)
-    await record_security_findings(context_variables=clean)
-    assert clean["security_readiness_summary"]["checked_file_count"] == 1
-    assert clean["security_readiness_summary"]["status"] == "passed"
-    assert clean["security_readiness_summary"]["persisted"] is False
+async def test_no_files_is_not_assessed_and_checked_count_survives_recording(security_build) -> None:
+    empty = security_build.add({}).bridge
+    assert (await invoke(inspect_generated_app_security, empty))["status"] == "not_assessed"
+    await invoke(record_security_findings, empty)
+    assert empty.get("security_readiness_summary")["status"] == "not_assessed"
+    clean = security_build.add({"app/app.json": '{"authRequired": false}'}).bridge
+    await invoke(inspect_generated_app_security, clean)
+    await invoke(record_security_findings, clean)
+    assert clean.get("security_readiness_summary")["checked_file_count"] == 1
+    assert clean.get("security_readiness_summary")["status"] == "passed"
+    assert clean.get("security_readiness_summary")["persisted"] is False
 
 
 def test_security_readiness_is_between_app_generator_and_review(monkeypatch) -> None:

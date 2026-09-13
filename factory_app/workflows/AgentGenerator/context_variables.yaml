@@ -599,7 +599,7 @@ definitions:
       database_name: mozaiksai
       collection: ChatSessions
       query_template:
-        app_id: '{{run_build_binding.target_app_id}}'
+        app_id: '{{runtime.app_id}}'
         _id: '{{runtime.chat_id}}'
       fields:
       - attachments

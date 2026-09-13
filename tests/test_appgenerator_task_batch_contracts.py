@@ -500,6 +500,11 @@ async def test_appgenerator_task_batch_dogfood_path_executes_and_assembles() -> 
 async def test_assemble_app_tasks_applies_accumulated_repair_overlay_and_deletions(frozen: bool) -> None:
     context = _Context()
     context.set("app_id", "repair_app")
+    context.set("generated_files", {
+        "modules/untouched/backend/service.py": "UNCHANGED",
+        "modules/billing/backend/service.py": "OLD BASELINE",
+        "modules/billing/backend/token_wallet_ledger.py": "OBSOLETE",
+    })
     context.set(
         "app_task_batch_results",
         {
@@ -535,6 +540,7 @@ async def test_assemble_app_tasks_applies_accumulated_repair_overlay_and_deletio
     file_map = {item["filename"]: item["content"] for item in assembled["code_files"]}
     assert file_map["modules/billing/backend/service.py"].startswith("class BillingService")
     assert "async def list_products" in file_map["modules/billing/backend/service.py"]
+    assert file_map["modules/untouched/backend/service.py"] == "UNCHANGED"
     assert "modules/billing/backend/token_wallet_ledger.py" not in file_map
     assert context.get("generated_files") == file_map
 

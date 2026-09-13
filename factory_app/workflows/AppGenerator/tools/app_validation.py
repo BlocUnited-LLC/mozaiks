@@ -330,7 +330,7 @@ def _write_files_to_dir(root: Path, files_map: dict[str, str]) -> None:
             continue
         out_path = root / safe
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(str(content), encoding="utf-8")
+        out_path.write_text(str(content), encoding="utf-8", newline="")
 
 
 def _generated_files_from_context(context_variables: Any | None) -> dict[str, str]:
@@ -1381,8 +1381,7 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
                 if has_py or has_pkg_child:
                     init_file.write_text("", encoding="utf-8")
             # Snapshot global import state so this call is test-isolated.
-            _path_before = list(sys.path)
-            _modules_before = set(sys.modules)
+            _modules_before = dict(sys.modules)
             try:
                 loaded = await AppLoader.load(str(app_root))
                 details = {
@@ -1398,7 +1397,8 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
                         {
                             "test": "app_runtime_module_load",
                             "module": module_name,
-                            "error": loaded.module_load_errors.get(module_name) or f"modules/{module_name}/module.yaml: AppLoader could not load module.",
+                            "path": f"modules/{module_name}/backend/handler.py",
+                            "error": (loaded.module_load_errors.get(module_name) or "AppLoader could not load module.").replace(str(app_root), "app"),
                             "fix_suggestion": (
                                 "Fix the module contract, companion manifests, handler entrypoint, "
                                 "or app-owned service imports so AppLoader.load() can load every module."
@@ -1417,12 +1417,22 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
                     }
                 )
             finally:
-                # Restore global import state so this transient load doesn't
-                # pollute sys.path or sys.modules for subsequent tests/callers.
-                sys.path[:] = _path_before
-                for key in list(sys.modules):
-                    if key not in _modules_before:
-                        sys.modules.pop(key, None)
+                # Remove only this validation workspace's imports. Other
+                # workflows can legitimately import modules while load awaits.
+                roots = {str(app_root.resolve()), str(app_root.parent.resolve())}
+                sys.path[:] = [entry for entry in sys.path if entry not in roots]
+                for key, value in list(sys.modules.items()):
+                    filename = getattr(value, "__file__", None)
+                    if isinstance(filename, str) and Path(filename).is_relative_to(app_root):
+                        if key in _modules_before:
+                            sys.modules[key] = _modules_before[key]
+                        else:
+                            sys.modules.pop(key, None)
+                for key, value in _modules_before.items():
+                    if key not in sys.modules and (
+                        key == "services" or key.startswith(("services.", "mozaiks_runtime_module_"))
+                    ):
+                        sys.modules[key] = value
 
     passed = not failed_tests
     return {
@@ -1913,7 +1923,7 @@ def _bundle_repair_request(
 ) -> str:
     target_label = _BUNDLE_REPAIR_TARGET_LABELS.get(target, "generated app files")
     lines = [
-        f"Repair generated app bundle scanner failures in {target_label} only.",
+        f"Repair generated app bundle validation failures in {target_label} only.",
         "Use generated_files as the current source of truth and emit only files owned by this agent's canonical output lane.",
         "When a named stale/forbidden artifact must be removed rather than overwritten, put its relative path in deleted_files.",
         "Do not introduce payment-provider SDKs, app-local ledgers, hosted internal endpoints, raw secrets, or hosted product policy.",
@@ -2379,11 +2389,20 @@ async def run_app_bundle_acceptance_gate(
     )
     bundle_repair = _prepare_bundle_repair(
         {
-            "passed": bundle_scan_result["passed"] and app_runtime_load_result["passed"] and runtime_quality_result["passed"],
+            "passed": all(item["passed"] for item in (
+                bundle_scan_result, app_runtime_load_result, runtime_quality_result, module_implementation_result,
+            )),
             "errors": [
                 *bundle_scan_result.get("errors", []),
-                *[item["error"] for item in app_runtime_load_result.get("failed_tests", [])],
+                *[
+                    f"{item['path']}: {item['error']}" if item.get("path") else item["error"]
+                    for item in app_runtime_load_result.get("failed_tests", [])
+                ],
                 *runtime_quality_result.get("warnings", []),
+                *[
+                    f"{item['path']}: {item['test']}: {item['error']} Fix: {item['fix_suggestion']}"
+                    for item in module_implementation_result.get("failed_tests", [])
+                ],
             ],
         },
         context_variables,

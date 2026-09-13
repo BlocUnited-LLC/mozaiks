@@ -28,6 +28,17 @@ def test_appgenerator_structured_outputs_parse_with_runtime_contract_validator()
     assert parsed["models"]["ModuleIdentity"]["fields"]["user_data_scope"]["type"] == "bool"
 
 
+def test_service_guidance_keeps_optional_events_and_expected_errors_explicit() -> None:
+    agents = _read_yaml("factory_app/workflows/AppGenerator/agents.yaml")["agents"]
+    service = next(agent for agent in agents if agent["name"] == "ServiceAgent")
+    guidance = "\n".join(section["content"] for section in service["prompt_sections"])
+    assert "ModuleInputValidationError" in guidance
+    assert "Optional is not nullable" in guidance
+    assert "required-only" in guidance
+    assert "context.events.publish" not in guidance
+    assert "await ctx.emit(event_type, payload)" in guidance
+
+
 def test_appgenerator_structured_outputs_include_canonical_module_contract_models() -> None:
     config = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
     models = config["models"]
@@ -269,7 +280,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "Output MUST be a valid JSON object matching `RefinementHarnessOutput`" in source
     assert "`current_build_task_type` must equal `refinement_harness`" in source
     assert "RefinementHarnessBundle" in source
-    assert "Routes use workflow_sequence only" in source
+    assert "route by `workflow_sequence` only" in source
     assert "service_foundation_bundle" in source
     assert "Do NOT include an `admin_config` build task." in source
     assert "Fail the task" in source
@@ -488,6 +499,17 @@ def test_module_identity_declares_user_data_scope_field() -> None:
     assert uds["type"] == "bool"
     assert "optional" not in uds
     assert "account_data" in uds["description"].lower() or "user_data_scope" in uds["description"].lower()
+
+
+def test_refinement_plan_retains_architecture_but_scopes_execution() -> None:
+    config = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+    fields = config["models"]["AppBuildPlan"]["fields"]
+    assert "including unchanged" in fields["pages"]["description"]
+    assert "Only build_tasks" in fields["pages"]["description"]
+    assert "complete resulting app" in fields["build_tasks"]["description"]
+    prompts = _read("factory_app/workflows/AppGenerator/agents.yaml")
+    assert "backend-only change must still include every existing page" in prompts
+    assert "do not schedule their original generation tasks" in prompts
 
 
 def test_module_python_stub_includes_account_data_handler_kind() -> None:

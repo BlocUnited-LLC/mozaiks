@@ -47,6 +47,7 @@ Covers:
 from __future__ import annotations
 
 import pytest
+import yaml
 
 from factory_app.workflows.DesignDocs.tools.save_design_doc import (
     _canonical_experience_spec,
@@ -142,6 +143,17 @@ def _minimal_surface_map() -> dict:
 
 
 class TestInjectBackendSurfaceMap:
+    @pytest.mark.parametrize("notes", ["User-owned\u2014private records", r"literal \u2024 and \1", "C:\\customers\\new"])
+    def test_replacement_preserves_yaml_escapes_and_following_sections(self, notes):
+        doc = "# Backend\n\n## Surface Realization Map\n\n```yaml\nsurface_map: {}\n```\n\n## Actions\nKeep this."
+        surface_map = {"surfaces": [{"surface_id": "customers", "surface_kind": "module", "notes": notes}]}
+        rendered = _inject_backend_surface_map(doc, surface_map)
+        yaml_block = rendered.split("```yaml\n", 1)[1].split("```", 1)[0]
+        assert yaml.safe_load(yaml_block) == {"surface_map": surface_map}
+        assert rendered.endswith("## Actions\nKeep this.")
+        assert rendered.count("## Surface Realization Map") == 1
+        assert _inject_backend_surface_map(rendered, surface_map) == rendered
+
     def test_appends_section_when_absent(self):
         doc = "# Backend Design\n\nSome content here."
         result = _inject_backend_surface_map(doc, _minimal_surface_map())

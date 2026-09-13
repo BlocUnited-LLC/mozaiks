@@ -55,28 +55,38 @@ class _Reply:
 
 
 @pytest.mark.anyio
-async def test_resume_pending_agent_turns_replays_each_attached_identity() -> None:
+async def test_resume_pending_agent_turns_does_not_replay_new_live_turns() -> None:
+    expected = "PlannerAgent"
+
     class _Client:
-        def __init__(self, replayed: int) -> None:
+        def __init__(self, agent_id: str, replayed: int) -> None:
+            self.agent_id = agent_id
             self.replayed = replayed
             self.calls = 0
 
         async def resume_pending_turns(self) -> int:
+            nonlocal expected
             self.calls += 1
+            expected = "WorkerAgent"
             return self.replayed
 
-    planner = _Client(2)
-    worker = _Client(0)
+    class _Hub:
+        async def pending_turns_for(self, agent_id):
+            return [SimpleNamespace(channel_id="channel")] if agent_id == expected else []
+
+    planner = _Client("PlannerAgent", 1)
+    worker = _Client("WorkerAgent", 1)
 
     total = await _resume_pending_agent_turns(
+        hub=_Hub(), channel_id="channel",
         agent_clients={"PlannerAgent": planner, "WorkerAgent": worker},
         workflow_name="DurableResumeSmoke",
         chat_id="chat-durable-resume",
     )
 
-    assert total == 2
+    assert total == 1
     assert planner.calls == 1
-    assert worker.calls == 1
+    assert worker.calls == 0
 
 
 def test_pending_turn_recovery_detects_a_closed_channel() -> None:
@@ -89,6 +99,91 @@ def test_pending_turn_recovery_detects_a_closed_channel() -> None:
     ]
 
     assert _closed_reason_from_wal(wal) == (True, "workflow_complete")
+
+
+@pytest.mark.anyio
+async def test_recovered_turn_settles_before_a_new_user_message_is_sent() -> None:
+    store = MemoryKnowledgeStore()
+    rules = [
+        {"source_agent": "Planner", "target_agent": "Worker", "transition_type": "after_turn"},
+        {"source_agent": "Worker", "target_agent": "user", "transition_type": "after_turn"},
+        {"source_agent": "user", "target_agent": "terminate", "transition_type": "after_turn"},
+    ]
+
+    class PendingPlanner(_DeterministicAgent):
+        async def ask(self, *msg, **kwargs):
+            raise RuntimeError("process lost before the reply")
+
+    class SlowWorker(_DeterministicAgent):
+        async def ask(self, *msg, **kwargs):
+            await asyncio.sleep(0.03)
+            return await super().ask(*msg, **kwargs)
+
+    def request(agents, message):
+        return AG2NetworkRunnerRequest(
+            workflow_name="RecoverPendingSmoke", chat_id="chat-recovered", app_id="app-recovered",
+            agents=agents, transition_rules=rules, initial_agent_name="Planner",
+            initial_message=message, knowledge_store=store, close_timeout_seconds=3.0,
+        )
+
+    failed = await AG2NetworkRunner().run(request({
+        "Planner": PendingPlanner("Planner", "unused"),
+        "Worker": _DeterministicAgent("Worker", "unused"),
+    }, "Start"))
+    assert failed.status is RunStatus.FAILED
+    planner = _DeterministicAgent("Planner", "Recovered plan")
+    worker = SlowWorker("Worker", "Ready for approval")
+    recovered = await AG2NetworkRunner().run(request({"Planner": planner, "Worker": worker}, "Approve"))
+    try:
+        assert recovered.status is RunStatus.COMPLETED, recovered.error
+        assert recovered.channel_id == failed.channel_id
+        assert len(planner.ask_calls) == 1
+        assert len(worker.ask_calls) == 1
+    finally:
+        if recovered.live_run is not None:
+            await recovered.live_run.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("message", [None, "Continue"])
+async def test_rejected_reconnect_context_closes_the_new_hub(monkeypatch, message) -> None:
+    closed = []
+    original_close = Hub.close
+
+    async def observe_close(hub):
+        closed.append(hub)
+        await original_close(hub)
+
+    monkeypatch.setattr(Hub, "close", observe_close)
+    store = MemoryKnowledgeStore()
+
+    def request(initial_message, updates=None):
+        return AG2NetworkRunnerRequest(
+            workflow_name="RejectedResumeSmoke", chat_id="chat-rejected", app_id="app-rejected",
+            agents={"Worker": _DeterministicAgent("Worker", "Review")},
+            transition_rules=[
+                {"source_agent": "Worker", "target_agent": "user", "transition_type": "after_turn"},
+                {"source_agent": "user", "target_agent": "terminate", "transition_type": "after_turn"},
+            ],
+            initial_agent_name="Worker", initial_message=initial_message,
+            knowledge_store=store, resume_context_updates=updates, close_timeout_seconds=3.0,
+            context_authority_policy=build_context_authority_policy(
+                workflow_name="RejectedResumeSmoke", definitions={}, transition_rules=[],
+            ),
+        )
+
+    paused = await AG2NetworkRunner().run(request("Start"))
+    assert paused.status is RunStatus.PAUSED
+    await paused.live_run.close()
+    assert len(closed) == 1
+    rejected = await AG2NetworkRunner().run(request(message, {"app_id": "foreign-app"}))
+    try:
+        assert rejected.status is RunStatus.FAILED
+        assert rejected.live_run is None
+        assert len(closed) == 2
+    finally:
+        if rejected.live_run is not None:
+            await rejected.live_run.close()
 
 
 class _DeterministicAgent(Agent):
@@ -1222,6 +1317,13 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
             self.assistant_messages.append(dict(kwargs))
 
+        async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+            pass
+
+        async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+            self.failed = (chat_id, app_id)
+            return True
+
         async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
             self.completed.append((chat_id, app_id))
             return True
@@ -1311,6 +1413,8 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
         expected_error = "context fetch failed" if persistence_failure == "fetch" else "context update failed"
         with pytest.raises(RuntimeError, match=expected_error):
             await run_workflow_orchestration(**run_kwargs)
+        assert persistence.failed == ("chat-1", "app-1")
+        assert persistence.completed == []
         assert persistence.fetched_scope == ("chat-1", "app-1", "AlignmentSmoke")
         if persistence_failure == "fetch":
             assert persistence.persisted_scope is None
@@ -1391,6 +1495,13 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
             return None
+
+        async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+            pass
+
+        async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+            self.failed = (chat_id, app_id)
+            return True
 
         async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
             self.completed.append((chat_id, app_id))
@@ -1561,6 +1672,13 @@ async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigg
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
             self.assistant_messages.append(dict(kwargs))
+
+        async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+            pass
+
+        async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+            self.failed = (chat_id, app_id)
+            return True
 
         async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
             self.completed.append((chat_id, app_id))
@@ -1780,6 +1898,13 @@ async def test_task_batch_interview_retains_the_declared_ag2_pause_graph(
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
             self.assistant_messages.append(dict(kwargs))
+
+        async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+            pass
+
+        async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+            self.failed = (chat_id, app_id)
+            return True
 
         async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
             raise AssertionError("paused workflow must not be marked completed")

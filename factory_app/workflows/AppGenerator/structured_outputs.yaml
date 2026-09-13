@@ -812,6 +812,7 @@ models:
         - host_universal
         - managed_capability
         - operator_extension
+        - operator_pack
         description: >
           Implementation origin of this capability pack. Use one of:
           managed_capability (provided by a hosted platform capability — do not generate
@@ -822,6 +823,7 @@ models:
           generate only the declared app-specific wiring; product categories are not installed packs),
           config_file (registered pack emitting declarative app configuration),
           operator_extension (registered operator-provided extension),
+          operator_pack (registered operator build-context pack; preserve its declared origin and outputs),
           generated_module (app-owned generated module — generate full module contracts),
           external_adapter (third-party external service adapter — api_surface only).
   BuildTaskBase:
@@ -1135,11 +1137,14 @@ models:
       pages:
         type: optional_list
         items: AppBuildPage
-        description: Ordered pages planned for the app. AppSchemaAgent materializes each page into a full AppPageSchema.
+        description: >
+          Complete ordered page inventory for the resulting app, including unchanged
+          pages in a revision. Never empty for an app with existing pages.
+          Only build_tasks determines which page files AppSchemaAgent regenerates.
       entities:
         type: optional_list
         items: AppBuildEntity
-        description: Canonical entities and required operations.
+        description: Canonical entities and required operations, including unchanged entities retained during a revision.
       roles:
         type: optional_list
         items: str
@@ -1311,7 +1316,10 @@ models:
       build_tasks:
         type: list
         items: AppBuildTask
-        description: Explicit execution-oriented build tasks derived from the plan.
+        description: >
+          Explicit execution-oriented tasks for this run. In a revision this is
+          only the changed-file delta; pages, entities, capability_packs, and
+          data_contract still describe the complete resulting app.
       data_contract:
         type: union
         variants:
@@ -5979,9 +5987,17 @@ models:
         type: str
         description: Short summary of the schema produced.
       manifest:
-        type: AppManifest
+        type: union
+        variants:
+        - AppManifest
+        - 'null'
         description: >
           App metadata used to persist app.json startup and validate page routes.
+          In task-batch execution, emit AppManifest only when current_build_task.owned_paths
+          includes app.json; otherwise explicitly emit null. Null emits neither app.json
+          nor provenance.yaml. Standalone save_app_schema still requires AppManifest.
+          Final assembly must contain the complete app manifest from its owning task
+          or the verified revision baseline before app-bundle acceptance.
           Persistent routes are derived from the emitted ui/pages/*.yaml schemas.
       pages:
         type: list
@@ -5989,8 +6005,11 @@ models:
         description: >
           One AppPageSchema per page. Each is persisted as ui/pages/{name}.yaml and
           rendered by the platform shell's RouteRenderer using the primitive system.
-          Prefer this declarative lane by default; emit an empty list only when every
-          persistent page is owned by custom_route_bundle.
+          In task-batch execution, emit only pages whose ui/pages/*.yaml paths are owned
+          by current_build_task; other pages remain owned by other tasks or the baseline.
+          Prefer this declarative lane by default; emit an empty list only when the
+          current scope owns no declarative pages (for example, a manifest-only task
+          or pages owned by custom_route_bundle).
       custom_route_bundle:
         type: union
         variants:

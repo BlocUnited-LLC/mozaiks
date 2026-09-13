@@ -902,6 +902,7 @@ async def websocket_endpoint(
 
     ws_id: int | None = None
     try:
+        from mozaiksai.core.data.models import WorkflowStatus
         from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
         from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
         from mozaiksai.core.transport.event_contract import send_event_envelope
@@ -928,6 +929,10 @@ async def websocket_endpoint(
             existing.get("user_id") != user_id or existing.get("workflow_name") != resolved_workflow_name
         ):
             await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
+            return
+
+        if existing and existing.get("status") == int(WorkflowStatus.FAILED):
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Workflow session failed; start a new run")
             return
 
         try:
@@ -996,6 +1001,9 @@ async def websocket_endpoint(
         )
         if resolved_doc is None:
             raise ValueError("Resolved workflow session is not available")
+        if resolved_doc.get("status") == int(WorkflowStatus.FAILED):
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Workflow session failed; start a new run")
+            return
         original_target = (existing.get("run_build_binding") or {}).get("target_app_id")
         resolved_target = (resolved_doc.get("run_build_binding") or {}).get("target_app_id")
         if resolved_target != original_target:
@@ -1063,6 +1071,7 @@ async def websocket_endpoint(
                 launch_behavior=_autostart_launch_behavior,
             )
             and run_history_count == 0
+            and resolved_doc.get("status") == int(WorkflowStatus.IN_PROGRESS)
         ):
             existing_task = simple_transport._background_tasks.get(resolved_chat_id)
             if not (existing_task and not existing_task.done()):

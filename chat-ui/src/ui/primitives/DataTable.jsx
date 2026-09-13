@@ -130,6 +130,8 @@ export function DataTable({
   pagination = true,
   page_size = 20,
   search = true,
+  search_placeholder = 'Search...',
+  search_keys,
   actions = EMPTY_ARRAY,
   onAction,
   onRefresh,
@@ -171,10 +173,14 @@ export function DataTable({
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return data;
     const q = searchQuery.toLowerCase();
+    const keys = search_keys ?? columns.map((column) => column.key);
     return data.filter((row) =>
-      columns.some((col) => String(row[col.key] ?? '').toLowerCase().includes(q))
+      keys.some((key) => String(row[key] ?? '').toLowerCase().includes(q))
     );
-  }, [data, searchQuery, columns]);
+  }, [data, searchQuery, columns, search_keys]);
+
+  // Row identity must survive sorting, filtering, and pagination.
+  const rowKeys = useMemo(() => new Map(data.map((row, index) => [row, getRowKey(row, index)])), [data]);
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered;
@@ -208,8 +214,8 @@ export function DataTable({
   }, [selection]);
 
   const selectedRows = useMemo(
-    () => sorted.filter((row, rowIndex) => selected.has(getRowKey(row, rowIndex))),
-    [selected, sorted],
+    () => sorted.filter((row) => selected.has(rowKeys.get(row))),
+    [selected, sorted, rowKeys],
   );
 
   return (
@@ -220,9 +226,10 @@ export function DataTable({
           {search && (
             <input
               type="search"
-              placeholder="Search…"
+              placeholder={search_placeholder}
+              aria-label={search_placeholder}
               value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); setSelected(new Set()); }}
               className="h-11 w-full max-w-md rounded-[var(--shell-control-radius,1rem)] border border-border/48 bg-card/34 px-4 text-sm text-foreground shadow-sm shadow-black/5 outline-none transition placeholder:text-muted-foreground/68 hover:border-border/70 focus:border-primary/42 focus:ring-2 focus:ring-primary/16"
             />
           )}
@@ -264,11 +271,8 @@ export function DataTable({
       ) : (
         <>
           <div className="space-y-3 md:hidden">
-            {paged.map((row, rowIdx) => {
-              const rowKey = getRowKey(
-                row,
-                pagination ? ((page - 1) * page_size) + rowIdx : rowIdx,
-              );
+            {paged.map((row) => {
+              const rowKey = rowKeys.get(row);
               return (
                 <MobileRowCard
                   key={rowKey}
@@ -303,11 +307,8 @@ export function DataTable({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paged.map((row, rowIdx) => {
-                  const rowKey = getRowKey(
-                    row,
-                    pagination ? ((page - 1) * page_size) + rowIdx : rowIdx,
-                  );
+                {paged.map((row) => {
+                  const rowKey = rowKeys.get(row);
                   const isSelected = selected.has(rowKey);
                   return (
                     <TableRow

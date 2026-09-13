@@ -384,7 +384,7 @@ def test_theme_handoff_drops_source_progress_but_preserves_launch_inputs():
 
     assert validate_context_for_workflow("ThemeCapture", projected) == projected
     with pytest.raises(ContextAuthorityError):
-        validate_context_for_workflow("ThemeCapture", {"interview_complete": True})
+        validate_context_for_workflow("ThemeCapture", {"interview_outcome": "ready"})
 
 
 def test_handoff_cannot_silently_drop_context_for_an_unloaded_workflow():

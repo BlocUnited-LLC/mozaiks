@@ -93,28 +93,32 @@ def _materialize_app_schema_file_map(
 ) -> dict[str, str]:
     manifest = payload.get("manifest")
     pages = payload.get("pages")
-    if not isinstance(manifest, dict) or not isinstance(pages, list):
+    if "manifest" not in payload or not isinstance(pages, list):
         return {}
+    if manifest is not None and not isinstance(manifest, dict):
+        raise ValueError("AppSchemaOutput.manifest must be an object or null")
 
     file_map: dict[str, str] = {}
-    default_route = manifest.get("default_route") or "/"
-    auth_strategy = manifest.get("auth_strategy")
-    app_json = {  # type: ignore[var-annotated]
-        "appName": manifest.get("app_name") or manifest.get("name") or "Generated App",
-        "startup": {"landing_spot": default_route},
-        "targets": {"web": True, "mobile": False},
-        "authRequired": bool(auth_strategy and auth_strategy != "public"),
-        "admins": [],
-    }
-    file_map["app.json"] = json.dumps(app_json, indent=2, ensure_ascii=False)
-    file_map["provenance.yaml"] = dump_app_provenance_yaml(
-        build_default_app_provenance(
-            app_kind="generated",
-            created_mode="factory",
-            workflow="AppGenerator",
-            timestamp=build_timestamp,
+    # Scoped page workers leave app identity and provenance to their existing owner.
+    if manifest is not None:
+        default_route = manifest.get("default_route") or "/"
+        auth_strategy = manifest.get("auth_strategy")
+        app_json = {  # type: ignore[var-annotated]
+            "appName": manifest.get("app_name") or manifest.get("name") or "Generated App",
+            "startup": {"landing_spot": default_route},
+            "targets": {"web": True, "mobile": False},
+            "authRequired": bool(auth_strategy and auth_strategy != "public"),
+            "admins": [],
+        }
+        file_map["app.json"] = json.dumps(app_json, indent=2, ensure_ascii=False)
+        file_map["provenance.yaml"] = dump_app_provenance_yaml(
+            build_default_app_provenance(
+                app_kind="generated",
+                created_mode="factory",
+                workflow="AppGenerator",
+                timestamp=build_timestamp,
+            )
         )
-    )
 
     for page in pages:
         if not isinstance(page, dict):

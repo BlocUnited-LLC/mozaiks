@@ -748,8 +748,8 @@ def test_existing_app_entry_routes_into_discovery_with_context() -> None:
     coding_selector = transition_map["coding_journey_selector"]
     assert coding_selector["transition_type"] == "user_choice_context"
     coding_options = {item["id"]: item for item in coding_selector["options"]}
-    assert coding_options["autonomous"]["route_to"] == "DesignDocs"
-    assert coding_options["guided"]["route_to"] == "DesignDocs"
+    assert coding_options["autonomous"]["route_to"] == "database_setup_selector"
+    assert coding_options["guided"]["route_to"] == "database_setup_selector"
     assert coding_options["autonomous"]["context_variables"]["design_docs_hitl"] is False
     assert coding_options["guided"]["context_variables"]["design_docs_hitl"] is True
 

@@ -63,14 +63,16 @@ function approvalTone(state) {
 }
 
 function runStatusTone(status) {
-  if (status === 2) return 'success'
-  if (status === 1) return 'primary'
+  if (status === 2) return 'destructive'
+  if (status === 1) return 'success'
+  if (status === 0) return 'primary'
   return 'default'
 }
 
 function runStatusLabel(status) {
-  if (status === 2) return 'Completed'
-  if (status === 1) return 'Running'
+  if (status === 2) return 'Failed'
+  if (status === 1) return 'Completed'
+  if (status === 0) return 'Running'
   return 'Unknown'
 }
 

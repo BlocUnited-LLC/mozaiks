@@ -292,6 +292,9 @@ class WorkflowBridgeMixin:
                     return await self._reject_chat_lease_lost(chat_id=chat_id)
 
             if has_active_session and active_callbacks:
+                rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+                if rejection is not None:
+                    return rejection
                 # Route to existing AG2 session via WebSocket callback mechanism
                 logger.debug("[SMART_ROUTING] Continuing existing AG2 session for chat %s", chat_id)
 
@@ -488,6 +491,23 @@ class WorkflowBridgeMixin:
             "route": "chat_lock_lost",
         }
 
+    async def _reject_terminal_session(self, *, chat_id: str, app_id: str) -> dict[str, Any] | None:
+        from mozaiksai.core.data.persistence.persistence_manager import ChatSessionTerminalError
+
+        try:
+            await self._get_or_create_persistence_manager().assert_chat_resumable(chat_id, app_id)
+        except ChatSessionTerminalError as exc:
+            await self.send_error(
+                error_message="This workflow session has ended. Start a new run to continue.",
+                error_code="WORKFLOW_SESSION_TERMINAL",
+                chat_id=chat_id,
+            )
+            return {
+                "status": "error", "chat_id": chat_id, "route": "terminal_session",
+                "run_status": str(exc.status), "error_code": "WORKFLOW_SESSION_TERMINAL",
+            }
+        return None
+
     async def _launch_workflow_run_locked(
         self,
         *,
@@ -509,6 +529,10 @@ class WorkflowBridgeMixin:
         """
         from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
         from mozaiksai.core.ports.orchestration import ResumeRequest, RunRequest
+
+        rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+        if rejection is not None:
+            return rejection
 
         if message or is_resume_request:
             try:
@@ -658,7 +682,12 @@ class WorkflowBridgeMixin:
         from mozaiksai.core.workflow.orchestration_patterns import (
             _last_agent_name_from_runner_result,
             _project_ag2_wal_to_mozaiks_transport,
+            _structured_output_validation_failed,
         )
+
+        rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+        if rejection is not None:
+            return rejection
 
         context_updates = await self._apply_user_text_context_updates(
             chat_id=chat_id,
@@ -686,6 +715,8 @@ class WorkflowBridgeMixin:
             message,
             context_updates=context_updates,
         )
+        if runner_result.status is RunStatus.FAILED:
+            await pm.mark_chat_failed(chat_id, app_id=app_id)
         manager = getattr(self, "_derived_context_managers", {}).get(chat_id)
         try:
             from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
@@ -694,17 +725,18 @@ class WorkflowBridgeMixin:
         except Exception:
             structured_registry = {}
         ctx = dict(getattr(runner_result, "context_variables", {}) or {})
-        await _project_ag2_wal_to_mozaiks_transport(
-            runner_result=runner_result,
-            transport=self,
-            persistence_manager=pm,
-            chat_id=chat_id,
-            app_id=app_id,
-            agent_name_by_id=runner_result.agent_name_by_id,
-            initial_sequence=0,
-            derived_context_manager=manager,
-            structured_registry=structured_registry,
-        )
+        if not _structured_output_validation_failed(runner_result):
+            await _project_ag2_wal_to_mozaiks_transport(
+                runner_result=runner_result,
+                transport=self,
+                persistence_manager=pm,
+                chat_id=chat_id,
+                app_id=app_id,
+                agent_name_by_id=runner_result.agent_name_by_id,
+                initial_sequence=0,
+                derived_context_manager=manager,
+                structured_registry=structured_registry,
+            )
 
         if ctx:
             await pm.persist_context_variables(
@@ -729,6 +761,36 @@ class WorkflowBridgeMixin:
             register_live_run = getattr(self, "register_live_ag2_workflow_run", None)
             if callable(register_live_run):
                 register_live_run(chat_id, live_run)
+
+        if run_failed:
+            # Match initial orchestration's declared failure hooks before reporting settlement.
+            from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
+
+            try:
+                await get_lifecycle_manager(workflow_name).execute_trigger(
+                    "on_fail",
+                    context_variables=ctx,
+                    app_id=app_id,
+                    execution_id=chat_id,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    workflow_name=workflow_name,
+                    error=runner_result.error,
+                )
+            except Exception as lifecycle_err:
+                logger.warning("LIVE_AG2_ON_FAIL_FAILED chat=%s: %s", chat_id, lifecycle_err)
+            if user_id:
+                try:
+                    from mozaiksai.core.session.router import get_session_router_for_chat
+
+                    revision_router = await get_session_router_for_chat(
+                        app_id=app_id, user_id=user_id, chat_id=chat_id,
+                    )
+                    await revision_router.fail_active_revision(
+                        app_id=app_id, user_id=user_id, workflow_id=workflow_name,
+                    )
+                except Exception as revision_err:
+                    logger.warning("LIVE_AG2_REVISION_FAIL_FAILED chat=%s: %s", chat_id, revision_err)
 
         if awaiting_user_input:
             await self.send_event_to_ui(

@@ -394,6 +394,17 @@ def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
     return merged
 
 
+def resolve_app_theme_config(captured_theme_config: Any, theme_config_patch: Any) -> dict[str, Any] | None:
+    """Apply explicit visual deltas without losing the approved ThemeCapture base."""
+    captured = detach(captured_theme_config)
+    patch = _strip_none(_to_plain(theme_config_patch))
+    if captured is not None and not isinstance(captured, dict):
+        raise ValueError("captured_theme_config must be an object or null")
+    if patch is not None and not isinstance(patch, dict):
+        raise ValueError("theme_config_patch must be an object or null")
+    return _deep_merge_dicts(captured or {}, patch or {}) or None
+
+
 def _resolve_output_dir(
     *,
     context_variables: Any | None = None,
@@ -1726,6 +1737,9 @@ def save_app_schema(
     _repair_missing_submit_hrefs(page_list, context_variables)
 
     theme_config_patch = _strip_none(_to_plain(theme_config_patch))
+    resolved_theme_config = resolve_app_theme_config(
+        _context_get(context_variables, "captured_theme_config"), theme_config_patch,
+    )
     shell_config = _normalize_shell_config(shell_config)
     asset_manifest = _strip_none(_to_plain(asset_manifest))
     data_contract = _strip_none(_to_plain(data_contract))
@@ -1845,7 +1859,7 @@ def save_app_schema(
             output_dir,
             manifest_dict,
             page_list,
-            theme_config_patch,
+            resolved_theme_config,
             shell_config,
             asset_manifest,
             resolved_data_contract,

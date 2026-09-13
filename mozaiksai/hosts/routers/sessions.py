@@ -125,10 +125,12 @@ async def delete_user_sessions(
             query["status"] = int(WorkflowStatus.IN_PROGRESS)
         elif normalized_status in {"completed", "done", "closed"}:
             query["status"] = int(WorkflowStatus.COMPLETED)
+        elif normalized_status == "failed":
+            query["status"] = int(WorkflowStatus.FAILED)
         elif normalized_status in {"all", "any", "*"}:
             pass
         else:
-            raise HTTPException(status_code=400, detail="status must be one of: in_progress, completed, all")
+            raise HTTPException(status_code=400, detail="status must be one of: in_progress, completed, failed, all")
 
         result = await (await runtime_app._chat_coll()).delete_many(query)
         return {
@@ -163,10 +165,12 @@ async def delete_general_chats(
             query["status"] = int(WorkflowStatus.IN_PROGRESS)
         elif normalized_status in {"completed", "done", "closed"}:
             query["status"] = int(WorkflowStatus.COMPLETED)
+        elif normalized_status == "failed":
+            query["status"] = int(WorkflowStatus.FAILED)
         elif normalized_status in {"all", "any", "*"}:
             pass
         else:
-            raise HTTPException(status_code=400, detail="status must be one of: in_progress, completed, all")
+            raise HTTPException(status_code=400, detail="status must be one of: in_progress, completed, failed, all")
 
         general_coll = await persistence_manager._general_coll()
         result = await general_coll.delete_many(query)

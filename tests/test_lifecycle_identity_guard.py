@@ -81,6 +81,8 @@ async def test_startup_identity_change_stops_before_agent_creation(
     context = (create_context_container(initial, authority_policy=policy)
                if container_kind == "runtime" else detach(initial))
     persistence = SimpleNamespace(
+        assert_chat_resumable=AsyncMock(),
+        mark_chat_failed=AsyncMock(),
         load_run_events=AsyncMock(return_value=[]),
         create_chat_session=AsyncMock(),
         get_or_assign_cache_seed=AsyncMock(return_value=1),
@@ -140,6 +142,7 @@ async def test_startup_identity_change_stops_before_agent_creation(
     agents_factory.assert_not_awaited()
     network_phase.assert_not_awaited()
     persistence.mark_chat_completed.assert_not_awaited()
+    persistence.mark_chat_failed.assert_awaited_once_with("chat-one", app_id="factory-host")
     assert persistence.create_chat_session.await_args.kwargs["app_id"] == "factory-host"
     events = [call.args[0] for call in transport.send_event_to_ui.await_args_list]
     assert [event["kind"] for event in events] == ["error", "run_complete"]

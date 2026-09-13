@@ -714,12 +714,10 @@ async def _load_context_async(
     if data_entity_managers:
         context._mozaiks_data_entity_managers = data_entity_managers
 
-    # Expose definitions and agent plan on the context container for downstream consumers
+    # Expose definitions for downstream context consumers.
     if definitions:
         context._mozaiks_context_definitions = definitions
     context._mozaiks_context_authority_policy = authority_policy
-    if plan.agents:
-        context._mozaiks_context_agents = plan.agents
 
     # Log context summary
     try:

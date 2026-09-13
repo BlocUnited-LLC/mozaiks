@@ -985,7 +985,7 @@ definitions:
   bundle_repair_status:
     type: string
     description: >
-      Bounded repair status for deterministic generated-bundle scanner failures.
+      Bounded repair status for deterministic generated-bundle validation failures.
       One of not_applicable | needs_revision | passed | blocked.
     source:
       type: computed
@@ -1000,25 +1000,25 @@ definitions:
       default: null
   bundle_repair_attempt_count:
     type: integer
-    description: Number of generated-bundle scanner repair passes already scheduled.
+    description: Number of generated-bundle validation repair passes already scheduled.
     source:
       type: computed
       default: 0
   bundle_repair_max_attempts:
     type: integer
-    description: Maximum automated generated-bundle scanner repair attempts before blocking.
+    description: Maximum automated generated-bundle validation repair attempts before blocking.
     source:
       type: computed
       default: 2
   bundle_repair_request:
     type: string
-    description: Focused repair instruction derived from generated-bundle scanner failures.
+    description: Focused repair instruction derived from generated-bundle validation failures.
     source:
       type: computed
       default: null
   bundle_repair_errors:
     type: array
-    description: Raw generated-bundle scanner errors that caused the repair pass.
+    description: Generated-bundle validation errors that caused the repair pass.
     source:
       type: computed
       default: []
@@ -1036,7 +1036,7 @@ definitions:
       default: false
   bundle_repair_result:
     type: object
-    description: Full generated-bundle scanner repair scheduling result.
+    description: Full generated-bundle validation repair scheduling result.
     source:
       type: computed
       default: null
@@ -1554,7 +1554,10 @@ definitions:
       default: []
   generated_files:
     type: object
-    description: Canonical generated app bundle file map assembled from schema and task-batch outputs.
+    description: >-
+      Canonical app bundle file map. Partial revisions preload the verified
+      selected app-bundle archive; assembly overlays schema/task outputs and
+      explicit deletions while preserving unchanged files.
     source:
       type: computed
       default: {}
@@ -1614,6 +1617,7 @@ agents:
   AppPlanAgent:
     variables:
     - app_plan_feedback
+    - generated_files
     - platform_user_email
     - app_backend_url
     - build_mode
@@ -1829,6 +1833,7 @@ agents:
     - module_runtime_quality_revision_request
   ModelAgent:
     variables:
+    - generated_files
     - concept_overview
     - design_surface_map
     - data_contract
@@ -1863,6 +1868,7 @@ agents:
     - bundle_repair_errors
   ControllerAgent:
     variables:
+    - generated_files
     - app_backend_url
     - concept_overview
     - concept_api_endpoints

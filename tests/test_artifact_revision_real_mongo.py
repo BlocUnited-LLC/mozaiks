@@ -93,15 +93,17 @@ async def test_real_mongo_competing_genesis_candidates_have_one_current(
     try:
         first_ref = await store_one.persist_revision_closure(
             bundle=first_fixture["bundle"],
-            assignment_results=(),
+            assignment_results=first_fixture["assignment_results"],
             evidence=first_fixture["evidence"],
             revision=first_fixture["revision"],
+            authority_inputs=first_fixture["authority_inputs"],
         )
         second_ref = await store_one.persist_revision_closure(
             bundle=first_fixture["bundle"],
-            assignment_results=(),
+            assignment_results=first_fixture["assignment_results"],
             evidence=first_fixture["evidence"],
             revision=alternative,
+            authority_inputs=first_fixture["authority_inputs"],
         )
 
         async def promote(store, ref):

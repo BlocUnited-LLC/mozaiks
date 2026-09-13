@@ -34,14 +34,15 @@ class Role(StrEnum):
 
 class WorkflowStatus(IntEnum):
     """Numeric workflow/chat session status.
-    0 = in progress, 1 = completed. Additional states removed per simplification.
+    0 = in progress (including paused), 1 = completed, 2 = failed.
     Stored as small integers in MongoDB.
     """
     IN_PROGRESS = 0
     COMPLETED = 1
+    FAILED = 2
 
     def __str__(self) -> str:  # for logging
-        return "completed" if self.value == 1 else "in_progress"
+        return self.name.lower()
 
 
 class ChatMessage(BaseModel):
@@ -117,10 +118,11 @@ class ChatSessionDoc(BaseModel):
     app_id: str
     workflow_name: str
     user_id: str
-    status: WorkflowStatus  # stored as int (0/1)
+    status: WorkflowStatus  # stored as int (0/1/2)
     created_at: datetime
     last_updated_at: datetime
     completed_at: datetime | None = None
+    failed_at: datetime | None = None
     trace_id: str | None = None
     # Pause support: for low balance scenarios where chat stays resumable
     paused: bool = False

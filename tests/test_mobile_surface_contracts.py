@@ -124,7 +124,9 @@ def test_dialog_and_overlay_primitives_use_mobile_sheet_layout() -> None:
     transition_source = _read("chat-ui/src/ui/screens/TransitionOverlayFrame.jsx")
     surface_source = _read("chat-ui/src/ui/primitives/Surface.jsx")
 
-    assert 'fixed inset-x-0 bottom-0 z-50 grid w-full' in dialog_source
+    assert 'fixed inset-x-0 bottom-0 z-50 grid' in dialog_source
+    assert 'max-h-[calc(100dvh-1rem)] w-full' in dialog_source
+    assert 'overflow-y-auto' in dialog_source
     assert 'rounded-t-[1.75rem] border-b-0' in dialog_source
     assert 'sm:left-[50%] sm:top-[50%]' in dialog_source
 

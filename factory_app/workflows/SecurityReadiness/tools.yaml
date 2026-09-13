@@ -3,9 +3,8 @@ tools:
     file: tools/inspect_generated_app_security.py
     function: inspect_generated_app_security
     description: >
-      Deterministically inspect generated app files or bundle_path for baseline
-      security readiness issues and persist the security_readiness_summary into
-      context_variables.
+      Inspect the verified archive of the current owned build artifact for baseline
+      security readiness issues. Record explicit source diagnostics in the summary.
     tool_type: Agent_Tool
     auto_tool_call: false
   - agent: SecurityReadinessAgent

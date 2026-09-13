@@ -96,6 +96,17 @@ def _definitions(workflow_id: str) -> dict:
     return _load_context_variables(workflow_id).get("definitions") or {}
 
 
+def test_agentgenerator_attachments_use_execution_session_scope():
+    from mozaiksai.core.workflow.context.variables import _materialize_query_template
+
+    source = _definitions("AgentGenerator")["chat_attachments"]["source"]
+    assert source["collection"] == "ChatSessions"
+    query = _materialize_query_template(source["query_template"], {
+        "chat_id": "execution-chat", "run_build_binding": {"target_app_id": "generated-app"},
+    }, app_id="factory-host")
+    assert query == {"app_id": "factory-host", "_id": "execution-chat"}
+
+
 def _agent_variables(workflow_id: str, agent_name: str) -> set[str]:
     agents = _load_context_variables(workflow_id).get("agents") or {}
     return set((agents.get(agent_name) or {}).get("variables") or [])

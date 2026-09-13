@@ -17,13 +17,7 @@ import FileTreePane from './FileTreePane';
 import HarnessDecisionCard from '../../../app/ui/components/HarnessDecisionCard.jsx';
 import { studioFetch } from '../../../app/admin/pages/studioApi.js';
 
-// Known locations where AppGenerator may write the theme config file.
-const _THEME_FILE_CANDIDATES = [
-  'theme_config.json',
-  'src/theme_config.json',
-  'app/theme_config.json',
-  'public/theme_config.json',
-];
+const THEME_FILE_PATH = 'brand/theme_config.json';
 
 const AppWorkbench = ({
   payload = {},
@@ -52,6 +46,7 @@ const AppWorkbench = ({
   const defaultView = layoutCfg.defaultView || 'split';
   const [view, setView] = useState(defaultView);
   const [refinementRequest, setRefinementRequest] = useState('');
+  const [limitToSelectedFile, setLimitToSelectedFile] = useState(false);
   const [refinementResult, setRefinementResult] = useState(null);
   const [refinementError, setRefinementError] = useState(null);
   const [artifactReview, setArtifactReview] = useState(payload?.review || null);
@@ -201,25 +196,24 @@ const AppWorkbench = ({
       // parent_theme_config. Must live inside refinement_request.extra because
       // RefinementRequest uses extra="forbid" — top-level unknown fields fail
       // Pydantic validation on the server.
-      if (config && typeof config === 'object' && Object.keys(config).length > 0) {
+      const themeSource = filesMap?.[THEME_FILE_PATH];
+      const parentTheme = themeSource ? JSON.parse(themeSource) : null;
+      if (parentTheme && typeof parentTheme === 'object' && !Array.isArray(parentTheme)) {
         triggerPayload.refinement_request.extra = {
           ...(triggerPayload.refinement_request.extra || {}),
-          parent_theme_config: config,
+          parent_theme_config: parentTheme,
         };
       }
       // Scope the coding request explicitly to theme files so the scope
       // proposer is bypassed. Without this it would try to load a
       // theme_config artifact from the store, which may not exist yet.
-      const themeFilePath = _THEME_FILE_CANDIDATES.find(
-        (p) => filesMap?.[p] != null
-      );
-      if (themeFilePath) {
+      if (themeSource != null) {
         triggerPayload.coding_request = {
-          files: { [themeFilePath]: filesMap[themeFilePath] },
+          files: { [THEME_FILE_PATH]: themeSource },
           validation_strategy: validationStrategy || 'skip',
         };
       }
-    } else if (selectedPath && scopeFiles[selectedPath] != null) {
+    } else if (limitToSelectedFile && selectedPath && scopeFiles[selectedPath] != null) {
       triggerPayload.coding_request = {
         files: scopeFiles,
         validation_strategy: validationStrategy || 'skip',
@@ -412,7 +406,7 @@ const AppWorkbench = ({
               </div>
             </div>
             <div className="text-right text-[10px] text-[var(--color-text-muted)]">
-              <div>{selectedPath ? `Scoped to ${selectedPath}` : 'Agents will pick the right files'}</div>
+              <div>{limitToSelectedFile && selectedPath ? selectedPath : 'Entire app'}</div>
               {!artifactVersionId && <div>Waiting for this build to be saved…</div>}
             </div>
           </div>
@@ -420,11 +414,21 @@ const AppWorkbench = ({
           <textarea
             value={refinementRequest}
             onChange={(event) => setRefinementRequest(event.target.value)}
-            placeholder="Describe what you want changed — e.g. 'Make the header sticky' or 'Add a delete button to each task row'. Select a file first to limit the change to that file."
+            aria-label="App change request"
+            placeholder="Describe the change"
             className="mt-3 min-h-24 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-[rgba(var(--color-primary-rgb),0.45)]"
           />
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+              <input
+                type="checkbox"
+                checked={limitToSelectedFile}
+                onChange={(event) => setLimitToSelectedFile(event.target.checked)}
+                disabled={!selectedPath || refinementStarting}
+              />
+              Limit to selected file
+            </label>
             <button
               type="button"
               className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}

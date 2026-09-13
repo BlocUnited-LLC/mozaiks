@@ -1094,7 +1094,7 @@ async def test_execute_task_batches_rejects_worker_output_outside_owned_paths() 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("repair", [False, True])
-@pytest.mark.parametrize("failure_kind", ["ownership", "null_manifest", "task_identity"])
+@pytest.mark.parametrize("failure_kind", ["ownership", "null_manifest", "task_identity", "form_payload"])
 async def test_task_output_validation_uses_the_declared_retry_budget(repair: bool, failure_kind: str) -> None:
     payload = _valid_payload()
     batch = payload["batches"][0]
@@ -1111,9 +1111,27 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
             "code_files": [{"filename": "modules/profiles/contracts/events.yaml", "content": "events: []"}],
         }
         error = "events_yaml is null"
-    else:
+    elif failure_kind == "task_identity":
         invalid = {**valid, "task_id": "another_task"}
         error = "mismatched task_id"
+    else:
+        from tests.test_page_schema_runtime_validation import _valid_page
+
+        page = _valid_page(sections=[{
+            "id": "edit", "primitive": "Form", "config": {
+                "fields": [{"name": "name", "label": "Name", "type": "text"},
+                           {"name": "notes", "label": "Notes", "type": "textarea"}],
+                "submit_action": {"label": "Save", "action_type": "submit",
+                                  "href": "/api/modules/profiles/update",
+                                  "payload": {"record_id": "{selected_row.id}"}},
+            },
+        }])
+        invalid = {"code_files": [{"filename": "ui/pages/home.yaml", "content": yaml.safe_dump(page)}]}
+        page["sections"][0]["config"]["submit_action"]["payload"].update({
+            "name": "{form.name}", "notes": "{form.notes}",
+        })
+        valid = {"code_files": [{"filename": "ui/pages/home.yaml", "content": yaml.safe_dump(page)}]}
+        error = "page_schema.incomplete_form_payload"
 
     class RepairAgent(_RunnerAgent):
         async def ask(self, message, **kwargs):
@@ -1125,6 +1143,11 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
         "task_id": "profiles", "initial_agent": "WorkerAgent", "initial_message": "Build profiles.",
         "owned_paths": ["modules/profiles/module.yaml"],
     }]}}
+    if failure_kind == "form_payload":
+        context["review_plan"]["tasks"][0].update({
+            "task_type": "page_bundle", "owned_paths": ["ui/pages/home.yaml"],
+        })
+        context["app_build_plan"] = {"pages": [{"name": "home", "route": "/home"}]}
 
     async def execute():
         return await execute_task_batches_for_trigger(
@@ -1145,3 +1168,6 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
     assert "[TASK VALIDATION FEEDBACK]" not in agent.ask_calls[0]["message"]
     assert "[TASK VALIDATION FEEDBACK]" in agent.ask_calls[1]["message"]
     assert error in agent.ask_calls[1]["message"]
+    assert "[REJECTED TASK OUTPUT]" not in agent.ask_calls[0]["message"]
+    rejected_json = agent.ask_calls[1]["message"].split("complete task output.\n", 1)[1]
+    assert json.loads(rejected_json) == invalid

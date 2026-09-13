@@ -151,6 +151,13 @@ transition_rules:
   condition_value: true
   transition_target: TerminateTarget
 - source_agent: ServiceAgent
+  target_agent: AppValidationAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_target
+  condition_value: ServiceAgent
+  transition_target: AgentTarget
+- source_agent: ServiceAgent
   target_agent: ModuleRuntimeQualityAgent
   transition_type: after_turn
   transition_target: AgentTarget

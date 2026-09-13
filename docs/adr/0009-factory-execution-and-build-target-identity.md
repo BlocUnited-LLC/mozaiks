@@ -99,9 +99,31 @@ reached real task execution, exposing optional-manifest and planning failures.
 The latest run confirmed a rejected plan closes with `workflow_failed` and
 clears pending tasks instead of falling through into page generation.
 
-Canonical capability classification, complete module/page planning, bounded
-plan repair, and terminal lifecycle recording remain unresolved. SecurityReadiness
-also still needs alignment with the immutable build binding and owned artifacts.
-The complete generated-app CRUD/refinement/export acceptance and App Zero
-integration remain unverified. Passing earlier stages or stopping on invalid
-output is not a completed app build.
+On 2026-09-12 checkpoint `613447fc` produced a working Client Ledger after
+human-directed Factory repairs. Its saved artifact
+`av_6c7663827b1448a590c55bc8` passed real OIDC login, owner-isolated CRUD,
+search, details, dashboard, desktop/mobile use, persistence across restart,
+and authenticated export. The 22 running source files matched the saved ZIP
+byte for byte. No generated customer source was hand-edited for acceptance.
+The full checkpoint suite passed 17,008 tests with 98 skipped; subsequent
+focused validation covered the final result-message change.
+
+This is a completed functional app, not an unattended or first-try Genesis
+proof. Recovery included authenticated public APIs and repeated scoped repairs.
+The checkpoint is being integrated onto newer main, with independent real UI
+Genesis and hosted-product consumer alignment still in progress.
+
+The fresh UI test exposed theme handoffs that depended on exact model-authored
+sentinels. Interview readiness now uses validated finite tool outcomes; analysis
+advances through the existing graph directly to the strict assembler. Interview
+clarification and save validation remain separate gates. Existing AG2 channels retain their original graph on
+resume, so a new run is required to exercise changed workflow topology.
+
+A second normal-UI Genesis reached AppGenerator, where a 32,768-token planner
+response failed strict JSON validation. The invalid plan was not promoted.
+Obsolete planner examples were removed instead of accepting partial output;
+complete integrated generation acceptance remains open.
+
+SecurityReadiness target/artifact ownership and App Zero commercial correlation,
+dependency installation, refinement continuity, and final integrated regression
+acceptance must be verified before closing this ADR's implementation.

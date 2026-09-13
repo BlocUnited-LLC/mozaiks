@@ -315,11 +315,13 @@ class AG2OrchestrationAdapter:
         # Guard before the try: a lease-loss refusal must abort the resume,
         # never degrade into the warning path below.
         assert_chat_mutable(app_id=request.app_id, chat_id=request.chat_id)
+        from mozaiksai.core.data.persistence import AG2PersistenceManager
+
+        pm = AG2PersistenceManager()
+        await pm.assert_chat_resumable(request.chat_id, request.app_id)
         try:
-            from mozaiksai.core.data.persistence import AG2PersistenceManager
             from mozaiksai.core.multitenant import build_app_scope_filter
 
-            pm = AG2PersistenceManager()
             coll = await pm._coll()
             await coll.update_one(
                 {"_id": request.chat_id, **build_app_scope_filter(request.app_id)},

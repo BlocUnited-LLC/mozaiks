@@ -121,6 +121,43 @@ def test_registered_pack_origin_is_read_from_frozen_context():
         validate_plan_origins(_plan(), context)
 
 
+def test_registered_operator_pack_survives_typed_plan_and_template_materialization(tmp_path):
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+    )
+
+    root = tmp_path / "reports"
+    template = root / "templates/config/reports.yaml.j2"
+    template.parent.mkdir(parents=True)
+    template.write_text("label: {{ report_label }}\n", encoding="utf-8")
+    (root / "context.yaml").write_text(yaml.safe_dump({
+        "context_id": "reports", "applies_to_workflows": ["AppGenerator"],
+        "assets": [{"path": "templates/", "kind": "templates"}],
+        "pack": {"id": "reports", "version": "0.1.0", "status": "active", "capability_source": "operator_pack"},
+    }), encoding="utf-8")
+    context = _context()
+    context.set("capability_packs", [{"id": "reports", "capability_source": "operator_pack", "pack_source_path": str(root)}])
+    plan = _plan()
+    plan["capability_packs"][0]["capability_source"] = "operator_pack"
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "ready", result
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    packs = detach(context.get("app_build_plan"))["capability_packs"]
+    assert packs[0]["capability_source"] == "operator_pack"
+    assert packs[0]["pack_source_path"] == str(root)
+    rendered = resolve_managed_capability_templates(packs, context_variables={"report_label": "Reports"})
+    files = {item["filename"]: item["content"] for item in rendered}
+    assert files["config/reports.yaml"] == "label: Reports"
+
+
+def test_unregistered_operator_pack_is_not_a_generated_module():
+    plan = _plan()
+    plan["capability_packs"][0]["capability_source"] = "operator_pack"
+    with pytest.raises(ValueError, match="operator_pack requires an installed pack"):
+        validate_plan_origins(plan, _context())
+
+
 def test_generated_module_identity_cannot_be_a_product_category():
     plan = _plan()
     plan["capability_packs"][0]["capability_pack_id"] = "crud_pack"

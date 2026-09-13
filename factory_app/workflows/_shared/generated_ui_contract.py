@@ -795,6 +795,24 @@ def audit_page_schemas(
                 "and declare this page through custom_route_bundle in the build plan."
             )
 
+        if (
+            page_type == "record_list"
+            and page.get("layout") == "grid"
+            and isinstance(sections, list)
+            and sections
+            and isinstance(sections[0], dict)
+            and sections[0].get("primitive") == "PageHeader"
+            and any(
+                isinstance(section, dict)
+                and section.get("primitive") in {"DataTable", "ResourceTable"}
+                for section in sections
+            )
+        ):
+            warnings.append(
+                f"{page_path} places a primary record table beside its PageHeader; "
+                "use layout='full-width' to stack these sections."
+            )
+
         summary_count = primitive_counts.get("SummaryStrip", 0)
         if summary_count > 1:
             warnings.append(

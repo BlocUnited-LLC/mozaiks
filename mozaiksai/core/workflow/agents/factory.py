@@ -39,6 +39,7 @@ from ..context.context_utils import (
     context_to_dict as _context_to_dict,
 )
 from ..context.frozen import detach, freeze
+from ..context.schema import load_context_variables_config
 from ..outputs.structured import (
     get_provider_response_model,
     get_structured_outputs_for_workflow,
@@ -623,8 +624,11 @@ async def create_agents(
         except Exception:
             pass
 
-    exposures_map = getattr(context_variables, "_mozaiks_context_exposures", {}) or {}
-    agent_plan_map = getattr(context_variables, "_mozaiks_context_agents", {}) or {}
+    # Task workers receive detached snapshots, not context-container attributes.
+    # Resolve their prompt views from the same canonical YAML as network agents.
+    agent_plan_map = load_context_variables_config(
+        workflow_config.get("context_variables") or {},
+    ).agents
 
     agents: dict[str, Agent] = {}
 
@@ -669,13 +673,12 @@ async def create_agents(
 
         # Apply context exposures to the base prompt
         unprojected_system_message = system_message
-        agent_exposures = (exposures_map or {}).get(agent_name, []) or []
         agent_plan = (agent_plan_map or {}).get(agent_name)
         agent_variables = list(getattr(agent_plan, "variables", []) or [])
 
-        if agent_exposures or agent_variables:
+        if agent_variables:
             system_message = _apply_context_exposures(
-                system_message, agent_exposures, context_dict, agent_variables,
+                system_message, [], context_dict, agent_variables,
             )
 
         _log_existing_app_discovery_projection(
@@ -686,12 +689,11 @@ async def create_agents(
         )
         visible_context_keys = _safe_context_keys(context_dict)
         _conv_logger.info(
-            "[%s] AGENT_CONTEXT_READY agent=%s context_keys=%s exposed=%s declared=%s "
+            "[%s] AGENT_CONTEXT_READY agent=%s context_keys=%s declared=%s "
             "prompt_chars=%s",
             workflow_name,
             agent_name,
             visible_context_keys,
-            agent_exposures,
             agent_variables,
             len(system_message),
             extra={
@@ -928,7 +930,7 @@ async def create_agents(
         except Exception as watchdog_err:
             logger.debug("[AGENTS] AG2 token watchdog observers skipped for '%s': %s", agent_name, watchdog_err)
 
-        if prompt_middleware_functions or agent_exposures or agent_variables:
+        if prompt_middleware_functions or agent_variables:
             from ..execution.middleware import build_prompt_middleware
 
             middleware.append(
@@ -937,7 +939,7 @@ async def create_agents(
                     agent_name=agent_name,
                     base_system_message=unprojected_system_message,
                     context_bridge=context_bridge,
-                    context_exposures=agent_exposures,
+                    context_exposures=[],
                     context_variables=agent_variables,
                 )
             )

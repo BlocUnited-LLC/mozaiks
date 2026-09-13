@@ -1,15 +1,26 @@
 schema_version: mozaiks.structured_outputs.v1
 # ThemeCapture Structured Outputs
 #
-# Only ThemeConfigAssemblerAgent produces structured output.
-# The output matches the live theme_config contract used by themeProvider.js.
+# Interview readiness is typed; assembled output matches the live theme contract.
 
 registry:
-  ThemeInterviewAgent: null
+  ThemeInterviewAgent: ThemeInterviewResult
   ThemeAnalysisAgent: null
   ThemeConfigAssemblerAgent: CapturedThemeConfig
 
 models:
+  ThemeInterviewResult:
+    type: model
+    description: A user-facing clarification or confirmation with explicit readiness.
+    fields:
+      agent_message:
+        type: str
+        description: A short question for missing evidence, or a concise confirmation. Never include routing markers.
+      outcome:
+        type: literal
+        values: [needs_input, ready]
+        description: Use needs_input only for missing critical branding evidence; ready when the confirmed evidence is sufficient.
+
   ColorVariant:
     type: model
     description: A semantic color with main/light/dark hex variants.

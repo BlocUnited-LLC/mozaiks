@@ -410,7 +410,7 @@ const Header = ({
               alt={brandName || "Brand"}
             />
           ) : (
-            <span className="block truncate text-sm font-semibold uppercase tracking-[0.18em] text-white md:text-base heading-font">
+            <span className="block truncate text-sm font-semibold text-foreground md:text-base heading-font">
               {brandName}
             </span>
           )}
@@ -446,7 +446,7 @@ const Header = ({
   };
 
   return (
-    <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled ? "backdrop-blur-md bg-black/25" : "backdrop-blur-md bg-black/15"} border-b border-[rgba(var(--color-primary-rgb),0.1)]`}>
+    <header className={`fixed top-0 left-0 right-0 z-50 bg-background text-foreground border-b border-border transition-shadow ${isScrolled ? "shadow-sm" : ""}`}>
       <div className="relative flex w-full items-center justify-between" style={headerFrameStyle}>
         <div className="flex min-w-0 items-center" style={headerClusterStyle}>
           <LogoSection />
@@ -460,9 +460,9 @@ const Header = ({
                     key={item.id || item.path || item.label}
                     type="button"
                     onClick={() => handleNavigationItem(item)}
-                    className={`rounded-lg border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] transition heading-font ${isActive
-                      ? "border-[rgba(var(--color-primary-light-rgb),0.55)] bg-[rgba(var(--color-primary-rgb),0.15)] text-white"
-                      : "border-[rgba(148,163,184,0.18)] bg-[rgba(255,255,255,0.03)] text-[rgba(226,232,240,0.8)] hover:border-[rgba(var(--color-primary-light-rgb),0.4)] hover:bg-[rgba(var(--color-primary-rgb),0.08)] hover:text-white"}`}
+                    className={`rounded-md border px-3 py-1.5 text-sm font-medium transition heading-font ${isActive
+                      ? "border-primary/40 bg-primary/10 text-foreground"
+                      : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                     style={navButtonStyle}
                   >
                     {item.label || item.id}

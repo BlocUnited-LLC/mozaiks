@@ -1,4 +1,5 @@
 import ast
+import json
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 
@@ -18,8 +19,10 @@ from .code_file_utils import (
     extract_code_file_entries_from_payload,
     extract_deleted_file_paths_from_payload,
 )
+from .hydrate_app_revision_context import hydrate_app_revision_context
 from .materialize_app_config_contracts import materialize_app_config_contracts
 from .resolve_managed_capability_templates import resolve_managed_capability_templates
+from .save_app_schema import resolve_app_theme_config
 
 
 def _is_truthy(value: Any) -> bool:
@@ -169,6 +172,14 @@ def _apply_app_config_contracts(
     context_variables: Any,
 ) -> list[dict[str, str]]:
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
+    captured_theme = (
+        context_variables.get("captured_theme_config") if context_variables is not None else None
+    )
+    theme_path = "brand/theme_config.json"
+    theme_patch = json.loads(file_map[theme_path]) if theme_path in file_map else None
+    resolved_theme = resolve_app_theme_config(captured_theme, theme_patch)
+    if resolved_theme is not None:
+        file_map[theme_path] = json.dumps(resolved_theme, indent=2, ensure_ascii=False)
     for file in materialize_app_config_contracts(
         app_id=app_id,
         app_build_plan=app_build_plan,
@@ -299,11 +310,18 @@ async def assemble_app_tasks(
         Field(description="AG2-injected workflow context variables."),
     ] = None,
 ) -> dict[str, Any]:
+    await hydrate_app_revision_context(context_variables)
     app_id = None
     feature_outputs: list[dict[str, Any]] = []
     inject_key: str | None = None
 
     if context_variables and hasattr(context_variables, "get"):
+        existing_files = detach(context_variables.get("generated_files")) or {}
+        if existing_files:
+            feature_outputs.append({"code_files": [
+                {"filename": path, "content": content}
+                for path, content in sorted(existing_files.items())
+            ]})
         schema_ready = _is_truthy(context_variables.get("app_schema_ready"))
         if schema_ready:
             quality_status = context_variables.get("app_ui_quality_status")

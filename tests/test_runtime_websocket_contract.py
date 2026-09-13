@@ -221,6 +221,27 @@ async def _drain_scheduled_coroutines(scheduled_coroutines: list) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("resolved", [False, True])
+async def test_failed_reconnect_never_schedules_execution(monkeypatch, resolved):
+    docs = [{"_id": "chat", "app_id": "app", "user_id": "user", "workflow_name": "AgentGenerator",
+             "status": 0 if resolved else 2, "messages": []}]
+    if resolved:
+        docs.append({**docs[0], "_id": "resolved", "status": 2})
+    harness = _patch_runtime_websocket_harness(
+        monkeypatch, chat_docs=docs,
+        resume_resolution={"chat_id": "resolved" if resolved else "chat"},
+        workflow_startup_mode="AgentDriven",
+    )
+    websocket = _FakeWebSocket()
+    await harness.runtime_app.websocket_endpoint(
+        websocket=websocket, workflow_name="AgentGenerator", app_id="app", chat_id="chat", user_id="user",
+    )
+    assert websocket.closed == [(1008, "Workflow session failed; start a new run")]
+    assert harness.scheduled_coroutines == harness.created_sessions == []
+    assert harness.transport.api_calls == harness.transport.handle_websocket_calls == []
+
+
+@pytest.mark.asyncio
 async def test_runtime_websocket_endpoint_uses_resolved_resume_chat(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = _patch_runtime_websocket_harness(
         monkeypatch,

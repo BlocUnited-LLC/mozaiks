@@ -37,16 +37,13 @@ def test_theme_capture_uses_canonical_context_and_handoffs() -> None:
     assert "definitions" in context_vars
     assert "agents" in context_vars
 
-    interview = context_vars["definitions"]["interview_complete"]
-    analysis = context_vars["definitions"]["analysis_complete"]
+    assert "interview_complete" not in context_vars["definitions"]
+    interview = context_vars["definitions"]["interview_outcome"]
+    assert "analysis_complete" not in context_vars["definitions"]
 
-    interview_trigger = interview["source"]["triggers"][0]
-    analysis_trigger = analysis["source"]["triggers"][0]
-
-    assert interview_trigger["agent"] == "ThemeInterviewAgent"
-    assert interview_trigger["match"]["equals"] == "NEXT"
-    assert analysis_trigger["agent"] == "ThemeAnalysisAgent"
-    assert analysis_trigger["match"]["equals"] == "NEXT"
+    assert interview["authority_class"] == "closed_writer_routing_state"
+    assert interview["writer_ids"] == ["deterministic_tool"]
+    assert "triggers" not in interview["source"]
 
     route_pairs = {
         (item["source_agent"], item["target_agent"])
@@ -54,6 +51,10 @@ def test_theme_capture_uses_canonical_context_and_handoffs() -> None:
     }
     assert ("ThemeInterviewAgent", "ThemeAnalysisAgent") in route_pairs
     assert ("ThemeAnalysisAgent", "ThemeConfigAssemblerAgent") in route_pairs
+    assert ("ThemeAnalysisAgent", "user") not in route_pairs
+    assert "ThemeAnalysisAgent" not in _read_yaml(
+        "factory_app/workflows/ThemeCapture/ui_config.yaml"
+    )["visual_agents"]
 
     lifecycle_tool = tools["lifecycle_tools"][0]
     assert lifecycle_tool["trigger"] == "before_chat"

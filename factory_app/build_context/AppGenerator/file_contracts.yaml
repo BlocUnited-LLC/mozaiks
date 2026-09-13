@@ -25,9 +25,9 @@ task_contracts:
     owner_agent: AppSchemaAgent
     summary: Declarative persistent app UI bundle owned by AppSchemaAgent.
     required_outputs:
-      - app.json
       - ui/pages/*.yaml
     optional_outputs:
+      - app.json
       - provenance.yaml
       - ui/route_manifest.json
       - ui/pages/custom/*.jsx
@@ -39,6 +39,9 @@ task_contracts:
       - config/asset_manifest.json
     hard_constraints:
       - Persistent app pages stay declarative by default.
+      - Emit exactly the current task's owned_paths. Required page outputs apply only to pages in that scope; a manifest-only task may emit pages as an empty list.
+      - AppSchemaOutput.manifest is AppManifest or explicit null. A task owning app.json must emit AppManifest; otherwise emit null, which materializes neither app.json nor provenance.yaml. Do not emit a placeholder manifest or silently discard out-of-scope files.
+      - New-app page_bundle tasks collectively own app.json and every planned page, with one manifest owner. Page-only revisions preserve app.json and unchanged pages from the verified baseline; full-bundle acceptance still requires a complete valid app. Standalone save_app_schema requires a non-null manifest.
       - provenance.yaml is app-root metadata emitted by the scaffold/generator path. It records creation/refinement/validation lineage and declared contract refs; it must not contain secrets, absolute local paths, or provider execution state.
       - "Workflow launches from pages use action_type: workflow."
       - Prefer compact config/shell.json shortcuts for common shell chrome instead of repeating full header/profile/mobile/footer arrays.
@@ -49,6 +52,7 @@ task_contracts:
       - Dashboard manifests may reference workflow_sequence actions, but those sequences must already exist in workflows/extended_orchestration/extension_registry.json.
       - Use config/shell.json navigation.policy for placement rules such as desktop global=header, desktop local=sidebar, mobile global=bottomBar, mobile local=sheet, and mobile footer=hidden.
       - Put route chrome intent on AppPageSchema.shell_mode; use config/shell.json chrome only for app-wide mode-policy overrides.
+      - Use layout=full-width for a PageHeader followed by a primary record table. Grid places peer top-level sections in separate columns; it does not stack a heading above a full-width table.
       - Use shell_mode=conversation for DM/chat/thread routes, workspace for dense module/profile/admin-like work surfaces, focused for setup/review flows, immersive for full-viewport experiences, public for public/legal routes, and standard for ordinary pages.
       - Use explicit shell arrays only when labels, icons, role gates, or custom paths differ from the shortcut catalog.
       - Durable page mutations bind through declared api_endpoint values or canonical module actions.
@@ -119,7 +123,8 @@ task_contracts:
     hard_constraints:
       - module.yaml is always required.
       - module_contract owned_paths are YAML/declarative contract files only - module.yaml, contracts/*.yaml, and optional runtime_extensions.yaml. Do not include backend/*.py in module_contract tasks; use data_models for backend/schemas.py and business_services for handler.py/service.py/repo.py/policy.py.
-      - actions[].input_schema is a closed request contract. Every object level (root, nested objects, array item objects) must declare additionalProperties false, and every accepted request key must be an explicitly declared property. Never emit an open map property such as metadata {type object} in an action input schema - use a closed nested object with declared keys, or an array of closed {key, value} string entries for app-defined annotations. Keep input schemas to closed-profile keywords (type, enum, items, properties, required, additionalProperties); defaults and length limits live in handler/service code.
+      - Optional request and event properties are not nullable unless their declared type admits null. Service code normalizes documented defaults before writes, preserves omitted fields on partial update, and omits absent optional event keys rather than emitting None. Verify required-only inputs against the event schema as well as fully populated forms.
+      - actions[].input_schema is a closed request contract. Every object level (root, nested objects, array item objects) must declare additionalProperties false, and every accepted request key must be an explicitly declared property. Never emit an open map property such as metadata {type object} in an action input schema - use a closed nested object with declared keys, or an array of closed {key, value} string entries for app-defined annotations. Keep input schemas to closed-profile keywords (type, enum, items, properties, required, additionalProperties); defaults and length limits live in service code. Expected business-rule input rejections raise mozaiksai.core.runtime.ModuleInputValidationError before writes/events, producing INVALID_PARAMS/400. Plain ValueError remains an unexpected execution error.
       - Emit only files declared by owned_paths or explicit file_manifest.
       - Omit YAML files that would serialize to empty arrays or null objects.
       - YAML declares the contract; downstream agents implement Python and JS stubs.

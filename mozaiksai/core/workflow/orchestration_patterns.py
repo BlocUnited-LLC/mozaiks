@@ -30,6 +30,8 @@ from mozaiksai.core.data.persistence.persistence_manager import (
 )
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.persistence.distributed_lock import ChatLeaseLostError
+from mozaiksai.core.tokens.guard import TokenUsageDenied
 from mozaiksai.core.workflow.execution.network_graph import (
     WorkflowGraphCompileError,
     compile_transition_rules_to_graph,
@@ -611,6 +613,8 @@ async def run_workflow_orchestration(
     logger.info("[ORCHESTRATION] Starting %s workflow", workflow_name)
 
     persistence_manager = AG2PersistenceManager()
+    # Refusing re-entry is not another failed execution or lifecycle trigger.
+    await persistence_manager.assert_chat_resumable(chat_id, app_id)
 
     from mozaiksai.core.transport.simple_transport import SimpleTransport
 
@@ -1092,6 +1096,8 @@ async def run_workflow_orchestration(
         run_error = runner_result.error
         awaiting_user_input = runner_result.status is RunStatus.PAUSED
         run_completed = runner_result.status is RunStatus.COMPLETED
+        if run_failed:
+            await persistence_manager.mark_chat_failed(chat_id, app_id=app_id)
         pause_agent = _last_agent_name_from_runner_result(runner_result) if awaiting_user_input else None
         run_status = (
             "failed" if run_failed
@@ -1201,8 +1207,12 @@ async def run_workflow_orchestration(
             structured_outputs=runner_result.structured_outputs,
         )
 
+    except (ChatLeaseLostError, TokenUsageDenied):
+        # Lease loss and admission pauses must not terminalize a resumable run.
+        raise
     except Exception as e:
         logger.error("[%s] Orchestration failed: %s", workflow_name_upper, e, exc_info=True)
+        await persistence_manager.mark_chat_failed(chat_id, app_id=app_id)
         if lifecycle_manager is not None:
             try:
                 await lifecycle_manager.execute_trigger(

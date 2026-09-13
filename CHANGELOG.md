@@ -14,12 +14,49 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Preserve source line endings during app validation and export so Windows
+  refinement does not repeatedly insert blank lines into unchanged files.
+- Honor ResourceTable search fields and placeholder, preserve selected record identity
+  after sorting, and guide generated primary tables toward full-width page layouts.
+- Return HTTP 400 for explicit module service input-validation errors without
+  masking unexpected application errors. Text-only branding no longer warns about
+  an intentionally absent logo image.
+- Preserve the requested chat when routing an in-page refinement and keep
+  backend repairs scoped to validation rather than unrelated generation steps.
+- Preserve canonical prompt-context views for detached task workers and retain
+  captured themes when assembling partial UI theme output.
+- Make AppWorkbench single-file refinement opt-in and use the canonical
+  `brand/theme_config.json` artifact for theme refinement.
+- Route module implementation validation failures through the existing bounded
+  bundle repair graph without relaxing handler contracts or retry limits.
+- Prevent Factory reconnects from replaying newly active downstream AG2 turns or
+  overlapping context-packet callbacks, and await recovery settlement before user input.
+- Include rejected task candidates in bounded validation retries so fresh AG2
+  worker attempts can repair their output without bypassing ownership or quality checks.
+- Display explicit user-facing messages from nonvisual automatic tools without
+  exposing internal tool payloads or duplicating replayed messages.
+- Preserve escaped Unicode and backslashes when replacing generated design
+  document surface maps instead of interpreting YAML as regex replacement syntax.
+- Keep workflow reviews visible on rejected or unconfirmed decisions and display
+  submission errors instead of closing the review before server acknowledgement.
+- Remove obsolete duplicate planner output examples and refer to the canonical
+  structured response schema; task prompts reuse inherited build context.
+- Attribute model usage to the validated run build binding without changing
+  execution-host charging or trusting caller-supplied build IDs.
+- Preserve registered operator-pack identity through typed app planning and
+  template expansion; reject unregistered pack references before generation.
+- Read workflow attachments from the execution session while keeping generated
+  artifacts scoped to the bound target app.
+- Route theme interviews using typed readiness and advance internal analysis
+  directly to validated theme assembly, without chat-text routing markers.
 - Security Readiness now saves findings through permissioned workflow module
   dispatch using the live session principal. Findings retain project/build
   association and cannot overwrite another project's matching scanner rule.
   Workflow handoffs tolerate brief reconnects while rechecking the original
   actor and fresh permissions before dispatch; started actions are never retried.
   Unavailable persistence and uninspected bundles remain explicit in review.
+- Resolve Security Readiness input from the authenticated build binding and
+  verified target-owned artifact, rejecting stale, foreign, or tampered bundles.
 - Studio workspaces inherit packaged first-party modules through the standard
   app loader. App-local modules override defaults by id, so hosted workspaces
   can reuse Security Readiness without copying its implementation.
@@ -3518,3 +3555,5 @@ This project follows a practical pre-1.0 changelog format:
 - Packaged CLI entrypoint with `mozaiks --version`.
 - Tag-driven GitHub Actions release flow for building, smoke-testing, creating a GitHub release, and publishing to PyPI.
 
+- Preserve untouched app files during partial AppGenerator revisions using the
+  selected artifact's verified archive as the baseline for agents and assembly.

@@ -35,6 +35,17 @@ Exhaustion leaves the plan unready and the worker queue empty, then terminates
 as a workflow failure. Graph outcome operations remain separate from task-batch
 triggers; this gate does not change that runtime contract. Scoped revision and
 brownfield plans do not have to regenerate the entire genesis inventory.
+Partial revisions preload the selected target-owned app-bundle archive into
+`generated_files`. The Factory reader verifies the committed archive digest;
+foreign ownership, retired records, missing content, and incomplete text-file
+loading fail rather than producing a partial baseline. Assembly rechecks the
+baseline, then applies schema/task outputs, accumulated repairs, and explicit
+deletions in that order. Unchanged files remain intact. A stale selected version
+is allowed as revision input because invalidation marks the old version stale;
+it is not thereby accepted or promoted. Explicit conceptual replans and full
+rebuilds retain their separate carry-forward policy and do not copy the old
+implementation wholesale. Binary-containing bundles currently require a
+binary-capable refinement path; this text-file path refuses to silently omit them.
 Auth scaffolding remains AuthScaffoldAgent's responsibility outside build tasks.
 It runs after integration readiness and before app validation, which requires the
 auth contract. Only a passed complete-bundle validation advances to DownloadAgent.
@@ -168,6 +179,22 @@ task materialization forwards the build timestamp used for provenance replay.
 - `theme_config_patch`
 - `shell_config`
 - `asset_manifest`
+
+`manifest` is typed `AppManifest | null`. A detached `page_bundle` worker emits
+only its owned pages and supplies a manifest only when it owns `app.json`.
+Null materializes neither `app.json` nor `provenance.yaml`; it does not remove
+existing root metadata. Other unowned optional output fields remain null.
+The existing file-ownership gate still rejects an emitted manifest outside
+`owned_paths` and a missing manifest when the task owns `app.json`.
+
+New-app plan coverage requires a manifest owner and ownership of every planned
+page. Scoped revision assembly hydrates the verified archive and overlays task
+outputs, preserving the baseline manifest and unchanged pages. Nullable worker
+output does not make the final app manifest optional: full bundle validation,
+runtime loading, and export acceptance still require a complete valid app.
+Standalone `save_app_schema` continues to reject a null manifest before writes.
+Provider response schemas require an explicit object or null; local acceptance
+models retain the existing optional-field default semantics.
 
 ### Theme vs Shell Ownership
 
@@ -377,7 +404,8 @@ It must:
 - write `ui/pages/custom/*.jsx` when `custom_route_bundle` exists
 - synthesize `ui/index.js` from `custom_route_bundle.page_files` when custom routes exist
 - reject or warn on custom route registry drift before assembly: missing page files, duplicate registry keys, `.js` route files, non-default-exported React, or route components that no page file registers
-- deep-merge `theme_config_patch` into `brand/theme_config.json`
+- preserve `captured_theme_config` as the theme base and deep-merge non-null
+  `theme_config_patch` deltas into `brand/theme_config.json`
 - deep-merge `shell_config` into `config/shell.json`
 - deep-merge `asset_manifest` into `config/asset_manifest.json`
 - store `app_manifest`, `app_pages`, `app_custom_route_bundle`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
@@ -398,12 +426,19 @@ Required schema-driven outputs:
 - `ui/route_manifest.json` when `app_custom_route_bundle` exists
 - `ui/pages/custom/*.jsx` when `app_custom_route_bundle` exists
 - `ui/index.js` when `app_custom_route_bundle` exists
-- `brand/theme_config.json` when `app_theme_config_patch` exists
+- `brand/theme_config.json` when a captured theme or `app_theme_config_patch` exists
 - `config/shell.json` when `app_shell_config` exists
 - `config/asset_manifest.json` when `app_asset_manifest` exists
 
 When `app_schema_ready == false`, `AssemblyAgent` should use task batch outputs
 via `assemble_app_tasks` and must still preserve the page contract.
+Both assembly paths retain the captured theme's identity, assets, and visual
+tokens. A partial patch is not a replacement theme document. Explicit deltas
+override the corresponding base fields; null patch fields mean no change.
+
+Task worker prompt views come directly from the workflow's declared
+`context_variables.yaml` agent views, just like network agents. Detached task
+snapshots must not silently lose these declarations or expose undeclared values.
 
 ### 4b. Raw Frontend Path Removed
 
@@ -507,8 +542,9 @@ backend Python, frontend code, pages, data contracts, service foundation files,
 or unrelated modules. After the configured attempt limit, the status becomes
 `blocked` and the workflow returns to the user.
 
-When the generated-bundle scanner fails on a file-family violation, the same
-acceptance gate writes a bundle repair contract before export can proceed:
+When the generated-bundle scanner, runtime loading, runtime-quality checks, or
+module implementation validation fails, the same acceptance gate writes a bundle
+repair contract before export can proceed:
 
 - `bundle_repair_status`
 - `bundle_repair_target`
@@ -539,8 +575,13 @@ Agent prompts may propose a patch, but they do not decide whether the loop
 continues. The acceptance gate, failure fingerprint, ownership table, and retry
 budget are the control authority.
 
-The automated repair controller currently covers workflow-integration failures
-and generated-bundle scanner failures. Other acceptance failures still fail
+The automated repair controller currently covers workflow-integration failures,
+generated-bundle scanner failures, runtime loading/quality, and module
+implementation failures. Missing handler classes, methods, and invalid signatures
+carry the exact path and validator guidance into the existing owning-agent repair
+lane. A successful Python import does not waive the canonical workspace-subclass
+contract. These failures share the existing budget and no-progress guard; they do
+not gain a separate retry allowance. Other acceptance failures still fail
 closed to the user. Browser interaction evidence (console errors, failed network
 requests, screenshots, and replayable user-flow assertions) is not yet a
 first-class automatic repair input. Closing that gap requires a typed,
@@ -656,6 +697,12 @@ name, preserve unchanged routes, and publish the rendered file overlay back to
 the same validation bundle. A corrected page on disk is not sufficient if the
 export gate still sees stale context.
 
+Every task writer that edits an existing artifact receives `generated_files`
+through its declared agent context view, including ModelAgent. Schema patches
+preserve exports consumed by unchanged files. Runtime module-import failures
+enter the existing bounded ServiceAgent repair lane; that lane returns directly
+to AppValidationAgent instead of regenerating unrelated UI or adapter files.
+
 Page HTTP bindings, including nested form and modal actions, must resolve to
 HTTP-visible module actions. Omitted/null `api_surface` means authenticated API
 access; `internal` and `admin_internal` are not browser endpoints. Keep declared
@@ -669,7 +716,11 @@ plan's `event_flows`, even if the task's prose does not repeat them.
 Service implementations emit declared events with `await ctx.emit(event_type,
 payload)` after persistence, not `ctx.events.publish(...)`. The module quality
 gate rejects access to that nonexistent event bus. Input constraints belong in
-the action's JSON Schema; expected ownership denials use `PermissionError` so
+the closed action request contract where supported. Additional business checks
+such as nonblank names run in service code before mutations and raise
+`mozaiksai.core.runtime.ModuleInputValidationError` for `INVALID_PARAMS`/HTTP 400.
+The executor does not expose the exception message or classify arbitrary
+`ValueError` bugs as client mistakes. Expected ownership denials use `PermissionError` so
 the module API returns a permission response instead of an internal error.
 
 `api_surface` is a finite runtime contract. Omitted/null is distinct from the
@@ -689,6 +740,8 @@ planned repair; staging never implies promotion or successful live acceptance.
 Do:
 
 - keep persistent pages declarative
+- stack primary record tables below page headers with `layout: full-width`;
+  `grid` means peer top-level columns, not full-width rows
 - keep shell content separate from shell styling
 - reuse ThemeCapture output when available
 - deep-merge generated theme/shell patches into canonical runtime files

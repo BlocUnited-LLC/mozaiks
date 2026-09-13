@@ -9,6 +9,17 @@ from factory_app.workflows._shared.generated_ui_contract import (
 )
 
 
+@pytest.mark.parametrize("layout,expected", [("grid", True), ("full-width", False)])
+def test_primary_record_table_stacks_below_heading(layout: str, expected: bool) -> None:
+    warnings = audit_page_schemas([_strict_page(
+        page_type="record_list", layout=layout, sections=[
+            {"id": "heading", "primitive": "PageHeader", "config": {"title": "Records"}},
+            {"id": "records", "primitive": "ResourceTable", "config": {"columns": ["name"]}},
+        ],
+    )])
+    assert any("beside its PageHeader" in warning for warning in warnings) is expected
+
+
 def test_generated_ui_contract_accepts_clean_react_surface() -> None:
     warnings = audit_generated_react_files(
         [
@@ -30,6 +41,17 @@ def test_generated_ui_contract_accepts_clean_react_surface() -> None:
     )
 
     assert warnings == []
+
+
+@pytest.mark.parametrize("sections", [
+    [None],
+    [{"id": "heading", "primitive": "PageHeader", "config": {"title": "Records"}}, None],
+])
+def test_record_layout_audit_reports_malformed_sections_without_crashing(sections) -> None:
+    warnings = audit_page_schemas([_strict_page(
+        page_type="record_list", layout="grid", sections=sections,
+    )])
+    assert warnings
 
 
 def test_generated_ui_contract_blocks_removed_primitives_and_hardcoded_style() -> None:

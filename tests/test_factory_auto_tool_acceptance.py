@@ -225,6 +225,38 @@ async def test_theme_capture_auto_tool_succeeds_through_real_runtime_path(
         assert STRUCTURED_OUTPUT_KEY not in snapshot
 
 
+async def test_typed_theme_question_reaches_chat_through_auto_tool_binding(
+    factory_manager, side_effect_probes, monkeypatch,
+):
+    events = []
+
+    class Transport:
+        async def send_event_to_ui(self, event, chat_id):
+            events.append(event)
+
+    async def get_transport():
+        return Transport()
+
+    monkeypatch.setattr(_auto_tool_mod, "_get_simple_transport", get_transport)
+    _, registry = _so.load_workflow_structured_outputs(WORKFLOW)
+    pattern = _PatternContext()
+    pattern.data.update(interview_outcome="blocked", interview_attempts=0)
+    payload = {"agent_message": "What is your primary brand color?", "outcome": "needs_input"}
+    await emit_validated_agent_output(
+        current_agent_name="ThemeInterviewAgent", last_reply=payload,
+        workflow_name=WORKFLOW, chat_id="theme-interview", app_id="app-theme-1",
+        user_id="user-1", turn_sequence=1, context_vars_dict={"app_id": "app-theme-1"},
+        context_bridge=pattern, structured_registry=registry,
+        auto_tool_agents={"ThemeInterviewAgent"}, wf_logger=_Logger(),
+    )
+    calls = [event for event in events if event["kind"] == "tool_call"]
+    assert len(calls) == 1
+    assert calls[0]["payload"]["agent_message"] == payload["agent_message"]
+    assert calls[0]["awaiting_response"] is False
+    assert pattern.data["interview_outcome"] == "needs_input"
+    assert STRUCTURED_OUTPUT_KEY not in pattern.data
+
+
 @pytest.mark.parametrize(
     "inject",
     [

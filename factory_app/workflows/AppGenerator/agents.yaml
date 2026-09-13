@@ -152,9 +152,11 @@ agents:
       - Keep the plan concise: describe decisions and task acceptance criteria once. Do not embed generated source code, full page schemas, copied catalogs, design documents, or repeated runtime manuals in task initial_message or config_hint fields. Downstream workers receive their own canonical implementation context.
       - Explicit interview corrections and approved scope exclusions override category defaults. Do not expand an approved surface map or page inventory with inferred table-stakes features.
       - If app_plan_feedback is non-empty, correct every listed error and emit a complete replacement AppBuildPlanOutput, not a patch or a prose explanation.
+      - In a revision, pages and capability_packs are complete retained inventories, not generation requests. Read all baseline ui/pages/*.yaml and module.yaml files before emitting them. A backend-only change must still include every existing page; put only changed files in build_tasks.
       - Product categories such as CRUD are not managed services. An app-owned module in design_surface_map stays app-owned; managed_capability requires an actual registered provider pack from capability_packs.
-      - Include a page_bundle task owning app.json and every planned ui/pages/*.yaml file. Preserve all approved ExperienceSpec page names and routes. Each generated module needs module_contract, data_models, and business_services tasks; modules with owned primary_entities need handler.py, service.py, repo.py, policy.py, and schemas.py across those tasks.
+      - For a new app, page_bundle tasks must collectively own app.json and every planned ui/pages/*.yaml file, with exactly one task owning app.json. Revision tasks may own only changed pages and preserve app.json from the verified baseline. A page-only AppSchemaAgent task emits manifest: null; do not add app.json ownership just to satisfy its output shape. Preserve all approved ExperienceSpec page names and routes. Each generated module needs module_contract, data_models, and business_services tasks; modules with owned primary_entities need handler.py, service.py, repo.py, policy.py, and schemas.py across those tasks.
       - Ordinary app-owned CRUD is generated_module, not framework_pack. Framework packs must actually exist in the injected capability_packs registry. Use the approved module surface_id for capability_pack_id and every module task/path. Keep category names such as crud_pack in pack_type only. Generate complete working behavior, not empty stubs.
+      - Registered operator packs retain capability_source=operator_pack through planning and template materialization. Use their declared outputs for the approved surfaces; do not relabel them as managed_capability, framework_pack, or generated_module. An unregistered category is not an operator pack.
       - AuthScaffoldAgent owns config/auth.yaml and the shared auth adapter before runtime validation; do not add duplicate auth provider implementation tasks. Persistent entities use the canonical data contract and ctx.persistence, not a new database service.
   - id: context
     heading: '[CONTEXT]'
@@ -198,6 +200,7 @@ agents:
       - Use the existing context instead of re-interviewing.
 
       Your output becomes the shared contract for downstream generation agents. Decompose into product capability packs first, not arbitrary code tasks first.
+      In revision mode, AppBuildPlan still describes the complete retained app architecture; only build_tasks is a delta. Preserve every existing module capability, surface_id, operation, page, and data ownership entry from generated_files and app intelligence even when the requested edit touches one file. "Do not change modules/pages" means retain their declarations and omit unnecessary generation tasks, not clear capability_packs/pages. A service-only patch still resolves its capability_pack_id to a declared retained module capability.
   - id: industry_defaults
     heading: '[INDUSTRY DEFAULTS — APPLY WITHOUT ASKING]'
     content: |-
@@ -245,16 +248,16 @@ agents:
       1. **Revision Mode (Highest Priority)**:
          - IF `ContextVariables.build_mode` equals `revision`:
            - Do NOT rebuild the entire app build plan from scratch.
-           - Load the existing plan from `artifact_version_id` as your baseline.
+           - The selected artifact is preloaded into `generated_files`. Use its actual contracts, routes, identities, permissions, and implementation signatures as the baseline, together with the current App Intelligence context. Do not pretend an artifact id itself contains a loaded plan.
            - Read `refinement_request` — this describes only the scoped change.
            - Read `revision_scope` to scope the rebuild:
-             - `patch`: update only the specific `build_tasks` whose `owned_paths` are directly affected. All other tasks remain unchanged.
+             - `patch`: schedule only the specific `build_tasks` whose `owned_paths` are directly affected. Retain all unchanged architecture declarations, but do not schedule their original generation tasks.
              - `feature`: extend the plan by adding or expanding the affected `capability_packs`, then add new pages/entities/tasks as needed without re-deriving unrelated ones.
              - `design`: update `theme_preferences`, `brand_intent`, and visual hints only; do not touch `capability_packs`, `build_tasks`, pages, or entities unless the design change structurally requires it.
              - `core` (conceptual_replan): the control plane has re-entered AppGenerator as part of a concept-level pivot. Do NOT load the previous plan as a baseline — generate a fresh build plan from the new concept and design docs. Treat `carry_forward_modules` as advisory preservation hints only (see below).
              - `core` (other): this should not reach AppPlanAgent in refinement mode — escalate to ValueEngine.
-           - In all refinement cases: preserve `generation_order`, existing `build_tasks`, and all non-affected sections of the plan.
-           - Emit ONLY the fields that changed. Include unchanged sections as-is from the loaded artifact.
+           - For partial revisions, preserve all non-affected app surfaces in the plan and schedule only tasks for changed files. Assembly preserves unchanged baseline files automatically. Do not schedule persistence changes, rewrite auth, rename handler/service methods, or drop response fields for a UI-only repair.
+           - Emit the complete typed AppBuildPlan output, not a JSON field patch. Each task owns only the paths it actually changes; task dependencies and existing baseline contracts must remain consistent.
            - **conceptual_replan carry_forward_modules guidance** (applies only when `workflow_sequence` is `conceptual_replan`):
              - `carry_forward_modules` is an advisory list of module ids from the previous app bundle. Each entry includes `carry_forward_classification` (`safe_carry_forward`, `needs_adaptation`, or `regenerate`) and `carry_forward_reasons`.
              - Do NOT blindly re-emit these modules. Each must be re-evaluated against the new concept.
@@ -317,7 +320,7 @@ agents:
       5. Derive the minimum complete set of pages/screens required by the selected capability packs, and identify whether each route is global navigation, local/module navigation, profile/account navigation, footer/legal navigation, or direct-link only. Also classify the intended shell chrome mode for each route: standard, workspace, conversation, focused, immersive, or public.
       5a. **When `experience_spec.pages[]` is present, use the designed pages as the canonical page list** — do not invent or re-derive page structure from capability packs. For each designed page:
          - Preserve `name`, `route`, `layout`, and `intent` from the design.
-         - Map each `experience_spec.pages[i].sections[j]` to one `PrimitiveSectionHint` in `sections_hint[]`, carrying over `primitive`, `id` (as `section_id_hint`), `intent`, and `config_hint`. Note: `config_hint` in `experience_spec` is a JSON-encoded string — parse it to a dict when populating `PrimitiveSectionHint.config_hint`.
+         - Map each `experience_spec.pages[i].sections[j]` to one `PrimitiveSectionHint` in `sections_hint[]`, carrying over `primitive`, `id` (as `section_id_hint`), `intent`, and `config_hint`. Preserve `config_hint` as a JSON-encoded string or null; never emit a dict in that field.
          - Extend `sections_hint[]` with additional sections only when the capability pack context reveals a clear need not covered by the design (for example a workflow launch button required by an integration).
          - Set `design_intent` on the page from `experience_spec.pages[i].intent`.
          - Only infer page structure from scratch when `experience_spec` is null.
@@ -683,316 +686,29 @@ agents:
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
-      Output MUST be a valid JSON object with the following structure and NO additional text:
+      Emit exactly one JSON object satisfying the supplied AppBuildPlanOutput response schema.
+      The only root field is AppBuildPlan. Its nested fields are defined by the schema,
+      not by a second illustrative output shape. No Markdown, prose, duplicate keys,
+      generated source files, or separate workflows/child-spec collection.
 
-      ```json
-      {
-        "AppBuildPlan": {
-          "agent_message": "<string>",
-          "app_kind": "<string>",
-          "surface_map": {
-            "surfaces": [
-              {
-                "surface_id": "messaging_core",
-                "surface_kind": "module",
-                "owner": "app",
-                "source_capability_packs": ["messaging_pack"],
-                "label": "Messaging Core",
-                "summary": "Durable messaging state and deterministic inbox actions.",
-                "primary_entities": ["Conversation", "Message"],
-                "owned_pages": ["Inbox", "Thread"],
-                "owned_mutations": ["send_message", "mark_read"],
-                "events_emitted": ["domain.messaging_core.message_sent"],
-                "workflow_triggers": [],
-                "dependencies": []
-              }
-            ]
-          },
-          "capability_packs": [
-            {
-              "capability_pack_id": "messaging_core",
-              "surface_id": "messaging_core",
-              "surface_kind": "module",
-              "pack_type": "messaging_pack",
-              "label": "Direct messaging",
-              "summary": "Inbox, threads, and delivery semantics for user-to-user messaging.",
-              "implementation_mode": "hybrid",
-              "primary_entities": ["Conversation", "Message"],
-              "primary_pages": ["Inbox", "Thread"],
-              "operations": ["send_message", "list_threads", "mark_read"],
-              "required_integrations": [],
-              "agentic_extensions": ["thread_summary"]
-            },
-            {
-              "capability_pack_id": "managed_payments",
-              "surface_id": "managed_payments",
-              "surface_kind": "external_integration",
-              "pack_type": "billing_pack",
-              "label": "Managed Payments",
-              "summary": "Managed payment and subscription provider consumed through an app-scoped connector and facade module.",
-              "implementation_mode": "external_integration",
-              "primary_entities": ["Subscription"],
-              "primary_pages": ["Billing"],
-              "operations": ["get_subscription_status", "open_billing_portal"],
-              "required_integrations": [
-                {
-                  "service": "managed_payments",
-                  "provider": "managed_payments",
-                  "display_name": "Managed Payments",
-                  "kind": "api_key",
-                  "purpose": "Connect generated app billing surfaces to the managed payment provider.",
-                  "required_at": "runtime",
-                  "optional": false,
-                  "required_fields": [
-                    {"name": "api_base", "label": "API Base URL", "type": "url", "required": true, "frontend_safe": true},
-                    {"name": "client_id", "label": "Client ID", "type": "text", "required": true, "frontend_safe": true},
-                    {"name": "client_secret", "label": "Client Secret", "type": "secret", "required": true, "frontend_safe": false}
-                  ]
-                }
-              ],
-              "agentic_extensions": [],
-              "capability_source": "managed_capability"
-            }
-          ],
-          "pages": [
-            {
-              "name": "<string>",
-              "route": "<string>",
-              "purpose": "<string>",
-              "primary_entities": ["<string>"],
-              "primary_actions": ["<string>"],
-              "page_type_hint": "record_list | record_detail | analytics_dashboard | workflow_board | activity_feed | gallery | wizard | split_view | settings | landing | checkout_success | null",
-              "ui_layout": "grid | sidebar | full-width | split | null",
-              "sections_hint": [
-                {
-                  "primitive": "DataTable",
-                  "config_hint": "{\"columns\": [\"id\", \"name\", \"status\"], \"selection\": \"single\", \"search\": true, \"api_endpoint\": \"/api/modules/<module_id>/<action_id>\"}",
-                  "section_id_hint": "<resource>-table",
-                  "title_hint": "All <Resources>"
-                },
-                {
-                  "primitive": "ActionButton",
-                  "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Create <Resource>\", \"action_type\": \"event\", \"event_type\": \"ui.modal.open\"}]}",
-                  "section_id_hint": "create-action",
-                  "title_hint": null
-                }
-              ]
-            }
-          ],
-          "entities": [
-            {
-              "name": "<string>",
-              "operations": ["create", "read", "update", "delete"],
-              "notes": null
-            }
-          ],
-          "roles": ["<string>"],
-          "auth_strategy": "<string|null>",
-          "service_scope": ["<string>"],
-          "frontend_scope": ["<string>"],
-          "theme_preferences": "<string|null>",
-          "brand_intent": {
-            "style_summary": "<string>",
-            "brand_keywords": ["<string>"],
-            "experience_goals": ["<string>"],
-            "appearance_hint": "<string|null>"
-          },
-          "shell_preset_hint": "product_app | workspace_studio | public_plus_app | conversation_app | flow_app | null",
-          "external_integrations": [
-            { "name": "<string>", "kind": "<string>", "purpose": "<string>" }
-          ],
-          "event_flows": [
-            {
-              "event_type": "domain.messaging_core.message_sent",
-              "producer_pack_id": "messaging_core",
-              "producing_action": "send_message",
-              "subscriber_intents": ["notify recipient", "optional AI thread summary"],
-              "workflow_capability_ids": ["messaging_core.summarize_thread"]
-            }
-          ],
-          "agent_backend_required": true,
-          "data_contract": null,
-          "data_contract": null,
-          "pending_schema_migration": null,
-          "build_tasks": [
-            {
-              "task_id": "task_refinement_harness",
-              "task_type": "refinement_harness",
-              "capability_pack_id": null,
-              "surface_id": "app_refinement_harness",
-              "surface_kind": "refinement",
-              "execution_target": "AppGenerator",
-              "initial_agent": "RefinementHarnessAgent",
-              "description": "Generate the optional app-local refinement harness pack.",
-              "initial_message": "Generate a declarative refinement harness that routes scoped refinements to existing workflow_sequences only.",
-              "owned_paths": ["config/refinement_policy.yaml", "refinement_harness/config/harness.yaml"],
-              "depends_on": [],
-              "acceptance_criteria": ["Routes use workflow_sequence only", "No custom harness Python"]
-            }
-          ],
-          "generation_order": ["<string>"]
-        },
-        "workflows": [
-          {
-            "name": "AppGenerator",
-            "description": "Refinement harness task",
-            "initial_agent": "RefinementHarnessAgent",
-            "initial_message": "Execute only the refinement harness task.",
-            "context_variables": [
-              { "key": "current_build_task_type", "value": "refinement_harness" }
-            ]
-          },
-          {
-            "name": "AppGenerator",
-            "description": "Managed wallet adapter",
-            "initial_agent": "ControllerAgent",
-            "initial_message": "Execute only the wallet adapter task.",
-            "context_variables": [
-              { "key": "current_build_task_type", "value": "api_surface" }
-            ]
-          }
-        ]
-      }
-      ```
-
-      For persistent CRUD apps, the `build_tasks` shape must include the persistence and backend paths explicitly. Minimal example:
-
-      ```json
-      {
-        "data_contract": {
-          "version": "1",
-          "surfaces": [
-            {
-              "surface_id": "projects",
-              "surface_kind": "module",
-              "collections": [
-                {
-                  "module_id": "projects",
-                  "name": "projects",
-                  "entity_name": "projects",
-                  "indexes": [
-                    {"name": "project_owner_created_at", "keys": [{"field": "owner_id", "order": 1}, {"field": "created_at", "order": -1}]}
-                  ]
-                }
-              ]
-            },
-            {
-              "surface_id": "tasks",
-              "surface_kind": "module",
-              "collections": [
-                {
-                  "module_id": "tasks",
-                  "name": "tasks",
-                  "entity_name": "tasks",
-                  "indexes": [
-                    {"name": "task_project_status", "keys": [{"field": "project_id", "order": 1}, {"field": "status", "order": 1}]}
-                  ]
-                }
-              ]
-            }
-          ]
-        },
-        "data_contract": null,
-        "pending_schema_migration": {
-          "migration_id": "001_projects_tasks_indexes",
-          "version": "1",
-          "operations": [
-            {"type": "ensure_collection", "module_id": "projects", "entity_name": "projects"},
-            {"type": "ensure_index", "module_id": "projects", "entity_name": "projects", "index": {"name": "project_owner_created_at", "keys": [{"field": "owner_id", "order": 1}, {"field": "created_at", "order": -1}]}},
-            {"type": "ensure_collection", "module_id": "tasks", "entity_name": "tasks"},
-            {"type": "ensure_index", "module_id": "tasks", "entity_name": "tasks", "index": {"name": "task_project_status", "keys": [{"field": "project_id", "order": 1}, {"field": "status", "order": 1}]}}
-          ]
-        },
-        "build_tasks": [
-          {
-            "task_id": "task_projects_persistence",
-            "task_type": "persistence_contract",
-            "capability_pack_id": null,
-            "surface_id": "database",
-            "surface_kind": null,
-            "execution_target": "AppGenerator",
-            "initial_agent": "DatabaseAgent",
-            "description": "Stage data contract and additive index migrations for projects and tasks.",
-            "initial_message": "Create data_contract entries for projects/projects and tasks/tasks. Stage data/contract.json and optional data/migrations/001_projects_tasks_indexes.json. Keep this intent-first and additive only.",
-            "owned_paths": ["data/contract.json", "data/migrations/001_projects_tasks_indexes.json"],
-            "depends_on": [],
-            "acceptance_criteria": ["data_contract declares projects/projects and tasks/tasks"]
-          },
-          {
-            "task_id": "task_projects_module",
-            "task_type": "module_contract",
-            "capability_pack_id": "projects",
-            "surface_id": "projects",
-            "surface_kind": "module",
-            "execution_target": "AppGenerator",
-            "initial_agent": "ConfigMiddlewareAgent",
-            "description": "Generate the projects module YAML contract.",
-            "initial_message": "Generate projects module.yaml and events.yaml. Declare python_stubs for backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, and backend/schemas.py. repo.py must use ctx.persistence.collection(\"projects\", \"projects\") and align with data_contract.",
-            "owned_paths": ["modules/projects/module.yaml", "modules/projects/contracts/events.yaml"],
-            "depends_on": ["task_projects_persistence"],
-            "acceptance_criteria": ["module.yaml declares project actions", "python_stubs declares canonical backend files", "no backend Python is emitted"]
-          },
-          {
-            "task_id": "task_projects_models",
-            "task_type": "data_models",
-            "capability_pack_id": "projects",
-            "surface_id": "projects",
-            "surface_kind": "module",
-            "execution_target": "AppGenerator",
-            "initial_agent": "ModelAgent",
-            "description": "Generate typed project DTO and document helpers.",
-            "initial_message": "Generate only modules/projects/backend/schemas.py. Read dependency_task_outputs for task_projects_module and task_projects_persistence before emitting code.",
-            "owned_paths": ["modules/projects/backend/schemas.py"],
-            "depends_on": ["task_projects_module", "task_projects_persistence"],
-            "acceptance_criteria": ["schemas.py is canonical", "removed model artifacts are absent"]
-          },
-          {
-            "task_id": "task_projects_services",
-            "task_type": "business_services",
-            "capability_pack_id": "projects",
-            "surface_id": "projects",
-            "surface_kind": "module",
-            "execution_target": "AppGenerator",
-            "initial_agent": "ServiceAgent",
-            "description": "Generate project module handler, service, repo, and policy layers.",
-            "initial_message": "Generate only modules/projects/backend/handler.py, service.py, repo.py, and policy.py. Read dependency_task_outputs for task_projects_module, task_projects_models, and task_projects_persistence. repo.py must use ctx.persistence.collection(\"projects\", \"projects\"); service.py calls repo.py; handler.py does not touch persistence.",
-            "owned_paths": ["modules/projects/backend/handler.py", "modules/projects/backend/service.py", "modules/projects/backend/repo.py", "modules/projects/backend/policy.py"],
-            "depends_on": ["task_projects_module", "task_projects_models", "task_projects_persistence"],
-            "acceptance_criteria": ["repo.py uses ctx.persistence", "handler.py remains thin dispatch", "service.py publishes declared domain events when present"]
-          },
-          {
-            "task_id": "task_project_pages",
-            "task_type": "page_bundle",
-            "capability_pack_id": null,
-            "surface_id": "project_pages",
-            "surface_kind": "ui_only",
-            "execution_target": "AppGenerator",
-            "initial_agent": "AppSchemaAgent",
-            "description": "Generate declarative project and task list pages.",
-            "initial_message": "Generate app.json and ui/pages/*.yaml pages that bind to app-owned module actions such as /api/modules/projects/list_projects and /api/modules/tasks/list_tasks.",
-            "owned_paths": ["app.json", "ui/pages/projects.yaml", "ui/pages/tasks.yaml"],
-            "depends_on": ["task_projects_services"],
-            "acceptance_criteria": ["page endpoints bind to app-owned modules", "persistent pages are declarative"]
-          },
-          {
-            "task_id": "task_managed_payments_adapter",
-            "task_type": "api_surface",
-            "capability_pack_id": "managed_payments",
-            "surface_id": "managed_payments",
-            "surface_kind": "external_integration",
-            "execution_target": "AppGenerator",
-            "initial_agent": "ControllerAgent",
-            "description": "Generate a thin adapter client for the selected managed payments capability.",
-            "initial_message": "Generate services/integrations/managed_payments_client.py as a thin adapter client. current_build_task_type is api_surface. No provider business logic — only thin client wiring to the selected managed payments service API.",
-            "owned_paths": ["services/integrations/managed_payments_client.py"],
-            "depends_on": [],
-            "acceptance_criteria": ["adapter delegates to the selected managed capability API", "no managed capability internals in generated file"]
-          }
-        ]
-      }
-      ```
-
-      **CRITICAL**: Output ONLY the raw JSON object.
+      Keep architecture and task ownership explicit; leave implementation to the task workers.
+      - Preserve the approved page inventory, entity fields, ownership rules, and action names.
+      - Use null only for nullable fields; use [] for out-of-scope optional collections.
+      - Keep task initial_message to task-specific decisions and exact required interfaces.
+        Workers inherit app_build_plan and dependency_task_outputs; reference that context
+        instead of copying the full plan, design documents, catalogs, or page schemas.
+      - Task context_variables contain only task-local overrides, normally [].
+        Never embed a copy of app_build_plan, upstream documents, or shared catalogs there.
+      - Keep sections_hint.config_hint a compact JSON-encoded partial config string or null.
+        Do not expand nested modal/page schemas during planning; AppSchemaAgent owns them.
+      - Plan persistence_contract, module_contract, data_models, business_services, and
+        page_bundle tasks when needed, with disjoint owned_paths and explicit dependencies.
+      - For a registered managed pack, plan its declared facade and
+        services/integrations/{pack_id}_client.py boundary through an api_surface task
+        owned by ControllerAgent. Do not invent a provider pack from this pattern.
+      - data_contract declares persistent collection ownership once. Do not repeat it in
+        task context_variables. deployment_targets is [] and deployment_template_manifest
+        is null unless an explicit launch contract supplies them; export owns deployment files.
   max_consecutive_auto_reply: 8
   structured_outputs_required: true
 - name: AppSchemaAgent
@@ -1014,11 +730,11 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       - Read the canonical app build plan and any available design documents.
-      - Produce one AppSchemaOutput covering: app startup/product intent (app.json), declarative AppPageSchema files for the exact `app_build_plan.pages[]` set (ui/pages/*.yaml), an optional bounded custom_route_bundle (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`), optional theme_config patch, optional shell_config, and optional asset_manifest. Do not manually duplicate `provenance.yaml`; `save_app_schema` emits it from the active factory/build context.
+      - Produce one AppSchemaOutput covering the current scope: app startup/product intent (app.json), declarative AppPageSchema files (ui/pages/*.yaml), an optional bounded custom_route_bundle (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`), optional theme_config patch, optional shell_config, and optional asset_manifest. In task-batch execution, emit only fields/files owned by `current_build_task.owned_paths`; standalone execution covers the full `app_build_plan.pages[]` set. Do not manually duplicate `provenance.yaml`; the materializer/save path owns it.
       - Every page section must use a named primitive from the platform primitive system.
       - Keep persistent app pages declarative by default. Only emit custom full-page React when a true primitive gap remains after exhausting primitive composition.
       - When emitting custom_route_bundle, stay within the bounded app-level contract. Do not invent parallel routing systems, CSS frameworks, or shell-owned UI.
-      - Persist the schema via save_app_schema (auto-invoked after your output).
+      - Standalone execution persists the schema via save_app_schema (auto-invoked after your output) and requires a non-null manifest. Detached task workers return typed output for task materialization; they do not call the standalone save tool.
       - In scanner repair mode, preserve the current generated app structure and patch only the affected page/schema/custom-route artifacts.
   - id: context
     heading: '[CONTEXT]'
@@ -1138,6 +854,7 @@ agents:
       - If the route needs scoped access but the owning module does not yet declare a suitable `authorize_*_route` action, keep the route and module action in the same build plan dependency chain so the action exists before the page route references it.
 
       **Page layout options**: grid | sidebar | full-width | split
+      `grid` places top-level sections beside each other, not in full-width rows. Use `full-width` for a PageHeader followed by a primary DataTable/ResourceTable, including record lists and dashboards with recent-record tables. Reserve `grid` for peer sections that can each fit in a narrow column.
 
       **Theme and shell inference**:
       Infer appropriate brand settings from ALL available context — no separate brand
@@ -1206,8 +923,10 @@ agents:
       - When genuinely ambiguous, null is the correct answer
 
       **Output contract**:
-      - manifest.pages must list every `app_build_plan.pages[].name` materialized as AppPageSchema.
-      - manifest.custom_routes must list every AppCustomRouteEntry.id produced in custom_route_bundle.route_manifest, or be null/empty when no custom routes exist.
+      - In task-batch execution, set `manifest` to null unless `current_build_task.owned_paths` includes `app.json`. A null manifest emits neither app.json nor provenance.yaml and preserves the existing manifest at assembly. If app.json is owned, a non-null manifest is required. Never widen owned_paths or emit a placeholder manifest for a page-only task.
+      - Emit only pages whose materialized ui/pages/*.yaml paths are owned by the task. Set unowned `custom_route_bundle`, `theme_config_patch`, `shell_config`, `asset_manifest`, and `data_contract` to null. Custom routes require ownership of the route manifest, page files, and registry barrel together.
+      - When manifest is non-null, manifest.pages must list every `app_build_plan.pages[].name` materialized as AppPageSchema across the full assembled app, including baseline pages outside the current task.
+      - When manifest is non-null, manifest.custom_routes must list every AppCustomRouteEntry.id in the full assembled custom route manifest, or be null/empty when no custom routes exist.
       - Each persistent route must have exactly one owner: either an AppPageSchema.route or an AppCustomRouteEntry.path, never both.
       - sections[*].id must be unique within a page and kebab-cased.
       - sections[*].config must be a valid object for the declared primitive type.
@@ -1255,9 +974,9 @@ agents:
       0. If `bundle_repair_target == "AppSchemaAgent"`, repair only the UI files named by `bundle_repair_request`. Use `generated_files` as the current source of truth, keep unchanged pages/routes stable, and emit only AppSchemaOutput fields required to replace the affected `ui/pages/*.yaml`, `ui/route_manifest.json`, `ui/pages/custom/*.jsx`, app manifest custom route list, shell/theme patch, or asset manifest. If the scanner request names a file outside this agent's output lane, fail clearly in `agent_message` instead of broadening scope.
       1. Read `app_build_plan.capability_packs`, `app_build_plan.pages`, and `app_build_plan.workflow_touchpoints`. Treat `app_build_plan.pages` as the authoritative page inventory. For each declared page, map `purpose`, `primary_entities`, `primary_actions`, `ui_layout`, `sections_hint`, any workflow touchpoints, and any pack-specific behaviors to concrete primitive sections. When `sections_hint[i].config_hint` is a non-null string, JSON-decode it to a dict and use it as the base config for that section — merge it with any additional fields required by the primitive contract and page context. Do not discard or ignore provided `config_hint` values.
       2. Prefer `design_surface_map` for page ownership decisions, then `experience_spec_document`, then `ui_design_document`, before falling back to inference.
-      3. For each page:
+      3. For each page in the current scope (only owned ui/pages/*.yaml paths in task-batch execution):
           a. Set `page_type` from `page_type_hint` in the build plan. When hint is null, infer from page purpose using the page type archetype rules above.
-          b. Choose a `layout` consistent with `page_type`: analytics_dashboard and gallery → grid; split_view → sidebar; wizard, landing → full-width; others use grid or the plan's ui_layout hint.
+          b. Choose a `layout` consistent with content: record_list, wizard, landing, and pages with a PageHeader followed by a primary table → full-width; gallery and peer dashboard sections → grid; split_view → sidebar. Do not use grid merely because the page contains several vertically ordered sections.
           c. Produce ordered `sections` — each section uses one primitive and has a complete, valid `config`. Let `page_type` guide primitive selection (see archetype rules above).
              **State coverage rules (enforced by the quality gate):**
              - Every `DataTable` or `ResourceTable` section with an `api_endpoint` MUST declare a non-null `empty` field with meaningful copy tailored to the entity (not generic "No items found").
@@ -1268,7 +987,7 @@ agents:
           d. Set `shell_mode` using the semantic chrome mode rules above. Prefer `workspace` for module/profile/admin-like work surfaces and `conversation` for DM/chat thread surfaces. Use `focused` for wizard/onboarding pages.
           e. Set `roles` to null unless the plan restricts page access.
           f. Set `navigation` when the page should appear in shell or module navigation. Use `scope: global` for primary app routes, `scope: local` for page/workspace subsections, `scope: profile` for account destinations, and `null` for routes that should be reachable only by direct links or in-page actions.
-      4. Build the `manifest`:
+      4. Build the `manifest` only for standalone execution or a task owning app.json; otherwise emit null and skip this step:
           a. `app_name`, `description`, `tagline`, and `value_proposition` — preserve the approved concept identity from `value_manifest` / `concept_blueprint` when present. `description` should be the durable "what this app is" summary shown in Studio; `tagline` should be a short positioning line; `value_proposition` should carry the core user value.
           b. `pages` — list every declared `app_build_plan.pages[].name`.
           c. `custom_routes` — null/empty unless you emit custom_route_bundle; otherwise list every custom route id in order.
@@ -2406,6 +2125,7 @@ agents:
     heading: '[INSTRUCTIONS]'
     content: |-
       1. In task batch mode, create or update only the `modules/{module_id}/backend/schemas.py` file listed in `current_build_task.owned_paths`.
+         When `generated_files` contains that file, edit the existing implementation. Preserve every DTO and helper imported by unchanged service/repo/account-data files, including detail-response serializers. A list-row repair must not replace the file with only the new list DTOs or rename existing exports.
       2. Use TypedDicts, enums/constants, and pure normalization helpers. Do not use I/O here.
       3. Strictly adhere to design specifications.
       4. If fixing errors, ensure the fix is applied.
@@ -2481,7 +2201,7 @@ agents:
         - `needs_revision`: a bounded repair pass is scheduled and workflow routing returns to ConfigMiddlewareAgent.
         - `blocked`: repair attempts are exhausted and workflow routing returns to the user.
         - `passed` or `not_applicable`: no workflow-integration repair pass is needed.
-      - When generated-bundle scanner failures are repairable, the gate writes `bundle_repair_status`, `bundle_repair_target`, `bundle_repair_request`, and `bundle_repair_result`:
+      - When generated-bundle scanner, runtime-load, runtime-quality, or module-implementation failures are repairable, the gate writes `bundle_repair_status`, `bundle_repair_target`, `bundle_repair_request`, and `bundle_repair_result`:
         - `needs_revision`: a bounded repair pass is scheduled and workflow routing returns to the owning agent named by `bundle_repair_target`.
         - `blocked`: scanner repair attempts are exhausted or the scanner error has no deterministic owner, and workflow routing returns to the user.
         - `passed` or `not_applicable`: no scanner repair pass is needed.
@@ -2700,7 +2420,8 @@ agents:
       - Generate the module backend implementation files declared by ConfigMiddlewareAgent and assigned to the current build task.
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
       - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
-      - Do not emit `backend/schemas.py` unless it is explicitly listed in `current_build_task.owned_paths`; the `data_models` task owns schemas.py in task batch execution.
+      - In task batch execution, do not emit `backend/schemas.py` unless it is explicitly listed in `current_build_task.owned_paths`; the `data_models` task owns schemas.py.
+      - In bounded bundle repair (not task batch execution), a module import failure may originate in its existing schemas.py. Restore the missing imported helper or DTO there, preserving the other exports and behavior. Do not replace a working handler/service or generate new API routes to work around a missing import.
       - Generate optional hook stubs referenced by settings.yaml, notifications.yaml, or admin.yaml.
       - After each mutating action, publish the corresponding namespaced domain event declared in events.yaml.
       - Reference model details directly from the Code Context.
@@ -2716,13 +2437,14 @@ agents:
     content: |-
       **Inputs**:
       - Code Context: `config_config`, `database_config`, `model_context` (injected by hook).
-      - `app_backend_url`: Base URL of the active Mozaiks app host. Non-null means a live backend exists and services must publish real events. Null still requires runtime-safe code: guard `context.events` before publishing instead of leaving TODO comments.
+      - `app_backend_url`: Base URL of the active Mozaiks app host. Domain events always use the injected ModuleContext.emit; this URL does not determine whether events are available.
       - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml/contracts/profile.yaml/contracts/relationships.yaml/contracts/policy_hooks.yaml.
       - `dependency_task_outputs`: completed upstream task outputs keyed by task_id. Read the module contract, data model, and persistence outputs from this map before generating backend implementation files.
       - `app_task_batch_results`: the current batch result map, including completed upstream task outputs and `_meta`.
       - `[MODULE ARCHETYPES CONTEXT]` is injected into your system message. Use it for cookie-cutter backend layering and type-specific conventions rather than inventing domain-specific backend shapes.
       - **Previous Validation Errors**: If this is a retry, review the chat history for `AppValidation` errors and fix them.
       - **Previous Runtime Quality Errors**: If `module_runtime_quality_revision_request` is present, revise the backend code to remove every listed placeholder/runtime-data warning before emitting ServiceOutput again.
+      - **Module Implementation Repair**: The same `bundle_repair_target == "ServiceAgent"` lane includes missing handler classes, action methods, signatures, and invalid module-local Python. Follow the declared module handler entrypoint and every listed action exactly. When base_handler.py is present, handler.py must define the workspace subclass, not merely re-export the base class. Repair only the named backend files and preserve unrelated code.
       - **Generated Bundle Scanner Repair**: If `bundle_repair_target == "ServiceAgent"`, read `bundle_repair_request`, `bundle_repair_errors`, and `generated_files`. Repair only module backend Python files named by the scanner. Remove raw payment-provider SDK imports/calls, app-local token wallet or usage ledgers, direct hosted internal endpoint calls, raw secrets, and duplicate ledger behavior. Use generated facade/client boundaries and OSS runtime token/usage endpoints instead. If a forbidden Python artifact must be removed entirely, include the relative path in `deleted_files`; do not emit an empty replacement file.
       - Service implementation does not collect or request credentials. Integration
         needs must already be declared by planning, ConfigMiddlewareAgent, or
@@ -2739,7 +2461,7 @@ agents:
         - `module_contract.module_yaml.module.type` selects the cookie-cutter backend conventions from the injected `[MODULE ARCHETYPES CONTEXT]`. Do not invent a parallel module taxonomy or restate a different set of type rules.
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
       - `module_contract.python_stubs` is the authoritative list of backend stub files to implement. Do not invent undeclared Python files.
-      - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, roles/principal metadata, `context.persistence` in `backend/repo.py`, and `context.events.publish(...)` for event emission.
+      - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, roles/principal metadata, `context.persistence` in `backend/repo.py`, and `await context.emit(...)` for event emission.
       - For membership-style modules, implement resource-scoped user class records in the generated module itself. Policy checks must combine `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, and module-owned membership records. Never accept request-body `user_id`, `tenant_id`, `workspace_id`, `class`, `role`, or `permissions` as authorization truth. `list_user_relationships` returns safe routing inventory only, and `authorize_<resource>_route` returns a minimal allowed/status/capabilities summary without raw records, secrets, payment provider fields, or ledger data. If class labels/categories/default weights are needed, load them from `contracts/settings.yaml` or module-owned records instead of hardcoding Python constants.
       - `backend/repo.py` is the only generated backend layer that touches `context.persistence`. `backend/service.py` calls repo methods, and `backend/handler.py` never touches persistence.
       - The runtime executor calls each module action as `handler_method(ctx, **params)`. Every generated handler method must accept runtime context as the first positional parameter after `self` (`ctx` or `context`) and then either `**params` or named parameters matching module.yaml input_schema fields.
@@ -2747,7 +2469,7 @@ agents:
       - Generated `backend/repo.py` must use `context.persistence.collection(module_id, entity_name)` with module/entity values aligned to `data_contract` and `data/contract.json`.
       - Generated module code must not use `ctx.db` or `context.db`, must not import or call `get_mongo_client()`, and must not hardcode database names.
       - External HTTP module dispatch validates request-supplied tenant/workspace/user scope before this code runs. Generated module code must still build resource filters from `context.app_id`, `context.tenant_id`, `context.workspace_id`, `context.user_id`, and `context.permissions`; never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization.
-      - Publish events through the runtime context: `await context.events.publish("domain.task_manager.task_created", payload)`.
+      - Publish events through the runtime context: `await context.emit("domain.task_manager.task_created", payload)`.
       - Event types must exactly match `events.yaml.events[].type`.
       - Generated service methods must consume runtime input from `**params` using the exact fields declared in `module.yaml.actions[].input_schema.required`. Do not wrap request fields under a synthetic `payload` key unless the module action input schema explicitly declares a required `payload` field.
 
@@ -2777,7 +2499,9 @@ agents:
           - set trend/change fields to `null` unless a real historical comparison or metrics snapshot collection is queried;
           - never hardcode percentages such as "+12.4% change".
       14. Publish declared domain events with `await ctx.emit(event_type, payload)` from service.py. ModuleContext always provides emit; do not use `ctx.events`, `.publish(...)`, or availability fallbacks.
-      15. Declare expected input constraints in module action input_schema (including nonblank required names) so invalid requests fail before mutations. Use PermissionError for denied ownership access; do not turn expected denials into ValueError/500 responses or disclose another user's record.
+      14a. Optional is not nullable. For request or event fields declared as string/number/etc., omission is allowed only when not required; a present None still violates that type. Normalize documented defaults before writes and construct event payloads from validated values. Omit absent optional event keys instead of emitting None. On partial updates preserve omitted stored fields and omit unchanged optional fields from change events. Check required-only requests as well as fully populated UI requests so successful persistence cannot be followed by an avoidable event-schema failure.
+      14b. Missing and explicitly empty inputs are different. For an optional string that permits clearing, a present empty string is a valid replacement, not an omitted value. Do not use truthiness or a None fallback to restore the old value when a user clears a field. Keep persistence semantics unchanged when repairing only an event payload.
+      15. Declare input types, required fields, and enums in the closed module action input_schema. Enforce additional business rules such as nonblank names in service code before mutations using `from mozaiksai.core.runtime import ModuleInputValidationError`. Raise that specific error for expected invalid input; the executor returns INVALID_PARAMS/400 without exposing exception details. Do not add unsupported pattern/length keywords to closed request schemas or use plain ValueError for expected input rejections. Use PermissionError for denied ownership access and never disclose another user's record.
       15. Generate optional hook files only when the YAML references them and `module_contract.python_stubs` declares them.
       16. Follow proper parameter ordering and dependency injection conventions.
       17. Do not generate JS/frontend customization files here; those belong to frontend/UI generation paths.
@@ -2819,7 +2543,7 @@ agents:
       Emit ServiceOutput only after all files pass both checks. Do not include validation shell output in ServiceOutput.
 
       Cross-reference check (run after syntax and lint pass):
-      4. Events.yaml coverage: for every declared domain event, verify its exact type appears in service.py as a context.events.publish(...) argument. Handler files contain dispatch only, not event publication.
+      4. Events.yaml coverage: for every declared domain event, verify its exact type appears in service.py as a ctx.emit(...) argument. Exercise required-only create/update inputs and verify every emitted payload against its declared schema, including omitted optional fields. Handler files contain dispatch only, not event publication.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
