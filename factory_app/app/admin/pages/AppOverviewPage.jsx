@@ -612,8 +612,8 @@ export default function AppOverviewPage() {
   const nextStep = getLifecycleGuidance(lifecycle)
   const dashboardMetrics = buildDashboardMetrics(snapshot, totalCost, totalRuns)
 
-  // Live analytics values take precedence over legacy snapshot fields; the
-  // deterministic analytics service is the single authority for these KPIs.
+  // The deterministic analytics service is the single authority for these
+  // KPIs, so its values override whatever the app summary record carries.
   const analyticsMetrics = analytics?.metrics || null
   if (analyticsMetrics) {
     if (analyticsMetrics.mrr?.available) dashboardMetrics.mrr = analyticsMetrics.mrr.value
