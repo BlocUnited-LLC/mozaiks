@@ -53,7 +53,7 @@ function InsightRow({ item }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">{item.headline}</span>
         {item.detail ? (
-          <span className="mt-0.5 block truncate text-xs text-muted-foreground/78">{item.detail}</span>
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.detail}</span>
         ) : null}
       </span>
       {clickable ? <Chevron /> : null}
@@ -69,7 +69,7 @@ export function InsightList({ items = [], emptyLabel = null, className }) {
   if (normalizedItems.length === 0) {
     if (!emptyLabel) return null;
     return (
-      <div className={cn('rounded-lg border border-border/45 bg-card/[0.18] px-4 py-4 text-sm text-muted-foreground/80 sm:px-5', className)}>
+      <div className={cn('rounded-lg border border-border/45 bg-card/[0.18] px-4 py-4 text-sm text-muted-foreground sm:px-5', className)}>
         {emptyLabel}
       </div>
     );

@@ -54,12 +54,26 @@ export function UsageTrendPanel({
   action = null,
   emptyLabel = 'No usage recorded yet',
   formatPointValue = defaultFormatValue,
+  baseline = 'zero',
   className = '',
 }) {
   const [activePointId, setActivePointId] = useState(null);
   const points = normalizePoints(data);
   const maxValue = Math.max(...points.map((point) => point.value), 0);
   const hasValues = maxValue > 0;
+  // A level that hovers around a value (MRR, active users) renders as a wall
+  // of identical full-height bars when measured from zero — technically true
+  // and visually useless. `baseline="auto"` scales the plot to the window's
+  // own range so the shape of the change is what you actually see.
+  const minValue = points.length ? Math.min(...points.map((point) => point.value)) : 0;
+  const autoBaseline = baseline === 'auto' && points.length > 1 && maxValue > minValue;
+  const span = autoBaseline ? maxValue - minValue : maxValue;
+  const heightFor = (value) => {
+    if (!hasValues) return 0;
+    if (!autoBaseline) return Math.max(4, (value / maxValue) * 100);
+    // Floor keeps the lowest point visible as a bar rather than a hairline.
+    return Math.max(12, ((value - minValue) / span) * 100);
+  };
   const normalizedSideItems = Array.isArray(sideItems)
     ? sideItems.filter((item) => item && typeof item === 'object' && item.label)
     : [];
@@ -76,16 +90,16 @@ export function UsageTrendPanel({
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
               {title ? <h2 className="text-base font-semibold text-foreground sm:text-lg">{title}</h2> : null}
-              {subtitle ? <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground/86">{subtitle}</p> : null}
+              {subtitle ? <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">{subtitle}</p> : null}
             </div>
             {action ? <div className="shrink-0">{action}</div> : null}
           </div>
 
           <div className="mt-6">
-            <div className="text-[12px] font-medium text-muted-foreground/82">{metricLabel}</div>
+            <div className="text-[12px] font-medium text-muted-foreground">{metricLabel}</div>
             <div className="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
               <div className="text-3xl font-semibold leading-none text-foreground sm:text-4xl">{metricValue}</div>
-              {metricDetail ? <div className="pb-1 text-sm text-muted-foreground/86">{metricDetail}</div> : null}
+              {metricDetail ? <div className="pb-1 text-sm font-medium text-muted-foreground">{metricDetail}</div> : null}
             </div>
           </div>
 
@@ -97,7 +111,7 @@ export function UsageTrendPanel({
                 className="flex h-72 items-end gap-2 px-1 pt-4"
               >
                 {points.map((point, index) => {
-                  const height = hasValues ? Math.max(4, (point.value / maxValue) * 100) : 0;
+                  const height = heightFor(point.value);
                   const showLabel = index === 0 || index === points.length - 1 || points.length <= 8;
                   return (
                     <div key={point.id} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-2">
@@ -143,9 +157,9 @@ export function UsageTrendPanel({
                   index < normalizedSideItems.length - 1 && 'border-b border-border/32',
                 )}
               >
-                <div className="text-[12px] font-medium text-muted-foreground/82">{item.label}</div>
+                <div className="text-[12px] font-medium text-muted-foreground">{item.label}</div>
                 <div className="mt-2 break-words text-xl font-semibold text-foreground">{item.value}</div>
-                {item.detail ? <div className="mt-2 text-sm leading-6 text-muted-foreground/86">{item.detail}</div> : null}
+                {item.detail ? <div className="mt-2 text-sm leading-6 text-muted-foreground">{item.detail}</div> : null}
               </div>
             ))}
           </aside>

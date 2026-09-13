@@ -41,7 +41,7 @@ function StageRow({ step, maxCount }) {
         <span className="flex shrink-0 items-baseline gap-2">
           <span className="text-sm font-semibold tabular-nums text-foreground">{step.formattedCount}</span>
           {step.conversionLabel ? (
-            <span className="text-[11px] tabular-nums text-muted-foreground/78">{step.conversionLabel}</span>
+            <span className="text-[11px] tabular-nums text-muted-foreground">{step.conversionLabel}</span>
           ) : null}
         </span>
       </div>

@@ -9,10 +9,12 @@
 
 // ── Periods ──────────────────────────────────────────────────────────────────
 
+// Spelled out, not "7D/30D/90D": in the display font a capital D reads as a
+// zero, so "30D" renders as "300".
 export const ANALYTICS_PERIODS = [
-  { value: '7d', label: '7D' },
-  { value: '30d', label: '30D' },
-  { value: '90d', label: '90D' },
+  { value: '7d', label: '7 days' },
+  { value: '30d', label: '30 days' },
+  { value: '90d', label: '90 days' },
 ];
 
 export const DEFAULT_ANALYTICS_PERIOD = '30d';
@@ -25,8 +27,11 @@ export const WORLD_USERS_HEADLINES = ['active_users', 'paying_users', 'user_grow
 export const APP_REVENUE_HEADLINES = WORLD_REVENUE_HEADLINES;
 export const APP_USERS_HEADLINES = WORLD_USERS_HEADLINES;
 
-export const REVENUE_PAGE_HEADLINES = ['mrr', 'arr', 'mrr_growth', 'nrr', 'arppu'];
-export const USERS_PAGE_HEADLINES = ['active_users', 'paying_users', 'new_users', 'paid_conversion', 'retention'];
+// Four per row: the strip is a 4-column grid, so a fifth metric orphans onto
+// a second row by itself. ARPPU and retention stay reachable in the metric
+// drawer rather than unbalancing the headline.
+export const REVENUE_PAGE_HEADLINES = ['mrr', 'arr', 'mrr_growth', 'nrr'];
+export const USERS_PAGE_HEADLINES = ['active_users', 'paying_users', 'new_users', 'paid_conversion'];
 
 // ── Trend metric switchers ───────────────────────────────────────────────────
 
@@ -123,16 +128,14 @@ export function buildDeltaView(definition, envelope, comparisonLabel = null) {
   };
 }
 
-// Growth-style metrics (derived, no previous window) compare against zero.
-function growthDelta(definition, envelope) {
-  if (!envelope || envelope.value == null) return null;
-  const value = Number(envelope.value);
-  return {
-    label: `${Math.abs(value).toFixed(1)}%`,
-    tone: deltaTone(definition, value),
-    rising: value === 0 ? null : value > 0,
-    srLabel: `${value >= 0 ? 'up' : 'down'} ${Math.abs(value).toFixed(1)}%`,
-  };
+// A growth metric IS a change, so pairing it with a delta chip prints the
+// same number twice ("7.8%  ^7.8%"). Render the signed value once and let the
+// comparison label carry the context.
+function signedPercent(value) {
+  if (value == null || Number.isNaN(Number(value))) return 'Pending';
+  const num = Number(value);
+  const sign = num > 0 ? '+' : '';
+  return `${sign}${num.toFixed(Math.abs(num) % 1 === 0 ? 0 : 1)}%`;
 }
 
 // ── Headline strips ──────────────────────────────────────────────────────────
@@ -152,19 +155,16 @@ export function buildHeadlineItems(registry, values, metricIds, options = {}) {
     const envelope = values?.[metricId] || null;
     const available = Boolean(envelope?.available);
     const isGrowth = definition?.source === 'derived' && /growth/.test(metricId);
-    const delta = isGrowth
-      ? null
-      : buildDeltaView(definition, envelope, comparisonLabel);
     const value = isGrowth
-      ? formatPercent(envelope?.value, 'Pending')
+      ? signedPercent(envelope?.value)
       : formatMetricValue(definition, envelope?.value, 'Pending');
-    const growthView = isGrowth ? growthDelta(definition, envelope) : null;
     return {
       id: metricId,
       label: definition?.short_label || definition?.label || metricId,
       value,
-      delta: growthView || delta,
-      detail: available ? null : 'No data yet',
+      // Growth already reads as a change; everything else gets a delta chip.
+      delta: isGrowth ? null : buildDeltaView(definition, envelope, comparisonLabel),
+      detail: !available ? 'No data yet' : isGrowth ? comparisonLabel : null,
       pending: !available,
       onSelect: onSelect ? () => onSelect(metricId) : undefined,
     };

@@ -323,6 +323,7 @@ export default function WorkspacePerformancePage() {
               sideItems={sideItems}
               emptyLabel="Trend appears once daily data is recorded"
               formatPointValue={(value) => formatMetricValue(trendDefinition, value, '—')}
+              baseline="auto"
               action={
                 <div className="flex flex-col items-end gap-2">
                   <SegmentedControl options={TREND_DOMAINS} value={trendDomain} onChange={setTrendDomain} />

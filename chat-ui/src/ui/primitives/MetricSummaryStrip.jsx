@@ -74,7 +74,7 @@ function MetricCell({ item, isFirst, isLast }) {
           'cursor-pointer transition-colors hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
       )}
     >
-      <div className="truncate text-[12px] font-medium text-muted-foreground/84">{item.label}</div>
+      <div className="truncate text-[12px] font-medium text-foreground/75">{item.label}</div>
       <div className="mt-1.5 flex min-w-0 flex-wrap items-end gap-x-2 gap-y-1">
         <div
           className={cn(
@@ -98,7 +98,7 @@ function MetricCell({ item, isFirst, isLast }) {
         ) : null}
       </div>
       {item.detail || item.pending ? (
-        <div className="mt-1.5 truncate text-[11px] text-muted-foreground/72">
+        <div className="mt-1.5 truncate text-[11px] text-foreground/60">
           {item.pending ? item.detail || 'No data yet' : item.detail}
         </div>
       ) : null}
@@ -115,7 +115,7 @@ export function MetricSummaryStrip({ eyebrow = null, items = [], className }) {
   return (
     <section className={className} aria-label={eyebrow ? `${eyebrow} metrics` : 'Summary metrics'}>
       {eyebrow ? (
-        <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/68">
+        <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-widest text-foreground/80">
           {eyebrow}
         </div>
       ) : null}
