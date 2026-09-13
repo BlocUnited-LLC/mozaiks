@@ -421,6 +421,7 @@ class WorkspaceSupportService:
             thread_id = req.get("message_thread_id")
             if not thread_id:
                 req["messages"] = []
+                req["error"] = "Support conversation unavailable."
                 logger.warning(
                     "workspace_support: support request has no message thread request_id=%s",
                     req.get("request_id"),
@@ -433,6 +434,16 @@ class WorkspaceSupportService:
                     message_limit=100,
                     allow_nonparticipant_reader=True,
                 )
+                if thread_result.get("error") or not thread_result.get("thread"):
+                    req["messages"] = []
+                    req["error"] = "Support conversation unavailable."
+                    logger.warning(
+                        "workspace_support: support message thread unavailable request_id=%s thread_id=%s error=%s",
+                        req.get("request_id"),
+                        thread_id,
+                        thread_result.get("error"),
+                    )
+                    continue
                 req["messages"] = [
                     {
                         "role": m.get("sender_role", "user"),
@@ -463,6 +474,7 @@ class WorkspaceSupportService:
                     exc_info=True,
                 )
                 req["messages"] = []
+                req["error"] = "Support conversation unavailable."
 
         for req in serialized_requests:
             subject_app_id = req.get("subject_app_id") or req.get("app_id") or getattr(ctx, "app_id", None)

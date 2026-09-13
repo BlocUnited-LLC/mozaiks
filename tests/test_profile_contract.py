@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -754,6 +755,19 @@ async def test_factory_support_page_is_discovered_and_hydrated(monkeypatch) -> N
             return executor
 
     monkeypatch.setattr(platform_app, "executor_registry", _Registry())
+    scope_calls = []
+
+    class _ScopeHooks:
+        async def call_module_scope(self, **kwargs):
+            scope_calls.append(kwargs)
+            return {
+                **kwargs["requested_scope"],
+                "tenant_id": "tenant-from-membership",
+                "workspace_id": "workspace-from-membership",
+                "permissions": ["workspace_support.read"],
+            }
+
+    monkeypatch.setattr(platform_app, "get_platform_hooks", lambda: _ScopeHooks())
     principal = UserPrincipal(
         user_id="support-user",
         email="support@example.com",
@@ -764,7 +778,8 @@ async def test_factory_support_page_is_discovered_and_hydrated(monkeypatch) -> N
         app_id="mozaiks-factory",
     )
 
-    result = await platform_app.get_profile_pages(app_id=None, principal=principal)
+    http_request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(executor_registry=_Registry())))
+    result = await platform_app.get_profile_pages(request=http_request, app_id=None, principal=principal)
     hydrated = next(page for page in result["pages"] if page["id"] == "support-tickets")
     assert hydrated["data"] == {"requests": [{"request_id": "ticket-1"}], "total": 1}
     assert hydrated["error"] is None
@@ -773,8 +788,52 @@ async def test_factory_support_page_is_discovered_and_hydrated(monkeypatch) -> N
     assert request.module == "workspace_support"
     assert request.action == "list_support_requests"
     assert request.user_id == "support-user"
+    assert request.tenant_id == "tenant-from-membership"
+    assert request.workspace_id == "workspace-from-membership"
     assert request.params == {}
-    assert request.authority.permissions == ()
+    assert request.authority.permissions == ("workspace_support.read",)
+    assert scope_calls[0]["requested_scope"]["workspace_id"] is None
+    assert scope_calls[0]["principal"] is principal
+    assert scope_calls[0]["request"] is http_request
+    assert scope_calls[0]["fail_closed"] is True
+
+
+@pytest.mark.asyncio
+async def test_profile_page_scope_resolution_failure_does_not_dispatch(monkeypatch) -> None:
+    from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import platform as platform_app
+
+    factory_app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
+    monkeypatch.setenv("PLATFORM_PATH", str(factory_app_root))
+
+    class _Executor:
+        async def execute(self, request, context):
+            pytest.fail("Profile action dispatched without resolved scope")
+
+    class _Registry:
+        module_executor = _Executor()
+
+    class _ScopeHooks:
+        async def call_module_scope(self, **kwargs):
+            raise RuntimeError("membership lookup failed")
+
+    monkeypatch.setattr(platform_app, "executor_registry", _Registry())
+    monkeypatch.setattr(platform_app, "get_platform_hooks", lambda: _ScopeHooks())
+    principal = UserPrincipal(
+        user_id="support-user",
+        email="support@example.com",
+        name="Support User",
+        roles=[],
+        scopes=[],
+        raw_claims={},
+        app_id="mozaiks-factory",
+    )
+
+    result = await platform_app.get_profile_pages(request=SimpleNamespace(), app_id=None, principal=principal)
+
+    support = next(page for page in result["pages"] if page["id"] == "support-tickets")
+    assert support["data"] is None
+    assert support["error"] == "Action 'list_support_requests' failed"
 
 
 @pytest.mark.asyncio
@@ -805,7 +864,11 @@ async def test_profile_pages_do_not_inject_my_apps(monkeypatch, tmp_path: Path) 
         app_id="app_1",
     )
 
-    result = await platform_app.get_profile_pages(app_id=None, principal=principal)
+    result = await platform_app.get_profile_pages(
+        request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(executor_registry=_FakeRegistry()))),
+        app_id=None,
+        principal=principal,
+    )
 
     ids = [page["id"] for page in result["pages"]]
     assert "my-apps" not in ids
