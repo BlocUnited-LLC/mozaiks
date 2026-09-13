@@ -12,6 +12,22 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- The floating assistant widget always offers a way into a workflow. Its
+  workspace button is no longer hidden when this browser has no stored
+  session: the widget reads the user's in-progress sessions from the server,
+  resumes directly when one is running, opens a picker when several are, and
+  otherwise sends the user to the workflow surface to start one. The widget
+  itself stays ask-only — this is the route back out of it.
+- The collapsed assistant toggle is legible against the page: an opaque card
+  surface with a solid primary edge and a full-size brand mark, instead of a
+  faint translucent tab that was easy to miss entirely.
+- Page routes share one themeable content measure (`--mz-content-max`, set by
+  `theme.content_width`, default `wide`) instead of each route choosing its own
+  max-width. The profile route no longer strands large empty gutters on wide
+  viewports while workspace routes fill them.
+
 ### Added
 
 - Pages can declare the ask-mode context they need. A page's

@@ -27,6 +27,16 @@ const densityScale = {
   spacious:    '0.3125rem',
 };
 
+// Shared page content measure. Page surfaces align to one rhythm instead of
+// each route picking its own max-width, which is what leaves wide viewports
+// with large empty gutters on some pages and not others.
+const contentWidthScale = {
+  reading: '48rem',
+  comfortable: '72rem',
+  wide: '96rem',
+  full: 'none',
+};
+
 /**
  * Generate CSS custom property map from a theme config object.
  *
@@ -42,6 +52,7 @@ export function generateThemeTokens(config) {
     font       = 'system',
     font_heading,
     density    = 'comfortable',
+    content_width = 'wide',
   } = config ?? {};
 
   const scale       = palettes[primary] ?? palettes.blue;
@@ -64,6 +75,9 @@ export function generateThemeTokens(config) {
     '--mz-font-sans':    fontFamilies[font]          ?? fontFamilies.system,
     '--mz-font-heading': fontFamilies[font_heading]  ?? 'var(--mz-font-sans)',
     '--mz-font-mono':    "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
+
+    // Shared page content measure
+    '--mz-content-max': contentWidthScale[content_width] ?? contentWidthScale.wide,
 
     // Density-driven spacing
     '--mz-spacing-unit': spacingUnit,
