@@ -258,6 +258,15 @@
   bottom: max(1rem, calc(env(safe-area-inset-bottom, 0px) + 1rem));
 }
 
+/* When the shell renders its fixed mobile bottom bar (max-width: 767px in
+   header-styles.css), lift the floating assistant toggle above it so it stays
+   visible and tappable instead of hiding behind the bar. */
+@media (max-width: 767px) {
+  body:has(.shell-mobile-bottom-bar) .widget-safe-bottom {
+    bottom: max(5.5rem, calc(env(safe-area-inset-bottom, 0px) + 5.5rem));
+  }
+}
+
 /* ==========================================================================
    SCROLL BEHAVIOR
    ========================================================================== */

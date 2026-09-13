@@ -3458,6 +3458,51 @@ async def websocket_endpoint(
         return
     user_id = ws_user.user_id
 
+    # Ask-mode carrier connections declare intent at connect time and never
+    # bind to a workflow session. Mirrors the runtime host's ask-carrier branch.
+    transport_purpose = str(websocket.query_params.get("transport_purpose", "")).strip().lower()
+    if transport_purpose == "ask_carrier":
+        from mozaiksai.core.transport.session_registry import (
+            session_registry as _ask_session_registry,
+        )
+
+        ask_ws_id = id(websocket)
+        try:
+            coll = await runtime_app._chat_coll()
+            ask_query = {"_id": chat_id, **build_app_scope_filter(app_id)}
+            ask_existing = await coll.find_one(ask_query, {"_id": 1, "user_id": 1, "transport_purpose": 1})
+            if ask_existing and ask_existing.get("user_id") != user_id:
+                await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
+                return
+            if ask_existing is None:
+                await persistence_manager.create_chat_session(
+                    chat_id,
+                    app_id,
+                    workflow_name="",
+                    user_id=user_id,
+                    extra_fields={"transport_purpose": "ask_carrier"},
+                )
+            elif ask_existing.get("transport_purpose") != "ask_carrier":
+                await coll.update_one(
+                    {**ask_query, "user_id": user_id},
+                    {"$set": {"transport_purpose": "ask_carrier", "last_updated_at": datetime.now(UTC)}},
+                )
+            await runtime_app.simple_transport.handle_websocket(
+                websocket=websocket,
+                chat_id=chat_id,
+                user_id=user_id,
+                workflow_name="",
+                app_id=app_id,
+                ws_id=ask_ws_id,
+                suppress_history_replay=True,
+            )
+        except Exception as ask_err:
+            logger.warning("WS_ASK_CARRIER_PREP_FAILED: %s", ask_err)
+            await websocket.close(code=1011, reason="Failed to prepare ask session")
+        finally:
+            _ask_session_registry.remove_session(ask_ws_id)
+        return
+
     try:
         coll = await runtime_app._chat_coll()
         existing = await coll.find_one(

@@ -1623,21 +1623,26 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         }
         logger.info("WS_CONNECTED chat=%s ws_id=%s", chat_id, ws_id)
 
-        try:
-            session_registry.add_workflow(
-                ws_id=ws_id,
-                chat_id=chat_id,
-                workflow_name=str(workflow_name),
-                app_id=str(app_id) if app_id is not None else "",
-                user_id=str(user_id),
-                auto_activate=True,
-            )
-        except Exception as registry_err:
-            logger.warning(
-                "Failed to register workflow context on websocket connect for chat %s: %s",
-                chat_id,
-                registry_err,
-            )
+        # An empty workflow_name marks a general-only connection (ask-mode
+        # carrier): it must never register a workflow context, otherwise the
+        # session registry would route its free-form input into the workflow
+        # bridge instead of the general-mode exchange.
+        if str(workflow_name or "").strip():
+            try:
+                session_registry.add_workflow(
+                    ws_id=ws_id,
+                    chat_id=chat_id,
+                    workflow_name=str(workflow_name),
+                    app_id=str(app_id) if app_id is not None else "",
+                    user_id=str(user_id),
+                    auto_activate=True,
+                )
+            except Exception as registry_err:
+                logger.warning(
+                    "Failed to register workflow context on websocket connect for chat %s: %s",
+                    chat_id,
+                    registry_err,
+                )
         
         # H2: Start heartbeat for connection
         await self._start_heartbeat(chat_id, websocket)

@@ -17,6 +17,26 @@ This project follows a practical pre-1.0 changelog format:
 - Preserve the original Factory build-event envelope across re-emission and
   lost acknowledgements. Successful delivery cannot be revoked by a late failed
   attempt, and already acknowledged events are not posted again by lifecycle hooks.
+- The floating ask widget is now fully isolated from workflow sessions. Its
+  WebSocket declares `transport_purpose=ask_carrier` at connect time, so the
+  runtime never resolves the widget's carrier chat onto an in-progress build
+  session, never auto-starts the entry-point workflow on it, and never replays
+  workflow history into it — workflow agents (e.g. the build interview) can no
+  longer appear inside the ask widget, and widget messages can no longer start
+  phantom builds. Widget carrier chats created before this fix are retro-tagged
+  on next connect so session listings stop offering them as resumable
+  workflows, and the session router never substitutes an ask carrier as a
+  resume target.
+- The ask agent now receives the current screen's `page_context` with each
+  widget message, so ask-mode answers are grounded in the page the user is on.
+- The collapsed assistant toggle uses a higher-contrast branded surface, sits
+  above the shell's mobile bottom bar instead of hiding behind it, and the
+  widget header's support control is a lifebuoy instead of a bare `?`. The
+  "Back to workspace" logo button also resolves the active workflow session
+  from the server session snapshot when local storage was cleared.
+- The Studio workspace mobile navigation trigger is a sticky top-of-content
+  control (matching the admin layout) instead of a floating pill overlapping
+  the shell bottom bar.
 - Contextual workflow logging supports exception tracebacks so an error handler
   can persist failed indexing/build state instead of raising a logging error.
 - Studio app/build summaries select owned generated targets through their build

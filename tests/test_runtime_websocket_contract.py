@@ -619,3 +619,84 @@ async def test_runtime_websocket_binding_revalidation_failure_prevents_model_sta
     assert harness.session_router.resolve_calls == []
     assert harness.transport.api_calls == []
 
+
+
+@pytest.mark.asyncio
+async def test_runtime_websocket_ask_carrier_connects_general_only(monkeypatch):
+    """transport_purpose=ask_carrier connections never touch workflow machinery:
+    no resume resolution, no workflow binding, no auto-start, no history replay,
+    and no session-registry workflow context."""
+    harness = _patch_runtime_websocket_harness(
+        monkeypatch, chat_docs=[], resume_resolution={"chat_id": "unused"},
+        workflow_startup_mode="AgentDriven",
+    )
+    websocket = _FakeWebSocket(query_params={"transport_purpose": "ask_carrier"})
+    await harness.runtime_app.websocket_endpoint(
+        websocket=websocket, workflow_name="ask", app_id="app_1", chat_id="carrier_1", user_id="user_1",
+    )
+
+    assert harness.created_sessions == [
+        {
+            "chat_id": "carrier_1",
+            "app_id": "app_1",
+            "workflow_name": "",
+            "user_id": "user_1",
+            "extra_fields": {"transport_purpose": "ask_carrier"},
+        }
+    ]
+    assert len(harness.transport.handle_websocket_calls) == 1
+    handoff = harness.transport.handle_websocket_calls[0]
+    assert handoff["chat_id"] == "carrier_1"
+    assert handoff["workflow_name"] == ""
+    assert handoff["suppress_history_replay"] is True
+    assert harness.session_router.resolve_calls == []
+    assert harness.session_router.bind_calls == []
+    assert harness.scheduled_coroutines == []
+    assert harness.transport.api_calls == []
+    assert harness.added_workflows == []
+    assert harness.removed_sessions  # connection cleanup still runs
+    assert websocket.closed == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_websocket_ask_carrier_retro_tags_legacy_carrier(monkeypatch):
+    """Carrier docs created before connect-time ask intent existed get tagged
+    so session listings stop offering them as resumable workflow sessions."""
+    harness = _patch_runtime_websocket_harness(
+        monkeypatch,
+        chat_docs=[{"_id": "carrier_1", "app_id": "app_1", "user_id": "user_1",
+                    "workflow_name": "AgentGenerator", "status": 0,
+                    "messages": [{"role": "user", "content": "leaked"}]}],
+        resume_resolution={"chat_id": "unused"}, workflow_startup_mode="AgentDriven",
+    )
+    websocket = _FakeWebSocket(query_params={"transport_purpose": "ask_carrier"})
+    await harness.runtime_app.websocket_endpoint(
+        websocket=websocket, workflow_name="ask", app_id="app_1", chat_id="carrier_1", user_id="user_1",
+    )
+
+    assert harness.created_sessions == []
+    assert harness.collection._docs["carrier_1"]["transport_purpose"] == "ask_carrier"
+    assert len(harness.transport.handle_websocket_calls) == 1
+    handoff = harness.transport.handle_websocket_calls[0]
+    assert handoff["workflow_name"] == ""
+    assert handoff["suppress_history_replay"] is True
+    assert harness.session_router.resolve_calls == []
+    assert harness.scheduled_coroutines == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_websocket_ask_carrier_rejects_foreign_chat(monkeypatch):
+    harness = _patch_runtime_websocket_harness(
+        monkeypatch,
+        chat_docs=[{"_id": "carrier_1", "app_id": "app_1", "user_id": "someone_else",
+                    "workflow_name": "", "status": 0, "messages": []}],
+        resume_resolution={"chat_id": "unused"}, workflow_startup_mode="AgentDriven",
+    )
+    websocket = _FakeWebSocket(query_params={"transport_purpose": "ask_carrier"})
+    await harness.runtime_app.websocket_endpoint(
+        websocket=websocket, workflow_name="ask", app_id="app_1", chat_id="carrier_1", user_id="user_1",
+    )
+
+    assert websocket.closed and websocket.closed[-1][0] == 1008
+    assert harness.transport.handle_websocket_calls == []
+    assert harness.created_sessions == []

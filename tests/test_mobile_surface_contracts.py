@@ -65,12 +65,15 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert "<AdminTopbar" not in layout_source
     assert "Open Studio navigation" in layout_source
     assert "Studio navigation" in layout_source
-    assert "bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)]" in layout_source
+    # Mobile nav trigger is a sticky top-of-content control (admin-layout
+    # pattern), never a floating pill overlapping the shell bottom bar.
+    assert "sticky top-[calc(env(safe-area-inset-top,0px)+4.5rem)]" in layout_source
+    assert "fixed bottom-[calc(env(safe-area-inset-bottom,0px)" not in layout_source
     assert "max-h-[82dvh]" in layout_source
     assert "top-24 w-[min" not in layout_source
 
     assert 'fixed right-0 bottom-6 z-50 widget-safe-bottom' in widget_source
-    assert 'rounded-l-2xl border border-r-0 border-border/50' in widget_source
+    assert 'rounded-l-2xl border border-r-0 border-primary/40' in widget_source
     assert 'w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px]' in widget_source
 
 

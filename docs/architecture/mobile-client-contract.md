@@ -92,8 +92,18 @@ Auth-disabled local mode (`AUTH_ENABLED=false`) is supported for local developme
 ## Connect
 - Endpoint:
   - `/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}`
+- Optional query parameters:
+  - `suppress_history_replay=1` — skip the on-connect replay of an
+    in-progress run's history.
+  - `transport_purpose=ask_carrier` — declare an ask-mode (general-mode-only)
+    connection at connect time. The runtime then never resolves the carrier
+    onto a workflow session, never binds it in the session router, never
+    auto-starts a workflow, and never replays workflow history into it. The
+    `{workflow_name}` path segment is ignored for these connections (clients
+    send the literal `ask`), and the carrier chat document is persisted with
+    `transport_purpose: "ask_carrier"` so session listings exclude it.
 
-After connection, runtime emits initial chat metadata event so clients can align local cache and artifact state.
+After connection, runtime emits initial chat metadata event so clients can align local cache and artifact state. Ask-carrier connections skip this event and reply to `chat.enter_general_mode` with `chat.mode_changed` instead.
 
 ## Client → Runtime messages
 
