@@ -95,6 +95,10 @@ runtime `app_id` or persistence scope. Support clients send their access token
 with module actions. A failed ticket insert or list read is surfaced as an
 error, so the UI does not claim that an unsaved ticket exists or show an
 unavailable queue as empty.
+Generic message lookups and mutations resolve `thread_id` inside the caller's
+current app or workspace scope before loading messages, updating the thread, or
+writing read state. A matching participant id alone is not enough to read or
+mutate a conversation from another app/workspace scope.
 The profile support panel groups tickets by `subject_app_id`, keeping the
 authenticated runtime `app_id` separate from the app the ticket concerns. If a
 listed ticket has no accessible linked message thread, its `error` field tells

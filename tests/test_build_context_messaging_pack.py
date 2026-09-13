@@ -187,6 +187,24 @@ def test_messaging_data_migration_declares_stable_collection_aliases() -> None:
     }
 
 
+def test_messaging_read_state_index_includes_scope() -> None:
+    migration_path = TEMPLATES / "data" / "migrations" / "001_messaging_collections.json"
+    migration = json.loads(migration_path.read_text(encoding="utf-8"))
+    collections = {
+        collection["data_alias"]: collection
+        for surface in migration.get("surfaces", [])
+        for collection in surface.get("collections", [])
+    }
+    read_indexes = {index["name"]: index for index in collections["messages.thread_reads"]["indexes"]}
+
+    assert [key["field"] for key in read_indexes["reads_by_thread_user"]["keys"]] == [
+        "scope_type",
+        "scope_id",
+        "thread_id",
+        "user_id",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Backend template contracts
 # ---------------------------------------------------------------------------
