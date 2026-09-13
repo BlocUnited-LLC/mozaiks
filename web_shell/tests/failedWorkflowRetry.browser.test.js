@@ -163,6 +163,7 @@ test('failed workflow retry uses the existing authenticated launch path', async 
   const bundle = await build({
     stdin: { contents: entry, resolveDir: shell, loader: 'jsx' }, bundle: true, write: false,
     jsx: 'automatic', loader: { '.js': 'jsx' }, nodePaths: [path.join(shell, 'node_modules')],
+    alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
     define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'mock-host-boundaries', setup(builder) {
       builder.onResolve({ filter: /.*/ }, (args) => (
