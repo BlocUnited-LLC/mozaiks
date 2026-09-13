@@ -91,11 +91,8 @@ async def upsert_outbox_event(
     coll = await _coll()
 
     now = _utc_now()
-    existing = await coll.find_one({"_id": outbox_id}, {"platform_notified": 1})
-    if isinstance(existing, dict) and existing.get("platform_notified") is True:
-        return outbox_id
-
-    set_fields: dict[str, Any] = {
+    event: dict[str, Any] = {
+        "_id": outbox_id,
         **build_app_scope_filter(str(resolved_app_id)),
         "build_id": bid,
         "event_type": evt,
@@ -105,21 +102,17 @@ async def upsert_outbox_event(
         "workflow_name": str(workflow_name).strip() if workflow_name else None,
         "idempotency_key": str(idempotency_key).strip() if idempotency_key else None,
         "updated_at": now,
-        # Make the event eligible for immediate retry attempt.
         "next_retry_at": now,
+        "platform_notified": False,
+        "attempts": 0,
+        "created_at": now,
     }
 
+    # One logical event has one immutable payload, including its timestamp.
+    # Re-emission must not replace a receiver's receipt or reset retry state.
     await coll.update_one(
         {"_id": outbox_id},
-        {
-            "$set": set_fields,
-            "$setOnInsert": {
-                "_id": outbox_id,
-                "platform_notified": False,
-                "attempts": 0,
-                "created_at": now,
-            },
-        },
+        {"$setOnInsert": event},
         upsert=True,
     )
     return outbox_id
@@ -168,7 +161,10 @@ async def mark_attempt(
     if error:
         update["last_error"] = str(error)[:4000]
     update["next_retry_at"] = compute_next_retry_at(attempts=next_attempts, now=now)
-    await coll.update_one({"_id": outbox_id}, {"$set": update})
+    # A concurrent successful delivery is terminal even if this request failed.
+    await coll.update_one(
+        {"_id": outbox_id, "platform_notified": {"$ne": True}}, {"$set": update},
+    )
 
 
 async def get_outbox_event(*, outbox_id: str) -> dict[str, Any] | None:

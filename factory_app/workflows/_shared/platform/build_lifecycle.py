@@ -191,6 +191,8 @@ async def _deliver_outbox_event_once(*, outbox_event_id: str) -> None:
     doc = await get_outbox_event(outbox_id=outbox_event_id)
     if not isinstance(doc, dict) or not doc.get("app_id") or not isinstance(doc.get("payload"), dict):
         return
+    if doc.get("platform_notified") is True:
+        return
     try:
         result = await _build_events_client().post_build_event(app_id=doc["app_id"], payload=doc["payload"])
         await mark_attempt(outbox_id=outbox_event_id, ok=result.ok, status_code=result.status_code, error=result.error)

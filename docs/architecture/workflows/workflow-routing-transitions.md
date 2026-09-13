@@ -361,6 +361,15 @@ hosted delivery, but `/apps` must not depend on that callback being configured:
 as soon as `ExistingAppDiscovery` starts, the imported repository appears as an
 in-progress app with a continue link back to the discovery chat.
 
+Hosted delivery is at least once. The existing build-events outbox stores one
+immutable envelope per execution host, build, and event type. Re-emitting a
+lifecycle hook retains the original payload, timestamp, and idempotency key;
+it does not reset delivery attempts or retry scheduling. Receivers can therefore
+verify an exact replay without accepting changed data under the same key.
+A successful acknowledgement is terminal: a later failed delivery cannot make
+the event pending again. This is Factory callback durability, not AG2 agent
+scheduling or permission to promote or deploy an app.
+
 ## Navigation Entry
 
 The app shell enters a transition directly:
