@@ -7,11 +7,9 @@ AppSchemaAgent output and task-batch assembly are complete.
 
 Algorithm
 ---------
-1. Extract every api_endpoint string from page sections in context_variables.app_pages
-   (recursively, including nested children in compositional sections).
-2. Build a registry of valid "{module_id}/{action_id}" paths from two sources:
-     a. context_variables.app_build_plan.capability_packs  (planned actions)
-     b. modules/*/module.yaml files on disk in the generated app directory (actual actions)
+1. Extract page API references from generated_files, including nested actions.
+2. Build the action registry from module.yaml files in that same snapshot.
+   Before assembly, app_pages and planned/on-disk actions support standalone checks.
 3. Cross-reference every referenced endpoint against the registry or the small
    allowlist of platform-owned read endpoints that the page renderer may fetch.
 4. Report:
@@ -20,9 +18,8 @@ Algorithm
      orphaned_pages   — endpoints with no matching module action or platform endpoint (BLOCKING)
      orphaned_actions — module actions with no page referencing them (advisory warning)
 
-The check is only blocking when a module registry is available. If neither
-capability_packs nor module.yaml files can be found, the check is advisory
-(cannot confirm or deny validity without a registry).
+Unresolved endpoints and missing input are blocking. A static/custom UI bundle
+may legitimately have no declarative page API references.
 """
 
 import logging
@@ -32,6 +29,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+
+from mozaiksai.core.workflow.context.frozen import detach
 
 _logger = logging.getLogger("tools.validate_wiring")
 
@@ -53,14 +52,14 @@ def _context_get(context_variables: dict[str, Any] | None, key: str) -> Any | No
         try:
             v = context_variables.get(key)
             if v is not None:
-                return v
+                return detach(v)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key)
+        return detach(data.get(key))
     if isinstance(context_variables, dict):
-        return context_variables.get(key)
+        return detach(context_variables.get(key))
     return None
 
 
@@ -132,9 +131,10 @@ def _collect_endpoints_from_config(
     href = config.get("href")
     if isinstance(href, str) and href.strip().startswith("/api/"):
         out.append((page_name, section_id, href.strip()))
-    submit_action = config.get("submit_action")
-    if isinstance(submit_action, dict):
-        _collect_endpoints_from_config(page_name, f"{section_id}/submit", submit_action, out)
+    for field in ("submit_action", "cancel_action", "action", "empty"):
+        action = config.get(field)
+        if isinstance(action, dict):
+            _collect_endpoints_from_config(page_name, f"{section_id}/{field}", action, out)
     for action in config.get("actions") or []:
         if isinstance(action, dict):
             action_id = str(action.get("id") or "action").strip()
@@ -329,9 +329,12 @@ async def validate_wiring(
     """
     # ── Read context ──────────────────────────────────────────────────────
     generated_files = _generated_files_from_context(context_variables)
-    app_pages: list[Any] = _context_get(context_variables, "app_pages") or []
-    if not app_pages:
-        app_pages = _pages_from_generated_files(generated_files)
+    has_file_snapshot = _context_get(context_variables, "generated_files") is not None
+    app_pages: list[Any] = (
+        _pages_from_generated_files(generated_files)
+        if has_file_snapshot
+        else _context_get(context_variables, "app_pages") or []
+    )
     app_build_plan: dict[str, Any] = _context_get(context_variables, "app_build_plan") or {}
     generated_app_dir_str: str | None = _context_get(context_variables, "generated_app_dir")
 
@@ -365,7 +368,8 @@ async def validate_wiring(
 
     # Source A: capability_packs
     capability_packs = app_build_plan.get("capability_packs") or []
-    known_actions.update(_actions_from_capability_packs(capability_packs))
+    if not has_file_snapshot:
+        known_actions.update(_actions_from_capability_packs(capability_packs))
 
     # Source B: modules/*/module.yaml on disk
     app_dir: Path | None = None
@@ -386,7 +390,7 @@ async def validate_wiring(
                 / "app"
             )
 
-    if app_dir and app_dir.is_dir():
+    if not has_file_snapshot and app_dir and app_dir.is_dir():
         known_actions.update(_actions_from_module_yamls(app_dir))
     if generated_files:
         known_actions.update(_actions_from_generated_module_files(generated_files))
@@ -421,13 +425,20 @@ async def validate_wiring(
     no_registry = not known_actions
     has_orphaned_pages = bool(orphaned_pages)
     has_invalid_endpoints = bool(invalid_endpoints)
+    missing_input = not generated_files and not app_pages
 
-    # Block only when we have a registry to validate against.
-    blocking_pass: bool = not has_invalid_endpoints and (not has_orphaned_pages or no_registry)
+    blocking_pass: bool = not (missing_input or has_invalid_endpoints or has_orphaned_pages)
 
     # ── 5. Build human-readable output ───────────────────────────────────
     warnings: list[str] = []
     failed_tests: list[dict[str, Any]] = []
+
+    if missing_input:
+        failed_tests.append({
+            "test": "wiring_missing_input",
+            "error": "No generated files or page schemas were available for wiring validation.",
+            "fix_suggestion": "Pass the assembled generated_files snapshot to the acceptance gate.",
+        })
 
     for item in invalid_endpoints:
         failed_tests.append({
@@ -446,7 +457,7 @@ async def validate_wiring(
             ),
         })
 
-    if has_orphaned_pages and not no_registry:
+    if has_orphaned_pages:
         for item in orphaned_pages:
             failed_tests.append({
                 "test": "wiring_orphaned_endpoint",
@@ -472,9 +483,8 @@ async def validate_wiring(
 
     if no_registry:
         warnings.append(
-            "No module action registry available (capability_packs is empty and no "
-            "module.yaml files found on disk). Wiring check is advisory — cannot "
-            "confirm or deny endpoint validity."
+            "No module actions were found in the validation input. "
+            "Only supported platform read endpoints can resolve without app modules."
         )
 
     if orphaned_actions:
@@ -484,7 +494,9 @@ async def validate_wiring(
             "actions — review intent."
         )
 
-    if has_invalid_endpoints:
+    if missing_input:
+        message = "Wiring validation requires generated files or page schemas."
+    elif has_invalid_endpoints:
         message = f"{len(invalid_endpoints)} page endpoint(s) have invalid api_endpoint syntax."
     elif not blocking_pass:
         message = (
@@ -502,14 +514,14 @@ async def validate_wiring(
             f"module actions{platform_suffix}."
         )
     else:
-        message = "Wiring check passed (advisory — registry or endpoints unavailable)."
+        message = "Wiring check passed; no unresolved page API references."
 
     check: dict[str, Any] = {
         "id": "module_action_wiring",
         "passed": blocking_pass,
         "message": message,
         "details": {
-            "blocking": not no_registry,
+            "blocking": True,
             "total_endpoints_referenced": len(endpoint_refs),
             "wired_count": len(wired),
             "platform_endpoint_count": len(platform_endpoints),
