@@ -2254,7 +2254,9 @@ async def run_app_bundle_acceptance_gate(
     }
 
     agent_integration_result = await _agent_backend_integration_result(context_variables)
-    wiring_result = await validate_wiring(context_variables=context_variables)
+    wiring_result = await validate_wiring(context_variables={"generated_files": generated_files})
+    _context_set(context_variables, "wiring_validation_passed", wiring_result["passed"])
+    _context_set(context_variables, "wiring_validation_result", wiring_result)
     module_implementation_result = validate_module_implementation_contract(generated_files)
     runtime_quality_result = _runtime_quality_result(generated_files)
     functional_diagnostics = scan_functional_generated_app(
