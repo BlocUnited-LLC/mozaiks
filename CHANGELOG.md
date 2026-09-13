@@ -74,6 +74,8 @@ This project follows a practical pre-1.0 changelog format:
   platform host, shared frontend, and disposable Mongo database. Failed startup,
   expiry, and artifact changes clear stale preview URLs. A local Docker image
   supplies the canonical runtime without inheriting Factory credentials.
+  Preview account export and deletion use the same private app database as
+  generated module actions, so they can reach the user's saved records.
 - Page-derived shell routes use the loader's exact file key, avoiding Linux
   404s when generated display names differ in case from page filenames.
 - SecurityReadiness preserves its inspected artifact identity and review summary
