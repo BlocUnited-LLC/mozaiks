@@ -33,7 +33,10 @@ import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from mozaiksai.core.runtime.app.page_schema import validate_ask_context_references
+from mozaiksai.core.runtime.app.page_schema import (
+    discover_page_schema_paths,
+    validate_ask_context_references,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 
 _logger = logging.getLogger("tools.validate_wiring")
@@ -509,10 +512,10 @@ async def validate_wiring(
         if manifest_path.is_file():
             contract_files["ui/route_manifest.json"] = manifest_path.read_text(encoding="utf-8")
         if not app_pages:
-            app_pages = _pages_from_generated_files({
-                path.relative_to(app_dir).as_posix(): path.read_text(encoding="utf-8")
-                for path in sorted((app_dir / "ui/pages").glob("*.yaml"))
-            })
+            app_pages = [
+                yaml.safe_load(path.read_text(encoding="utf-8"))
+                for path in discover_page_schema_paths(app_dir).values()
+            ]
     ask_pages = list(app_pages)
     if "ui/route_manifest.json" in contract_files:
         manifest = json.loads(contract_files["ui/route_manifest.json"])

@@ -153,7 +153,10 @@ async def test_planned_action_names_cannot_authorize_server_bindings():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source", ["snapshot", "disk"])
+@pytest.mark.parametrize("source", [
+    "snapshot", "disk", "disk_yml", "disk_nested_yaml", "disk_nested_yml",
+    "disk_upper_yaml", "disk_upper_yml",
+])
 @pytest.mark.parametrize("fault", [None, "server", "ask", "endpoint"])
 async def test_ask_and_server_bindings_share_resolved_pages(tmp_path, source, fault):
     action, page = bundle()
@@ -165,11 +168,17 @@ async def test_ask_and_server_bindings_share_resolved_pages(tmp_path, source, fa
         page["meta"]["ask_context"][0]["action"] = "missing"
     elif fault == "endpoint":
         page["sections"][0]["config"]["children"][0]["config"]["api_endpoint"] = "/api/modules/books/missing"
+    page_path = {
+        "disk_yml": "ui/pages/books.yml", "disk_nested_yaml": "ui/pages/books/page.yaml",
+        "disk_nested_yml": "ui/pages/books/page.yml", "disk_upper_yaml": "ui/pages/books.YAML",
+        "disk_upper_yml": "ui/pages/books.YML",
+    }.get(source, "ui/pages/books.yaml")
     files = {
-        "ui/pages/books.yaml": yaml.safe_dump(page),
+        page_path: yaml.safe_dump(page),
         "modules/books/module.yaml": yaml.safe_dump({"module": {"id": "books"}, "actions": [action]}),
+        "ui/route_manifest.json": '{"pages":[{"path":"/help","component":"Help"}]}',
     }
-    if source == "disk":
+    if source.startswith("disk"):
         for name, content in files.items():
             path = tmp_path / name
             path.parent.mkdir(parents=True, exist_ok=True)
