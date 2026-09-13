@@ -205,9 +205,10 @@ async def assemble_revision_context(
 
     pack = _load_pack(pack_loader)
     session_state = None
-    if user_id:
+    host_app_id = tool_context.app_id
+    if user_id and host_app_id:
         session_state = await (session_store or SessionStateStore()).load(
-            app_id=tool_context.app_id, user_id=user_id, target_app_id=tool_context.target_app_id,
+            app_id=host_app_id, user_id=user_id, target_app_id=tool_context.target_app_id,
         )
 
     store = artifact_store or get_artifact_store()

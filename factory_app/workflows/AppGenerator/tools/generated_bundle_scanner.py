@@ -296,13 +296,12 @@ def _module_surface_ids(data_contract: dict[str, Any]) -> set[str]:
         for collection in collections:
             if not isinstance(collection, dict):
                 continue
-            ownership = (
-                collection.get("ownership") if isinstance(collection.get("ownership"), dict) else {}
-            )
+            ownership_value = collection.get("ownership")
+            ownership = ownership_value if isinstance(ownership_value, dict) else {}
             module_id = str(
                 collection.get("module_id") or ownership.get("surface_id") or ""
-            ).strip()  # type: ignore[union-attr]
-            ownership_kind = str(ownership.get("surface_kind") or surface_kind).strip()  # type: ignore[union-attr]
+            ).strip()
+            ownership_kind = str(ownership.get("surface_kind") or surface_kind).strip()
             if ownership_kind == "module" and module_id:
                 module_ids.add(module_id)
             elif surface_kind == "module" and surface_id:
@@ -1696,7 +1695,9 @@ def _scan_page_api_endpoint_alignment(files_map: dict[str, str]) -> list[str]:
                 "internal",
                 "admin_internal",
             }:
-                internal_actions.add((module_id, action.get("id")))
+                action_id = action.get("id")
+                if isinstance(action_id, str):
+                    internal_actions.add((module_id, action_id))
 
     if not module_actions:
         return []  # No modules in bundle — skip reference closure.

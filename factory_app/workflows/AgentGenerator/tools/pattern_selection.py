@@ -8,9 +8,9 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
 
-def validate_selection(selection: Any, context_variables: Any) -> dict[str, Any]:
+def validate_selection(raw_selection: Any, context_variables: Any) -> dict[str, Any]:
     models, _ = load_workflow_structured_outputs("AgentGenerator")
-    selection = models["PatternSelection"].model_validate(detach(selection)).model_dump(mode="json")
+    selection = models["PatternSelection"].model_validate(detach(raw_selection)).model_dump(mode="json")
     workflows = selection["workflows"]
     if selection["is_multi_workflow"] != (len(workflows) > 1):
         raise ValueError("is_multi_workflow must match the workflow count")

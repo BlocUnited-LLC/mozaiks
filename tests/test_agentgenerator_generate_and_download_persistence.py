@@ -37,6 +37,21 @@ class _FakeArtifactStore:
         return type("BuildRecord", (), {"id": "av_workflow_bundle_1"})()
 
 
+def test_register_workflow_bundle_requires_context_before_artifact_reads(monkeypatch) -> None:
+    artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
+    resolve_inputs = AsyncMock()
+    monkeypatch.setattr(artifacts_mod, "resolve_latest_artifact_version_refs", resolve_inputs)
+    store = _FakeArtifactStore()
+    with pytest.raises(ValueError, match="requires runtime context"):
+        asyncio.run(generate_and_download_module._register_workflow_bundle_artifact_version(
+            app_id="app_123", user_id="user_123", workflow_name="AgentGenerator",
+            chat_id="chat_123", bundle_name="LeadWorkflow", zip_path=None,
+            context_variables=None, artifact_store=store,
+        ))
+    resolve_inputs.assert_not_awaited()
+    assert store.calls == []
+
+
 def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeypatch, tmp_path: Path) -> None:
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")

@@ -12,9 +12,9 @@ def record_theme_interview(agent_message: str, context_variables: Any = None) ->
     models, _ = load_workflow_structured_outputs("ThemeCapture")
     result = models["ThemeInterviewResult"].model_validate(
         detach(context_variables.get("structured_output"))
-    )
-    if not result.agent_message.strip():
+    ).model_dump(mode="json")
+    if not result["agent_message"].strip():
         raise ValueError("Theme interview requires a user-facing message")
-    if agent_message != result.agent_message:
+    if agent_message != result["agent_message"]:
         raise ValueError("Theme interview message must match its validated output")
-    return {"outcome": result.model_dump(mode="json")["outcome"]}
+    return {"outcome": result["outcome"]}

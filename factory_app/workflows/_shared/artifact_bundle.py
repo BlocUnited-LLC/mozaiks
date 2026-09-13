@@ -48,10 +48,11 @@ async def read_artifact_bundle(artifact: BuildRecord) -> tuple[dict[str, str], l
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         for info in archive.infolist():
             path = safe_artifact_relpath(info.filename)
-            reason = None
             if path is None:
-                reason = "unsafe_path"
-            elif stat.S_ISLNK(info.external_attr >> 16):
+                diagnostics.append({"path": info.filename, "code": "unsafe_path", "blocking": True})
+                continue
+            reason = None
+            if stat.S_ISLNK(info.external_attr >> 16):
                 reason = "symlink"
             elif info.is_dir():
                 continue
@@ -83,4 +84,3 @@ async def read_artifact_bundle(artifact: BuildRecord) -> tuple[dict[str, str], l
                 continue
             files[path] = text
     return files, diagnostics
-

@@ -538,13 +538,14 @@ class RefinementTriggerRouteResolver:
         paths = RefinementTriggerRouteResolver._manifest_paths_from_extra(request.extra)
         if paths:
             return paths
-        if not request.app_id or not request.build_record_id:
+        artifact_app_id = request.artifact_app_id
+        if not request.app_id or not artifact_app_id or not request.build_record_id:
             return []
         try:
             from mozaiksai.core.artifacts.store import ArtifactStore
 
             artifact = await ArtifactStore().get_build_record(
-                app_id=request.artifact_app_id,
+                app_id=artifact_app_id,
                 build_record_id=request.build_record_id,
             )
         except Exception as exc:
@@ -1383,14 +1384,15 @@ class RefinementTriggerRouteResolver:
         there is no point classifying the user's change request if the upstream
         artifacts it depends on are already out of date.
         """
-        if not request.app_id:
+        artifact_app_id = request.artifact_app_id
+        if not request.app_id or not artifact_app_id:
             return None
         try:
             from mozaiksai.core.artifacts.store import (
                 ArtifactStore,  # local import avoids circular dep
             )
             store = ArtifactStore()
-            stale = await store.get_stale_artifact_families(app_id=request.artifact_app_id)
+            stale = await store.get_stale_artifact_families(app_id=artifact_app_id)
         except Exception as exc:
             _logger.debug("STALE_ARTIFACT_LOOKUP_FAILED app=%s: %s", request.app_id, exc)
             return None

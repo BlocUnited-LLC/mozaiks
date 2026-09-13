@@ -281,8 +281,11 @@ class OrchestrationControlHarness:
         owned_paths = {path for surface in plan.surfaces for path in surface.affected_paths}
         if not result.all_files or set(result.all_files) - owned_paths:
             raise ValueError("Surface output is empty or outside its declared scope")
+        app_id = refinement_request.app_id
+        if not app_id:
+            raise ValueError("Surface output requires an execution host app_id")
         request = CodingWorkerRequest(
-            app_id=refinement_request.app_id, target_app_id=refinement_request.target_app_id,
+            app_id=app_id, target_app_id=refinement_request.target_app_id,
             user_id=refinement_request.user_id, run_build_binding=run_build_binding,
             build_family=refinement_request.build_family, build_key=refinement_request.normalized_build_key(),
             build_record_id=refinement_request.build_record_id, requested_workflow_id=routing_decision.workflow_id,

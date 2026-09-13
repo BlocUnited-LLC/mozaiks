@@ -5,6 +5,7 @@
 
 import logging
 import types as _types
+from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Literal, Optional, Union, get_args, get_origin
 
@@ -16,8 +17,8 @@ from ..llm_config import get_llm_config
 from ..workflow_manager import workflow_manager
 
 # Workflow-specific model cache
-_workflow_models: dict[str, dict[str, type]] = {}
-_workflow_registries: dict[str, dict[str, type]] = {}
+_workflow_models: dict[str, dict[str, type[BaseModel]]] = {}
+_workflow_registries: dict[str, dict[str, type[BaseModel]]] = {}
 # Cache of workflow -> set(agent_names) that have structured output models
 _workflow_structured_agents: dict[str, set[str]] = {}
 _provider_response_model_cache: dict[type[BaseModel], type[BaseModel]] = {}
@@ -76,7 +77,7 @@ def _build_literal_enum(name: str, values: list[Any]) -> type[Enum]:
 
 def _resolve_named_type(
     type_name: str,
-    available_models: dict[str, type],
+    available_models: Mapping[str, type],
     alias_defs: dict[str, dict[str, Any]],
     alias_cache: dict[str, Any],
     stack: set[str] | None = None,
@@ -379,7 +380,7 @@ def _build_field(field_kwargs: dict[str, Any]) -> Any:
 
 def resolve_field_type(
     field_def: dict[str, Any],
-    available_models: dict[str, type],
+    available_models: Mapping[str, type],
     alias_defs: dict[str, dict[str, Any]] | None = None,
     alias_cache: dict[str, Any] | None = None,
 ) -> tuple[Any, Any]:
@@ -466,7 +467,7 @@ def resolve_field_type(
 
 def build_models_from_config(
     models_config: dict[str, Any], *, exact_model_ids: frozenset[str] = frozenset(),
-) -> dict[str, type]:
+) -> dict[str, type[BaseModel]]:
     """Compile provider-neutral acceptance models from workflow declarations.
 
     Declared defaults and optional fields remain truthful in the model and
@@ -477,7 +478,7 @@ def build_models_from_config(
     """
     if not models_config:
         return {}
-    models: dict[str, type] = {}
+    models: dict[str, type[BaseModel]] = {}
     alias_defs: dict[str, dict[str, Any]] = {
         name: mdef
         for name, mdef in models_config.items()
@@ -536,7 +537,7 @@ def build_models_from_config(
         raise ValueError(f"Unresolved model dependencies: {[n for n,_ in pending]}")
     return models
 
-def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type], dict[str, type]]:
+def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type[BaseModel]], dict[str, type[BaseModel]]]:
     """Load structured outputs configuration for a workflow."""
     if workflow_name in _workflow_models:
         # Ensure structured agents cache is initialized before returning cached models.
@@ -657,7 +658,7 @@ def get_structured_output_model_fields(workflow_name: str, agent_name: str) -> d
         except Exception:
             return {}
 
-def build_dynamic_models(spec_models: list[dict[str, Any]], existing_models: dict[str, type]) -> dict[str, type]:
+def build_dynamic_models(spec_models: list[dict[str, Any]], existing_models: dict[str, type]) -> dict[str, type[BaseModel]]:
     """Build dynamic models from runtime specifications."""
     if not spec_models:
         return {}

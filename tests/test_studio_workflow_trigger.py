@@ -1724,6 +1724,8 @@ def test_studio_artifact_promote_endpoint_restores_bundle_and_updates_session(mo
     runtime_root = tmp_path / "runtime_app"
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
     monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
+    index_start = AsyncMock(return_value={"status": "queued"})
+    monkeypatch.setattr(studio_app, "_start_studio_app_intelligence_index_job", index_start)
 
     client = TestClient(studio_app.app)
     response = client.post("/api/studio/build/artifacts/av_child_1/promote?build_registry_id=appreg_1")
@@ -1736,6 +1738,32 @@ def test_studio_artifact_promote_endpoint_restores_bundle_and_updates_session(mo
     assert (target / "app" / "src" / "App.jsx").exists()
     assert not runtime_root.exists()
     assert store.update_calls[-1]["status"] == RefinementSessionStatus.PROMOTED
+    index_start.assert_awaited_once()
+    assert index_start.await_args.kwargs["app_id"] == "app_1"
+    assert index_start.await_args.kwargs["body"].workspace_root == str(target)
+
+
+@pytest.mark.asyncio
+async def test_studio_index_failure_is_persisted_without_logging_failure(monkeypatch, tmp_path):
+    from mozaiksai.hosts import studio
+
+    job = studio.create_app_intelligence_index_job(
+        app_id="app_1", requested_by="demo-user", workspace_root=str(tmp_path),
+    )
+    monkeypatch.setattr(studio, "get_app_intelligence_index_job", AsyncMock(return_value=job))
+    save = AsyncMock(side_effect=lambda value: value)
+    monkeypatch.setattr(studio, "save_app_intelligence_index_job", save)
+
+    def reject_source(**kwargs):
+        raise ValueError("source inspection rejected")
+
+    monkeypatch.setattr(studio, "resolve_source_import", reject_source)
+    await studio._run_studio_app_intelligence_index_job("app_1", job.job_id)
+    save.assert_awaited_once()
+    failed = save.await_args.args[0]
+    assert failed.status == "failed"
+    assert failed.error == "source inspection rejected"
+    assert failed.completed_at is not None
 
 
 def _async_classifier(*, change_class: str, rationale: str, confidence: float, signals: list[str]):

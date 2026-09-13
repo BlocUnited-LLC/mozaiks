@@ -24,6 +24,15 @@ SessionStateStore = _session_persist.SessionStateStore
 WorkflowStatus = _data_models.WorkflowStatus
 
 
+@pytest.fixture(autouse=True)
+def _isolated_platform_hooks(monkeypatch):
+    from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+
+    # Generic launcher tests must not inherit the running app's Factory hooks.
+    hooks = PlatformHookRegistry()
+    monkeypatch.setattr(_session_launcher, "get_platform_hooks", lambda: hooks)
+
+
 class _MemoryCollection:
     def __init__(self) -> None:
         self._docs = {}

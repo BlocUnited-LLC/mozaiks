@@ -28,7 +28,7 @@ async def record_security_findings(
     _context_set(context_variables, "security_readiness_recorded", False)
     inspected = _context_get(context_variables, "security_readiness_summary", {})
     if inspected.get("source_error"):
-        return inspected
+        return dict(inspected)
     try:
         binding, artifact = await resolve_security_artifact(context_variables)
     except Exception as exc:

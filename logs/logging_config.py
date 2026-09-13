@@ -612,6 +612,9 @@ class ContextLogger:
     def error(self, msg, *args, **extra):
         self._log(logging.ERROR, msg, *args, **extra)
 
+    def exception(self, msg, *args, exc_info=True, **extra):
+        self._log(logging.ERROR, msg, *args, exc_info=exc_info, **extra)
+
     def with_context(self, **more):
         return ContextLogger(self._base, _filter_reserved_log_keys({**self._ctx, **more}))
 

@@ -14,12 +14,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Contextual workflow logging supports exception tracebacks so an error handler
+  can persist failed indexing/build state instead of raising a logging error.
 - Studio app/build summaries select owned generated targets through their build
   registry without changing the authenticated host scope. Build review filters
-  app bundles instead of showing internal App Intelligence records as builds;
+  app bundles instead of showing non-bundle App Intelligence projections as builds;
   demo data no longer replaces unavailable real apps.
 - Mobile record cards wrap long values, and bottom navigation uses the app's
   light/dark theme. Dashboard run labels distinguish failed runs from completed.
+- Structured-output compiler results retain their Pydantic model types. Artifact
+  registration requires runtime context, and refinement lookups guard missing
+  execution identity before reading app-scoped state.
 
 - Preserve source line endings during app validation and export so Windows
   refinement does not repeatedly insert blank lines into unchanged files.

@@ -158,6 +158,8 @@ async def _register_workflow_bundle_artifact_version(
     workflow_integration_metadata: dict[str, Any] | None = None,
     artifact_store: Any | None = None,
 ) -> Any:
+    if context_variables is None:
+        raise ValueError("Workflow artifact registration requires runtime context")
     try:
         import hashlib
 

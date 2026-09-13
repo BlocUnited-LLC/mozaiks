@@ -6,6 +6,7 @@ import json
 import stat
 import zipfile
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -184,6 +185,10 @@ def _promote_client(monkeypatch, runtime_root: Path, store: _PromoteStore):
     studio_app = _studio_app(monkeypatch)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
     monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
+    monkeypatch.setattr(
+        studio_app, "_start_studio_app_intelligence_index_job",
+        AsyncMock(return_value={"status": "queued"}),
+    )
     monkeypatch.setenv("MOZAIKS_WORKSPACES_PATH", str(runtime_root.parent / "workspaces"))
     monkeypatch.setattr(studio_app, "_resolve_studio_scope", lambda *args, **kwargs: ("factory", "demo-user"))
     registry = _AppRegistryServiceDouble(artifact_version_id=store.version.id)

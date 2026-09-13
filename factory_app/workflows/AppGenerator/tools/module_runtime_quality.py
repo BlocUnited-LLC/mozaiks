@@ -226,7 +226,7 @@ def _audit_ast(filename: str, content: str) -> list[str]:
             and isinstance(node.args[0], ast.Name) and node.args[0].id in {"ctx", "context"}
             and isinstance(node.args[1], ast.Constant) and node.args[1].value == "events"
         )
-        if direct_events or optional_events:
+        if isinstance(node, (ast.Attribute, ast.Call)) and (direct_events or optional_events):
             warnings.append(
                 f"{filename}:{node.lineno}: ModuleContext has no events API; use await ctx.emit(event_type, payload)."
             )

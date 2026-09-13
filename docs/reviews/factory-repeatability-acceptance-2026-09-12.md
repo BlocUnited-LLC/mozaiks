@@ -58,11 +58,24 @@ download returned 401 and an unrelated registry returned 404.
 
 - Integrated OSS run: 17,247 passed, 98 skipped, two failures. Both failures were
   stale source/documentation assertions, subsequently corrected. Their final
-  route, ownership, summary, and readiness slice passed 48 tests. A clean full
-  rerun is required before merging.
+  route, ownership, summary, and readiness slice passed 48 tests. The clean full
+  rerun passed 17,252 tests with 98 skipped and four warnings. Final typing and
+  indexing-error follow-ups are additionally covered by focused tests and CI.
 - Final runtime/admin/Studio overlay before that correction: 83 passed.
-- Shared frontend regression: 13 passed, including real-browser schema actions,
-  downloads, theme, UI response acknowledgement, and workflow UI registration.
+- Shared frontend regression: 42 passed across all seven Node/browser files,
+  covering schema actions, downloads, theme, UI response acknowledgement,
+  concept review, workflow UI registration, and auth adapters. Five additional
+  Playwright auth tests passed.
+- CI exposed 18 typing errors in the integration; corrected compiler return
+  types and explicit optional-value checks passed mypy across 623 source files.
+  The affected generation/refinement slice passed 608 tests; six artifact
+  registration tests include the new missing-context-before-read guard.
+- Linux shard isolation exposed generic launcher tests inheriting Factory hooks
+  and promotion tests invoking unrelated background indexing with partial store
+  doubles. Their dependencies are now explicit. The indexing error path also
+  exposed a missing contextual logger `exception()` method, now implemented and
+  covered together with failed-job persistence. The combined CI-fix slice passed
+  100 tests; the control-plane identity slice passed 301 tests.
 - Whole-tree Ruff and `git diff --check` passed. A redacted Gitleaks scan of this
   branch's commit patches found no leaks.
 - App Zero installed a local wheel built from OSS checkpoint `9c1078eb`, without
