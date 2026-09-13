@@ -239,7 +239,7 @@ def test_state_machine_behavior_pattern_keeps_provider_jobs_operator_owned() -> 
     """Generated app bundles do not own provider-specific scheduler provisioning."""
     spec_text = yaml.dump(_state_machine_pattern())
     assert "operator or hosted deployment" in spec_text
-    assert "not AuthScaffoldAgent or the generated app bundle" in spec_text
+    assert "outside the authentication scaffold or generated app bundle" in " ".join(spec_text.split())
 
 
 def test_state_machine_behavior_pattern_mandates_env_vars_in_docstring() -> None:

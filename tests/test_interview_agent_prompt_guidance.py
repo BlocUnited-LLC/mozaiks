@@ -14,7 +14,7 @@ def test_value_engine_prompt_stays_route_bounded_and_non_exhaustive() -> None:
 
     assert 'do NOT ask whether they already have an existing app' in source
     assert 'You do not need to ask every category directly.' in source
-    assert 'Competitor/market depth belongs to ResearchAgent.' in source
+    assert 'Competitor/market depth belongs in the research findings.' in source
 
 
 def test_appgenerator_prompt_prefers_context_and_assumption_forward_guidance() -> None:

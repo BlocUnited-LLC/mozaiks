@@ -81,7 +81,7 @@ def test_capability_routing_distinguishes_money_flow_from_subscription_contract(
     assert "monetized as \"revenue model unresolved\"" in rule
     assert "true only for subscriptions, plan gates, seats, quotas, credits, token" in rule
     assert "instead of inventing provider internals" in rule
-    assert "AppBuildPlan.revenue_model to free, subscriptions, usage_based" in rule
+    assert "AppBuildPlan.revenue_model is set to free, subscriptions, usage_based" in rule
 
 
 def test_generator_prompts_refuse_blanket_monetized_equals_subscriptions() -> None:
