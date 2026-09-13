@@ -100,6 +100,7 @@ export default function AppRevenuePage() {
               data={trendPoints}
               emptyLabel="Trend appears once daily revenue snapshots are recorded"
               formatPointValue={(value) => formatMetricValue(trendDefinition, value, '—')}
+              baseline="auto"
               action={
                 <SegmentedControl
                   options={REVENUE_TREND_METRICS}

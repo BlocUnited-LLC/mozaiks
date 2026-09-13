@@ -96,6 +96,7 @@ export default function AppUsersPage() {
               data={trendPoints}
               emptyLabel="Trend appears once daily activity is recorded"
               formatPointValue={(value) => formatMetricValue(trendDefinition, value, '—')}
+              baseline="auto"
               action={
                 <SegmentedControl
                   options={USERS_TREND_METRICS}

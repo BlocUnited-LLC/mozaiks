@@ -89,9 +89,9 @@ export function MetricBridge({ start, end, steps = [], unexplained = null, class
         ))}
         {unexplained ? (
           <div className="grid grid-cols-[minmax(7rem,10rem)_minmax(0,1fr)_minmax(5rem,auto)] items-center gap-3 px-4 py-2.5 sm:px-5">
-            <span className="truncate text-sm text-muted-foreground/70">Unattributed</span>
+            <span className="truncate text-sm text-muted-foreground">Unattributed</span>
             <span aria-hidden="true" />
-            <span className="text-right text-sm tabular-nums text-muted-foreground/70">
+            <span className="text-right text-sm tabular-nums text-muted-foreground">
               {unexplained.formatted}
             </span>
           </div>
