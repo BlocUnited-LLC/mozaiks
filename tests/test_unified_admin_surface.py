@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
@@ -11,6 +12,13 @@ def _workspace() -> Path:
 
 def _read(relative_path: str) -> str:
     return (_workspace() / relative_path).read_text(encoding="utf-8")
+
+
+def test_studio_support_queue_routes_are_operator_only() -> None:
+    manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
+    routes = {route["path"]: route for route in manifest["pages"]}
+    for path in ("/support", "/apps/:appId/support"):
+        assert routes[path]["meta"]["requiresRole"] == "admin"
 
 
 def test_admin_portal_is_the_only_registered_admin_page() -> None:

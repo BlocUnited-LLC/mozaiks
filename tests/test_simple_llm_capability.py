@@ -238,3 +238,37 @@ async def test_generate_response_omits_page_context_line_when_absent(monkeypatch
 
     system_message = captured["messages"][0]
     assert "currently on this screen" not in system_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_generate_response_renders_workspace_context_lines(monkeypatch) -> None:
+    from mozaiksai.core.runtime.app import ai_config as ai_config_module
+
+    monkeypatch.setattr(
+        ai_config_module,
+        "load_runtime_ai_config",
+        lambda: {"ask": {"ask_mode_prompt": "You are the Studio assistant."}},
+    )
+    service = SimpleLLMCapabilityService()
+    captured: dict = {}
+
+    async def fake_chat_completion(**kwargs):
+        captured.update(kwargs)
+        return {"content": "ok", "usage": {}}
+
+    monkeypatch.setattr(service, "generate_chat_completion", fake_chat_completion)
+
+    await service.generate_response(
+        prompt="how many apps do I have?",
+        workflows=[{"workflow_name": "ValueEngine"}],
+        app_id="app_1",
+        user_id="user_1",
+        ui_context=None,
+        workspace_context={"Workspace apps": "8 total — 8 draft", "Empty": "  "},
+    )
+    await service.aclose()
+
+    system_content = captured["messages"][0]["content"]
+    assert "Workspace apps: 8 total — 8 draft" in system_content
+    assert "Active workflows: ValueEngine" in system_content
+    assert "Empty:" not in system_content

@@ -10,12 +10,13 @@ import {
   StudioLoadingState,
 } from '../../ui/components/StudioShared.jsx'
 import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
+import { studioFetch } from './studioApi.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function fetchCurrentProfileAppId() {
   try {
-    const response = await fetch('/api/me')
+    const response = await studioFetch('/api/me')
     if (!response.ok) return null
     const profile = await response.json()
     return profile?.app_id || profile?.appId || null
@@ -129,7 +130,7 @@ function SessionListCard({ run, active, onClick }) {
 
 // ─── Thread detail panel ──────────────────────────────────────────────────────
 
-function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) {
+function ThreadPanel({ run, onMessageSent, onDeleted, onStatusUpdated }) {
   const [extraMessages, setExtraMessages] = useState([])
   const [sendError, setSendError] = useState(null)
   const [deleteError, setDeleteError] = useState(null)
@@ -155,10 +156,10 @@ function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) 
     setSendError(null)
     if (run.request_id) {
       try {
-        const response = await fetch('/api/modules/workspace_support/add_support_message', {
+        const response = await studioFetch('/api/modules/workspace_support/add_support_message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ request_id: run.request_id, message: text, sender_role: 'operator', app_id: appId }),
+          body: JSON.stringify({ request_id: run.request_id, message: text, sender_role: 'operator' }),
         })
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
         const body = await response.json()
@@ -177,10 +178,10 @@ function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) 
     setStatusUpdating(true)
     setStatusError(null)
     try {
-      const response = await fetch('/api/modules/workspace_support/update_support_request_status', {
+      const response = await studioFetch('/api/modules/workspace_support/update_support_request_status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: run.request_id, status: nextStatus, app_id: appId }),
+        body: JSON.stringify({ request_id: run.request_id, status: nextStatus }),
       })
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
       const body = await response.json()
@@ -200,10 +201,10 @@ function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) 
     setDeleting(true)
     setDeleteError(null)
     try {
-      const response = await fetch('/api/modules/workspace_support/delete_support_request', {
+      const response = await studioFetch('/api/modules/workspace_support/delete_support_request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: run.request_id, app_id: appId }),
+        body: JSON.stringify({ request_id: run.request_id }),
       })
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
       const body = await response.json()
@@ -335,10 +336,10 @@ export default function AppSupportPage() {
         targetAppId = await fetchCurrentProfileAppId() || targetAppId
       }
       setEffectiveAppId(targetAppId)
-      const res = await fetch('/api/modules/workspace_support/list_support_requests', {
+      const res = await studioFetch('/api/modules/workspace_support/list_support_requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'all', limit: 50, scope: 'app', app_id: targetAppId }),
+        body: JSON.stringify({ status: 'all', limit: 50, scope: 'app', subject_app_id: targetAppId }),
       })
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`)
@@ -464,7 +465,6 @@ export default function AppSupportPage() {
             {/* Right: thread detail */}
             <ThreadPanel
               run={selectedRun}
-              appId={effectiveAppId}
               onMessageSent={loadSupportRequests}
               onStatusUpdated={loadSupportRequests}
               onDeleted={async () => {

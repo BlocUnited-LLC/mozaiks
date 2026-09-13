@@ -91,6 +91,22 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert "return `/me?${params.toString()}`;" in support_links_source
     assert "buildSupportRequestPayload" in widget_source
     assert "buildSupportRequestPayload" in chat_page_source
+    assert "payload.subject_app_id = cleanAppId" in support_links_source
+    assert "payload.app_id = cleanAppId" not in support_links_source
+    assert "payload.user_id = cleanUserId" not in support_links_source
+    assert "Authorization: `Bearer ${supportToken}`" in widget_source
+    assert "Authorization: `Bearer ${supportToken}`" in chat_page_source
+    assert "getSupportApiBaseUrl(api, config)" in widget_source
+    assert "getSupportApiBaseUrl(api, config)" in chat_page_source
+    assert "appId: resolvedAppId || supportScope.appId" in widget_source
+    assert "appId: currentAppId || supportScope.appId" in chat_page_source
+    assert "Your support request could not be sent. Please try again." in chat_page_source
+    assert "navigate(buildUserSupportPath({ appId: currentAppId }))" not in chat_page_source
+    assert "getAccessToken?.()" in profile_source
+    assert "window.location.origin" in profile_source
+    assert "getToken?.()" not in profile_source
+    assert "studioModuleAction('workspace_support'" in profile_panel_source
+    assert "if (page?.error)" in profile_panel_source
     assert "supportError" in widget_source
     assert "page_title:" not in widget_source
     assert "page_url:" not in widget_source
@@ -210,12 +226,15 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
 
     smoke_titles_by_component = {
         "AppsPage": "apps route stays responsive across desktop and mobile widths",
+        "WorkspacePerformancePage": "workspace performance route stays responsive across desktop and mobile widths",
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
         "WorkspaceUsersPage": "workspace users route stays responsive across desktop and mobile widths",
         "WorkspaceIntegrationsPage": "workspace integrations route stays responsive across desktop and mobile widths",
         "UserSupportPage": "workspace support route stays responsive across desktop and mobile widths",
         "StudioPage": "app Studio root redirects to manifest default portal",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
+        "AppRevenuePage": "app revenue route stays responsive across desktop and mobile widths",
+        "AppUsersPage": "app users analytics route stays responsive across desktop and mobile widths",
         "DashboardPortalPage": "app building route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
         "AppAccessPage": "app access route stays responsive across desktop and mobile widths",
@@ -253,6 +272,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "CarryForwardReportSummary",
         "CarryForwardReportPanel",
         "PricingHealthPanel",
+        "MetricDetailPanel",
     }
 
 
@@ -284,6 +304,8 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/admin/pages/CarryForwardReportSummary.jsx",
         "factory_app/app/admin/pages/CarryForwardReportPanel.jsx",
         "factory_app/app/admin/pages/PricingHealthPanel.jsx",
+        # Universal metric drill-down drawer, opened from analytics surfaces
+        "factory_app/app/admin/pages/MetricDetailPanel.jsx",
         "factory_app/app/ui/components/StudioShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/app/ui/components/OnboardingTour.jsx",

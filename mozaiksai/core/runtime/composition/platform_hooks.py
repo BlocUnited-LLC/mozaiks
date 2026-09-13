@@ -79,6 +79,12 @@ Bundle keys (all optional):
         Best-effort structured event-reaction audit callback. Exceptions are
         logged and do not affect event fan-out.
 
+    ask_context           async (*, app_id: str, user_id: str) -> Dict[str, Any]
+        Workspace context lines appended to the ask-mode system prompt, as
+        ``{label: value}`` (e.g. ``{"Workspace apps": "3 total — 2 draft"}``).
+        Best-effort UX context, never authority: exceptions are logged and
+        skipped, and earlier registrations win on key collisions.
+
     on_account_delete_complete
                           async (*, app_id: str, user_id: str,
                                   deletion_results: Dict[str, Any]) -> None
@@ -139,6 +145,7 @@ class PlatformExtensionBundle:
     before_module_execution: Callable | None = None
     module_dispatch_audit: Callable | None = None
     module_reaction_audit: Callable | None = None
+    ask_context: Callable | None = None
 
 
 def _clean_optional(value: Any) -> str | None:
@@ -158,6 +165,7 @@ _BUNDLE_KEYS = (
     "before_module_execution",
     "module_dispatch_audit",
     "module_reaction_audit",
+    "ask_context",
 )
 
 
@@ -185,6 +193,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
             before_module_execution=bundle.get("before_module_execution"),
             module_dispatch_audit=bundle.get("module_dispatch_audit"),
             module_reaction_audit=bundle.get("module_reaction_audit"),
+            ask_context=bundle.get("ask_context"),
         )
 
     if bundle is None or isinstance(bundle, (str, bytes, int, float, bool)):
@@ -208,6 +217,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
         before_module_execution=getattr(bundle, "before_module_execution", None),
         module_dispatch_audit=getattr(bundle, "module_dispatch_audit", None),
         module_reaction_audit=getattr(bundle, "module_reaction_audit", None),
+        ask_context=getattr(bundle, "ask_context", None),
     )
 
 
@@ -243,6 +253,7 @@ class PlatformHookRegistry:
         self._before_module_execution_hooks: list[Callable] = []
         self._module_dispatch_audit_hooks: list[Callable] = []
         self._module_reaction_audit_hooks: list[Callable] = []
+        self._ask_context_hooks: list[Callable] = []
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -311,6 +322,7 @@ class PlatformHookRegistry:
             "before_module_execution": self._before_module_execution_hooks,
             "module_dispatch_audit": self._module_dispatch_audit_hooks,
             "module_reaction_audit": self._module_reaction_audit_hooks,
+            "ask_context": self._ask_context_hooks,
         }
         for key, target in slot_map.items():
             val = _get(key)
@@ -633,6 +645,26 @@ class PlatformHookRegistry:
                 return str(name)
         return None
 
+    async def call_ask_context(self, app_id: str, user_id: str) -> dict[str, Any]:
+        """Collect host-provided workspace context for ask-mode exchanges.
+
+        Best-effort UX context, never authority: a failing hook is logged and
+        skipped, and earlier registrations win on key collisions.
+        """
+        merged: dict[str, Any] = {}
+        for hook in self._ask_context_hooks:
+            try:
+                res = hook(app_id=app_id, user_id=user_id)
+                if inspect.isawaitable(res):
+                    res = await res
+            except Exception as exc:
+                logger.warning("PLATFORM_HOOKS_ASK_CONTEXT_ERROR: %s", exc)
+                continue
+            if isinstance(res, dict):
+                for key, value in res.items():
+                    merged.setdefault(str(key), value)
+        return merged
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
@@ -669,6 +701,10 @@ class PlatformHookRegistry:
     def has_module_reaction_audit(self) -> bool:
         return bool(self._module_reaction_audit_hooks)
 
+    @property
+    def has_ask_context(self) -> bool:
+        return bool(self._ask_context_hooks)
+
     def summary(self) -> dict[str, Any]:
         return {
             "startup_hooks": len(self._startup_hooks),
@@ -681,6 +717,7 @@ class PlatformHookRegistry:
             "before_module_execution_hooks": len(self._before_module_execution_hooks),
             "module_dispatch_audit_hooks": len(self._module_dispatch_audit_hooks),
             "module_reaction_audit_hooks": len(self._module_reaction_audit_hooks),
+            "ask_context_hooks": len(self._ask_context_hooks),
         }
 
 

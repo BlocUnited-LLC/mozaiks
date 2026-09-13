@@ -46,7 +46,6 @@ export function buildUserSupportPath({ requestId = null, appId = null } = {}) {
 export function buildSupportRequestPayload({
   message,
   appId = null,
-  userId = null,
   pageUrl = null,
   pageTitle = null,
   severity = 'low',
@@ -57,11 +56,9 @@ export function buildSupportRequestPayload({
     severity: cleanString(severity) || 'low',
   };
   const cleanAppId = cleanString(appId);
-  const cleanUserId = cleanString(userId);
   const cleanPageUrl = cleanString(pageUrl);
   const cleanPageTitle = cleanString(pageTitle);
-  if (cleanAppId) payload.app_id = cleanAppId;
-  if (cleanUserId) payload.user_id = cleanUserId;
+  if (cleanAppId) payload.subject_app_id = cleanAppId;
   if (cleanPageUrl) payload.page_url = cleanPageUrl;
   if (cleanPageTitle) payload.page_title = cleanPageTitle;
   if (Array.isArray(conversationTranscript) && conversationTranscript.length > 0) {
@@ -98,10 +95,10 @@ export function buildSupportConversationTranscript(messages = [], { includeMessa
   return rows.slice(-20);
 }
 
-function getHostApiBaseUrl(api, config = {}) {
+export function getSupportApiBaseUrl(api, config = {}) {
   if (api && typeof api.getHttpBaseUrl === 'function') {
     const baseUrl = api.getHttpBaseUrl();
-    if (typeof baseUrl === 'string') return baseUrl.replace(/\/+$/, '');
+    if (typeof baseUrl === 'string' && baseUrl.trim()) return baseUrl.replace(/\/+$/, '');
   }
   const configured = (
     config?.apiUrl ||
@@ -112,15 +109,16 @@ function getHostApiBaseUrl(api, config = {}) {
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_URL) ||
     ''
   );
-  return typeof configured === 'string' ? configured.replace(/\/+$/, '') : '';
+  if (typeof configured === 'string' && configured.trim()) return configured.replace(/\/+$/, '');
+  return typeof window !== 'undefined' ? window.location.origin : '';
 }
 
 async function fetchCurrentProfileScope(api, auth, config) {
-  const backendUrl = getHostApiBaseUrl(api, config);
+  const backendUrl = getSupportApiBaseUrl(api, config);
   if (!backendUrl) return null;
   const headers = { 'Content-Type': 'application/json' };
   try {
-    const token = await auth?.getToken?.();
+    const token = await auth?.getAccessToken?.();
     if (token) headers.Authorization = `Bearer ${token}`;
   } catch (_) {}
   const response = await fetch(`${backendUrl}/api/me`, { headers });

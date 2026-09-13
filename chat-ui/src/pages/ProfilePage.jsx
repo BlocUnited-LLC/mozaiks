@@ -40,7 +40,7 @@ const VALID_LAYOUTS = new Set(['sidebar_left', 'top_nav', 'drawer', 'icon_rail']
 function getHostApiBaseUrl(config, api) {
   if (api && typeof api.getHttpBaseUrl === 'function') {
     const baseUrl = api.getHttpBaseUrl();
-    if (typeof baseUrl === 'string') return baseUrl.replace(/\/+$/, '');
+    if (typeof baseUrl === 'string' && baseUrl.trim()) return baseUrl.replace(/\/+$/, '');
   }
   const configured = (
     config?.apiUrl ||
@@ -51,11 +51,12 @@ function getHostApiBaseUrl(config, api) {
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_URL) ||
     ''
   );
-  return typeof configured === 'string' ? configured.replace(/\/+$/, '') : '';
+  if (typeof configured === 'string' && configured.trim()) return configured.replace(/\/+$/, '');
+  return typeof window !== 'undefined' ? window.location.origin : '';
 }
 
 async function fetchWithAuth(url, options = {}, auth = null) {
-  const token = await auth?.getToken?.();
+  const token = await auth?.getAccessToken?.();
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return fetch(url, { ...options, headers });
@@ -752,8 +753,8 @@ export default function ProfilePage() {
     for (const [s, pages] of Object.entries(pagesBySection)) {
       if (!SECTION_ORDER.includes(s)) flat.push(...(pages || []));
     }
-    return flat;
-  }, [pagesBySection]);
+    return isOwner ? flat : flat.filter(page => page.visibility !== 'owner_only');
+  }, [pagesBySection, isOwner]);
 
   // Sync active page when pages load or URL param changes
   useEffect(() => {

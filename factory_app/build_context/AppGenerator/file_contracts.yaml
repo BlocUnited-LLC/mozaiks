@@ -91,7 +91,6 @@ task_contracts:
       - Token wallets and token_allowances are only for apps selling AI usage, credits, quotas, token packs, or usage-charge estimates; access-only SaaS plans must omit those fields.
       - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
 
-
   module_contract:
     owner_agent: ConfigMiddlewareAgent
     summary: Canonical module contract bundle that declares module behavior before Python or JS implementation.

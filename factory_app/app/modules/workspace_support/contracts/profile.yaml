@@ -1,10 +1,13 @@
-schema_version: mozaiks.profile.v1
+schema_version: mozaiks.profile.v2
 
-panels:
+pages:
   - id: support-tickets
-    title: Support
+    label: Support
+    route: support-tickets
+    section: overview
     description: Your help requests and operator conversations.
     order: 20
-    kind: component
+    renderer: custom_component
     component: UserSupportPanel
+    visibility: owner_only
     action: list_support_requests

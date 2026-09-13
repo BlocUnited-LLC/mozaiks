@@ -691,6 +691,224 @@ function buildOnboardingStatusPayload({ dismissed = false, progress = 0, steps =
   };
 }
 
+// ─── Owner analytics payloads ────────────────────────────────────────────────
+// Deterministic stand-ins for /api/studio/analytics/*, mirroring the envelope
+// the backend serves: registry metadata, {value, previous, delta, delta_pct,
+// available} per metric, daily series, insights, and movement/funnel blocks.
+
+const ANALYTICS_REGISTRY = {
+  mrr: { metric_id: 'mrr', domain: 'revenue', label: 'MRR', short_label: 'MRR', unit: 'currency_usd', polarity: 'higher_is_better', source: 'kpi_snapshot', headline: true, benchmarkable: true, description: 'Monthly recurring revenue.', related: ['arr'] },
+  arr: { metric_id: 'arr', domain: 'revenue', label: 'ARR', short_label: 'ARR', unit: 'currency_usd', polarity: 'higher_is_better', source: 'derived', description: 'Annualized recurring revenue.', related: ['mrr'] },
+  new_mrr: { metric_id: 'new_mrr', domain: 'revenue', label: 'New MRR', short_label: 'New MRR', unit: 'currency_usd', polarity: 'higher_is_better', source: 'kpi_snapshot', description: 'Revenue from new subscriptions.', related: [] },
+  expansion_mrr: { metric_id: 'expansion_mrr', domain: 'revenue', label: 'Expansion MRR', short_label: 'Expansion', unit: 'currency_usd', polarity: 'higher_is_better', source: 'kpi_snapshot', description: 'Revenue from upgrades.', related: [] },
+  contraction_mrr: { metric_id: 'contraction_mrr', domain: 'revenue', label: 'Contraction MRR', short_label: 'Contraction', unit: 'currency_usd', polarity: 'lower_is_better', source: 'kpi_snapshot', description: 'Revenue lost to downgrades.', related: [] },
+  churned_mrr: { metric_id: 'churned_mrr', domain: 'revenue', label: 'Churned MRR', short_label: 'Churned', unit: 'currency_usd', polarity: 'lower_is_better', source: 'kpi_snapshot', description: 'Revenue lost to cancellations.', related: [] },
+  net_new_mrr: { metric_id: 'net_new_mrr', domain: 'revenue', label: 'Net New MRR', short_label: 'Net New MRR', unit: 'currency_usd', polarity: 'higher_is_better', source: 'derived', headline: true, description: 'New + expansion minus contraction and churn.', related: [] },
+  mrr_growth: { metric_id: 'mrr_growth', domain: 'revenue', label: 'MRR growth', short_label: 'Growth', unit: 'percent', polarity: 'higher_is_better', source: 'derived', headline: true, benchmarkable: true, description: 'Percent change in MRR.', related: ['mrr'] },
+  nrr: { metric_id: 'nrr', domain: 'revenue', label: 'NRR', short_label: 'NRR', unit: 'percent', polarity: 'higher_is_better', source: 'derived', headline: true, benchmarkable: true, description: 'Net revenue retention.', related: [] },
+  arppu: { metric_id: 'arppu', domain: 'revenue', label: 'ARPPU', short_label: 'ARPPU', unit: 'currency_usd', polarity: 'higher_is_better', source: 'derived', description: 'Revenue per paying user.', related: [] },
+  active_users: { metric_id: 'active_users', domain: 'users', label: 'Active users', short_label: 'Active', unit: 'count', polarity: 'higher_is_better', source: 'usage_rollup', headline: true, benchmarkable: true, description: 'Users active in the period.', related: [] },
+  total_users: { metric_id: 'total_users', domain: 'users', label: 'Total users', short_label: 'Total', unit: 'count', polarity: 'higher_is_better', source: 'kpi_snapshot', description: 'All registered users.', related: [] },
+  new_users: { metric_id: 'new_users', domain: 'users', label: 'New users', short_label: 'New', unit: 'count', polarity: 'higher_is_better', source: 'kpi_snapshot', description: 'Signups in the period.', related: [] },
+  paying_users: { metric_id: 'paying_users', domain: 'users', label: 'Paying users', short_label: 'Paying', unit: 'count', polarity: 'higher_is_better', source: 'kpi_snapshot', headline: true, benchmarkable: true, description: 'Users on a paid plan.', related: [] },
+  user_growth: { metric_id: 'user_growth', domain: 'users', label: 'User growth', short_label: 'Growth', unit: 'percent', polarity: 'higher_is_better', source: 'derived', headline: true, benchmarkable: true, description: 'Percent change in active users.', related: [] },
+  paid_conversion: { metric_id: 'paid_conversion', domain: 'users', label: 'Paid conversion', short_label: 'Conversion', unit: 'percent', polarity: 'higher_is_better', source: 'derived', headline: true, benchmarkable: true, description: 'Paying users over total users.', related: [] },
+  retention: { metric_id: 'retention', domain: 'users', label: 'Retention', short_label: 'Retention', unit: 'percent', polarity: 'higher_is_better', source: 'derived', benchmarkable: true, description: 'Share of users retained.', related: [] },
+  churn_rate: { metric_id: 'churn_rate', domain: 'users', label: 'Churn', short_label: 'Churn', unit: 'percent', polarity: 'lower_is_better', source: 'derived', benchmarkable: true, description: 'Share of users churned.', related: [] },
+};
+
+function analyticsEnvelope(value, previous) {
+  const bothPresent = value != null && previous != null;
+  return {
+    value: value ?? null,
+    previous: previous ?? null,
+    delta: bothPresent ? value - previous : null,
+    delta_pct: bothPresent && previous !== 0 ? ((value - previous) / Math.abs(previous)) * 100 : null,
+    available: value != null,
+  };
+}
+
+function analyticsMetricSet(base) {
+  return {
+    mrr: analyticsEnvelope(base.mrr, base.prevMrr),
+    arr: analyticsEnvelope(base.mrr * 12, base.prevMrr * 12),
+    new_mrr: analyticsEnvelope(base.newMrr, base.newMrr),
+    expansion_mrr: analyticsEnvelope(base.expansionMrr, base.expansionMrr),
+    contraction_mrr: analyticsEnvelope(base.contractionMrr, base.contractionMrr),
+    churned_mrr: analyticsEnvelope(base.churnedMrr, base.churnedMrr),
+    net_new_mrr: analyticsEnvelope(
+      base.newMrr + base.expansionMrr - base.contractionMrr - base.churnedMrr,
+      base.newMrr,
+    ),
+    mrr_growth: { value: ((base.mrr - base.prevMrr) / base.prevMrr) * 100, previous: null, delta: null, delta_pct: null, available: true },
+    nrr: analyticsEnvelope(102.5, null),
+    arppu: analyticsEnvelope(base.mrr / base.payingUsers, null),
+    active_users: analyticsEnvelope(base.activeUsers, base.prevActiveUsers),
+    total_users: analyticsEnvelope(base.totalUsers, base.totalUsers - base.newUsers),
+    new_users: analyticsEnvelope(base.newUsers, base.newUsers),
+    paying_users: analyticsEnvelope(base.payingUsers, base.prevPayingUsers),
+    user_growth: { value: ((base.activeUsers - base.prevActiveUsers) / base.prevActiveUsers) * 100, previous: null, delta: null, delta_pct: null, available: true },
+    paid_conversion: analyticsEnvelope(
+      (base.payingUsers / base.totalUsers) * 100,
+      (base.prevPayingUsers / (base.totalUsers - base.newUsers)) * 100,
+    ),
+    retention: analyticsEnvelope(96.2, 95.1),
+    churn_rate: analyticsEnvelope(3.8, 4.9),
+  };
+}
+
+const ANALYTICS_BASES = {
+  'campaign-revision-workbench': { mrr: 1600, prevMrr: 1750, newMrr: 40, expansionMrr: 0, contractionMrr: 60, churnedMrr: 130, payingUsers: 12, prevPayingUsers: 14, totalUsers: 19, newUsers: 2, activeUsers: 11, prevActiveUsers: 14 },
+  'partner-delivery-studio': { mrr: 9200, prevMrr: 8760, newMrr: 520, expansionMrr: 240, contractionMrr: 120, churnedMrr: 200, payingUsers: 54, prevPayingUsers: 51, totalUsers: 204, newUsers: 21, activeUsers: 163, prevActiveUsers: 149 },
+  'member-growth-studio': { mrr: 27800, prevMrr: 25300, newMrr: 2100, expansionMrr: 900, contractionMrr: 180, churnedMrr: 320, payingUsers: 482, prevPayingUsers: 448, totalUsers: 2480, newUsers: 206, activeUsers: 1824, prevActiveUsers: 1698 },
+};
+
+const ANALYTICS_PERIOD = {
+  id: '30d',
+  label: 'Last 30 days',
+  comparison_label: 'vs previous 30 days',
+  since: '2026-08-13T00:00:00+00:00',
+  until: '2026-09-12T00:00:00+00:00',
+  previous_since: '2026-07-14T00:00:00+00:00',
+  previous_until: '2026-08-13T00:00:00+00:00',
+};
+
+function analyticsSeries(start, end, days = 14) {
+  return Array.from({ length: days }, (_, index) => ({
+    period_start: `2026-08-${String(index + 14).padStart(2, '0')}`,
+    value: start + ((end - start) * index) / (days - 1),
+  }));
+}
+
+function buildPortfolioAnalyticsPayload() {
+  const apps = Object.entries(ANALYTICS_BASES).map(([appId, base]) => ({
+    app_id: appId,
+    name: appsPayload.apps.find((app) => app.app_id === appId)?.name || appId,
+    lifecycle_state: 'active',
+    metrics: analyticsMetricSet(base),
+    error: false,
+  }));
+  const totals = Object.values(ANALYTICS_BASES).reduce(
+    (sum, base) => ({
+      mrr: sum.mrr + base.mrr,
+      prevMrr: sum.prevMrr + base.prevMrr,
+      newMrr: sum.newMrr + base.newMrr,
+      expansionMrr: sum.expansionMrr + base.expansionMrr,
+      contractionMrr: sum.contractionMrr + base.contractionMrr,
+      churnedMrr: sum.churnedMrr + base.churnedMrr,
+      payingUsers: sum.payingUsers + base.payingUsers,
+      prevPayingUsers: sum.prevPayingUsers + base.prevPayingUsers,
+      totalUsers: sum.totalUsers + base.totalUsers,
+      newUsers: sum.newUsers + base.newUsers,
+      activeUsers: sum.activeUsers + base.activeUsers,
+      prevActiveUsers: sum.prevActiveUsers + base.prevActiveUsers,
+    }),
+    { mrr: 0, prevMrr: 0, newMrr: 0, expansionMrr: 0, contractionMrr: 0, churnedMrr: 0, payingUsers: 0, prevPayingUsers: 0, totalUsers: 0, newUsers: 0, activeUsers: 0, prevActiveUsers: 0 },
+  );
+  return {
+    period: ANALYTICS_PERIOD,
+    registry: ANALYTICS_REGISTRY,
+    portfolio: analyticsMetricSet(totals),
+    series: {
+      mrr: analyticsSeries(totals.prevMrr, totals.mrr),
+      arr: analyticsSeries(totals.prevMrr * 12, totals.mrr * 12),
+      net_new_mrr: analyticsSeries(120, 180),
+      active_users: analyticsSeries(totals.prevActiveUsers, totals.activeUsers),
+      paying_users: analyticsSeries(totals.prevPayingUsers, totals.payingUsers),
+      new_users: analyticsSeries(4, 9),
+    },
+    apps,
+    benchmarks: {
+      mrr: { median: 9200, sample_size: 3 },
+      mrr_growth: { median: 5.0, sample_size: 3 },
+      paid_conversion: { median: 26.5, sample_size: 3 },
+    },
+    insights: [
+      {
+        insight_id: 'mrr_decline',
+        severity: 'attention',
+        app_id: 'campaign-revision-workbench',
+        app_name: 'Campaign Revision Workbench',
+        metric_id: 'mrr',
+        headline: 'Campaign Revision Workbench MRR declined 8.6%',
+        detail: 'Largest revenue decline in the portfolio this period.',
+        delta_pct: -8.57,
+        delta: null,
+      },
+      {
+        insight_id: 'mrr_growth_leader',
+        severity: 'highlight',
+        app_id: 'member-growth-studio',
+        app_name: 'Member Growth Studio',
+        metric_id: 'mrr',
+        headline: 'Member Growth Studio is the fastest-growing app',
+        detail: 'MRR grew 9.9% versus the comparison period.',
+        delta_pct: 9.88,
+        delta: null,
+      },
+    ],
+    availability: { revenue: 'full', users: 'full' },
+  };
+}
+
+function buildAppAnalyticsPayload(appId) {
+  const base = ANALYTICS_BASES[appId] || ANALYTICS_BASES[APP_ID];
+  return {
+    period: ANALYTICS_PERIOD,
+    registry: ANALYTICS_REGISTRY,
+    app: { app_id: appId, name: appsPayload.apps.find((app) => app.app_id === appId)?.name || appId, lifecycle_state: 'active' },
+    metrics: analyticsMetricSet(base),
+    series: {
+      mrr: analyticsSeries(base.prevMrr, base.mrr),
+      arr: analyticsSeries(base.prevMrr * 12, base.mrr * 12),
+      net_new_mrr: analyticsSeries(10, 25),
+      active_users: analyticsSeries(base.prevActiveUsers, base.activeUsers),
+      paying_users: analyticsSeries(base.prevPayingUsers, base.payingUsers),
+      new_users: analyticsSeries(1, 3),
+    },
+    movement: {
+      available: true,
+      starting_mrr: base.prevMrr,
+      ending_mrr: base.mrr,
+      unexplained: null,
+      new_mrr: base.newMrr,
+      expansion_mrr: base.expansionMrr,
+      contraction_mrr: base.contractionMrr,
+      churned_mrr: base.churnedMrr,
+    },
+    funnel: {
+      configured: true,
+      available: true,
+      funnel_id: 'activation',
+      label: 'Activation',
+      subject: 'actor',
+      steps: [
+        { step_id: 'signed_up', label: 'Signed up', event_name: 'user.signed_up', count: base.totalUsers, conversion_rate: null },
+        { step_id: 'activated', label: 'Activated', event_name: 'app.activated', count: base.activeUsers, conversion_rate: 57.9 },
+        { step_id: 'paid', label: 'Paid', event_name: 'subscription.activated', count: base.payingUsers, conversion_rate: 63.2 },
+      ],
+    },
+    insights: [],
+    availability: { revenue: 'full', users: 'full' },
+    error: false,
+  };
+}
+
+function buildMetricDetailPayload(appId, metricId) {
+  const app = buildAppAnalyticsPayload(appId);
+  return {
+    period: ANALYTICS_PERIOD,
+    definition: ANALYTICS_REGISTRY[metricId] || ANALYTICS_REGISTRY.mrr,
+    app: { app_id: appId, name: app.app.name },
+    value: app.metrics[metricId] || app.metrics.mrr,
+    series: app.series[metricId] || [],
+    drivers: [],
+    related: [],
+    benchmark: { kind: 'portfolio_median', label: 'Portfolio median', median: 9200, sample_size: 3 },
+    error: false,
+  };
+}
+
 async function mockStudioApis(page) {
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({
@@ -932,6 +1150,23 @@ async function mockStudioApis(page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
   });
 
+  // One handler for every owner-analytics read; branch on the path so the
+  // metric-detail route is not shadowed by the app-analytics glob.
+  await page.route('**/api/studio/analytics/**', async (route) => {
+    const { pathname } = new URL(route.request().url());
+    const metricMatch = pathname.match(/\/analytics\/apps\/([^/]+)\/metrics\/([^/]+)$/);
+    const appMatch = pathname.match(/\/analytics\/apps\/([^/]+)$/);
+    let body;
+    if (metricMatch) {
+      body = buildMetricDetailPayload(decodeURIComponent(metricMatch[1]), decodeURIComponent(metricMatch[2]));
+    } else if (appMatch) {
+      body = buildAppAnalyticsPayload(decodeURIComponent(appMatch[1]));
+    } else {
+      body = buildPortfolioAnalyticsPayload();
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+
 }
 
 async function expectNoHorizontalOverflow(page) {
@@ -1156,6 +1391,61 @@ test('workspace support route stays responsive across desktop and mobile widths'
   }
 });
 
+test('profile support page loads tickets on a same-origin Studio host', async ({ page }) => {
+  let profilePageRequests = 0;
+  await page.route('**/api/me/profile-pages**', async (route) => {
+    profilePageRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        pages: [{
+          id: 'overview',
+          label: 'Profile',
+          section: 'overview',
+          renderer: 'custom_component',
+          component: 'ProfileOverview',
+          visibility: 'public',
+        }, {
+          id: 'support-tickets',
+          label: 'Support',
+          section: 'overview',
+          renderer: 'custom_component',
+          component: 'UserSupportPanel',
+          visibility: 'owner_only',
+          data: {
+            requests: [{
+              request_id: 'sr_browser',
+              subject_app_id: APP_ID,
+              user_id: 'user_1',
+              message: 'Need help with my app',
+              status: 'open',
+              created_at: '2026-01-01T00:00:00Z',
+            }],
+            total: 1,
+          },
+        }],
+      }),
+    });
+  });
+
+  await page.goto('/me?tab=support-tickets');
+
+  await expect(page.getByText('Need help with my app').first()).toBeVisible();
+  expect(profilePageRequests).toBeGreaterThan(0);
+
+  await page.route('**/api/users/test-person', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ username: 'test-person', display_name: 'Public Profile Name' }),
+    });
+  });
+  await page.goto('/u/test-person?tab=support-tickets');
+  await expect(page.getByText('Public Profile Name').first()).toBeVisible();
+  await expect(page.getByText('Need help with my app')).toHaveCount(0);
+});
+
 test('app Studio root redirects to manifest default portal', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}`);
 
@@ -1319,6 +1609,84 @@ test('app usage route stays responsive across desktop and mobile widths', async 
   }
 });
 
+test('workspace performance route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto('/performance');
+  const main = page.locator('main');
+
+  await expect(main.getByRole('heading', { name: 'Performance', exact: true })).toBeVisible();
+  // Both domains stay visible as separate, labelled groups.
+  const revenueMetrics = main.getByLabel('Revenue metrics');
+  const usersMetrics = main.getByLabel('Users metrics');
+  await expect(revenueMetrics).toBeVisible();
+  await expect(usersMetrics).toBeVisible();
+  await expect(revenueMetrics.getByText('MRR').first()).toBeVisible();
+  await expect(usersMetrics.getByText('Active').first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Portfolio trend' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Needs attention' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Applications' })).toBeVisible();
+  // Deterministic insight text, not an opaque generated summary.
+  await expect(main.getByText('Campaign Revision Workbench MRR declined 8.6%')).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+
+  if (viewport.width < 768) {
+    await expect(main.locator('article').filter({ hasText: 'Member Growth Studio' }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+  } else {
+    await expect(main.getByRole('row', { name: /Member Growth Studio/i }).first()).toBeVisible();
+    await expect(main.getByRole('columnheader', { name: 'MRR' })).toBeVisible();
+    await expect(main.getByRole('columnheader', { name: 'Conversion' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+  }
+});
+
+test('app revenue route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto(`/apps/${APP_ID}/revenue`);
+  const main = page.locator('main');
+
+  await expect(main.getByRole('heading', { name: 'Revenue', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Revenue trend' })).toBeVisible();
+  // The MRR bridge explains why revenue moved, start through end.
+  await expect(main.getByRole('heading', { name: 'Why MRR changed' })).toBeVisible();
+  await expect(main.getByText('Starting MRR')).toBeVisible();
+  await expect(main.getByText('Ending MRR')).toBeVisible();
+  await expect(main.getByText('Churned MRR')).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+
+  if (viewport.width < 768) {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+  } else {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+  }
+});
+
+test('app users analytics route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto(`/apps/${APP_ID}/audience`);
+  const main = page.locator('main');
+
+  await expect(main.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'User trend' })).toBeVisible();
+  // App-declared funnel stages, not a hard-coded SaaS funnel.
+  await expect(main.getByRole('heading', { name: 'Activation' })).toBeVisible();
+  await expect(main.getByText('Signed up')).toBeVisible();
+  await expect(main.getByText('Paid', { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+
+  if (viewport.width < 768) {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+  } else {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+  }
+});
+
 test('app health route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/health`);
   const main = page.locator('main');
@@ -1359,7 +1727,7 @@ test('app support route stays responsive across desktop and mobile widths', asyn
   await expect(main.getByText('Needs reply').first()).toBeVisible();
   await expect(main.getByText('Responded').first()).toBeVisible();
   await expect(main.getByText('Running')).toHaveCount(0);
-  expect(supportModuleRequests.some(({ postData }) => postData.includes(`"app_id":"${APP_ID}"`))).toBeTruthy();
+  expect(supportModuleRequests.some(({ postData }) => postData.includes(`"subject_app_id":"${APP_ID}"`))).toBeTruthy();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();

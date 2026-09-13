@@ -101,6 +101,22 @@ def _safe_group_field(value: str | None) -> str | None:
     return field
 
 
+_ALLOWED_DISTINCT_FIELDS = {"actor_id", "session_id", "attribution_id"}
+
+
+def _safe_distinct_field(value: str | None) -> str | None:
+    if value is None:
+        return None
+    field = str(value or "").strip()
+    if not field:
+        return None
+    if field not in _ALLOWED_DISTINCT_FIELDS:
+        raise AppMetricTrackError(
+            "count_distinct must be one of actor_id, session_id, or attribution_id"
+        )
+    return field
+
+
 def _normalize_event_names(event_names: Iterable[str] | str | None) -> list[str]:
     if event_names is None:
         return []
@@ -466,24 +482,44 @@ class AppMetrics:
         dimension_filters: Mapping[str, Any] | None = None,
         since: datetime | str | None = None,
         until: datetime | str | None = None,
+        count_distinct: str | None = None,
     ) -> dict[str, Any]:
-        """Count each step and compute step-to-step conversion rates."""
+        """Count each step and compute step-to-step conversion rates.
 
+        With ``count_distinct`` set to ``actor_id``, ``session_id``, or
+        ``attribution_id``, each step counts distinct non-empty subjects
+        instead of raw events, so conversion compares populations.
+        """
+
+        distinct_field = _safe_distinct_field(count_distinct)
         normalized_steps = _normalize_event_names(steps)
         rows: list[dict[str, Any]] = []
         previous_count: int | None = None
         for step in normalized_steps:
-            result = await self.summarize(
-                event_names=step,
-                subject_type=subject_type,
-                subject_id=subject_id,
-                attribution_id=attribution_id,
-                session_id=session_id,
-                dimension_filters=dimension_filters,
-                since=since,
-                until=until,
-            )
-            count = int(result["total"])
+            if distinct_field is None:
+                result = await self.summarize(
+                    event_names=step,
+                    subject_type=subject_type,
+                    subject_id=subject_id,
+                    attribution_id=attribution_id,
+                    session_id=session_id,
+                    dimension_filters=dimension_filters,
+                    since=since,
+                    until=until,
+                )
+                count = int(result["total"])
+            else:
+                count = await self._count_distinct(
+                    field=distinct_field,
+                    event_names=step,
+                    subject_type=subject_type,
+                    subject_id=subject_id,
+                    attribution_id=attribution_id,
+                    session_id=session_id,
+                    dimension_filters=dimension_filters,
+                    since=since,
+                    until=until,
+                )
             if previous_count is None or previous_count == 0:
                 rate = None
             else:
@@ -491,6 +527,110 @@ class AppMetrics:
             rows.append({"event_name": step, "count": count, "conversion_rate": rate})
             previous_count = count
         return {"steps": rows}
+
+    async def _count_distinct(
+        self,
+        *,
+        field: str,
+        event_names: Iterable[str] | str | None = None,
+        subject_type: str | None = None,
+        subject_id: str | None = None,
+        attribution_id: str | None = None,
+        session_id: str | None = None,
+        dimension_filters: Mapping[str, Any] | None = None,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+    ) -> int:
+        collection = self._collection()
+        query = self._base_query(
+            event_names=event_names,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            attribution_id=attribution_id,
+            session_id=session_id,
+            dimension_filters=dimension_filters,
+            since=since,
+            until=until,
+        )
+        pipeline = [
+            {"$match": query},
+            {"$group": {"_id": None, "subjects": {"$addToSet": f"${field}"}}},
+        ]
+        rows = await collection.aggregate(pipeline)
+        for row in rows or []:
+            subjects = [value for value in (row.get("subjects") or []) if _safe_text(value)]
+            return len(subjects)
+        return 0
+
+    async def active_subjects(
+        self,
+        *,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+    ) -> int:
+        """Distinct actors over the automatic usage events in a window.
+
+        This is the deterministic "active users in period" read: unique
+        non-empty ``actor_id`` values over ``app.page_view`` and
+        ``app.action_invoked`` events, deduplicated across the whole window
+        (summing per-day active users would double count).
+        """
+
+        return await self._count_distinct(
+            field="actor_id",
+            event_names=[USAGE_PAGE_VIEW_EVENT, USAGE_ACTION_EVENT],
+            since=since,
+            until=until,
+        )
+
+    async def value_series(
+        self,
+        event_name: str,
+        *,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+        reducer: str = "last",
+    ) -> list[dict[str, Any]]:
+        """Daily value series for one metric event.
+
+        ``reducer`` selects the per-day bucket semantics: ``last`` keeps the
+        latest recorded value in each UTC day (stock metrics such as MRR
+        snapshots); ``sum`` totals values recorded that day (flow metrics
+        such as New MRR). Returns ``[{period_start, value}]`` sorted by day.
+        """
+
+        if reducer not in {"last", "sum"}:
+            raise AppMetricTrackError("reducer must be 'last' or 'sum'")
+        collection = self._collection()
+        query = self._base_query(event_names=event_name, since=since, until=until)
+        value_accumulator: dict[str, Any] = (
+            {"$last": "$value"} if reducer == "last" else {"$sum": "$value"}
+        )
+        pipeline = [
+            {"$match": query},
+            {"$sort": {"occurred_at": 1}},
+            {
+                "$group": {
+                    "_id": {"$substrBytes": ["$occurred_at", 0, 10]},
+                    "value": value_accumulator,
+                }
+            },
+            {"$sort": {"_id": 1}},
+        ]
+        rows = await collection.aggregate(pipeline)
+        series: list[dict[str, Any]] = []
+        for row in rows or []:
+            period_start = _safe_text(row.get("_id"), maximum=10)
+            if not period_start:
+                continue
+            raw_value = row.get("value")
+            series.append(
+                {
+                    "period_start": period_start,
+                    "value": None if raw_value is None else float(raw_value),
+                }
+            )
+        return series
 
     async def usage_rollup(
         self,
