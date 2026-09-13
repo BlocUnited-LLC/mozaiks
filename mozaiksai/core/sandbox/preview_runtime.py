@@ -58,8 +58,9 @@ def preview_environment(app_root: Path, *, preview_url: str) -> dict[str, str]:
         "MOZAIKS_FACTORY_APP_PATH": str(factory),
         "MOZAIKS_WORKFLOWS_PATH": str(app_root.parent / "workflows"),
         "MONGO_URI": "mongodb://127.0.0.1:27017/mozaiks_preview",
+        # Module persistence and account routes must reach the same app records.
         "MOZAIKS_APP_DATABASE_NAME": "mozaiks_preview",
-        "MOZAIKS_APP_DATA_DATABASE_NAME": "mozaiks_preview_data",
+        "MOZAIKS_APP_DATA_DATABASE_NAME": "mozaiks_preview",
         "VITE_API_URL": "",
         "VITE_CORE_URL": "",
         "VITE_WS_URL": "",

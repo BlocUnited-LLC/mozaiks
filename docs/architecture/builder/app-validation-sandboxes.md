@@ -56,6 +56,25 @@ shell-config proxy pass health and target-identity checks. Status checks clear
 the URL after failure or expiry. A health check is not functional acceptance:
 exercise the generated screens, actions, permissions, and persistence too.
 
+Preview pins both `MOZAIKS_APP_DATABASE_NAME` and
+`MOZAIKS_APP_DATA_DATABASE_NAME` to `mozaiks_preview` inside its private Mongo.
+Generated module `ctx.persistence` reads the first setting; account export and
+deletion resolve their database through `app_data_from_context(None, contract={})`,
+which prefers the second. Different values silently send account handlers to an
+empty database instead of the app's records. This is preview-only composition;
+normal host database precedence and explicitly bound app-data contracts remain
+unchanged. The standard module executor does not supply `app_slug`, so account
+handlers using the same module/entity IDs with `collection_name_for` also use
+its default slug. Custom naming inputs are not inferred from app display names.
+
+The preview regression writes through the executor's real scoped persistence
+context, then calls the account routes through a registered canonical handler
+against an in-memory Mongo substitute. It checks export, owned deletion, repeat
+deletion, and preservation of other users/apps. Direct helper tests with a
+preselected database do not cover this environment-resolution boundary. Existing
+preview images must be rebuilt to pick up supervisor changes; live functional
+acceptance must recheck account routes against stored app data.
+
 File synchronization rejects destination aliases before provider writes. Docker
 extracts files as its configured sandbox user so later replacement and deletion
 work without root privileges. A partial or cancelled sync invalidates the session;

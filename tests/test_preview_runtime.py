@@ -1,6 +1,8 @@
 import io
 import json
+from collections import defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -65,7 +67,7 @@ def test_preview_uses_disposable_database_and_same_origin_api(app_root, monkeypa
     assert env["MOZAIKS_APP_WORKSPACE_PATH"] == str(app_root.parent)
     assert env["MOZAIKS_WORKFLOWS_PATH"] == str(app_root.parent / "workflows")
     assert env["MOZAIKS_APP_DATABASE_NAME"] == "mozaiks_preview"
-    assert env["MOZAIKS_APP_DATA_DATABASE_NAME"] == "mozaiks_preview_data"
+    assert env["MOZAIKS_APP_DATA_DATABASE_NAME"] == env["MOZAIKS_APP_DATABASE_NAME"]
     assert env["MOZAIKS_HOST"] == env["VITE_MOZAIKS_HOST"] == "platform"
     assert env["AUTH_AUDIENCE"] == env["VITE_OIDC_CLIENT_ID"] == "preview-app"
     assert env["AUTH_ENABLED"] == "true"
@@ -74,6 +76,76 @@ def test_preview_uses_disposable_database_and_same_origin_api(app_root, monkeypa
     assert env["CORS_ORIGINS"] == "http://localhost:12345"
     assert env["MOZAIKS_BACKEND_URL"] == "http://127.0.0.1:8000"
     assert env["PYTHON_DOTENV_DISABLED"] == "1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["export", "delete"])
+async def test_preview_account_routes_reach_module_persistence(app_root, monkeypatch, action):
+    from factory_app.app.modules.user_onboarding.backend.account_data_handler import (
+        AccountDataHandler,
+    )
+    from mozaiksai.core.account.registry import AccountDataRegistry
+    from mozaiksai.core.auth import UserPrincipal
+    from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
+    from mozaiksai.core.runtime.persistence import app_data, mongo
+    from mozaiksai.core.runtime.persistence.naming import collection_name_for
+    from mozaiksai.hosts.routers import account
+    from tests.test_user_onboarding_account_data_handler import FakeCollection
+
+    class Collection(FakeCollection):
+        async def insert_one(self, document):
+            self.docs.append(dict(document))
+            return SimpleNamespace(inserted_id=len(self.docs))
+
+    monkeypatch.setenv("MOZAIKS_OIDC_AUTHORITY", "http://local-idp")
+    monkeypatch.setenv("VITE_OIDC_AUTHORITY", "http://local-idp")
+    env = runtime.preview_environment(app_root, preview_url="http://localhost:3000")
+    monkeypatch.setattr(runtime.os, "environ", env)
+    client = defaultdict(lambda: defaultdict(lambda: Collection([])))
+    monkeypatch.setattr(mongo, "get_mongo_client", lambda: client)
+    monkeypatch.setattr(app_data, "get_mongo_client", lambda: client)
+    registry = AccountDataRegistry()
+    registry.register("user_onboarding", AccountDataHandler)
+    monkeypatch.setattr(account, "account_data_registry", registry)
+    monkeypatch.setattr(account, "get_platform_hooks", lambda: SimpleNamespace())
+
+    # Use the executor's actual context factory and scoped writes, not a DB
+    # injected directly into the account helper (which misses preview miswiring).
+    contexts = []
+    for app_id, user_id in (("preview-app", "owner-a"), ("preview-app", "owner-b"), ("other-app", "owner-a")):
+        persistence = ModuleExecutor()._build_persistence_context(SimpleNamespace(
+            app_id=app_id, user_id=user_id, tenant_id=None, workspace_id=None,
+        ))
+        assert persistence is not None
+        assert persistence.collection_name("user_onboarding", "status") == collection_name_for(
+            app_id=app_id, module_id="user_onboarding", entity_name="status",
+        )
+        await persistence.collection("user_onboarding", "status").insert_one({"seen_welcome": True})
+        contexts.append(persistence)
+
+    principal = UserPrincipal(
+        app_id="preview-app", user_id="owner-a", email=None, name=None,
+        roles=[], scopes=[], raw_claims={}, provider="test",
+    )
+    own = contexts[0]
+    own_rows = client[own.database_name][own.collection_name("user_onboarding", "status")].docs
+    foreign = contexts[2]
+    foreign_rows = client[foreign.database_name][foreign.collection_name("user_onboarding", "status")].docs
+    if action == "export":
+        response = json.loads((await account.export_account_data(principal=principal)).body)
+        assert response["user_onboarding_status"] == [
+            {"app_id": "preview-app", "user_id": "owner-a", "seen_welcome": True},
+        ]
+        assert len(own_rows) == 2
+    else:
+        response = json.loads((await account.delete_account(principal=principal)).body)
+        assert response["results"]["user_onboarding"] == {"deleted_count": 1}
+        remaining = client[own.database_name][own.collection_name("user_onboarding", "status")].docs
+        assert [row["user_id"] for row in remaining] == ["owner-b"]
+        repeated = json.loads((await account.delete_account(principal=principal)).body)
+        assert repeated["results"]["user_onboarding"] == {"deleted_count": 0}
+    assert foreign_rows == [{"app_id": "other-app", "user_id": "owner-a", "seen_welcome": True}]
+    assert app_data.app_data_from_context(None, contract={}).db is client[own.database_name]
 
 
 def test_explicitly_public_app_does_not_inherit_an_enabled_provider(app_root, monkeypatch):
