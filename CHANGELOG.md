@@ -28,6 +28,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Summary metric columns adapt to their container width and wrap complete labels
+  instead of truncating short labels in narrow dashboard panels.
 - Factory planning receives exact materializer page paths and actionable
   case-sensitive filename feedback, avoiding repeated display-name/path mismatches.
 - Factory form-action retries report known required-field errors and receive
