@@ -37,6 +37,8 @@ This project follows a practical pre-1.0 changelog format:
 
 - Fix cold imports of auxiliary usage attribution and session binding contracts
   without requiring consumers to preload AG2 adapters.
+- Factory account-data guidance uses the runtime's canonical collection naming,
+  explicit app/user query scope, and JSON-safe exports for generated persistence.
 - Generated form defaults and explicit table search fields survive the strict
   page contracts and materialization into the existing shared UI primitives.
 - Summary metric columns adapt to their container width and wrap complete labels
