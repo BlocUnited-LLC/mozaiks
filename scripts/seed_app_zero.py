@@ -24,11 +24,21 @@ import argparse
 import asyncio
 import os
 import random
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-_ENV = Path(__file__).resolve().parents[1] / ".env"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Running `python scripts/seed_app_zero.py` puts scripts/ on sys.path, not the
+# repo root, so `import mozaiksai` fails unless the package happens to be
+# installed in the active environment. Put the repo root first so the script
+# works from a plain checkout the same way it works from an install.
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+_ENV = _REPO_ROOT / ".env"
 if _ENV.exists():
     from dotenv import load_dotenv
 
