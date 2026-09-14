@@ -3550,12 +3550,14 @@ const ChatPage = () => {
         if (!pendingTransitionIdRef.current && !isHumanInTheLoop) {
           const duration = data.duration_sec || data.data?.duration_sec;
           const tokensUsed = data.total_tokens || data.data?.total_tokens;
+          // Only carry a summary when a field actually has a value. An object
+          // of nulls is still truthy and renders an empty "Run Summary" panel.
+          const summary = {};
+          if (duration) summary.duration = `${Math.round(duration)}s`;
+          if (tokensUsed) summary.tokensUsed = tokensUsed.toLocaleString();
           setPendingTransitionContext({
             workflowName: activeWorkflow,
-            summary: {
-              duration: duration ? `${Math.round(duration)}s` : null,
-              tokensUsed: tokensUsed ? tokensUsed.toLocaleString() : null,
-            },
+            ...(Object.keys(summary).length ? { summary } : {}),
           });
           setPendingTransitionId('workflow_complete');
         }

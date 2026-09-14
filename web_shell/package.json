@@ -21,7 +21,9 @@
     "test:generated-ui": "playwright test -c playwright.generated-ui.config.js",
     "test:generated-ui:app": "playwright test -c playwright.generated-ui.config.js playwright/generated-ui/generated-app.generic.acceptance.spec.js",
     "test:visual": "playwright test -c playwright.visual.config.js",
-    "test:visual:update": "playwright test -c playwright.visual.config.js --update-snapshots"
+    "test:visual:update": "playwright test -c playwright.visual.config.js --update-snapshots",
+    "render:workflow-ui": "node scripts/render-workflow-ui.mjs dist/harness.html",
+    "shoot:workflow-ui": "node scripts/shoot-workflow-ui.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",

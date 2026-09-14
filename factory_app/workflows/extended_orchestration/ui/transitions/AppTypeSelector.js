@@ -74,10 +74,11 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
       entered={motion.entered}
       prefersReducedMotion={motion.prefersReducedMotion}
     >
-      <div
-        className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4 rounded-xl border border-border/70 bg-card/80 px-4 py-3 text-left"
-        style={{ flexBasis: '100%' }}
-      >
+      {/* Own flex line: the inner box is capped at max-w-3xl, so the row itself
+          must span 100% or a choice card wraps up beside it. alignSelf keeps the
+          panel's align-items:stretch from inflating it to card height. */}
+      <div className="w-full" style={{ flexBasis: '100%', alignSelf: 'flex-start' }}>
+      <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4 rounded-xl border border-border/70 bg-card/80 px-4 py-3 text-left">
         <div>
           <p className="text-sm font-semibold text-foreground">Build with monetization</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -103,6 +104,7 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
             ].join(' ')}
           />
         </button>
+      </div>
       </div>
       {options.map((option, index) => {
             const meta = OPTION_VIEW[option.id] || {

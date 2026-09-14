@@ -12,6 +12,7 @@ import {
   KeyRound,
   RefreshCw,
 } from 'lucide-react';
+import { Button, StatusPill } from '@mozaiks/chat-ui/ui';
 
 const EMPTY_ARRAY = Object.freeze([]);
 
@@ -52,11 +53,7 @@ export default function RepoAccessRecoveryCard({ payload = {} }) {
                 <FolderGit2 className="h-3.5 w-3.5" aria-hidden="true" />
                 Repository Access Needed
               </span>
-              {httpStatus && (
-                <span className="rounded-full border border-warning/30 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-warning">
-                  {httpStatus}
-                </span>
-              )}
+              {httpStatus && <StatusPill tone="warning" label={httpStatus} />}
             </div>
             <p className="mt-1 truncate text-sm font-semibold text-foreground">{repo}</p>
             {githubUrl && (
@@ -111,24 +108,20 @@ export default function RepoAccessRecoveryCard({ payload = {} }) {
         )}
 
         <div className="flex flex-col gap-2 sm:flex-row">
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="sm"
             onClick={startImportAgain}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary/60"
-          >
-            <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            Start Import Again
-          </button>
+            icon={<RefreshCw className="h-4 w-4" aria-hidden="true" />}
+            label="Start Import Again"
+          />
           {githubUrl && (
-            <a
-              href={githubUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/50"
-            >
-              <ExternalLink className="h-4 w-4" aria-hidden="true" />
-              Open Repo
-            </a>
+            <Button asChild variant="outline" size="sm">
+              <a href={githubUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                Open Repo
+              </a>
+            </Button>
           )}
         </div>
       </div>

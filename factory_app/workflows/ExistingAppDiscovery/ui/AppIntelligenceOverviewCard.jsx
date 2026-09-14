@@ -7,20 +7,19 @@
  */
 
 import { useMemo, useState } from 'react';
+import { Metric, SegmentedControl, StatusPill } from '@mozaiks/chat-ui/ui';
 
 const EMPTY_ARRAY = Object.freeze([]);
 const EMPTY_OBJECT = Object.freeze({});
 
-const STATUS_COLORS = {
-  ready: 'bg-success/15 text-success border-success/25',
-  partial: 'bg-warning/15 text-warning border-warning/25',
-  none: 'bg-muted text-muted-foreground border-border',
-};
+const STATUS_TONES = { ready: 'success', partial: 'warning', none: 'default' };
 
-const RISK_COLORS = {
-  high: 'border-destructive/35 bg-destructive/10 text-destructive',
-  medium: 'border-warning/35 bg-warning/10 text-warning',
-  low: 'border-border bg-muted/45 text-muted-foreground',
+const RISK_TONES = { high: 'destructive', medium: 'warning', low: 'default' };
+
+const RISK_SHELLS = {
+  high: 'border-destructive/35 bg-destructive/10',
+  medium: 'border-warning/35 bg-warning/10',
+  low: 'border-border bg-muted/45',
 };
 
 function asArray(value) {
@@ -68,16 +67,6 @@ function surfaceDetail(item) {
   if (item.role) return `${item.role}${item.language ? ` / ${item.language}` : ''}`;
   if (item.kind) return item.kind;
   return '';
-}
-
-function Metric({ label, value, detail }) {
-  return (
-    <div className="min-h-[5.25rem] rounded-lg border border-border/55 bg-background/70 px-3 py-2">
-      <p className="text-xl font-semibold tabular-nums text-foreground">{formatCount(value)}</p>
-      <p className="mt-0.5 text-xs font-medium text-muted-foreground">{label}</p>
-      {detail && <p className="mt-1 truncate text-[11px] text-muted-foreground/75">{detail}</p>}
-    </div>
-  );
 }
 
 function CountStrip({ title, items }) {
@@ -150,11 +139,11 @@ function RiskList({ risks }) {
         return (
           <div
             key={`${risk.risk_id || index}`}
-            className={`rounded-lg border px-3 py-2 ${RISK_COLORS[severity] || RISK_COLORS.low}`}
+            className={`rounded-lg border px-3 py-2 ${RISK_SHELLS[severity] || RISK_SHELLS.low}`}
           >
             <div className="flex items-center justify-between gap-3">
-              <p className="truncate text-xs font-medium">{labelize(risk.risk_id || 'risk')}</p>
-              <span className="shrink-0 text-[11px]">{labelize(severity)}</span>
+              <p className="truncate text-xs font-medium text-foreground">{labelize(risk.risk_id || 'risk')}</p>
+              <StatusPill tone={RISK_TONES[severity] || 'default'} label={labelize(severity)} />
             </div>
             {risk.description && (
               <p className="mt-1 text-[11px] leading-5 text-foreground/80">{risk.description}</p>
@@ -197,7 +186,7 @@ export default function AppIntelligenceOverviewCard({ payload = {} }) {
   const architecture = asObject(catalog.architecture);
   const policy = asObject(catalog.agent_context_policy);
   const status = payload.status || (catalog.present ? 'ready' : 'partial');
-  const statusColor = STATUS_COLORS[status] || STATUS_COLORS.partial;
+  const statusTone = STATUS_TONES[status] || 'warning';
   const displayName = payload.app_name || payload.repo_name || payload.github_repo || catalog.app_id || 'Indexed app';
   const warnings = asArray(payload.warnings).length ? asArray(payload.warnings) : asArray(catalog.warnings);
   const progress = asObject(payload.app_intelligence_progress);
@@ -243,9 +232,7 @@ export default function AppIntelligenceOverviewCard({ payload = {} }) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-medium uppercase text-muted-foreground">App Intelligence</span>
-              <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusColor}`}>
-                {labelize(status)}
-              </span>
+              <StatusPill tone={statusTone} label={labelize(status)} />
             </div>
             <p className="mt-1 truncate text-sm font-semibold text-foreground">{displayName}</p>
             {payload.github_repo && (
@@ -260,10 +247,10 @@ export default function AppIntelligenceOverviewCard({ payload = {} }) {
 
       <div className="space-y-4 p-4">
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <Metric label="Files" value={coverage.file_count || payload.total_files_scanned} />
-          <Metric label="Symbols" value={coverage.symbol_count} />
-          <Metric label="Graph Nodes" value={coverage.node_count} />
-          <Metric label="Graph Edges" value={coverage.edge_count} />
+          <Metric label="Files" value={formatCount(coverage.file_count || payload.total_files_scanned)} />
+          <Metric label="Symbols" value={formatCount(coverage.symbol_count)} />
+          <Metric label="Graph Nodes" value={formatCount(coverage.node_count)} />
+          <Metric label="Graph Edges" value={formatCount(coverage.edge_count)} />
         </div>
 
         {(payload.app_intelligence_summary || progress.message || health.status) && (
@@ -302,24 +289,19 @@ export default function AppIntelligenceOverviewCard({ payload = {} }) {
           </div>
         )}
 
-        <div className="flex gap-1 overflow-x-auto rounded-lg border border-border/45 bg-background/55 p-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={[
-                'shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                activeTab === tab.id
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-              ].join(' ')}
-            >
-              {tab.label}
-              <span className="ml-1 opacity-75">{formatCount(tab.count)}</span>
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          value={activeTab}
+          onChange={setActiveTab}
+          options={tabs.map((tab) => ({
+            value: tab.id,
+            label: (
+              <>
+                {tab.label}
+                <span className="ml-1 font-normal text-muted-foreground">{formatCount(tab.count)}</span>
+              </>
+            ),
+          }))}
+        />
 
         {activeTab === 'architecture' && (
           <div className="grid gap-3 md:grid-cols-2">
