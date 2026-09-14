@@ -71,6 +71,7 @@ export default function ApprovalCard({ payload = {}, onResponse, onCancel, workf
               variant={action.variant}
               disabled={Boolean(submittingAction)}
               onClick={() => submit(action)}
+              data-testid={`approval-action-${action.id}`}
             />
           ))}
           {onCancel ? (
@@ -79,6 +80,7 @@ export default function ApprovalCard({ payload = {}, onResponse, onCancel, workf
               variant="ghost"
               disabled={Boolean(submittingAction)}
               onClick={() => onCancel({ status: 'cancelled', action: 'cancel' })}
+              data-testid="approval-action-cancel"
             />
           ) : null}
         </div>
