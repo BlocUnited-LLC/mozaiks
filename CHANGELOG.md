@@ -12,6 +12,27 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+
+### Fixed
+
+- Workflow UI: `ActionPlan` no longer crashes on render. It referenced two
+  undefined names (`fonts`, `colors`), so the branch containing them threw a
+  `ReferenceError` whenever it was reached.
+- Workflow UI: the app-type chooser (`AppTypeSelector`) no longer shows a large
+  empty box beside its choice cards. The monetization row now spans its own row
+  instead of sharing a line with the first card and stretching to card height.
+- Workflow UI: the workflow completion screen no longer shows a "Run Summary"
+  heading with nothing beneath it when a run reports no duration or token count.
+- Workflow UI: `AppIntelligenceOverviewCard` and `RepoAccessRecoveryCard` now
+  use the shared design-system primitives instead of local copies, so their
+  metrics, status pills, tabs, and buttons match the rest of the product.
+
+### Added
+
+- `web_shell`: `npm run render:workflow-ui` and `npm run shoot:workflow-ui`
+  render every workflow UI component with a representative payload and
+  screenshot it at desktop and mobile widths, for visual review.
+
 ### Fixed
 
 - Generated Support pages now submit a ticket and its first message in one
