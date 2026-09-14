@@ -789,7 +789,7 @@ const ModernChatInterface = ({
 
         {/* Jump to Present Button - Positioned over the messages area */}
         {isScrolledUp && (
-      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-10">
+      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20">
             <button
               onClick={scrollToBottom}
         className="jump-present"
