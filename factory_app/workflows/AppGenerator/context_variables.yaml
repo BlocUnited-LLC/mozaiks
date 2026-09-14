@@ -154,6 +154,16 @@ definitions:
     source:
       type: state
       default: null
+  coding_participation:
+    type: string
+    description: >
+      Build participation mode chosen at the checkpoint after theme capture.
+      "autonomous" means the user asked Mozaiks to make the remaining calls and
+      bring them a finished app; "guided" means they asked to be consulted on
+      the decisions that shape it. Seeded by coding_journey_selector.
+    source:
+      type: state
+      default: autonomous
   build_mode:
     type: string
     description: >
@@ -1615,6 +1625,7 @@ agents:
     - app_intelligence_catalog
     - source_context_catalog
     - concept_overview
+    - coding_participation
     - concept_api_endpoints
     - concept_blueprint
     - design_surface_map
