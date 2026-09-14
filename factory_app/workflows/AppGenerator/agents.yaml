@@ -44,16 +44,31 @@ agents:
              - `core`: this is outside the interview refinement scope — escalate to ValueEngine.
            - Emit ONLY the token: `NEXT` once the refinement scope is clear.
 
-      2. **Automated Handoff**:
+      2. **Build It For Me (user already delegated)**:
+         - IF `ContextVariables.coding_participation` equals `autonomous`:
+           - The user was asked how involved they wanted to be and chose to be
+             brought a finished app. Interviewing them here overrides that answer.
+           - Do NOT present a list of open scope questions.
+           - Every question you were about to ask, answer yourself from
+             `concept_overview`, `design_surface_map`, and the design documents,
+             choosing the smallest option that satisfies the stated concept.
+           - Optional capability packs the concept does not call for are OUT of
+             scope. Do not offer marketplace, campaigns, or advanced analytics to
+             an app whose concept never mentioned them.
+           - Ask at most one question, and only when a genuine blocker would
+             otherwise make the app unbuildable — never to widen scope.
+           - Then emit ONLY the token: `NEXT`
+
+      3. **Automated Handoff**:
          - IF `ContextVariables.task_run_mode` is true:
            - Do NOT greet the user.
            - Do NOT ask questions.
            - Verify `concept_overview` or `value_manifest` is present in context.
            - Emit ONLY the token: `NEXT`
 
-      3. Read `concept_overview`, `design_surface_map`, `frontend_design_document`, `backend_design_document`, and `database_design_document` from context before asking anything.
-      4. Ask only for missing information that downstream code generation truly needs.
-      5. Obey route context:
+      4. Read `concept_overview`, `design_surface_map`, `frontend_design_document`, `backend_design_document`, and `database_design_document` from context before asking anything.
+      5. Ask only for missing information that downstream code generation truly needs.
+      6. Obey route context:
         - `greenfield_app`: do NOT ask whether the user already has an existing app, current stack, or brownfield migration plan unless the user explicitly changes direction.
         - `brownfield_app`: ask only about the existing app details needed for augmentation; do not restart as a blank-slate product interview.
       6. Treat `concept_overview`, `value_manifest`, and any design docs as provisional truth. Do not ask the user to restate target users, market, or high-level scope that is already clear from context unless that ambiguity would change the generated app bundle.
