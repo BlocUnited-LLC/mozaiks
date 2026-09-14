@@ -224,9 +224,6 @@
           "transition": "coding_journey_selector"
         },
         {
-          "transition": "database_setup_selector"
-        },
-        {
           "workflows": [
             "DesignDocs"
           ]
@@ -773,18 +770,22 @@
       "options": [
         {
           "id": "autonomous",
-          "route_to": "database_setup_selector",
+          "route_to": "DesignDocs",
           "context_variables": {
             "coding_participation": "autonomous",
-            "design_docs_hitl": false
+            "design_docs_hitl": false,
+            "database_provider": "mongodb",
+            "database_setup_mode": "local"
           }
         },
         {
           "id": "guided",
-          "route_to": "database_setup_selector",
+          "route_to": "DesignDocs",
           "context_variables": {
             "coding_participation": "guided",
-            "design_docs_hitl": true
+            "design_docs_hitl": true,
+            "database_provider": "mongodb",
+            "database_setup_mode": "local"
           }
         }
       ]

@@ -76,20 +76,14 @@ const authFetch = async (url, options, credentials) => {
 };
 const handle = eval('(' + callback + ')');
 (async () => {
+  // The coding choice now resolves straight into DesignDocs: there is no
+  // intermediate database prompt to leave pending.
   assert.equal(await handle(requests[0].option_id), true);
-  assert.equal(pendingTransitionId, 'database_setup_selector');
-  assert.deepEqual(pendingTransitionContext, responses[0].context_variables);
-  assert.equal(currentChatId, requests[0].source_chat_id);
-  assert.equal(closed, 0);
-  assert.equal(navigations.length, 0);
-  assert.equal(remembered.length, 0);
-  assert.equal(calls, 1);
-  assert.equal(await handle(requests[1].option_id), true);
   assert.equal(pendingTransitionId, null);
   assert.equal(currentChatId, 'design-chat');
   assert.equal(currentWorkflowNameRef.current, 'DesignDocs');
   assert.equal(closed, 1);
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
   assert.deepEqual(remembered, [['design-chat', 'DesignDocs']]);
   assert.deepEqual(navigations, ['/chat?mode=workflow&workflow=DesignDocs&chat_id=design-chat']);
 })().catch(error => { console.error(error); process.exitCode = 1; });
@@ -107,14 +101,18 @@ const handle = eval('(' + callback + ')');
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("coding_option", ["guided", "autonomous"])
-@pytest.mark.parametrize(
-    ("database_option", "setup_mode"),
-    [("local_mongodb", "local"), ("mongodb_atlas", "atlas"),
-     ("existing_uri", "existing_uri"), ("skip_for_now", "skip")],
-)
-async def test_normal_chat_coding_choice_waits_for_database_choice(
-    monkeypatch, coding_option: str, database_option: str, setup_mode: str,
+async def test_normal_chat_coding_choice_goes_straight_to_design(
+    monkeypatch, coding_option: str,
 ) -> None:
+    """The build no longer stops to ask how MongoDB will be connected.
+
+    Every option on the old database gate routed to DesignDocs and set the
+    same provider; only a setup-mode string differed, and its own
+    "skip for now" option stated that the schema can be designed now and the
+    database connected later. So the answer was never needed to proceed, and
+    asking a non-technical founder to choose a connection strategy bought
+    nothing. The platform now defaults it and the choice moves to deployment.
+    """
     pack = load_global_pack_graph(workflows_root=WORKSPACE / "factory_app/workflows")
     assert pack is not None
     monkeypatch.setattr(session_router, "load_global_pack_graph", lambda: pack)
@@ -182,33 +180,19 @@ async def test_normal_chat_coding_choice_waits_for_database_choice(
         coding = await client.post("/api/transitions/resolve", json=requests[0])
         assert coding.status_code == 200, coding.text
         first = coding.json()
-        assert first["resolution_type"] == "transition", first
-        assert first["transition"]["id"] == "database_setup_selector"
-        assert first["transition"]["ui"]["component"] == "DatabaseSetupSelector"
-        launch_workflow.assert_not_awaited()
-        state = await store.load(app_id=HOST, user_id=USER, target_app_id=TARGET)
-        assert state.pending_transition_id == "database_setup_selector"
-        assert state.journey_position == 4
-        assert await store.load(app_id=HOST, user_id=USER) is None
-        requests.append({
-            **requests[0], "transition_id": first["transition"]["id"],
-            "option_id": database_option, "context_variables": first["context_variables"],
-        })
-        database = await client.post("/api/transitions/resolve", json=requests[1])
-        assert database.status_code == 200, database.text
-        second = database.json()
-    assert second["resolution_type"] == "workflow"
-    assert second["workflow_id"] == "DesignDocs"
+    # One resolve, straight into design — no intermediate database prompt.
+    assert first["resolution_type"] == "workflow", first
+    assert first["workflow_id"] == "DesignDocs"
     expected_context = {
         "app_type": "greenfield_app", "coding_participation": coding_option,
         "design_docs_hitl": coding_option == "guided", "database_provider": "mongodb",
-        "database_setup_mode": setup_mode,
+        "database_setup_mode": "local",
     }
-    assert second["context_variables"] == expected_context
+    assert first["context_variables"] == expected_context
     launch_workflow.assert_awaited_once()
     kwargs = launch_workflow.await_args.kwargs
     assert kwargs["context_variables"] == expected_context
     assert kwargs["app_id"] == HOST
     assert kwargs["source_chat_id"] == SOURCE_CHAT
     assert kwargs["session_router"]._target_app_id == TARGET
-    _exercise_chat_page_handoff(requests, [first, second])
+    _exercise_chat_page_handoff(requests, [first])
