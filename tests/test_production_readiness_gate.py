@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def _load_gate_module():
@@ -119,3 +122,41 @@ def test_source_hygiene_excludes_local_agent_worktrees_but_keeps_repo_rules() ->
         gate.REPO_ROOT / ".claude" / "rules" / "testing.md"
     )
 
+
+def test_source_hygiene_scans_only_tracked_files() -> None:
+    gate = _load_gate_module()
+
+    scanned = {
+        path.relative_to(gate.REPO_ROOT).as_posix() for path in gate._source_hygiene_files()
+    }
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files"],
+            cwd=str(gate.REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+    )
+    assert scanned - tracked == set()
+
+
+def test_source_hygiene_skips_untracked_agent_worktrees_present_on_disk() -> None:
+    gate = _load_gate_module()
+
+    if not (gate.REPO_ROOT / ".codex-worktrees").is_dir():
+        pytest.skip("no leftover agent worktrees on this checkout")
+    # Scanning these made the gate fail locally while passing on a fresh CI checkout.
+    assert not any(
+        ".codex-worktrees" in path.relative_to(gate.REPO_ROOT).parts
+        for path in gate._source_hygiene_files()
+    )
+
+
+def test_source_hygiene_falls_back_to_a_walk_when_git_is_unavailable(monkeypatch) -> None:
+    gate = _load_gate_module()
+
+    # A source tarball carries no git metadata; the fallback must still find
+    # files rather than scanning nothing and reporting a clean repo.
+    monkeypatch.setattr(gate, "_tracked_source_paths", lambda: None)
+    assert len(gate._source_hygiene_files()) > 100
