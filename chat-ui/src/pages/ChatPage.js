@@ -111,7 +111,15 @@ const ChatPage = () => {
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [transportType, setTransportType] = useState(null);
   const [modeChangePending, setModeChangePending] = useState(false);
-  const [currentChatId, setCurrentChatId] = useState(null); // set via start/resume flow below
+  const [currentChatId, _setCurrentChatId] = useState(null); // set via start/resume flow below
+  // Synchronous mirror of currentChatId. Websocket events for two journey steps
+  // can land in the same tick, and a state read would still name the chat we
+  // just left. Same reason pendingTransitionIdRef exists below.
+  const currentChatIdRef = useRef(null);
+  const setCurrentChatId = useCallback((id) => {
+    currentChatIdRef.current = id;
+    _setCurrentChatId(id);
+  }, []);
   const LOCAL_STORAGE_KEY = 'mozaiks.current_chat_id';
   const [, setConnectionInitialized] = useState(false);
   const [workflowConfigLoaded, setWorkflowConfigLoaded] = useState(false); // becomes true once workflow config resolved
@@ -2483,6 +2491,14 @@ const ChatPage = () => {
         setConversationMode('workflow');
         setWorkflowCompleted(false);
         setCompletionData(null);
+        // The journey has moved on. A workflow_complete overlay raised by the
+        // step we just left would otherwise render on top of the step that just
+        // started — a full-screen wall naming an internal workflow, whose only
+        // button dismisses itself. Clear it and let the new step show through.
+        if (pendingTransitionIdRef.current === 'workflow_complete') {
+          setPendingTransitionId(null);
+          setPendingTransitionContext({});
+        }
         if (payload.message && showSystemMessages) {
           setMessagesWithLogging((prev) => ([
             ...prev,
@@ -3550,7 +3566,15 @@ const ChatPage = () => {
         const isHumanInTheLoop = workflowConfig?.getWorkflowConfig
           ? Boolean(workflowConfig.getWorkflowConfig(activeWorkflow)?.human_in_the_loop)
           : false;
-        if (!pendingTransitionIdRef.current && !isHumanInTheLoop) {
+        // run_complete and context_switched race. When the switch wins, this
+        // completion describes the previous journey step, and announcing it
+        // would block the step already running underneath.
+        const completedChatId = String(data.chat_id || data.data?.chat_id || '').trim();
+        const activeChatIdNow = String(currentChatIdRef.current || '').trim();
+        const isCompletionForAbandonedChat = Boolean(
+          completedChatId && activeChatIdNow && completedChatId !== activeChatIdNow,
+        );
+        if (!pendingTransitionIdRef.current && !isHumanInTheLoop && !isCompletionForAbandonedChat) {
           const duration = data.duration_sec || data.data?.duration_sec;
           const tokensUsed = data.total_tokens || data.data?.total_tokens;
           // Only carry a summary when a field actually has a value. An object

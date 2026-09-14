@@ -200,9 +200,13 @@ export function TransitionChoiceCard({
             draggable={false}
           />
         </div>
-      ) : (
+      ) : badge ? null : (
+        // A badge already renders in the corner pill above. Repeating it here
+        // read out twice in the card's accessible name - "FASTEST PATH FASTEST
+        // PATH Autonomous Build" - and said nothing the corner had not. Cards
+        // without a badge keep the call to action as their lead-in, unchanged.
         <div className="mb-4 inline-flex w-fit rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary">
-          {badge || cta}
+          {cta}
         </div>
       )}
 
