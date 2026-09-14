@@ -20,7 +20,9 @@ def test_value_engine_interview_agent_infers_recognizable_concept_shorthand() ->
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
     orchestrator = yaml.safe_load((VALUE_ENGINE_DIR / "orchestrator.yaml").read_text(encoding="utf-8"))
 
-    assert "Polymarket for AI startups" in agents_text
+    # Deliberately a pattern, not a product. A named, buildable example in the
+    # prompt is the app the agent reaches for when the user supplies nothing.
+    assert '"<KnownProduct> for <Audience>"' in agents_text
     assert 'Do NOT ask "what niche or user group?"' in agents_text
     assert "For recognizable shorthand, you MUST include concrete pain points and app directions" in agents_text
     assert "Present one flexible working direction plus 1-2 lighter suggestion angles" in agents_text
@@ -31,8 +33,9 @@ def test_value_engine_interview_agent_keeps_domain_signal_instead_of_generic_fal
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
 
     assert "Never discard a domain signal" in agents_text
-    assert '"Polymarket for AI startups" + "gamblers"' in agents_text
-    assert "Do not propose unrelated categories such as mental health, personal finance, or remote collaboration." in agents_text
+    assert '"<KnownProduct> for <Audience>" plus a later detail' in agents_text
+    assert "never switches category" in agents_text
+    assert "Do not answer with an unrelated vertical." in agents_text
 
 
 def test_value_engine_interview_agent_bans_generic_questions_after_shorthand() -> None:
@@ -45,8 +48,8 @@ def test_value_engine_interview_agent_bans_generic_questions_after_shorthand() -
     assert "What niche?" in agents_text
     assert "Which one should I use?" in agents_text
     assert "Which of these resonates?" in agents_text
-    assert "fragmented startup signal" in agents_text
-    assert "market-implied confidence around AI companies" in agents_text
+    assert "Anchor your reading in the mechanic the known product is famous for" in agents_text
+    assert "never from any product named in these instructions" in agents_text
 
 
 def test_value_engine_interview_agent_never_invents_an_app_the_user_did_not_describe() -> None:
