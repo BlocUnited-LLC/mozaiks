@@ -63,13 +63,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from mozaiksai.core.utils.sequences import dedupe_strings
 from mozaiksai.core.workflow.declarative.contracts import (
     AgentsConfig,
     AgentSpec,
     OrchestratorConfig,
     OrchestratorTriggerSpec,
     PromptSectionSpec,
-    _normalize_string_list,
     _optional_text,
     _required_text,
 )
@@ -149,32 +149,32 @@ class TestOptionalText:
 
 class TestNormalizeStringList:
     def test_empty_list_returns_empty(self):
-        assert _normalize_string_list([]) == []
+        assert dedupe_strings([]) == []
 
     def test_strings_stripped(self):
-        result = _normalize_string_list(["  a  ", "  b  "])
+        result = dedupe_strings(["  a  ", "  b  "])
         assert result == ["a", "b"]
 
     def test_empty_strings_excluded(self):
-        result = _normalize_string_list(["a", "", "b"])
+        result = dedupe_strings(["a", "", "b"])
         assert "" not in result
         assert result == ["a", "b"]
 
     def test_duplicates_removed(self):
-        result = _normalize_string_list(["a", "b", "a"])
+        result = dedupe_strings(["a", "b", "a"])
         assert result == ["a", "b"]
 
     def test_order_preserved(self):
-        result = _normalize_string_list(["c", "a", "b"])
+        result = dedupe_strings(["c", "a", "b"])
         assert result == ["c", "a", "b"]
 
     def test_whitespace_only_excluded(self):
-        result = _normalize_string_list(["  ", "valid"])
+        result = dedupe_strings(["  ", "valid"])
         assert result == ["valid"]
 
     def test_none_items_excluded(self):
         # str(None or "").strip() = "" → excluded
-        result = _normalize_string_list([None, "valid"])
+        result = dedupe_strings([None, "valid"])
         assert result == ["valid"]
 
 

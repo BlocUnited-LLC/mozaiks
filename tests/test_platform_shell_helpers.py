@@ -98,7 +98,6 @@ from mozaiksai.hosts.platform import (
     _append_page_once,
     _clean_string,
     _footer_link_from_item,
-    _is_runnable_workflow_name,
     _navigation_config_from_page,
     _normalize_shell_mode,
     _normalize_shell_surface,
@@ -110,6 +109,7 @@ from mozaiksai.hosts.platform import (
     _shortcut_ids,
     _title_from_id,
 )
+from mozaiksai.hosts.workflow_runnability import is_runnable_workflow_name
 
 # ---------------------------------------------------------------------------
 # 1. _title_from_id
@@ -525,22 +525,22 @@ class TestNavigationConfigFromPage:
 
 class TestIsRunnableWorkflowName:
     def test_empty_string_false(self):
-        assert _is_runnable_workflow_name("", ["MyWorkflow"]) is False
+        assert is_runnable_workflow_name("", ["MyWorkflow"]) is False
 
     def test_none_false(self):
-        assert _is_runnable_workflow_name(None, ["MyWorkflow"]) is False
+        assert is_runnable_workflow_name(None, ["MyWorkflow"]) is False
 
     def test_non_runnable_id_false(self):
-        assert _is_runnable_workflow_name("extended_orchestration", ["extended_orchestration"]) is False
+        assert is_runnable_workflow_name("extended_orchestration", ["extended_orchestration"]) is False
 
     def test_name_in_ordered_names_true(self):
-        assert _is_runnable_workflow_name("AppGenerator", ["AppGenerator", "AgentGenerator"]) is True
+        assert is_runnable_workflow_name("AppGenerator", ["AppGenerator", "AgentGenerator"]) is True
 
     def test_case_insensitive_match_true(self):
-        assert _is_runnable_workflow_name("appgenerator", ["AppGenerator"]) is True
+        assert is_runnable_workflow_name("appgenerator", ["AppGenerator"]) is True
 
     def test_name_not_in_ordered_names_false(self):
-        assert _is_runnable_workflow_name("Unknown", ["AppGenerator"]) is False
+        assert is_runnable_workflow_name("Unknown", ["AppGenerator"]) is False
 
     def test_empty_ordered_names_false(self):
-        assert _is_runnable_workflow_name("AppGenerator", []) is False
+        assert is_runnable_workflow_name("AppGenerator", []) is False

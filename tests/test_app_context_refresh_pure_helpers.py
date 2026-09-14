@@ -34,11 +34,11 @@ from __future__ import annotations
 from mozaiksai.control_plane.app_context import AppContextSummary
 from mozaiksai.control_plane.app_context_policy import AppContextPolicyResult
 from mozaiksai.control_plane.app_context_refresh import (
-    _dedupe,
     _normalize_policy,
     _normalize_summary,
     _refresh_reason,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 # ---------------------------------------------------------------------------
 # 1. _normalize_summary
@@ -134,32 +134,32 @@ class TestRefreshReason:
 
 class TestDedupe:
     def test_empty_list_returns_empty(self):
-        assert _dedupe([]) == []
+        assert dedupe_strings([]) == []
 
     def test_unique_values_preserved_in_order(self):
-        result = _dedupe(["alpha", "beta", "gamma"])
+        result = dedupe_strings(["alpha", "beta", "gamma"])
         assert result == ["alpha", "beta", "gamma"]
 
     def test_duplicate_values_first_occurrence_kept(self):
-        result = _dedupe(["alpha", "beta", "alpha"])
+        result = dedupe_strings(["alpha", "beta", "alpha"])
         assert result == ["alpha", "beta"]
 
     def test_empty_strings_filtered(self):
-        result = _dedupe(["alpha", "", "beta"])
+        result = dedupe_strings(["alpha", "", "beta"])
         assert result == ["alpha", "beta"]
 
     def test_whitespace_only_strings_filtered(self):
-        result = _dedupe(["alpha", "   ", "beta"])
+        result = dedupe_strings(["alpha", "   ", "beta"])
         assert result == ["alpha", "beta"]
 
     def test_none_entries_filtered(self):
-        result = _dedupe(["alpha", None, "beta"])  # type: ignore
+        result = dedupe_strings(["alpha", None, "beta"])  # type: ignore
         assert result == ["alpha", "beta"]
 
     def test_all_duplicates_returns_single(self):
-        result = _dedupe(["same", "same", "same"])
+        result = dedupe_strings(["same", "same", "same"])
         assert result == ["same"]
 
     def test_mixed_valid_and_invalid(self):
-        result = _dedupe(["valid", "", "valid", "also_valid", None, "also_valid"])  # type: ignore
+        result = dedupe_strings(["valid", "", "valid", "also_valid", None, "also_valid"])  # type: ignore
         assert result == ["valid", "also_valid"]

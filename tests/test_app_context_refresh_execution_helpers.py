@@ -65,7 +65,6 @@ from mozaiksai.control_plane.app_context_refresh_execution import (
     ContextRefreshLaunchResult,
     ContextRefreshLaunchStatus,
     _artifact_lifecycle_value,
-    _dedupe,
     _dedupe_artifact_refs,
     _missing_expected_artifacts,
     _normalize_launch_result,
@@ -87,6 +86,7 @@ from mozaiksai.core.app_context.refresh import (
     BROWNFIELD_DISCOVERY_REFRESH_SEQUENCE,
     ContextRefreshPlan,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 # ---------------------------------------------------------------------------
 # Helpers to build test fixtures
@@ -147,19 +147,19 @@ def _launch_result(
 
 class TestDedupe:
     def test_empty_list_returns_empty(self):
-        assert _dedupe([]) == []
+        assert dedupe_strings([]) == []
 
     def test_unique_values_preserved_in_order(self):
-        assert _dedupe(["a", "b", "c"]) == ["a", "b", "c"]
+        assert dedupe_strings(["a", "b", "c"]) == ["a", "b", "c"]
 
     def test_duplicate_first_kept(self):
-        assert _dedupe(["a", "b", "a"]) == ["a", "b"]
+        assert dedupe_strings(["a", "b", "a"]) == ["a", "b"]
 
     def test_empty_strings_excluded(self):
-        assert _dedupe(["a", "", "b"]) == ["a", "b"]
+        assert dedupe_strings(["a", "", "b"]) == ["a", "b"]
 
     def test_whitespace_excluded(self):
-        assert _dedupe(["a", "  ", "b"]) == ["a", "b"]
+        assert dedupe_strings(["a", "  ", "b"]) == ["a", "b"]
 
 
 # ---------------------------------------------------------------------------

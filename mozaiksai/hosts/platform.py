@@ -154,6 +154,11 @@ from mozaiksai.hosts.routers.sessions import router as _sessions_router  # noqa:
 from mozaiksai.hosts.routers.shell import router as _shell_router  # noqa: E402
 from mozaiksai.hosts.routers.transitions import router as _transitions_router  # noqa: E402
 from mozaiksai.hosts.routers.workflows import router as _workflows_router  # noqa: E402
+from mozaiksai.hosts.workflow_runnability import (
+    NON_RUNNABLE_WORKFLOW_IDS,
+    get_ordered_workflow_names,
+    is_runnable_workflow_name,
+)
 
 app.include_router(_account_router)
 app.include_router(_admin_modules_router)
@@ -212,13 +217,8 @@ def _warn_undeclared_entitlement_gates(
                 )
 
 
-_NON_RUNNABLE_WORKFLOW_IDS = {"extended_orchestration"}
 
 
-def _get_ordered_workflow_names() -> list[str]:
-    from mozaiksai.core.workflow.workflow_manager import workflow_manager
-
-    return get_platform_hooks().call_workflow_ordering(sorted(workflow_manager.get_all_workflow_names()))
 
 
 def _get_configured_entry_point() -> str | None:
@@ -234,23 +234,15 @@ def _get_configured_entry_point() -> str | None:
         return None
 
 
-def _is_runnable_workflow_name(workflow_name: str | None, ordered_names: list[str] | None = None) -> bool:
-    name = str(workflow_name or "").strip()
-    if not name:
-        return False
-    if name in _NON_RUNNABLE_WORKFLOW_IDS:
-        return False
-    names = ordered_names if ordered_names is not None else _get_ordered_workflow_names()
-    return any(name.lower() == loaded.lower() for loaded in names)
 
 
 def _resolve_requested_workflow_name(requested_workflow_name: str | None) -> str:
-    ordered_names = _get_ordered_workflow_names()
+    ordered_names = get_ordered_workflow_names()
     if not ordered_names:
         raise HTTPException(status_code=503, detail="No runnable workflows are currently loaded.")
 
     requested = str(requested_workflow_name or "").strip()
-    if requested and requested not in _NON_RUNNABLE_WORKFLOW_IDS:
+    if requested and requested not in NON_RUNNABLE_WORKFLOW_IDS:
         for loaded in ordered_names:
             if loaded.lower() == requested.lower():
                 return loaded
@@ -3524,7 +3516,7 @@ async def websocket_endpoint(
                 await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
                 return
             existing_workflow_name = str(existing_workflow or "").strip()
-            if existing_workflow_name != workflow_name or not _is_runnable_workflow_name(existing_workflow_name):
+            if existing_workflow_name != workflow_name or not is_runnable_workflow_name(existing_workflow_name):
                 await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat workflow does not match")
                 return
     except Exception as ownership_err:

@@ -657,6 +657,7 @@ from factory_app.workflows._shared.platform.ask_context import studio_ask_contex
 from factory_app.workflows._shared.platform.build_target import bind_factory_session
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.utils.path_containment import contains_symlink_component
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 
 def register_studio_platform_hooks(registry: Any | None = None) -> None:
@@ -1350,7 +1351,7 @@ async def _run_studio_app_intelligence_index_job(app_id: str, job_id: str) -> No
             update={
                 "workspace_root": import_result.selected_root,
                 "import_result": import_result.model_dump(mode="python"),
-                "warnings": _dedupe_strings([*job.warnings, *import_result.warnings]),
+                "warnings": dedupe_strings([*job.warnings, *import_result.warnings]),
             }
         )
         job = await save_app_intelligence_index_job(job)
@@ -1429,7 +1430,7 @@ def _index_result_readiness(result: Any) -> dict[str, Any]:
         "primary_framework_label": frameworks.get("primary_framework_label"),
         "framework_count": len(frameworks.get("frameworks") or []),
         "validation_command_count": len(frameworks.get("validation_commands") or []),
-        "warnings": _dedupe_strings([*list(result.warnings or []), *list(graph_health.get("warnings") or [])]),
+        "warnings": dedupe_strings([*list(result.warnings or []), *list(graph_health.get("warnings") or [])]),
     }
 
 
@@ -1457,20 +1458,11 @@ def _studio_context_readiness(*, summary: Any, graph_status: dict[str, Any], lat
             "indexed_at": graph_status.get("indexed_at"),
             "node_count": graph_status.get("node_count"),
             "edge_count": graph_status.get("edge_count"),
-            "warnings": _dedupe_strings([*list(summary.warnings), *list(graph_status.get("warnings") or [])]),
+            "warnings": dedupe_strings([*list(summary.warnings), *list(graph_status.get("warnings") or [])]),
         }
     return job_readiness or {"status": "missing", "warnings": list(summary.warnings)}
 
 
-def _dedupe_strings(values: list[Any]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for value in values:
-        text = str(value or "").strip()
-        if text and text not in seen:
-            seen.add(text)
-            out.append(text)
-    return out
 
 
 @app.post("/api/studio/apps/{app_id}/context/refresh-plan")

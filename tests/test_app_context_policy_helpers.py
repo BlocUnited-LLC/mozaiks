@@ -66,12 +66,12 @@ from mozaiksai.control_plane.app_context import (
 from mozaiksai.control_plane.app_context_policy import (
     _context_state,
     _context_warnings,
-    _dedupe,
     _normalize_path,
     _paths_overlap,
     _touches_module_or_backend,
     _touches_sensitive_boundary,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -153,25 +153,25 @@ class TestNormalizePath:
 
 class TestDedupe:
     def test_empty_list(self):
-        assert _dedupe([]) == []
+        assert dedupe_strings([]) == []
 
     def test_unique_items_preserved(self):
-        assert _dedupe(["a", "b", "c"]) == ["a", "b", "c"]
+        assert dedupe_strings(["a", "b", "c"]) == ["a", "b", "c"]
 
     def test_duplicates_removed_first_kept(self):
-        result = _dedupe(["b", "a", "b", "c", "a"])
+        result = dedupe_strings(["b", "a", "b", "c", "a"])
         assert result == ["b", "a", "c"]
 
     def test_whitespace_only_filtered(self):
-        result = _dedupe(["  ", "a", ""])
+        result = dedupe_strings(["  ", "a", ""])
         assert result == ["a"]
 
     def test_none_in_list_filtered(self):
-        result = _dedupe([None, "a", None])
+        result = dedupe_strings([None, "a", None])
         assert result == ["a"]
 
     def test_preserves_insertion_order(self):
-        result = _dedupe(["c", "a", "b"])
+        result = dedupe_strings(["c", "a", "b"])
         assert result == ["c", "a", "b"]
 
 

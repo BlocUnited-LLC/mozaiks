@@ -21,6 +21,7 @@ from mozaiksai.core.artifacts.models import (
     BuildRecordValidationStatus,
 )
 from mozaiksai.core.artifacts.store import BuildRecordStore, get_build_record_store
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 from .indexer import index_file_map, persist_app_context_index
 from .models import (
@@ -1091,7 +1092,7 @@ def _page_metadata(path: str, manifest_by_path: dict[str, dict[str, Any]]) -> di
         if path.endswith(".json")
         else _load_yaml_manifest(path, manifest_by_path)
     )
-    endpoints = sorted(_dedupe(_collect_string_values(data, {"api_endpoint", "apiEndpoint", "endpoint"})))
+    endpoints = sorted(dedupe_strings(_collect_string_values(data, {"api_endpoint", "apiEndpoint", "endpoint"})))
     module_ids = set(_collect_string_values(data, {"module_id", "moduleId", "module"}))
     for endpoint in endpoints:
         module_id = _module_id_from_endpoint(endpoint)
@@ -1135,8 +1136,8 @@ def _module_metadata(
         "source_path": path,
         "module_id": module_id,
     }
-    integration_ids = sorted(_dedupe(_integration_ids_from_structured_value(data)))
-    action_ids = sorted(_dedupe(_action_ids_from_module_yaml(data)))
+    integration_ids = sorted(dedupe_strings(_integration_ids_from_structured_value(data)))
+    action_ids = sorted(dedupe_strings(_action_ids_from_module_yaml(data)))
     if integration_ids:
         metadata["integration_ids"] = integration_ids
     if action_ids:
@@ -1375,16 +1376,6 @@ def _normalize_identifier(value: str) -> str:
     return _surface_id("", value).strip("_")
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        result.append(normalized)
-    return result
 
 
 def _greenfield_ownership_boundaries(

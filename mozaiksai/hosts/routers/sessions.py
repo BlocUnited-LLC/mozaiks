@@ -18,13 +18,15 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import validate_path_id, validate_user_id_against_principal
 from mozaiksai.core.multitenant import build_app_scope_filter
-from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.hosts import runtime as runtime_app
+from mozaiksai.hosts.workflow_runnability import (
+    get_ordered_workflow_names,
+    is_runnable_workflow_name,
+)
 
 router = APIRouter(tags=["sessions"])
 logger = get_workflow_logger("sessions_router")
 
-_NON_RUNNABLE_WORKFLOW_IDS: frozenset[str] = frozenset({"extended_orchestration"})
 
 persistence_manager = runtime_app.persistence_manager
 
@@ -33,20 +35,8 @@ persistence_manager = runtime_app.persistence_manager
 # Helpers (local to sessions/general_chats routes)
 # ---------------------------------------------------------------------------
 
-def _get_ordered_workflow_names() -> list[str]:
-    from mozaiksai.core.workflow.workflow_manager import workflow_manager
-
-    return get_platform_hooks().call_workflow_ordering(sorted(workflow_manager.get_all_workflow_names()))
 
 
-def _is_runnable_workflow_name(workflow_name: str | None, ordered_names: list[str] | None = None) -> bool:
-    name = str(workflow_name or "").strip()
-    if not name:
-        return False
-    if name in _NON_RUNNABLE_WORKFLOW_IDS:
-        return False
-    names = ordered_names if ordered_names is not None else _get_ordered_workflow_names()
-    return any(name.lower() == loaded.lower() for loaded in names)
 
 
 def _is_ask_carrier_session(session: dict[str, Any] | None) -> bool:
@@ -81,11 +71,11 @@ async def list_user_sessions(
             "status": int(WorkflowStatus.IN_PROGRESS),
             **build_app_scope_filter(app_id),
         }).sort("last_updated_at", -1).to_list(length=100)
-        runnable_names = _get_ordered_workflow_names()
+        runnable_names = get_ordered_workflow_names()
         sessions = [
             session
             for session in sessions
-            if _is_runnable_workflow_name(session.get("workflow_name"), runnable_names)
+            if is_runnable_workflow_name(session.get("workflow_name"), runnable_names)
             and not _is_ask_carrier_session(session)
         ]
 

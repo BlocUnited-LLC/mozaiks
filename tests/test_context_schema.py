@@ -66,6 +66,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from mozaiksai.core.utils.sequences import dedupe_strings
 from mozaiksai.core.workflow.context.schema import (
     ContextAgentView,
     ContextTriggerMatch,
@@ -73,7 +74,6 @@ from mozaiksai.core.workflow.context.schema import (
     ContextVariableDefinition,
     ContextVariableSource,
     ContextVariablesPlan,
-    _normalize_string_list,
     _optional_text,
     _required_text,
 )
@@ -134,23 +134,23 @@ class TestOptionalText:
 
 class TestNormalizeStringList:
     def test_empty_list_returns_empty(self):
-        assert _normalize_string_list([]) == []
+        assert dedupe_strings([]) == []
 
     def test_strips_whitespace(self):
-        assert _normalize_string_list(["  a  ", "b"]) == ["a", "b"]
+        assert dedupe_strings(["  a  ", "b"]) == ["a", "b"]
 
     def test_filters_empty_strings(self):
-        assert _normalize_string_list(["", "a", "  "]) == ["a"]
+        assert dedupe_strings(["", "a", "  "]) == ["a"]
 
     def test_deduplicates_preserving_order(self):
-        result = _normalize_string_list(["b", "a", "b", "c", "a"])
+        result = dedupe_strings(["b", "a", "b", "c", "a"])
         assert result == ["b", "a", "c"]
 
     def test_all_empty_returns_empty(self):
-        assert _normalize_string_list(["", "  ", "\t"]) == []
+        assert dedupe_strings(["", "  ", "\t"]) == []
 
     def test_single_item(self):
-        assert _normalize_string_list(["only"]) == ["only"]
+        assert dedupe_strings(["only"]) == ["only"]
 
 
 # ---------------------------------------------------------------------------

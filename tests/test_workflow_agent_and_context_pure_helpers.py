@@ -98,6 +98,7 @@ from __future__ import annotations
 
 import pytest
 
+from mozaiksai.core.utils.sequences import dedupe_strings
 from mozaiksai.core.workflow.agents.a2a import (
     _as_bool,
     _as_float,
@@ -113,7 +114,6 @@ from mozaiksai.core.workflow.context.projection import (
     _string_list,
 )
 from mozaiksai.core.workflow.context.schema import (
-    _normalize_string_list,
     _optional_text,
     _required_text,
 )
@@ -322,27 +322,27 @@ class TestOptionalText:
 
 class TestNormalizeStringListSchema:
     def test_empty_list_returns_empty(self):
-        assert _normalize_string_list([]) == []
+        assert dedupe_strings([]) == []
 
     def test_duplicates_removed(self):
-        result = _normalize_string_list(["a", "b", "a"])
+        result = dedupe_strings(["a", "b", "a"])
         assert result.count("a") == 1
 
     def test_whitespace_excluded(self):
-        result = _normalize_string_list(["a", "  ", "b"])
+        result = dedupe_strings(["a", "  ", "b"])
         assert "  " not in result
 
     def test_none_coerced_and_excluded(self):
-        result = _normalize_string_list([None, "valid"])  # type: ignore[list-item]
+        result = dedupe_strings([None, "valid"])  # type: ignore[list-item]
         assert None not in result
         assert "valid" in result
 
     def test_order_preserved(self):
-        result = _normalize_string_list(["c", "a", "b"])
+        result = dedupe_strings(["c", "a", "b"])
         assert result == ["c", "a", "b"]
 
     def test_strips_whitespace(self):
-        result = _normalize_string_list(["  hello  "])
+        result = dedupe_strings(["  hello  "])
         assert result == ["hello"]
 
 

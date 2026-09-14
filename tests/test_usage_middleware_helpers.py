@@ -42,11 +42,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from mozaiksai.core.usage.middleware import (
-    _ctx_get,
     _int_usage,
     _text,
     _usage_value,
 )
+from mozaiksai.core.utils.context_vars import context_get
 
 # ---------------------------------------------------------------------------
 # 1. _ctx_get
@@ -54,34 +54,34 @@ from mozaiksai.core.usage.middleware import (
 
 class TestCtxGet:
     def test_none_context_returns_default(self):
-        assert _ctx_get(None, "key") is None
-        assert _ctx_get(None, "key", "fallback") == "fallback"
+        assert context_get(None, "key") is None
+        assert context_get(None, "key", "fallback") == "fallback"
 
     def test_dict_context_returns_value(self):
         ctx = {"key": "value", "other": 42}
-        assert _ctx_get(ctx, "key") == "value"
+        assert context_get(ctx, "key") == "value"
 
     def test_dict_context_missing_key_returns_default(self):
         ctx = {"key": "value"}
-        assert _ctx_get(ctx, "missing", "default") == "default"
+        assert context_get(ctx, "missing", "default") == "default"
 
     def test_object_with_get_method(self):
         class FakeCtx:
             def get(self, key, default=None):
                 return {"key": "val"}.get(key, default)
-        assert _ctx_get(FakeCtx(), "key") == "val"
-        assert _ctx_get(FakeCtx(), "missing", "fb") == "fb"
+        assert context_get(FakeCtx(), "key") == "val"
+        assert context_get(FakeCtx(), "missing", "fb") == "fb"
 
     def test_object_with_data_dict_attribute(self):
         ctx = SimpleNamespace(data={"key": "from_data"})
-        assert _ctx_get(ctx, "key") == "from_data"
+        assert context_get(ctx, "key") == "from_data"
 
     def test_object_without_get_or_data_returns_default(self):
         ctx = SimpleNamespace(other="stuff")
-        assert _ctx_get(ctx, "key", "fallback") == "fallback"
+        assert context_get(ctx, "key", "fallback") == "fallback"
 
     def test_default_is_none_when_not_specified(self):
-        assert _ctx_get({}, "missing") is None
+        assert context_get({}, "missing") is None
 
 
 # ---------------------------------------------------------------------------

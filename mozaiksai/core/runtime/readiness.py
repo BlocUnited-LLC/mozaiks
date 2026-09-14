@@ -13,6 +13,8 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from mozaiksai.core.utils.sequences import dedupe_strings
+
 EnvReader = Callable[[str], str | None]
 EnvValidator = Callable[[str | None], bool]
 
@@ -48,22 +50,12 @@ def non_false_env(value: str | None) -> bool:
     return bool(text) and text not in {"0", "false", "no", "off"}
 
 
-def _dedupe(names: Iterable[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for raw_name in names:
-        name = str(raw_name or "").strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        result.append(name)
-    return result
 
 
 def _name_list(value: Any) -> list[str]:
     if not isinstance(value, (list, tuple, set)):
         return []
-    return _dedupe(value)
+    return dedupe_strings(value)
 
 
 def _int_or_default(value: Any, default: int = 0) -> int:
@@ -80,7 +72,7 @@ def _missing(
     validators: Mapping[str, EnvValidator],
 ) -> list[str]:
     missing: list[str] = []
-    for name in _dedupe(names):
+    for name in dedupe_strings(names):
         validator = validators.get(name, env_present)
         if not validator(env(name)):
             missing.append(name)

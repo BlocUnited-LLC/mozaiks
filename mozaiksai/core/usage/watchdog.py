@@ -17,6 +17,7 @@ from logs.logging_config import get_core_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
+from mozaiksai.core.utils.context_vars import context_get
 
 logger = get_core_logger("token_watchdog")
 
@@ -32,20 +33,6 @@ def _text(value: Any) -> str:
     return "" if text.lower() == "none" else text
 
 
-def _ctx_get(context_variables: Any, key: str, default: Any = None) -> Any:
-    if context_variables is None:
-        return default
-    if hasattr(context_variables, "get"):
-        try:
-            return context_variables.get(key, default)
-        except Exception:
-            return default
-    data = getattr(context_variables, "data", None)
-    if isinstance(data, dict):
-        return data.get(key, default)
-    if isinstance(context_variables, dict):
-        return context_variables.get(key, default)
-    return default
 
 
 def _positive_int(value: Any, *, default: int | None = None) -> int | None:
@@ -74,14 +61,14 @@ def resolve_token_watchdog_thresholds(context_variables: Any = None) -> tuple[in
     """
 
     alert = (
-        _positive_int(_ctx_get(context_variables, "token_watchdog_alert_tokens"))
-        or _positive_int(_ctx_get(context_variables, "token_budget_alert_tokens"))
-        or _positive_int(_ctx_get(context_variables, "token_budget_max_tokens"))
+        _positive_int(context_get(context_variables, "token_watchdog_alert_tokens"))
+        or _positive_int(context_get(context_variables, "token_budget_alert_tokens"))
+        or _positive_int(context_get(context_variables, "token_budget_max_tokens"))
         or _env_int("MOZAIKS_TOKEN_WATCHDOG_ALERT_TOKENS", DEFAULT_ALERT_THRESHOLD)
     )
     warn = (
-        _positive_int(_ctx_get(context_variables, "token_watchdog_warn_tokens"))
-        or _positive_int(_ctx_get(context_variables, "token_budget_warn_tokens"))
+        _positive_int(context_get(context_variables, "token_watchdog_warn_tokens"))
+        or _positive_int(context_get(context_variables, "token_budget_warn_tokens"))
         or _env_int("MOZAIKS_TOKEN_WATCHDOG_WARN_TOKENS", DEFAULT_WARN_THRESHOLD)
     )
     if warn >= alert:
@@ -246,12 +233,12 @@ def build_ag2_token_watchdog_observers(
                 severity = getattr(event, "severity", "")
                 severity_value = getattr(severity, "value", severity)
                 await emit_token_budget_alert(
-                    chat_id=_text(_ctx_get(context_variables, "chat_id", "")),
-                    app_id=_text(_ctx_get(context_variables, "app_id", "")),
-                    user_id=_text(_ctx_get(context_variables, "user_id", "anonymous")) or "anonymous",
-                    tenant_id=_text(_ctx_get(context_variables, "tenant_id", "")) or None,
-                    workspace_id=_text(_ctx_get(context_variables, "workspace_id", "")) or None,
-                    workflow_name=_text(_ctx_get(context_variables, "workflow_name", workflow_name)),
+                    chat_id=_text(context_get(context_variables, "chat_id", "")),
+                    app_id=_text(context_get(context_variables, "app_id", "")),
+                    user_id=_text(context_get(context_variables, "user_id", "anonymous")) or "anonymous",
+                    tenant_id=_text(context_get(context_variables, "tenant_id", "")) or None,
+                    workspace_id=_text(context_get(context_variables, "workspace_id", "")) or None,
+                    workflow_name=_text(context_get(context_variables, "workflow_name", workflow_name)),
                     agent_name=agent_name,
                     observer_source=_text(getattr(event, "source", "")),
                     severity=str(severity_value or "warning"),
