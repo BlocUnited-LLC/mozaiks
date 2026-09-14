@@ -49,6 +49,40 @@ def test_value_engine_interview_agent_bans_generic_questions_after_shorthand() -
     assert "market-implied confidence around AI companies" in agents_text
 
 
+def test_value_engine_interview_agent_never_invents_an_app_the_user_did_not_describe() -> None:
+    """A live run produced a full concept for an app nobody asked for.
+
+    The user described a habit tracker. The agent never registered it, kept
+    asking "What do you want to build?", and on bare affirmations emitted a
+    finished blueprint for "AI Startup Market" - a Polymarket-style investment
+    platform - which was then recorded as approved. The only concrete product
+    in this prompt is its own shorthand example, and the output matched it,
+    down to the "market prediction analysis" anchor.
+
+    The example stays, because it teaches real shorthand handling. What must
+    hold is that it can never become the product.
+    """
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+
+    assert "are illustrations of how to read" in agents_text
+    assert "They are never candidate products." in agents_text
+    assert "blueprint an app the user has not described" in agents_text
+    assert "you have nothing to propose" in agents_text
+
+
+def test_value_engine_affirmation_does_not_authorise_an_invented_direction() -> None:
+    """"Yes" to nothing is not consent to choose the product for the user."""
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+
+    # The old rule read: short affirmations "= user is happy. Emit NEXT." with
+    # no requirement that anything had been established first, so a user who
+    # only ever said "yes" advanced straight into a fabricated concept.
+    assert "happy with what is ALREADY on the table" in agents_text
+    assert "Emit NEXT only if a concrete app direction actually exists" in agents_text
+    assert "an affirmation is not an answer" in agents_text
+    assert "Agreement is never permission to pick the product for them." in agents_text
+
+
 def test_value_engine_interview_agent_must_recommend_when_user_delegates_choice() -> None:
     """Delegation must produce a decision, never the question handed back."""
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")

@@ -119,6 +119,12 @@ agents:
       - Example domain preservation: "Polymarket for AI startups" + "gamblers" should stay in prediction-market/startup-signal territory. Do not propose unrelated categories such as mental health, personal finance, or remote collaboration.
       - Good interpretation anchors include fragmented startup signal and market-implied confidence around AI companies.
 
+      The products named anywhere in this prompt are illustrations of how to read
+      shorthand. They are never candidate products. Never propose, name, or
+      blueprint an app the user has not described. If the user has not told you
+      what they want to build, you have nothing to propose, and saying so is the
+      correct move.
+
       BANNED after recognizable shorthand:
       - restarting with blank-slate discovery
       - asking the user to define the obvious product category
@@ -132,7 +138,10 @@ agents:
 
       If the user confirms or aligns with a direction you already proposed: either ask the one remaining question or emit NEXT. Do not re-explain.
 
-      Short affirming replies with no new signal ("ok", "ya", "sounds good", "sure", "yes") = user is happy. Emit NEXT.
+      Short affirming replies with no new signal ("ok", "ya", "sounds good", "sure", "yes") mean the user is happy with what is ALREADY on the table.
+      Emit NEXT only if a concrete app direction actually exists in this conversation, supplied by the user.
+      If nothing has been established yet, an affirmation is not an answer. Say plainly that you still need to know what they want to build, and ask again.
+      Agreement is never permission to pick the product for them.
 
       Never ask what you can look up. Never ask what the product category already implies.
   - id: how_to_propose
