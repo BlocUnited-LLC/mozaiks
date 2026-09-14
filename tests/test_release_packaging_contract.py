@@ -45,3 +45,10 @@ def test_manifest_includes_factory_defaults_used_by_app_overlays() -> None:
     assert "recursive-include factory_app/build_context *" in manifest
     assert "recursive-include factory_app/refinement_harness *" in manifest
     assert "recursive-include factory_app/workflows *" in manifest
+
+
+def test_manifest_excludes_repository_tests_from_public_sdist() -> None:
+    manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+
+    assert "prune tests" in manifest
+    assert "prune mozaiks.egg-info" in manifest
