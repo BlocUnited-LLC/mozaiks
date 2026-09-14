@@ -1500,6 +1500,12 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             "chat.switch_workflow",
             "chat.start_workflow",
             "chat.start_workflow_batch",
+            # Keepalive reply to server "ping" events. Accepting it (with no
+            # handler - dispatch ignores handler-less types) lets an idle
+            # client refresh last_received_at without tripping
+            # SCHEMA_VALIDATION_FAILED, so a builder waiting on a long agent
+            # turn is not disconnected by the idle timeout.
+            "client.pong",
         ):
             # Control commands - no additional validation needed
             return True

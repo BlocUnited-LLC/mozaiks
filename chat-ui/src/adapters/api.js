@@ -490,7 +490,16 @@ export class WebSocketApiAdapter extends ApiAdapter {
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        
+
+        // Answer server heartbeat pings so the idle timeout never severs a
+        // session that is merely waiting on a long agent turn.
+        if (data.type === 'ping') {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'client.pong', chat_id: chatId }));
+          }
+          return;
+        }
+
         // F7/F8: Track sequence numbers for resume capability
         if (data.seq && typeof data.seq === 'number') {
           if (data.seq > lastSequence) {

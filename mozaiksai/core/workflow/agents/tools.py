@@ -40,6 +40,23 @@ from ..workflow_manager import workflow_manager
 logger = logging.getLogger(__name__)
 
 
+def _returned_failure_reason(result: Any) -> str | None:
+    """Return a short reason string when a tool result carries a failure marker.
+
+    Tools report soft failures by returning ``{"ok": False, ...}`` or
+    ``{"success": False, ...}``; logging those as "completed successfully"
+    concealed silently-dropped artifacts in live builds. Only explicit False
+    markers count — absent keys stay success.
+    """
+    if not isinstance(result, dict):
+        return None
+    for flag in ("ok", "success"):
+        if result.get(flag) is False:
+            reason = result.get("reason") or result.get("error") or result.get("message")
+            return str(reason) if reason else f"{flag}=False"
+    return None
+
+
 def _ensure_workflow_import_paths(*, base_dir: Path, file_path: Path) -> None:
     """Expose workflow package and sibling tool modules during dynamic imports."""
     desired_order = (
@@ -215,16 +232,27 @@ def _wrap_with_validation(
                 
                 # Execute tool
                 result = await func(*args, **kwargs)
-                
-                # Log successful completion
+
+                # Log completion — a returned failure marker is not success.
                 duration_ms = (time.time() - start_time) * 1000
-                log_tool_event(
-                    tool_logger,
-                    action="complete",
-                    status="success",
-                    message=f"Tool '{tool_name}' completed successfully",
-                    duration_ms=round(duration_ms, 2)
-                )
+                failure_reason = _returned_failure_reason(result)
+                if failure_reason is not None:
+                    log_tool_event(
+                        tool_logger,
+                        action="complete",
+                        status="failed_result",
+                        message=f"Tool '{tool_name}' returned failure: {failure_reason}",
+                        level=logging.WARNING,
+                        duration_ms=round(duration_ms, 2)
+                    )
+                else:
+                    log_tool_event(
+                        tool_logger,
+                        action="complete",
+                        status="success",
+                        message=f"Tool '{tool_name}' completed successfully",
+                        duration_ms=round(duration_ms, 2)
+                    )
                 return result
                 
             except Exception as e:
@@ -290,16 +318,27 @@ def _wrap_with_validation(
             
             # Execute tool
             result = func(*args, **kwargs)
-            
-            # Log successful completion
+
+            # Log completion — a returned failure marker is not success.
             duration_ms = (time.time() - start_time) * 1000
-            log_tool_event(
-                tool_logger,
-                action="complete",
-                status="success",
-                message=f"Tool '{tool_name}' completed successfully",
-                duration_ms=round(duration_ms, 2)
-            )
+            failure_reason = _returned_failure_reason(result)
+            if failure_reason is not None:
+                log_tool_event(
+                    tool_logger,
+                    action="complete",
+                    status="failed_result",
+                    message=f"Tool '{tool_name}' returned failure: {failure_reason}",
+                    level=logging.WARNING,
+                    duration_ms=round(duration_ms, 2)
+                )
+            else:
+                log_tool_event(
+                    tool_logger,
+                    action="complete",
+                    status="success",
+                    message=f"Tool '{tool_name}' completed successfully",
+                    duration_ms=round(duration_ms, 2)
+                )
             return result
             
         except Exception as e:
