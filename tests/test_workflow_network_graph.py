@@ -707,3 +707,47 @@ def test_transition_graph_validator_accepts_user_as_special_source(monkeypatch: 
     assert summary["missing_target_agents"] == []
     assert summary["errors"] == []
 
+
+
+@pytest.mark.parametrize("declared,target_agent", [
+    ("RevertToUserTarget", "FinalAgent"),
+    ("NotARealTarget", "FinalAgent"),
+    ("NotARealTarget", "user"),
+])
+def test_declared_transition_target_must_match_its_destination(declared, target_agent):
+    with pytest.raises(WorkflowGraphCompileError):
+        compile_transition_rules_to_graph(
+            [
+                {
+                    "source_agent": "FinalAgent",
+                    "target_agent": target_agent,
+                    "transition_type": "after_turn",
+                    "transition_target": declared,
+                }
+            ],
+            initial_agent_name="FinalAgent",
+            agent_id_by_name={"FinalAgent": "FinalAgent", "user": "user"},
+            max_turns=4,
+        )
+
+
+@pytest.mark.parametrize("declared,target_agent", [
+    ("RevertToUserTarget", "user"),
+    ("AgentTarget", "FinalAgent"),
+    (None, "user"),
+])
+def test_consistent_declared_transition_targets_compile(declared, target_agent):
+    rule = {
+        "source_agent": "FinalAgent",
+        "target_agent": target_agent,
+        "transition_type": "after_turn",
+    }
+    if declared is not None:
+        rule["transition_target"] = declared
+    graph = compile_transition_rules_to_graph(
+        [rule],
+        initial_agent_name="FinalAgent",
+        agent_id_by_name={"FinalAgent": "FinalAgent", "user": "user"},
+        max_turns=4,
+    )
+    assert graph.transitions

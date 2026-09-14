@@ -30,6 +30,7 @@ from mozaiksai.core.workflow.context.authority import (
 
 _SPECIAL_TERMINATE = frozenset({"terminate"})
 _SPECIAL_USER = frozenset({"user"})
+_SUPPORTED_TRANSITION_TARGETS = frozenset({"agenttarget", "terminatetarget", "reverttousertarget"})
 _SUPPORTED_CONDITION_TYPES = frozenset({"context_equals", "context_expression", "tool_called"})
 
 
@@ -244,12 +245,21 @@ def _target_for(target_name: str, agent_ids: Mapping[str, str], transition_targe
         normalized_target != "terminate" or termination_reason not in {"workflow_complete", "workflow_failed"}
     ):
         raise WorkflowGraphCompileError("termination_reason requires terminate and a declared workflow_complete/workflow_failed reason")
+    if declared_target and declared_target not in _SUPPORTED_TRANSITION_TARGETS:
+        raise WorkflowGraphCompileError(
+            f"transition_target {transition_target!r} is not one of "
+            f"AgentTarget, TerminateTarget, RevertToUserTarget"
+        )
     if normalized_target in _SPECIAL_TERMINATE or declared_target == "terminatetarget":
         if normalized_target != "terminate":
             raise WorkflowGraphCompileError(
                 "TerminateTarget transitions must use target_agent='terminate'"
             )
         return TerminateTarget(reason=termination_reason or "workflow_complete")
+    if declared_target == "reverttousertarget" and normalized_target not in _SPECIAL_USER:
+        raise WorkflowGraphCompileError(
+            "RevertToUserTarget transitions must use target_agent='user'"
+        )
     if normalized_target in _SPECIAL_USER:
         return AgentTarget(_agent_id(target_name, agent_ids))
     if target_name.strip() not in agent_ids:
