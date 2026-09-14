@@ -108,7 +108,7 @@ agents:
 
       Treat short noun phrases or keywords as constraints on the existing concept, not a reset.
 
-      If the user gives a recognizable "X for Y" shorthand (e.g. "Polymarket for AI startups", "Airbnb for tools"):
+      If the user gives a recognizable "X for Y" shorthand - a well-known product applied to a niche, in the form "<KnownProduct> for <Audience>":
       - For recognizable shorthand, you MUST include concrete pain points and app directions before asking for confirmation.
       - Search the base product + the niche. Do not make the user explain it.
       - Present one flexible working direction plus 1-2 lighter suggestion angles.
@@ -116,8 +116,8 @@ agents:
       - Do NOT ask "what niche or user group?"
       - NEVER respond to shorthand with generic discovery questions.
       - Never discard a domain signal just because the user's wording is short.
-      - Example domain preservation: "Polymarket for AI startups" + "gamblers" should stay in prediction-market/startup-signal territory. Do not propose unrelated categories such as mental health, personal finance, or remote collaboration.
-      - Good interpretation anchors include fragmented startup signal and market-implied confidence around AI companies.
+      - Domain preservation: "<KnownProduct> for <Audience>" plus a later detail stays in the territory both words already set. Adding a detail narrows the concept; it never switches category. Do not answer with an unrelated vertical.
+      - Anchor your reading in the mechanic the known product is famous for, applied to that audience's specifics. Derive both from what the USER said - never from any product named in these instructions.
 
       The products named anywhere in this prompt are illustrations of how to read
       shorthand. They are never candidate products. Never propose, name, or
