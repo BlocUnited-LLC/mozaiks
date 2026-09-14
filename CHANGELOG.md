@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 
 
+### Changed
+
+- `web_shell` UI validation now fails when a surface declares its own copy of a
+  shared design-system primitive (e.g. a local `Metric`). Import rules alone did
+  not catch this: a hand-rolled component imports nothing and passed every check
+  while rendering a drifted duplicate.
+
 ### Fixed
 
 - Chat: the "..." typing bubble no longer sticks on screen after a run ends. It
@@ -22,8 +29,8 @@ This project follows a practical pre-1.0 changelog format:
 - Chat: the "Jump to Present" button no longer lets message text read through
   it. It sat at 55% opacity over scrolled content, and shared a z-index with the
   scroll layer so it only painted on top by DOM order.
-
-### Fixed
+- `SubscriptionContractReview` now composes the shared `Metric` primitive
+  instead of its own copy.
 
 - Workflow UI: `ActionPlan` no longer crashes on render. It referenced two
   undefined names (`fonts`, `colors`), so the branch containing them threw a

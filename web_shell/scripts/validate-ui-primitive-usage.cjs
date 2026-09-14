@@ -17,6 +17,11 @@ const primitiveSchemasPath = firstExisting([
   path.join(repoRoot, 'mozaiks_chat_ui', 'src', 'ui', 'page-renderer', 'primitive_schemas.json'),
 ]);
 
+const primitiveBarrelPath = firstExisting([
+  path.join(repoRoot, 'chat-ui', 'src', 'ui', 'primitives', 'index.js'),
+  path.join(repoRoot, 'mozaiks_chat_ui', 'src', 'ui', 'primitives', 'index.js'),
+]);
+
 const pageSchemaRoots = [
   path.join(repoRoot, 'factory_app', 'app', 'ui', 'pages'),
   path.join(repoRoot, 'web_shell', 'playwright', 'fixtures', 'generated-app', 'app', 'ui', 'pages'),
@@ -203,12 +208,78 @@ function validateAppsPageUsesCollectionPrimitives(failures) {
   }
 }
 
+/**
+ * Names exported from the shared primitive barrel.
+ *
+ * Used to catch local re-implementations. Import rules alone do not catch this:
+ * a file that defines its own `function Metric` imports nothing and passes every
+ * other check, while rendering a drifted copy of a primitive that already exists.
+ */
+function sharedPrimitiveNames() {
+  if (!exists(primitiveBarrelPath)) return new Set();
+
+  const source = fs.readFileSync(primitiveBarrelPath, 'utf8');
+  const names = new Set();
+
+  // export { A, B as C } from './X.jsx';  /  export { A, B };
+  for (const block of source.matchAll(/export\s*\{([^}]*)\}/g)) {
+    for (const clause of block[1].split(',')) {
+      const name = clause.includes(' as ')
+        ? clause.split(' as ')[1]
+        : clause;
+      const trimmed = name.trim();
+      if (/^[A-Z][A-Za-z0-9_]*$/.test(trimmed)) names.add(trimmed);
+    }
+  }
+  return names;
+}
+
+// Internal top-level PascalCase declarations — the shape a hand-rolled component
+// takes. One literal rather than a regex built per name, so nothing depends on
+// escaping a name.
+//
+// `export`ed declarations are deliberately excluded. A file that exports its own
+// `ActionButton` is publishing a local API — a name collision worth discussing,
+// but a different problem from a private helper quietly re-drawing a primitive
+// that already exists. Every clone found so far has been the private kind.
+const DECLARATION_PATTERN =
+  /(?:^|\n)\s*(?:function|class|const|let|var)\s+([A-Z][A-Za-z0-9_]*)\s*[=({]/g;
+
+function validateNoLocalPrimitiveClones(failures) {
+  const shared = sharedPrimitiveNames();
+  if (shared.size === 0) return;
+
+  const reactFiles = reactSurfaceRoots.flatMap((root) => (
+    walk(root, new Set(['.js', '.jsx', '.ts', '.tsx']))
+  ));
+
+  for (const filePath of reactFiles) {
+    const source = fs.readFileSync(filePath, 'utf8');
+    const seen = new Set();
+
+    DECLARATION_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = DECLARATION_PATTERN.exec(source)) !== null) {
+      const name = match[1];
+      if (!shared.has(name) || seen.has(name)) continue;
+      seen.add(name);
+      addFailure(
+        failures,
+        filePath,
+        `declares its own "${name}", which is a shared primitive. `
+        + 'Import it from @mozaiks/chat-ui/ui instead of re-implementing it.'
+      );
+    }
+  }
+}
+
 function main() {
   const failures = [];
 
   validatePagePrimitives(failures);
   validateReactImports(failures);
   validateNoLocalPrimitiveCatalogs(failures);
+  validateNoLocalPrimitiveClones(failures);
   validateAppsPageUsesCollectionPrimitives(failures);
 
   if (failures.length > 0) {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Panel, StatusPill } from '@mozaiks/chat-ui/ui';
+import { Button, Metric, Panel, StatusPill } from '@mozaiks/chat-ui/ui';
 
 function asList(value) {
   return Array.isArray(value) ? value : [];
@@ -92,15 +92,6 @@ function PlanCard({ plan }) {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function Metric({ label, value }) {
-  return (
-    <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
     </div>
   );
 }
