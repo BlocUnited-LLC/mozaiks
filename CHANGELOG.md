@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 
 
+
+### Added
+
+- Approval gates rendered by `ApprovalCard` now carry a stable
+  `data-testid="approval-action-<id>"` derived from the action id, so tests and
+  automation can drive them without matching model-authored button text.
+
 ### Changed
 
 - `web_shell` UI validation now fails when a surface declares its own copy of a
