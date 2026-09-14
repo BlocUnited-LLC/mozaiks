@@ -1084,10 +1084,12 @@ their previous meaning. Parsed versions can later be compared with
 `ChildContractRef.contract_schema_version`; this prerequisite adds no content
 resolver, implementation selection, binding, or ArtifactRevision redesign.
 
-The [workflow document migration census](../architecture/workflows/workflow-document-version-migration.md)
-records governed OSS documents, producers, exclusions, and the required App Zero
-migration when its pinned OSS version advances. Unversioned downstream documents
-receive no compatibility exception.
+The workflow document migration census is maintained as an internal repository
+record; the public contract is documented in the
+[workflow authoring contracts](../architecture/workflows/workflow-authoring-contracts.md).
+The internal record covers governed OSS documents, producers, exclusions, and the
+required App Zero migration when its pinned OSS version advances. Unversioned
+downstream documents receive no compatibility exception.
 
 ## BuildContextBindingRef
 
