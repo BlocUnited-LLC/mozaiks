@@ -211,9 +211,28 @@ def _source_hygiene_excluded(path: Path) -> bool:
     )
 
 
+def _tracked_source_paths() -> list[Path] | None:
+    """Git-tracked files, or None when git cannot answer (e.g. a source tarball)."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return [REPO_ROOT / entry for entry in result.stdout.split(chr(0)) if entry]
+
+
 def _source_hygiene_files() -> list[Path]:
+    # Tracked files only: a filesystem walk also reads untracked agent worktrees
+    # and generated output, which are not this repo's source.
+    candidates = _tracked_source_paths()
+    if candidates is None:
+        candidates = REPO_ROOT.rglob("*")
     files: list[Path] = []
-    for path in REPO_ROOT.rglob("*"):
+    for path in candidates:
         if _source_hygiene_excluded(path):
             continue
         if not path.is_file():
