@@ -73,6 +73,11 @@ dist/
 *.local
 /package-lock.json
 
+# Agent worktrees (checkouts, not sources). .local/worktrees/ is matched only
+# incidentally by the Node `*.local` rule above; name both deliberately.
+.codex-worktrees/
+.local/worktrees/
+
 # Runtime outputs
 .tmp/
 tmp/
