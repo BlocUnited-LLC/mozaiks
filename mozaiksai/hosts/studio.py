@@ -221,15 +221,6 @@ def _zipinfo_is_symlink(info: zipfile.ZipInfo) -> bool:
     return mode == stat.S_IFLNK
 
 
-def _contains_symlink_component(root: Path, relative_path: str) -> bool:
-    if root.is_symlink():
-        return True
-    current = root
-    for part in PurePosixPath(relative_path).parts:
-        current = current / part
-        if current.exists() and current.is_symlink():
-            return True
-    return False
 
 
 def _strip_shared_root_prefix(entries: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
@@ -457,7 +448,7 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path, workspace_lay
                     validate_secret_contract_text(archive.read(info.filename))
                 except ValueError as exc:
                     raise HTTPException(status_code=400, detail="Artifact contains an invalid names-only secret contract") from exc
-            if _contains_symlink_component(target_root, safe_name):
+            if contains_symlink_component(target_root, safe_name):
                 raise HTTPException(
                     status_code=400,
                     detail=f"Restore target contains a symlinked component for archive entry: {safe_name}",
@@ -472,7 +463,7 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path, workspace_lay
             safe_name = restore_names.get(safe_name, safe_name)
             if workspace_layout:
                 safe_name = app_bundle_workspace_path(safe_name)
-            if _contains_symlink_component(target_root, safe_name):
+            if contains_symlink_component(target_root, safe_name):
                 raise HTTPException(status_code=400, detail="Restore target contains a symlinked component")
             destination = (target_root / safe_name).resolve()
             if not destination.is_relative_to(target_root):
@@ -665,6 +656,7 @@ configure_session_router(
 from factory_app.workflows._shared.platform.ask_context import studio_ask_context
 from factory_app.workflows._shared.platform.build_target import bind_factory_session
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.utils.path_containment import contains_symlink_component
 
 
 def register_studio_platform_hooks(registry: Any | None = None) -> None:

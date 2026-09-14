@@ -47,6 +47,11 @@ from mozaiksai.core.artifacts import (
 from mozaiksai.core.runtime.persistence.artifact_signer import sign_artifact
 from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
 from mozaiksai.core.session.build_binding import RunBuildBinding
+from mozaiksai.core.utils.path_containment import contains_symlink_component, resolve_inside
+
+
+def _resolve_inside(parent: Path, child: Path) -> Path:
+    return resolve_inside(parent, child, error=DraftAppBundleArtifactVersionError, message="Refusing to write outside allowed workspace")
 
 
 class DraftAppBundleArtifactVersionResult(BaseModel):
@@ -125,31 +130,6 @@ def _safe_path_segment(value: Any, *, fallback: str) -> str:
     return text or fallback
 
 
-def _is_relative_to(child: Path, parent: Path) -> bool:
-    try:
-        child.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def _resolve_inside(parent: Path, child: Path) -> Path:
-    parent_resolved = parent.resolve()
-    child_resolved = child.resolve()
-    if not _is_relative_to(child_resolved, parent_resolved):
-        raise DraftAppBundleArtifactVersionError(f"Refusing to write outside allowed workspace: {child}")
-    return child_resolved
-
-
-def _contains_symlink_component(root: Path, relative_path: str) -> bool:
-    if root.is_symlink():
-        return True
-    current = root
-    for part in PurePosixPath(relative_path).parts:
-        current = current / part
-        if current.exists() and current.is_symlink():
-            return True
-    return False
 
 
 def _normalize_relative_path(path: str) -> tuple[str | None, str | None]:
@@ -325,7 +305,7 @@ def _bundle_workspace(
             normalized_path, skip_reason = _normalize_relative_path(relative_path)
             if normalized_path is None or skip_reason is not None:
                 continue
-            if file_path.is_symlink() or _contains_symlink_component(workspace_root, normalized_path):
+            if file_path.is_symlink() or contains_symlink_component(workspace_root, normalized_path):
                 continue
             if not file_path.exists() or not file_path.is_file():
                 continue

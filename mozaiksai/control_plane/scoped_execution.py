@@ -9,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from mozaiksai.control_plane.contracts import is_secret_sensitive_path
 from mozaiksai.control_plane.dry_run import RefinementExecutionPlan
 from mozaiksai.control_plane.staging import WORKSPACE_DIRNAME, RefinementStagingResult
+from mozaiksai.core.utils.path_containment import resolve_inside
+
+
+def _resolve_inside(parent: Path, child: Path) -> Path:
+    return resolve_inside(parent, child, error=ValueError, message="Refusing to write outside staging area")
 
 EXECUTION_RESULT_FILENAME = "execution_result.json"
 
@@ -50,22 +55,6 @@ class ScopedRefinementResult(BaseModel):
     mutation_scope: Literal["staging_only"] = "staging_only"
     mutation_allowed: Literal[False] = False
     result_path: str
-
-
-def _is_relative_to(child: Path, parent: Path) -> bool:
-    try:
-        child.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def _resolve_inside(parent: Path, child: Path) -> Path:
-    parent_resolved = parent.resolve()
-    child_resolved = child.resolve()
-    if not _is_relative_to(child_resolved, parent_resolved):
-        raise ValueError(f"Refusing to write outside staging area: {child}")
-    return child_resolved
 
 
 def _contains_symlink_component(path: Path) -> bool:

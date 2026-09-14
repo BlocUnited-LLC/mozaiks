@@ -32,15 +32,12 @@ Covers:
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 from mozaiksai.control_plane.dry_run import (
     RefinementExecutionPlan,
     RefinementExecutionProfiles,
     RefinementValidationPlan,
 )
 from mozaiksai.control_plane.staging import (
-    _is_relative_to,
     _normalize_bundle_path,
     _readme_text,
 )
@@ -69,33 +66,8 @@ def _plan(**kwargs) -> RefinementExecutionPlan:
 
 
 # ---------------------------------------------------------------------------
-# 1. _is_relative_to
 # ---------------------------------------------------------------------------
 
-class TestIsRelativeTo:
-    def test_child_inside_parent_true(self):
-        parent = Path("/a/b")
-        child = Path("/a/b/c/d.py")
-        assert _is_relative_to(child, parent) is True
-
-    def test_child_equal_to_parent_true(self):
-        parent = Path("/a/b")
-        assert _is_relative_to(parent, parent) is True
-
-    def test_child_outside_parent_false(self):
-        parent = Path("/a/b")
-        child = Path("/a/c/d.py")
-        assert _is_relative_to(child, parent) is False
-
-    def test_unrelated_paths_false(self):
-        parent = Path("/x/y")
-        child = Path("/a/b/c.py")
-        assert _is_relative_to(child, parent) is False
-
-    def test_sibling_path_false(self):
-        parent = Path("/staging/workspace")
-        sibling = Path("/staging/other")
-        assert _is_relative_to(sibling, parent) is False
 
 
 # ---------------------------------------------------------------------------
