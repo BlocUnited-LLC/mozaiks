@@ -182,7 +182,12 @@ def _workflow_generation_prompt(
     )
 
 
-def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str, Any]:
+def build_seeded_pack_context(
+    *,
+    pack_name: str = DEFAULT_PACK_NAME,
+    target_app_id: str = "live-smoke-target",
+    build_id: str = "live-smoke-build",
+) -> dict[str, Any]:
     """Build the approved AgentGenerator context used by the live smoke.
 
     The context starts at AgentGenerator's approved-generation boundary. It avoids
@@ -255,6 +260,8 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
         }
         workflow_specs.append(spec)
 
+    from mozaiksai.core.session.build_binding import RunBuildBinding
+
     return {
         "build_mode": "initial",
         "task_run_mode": False,
@@ -303,6 +310,12 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
             "workflows": workflow_specs,
         },
         "workflows_spec": workflow_specs,
+        "run_build_binding": RunBuildBinding(
+            build_registry_id="live-smoke-registry",
+            target_app_id=target_app_id,
+            build_id=build_id,
+            phase="genesis",
+        ).model_dump(),
     }
 
 
@@ -641,7 +654,6 @@ def _patched_download_tool():
         "_register_workflow_bundle_artifact_version": download_module._register_workflow_bundle_artifact_version,
         "resolve_agent_api_url": download_module.resolve_agent_api_url,
         "resolve_agent_websocket_url": download_module.resolve_agent_websocket_url,
-        "_promote_workflow_to_app_workspace": download_module._promote_workflow_to_app_workspace,
     }
 
     async def _fake_use_ui_tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -664,7 +676,6 @@ def _patched_download_tool():
     download_module._register_workflow_bundle_artifact_version = _fake_artifact_version
     download_module.resolve_agent_api_url = lambda app_id: f"https://api.local/{app_id}"
     download_module.resolve_agent_websocket_url = lambda app_id: f"wss://ws.local/{app_id}"
-    download_module._promote_workflow_to_app_workspace = lambda *args, **kwargs: None
     try:
         yield download_module
     finally:
@@ -729,7 +740,10 @@ async def run_live_agentgenerator_pack_smoke(
     generated_root.mkdir(parents=True, exist_ok=True)
     active_workflows_root.mkdir(parents=True, exist_ok=True)
 
-    context = build_seeded_pack_context()
+    context = build_seeded_pack_context(
+        target_app_id=app_id,
+        build_id=f"build-{uuid.uuid4().hex[:12]}",
+    )
     context.update(
         {
             "workflow_name": workflow_name,
