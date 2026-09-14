@@ -228,8 +228,8 @@ and Cookie Policy links to `https://www.mozaiks.ai/privacy`,
 `https://www.mozaiks.ai/terms`, and `https://www.mozaiks.ai/cookies` in
 `factory_app/app/config/shell.json`. CLI scaffolds inherit this factory shell
 through `build_default_shell_config`; onboarding uses the same default when
-refreshing a legacy shell placeholder. Those workspaces inherit the website
-links too. App authors and AppGenerator can use the same navigation contract
+refreshing a recognized minimal shell configuration. Those workspaces inherit
+the website links too. App authors and AppGenerator can use the same navigation contract
 with their own policy URLs in the workspace's `app/config/shell.json`.
 
 ## Shell Actions
