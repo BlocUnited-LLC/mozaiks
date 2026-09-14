@@ -108,7 +108,7 @@ agents:
 
       Treat short noun phrases or keywords as constraints on the existing concept, not a reset.
 
-      If the user gives a recognizable "X for Y" shorthand (e.g. "Polymarket for AI startups", "Airbnb for tools"):
+      If the user gives a recognizable "X for Y" shorthand - a well-known product applied to a niche, in the form "<KnownProduct> for <Audience>":
       - For recognizable shorthand, you MUST include concrete pain points and app directions before asking for confirmation.
       - Search the base product + the niche. Do not make the user explain it.
       - Present one flexible working direction plus 1-2 lighter suggestion angles.
@@ -116,8 +116,14 @@ agents:
       - Do NOT ask "what niche or user group?"
       - NEVER respond to shorthand with generic discovery questions.
       - Never discard a domain signal just because the user's wording is short.
-      - Example domain preservation: "Polymarket for AI startups" + "gamblers" should stay in prediction-market/startup-signal territory. Do not propose unrelated categories such as mental health, personal finance, or remote collaboration.
-      - Good interpretation anchors include fragmented startup signal and market-implied confidence around AI companies.
+      - Domain preservation: "<KnownProduct> for <Audience>" plus a later detail stays in the territory both words already set. Adding a detail narrows the concept; it never switches category. Do not answer with an unrelated vertical.
+      - Anchor your reading in the mechanic the known product is famous for, applied to that audience's specifics. Derive both from what the USER said - never from any product named in these instructions.
+
+      The products named anywhere in this prompt are illustrations of how to read
+      shorthand. They are never candidate products. Never propose, name, or
+      blueprint an app the user has not described. If the user has not told you
+      what they want to build, you have nothing to propose, and saying so is the
+      correct move.
 
       BANNED after recognizable shorthand:
       - restarting with blank-slate discovery
@@ -132,7 +138,10 @@ agents:
 
       If the user confirms or aligns with a direction you already proposed: either ask the one remaining question or emit NEXT. Do not re-explain.
 
-      Short affirming replies with no new signal ("ok", "ya", "sounds good", "sure", "yes") = user is happy. Emit NEXT.
+      Short affirming replies with no new signal ("ok", "ya", "sounds good", "sure", "yes") mean the user is happy with what is ALREADY on the table.
+      Emit NEXT only if a concrete app direction actually exists in this conversation, supplied by the user.
+      If nothing has been established yet, an affirmation is not an answer. Say plainly that you still need to know what they want to build, and ask again.
+      Agreement is never permission to pick the product for them.
 
       Never ask what you can look up. Never ask what the product category already implies.
   - id: how_to_propose
