@@ -48,7 +48,7 @@ def default_app_validation_strategy(
     local_available: bool | None = None,
     docker_available: bool | None = None,
 ) -> tuple[str, str]:
-    env_map = env or os.environ
+    env_map = os.environ if env is None else env
     if str(env_map.get("E2B_API_KEY", "")).strip():
         return "e2b", "resolved from E2B availability"
     if docker_available is None:
@@ -70,7 +70,7 @@ def resolve_app_validation_strategy(
     local_available: bool | None = None,
     docker_available: bool | None = None,
 ) -> tuple[str, str]:
-    env_map = env or os.environ
+    env_map = os.environ if env is None else env
     env_strategy = normalize_app_validation_strategy(env_map.get("MOZAIKS_APP_VALIDATION_STRATEGY"))
 
     for candidate, source in (
