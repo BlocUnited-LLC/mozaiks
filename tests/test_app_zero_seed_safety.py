@@ -83,3 +83,36 @@ def test_kpi_event_names_match_the_metric_registry() -> None:
             f"expected the seed to write {KPI_SNAPSHOT_EVENT_PREFIX}{metric_id}"
         )
         assert metric_id in known, f"{metric_id} is not a registered metric id"
+
+
+def test_script_runs_from_a_plain_checkout() -> None:
+    """`python scripts/seed_app_zero.py` must work without PYTHONPATH.
+
+    Python puts the script's own directory on sys.path, not the repo root, so
+    `import mozaiksai` fails from a checkout unless the script adds the root
+    itself. Verifying with PYTHONPATH set hides this entirely.
+    """
+    source = _source()
+    assert "sys.path.insert(0, str(_REPO_ROOT))" in source, (
+        "the script must put the repo root on sys.path so a plain checkout works"
+    )
+
+
+def test_script_imports_without_pythonpath(tmp_path) -> None:
+    """Actually execute it the way a developer would, with PYTHONPATH cleared."""
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    # --help exercises import and argument wiring without touching a database.
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--help"],
+        cwd=str(SCRIPT.parents[1]),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, f"script failed to start:\n{result.stderr}"
+    assert "--purge" in result.stdout
