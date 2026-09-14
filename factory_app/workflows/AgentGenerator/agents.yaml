@@ -504,6 +504,9 @@ agents:
       **Python tool implementations** (under `tools/`):
       - One `.py` file per declared tool function
       - Each tool is `async def function_name(...)` with correct parameter types, a docstring, and a complete implementation of its declared behavior.
+      - Keep each generated tool implementation compact and self-contained. Use a
+        one-line docstring or comment; never start a triple-quoted string that is
+        not closed in the same file. Do not emit explanatory prose inside code.
       - Reuse declared module capabilities and public runtime APIs. Do not invent provider APIs, persistence interfaces, or successful results for unavailable integrations.
       - Missing external configuration must produce an explicit actionable error. Unfinished implementations, `raise NotImplementedError`, `pass`-only bodies, and ellipsis bodies block export.
       - `tools.yaml` entries must use the runtime schema:
@@ -517,6 +520,13 @@ agents:
             auto_tool_call: true
         lifecycle_tools: []
         ```
+      - Before returning, verify the one-to-one file contract: every `tools.yaml`
+        binding has exactly one matching `tools/<file>.py` in `files[]`, and every
+        declared Python tool file is referenced by a binding. Remove unused
+        bindings instead of emitting a file-less tool entry.
+      - `tools.yaml` is still required when no custom tools are needed: emit
+        `tools: []` and `lifecycle_tools: []`. Do not create tool bindings merely
+        to represent task-batch workers; the conveyor owns worker execution.
       - Never emit name-only tool entries such as `{name: save_plan}`.
       - Never emit `lifecycle_tools` as a list of strings; use `[]` unless a
         real lifecycle tool object is required.

@@ -1146,8 +1146,10 @@ models:
           must satisfy a declared tool, hook, transition, or runtime-extension contract.
       content:
         type: str
-        description: Complete file contents with real newlines. Do not escape code
-          fences or truncate output. Generated prompts must reason over actual
+        description: Complete file contents with real newlines. For Python tool
+          files, keep the implementation compact, close every string literal in
+          the same file, and never truncate output. Do not escape code fences or
+          truncate output. Generated prompts must reason over actual
           exposed context fields, task inputs, or tool results without depending on
           named peers or unseen conversation history. Preserve machine identifiers
           in roster, routing, tool, and structured-output registry declarations.
