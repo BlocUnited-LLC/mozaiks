@@ -187,6 +187,27 @@ definitions:
       type: state
       default: null
 
+  concept_overview:
+    type: string
+    description: Product summary from the approved ValueEngine concept blueprint.
+    source:
+      type: state
+      default: null
+
+  value_proposition:
+    type: string
+    description: Approved concept's value proposition, used to justify a visual direction.
+    source:
+      type: state
+      default: null
+
+  target_user:
+    type: string
+    description: Approved concept's primary user, used to justify a visual direction.
+    source:
+      type: state
+      default: null
+
   tech_stack:
     type: string
     description: Optional frontend stack summary from discovery.
@@ -367,6 +388,9 @@ definitions:
 agents:
   ThemeInterviewAgent:
     variables:
+      - concept_overview
+      - value_proposition
+      - target_user
       - app_url
       - css_snapshot
       - screenshot_description
