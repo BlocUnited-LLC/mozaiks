@@ -130,10 +130,11 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
         ["AppGenerator"],
         ["SecurityReadiness"],
     ]
+    # database_setup_selector is intentionally absent: it gated the build on a
+    # question the build does not need answered.
     assert transition_steps == [
         "app_type_selector",
         "coding_journey_selector",
-        "database_setup_selector",
         "app_review",
     ]
     assert graph.artifact_dependency_graph["workflow_bundle"] == [

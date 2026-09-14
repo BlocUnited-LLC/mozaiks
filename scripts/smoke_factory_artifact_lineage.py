@@ -495,7 +495,6 @@ async def _run_lineage_smoke_with_store(
     expected_transition_steps = [
         "app_type_selector",
         "coding_journey_selector",
-        "database_setup_selector",
         "app_review",
     ]
     if workflow_steps != expected_workflow_steps:
