@@ -50,21 +50,48 @@ def test_value_engine_interview_agent_bans_generic_questions_after_shorthand() -
 
 
 def test_value_engine_interview_agent_must_recommend_when_user_delegates_choice() -> None:
+    """Delegation must produce a decision, never the question handed back."""
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
 
-    assert "If the user delegates choice" in agents_text
-    assert "Give one working direction as your suggested starting point" in agents_text
-    assert "do not ask them to choose" in agents_text
-    assert "Do not hard-code launch/funding milestones, traders, founders, or betting mechanics as the only path" in agents_text
+    assert "make the call yourself and say what you chose" in agents_text
+    assert "Never hand the decision back" in agents_text
+    assert "decide and move on. Do not hand the choice back" in agents_text
 
 
-def test_value_engine_interview_agent_uses_working_hypothesis_not_overconfident_assumption() -> None:
+def test_value_engine_interview_agent_proposes_with_a_default_and_an_alternative() -> None:
+    """The advisory shape: carry a default, and leave the door open.
+
+    A recommendation with no default is a survey question in disguise; a
+    recommendation with no alternative railroads the user. Both halves are
+    load-bearing for the conversation feeling like expertise.
+    """
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
 
-    assert "working direction" in agents_text
-    assert "working direction as your suggested starting point" in agents_text
+    assert "ALWAYS carry a default" in agents_text
+    assert "OPEN THE DOOR" in agents_text
+    assert "Never present a numbered menu and ask them to choose" in agents_text
     assert "I would assume [target user]" not in agents_text
     assert "traders bet on verifiable launch/funding/traction milestones" not in agents_text
+
+
+def test_value_engine_interview_agent_is_grounded_in_the_buildable_menu() -> None:
+    """Proposals must name things the generator can actually build.
+
+    The menu is injected by prompt middleware; without that wiring the agent
+    has no inventory and falls back to generic discovery questions.
+    """
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+    middleware = yaml.safe_load((VALUE_ENGINE_DIR / "middleware.yaml").read_text(encoding="utf-8"))
+
+    assert "[BUILDABLE MENU]" in agents_text
+    assert "Never promise anything absent from [BUILDABLE MENU]" in agents_text
+
+    hooks = [
+        entry for entry in middleware["prompt_middleware"]
+        if entry.get("function") == "inject_buildable_menu_context"
+    ]
+    assert len(hooks) == 1, "the buildable menu hook must be wired exactly once"
+    assert hooks[0]["agent"] == "ValueInterviewAgent"
 
 
 def test_value_engine_interview_complete_trigger_still_uses_exact_next() -> None:

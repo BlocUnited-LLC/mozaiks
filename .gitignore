@@ -80,6 +80,10 @@ logs/logs/
 logs/agent_outputs/
 logs/workflow_converter/
 generated_apps/
+# Generator output staged for validation/promotion is never source. A live
+# Studio run writes app-intelligence artifacts here; one already reached main
+# this way before it was ignored.
+generated/app_intelligence/
 uploads/
 mozaiks-platform/
 
