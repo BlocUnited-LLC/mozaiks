@@ -154,6 +154,8 @@ APPROVED_TOP_LEVEL_FAMILIES: frozenset[str] = frozenset(
         "logs",            # Logging configuration package
         "mozaiks",         # mozaiks namespace package (if present)
         "ai-pricing",      # Approved AI pricing catalogs
+        "chat-ui",         # Source tree for the packaged mozaiks_chat_ui bundle
+        "mozaiks.egg-info", # Standard setuptools metadata included in sdists
     }
 )
 
