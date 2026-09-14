@@ -62,8 +62,6 @@ Covers sync pure helpers (no IO/filesystem):
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 from pydantic import BaseModel
 
 from mozaiksai.control_plane.artifact_promotion import (
@@ -72,7 +70,6 @@ from mozaiksai.control_plane.artifact_promotion import (
     _build_scoped_execution_snapshot,
     _commit_metadata_document,
     _commit_metadata_payload,
-    _is_relative_to,
     _normalize_relative_path,
     _normalized_policy_decisions,
     _validation_status_from_evidence,
@@ -87,33 +84,8 @@ from mozaiksai.control_plane.validation_evidence import ValidationEvidence
 from mozaiksai.core.artifacts import ArtifactValidationStatus
 
 # ---------------------------------------------------------------------------
-# 1. _is_relative_to
 # ---------------------------------------------------------------------------
 
-class TestIsRelativeTo:
-    def test_child_inside_parent_true(self):
-        parent = Path("/workspace/app")
-        child = Path("/workspace/app/modules/wallet")
-        assert _is_relative_to(child, parent) is True
-
-    def test_child_outside_parent_false(self):
-        parent = Path("/workspace/app")
-        child = Path("/workspace/other/file.py")
-        assert _is_relative_to(child, parent) is False
-
-    def test_same_path_true(self):
-        p = Path("/workspace/app")
-        assert _is_relative_to(p, p) is True
-
-    def test_deep_nested_child_true(self):
-        parent = Path("/a")
-        child = Path("/a/b/c/d/e")
-        assert _is_relative_to(child, parent) is True
-
-    def test_sibling_with_shared_prefix_false(self):
-        parent = Path("/workspace/app")
-        child = Path("/workspace/app2/file.py")
-        assert _is_relative_to(child, parent) is False
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,11 @@ from mozaiksai.control_plane.validation_evidence import (
     ValidationEvidence,
     normalize_validation_evidence,
 )
+from mozaiksai.core.utils.path_containment import contains_symlink_component, resolve_inside
+
+
+def _resolve_inside(parent: Path, child: Path) -> Path:
+    return resolve_inside(parent, child, error=RefinementPromotionError, message="Refusing to write outside allowed workspace")
 
 PROMOTION_BACKUP_DIRNAME = "backups"
 
@@ -71,22 +76,6 @@ class _PromotionTarget:
     backup_file: Path | None
 
 
-def _is_relative_to(child: Path, parent: Path) -> bool:
-    try:
-        child.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def _resolve_inside(parent: Path, child: Path) -> Path:
-    parent_resolved = parent.resolve()
-    child_resolved = child.resolve()
-    if not _is_relative_to(child_resolved, parent_resolved):
-        raise RefinementPromotionError(f"Refusing to write outside allowed workspace: {child}")
-    return child_resolved
-
-
 def _normalize_bundle_path(path: str) -> tuple[str | None, RefinementPromotionFileStatus | None, str | None]:
     raw = str(path or "").strip()
     if not raw:
@@ -113,15 +102,6 @@ def _normalize_bundle_path(path: str) -> tuple[str | None, RefinementPromotionFi
     return relative_path, None, None
 
 
-def _contains_symlink_component(root: Path, relative_path: str) -> bool:
-    if root.is_symlink():
-        return True
-    current = root
-    for part in PurePosixPath(relative_path).parts:
-        current = current / part
-        if current.exists() and current.is_symlink():
-            return True
-    return False
 
 
 def _load_execution_result(
@@ -204,7 +184,7 @@ def _prepare_promotion_file(
             ),
             None,
         )
-    if staged_file.is_symlink() or _contains_symlink_component(staging_area / WORKSPACE_DIRNAME, relative_path):
+    if staged_file.is_symlink() or contains_symlink_component(staging_area / WORKSPACE_DIRNAME, relative_path):
         return (
             RefinementPromotionFile(
                 path=relative_path,
@@ -223,7 +203,7 @@ def _prepare_promotion_file(
             ),
             None,
         )
-    if source_file.is_symlink() or _contains_symlink_component(source_root, relative_path):
+    if source_file.is_symlink() or contains_symlink_component(source_root, relative_path):
         return (
             RefinementPromotionFile(
                 path=relative_path,

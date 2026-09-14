@@ -9,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.control_plane.contracts import is_secret_sensitive_path
 from mozaiksai.control_plane.dry_run import RefinementExecutionPlan
+from mozaiksai.core.utils.path_containment import is_relative_to, resolve_inside
+
+
+def _resolve_inside(parent: Path, child: Path) -> Path:
+    return resolve_inside(parent, child, error=ValueError, message="Refusing to write outside staging area")
 
 DEFAULT_STAGING_ROOT = Path(".refinement_staging")
 README_FILENAME = "README.md"
@@ -49,20 +54,6 @@ class RefinementStagingResult(BaseModel):
     mutation_allowed: Literal[False] = False
 
 
-def _is_relative_to(child: Path, parent: Path) -> bool:
-    try:
-        child.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def _resolve_inside(parent: Path, child: Path) -> Path:
-    parent_resolved = parent.resolve()
-    child_resolved = child.resolve()
-    if not _is_relative_to(child_resolved, parent_resolved):
-        raise ValueError(f"Refusing to write outside staging area: {child}")
-    return child_resolved
 
 
 def _plan_staging_path(plan: RefinementExecutionPlan, staging_root: Path | None) -> Path:
@@ -76,7 +67,7 @@ def _plan_staging_path(plan: RefinementExecutionPlan, staging_root: Path | None)
     if staging_root is not None:
         root = staging_root.resolve()
         resolved = candidate.resolve()
-        if not _is_relative_to(resolved, root):
+        if not is_relative_to(resolved, root):
             raise ValueError("Refinement staging area must stay inside staging_root.")
     return candidate
 
@@ -135,7 +126,7 @@ def _copy_single_affected_file(
 
     source_root = source_bundle_path.resolve()
     source_file = (source_root / reported_path).resolve()
-    if not _is_relative_to(source_file, source_root):
+    if not is_relative_to(source_file, source_root):
         return RefinementStagedFile(
             path=reported_path,
             status="skipped_unsafe",
@@ -204,7 +195,7 @@ def create_refinement_staging_workspace(
 ) -> RefinementStagingResult:
     staging_root_path = Path(staging_root).resolve() if staging_root is not None else None
     staging_area = validate_staging_path(plan, staging_root_path).resolve()
-    if staging_root_path is not None and not _is_relative_to(staging_area, staging_root_path):
+    if staging_root_path is not None and not is_relative_to(staging_area, staging_root_path):
         raise ValueError("Refinement staging area must stay inside staging_root.")
 
     staging_area.mkdir(parents=True, exist_ok=True)
