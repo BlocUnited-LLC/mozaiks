@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager, redirect_stdout
@@ -176,7 +177,12 @@ def _workflow_generation_prompt(
         f"{trigger_clause}\n"
         f"{task_batch_clause}\n"
         "Keep the smoke bundle concise: small agent roster, small structured models, "
-        "no external integrations, and no custom UI unless the assigned pattern truly requires it.\n"
+        "no external integrations, and no custom UI unless the assigned pattern truly requires it. "
+        "Keep each Python tool implementation compact with a one-line docstring or comment; "
+        "close every string literal in the same file. Emit tools.yaml with empty tools and "
+        "lifecycle_tools lists when no custom tool is needed; do not create bindings merely "
+        "to represent task-batch workers. Before returning, ensure every tools.yaml binding "
+        "has exactly one matching tools/<file>.py entry in files[].\n"
         "Keep complete tool implementations workflow-local under tools/. Unfinished stubs block export.\n"
         "Return only WorkflowBundleBuilderOutput JSON."
     )
@@ -694,11 +700,25 @@ async def _export_workflow_bundle(
         with _patched_download_tool() as download_module:
             stdout_buffer = io.StringIO()
             with redirect_stdout(stdout_buffer):
-                return await download_module.generate_and_download(
+                result = await download_module.generate_and_download(
                     DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
                     agent_message="Workflow bundle ready.",
                     context_variables=_Context(context),
                 )
+            if result.get("status") != "success":
+                print(
+                    json.dumps(
+                        {
+                            "workflow_bundle_quality_gate": result.get("workflow_bundle_quality_gate"),
+                            "workflow_bundle_repair": result.get("workflow_bundle_repair"),
+                            "validation_errors": result.get("validation_errors"),
+                        },
+                        default=str,
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+            return result
     finally:
         if old_generated_root is None:
             os.environ.pop("MOZAIKS_GENERATED_ARTIFACTS_PATH", None)
@@ -732,10 +752,10 @@ async def run_live_agentgenerator_pack_smoke(
     app_id = f"live-agentgenerator-pack-{uuid.uuid4().hex[:8]}"
     chat_id = f"chat_{workflow_name.lower()}_{uuid.uuid4().hex[:8]}"
     user_id = "live-smoke-user"
-    generated_root = (generated_root or (REPO_ROOT / ".tmp" / "agentgenerator_live_pack" / app_id / "generated")).resolve()
+    generated_root = (generated_root or (Path(tempfile.gettempdir()) / "mozaiks-ag2" / app_id / "generated")).resolve()
     active_workflows_root = (
         active_workflows_root
-        or (REPO_ROOT / ".tmp" / "agentgenerator_live_pack" / app_id / "active_workflows")
+        or (Path(tempfile.gettempdir()) / "mozaiks-ag2" / app_id / "active_workflows")
     ).resolve()
     generated_root.mkdir(parents=True, exist_ok=True)
     active_workflows_root.mkdir(parents=True, exist_ok=True)
@@ -900,7 +920,11 @@ async def run_live_agentgenerator_pack_smoke(
             )
             download_result = await _export_workflow_bundle(context=context, generated_root=generated_root)
 
-        bundle_root = generated_root / "workflows" / app_id
+        build_binding = context.get("run_build_binding") or {}
+        build_id = str(build_binding.get("build_id") or "").strip()
+        if not build_id:
+            raise RuntimeError("run_build_binding.build_id is required to resolve the generated workflow bundle")
+        bundle_root = generated_root / "workflows" / app_id / build_id
         validation = validate_generated_workflow_bundle(
             bundle_root=bundle_root,
             expected_workflows=context["workflows_spec"],
