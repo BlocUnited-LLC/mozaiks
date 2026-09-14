@@ -4,20 +4,24 @@ import {
   useTransitionMotion,
 } from '@mozaiks/chat-ui/platform';
 
+// The person answering this has just described an app idea. "Autonomous" and
+// "Guided" name our process; they say nothing about what the chooser gets.
+// These name the outcome instead, and avoid build vocabulary - "design docs",
+// "app bundle" - that means nothing to someone who has never shipped software.
 const OPTION_VIEW = {
   autonomous: {
-    label: 'Autonomous Build',
+    label: 'Build it for me',
     description:
-      'Let Mozaiks generate the design docs and app bundle with minimal interruption.',
-    cta: 'Choose Autonomous',
-    badge: 'Fastest path',
+      'I make the remaining design calls myself and bring you the finished app to look at.',
+    cta: 'Build it for me',
+    badge: 'Fastest',
   },
   guided: {
-    label: 'Guided Build',
+    label: 'Build it with me',
     description:
-      'Review key design choices before generation continues.',
-    cta: 'Choose Guided',
-    badge: 'Review checkpoints',
+      'I stop and check with you on the decisions that change how your app looks and works.',
+    cta: 'Build it with me',
+    badge: 'You review',
   },
 };
 
@@ -33,8 +37,8 @@ export default function CodingJourneySelector({ transition, onResolve, overlayTi
   return (
     <TransitionChoicePanel
       eyebrow="Build Mode"
-      title="Choose Your Build Path"
-      subtitle="Decide how much review you want before generation continues into design and code." 
+      title="How involved do you want to be?"
+      subtitle="Both paths build the same app. This only sets how often I stop to check with you." 
       overlayTitleId={overlayTitleId}
       overlayDescriptionId={overlayDescriptionId}
       entered={motion.entered}
