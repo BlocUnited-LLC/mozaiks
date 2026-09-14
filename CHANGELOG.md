@@ -32,8 +32,6 @@ This project follows a practical pre-1.0 changelog format:
 - `SubscriptionContractReview` now composes the shared `Metric` primitive
   instead of its own copy.
 
-### Fixed
-
 - Workflow UI: `ActionPlan` no longer crashes on render. It referenced two
   undefined names (`fonts`, `colors`), so the branch containing them threw a
   `ReferenceError` whenever it was reached.
