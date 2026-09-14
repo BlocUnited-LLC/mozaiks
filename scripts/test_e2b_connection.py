@@ -1,12 +1,9 @@
-"""
-Test E2B Sandbox Connection.
-"""
+"""Run a minimal live E2B connectivity check."""
+
 import os
-import sys
 
 from dotenv import load_dotenv
 
-# Load .env
 load_dotenv()
 
 try:
@@ -14,33 +11,32 @@ try:
 except ImportError:
     print("Error: e2b_code_interpreter package is not installed.")
     print("Run: pip install e2b-code-interpreter")
-    sys.exit(1)
+    raise SystemExit(1) from None
 
-def test_sandbox():
+
+def test_sandbox() -> bool:
     api_key = os.getenv("E2B_API_KEY")
     if not api_key:
         print("Error: E2B_API_KEY not found in environment variables.")
-        return
+        return False
 
     print(f"Found E2B_API_KEY: {api_key[:4]}...{api_key[-4:]}")
     print("Initializing Sandbox...")
 
     try:
-        # Create a sandbox
         with Sandbox.create() as sandbox:
             print("Sandbox created successfully!")
-            
-            # Run a simple command
             print("Running 'echo hello'...")
             result = sandbox.commands.run("echo hello")
-            
             if result.stdout.strip() == "hello":
-                print("✅ Success! Sandbox is working.")
-            else:
-                print(f"⚠️ Unexpected output: {result.stdout}")
-                
-    except Exception as e:
-        print(f"❌ Failed to connect to E2B: {e}")
+                print("Success: E2B sandbox is working.")
+                return True
+            print(f"Unexpected output: {result.stdout}")
+            return False
+    except Exception as exc:
+        print(f"Failed to connect to E2B: {exc}")
+        return False
+
 
 if __name__ == "__main__":
-    test_sandbox()
+    raise SystemExit(0 if test_sandbox() else 1)
