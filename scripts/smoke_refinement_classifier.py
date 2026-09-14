@@ -248,6 +248,8 @@ async def run_smoke() -> dict[str, Any]:
     for case in SMOKE_CASES:
         request = resolver.request_from_payload(
             payload=_request_payload(case),
+            app_id="refinement-classifier-smoke-app",
+            user_id="refinement-classifier-smoke-user",
             requested_workflow_id="AppGenerator",
         )
         if request is None:
