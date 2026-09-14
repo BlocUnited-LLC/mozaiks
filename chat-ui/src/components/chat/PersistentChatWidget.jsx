@@ -53,6 +53,7 @@ const PersistentChatWidget = ({
   workflowName,
   pageContext = null,
   pagePath = null,
+  freshStartPath = null,
 }) => {
   const {
     setConversationMode,
@@ -409,8 +410,15 @@ const PersistentChatWidget = ({
       handleBackToWorkspace();
       return;
     }
-    setConversationMode('workflow');
     setIsExpanded(false);
+    if (freshStartPath) {
+      // Start where the app declares builds begin. Routing to bare workflow
+      // mode instead would resolve a workflow from stored client state, which
+      // lands the user in whichever workflow this browser last touched.
+      navigate(freshStartPath);
+      return;
+    }
+    setConversationMode('workflow');
     navigate('/chat?mode=workflow');
   };
 

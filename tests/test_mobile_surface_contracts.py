@@ -410,3 +410,44 @@ def test_widget_workflow_button_announces_its_state() -> None:
     # The decorative mark must not contribute a competing name.
     assert 'alt=""\n                    aria-hidden="true"' in widget_source
     assert 'alt="Go to workflows"' not in widget_source
+
+
+def test_widget_no_sessions_routes_to_declared_fresh_start_entrypoint() -> None:
+    """With no running workflow the widget must open the app's own declared
+    start-a-build surface, not bare workflow mode.
+
+    Routing to /chat?mode=workflow resolved a workflow from stored client
+    state, so a user with no sessions landed in whichever workflow this browser
+    last touched — observed live as ExistingAppDiscovery (the brownfield
+    adoption flow) instead of the create-app selector.
+    """
+    wrapper_source = _read("chat-ui/src/widget/GlobalChatWidgetWrapper.jsx")
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+
+    # Discovered from shell config, never hardcoded, so any app's own
+    # entrypoint declaration is honored.
+    assert "p?.meta?.freshStart" in wrapper_source
+    assert "freshStartPath={freshStartPath}" in wrapper_source
+    assert "freshStartPath = null," in widget_source
+    assert "navigate(freshStartPath);" in widget_source
+
+    # The guessed-workflow route stays only as a last resort for an app that
+    # declares no entrypoint at all.
+    access_block = widget_source.split("const handleWorkflowAccess")[1].split("};")[0]
+    assert access_block.index("navigate(freshStartPath);") < access_block.index(
+        "navigate('/chat?mode=workflow');"
+    )
+
+
+def test_factory_declares_a_fresh_start_entrypoint() -> None:
+    """The widget's fresh-start routing depends on this declaration existing."""
+    registry = json.loads(
+        _read("factory_app/workflows/extended_orchestration/extension_registry.json")
+    )
+    fresh = [
+        entry for entry in registry.get("entrypoints", [])
+        if (entry.get("meta") or {}).get("freshStart")
+    ]
+    assert fresh, "no entrypoint declares meta.freshStart"
+    assert fresh[0]["path"] == "/create"
+    assert fresh[0]["transition"] == "app_type_selector"
