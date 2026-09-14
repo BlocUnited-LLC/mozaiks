@@ -14,6 +14,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- The assistant widget starts a build at the app's declared entrypoint. With no
+  workflow running, the workspace button routed to bare workflow mode, which
+  resolves a workflow from stored client state — so a user with nothing running
+  landed in whichever workflow that browser last touched (observed live as the
+  brownfield adoption flow instead of the create-app selector). It now opens the
+  entrypoint the app declares with `meta.freshStart`, discovered from shell
+  config rather than hardcoded, so each app's own start-a-build surface is used.
+
 - The widget's workflow button announces how many builds are running. The
   brand mark inside it supplied a static accessible name, so assistive tech
   read "Go to workflows" even with several sessions active while the tooltip

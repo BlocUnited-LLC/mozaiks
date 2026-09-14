@@ -63,6 +63,16 @@ const GlobalChatWidgetWrapper = () => {
     return pages.find((p) => p.path && matchRoutePattern(p.path, location.pathname)) || null;
   }, [pages, location.pathname]);
   const pageContext = matchedPage?.meta?.ai_context || null;
+
+  // The declared fresh-start entrypoint (extension_registry.json entrypoints[]
+  // with meta.freshStart, projected into shell config). This is where a user
+  // with no running workflow should begin — the app's own start-a-build
+  // surface, whatever it is, rather than a guessed workflow.
+  const freshStartPath = useMemo(() => {
+    if (!Array.isArray(pages)) return null;
+    const entry = pages.find((p) => p?.path && p?.meta?.freshStart);
+    return entry?.path || null;
+  }, [pages]);
   // Stable page identity (the route pattern) so the backend can resolve the
   // page's declared ask-context actions server-side.
   const pagePath = matchedPage?.path || null;
@@ -105,6 +115,7 @@ const GlobalChatWidgetWrapper = () => {
         conversationMode={conversationMode}
         pageContext={pageContext}
         pagePath={pagePath}
+        freshStartPath={freshStartPath}
       />
     </>
   );
