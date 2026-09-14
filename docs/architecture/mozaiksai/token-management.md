@@ -313,10 +313,16 @@ python scripts\update_usage_pricing_catalog.py `
 ```
 
 The GitHub workflow `.github/workflows/update-usage-pricing-catalog.yml` runs
-the same refresh weekly and opens a normal PR when provider reference prices
-change. AG2 intentionally does not maintain model prices; Mozaiks treats
+the same refresh daily and opens or updates a normal PR when provider reference
+prices change. AG2 intentionally does not maintain model prices; Mozaiks treats
 provider pricing as a runtime catalog concern so model launches and provider
 price changes do not require framework code changes.
+
+The automation branch is updated in place while its PR remains open. This keeps
+an unmerged PR from becoming a stale snapshot if LiteLLM changes during review.
+The workflow validates both mirrored files, runs the pricing regression tests,
+and refuses to publish a catalog with an unexpected row loss. Merge only after
+those checks pass; runtime never fetches provider prices live.
 
 The updater is intentionally CI/PR based instead of runtime-live fetching. This
 keeps cost estimates reproducible, avoids startup dependency on GitHub, and

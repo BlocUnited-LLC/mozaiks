@@ -3,7 +3,9 @@ name: Update usage pricing catalog
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 9 * * 1"
+    # Provider catalogs can change without a framework release. Refresh daily;
+    # the stable automation branch is updated in place if its PR is still open.
+    - cron: "17 9 * * *"
 
 permissions:
   contents: write
@@ -33,6 +35,29 @@ jobs:
 
       - name: Validate generated catalog
         run: python scripts/update_usage_pricing_catalog.py --check
+
+      - name: Verify mirrored catalogs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          paths = (
+              Path("ai-pricing/catalogs/usage-pricing.generated.json"),
+              Path("mozaiksai/core/usage/catalogs/usage-pricing.generated.json"),
+          )
+          payloads = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+          if payloads[0] != payloads[1]:
+              raise SystemExit("generated usage-pricing catalogs differ")
+          if payloads[0].get("schema_version") != "mozaiks.usage_pricing.v1":
+              raise SystemExit("generated catalog has an unsupported schema version")
+          if not isinstance(payloads[0].get("models"), dict) or not payloads[0]["models"]:
+              raise SystemExit("generated catalog has no model rows")
+          print(f"verified {len(payloads[0]['models'])} mirrored model rows")
+          PY
+
+      - name: Run pricing regression tests
+        run: python -m pytest -q --no-cov tests/test_usage_pricing_catalog.py tests/test_usage_pricing.py
 
       - name: Open pricing catalog PR
         uses: peter-evans/create-pull-request@v8
