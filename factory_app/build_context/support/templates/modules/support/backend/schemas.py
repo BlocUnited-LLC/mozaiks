@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any, TypedDict
-from uuid import uuid4
 
 SUPPORT_STATUSES = {"open", "waiting", "resolved", "archived"}
 SUPPORT_SEVERITIES = {"low", "medium", "high"}
@@ -13,13 +12,12 @@ class SupportRequestRecord(TypedDict, total=False):
     subject_app_id: str
     requester_id: str | None
     subject: str
-    message: str
     page_url: str | None
     page_title: str | None
     severity: str
     status: str
     assignee_id: str | None
-    message_thread_id: str | None
+    message_thread_id: str
     created_at: str
     updated_at: str
     resolved_at: str | None
@@ -53,6 +51,7 @@ def coerce_limit(value: Any, *, default: int = 50, maximum: int = 100) -> int:
 
 def build_support_request_record(
     *,
+    request_id: str,
     subject_app_id: str,
     requester_id: str | None,
     message: str,
@@ -60,22 +59,21 @@ def build_support_request_record(
     page_url: str | None = None,
     page_title: str | None = None,
     severity: str = "low",
-    message_thread_id: str | None = None,
+    message_thread_id: str,
 ) -> SupportRequestRecord:
     now = timestamp_now()
     clean_message = normalize_string(message)
     return {
-        "request_id": f"sr_{uuid4().hex}",
+        "request_id": request_id,
         "subject_app_id": normalize_string(subject_app_id),
         "requester_id": normalize_string(requester_id) or None,
         "subject": normalize_string(subject) or (clean_message[:80] if clean_message else "Support request"),
-        "message": clean_message,
         "page_url": normalize_string(page_url) or None,
         "page_title": normalize_string(page_title) or None,
         "severity": normalize_severity(severity),
         "status": "open",
         "assignee_id": None,
-        "message_thread_id": normalize_string(message_thread_id) or None,
+        "message_thread_id": normalize_string(message_thread_id),
         "created_at": now,
         "updated_at": now,
         "resolved_at": None,

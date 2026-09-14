@@ -162,7 +162,12 @@ async def test_send_message_emits_recipient_notification_payload() -> None:
     service = MessageService()
     created = await service.create_thread(ctx, participant_ids=["user_2"], thread_type="support")
 
-    result = await service.send_message(ctx, thread_id=created["thread"]["thread_id"], body="Hello")
+    result = await service.send_message(
+        ctx,
+        thread_id=created["thread"]["thread_id"],
+        body="Hello",
+        allow_support_thread_sender=True,
+    )
 
     assert result["success"] is True
     event_type, payload = ctx.emitted[-1]

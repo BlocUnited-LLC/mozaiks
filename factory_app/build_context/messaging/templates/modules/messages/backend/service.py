@@ -106,12 +106,17 @@ class MessageService:
         related_type: str | None = None,
         related_id: str | None = None,
         limit: int = 50,
+        include_support_threads: bool = False,
     ) -> dict[str, Any]:
         query = participant_thread_query(ctx)
         if status:
             query["status"] = normalize_status(status)
         if thread_type:
             query["thread_type"] = normalize_thread_type(thread_type)
+        if not include_support_threads:
+            if query.get("thread_type") == "support":
+                return {"threads": [], "total": 0}
+            query.setdefault("thread_type", {"$ne": "support"})
         if scope_type:
             query.update(current_scope_query(ctx, scope_type=normalize_scope_type(scope_type), scope_id=scope_id))
         if scope_id:
@@ -132,9 +137,12 @@ class MessageService:
         thread_id: str,
         message_limit: int = 50,
         allow_nonparticipant_reader: bool = False,
+        allow_support_thread_reader: bool = False,
     ) -> dict[str, Any]:
         thread = await self._get_authorized_thread(ctx, thread_id=thread_id)
         if not thread:
+            return {"thread": None, "messages": [], "error": "thread not found"}
+        if thread.get("thread_type") == "support" and not allow_support_thread_reader:
             return {"thread": None, "messages": [], "error": "thread not found"}
         if not allow_nonparticipant_reader and not is_participant(thread, actor_id(ctx)):
             return {"thread": None, "messages": [], "error": "access denied"}
@@ -156,6 +164,7 @@ class MessageService:
         recipient_ids: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         allow_nonparticipant_sender: bool = False,
+        allow_support_thread_sender: bool = False,
     ) -> dict[str, Any]:
         clean_body = normalize_string(body)
         if not clean_body:
@@ -165,6 +174,8 @@ class MessageService:
 
         thread = await self._get_authorized_thread(ctx, thread_id=thread_id)
         if not thread:
+            return {"success": False, "error": "thread not found"}
+        if thread.get("thread_type") == "support" and not allow_support_thread_sender:
             return {"success": False, "error": "thread not found"}
         if thread.get("status") != "open":
             return {"success": False, "error": "thread is closed"}
@@ -233,7 +244,7 @@ class MessageService:
     async def mark_thread_read(self, ctx, *, thread_id: str) -> dict[str, Any]:
         thread = await self._get_authorized_thread(ctx, thread_id=thread_id)
         user_id = actor_id(ctx)
-        if not thread or not is_participant(thread, user_id):
+        if not thread or thread.get("thread_type") == "support" or not is_participant(thread, user_id):
             return {"success": False, "error": "thread not found"}
         await self.reads.upsert(
             ctx,

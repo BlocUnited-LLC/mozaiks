@@ -1177,6 +1177,13 @@ class ModuleLoader:
         # Bind optional app support code to this workspace, even when another
         # workspace has a regular services package elsewhere on sys.path.
         self._register_module_package("services", self._base / "services")
+        self._clear_registered_package("modules")
+        # Pack modules may use another declared pack's backend service. Resolve
+        # those imports only from this app and its explicitly composed defaults.
+        self._register_module_package("modules", self._base / "modules")
+        sys.modules["modules"].__path__ = [
+            str(root / "modules") for root in self._module_roots
+        ]
 
     def discover_module_names(self) -> list[str]:
         """Discover active app modules and explicitly composed host defaults."""

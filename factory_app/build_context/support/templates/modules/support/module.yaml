@@ -3,7 +3,7 @@ module:
   id: support
   display_name: Support
   version: 1.0.0
-  description: App support request metadata. Conversation bodies are stored in the messages module.
+  description: App support requests and ticket-authorized conversations. Conversation bodies are stored in the messages module.
   owner: app
   visibility: private
   handler: backend.handler:SupportHandler
@@ -15,11 +15,11 @@ permissions:
   - id: support.read
     description: Read all support requests (operator/admin).
   - id: support.manage
-    description: Manage support queues, link threads, and update request status.
+    description: Manage support queues, reply to requests, and update request status.
 
 actions:
   - id: create_support_request
-    description: Create a support request. The UI should create/link a messages support thread for conversation history.
+    description: Create a support request with its linked messages thread and first message.
     handler_method: create_support_request
     input_schema:
       type: object
@@ -36,8 +36,6 @@ actions:
           enum: [low, medium, high]
         # app_id — the app this ticket is about. Stored as subject_app_id.
         app_id:
-          type: string
-        message_thread_id:
           type: string
     output_schema:
       type: object
@@ -78,25 +76,43 @@ actions:
         total: { type: integer }
     permissions: [support.submit]
 
-  - id: link_message_thread
-    description: Attach a messages.thread_id to a support request.
-    handler_method: link_message_thread
+  - id: get_support_conversation
+    description: Read a ticket conversation as its requester or a support reader.
+    handler_method: get_support_conversation
     input_schema:
       type: object
       additionalProperties: false
-      required: [request_id, message_thread_id]
+      required: [request_id]
       properties:
         request_id: { type: string }
-        message_thread_id: { type: string }
     output_schema:
       type: object
       required: [success]
       properties:
         success: { type: boolean }
-        request_id: { type: string }
-        message_thread_id: { type: string }
+        thread: { type: object }
+        messages: { type: array }
         error: { type: string }
-    permissions: [support.manage]
+    permissions: [support.submit]
+
+  - id: reply_support_request
+    description: Reply to an open ticket as its requester or a support manager.
+    handler_method: reply_support_request
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [request_id, body]
+      properties:
+        request_id: { type: string }
+        body: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        message: { type: object }
+        error: { type: string }
+    permissions: [support.submit]
 
   - id: update_support_status
     description: Update support status or assignee.

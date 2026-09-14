@@ -51,6 +51,18 @@ ticket owner as the recipient. The support module still emits
 `domain.workspace_support.message_added` for audit and support-specific
 automation, but user notification is owned by `domain.messages.message_sent`.
 
+Generated apps selecting the `support` pack also select `messaging`. Their
+`support.create_support_request` action creates the ticket's messages thread
+and first message on the server, then stores the thread id with ticket metadata.
+The Support page uses `support.get_support_conversation` and
+`support.reply_support_request`; the service checks requester ownership or
+support read/manage permission before delegating to `MessageService`. The
+generated public messages actions serve direct and group conversations only.
+They cannot create, list, read, or send support threads, even when the caller
+has generic messaging permission. This keeps the ticket as the authority for
+support conversation access. Support request records store the subject and
+page context, while message bodies stay only in the messages collection.
+
 Support status is explicit:
 
 - `open` means the ticket can still receive replies.

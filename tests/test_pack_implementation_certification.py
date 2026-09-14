@@ -14,7 +14,7 @@ derived from digest-verified bytes.  There is no caller-constructible
 authority token anywhere on the public resolution API.
 
 The corpus is discovered independently from the checked-in factory packs and
-pinned: 10 modules, 63 actions, all certifying end to end through
+pinned: 10 modules, 64 actions, all certifying end to end through
 ``resolve_module_action_implementation`` with exact verified bytes for the
 manifest, leaf, base, AND pack contract (the blob-read count proves the
 contract bytes are actually read), and the #484 closed request import.
@@ -53,7 +53,7 @@ OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant", workspace_id="elsewher
 OTHER_TENANT = ExecutionAccessScopeRef(tenant_id="rival", workspace_id="workspace")
 
 EXPECTED_MODULE_COUNT = 10
-EXPECTED_ACTION_COUNT = 63
+EXPECTED_ACTION_COUNT = 64
 
 
 def _discover_split_modules() -> list[tuple[str, str]]:
@@ -197,7 +197,7 @@ async def _resolved_module_for(content_store, staged):
 
 
 def test_census_is_pinned() -> None:
-    """The canonical corpus is exactly 10 split modules carrying 63 actions."""
+    """The canonical corpus is exactly 10 split modules carrying 64 actions."""
     assert len(SPLIT_MODULES) == EXPECTED_MODULE_COUNT, SPLIT_MODULES
     total_actions = 0
     for pack, module in SPLIT_MODULES:
