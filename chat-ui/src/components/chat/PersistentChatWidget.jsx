@@ -390,6 +390,12 @@ const PersistentChatWidget = ({
   // the user's only route back into a workflow from a non-chat page. One
   // running session goes straight there, several open a picker, and none sends
   // the user to the workflow surface to start one.
+  const workflowAccessLabel = workflowSessions.length > 1
+    ? `Go to a workflow (${workflowSessions.length} running)`
+    : workflowSessions.length === 1
+      ? `Go to ${workflowSessions[0].workflow_name}`
+      : 'Go to workflows';
+
   const handleWorkflowAccess = () => {
     if (workflowSessions.length > 1) {
       setShowWorkflowPicker((open) => !open);
@@ -650,18 +656,20 @@ const PersistentChatWidget = ({
                 <button
                   onClick={handleWorkflowAccess}
                   className="group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.1)] to-[rgba(var(--color-secondary-rgb),0.1)] border border-[rgba(var(--color-primary-light-rgb),0.3)] hover:border-[rgba(var(--color-primary-light-rgb),0.6)] transition-all duration-300 backdrop-blur-sm"
-                  title={workflowSessions.length > 1
-                    ? `Go to a workflow (${workflowSessions.length} running)`
-                    : workflowSessions.length === 1
-                      ? `Go to ${workflowSessions[0].workflow_name}`
-                      : 'Go to workflows'}
+                  title={workflowAccessLabel}
+                  // The brand mark would otherwise supply a static accessible
+                  // name, so assistive tech would announce "Go to workflows"
+                  // even with several builds running. Label the button itself
+                  // and hide the decorative image from the a11y tree.
+                  aria-label={workflowAccessLabel}
                   aria-haspopup={workflowSessions.length > 1 ? 'menu' : undefined}
                   aria-expanded={workflowSessions.length > 1 ? showWorkflowPicker : undefined}
                 >
                   <img
                     src={brandLogoSrc}
                     className="w-8 h-8 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
-                    alt="Go to workflows"
+                    alt=""
+                    aria-hidden="true"
                     onError={applyBrandImageFallback}
                   />
                   {workflowSessions.length > 1 && (

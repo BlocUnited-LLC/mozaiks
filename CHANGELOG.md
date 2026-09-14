@@ -14,6 +14,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- The widget's workflow button announces how many builds are running. The
+  brand mark inside it supplied a static accessible name, so assistive tech
+  read "Go to workflows" even with several sessions active while the tooltip
+  said otherwise. One derived label now feeds both the tooltip and the
+  accessible name, and the decorative mark is hidden from the a11y tree.
+
 - The floating assistant widget always offers a way into a workflow. Its
   workspace button is no longer hidden when this browser has no stored
   session: the widget reads the user's in-progress sessions from the server,

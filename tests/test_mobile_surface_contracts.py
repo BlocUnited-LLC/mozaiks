@@ -393,3 +393,20 @@ def test_widget_session_reads_carry_credentials() -> None:
     assert "authFetch(`/api/sessions/list/" in widget_source
     assert "fetch(`/api/session/state?" not in widget_source.replace("authFetch(`/api/session/state?", "")
     assert "fetch(`/api/sessions/list/" not in widget_source.replace("authFetch(`/api/sessions/list/", "")
+
+
+def test_widget_workflow_button_announces_its_state() -> None:
+    """The brand mark inside the button would otherwise supply a static
+    accessible name, so assistive tech announced "Go to workflows" even with
+    several builds running. Verified with Playwright against the built app:
+    the title updated while the accessible name did not."""
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+
+    # One derived label feeds both the tooltip and the accessible name, so the
+    # two cannot drift apart.
+    assert "const workflowAccessLabel = workflowSessions.length > 1" in widget_source
+    assert "title={workflowAccessLabel}" in widget_source
+    assert "aria-label={workflowAccessLabel}" in widget_source
+    # The decorative mark must not contribute a competing name.
+    assert 'alt=""\n                    aria-hidden="true"' in widget_source
+    assert 'alt="Go to workflows"' not in widget_source
