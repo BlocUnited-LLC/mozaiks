@@ -196,6 +196,42 @@ Use page `navigation` for page-owned routes. Use `navigation.items` only for
 app-level entries that are not owned by a page schema. Do not define custom
 shortcut catalogs inside `shortcuts`.
 
+### Policies hosted on an existing website
+
+Use `navigation.items` with `scope: "footer"` and an absolute `href` to link
+to existing policy pages. This shape is supported by AppGenerator's
+`AppShellNavigationItemPatch` and the platform shell resolver:
+
+```json
+{
+  "navigation": {
+    "items": [
+      {
+        "id": "privacy",
+        "label": "Privacy Policy",
+        "href": "https://www.example.com/privacy",
+        "scope": "footer",
+        "order": 10
+      }
+    ]
+  }
+}
+```
+
+Remove the corresponding `shortcuts.footer` entries so each link has one
+navigation owner. The shell renders absolute URLs as regular browser links;
+the policy content stays on the website. Footer visibility still follows
+the existing chrome and mobile policy.
+
+The first-party Studio bundle configures Privacy Policy, Terms of Service,
+and Cookie Policy links to `https://www.mozaiks.ai/privacy`,
+`https://www.mozaiks.ai/terms`, and `https://www.mozaiks.ai/cookies` in
+`factory_app/app/config/shell.json`. CLI scaffolds inherit this factory shell
+through `build_default_shell_config`; onboarding uses the same default when
+refreshing a recognized minimal shell configuration. Those workspaces inherit
+the website links too. App authors and AppGenerator can use the same navigation contract
+with their own policy URLs in the workspace's `app/config/shell.json`.
+
 ## Shell Actions
 
 `header.actions` are global shell CTAs or utility controls. Keep them sparse:

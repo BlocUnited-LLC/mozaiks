@@ -112,6 +112,10 @@ This project follows a practical pre-1.0 changelog format:
   ask actions against actual module contracts, including custom-route metadata;
   ask eligibility remains independent of HTTP exposure.
 
+- Studio's policy footer now links to the privacy, terms, and cookie pages
+  on mozaiks.ai so the website owns the policy content. CLI scaffolds and
+  onboarding's minimal-shell refresh inherit these factory shell defaults.
+
 - Auxiliary refinement agents now emit measured response usage through the
   existing runtime collector and configured token-wallet ingest. Trusted host
   app/user attribution is required; chat/build identity is attached only when
