@@ -138,7 +138,8 @@ def test_support_module_declares_expected_actions() -> None:
     assert _action_ids(module_yaml) == {
         "create_support_request",
         "list_support_requests",
-        "link_message_thread",
+        "get_support_conversation",
+        "reply_support_request",
         "update_support_status",
     }
 
@@ -156,10 +157,12 @@ def test_support_module_capabilities_target_existing_actions() -> None:
     }
 
 
-def test_support_module_links_message_thread_action_exists() -> None:
-    """link_message_thread must exist because support uses messaging for conversations."""
+def test_support_module_owns_conversation_actions() -> None:
+    """Ticket actions own conversation access; generic messaging is not the UI boundary."""
     module_yaml = _read_yaml(TEMPLATES / "modules" / "support" / "module.yaml")
-    assert "link_message_thread" in _action_ids(module_yaml)
+    actions = _action_ids(module_yaml)
+    assert {"get_support_conversation", "reply_support_request"} <= actions
+    assert "link_message_thread" not in actions
 
 
 # ---------------------------------------------------------------------------
@@ -229,9 +232,8 @@ def test_support_service_stores_metadata_not_message_transcripts() -> None:
     # The service should not store or read message content directly
     assert "message_content" not in service_text
     assert "transcript" not in service_text
-    # It should delegate to the messages module by storing the thread id reference
-    # (link_message_thread is the boundary action)
-    assert "message_thread_id" in service_text or "link_message_thread" in service_text
+    assert "MessageService" in service_text
+    assert "message_thread_id" in service_text
 
 
 # ---------------------------------------------------------------------------

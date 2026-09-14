@@ -46,7 +46,7 @@ SPLIT_MODULES: tuple[tuple[str, str], ...] = (
     ("support", "support"),
 )
 
-EXPECTED_ACTION_COUNT = 63
+EXPECTED_ACTION_COUNT = 64
 
 
 def _module_yaml(pack: str, module: str) -> dict[str, Any]:
@@ -73,7 +73,7 @@ def _split_backends_present() -> None:
 
 
 def test_census_is_complete() -> None:
-    """The split-pack corpus is exactly the audited 10 modules / 63 actions."""
+    """The split-pack corpus is exactly the audited 10 modules / 64 actions."""
     _split_backends_present()
     assert len(SPLIT_MODULES) == 10
     assert len(ACTIONS) == EXPECTED_ACTION_COUNT

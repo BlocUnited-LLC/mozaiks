@@ -17,7 +17,7 @@ permissions:
 
 actions:
   - id: create_thread
-    description: Create a message thread for an app conversation or support request.
+    description: Create a direct or group message thread. Support threads are created by the support module.
     handler_method: create_thread
     input_schema:
       type: object
@@ -32,7 +32,7 @@ actions:
         # thread_type — optional; the service defaults omitted values to group.
         thread_type:
           type: string
-          enum: [group, direct, support]
+          enum: [group, direct]
         # scope_type — whether the conversation belongs to one app or to
         # workspace-level social context; the service defaults omissions to app.
         scope_type:
@@ -90,7 +90,7 @@ actions:
           enum: [open, resolved, archived]
         thread_type:
           type: string
-          enum: [group, direct, support]
+          enum: [group, direct]
         scope_type:
           type: string
           enum: [app, workspace]
@@ -116,7 +116,7 @@ actions:
       - messages.read
 
   - id: get_thread
-    description: Fetch a thread and its messages.
+    description: Fetch a direct or group thread and its messages. Support conversations use support.get_support_conversation.
     handler_method: get_thread
     input_schema:
       type: object
@@ -139,7 +139,7 @@ actions:
       - messages.read
 
   - id: send_message
-    description: Send a message to a thread.
+    description: Send a direct or group message. Support replies use support.reply_support_request.
     handler_method: send_message
     input_schema:
       type: object

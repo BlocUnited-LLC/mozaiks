@@ -81,6 +81,12 @@ runtime_boundaries:
     rule: Generated repo.py must use ctx.persistence.collection("messages", entity_name). No direct Motor clients and no app_data_from_context aliases.
   - id: event_emission
     rule: Events must be emitted via ctx.emit(), not direct dispatcher calls from service/handler.
+  - id: support_ticket_authority
+    rule: >
+      Generated public messages actions only create, list, read, and send direct
+      or group conversations. The support module alone creates support threads
+      and mediates support conversation reads and replies after ticket authority
+      checks, while the messages service owns persistence and lifecycle events.
   - id: notification_delivery
     rule: Message recipient notifications are declared in messages/contracts/notifications.yaml from domain.messages.message_sent. Do not create a notification repo or delivery worker inside the app module.
   - id: no_announcement_leakage
@@ -103,9 +109,9 @@ facades: []
 cross_pack_integrations:
   - pack_id: support
     description: >
-      Support modules use messages for persisted conversations. The support
-      module stores ticket metadata and references messages.thread_id through
-      message_thread_id.
+      Support modules call the messages service for persisted conversations.
+      Support stores ticket metadata and references messages.thread_id through
+      message_thread_id; public support reads and replies use support actions.
   - pack_id: social
     description: >
       Social apps may use messages for DMs after the social pack creates

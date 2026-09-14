@@ -273,15 +273,20 @@ def test_support_pack_requires_messaging_and_stores_only_ticket_metadata() -> No
         for entry in (requires.get("packs") or [])
     ]
     assert "messaging" in pack_ids
-    assert {"create_support_request", "list_support_requests", "link_message_thread", "update_support_status"} <= action_ids
-    assert "message_thread_id" in module["actions"][0]["input_schema"]["properties"]
+    assert {"create_support_request", "list_support_requests", "get_support_conversation", "reply_support_request", "update_support_status"} <= action_ids
+    assert "message_thread_id" not in module["actions"][0]["input_schema"]["properties"]
     assert any("modules/support/module.yaml" in path for path in paths)
     assert any("modules/support/contracts/notifications.yaml" in path for path in paths)
     assert not any("support_messages" in path for path in paths)
 
 
-def test_support_template_module_loads_with_current_contracts() -> None:
-    loaded = ModuleLoader(str(_pack_path("support") / "templates")).load("support")
+def test_support_template_module_loads_with_current_contracts(tmp_path) -> None:
+    from shutil import copytree
+
+    for pack, module_id in (("support", "support"), ("messaging", "messages")):
+        source = _pack_path(pack) / "templates" / "modules" / module_id
+        copytree(source, tmp_path / "modules" / module_id)
+    loaded = ModuleLoader(str(tmp_path)).load("support")
 
     assert loaded.name == "support"
     assert "domain.support.request_created" in loaded.manifests.events.event_types
@@ -303,9 +308,9 @@ def test_support_page_creates_real_message_threads() -> None:
     ).read_text(encoding="utf-8")
 
     assert "moduleAction('support', 'create_support_request'" in source
-    assert "moduleAction('messages', 'create_thread'" in source
-    assert "moduleAction('support', 'link_message_thread'" in source
-    assert "moduleAction('messages', 'send_message'" in source
+    assert "moduleAction('support', 'get_support_conversation'" in source
+    assert "moduleAction('support', 'reply_support_request'" in source
+    assert "moduleAction('messages'" not in source
     assert "DEMO" not in source
 
 

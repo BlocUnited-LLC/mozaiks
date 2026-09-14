@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated Support pages now submit a ticket and its first message in one
+  support action. Requesters can read and reply through ticket-authorized
+  actions; generic messaging actions no longer expose support threads.
+
 - The assistant widget starts a build at the app's declared entrypoint. With no
   workflow running, the workspace button routed to bare workflow mode, which
   resolves a workflow from stored client state — so a user with nothing running
