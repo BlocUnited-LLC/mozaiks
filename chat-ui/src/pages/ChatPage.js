@@ -3507,7 +3507,7 @@ const ChatPage = () => {
             workflowName: data.workflow || data.data?.workflow || currentWorkflowName,
             force: true, reason: 'workflow_failed',
           });
-          setMessagesWithLogging(prev => [...prev, {
+          setMessagesWithLogging(prev => [...prev.filter(m => !m?.isThinking), {
             id:`run-failed-${Date.now()}`,
             sender:'system',
             agentName:'System',
@@ -3532,6 +3532,9 @@ const ChatPage = () => {
         }
         setLoading(false);
         setPendingWorkflowReply(null);
+        setMessagesWithLogging(prev => (
+          prev.some(m => m?.isThinking) ? prev.filter(m => !m?.isThinking) : prev
+        ));
         // Only show completion overlay when no server-fired transition is already pending.
         // pendingTransitionIdRef gives synchronous access to avoid the race where
         // transition_requested and run_complete arrive in quick succession.

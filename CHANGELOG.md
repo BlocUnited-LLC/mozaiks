@@ -13,6 +13,16 @@ This project follows a practical pre-1.0 changelog format:
 ## Unreleased
 
 
+
+### Fixed
+
+- Chat: the "..." typing bubble no longer sticks on screen after a run ends. It
+  is added when an agent hands off and was only removed when a *next* agent
+  spoke, so a run that finished or failed first left it there permanently.
+- Chat: the "Jump to Present" button no longer lets message text read through
+  it. It sat at 55% opacity over scrolled content, and shared a z-index with the
+  scroll layer so it only painted on top by DOM order.
+
 ### Fixed
 
 - Workflow UI: `ActionPlan` no longer crashes on render. It referenced two

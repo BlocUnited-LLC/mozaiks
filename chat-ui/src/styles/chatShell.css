@@ -244,7 +244,9 @@ html {
 .jump-present {
   padding: 8px 14px;
   border-radius: 9999px;
-  background: rgba(12, 30, 45, 0.55);
+  /* Floats above scrolled message text; must occlude it rather than let it
+     read through. Anything below ~0.9 alpha shows the sentence underneath. */
+  background: rgba(12, 30, 45, 0.94);
   border: 1px solid rgba(56, 189, 248, 0.28);
   color: #c8f3ff;
   font-family: 'Techfont', var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif), sans-serif;
