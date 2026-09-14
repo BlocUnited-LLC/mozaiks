@@ -6,6 +6,17 @@ definitions:
       type: runtime
       required: true
 
+  coding_participation:
+    type: string
+    description: >
+      Build participation mode chosen at the checkpoint after theme capture.
+      Relayed, not consumed here: _project_launch_context carries a key from one
+      journey step to the next only if the receiving workflow declares it, so a
+      gap anywhere between coding_journey_selector and AppGenerator drops the
+      user's answer for every step after it.
+    source:
+      type: state
+      default: autonomous
   build_mode:
     type: string
     description: Build mode for subscription contract generation.
