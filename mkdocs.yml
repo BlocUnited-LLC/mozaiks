@@ -10,6 +10,10 @@ docs_dir: docs
 # Internal planning, roadmap, and migration notes stay in the repo but are not
 # published to docs.mozaiks.ai.
 exclude_docs: |
+  # Repository governance and migration records are maintained for
+  # contributors, but are not public product documentation.
+  agent-engineering-contract.md
+  architecture/workflows/workflow-document-version-migration.md
   architecture/old/**
   reviews/**
   operations/**
@@ -212,6 +216,7 @@ nav:
           - Refinement Harness Architecture: architecture/workflows/refinement-harness-architecture.md
           - Session Router: architecture/workflows/session-router.md
           - Build Context Packs: architecture/workflows/build-context-packs.md
+          - Multimodal Media: architecture/workflows/multimodal-media.md
           - Domain-Agnostic Build Factory: architecture/workflows/domain-agnostic-build-factory.md
           - Strategy Extension Contract: architecture/workflows/strategy-extension-contract.md
           - AG2 Integration:

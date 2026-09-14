@@ -153,5 +153,5 @@ All 35 restored files matched the committed ZIP; restore policy excluded the
 three environment-example templates. Browser acceptance passed against the
 promoted backend with the production-built frontend, including a separate
 restart persistence check. See the
-[acceptance report](../reviews/factory-repeatability-acceptance-2026-09-12.md)
+internal factory repeatability acceptance report
 for evidence, repair history, and remaining limitations.

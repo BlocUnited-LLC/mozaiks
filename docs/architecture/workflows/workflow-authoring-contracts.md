@@ -184,7 +184,8 @@ Rules:
 
 #### Semantic Prompt Inputs
 
-Apply the shared [Workflow Prompt Input Rule](../../agent-engineering-contract.md#workflow-prompt-input-rule)
+Apply the shared workflow prompt input rule described in
+[Semantic Prompt Inputs](#semantic-prompt-inputs).
 to first-party Factory workflows, generated workflows, prompt middleware, and
 task-batch `initial_message` content. A workflow may retain state or supply
 history; prompts must be correct for the inputs actually delivered to the
