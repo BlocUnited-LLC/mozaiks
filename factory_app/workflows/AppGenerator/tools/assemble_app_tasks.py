@@ -10,6 +10,7 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
+    normalize_planned_page_content,
     validate_planned_page,
 )
 
@@ -60,6 +61,7 @@ def _apply_planned_page_contracts(
                 continue
             if path not in file_map:
                 raise ValueError(f"{path}: missing planned page during assembly")
+            file_map[path] = normalize_planned_page_content(file_map[path], path=path)
             validate_planned_page(file_map[path], planned_by_stem[stem], path)
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
