@@ -2450,6 +2450,8 @@ agents:
       - Generate the module backend implementation files declared in the supplied module contracts and assigned to current_build_task.owned_paths.
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
       - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
+      - Emit every path listed in `current_build_task.owned_paths`. A path you own but do not write fails the whole batch, discarding every other task in the run - the batch checks emitted files against owned_paths, it does not infer intent from them.
+      - That includes `backend/account_data_handler.py` whenever it appears in your owned_paths. It is required of ANY module with `user_data_scope: true`, not only membership-style modules: a habit registry owns user-scoped records and needs account lifecycle support exactly as a membership module does. Implement export and delete of this module's records by `app_id` and `user_id`.
       - In task batch execution, do not emit `backend/schemas.py` unless it is explicitly listed in `current_build_task.owned_paths`; the `data_models` task owns schemas.py.
       - In bounded bundle repair (not task batch execution), a module import failure may originate in its existing schemas.py. Restore the missing imported helper or DTO there, preserving the other exports and behavior. Do not replace a working handler/service or generate new API routes to work around a missing import.
       - Generate optional hook stubs referenced by settings.yaml, notifications.yaml, or admin.yaml.
