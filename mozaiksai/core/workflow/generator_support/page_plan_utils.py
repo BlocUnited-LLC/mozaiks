@@ -102,6 +102,77 @@ def promote_page_table_primitives(document: Any) -> int:
     return promoted
 
 
+_MODAL_EVENT_TYPES = frozenset({"ui.modal.open", "ui.modal.close"})
+
+
+def _iter_action_nodes(node: Any):
+    """Yield every dict in a section tree, so actions nested anywhere are seen."""
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _iter_action_nodes(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _iter_action_nodes(item)
+
+
+def _collect_modal_ids(document: Any) -> set[str]:
+    return {
+        str(node.get("id"))
+        for node in _iter_action_nodes(document)
+        if isinstance(node, dict) and node.get("primitive") == "Modal" and node.get("id")
+    }
+
+
+def resolve_modal_action_targets(document: Any) -> int:
+    """Point modal open/close actions at a Modal that exists on the page.
+
+    A live build generated a form whose cancel action closed a modal id nothing
+    declared:
+
+        $.sections[1].config.children[0].config.cancel_action.payload.modal_id:
+        page_schema.unknown_modal: Modal actions require modal_id referencing a
+        Modal on this page.
+
+    Two readings are unambiguous and both are applied: an action inside a Modal
+    means that Modal, and on a page with exactly one Modal there is only one
+    candidate. Anything else is left for the validator - guessing between
+    several modals would silently wire the wrong one.
+    """
+    if not isinstance(document, dict):
+        return 0
+    modal_ids = _collect_modal_ids(document)
+    if not modal_ids:
+        return 0
+    sole_modal = next(iter(modal_ids)) if len(modal_ids) == 1 else None
+    fixed = 0
+
+    def walk(node: Any, enclosing: str | None) -> None:
+        nonlocal fixed
+        if isinstance(node, list):
+            for item in node:
+                walk(item, enclosing)
+            return
+        if not isinstance(node, dict):
+            return
+        if node.get("primitive") == "Modal" and node.get("id"):
+            enclosing = str(node["id"])
+        if node.get("action_type") == "event" and node.get("event_type") in _MODAL_EVENT_TYPES:
+            payload = node.get("payload")
+            if isinstance(payload, dict):
+                current = payload.get("modal_id")
+                if not isinstance(current, str) or current not in modal_ids:
+                    target = enclosing or sole_modal
+                    if target:
+                        payload["modal_id"] = target
+                        fixed += 1
+        for value in node.values():
+            walk(value, enclosing)
+
+    walk(document.get("sections"), None)
+    return fixed
+
+
 def normalize_planned_page_content(content: str, *, path: str = "") -> str:
     """Return page YAML with table primitives corrected, or the original.
 
@@ -115,9 +186,14 @@ def normalize_planned_page_content(content: str, *, path: str = "") -> str:
         return content
     if not isinstance(document, dict):
         return content
-    if not promote_page_table_primitives(document):
+    promoted = promote_page_table_primitives(document)
+    retargeted = resolve_modal_action_targets(document)
+    if not promoted and not retargeted:
         return content
-    logger.info("[pages] %s: promoted DataTable -> ResourceTable", path or "page")
+    if promoted:
+        logger.info("[pages] %s: promoted %d DataTable -> ResourceTable", path or "page", promoted)
+    if retargeted:
+        logger.info("[pages] %s: pointed %d modal action(s) at a declared Modal", path or "page", retargeted)
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 
