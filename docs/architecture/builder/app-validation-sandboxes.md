@@ -9,9 +9,10 @@ ownership boundary against AG2's agent-level execution is defined in
 ## Strategies
 
 Resolution precedence: tool argument → `app_validation_strategy` context
-variable → `MOZAIKS_APP_VALIDATION_STRATEGY` env → automatic (`e2b` when
-`E2B_API_KEY` is set → `docker` when a daemon is reachable → `local` when
-npm exists → `skip`).
+variable → `MOZAIKS_APP_VALIDATION_STRATEGY` env → automatic (`docker` when a
+daemon is reachable → `local` when npm exists → `skip`). E2B is never selected
+automatically: `E2B_API_KEY` makes the provider available, but the workflow or
+operator must explicitly select `e2b`.
 
 | Strategy | Runs where | Preview URL | Cost | Intended for |
 |----------|-----------|-------------|------|--------------|
@@ -53,9 +54,9 @@ user starts the new version explicitly.
   the registry's target and verifies the saved app-bundle binding and archive
   digest before allocating a sandbox. Binary assets are retained.
 - Provider resolution mirrors the validation ladder's preview-capable rungs:
-  e2b when `E2B_API_KEY` is set, otherwise local Docker. With neither, the
-  create call returns 503 with a clear message (`local`/`skip` builds have no
-  live preview).
+  e2b only when explicitly selected and configured, otherwise local Docker.
+  With neither, the create call returns 503 with a clear message
+  (`local`/`skip` builds have no live preview).
 
 The canonical supervisor runs the existing platform host, shared web shell,
 and a private MongoDB in the sandbox. App files mount under `app/`, workflows
@@ -176,8 +177,8 @@ database containing builds or user records.
 
 | Variable | Default | Used by |
 |----------|---------|---------|
-| `MOZAIKS_APP_VALIDATION_STRATEGY` | auto | strategy resolution (`e2b`/`docker`/`local`/`skip`) |
-| `E2B_API_KEY` | unset | enables the e2b strategy |
+| `MOZAIKS_APP_VALIDATION_STRATEGY` | auto | strategy resolution (`e2b`/`docker`/`local`/`skip`); `e2b` must be explicit |
+| `E2B_API_KEY` | unset | makes the e2b strategy available; never selects it automatically |
 | `E2B_TEMPLATE` | provider default | e2b adapter template |
 | `E2B_TIMEOUT` | `300` (seconds) | e2b adapter session/default validation timeout |
 | `SANDBOX_PREVIEW_PORT` | `3000` | additional provider port; canonical app previews use frontend `3000` and backend `8000` |

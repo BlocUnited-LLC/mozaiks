@@ -152,6 +152,40 @@ def test_validation_strategy_defaults_to_skip_when_e2b_local_and_docker_are_unav
     assert "resolved" in reason
 
 
+def test_e2b_credentials_do_not_change_the_automatic_local_default() -> None:
+    from mozaiksai.core.workflow.generator_support import (
+        app_validation_strategy as app_validation_strategy_module,
+    )
+
+    strategy, reason = app_validation_strategy_module.resolve_app_validation_strategy(
+        env={"E2B_API_KEY": "configured"},
+        requested=None,
+        context_value=None,
+        local_available=False,
+        docker_available=True,
+    )
+
+    assert strategy == "docker"
+    assert "Docker" in reason
+
+
+def test_e2b_remains_available_when_explicitly_selected() -> None:
+    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+        resolve_app_validation_strategy,
+    )
+
+    strategy, reason = resolve_app_validation_strategy(
+        env={"E2B_API_KEY": "configured"},
+        requested="e2b",
+        context_value=None,
+        local_available=False,
+        docker_available=True,
+    )
+
+    assert strategy == "e2b"
+    assert "tool argument" in reason
+
+
 def test_validation_strategy_summary_exposes_allowed_values() -> None:
     from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
         build_app_validation_strategy_summary,
