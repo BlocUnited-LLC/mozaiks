@@ -25,7 +25,18 @@ batches:
       concurrency: 8
       dependency_field: depends_on
       failure_policy: fail_batch
-      retry_limit: 1
+      # One retry was not enough for mechanical contract errors. A live build
+      # failed the whole batch on "Schema contract required names must match
+      # property required flags" - a rule already stated in the agent's prompt,
+      # fed back verbatim with the rejected output, and still unfixed after two
+      # attempts.
+      #
+      # The feedback loop is sound: the retry prompt carries the validator
+      # message and the rejected candidate. What was short was the budget. With
+      # fail_batch, one task giving up discards every completed task in the run,
+      # so a few more attempts on a task that is being told exactly what is
+      # wrong costs far less than rebuilding everything.
+      retry_limit: 3
       timeout_seconds: 600
     result:
       context_key: app_task_batch_results
