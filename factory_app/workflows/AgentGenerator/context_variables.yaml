@@ -491,19 +491,15 @@ definitions:
       type: config
       env_var: CONTEXT_SCHEMA_DB
       default: null
-  interview_complete:
-    type: boolean
-    description: True once InterviewAgent has enough context to proceed to the next
-      stage
+  interview_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Validated interview readiness, not inferred from chat text.
     source:
       type: state
-      default: false
-      triggers:
-      - type: agent_text
-        agent: InterviewAgent
-        ui_hidden: true
-        match:
-          equals: NEXT
+      default: needs_input
   pattern_selection_feedback:
     type: string
     description: Validation feedback from the last rejected workflow partition. Correct it without changing the canonical design boundary.

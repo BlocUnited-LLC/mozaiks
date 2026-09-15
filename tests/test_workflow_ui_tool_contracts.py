@@ -523,14 +523,39 @@ def test_agent_generator_review_handoff_uses_structured_outcomes() -> None:
     assert "triggers" not in review_defs["workflow_review_outcome"]["source"]
 
 
-def test_agent_generator_interview_next_trigger_requires_exact_sentinel() -> None:
-    context_config = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
-    interview = context_config["definitions"]["interview_complete"]
-    trigger = interview["source"]["triggers"][0]
+def test_agent_generator_interview_states_readiness_as_a_field() -> None:
+    """Routing must not depend on the model emitting a bare token.
 
-    assert trigger["type"] == "agent_text"
-    assert trigger["agent"] == "InterviewAgent"
-    assert trigger["match"] == {"equals": "NEXT"}
+    The exact-match `NEXT` sentinel required a message equal to the token. A
+    live run produced correct reasoning followed by `NEXT`, the match failed,
+    and the build waited on a user forever (#591).
+    """
+    context_config = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
+    assert "interview_complete" not in context_config["definitions"], (
+        "the text-sentinel readiness key must not come back"
+    )
+
+    outputs = _read_yaml("factory_app/workflows/AgentGenerator/structured_outputs.yaml")
+    assert outputs["registry"]["InterviewAgent"] == "WorkflowInterviewResult"
+    fields = outputs["models"]["WorkflowInterviewResult"]["fields"]
+    assert set(fields["outcome"]["values"]) == {"needs_input", "ready"}
+
+    tools = _read_yaml("factory_app/workflows/AgentGenerator/tools.yaml")["tools"]
+    recorder = next(t for t in tools if t["function"] == "record_workflow_interview")
+    assert recorder["agent"] == "InterviewAgent"
+    assert recorder["auto_tool_call"] is True
+    # InterviewAgent is this workflow's initial_agent, and the workflow has task
+    # batches — contract_validation refuses outcome operations on task agents.
+    assert "outcome" not in recorder
+
+    rules = _read_yaml("factory_app/workflows/AgentGenerator/transition_graph.yaml")["transition_rules"]
+    advance = [
+        r for r in rules
+        if r.get("source_agent") == "InterviewAgent"
+        and r.get("condition_key") == "interview_outcome"
+        and r.get("condition_value") == "ready"
+    ]
+    assert len(advance) == 1 and advance[0]["target_agent"] == "PatternAgent"
 
 
 def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() -> None:

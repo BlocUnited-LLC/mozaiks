@@ -18,6 +18,16 @@ This project follows a practical pre-1.0 changelog format:
 
 
 
+
+### Fixed
+
+- AgentGenerator can advance past its interview again. Readiness was inferred by
+  matching the literal token `NEXT` against the agent's message, which required
+  the model to emit a bare token with no preamble; when it explained itself
+  first, the match failed and the build waited on a user forever. The agent now
+  states readiness in a validated structured-output field, written to routing
+  state by a deterministic tool.
+
 ### Fixed
 
 - A workflow transition no longer opens a second WebSocket for the same chat.

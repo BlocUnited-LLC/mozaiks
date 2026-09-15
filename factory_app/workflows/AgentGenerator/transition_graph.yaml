@@ -42,16 +42,16 @@ transition_rules:
   target_agent: PatternAgent
   transition_type: condition
   condition_type: context_equals
-  condition_key: interview_complete
-  condition_value: true
+  condition_key: interview_outcome
+  condition_value: ready
   transition_target: AgentTarget
 
 - source_agent: user
   target_agent: InterviewAgent
   transition_type: condition
   condition_type: context_equals
-  condition_key: interview_complete
-  condition_value: false
+  condition_key: interview_outcome
+  condition_value: needs_input
   transition_target: AgentTarget
 
 - source_agent: ProjectOverviewAgent
