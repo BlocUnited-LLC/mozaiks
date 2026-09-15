@@ -342,14 +342,27 @@ models:
 
 **4. tools/my_tool.py** - Read from context, emit UI:
 ```python
+from mozaiksai.core.workflow.ui_tools import emit_ui_surface
+
 async def save_my_output(context_variables=None):
     data = context_variables.get("structured_output")
-    await transport.send_ui_tool_event(
-        component_name="MyComponent",
-        display_type="artifact",
-        payload=transform_for_ui(data),
+    await emit_ui_surface(
+        "MyComponent",              # tool_id: resolves the ui: block in tools.yaml
+        transform_for_ui(data),
+        chat_id=context_variables.get("chat_id"),
+        workflow_name="MyWorkflow",
+        display="artifact",
     )
 ```
+
+The first argument is a tool id, not a component name: `emit_ui_surface` looks
+up the `ui:` block declared in `tools.yaml` and takes the component from there.
+The declaration is the contract, so a component cannot be summoned that the
+workflow never declared. Use `use_ui_tool` instead when the surface must await
+a user response.
+
+Do not reach for a transport method directly. `tests/test_workflow_ui_tool_contracts.py`
+requires factory tools to import `emit_ui_surface` and rejects raw transport calls.
 
 `structured_output` is reserved runtime vocabulary: auto tools receive it as a
 transient read-only projection. Never declare it in `context_variables.yaml`
