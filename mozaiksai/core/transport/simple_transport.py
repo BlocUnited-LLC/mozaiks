@@ -274,6 +274,16 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # CONNECTION HELPERS
     # ==================================================================================
 
+    @staticmethod
+    def _is_connection_alias(entry: dict[str, Any] | None) -> bool:
+        """True when this slot points at a socket another chat owns.
+
+        The journey orchestrator registers the source chat's socket under the
+        next chat id so events reach the user before their client reconnects.
+        Such an entry must be released without closing the socket.
+        """
+        return bool(isinstance(entry, dict) and entry.get("aliased_from_chat_id"))
+
     def _next_ws_id(self) -> int:
         """Allocate a connection identity that is never reused.
 
@@ -1628,11 +1638,22 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if chat_id in self.connections:
             stale = self.connections[chat_id]
             stale_ws = stale.get("websocket")
-            logger.warning("Evicting stale WebSocket for chat_id=%s (ws_id=%s)", chat_id, stale.get("ws_id"))
-            try:
-                await stale_ws.close(code=1001)
-            except Exception:
-                pass
+            # A journey alias points at a socket that still belongs to another
+            # chat, so the user can receive events for the next stage before
+            # reconnecting. Closing it would drop a live connection mid-build.
+            # Release the slot; leave the socket to its owner.
+            aliased_from = stale.get("aliased_from_chat_id")
+            if self._is_connection_alias(stale):
+                logger.info(
+                    "Releasing connection alias for chat_id=%s (socket owned by chat_id=%s)",
+                    chat_id, aliased_from,
+                )
+            else:
+                logger.warning("Evicting stale WebSocket for chat_id=%s (ws_id=%s)", chat_id, stale.get("ws_id"))
+                try:
+                    await stale_ws.close(code=1001)
+                except Exception:
+                    pass
             # This is a takeover, not a departure: a workflow may be mid-run on
             # this chat and waiting on the user. Release the dead socket, but
             # leave the execution's pending input callbacks armed for the

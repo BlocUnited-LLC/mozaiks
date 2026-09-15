@@ -19,6 +19,15 @@ This project follows a practical pre-1.0 changelog format:
 
 
 
+
+### Fixed
+
+- A workflow transition no longer closes the connection the user is on. The
+  journey orchestrator registers the current socket under the next chat's id so
+  events arrive before the client reconnects; when that client did reconnect,
+  the eviction path closed that shared socket and took the running build with
+  it. The slot is still released — the socket is left to the chat that owns it.
+
 ### Fixed
 
 - AgentGenerator can advance past its interview again. Readiness was inferred by
