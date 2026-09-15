@@ -1,8 +1,6 @@
 # syntax=docker/dockerfile:1
 # Local, disposable app previews. This image is not a deployment artifact.
-FROM node:24-bookworm-slim AS node
-FROM mongo:7 AS mongo
-FROM python:3.12-slim-bookworm
+FROM node:24-bookworm-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -12,17 +10,28 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MOZAIKS_FACTORY_APP_PATH=/opt/mozaiks/factory_app \
     LOGS_BASE_DIR=/workspace/logs
 
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
-COPY --from=mongo /usr/bin/mongod /usr/local/bin/mongod
-RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends libcurl4 libgssapi-krb5-2 libssl3 liblzma5 \
-    && rm -rf /var/lib/apt/lists/* \
-    && mongod --version && node --version
-
 WORKDIR /opt/mozaiks
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        libcurl4 \
+        libgssapi-krb5-2 \
+        liblzma5 \
+        libssl3 \
+        python3 \
+        python3-pip \
+    && curl -fsSL https://pgp.mongodb.com/server-7.0.asc \
+        | gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg \
+    && echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
+        > /etc/apt/sources.list.d/mongodb-org-7.0.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends mongodb-org-server \
+    && ln -s /usr/bin/python3 /usr/local/bin/python \
+    && python --version \
+    && mongod --version \
+    && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml setup.py MANIFEST.in README.md LICENSE ./
 COPY mozaiks/ ./mozaiks/
 COPY mozaiksai/ ./mozaiksai/
@@ -31,7 +40,7 @@ COPY logs/ ./logs/
 COPY factory_app/ ./factory_app/
 COPY web_shell/ ./web_shell/
 COPY chat-ui/ ./chat-ui/
-RUN pip install --no-cache-dir . \
+RUN pip install --no-cache-dir . --break-system-packages \
     && pip list --format=freeze > /opt/mozaiks/preview-constraints.txt \
     && npm ci --prefix web_shell --no-audit --no-fund \
     && useradd --create-home --uid 10001 sandbox \

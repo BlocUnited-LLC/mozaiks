@@ -292,7 +292,9 @@ def test_preview_image_has_runtime_frontend_database_and_no_host_mounts():
     assert "USER sandbox" in dockerfile
     assert "pip install --no-cache-dir ." in dockerfile
     assert "npm ci --prefix web_shell" in dockerfile
-    assert "COPY --from=mongo" in dockerfile
+    assert "FROM node:24-bookworm-slim" in dockerfile
+    assert "apt-get install -y --no-install-recommends mongodb-org-server" in dockerfile
+    assert "COPY --from=" not in dockerfile
     assert "COPY .env" not in dockerfile and "docker.sock" not in dockerfile
     ignore = (root / ".dockerignore").read_text()
     assert ".local/" in ignore and ".codex-worktrees/" in ignore
