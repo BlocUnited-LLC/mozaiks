@@ -70,6 +70,48 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
             pack["primary_entities"] = approved_entities
             repairs.append(f"{surface_id}: primary_entities -> approved {approved_entities}")
 
+    # A capability sourced from a provider that does not exist, for a surface the
+    # design never approved, is invented scope. The live run produced exactly
+    # one: a "notifications_pack" declared managed_capability on a habit tracker
+    # whose approved design has no notifications surface and whose concept never
+    # mentioned them. Three attempts produced it every time, so feedback does not
+    # remove it - and one unapproved capability fails the whole plan.
+    available = _context_available_pack_map(context)
+    surviving: list[dict[str, Any]] = []
+    dropped: set[str] = set()
+    for pack in packs:
+        pack_id = str(_pack_id_from_descriptor(pack))
+        source = pack.get("capability_source")
+        unbacked = source in {"managed_capability", "framework_pack", "operator_pack"} and pack_id not in available
+        if unbacked and pack.get("surface_id") not in approved:
+            dropped.add(pack_id)
+            repairs.append(
+                f"dropped {pack_id!r}: {source} with no registered provider and no approved surface"
+            )
+            continue
+        surviving.append(pack)
+
+    if dropped:
+        plan["capability_packs"] = surviving
+        kept_tasks = []
+        for task in plan.get("build_tasks") or []:
+            if str(task.get("capability_pack_id") or "") in dropped:
+                repairs.append(f"dropped task {task.get('task_id')!r}: built a capability that was dropped")
+                continue
+            kept_tasks.append(task)
+        dropped_ids = {
+            str(t.get("task_id"))
+            for t in (plan.get("build_tasks") or [])
+            if str(t.get("capability_pack_id") or "") in dropped
+        }
+        for task in kept_tasks:
+            depends = [d for d in (task.get("depends_on") or []) if str(d) not in dropped_ids]
+            if len(depends) != len(task.get("depends_on") or []):
+                task["depends_on"] = depends
+                repairs.append(f"{task.get('task_id')}: dropped dependency on a removed task")
+        plan["build_tasks"] = kept_tasks
+        packs = surviving
+
     if not renames:
         return repairs
 

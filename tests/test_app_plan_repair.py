@@ -161,3 +161,72 @@ def test_repair_does_not_invent_an_unapproved_module() -> None:
     # Still rejected, which is correct - this one is not derivable.
     with pytest.raises(ValueError):
         validate_plan_origins(plan, _context())
+
+
+def _plan_with_an_invented_capability() -> dict[str, Any]:
+    """The second live failure: a capability nobody approved.
+
+    After the identity repair landed, a rerun failed on exactly one error:
+
+        notifications_pack: managed_capability requires a registered provider
+        pack; a product category is not a managed service
+
+    The concept was a habit tracker. Nothing asked for notifications, the
+    approved design declares no notifications surface, and no provider pack is
+    registered to supply one. All three attempts produced it, so feedback does
+    not remove it - and one unapproved capability fails the entire plan.
+    """
+    plan = _plan_as_the_model_wrote_it()
+    plan["capability_packs"].append(
+        {
+            "capability_pack_id": "notifications_pack",
+            "surface_id": "notifications",
+            "surface_kind": "module",
+            "capability_source": "managed_capability",
+        }
+    )
+    plan["build_tasks"].append(
+        {
+            "task_id": "t_notify",
+            "capability_pack_id": "notifications_pack",
+            "surface_id": "notifications",
+            "owned_paths": ["modules/notifications/backend/services.py"],
+        }
+    )
+    plan["build_tasks"][0]["depends_on"] = ["t_notify"]
+    return plan
+
+
+def test_invented_capability_is_dropped_and_the_plan_passes() -> None:
+    plan = _plan_with_an_invented_capability()
+    context = _context()
+
+    repairs = _repair_plan(plan, context)
+
+    assert any("dropped 'notifications_pack'" in r for r in repairs)
+    assert [p["capability_pack_id"] for p in plan["capability_packs"]] == ["habits_module"]
+    assert all(t["task_id"] != "t_notify" for t in plan["build_tasks"])
+    # A task that depended on the removed one must not keep a dangling edge.
+    assert plan["build_tasks"][0].get("depends_on") == []
+
+    # The assertion that matters: the real validator accepts what is left.
+    validate_plan_origins(plan, context)
+
+
+def test_a_registered_managed_capability_is_kept() -> None:
+    """Dropping is for capabilities with no provider, not for managed ones."""
+    plan = _plan_with_an_invented_capability()
+    context = _Context(
+        {
+            "design_surface_map": _design_surface_map(),
+            # A real provider pack exists for it, so it is legitimate.
+            "capability_packs": [
+                {"id": "notifications_pack", "capability_source": "managed_capability"}
+            ],
+        }
+    )
+
+    repairs = _repair_plan(plan, context)
+
+    assert not any("dropped" in r for r in repairs)
+    assert any(p["capability_pack_id"] == "notifications_pack" for p in plan["capability_packs"])
