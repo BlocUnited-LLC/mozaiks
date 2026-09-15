@@ -163,7 +163,7 @@ definitions:
       the decisions that shape it. Seeded by coding_journey_selector.
     source:
       type: state
-      default: autonomous
+      default: guided
   build_mode:
     type: string
     description: >

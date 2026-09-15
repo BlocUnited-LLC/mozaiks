@@ -34,9 +34,12 @@ def test_coding_participation_is_declared_for_app_generator() -> None:
     assert "coding_participation" in definitions
     declared = definitions["coding_participation"]
     assert declared["type"] == "string"
-    # Defaulting to autonomous keeps a run that never passed the checkpoint from
-    # falling into interrogation.
-    assert declared["source"]["default"] == "autonomous"
+    # A missing answer must mean "ask", never "skip the human". Twelve journeys
+    # reach AppGenerator without passing coding_journey_selector - every revision
+    # and refinement journey, plus both brownfield generation paths - so an absent
+    # value is the common case. Defaulting to autonomous silently suppressed the
+    # interview on all of them; only an explicit choice may do that.
+    assert declared["source"]["default"] == "guided"
 
 
 def test_interview_agent_can_actually_read_the_participation_choice() -> None:
@@ -62,3 +65,25 @@ def test_interview_agent_does_not_offer_scope_the_concept_never_asked_for() -> N
     assert "Optional capability packs the concept does not call for are OUT of" in agents_text
     assert "marketplace, campaigns, or advanced analytics" in agents_text
     assert "never to widen scope" in agents_text
+
+
+def test_only_an_explicit_choice_can_suppress_a_human_turn() -> None:
+    """The bypass must fire on a chosen value, never on an absent one."""
+    import json
+
+    registry = json.loads(
+        (APP_GENERATOR_DIR.parents[0] / "extended_orchestration" / "extension_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    selector = next(t for t in registry["transitions"] if t["id"] == "coding_journey_selector")
+    chosen = {o["id"]: o["context_variables"]["coding_participation"] for o in selector["options"]}
+    assert chosen == {"autonomous": "autonomous", "guided": "guided"}
+
+    rules = yaml.safe_load((APP_GENERATOR_DIR / "transition_graph.yaml").read_text(encoding="utf-8"))
+    bypass = [r for r in rules["transition_rules"] if r["source_agent"] == "user"][0]
+    assert bypass["condition_value"] == "autonomous"
+
+    # The bypass value and the default must differ, or an absent answer bypasses.
+    definitions = _context_variables()["definitions"]
+    assert definitions["coding_participation"]["source"]["default"] != bypass["condition_value"]

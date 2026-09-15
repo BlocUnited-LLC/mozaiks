@@ -16,7 +16,7 @@ definitions:
       user's answer for every step after it.
     source:
       type: state
-      default: autonomous
+      default: guided
   build_mode:
     type: string
     description: Build mode for subscription contract generation.
