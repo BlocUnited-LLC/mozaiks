@@ -407,3 +407,70 @@ def test_an_installed_provider_pack_is_not_rewritten() -> None:
 
     assert not any("generated_module" in r for r in repairs)
     assert plan["capability_packs"][0]["capability_source"] == "framework_pack"
+
+
+def _plan_with_two_page_bundles() -> dict[str, Any]:
+    """A plan that splits page work across two page_bundle tasks.
+
+    The coverage rule takes the union of what page_bundle tasks own, so a split
+    is legal - but a separate rule forbids two tasks owning the same artifact,
+    because task batches would race for it. An earlier version of this repair
+    assumed one bundle task and force-assigned every page file to the first,
+    which produced exactly that collision on a live run:
+
+        Build tasks declare overlapping owned_paths:
+        {'ui/pages/habits.yaml': ['page_bundle_habit_dashboard',
+                                  'page_bundle_habit_list']}
+    """
+    return {
+        "capability_packs": [
+            {
+                "capability_pack_id": "habits_module",
+                "surface_id": "habits_module",
+                "surface_kind": "module",
+                "capability_source": "generated_module",
+                "primary_entities": ["Habit"],
+            }
+        ],
+        "pages": [
+            {"name": "Dashboard", "route": "/dashboard"},
+            {"name": "Habits", "route": "/habits"},
+        ],
+        "build_tasks": [
+            {
+                "task_id": "page_bundle_dashboard",
+                "task_type": "page_bundle",
+                "capability_pack_id": "habits_module",
+                "surface_id": "habits_module",
+                "owned_paths": ["ui/pages/dashboard.yaml"],
+            },
+            {
+                "task_id": "page_bundle_habits",
+                "task_type": "page_bundle",
+                "capability_pack_id": "habits_module",
+                "surface_id": "habits_module",
+                "owned_paths": ["ui/pages/habits.yaml"],
+            },
+        ],
+    }
+
+
+def test_split_page_bundles_do_not_end_up_sharing_a_file() -> None:
+    plan = _plan_with_two_page_bundles()
+    _repair_coverage(plan, _coverage_context())
+
+    bundles = [t for t in plan["build_tasks"] if t["task_type"] == "page_bundle"]
+    owners: dict[str, list[str]] = {}
+    for task in bundles:
+        for path in task["owned_paths"]:
+            owners.setdefault(path, []).append(task["task_id"])
+
+    shared = {path: ids for path, ids in owners.items() if len(ids) > 1}
+    assert not shared, f"page artifacts must have one owner each, got {shared}"
+
+    # Every required artifact is still owned by somebody.
+    assert set(owners) >= {"app.json", "ui/pages/dashboard.yaml", "ui/pages/habits.yaml"}
+    # And each task kept the page it already owned rather than being reshuffled.
+    by_id = {t["task_id"]: t["owned_paths"] for t in bundles}
+    assert "ui/pages/habits.yaml" in by_id["page_bundle_habits"]
+    assert "ui/pages/dashboard.yaml" in by_id["page_bundle_dashboard"]

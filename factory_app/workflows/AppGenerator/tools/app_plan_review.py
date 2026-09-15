@@ -212,17 +212,37 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
     page_paths = [f"ui/pages/{_page_file_stem(page)}.yaml" for page in plan.get("pages") or []]
     bundle_tasks = [task for task in tasks if task.get("task_type") == "page_bundle"]
     if bundle_tasks and page_paths:
-        bundle = bundle_tasks[0]
         required_paths = ["app.json", *page_paths]
         wanted_stems = {path.lower() for path in required_paths}
-        # Drop differently-cased spellings of the same file rather than keeping
-        # both, then add the canonical set back unconditionally - filtering and
-        # re-adding conditionally strips them on a second pass.
-        kept = [path for path in (bundle.get("owned_paths") or []) if str(path).lower() not in wanted_stems]
-        merged = kept + required_paths
-        if merged != list(bundle.get("owned_paths") or []):
-            bundle["owned_paths"] = merged
-            repairs.append(f"{bundle.get('task_id')}: page_bundle owns app.json and {len(page_paths)} page file(s)")
+
+        # A plan may split page work across several page_bundle tasks. The
+        # coverage rule takes the union of what they own, but a separate rule
+        # forbids two tasks owning the same artifact - "task batches cannot
+        # race". So assign each required path to exactly one task: leave it
+        # where it already lives, and give the rest to the first task.
+        assigned: dict[str, dict[str, Any]] = {}
+        for task in bundle_tasks:
+            for path in _normalized_owned_paths(task):
+                if path.lower() in wanted_stems:
+                    assigned.setdefault(path, task)
+
+        for path in required_paths:
+            assigned.setdefault(path, bundle_tasks[0])
+
+        for task in bundle_tasks:
+            mine = [path for path in required_paths if assigned.get(path) is task]
+            others = [
+                path
+                for path in (task.get("owned_paths") or [])
+                if str(path).lower() not in wanted_stems
+            ]
+            merged = others + mine
+            if merged != list(task.get("owned_paths") or []):
+                task["owned_paths"] = merged
+                repairs.append(
+                    f"{task.get('task_id')}: page_bundle owns {len(mine)} of "
+                    f"{len(required_paths)} page artifact(s), no shared ownership"
+                )
 
     # 3. Every generated module needs its required files owned by a task of the
     #    right type. The required set is derived exactly as the validator does.
