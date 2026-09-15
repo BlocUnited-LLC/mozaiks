@@ -219,6 +219,33 @@ def _normalize_blank_optional_strings(value: Any) -> Any:
     return value
 
 
+# ResourceTable extends DataTable with search, filtering and sorting. A section
+# that asks for those on a plain DataTable is rejected as
+# "Unknown runtime-affecting field is not allowed", which failed a live build at
+# ui/pages/habits.yaml over default_filter, default_sort and filters. The fields
+# are real; only the primitive was wrong, and the schema says which one owns
+# them. Server pagination stays on DataTable - AppResourceTableConfig accepts
+# client pagination only, so promoting it there would trade one rejection for
+# another.
+_RESOURCE_TABLE_ONLY_FIELDS = frozenset(
+    {"search", "search_placeholder", "filters", "default_filter", "sorts", "default_sort"}
+)
+
+
+def _promote_table_primitive(section: dict[str, Any]) -> bool:
+    if section.get("primitive") != "DataTable":
+        return False
+    config = section.get("config")
+    if not isinstance(config, dict):
+        return False
+    if not (_RESOURCE_TABLE_ONLY_FIELDS & set(config)):
+        return False
+    if config.get("pagination_mode") == "server":
+        return False
+    section["primitive"] = "ResourceTable"
+    return True
+
+
 def _normalize_page_section(section: Any) -> Any:
     section = _strip_none(_to_plain(section))
     if not isinstance(section, dict):
@@ -231,6 +258,12 @@ def _normalize_page_section(section: Any) -> Any:
         if isinstance(children, list):
             config["children"] = [_normalize_page_section(child) for child in children]
         section["config"] = _strip_none(config)
+    if _promote_table_primitive(section):
+        _logger.info(
+            "[AppGenerator] page section %r promoted DataTable -> ResourceTable for %s",
+            section.get("id"),
+            sorted(_RESOURCE_TABLE_ONLY_FIELDS & set(section.get("config") or {})),
+        )
     return _strip_none(section)
 
 
