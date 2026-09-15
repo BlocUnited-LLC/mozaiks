@@ -25,6 +25,15 @@ All sandbox strategies route through the `SandboxPort` seam
 Sandboxes are **ephemeral workspaces, never truth stores** — outcomes
 persist into build records; the sandbox itself is disposable.
 
+## Operating Rule
+
+The Factory uses two intentionally separate sandbox paths. AG2
+`SandboxShellTool` and `SandboxCodeTool` execute commands or code for an agent's
+bounded assignment. Mozaiks `SandboxPort` starts and validates the complete
+generated application. An agent's successful command is not application
+acceptance, and application preview is not an agent shell. The authoritative
+decision and configuration matrix is [ADR 0010](../../adr/0010-agent-and-app-sandbox-execution-boundary.md).
+
 ## Live preview sessions (AppWorkbench)
 
 Beyond one-shot validation, the Studio host mounts an artifact preview session
