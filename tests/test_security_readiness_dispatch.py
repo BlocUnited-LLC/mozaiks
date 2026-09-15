@@ -246,7 +246,8 @@ async def test_successor_reconnect_reacquires_principal_and_permissions(live_run
 
     source = {**live_runtime.connection, "ws_id": 1}
     JourneyOrchestrator()._ensure_connection_alias(
-        transport=live_runtime.transport, source_conn=source, target_chat_id=RUN[2],
+        transport=live_runtime.transport, source_conn=source,
+        source_chat_id=RUN[2], target_chat_id=RUN[2],
         workflow_name=RUN[0], app_id=RUN[1], user_id="owner_1",
     )
     principals = []
