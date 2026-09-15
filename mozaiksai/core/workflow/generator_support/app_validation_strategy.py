@@ -48,9 +48,8 @@ def default_app_validation_strategy(
     local_available: bool | None = None,
     docker_available: bool | None = None,
 ) -> tuple[str, str]:
-    env_map = os.environ if env is None else env
-    if str(env_map.get("E2B_API_KEY", "")).strip():
-        return "e2b", "resolved from E2B availability"
+    # A credential only makes the hosted provider available. It must never
+    # silently turn a local build into a billable hosted validation run.
     if docker_available is None:
         docker_available = docker_app_validation_available()
     if docker_available:
