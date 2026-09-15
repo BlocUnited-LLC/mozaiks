@@ -9,6 +9,8 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
+from mozaiksai.core.utils.sequences import dedupe_strings
+
 from .models import (
     AppContextGraph,
     AppContextGraphEdge,
@@ -160,16 +162,16 @@ def _report_payload(
     edge_by_id = {_edge_key(edge): edge for edge in graph.edges}
     affected_node_ids = sorted({item.affected_node_id for item in evidence})
     affected_nodes = [nodes_by_id[node_id] for node_id in affected_node_ids if node_id in nodes_by_id]
-    affected_files = sorted(_dedupe(path for node in affected_nodes for path in _node_paths(node)))
+    affected_files = sorted(dedupe_strings(path for node in affected_nodes for path in _node_paths(node)))
     affected_symbols = sorted(
-        _dedupe(
+        dedupe_strings(
             str((node.metadata or {}).get("qualified_name") or node.label or node.node_id)
             for node in affected_nodes
             if node.node_type == GraphNodeType.SYMBOL
         )
     )
     affected_contracts = sorted(
-        _dedupe(
+        dedupe_strings(
             path
             for node in affected_nodes
             for path in _node_paths(node)
@@ -177,14 +179,14 @@ def _report_payload(
         )
     )
     dependencies = sorted(
-        _dedupe(
+        dedupe_strings(
             edge.target_node_id
             for edge in graph.edges
             if edge.source_node_id in affected_node_ids and edge.edge_type == GraphEdgeType.DEPENDS_ON
         )
     )
     dependents = sorted(
-        _dedupe(
+        dedupe_strings(
             edge.source_node_id
             for edge in graph.edges
             if edge.target_node_id in affected_node_ids and edge.edge_type == GraphEdgeType.DEPENDS_ON
@@ -204,7 +206,7 @@ def _report_payload(
     )
     ambiguity = _ambiguity_risks(affected_nodes)
     unresolved = sorted(
-        _dedupe(
+        dedupe_strings(
             edge.target_node_id
             for item in evidence
             for edge_id in item.ordered_edge_path
@@ -214,7 +216,7 @@ def _report_payload(
         )
     )
     parser_degradation = sorted(
-        _dedupe(
+        dedupe_strings(
             item.degradation_reason
             for item in evidence
             if item.authority != ParserAuthority.AUTHORITATIVE and item.degradation_reason
@@ -477,7 +479,7 @@ def _ambiguity_risks(nodes: list[AppContextGraphNode]) -> list[str]:
             risks.append(f"unknown_node:{node.node_id}")
         if (node.metadata or {}).get("resolved") is False:
             risks.append(f"unresolved:{node.node_id}")
-    return sorted(_dedupe(risks))
+    return sorted(dedupe_strings(risks))
 
 
 def _dedupe_evidence(evidence: list[ImpactEvidence]) -> list[ImpactEvidence]:
@@ -535,15 +537,6 @@ def _digest(value: Any) -> str:
     return f"sha256:{hashlib.sha256(raw).hexdigest()}"
 
 
-def _dedupe(values: Any) -> list[str]:
-    out: list[str] = []
-    for value in values:
-        if value is None:
-            continue
-        text = str(value).strip()
-        if text and text not in out:
-            out.append(text)
-    return out
 
 
 __all__ = [

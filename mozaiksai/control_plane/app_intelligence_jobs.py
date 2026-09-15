@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, PlatformCollections
 from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 from .source_import import SourceImportKind, public_source_import_result
 
@@ -167,7 +168,7 @@ def advance_app_intelligence_index_job(
             "phases": phases,
             "started_at": job.started_at or now,
             "updated_at": now,
-            "warnings": _dedupe([*job.warnings, *list((details or {}).get("warnings") or [])]),
+            "warnings": dedupe_strings([*job.warnings, *list((details or {}).get("warnings") or [])]),
         }
     )
 
@@ -200,7 +201,7 @@ def complete_app_intelligence_index_job(
             "updated_at": now,
             "app_intelligence": dict(app_intelligence or {}),
             "context_readiness": dict(context_readiness or {}),
-            "warnings": _dedupe([*job.warnings, *list(warnings or [])]),
+            "warnings": dedupe_strings([*job.warnings, *list(warnings or [])]),
             "error": None,
         }
     )
@@ -234,7 +235,7 @@ def fail_app_intelligence_index_job(
             "phases": phases,
             "completed_at": now,
             "updated_at": now,
-            "warnings": _dedupe([*job.warnings, *list(warnings or [])]),
+            "warnings": dedupe_strings([*job.warnings, *list(warnings or [])]),
             "error": error,
         }
     )
@@ -351,16 +352,6 @@ def _default_phase_message(phase_id: str) -> str:
     }.get(phase_id, "Indexing app context.")
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for value in values:
-        text = str(value or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        out.append(text)
-    return out
 
 
 def _datetime_sort_key(value: datetime | None) -> float:

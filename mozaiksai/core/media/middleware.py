@@ -8,6 +8,8 @@ from ag2 import Context
 from ag2.events import BaseEvent, ModelResponse
 from ag2.middleware import BaseMiddleware, LLMCall, Middleware
 
+from mozaiksai.core.utils.context_vars import context_get
+
 from .artifacts import generated_media_artifact_payload
 from .store import MediaAssetStore, get_media_asset_store
 from .types import GeneratedMediaAsset, MediaPromotionTarget
@@ -15,20 +17,6 @@ from .types import GeneratedMediaAsset, MediaPromotionTarget
 logger = logging.getLogger("mozaiks.media.middleware")
 
 
-def _ctx_get(context_variables: Any, key: str, default: Any = None) -> Any:
-    if context_variables is None:
-        return default
-    if hasattr(context_variables, "get"):
-        try:
-            return context_variables.get(key, default)
-        except Exception:
-            return default
-    data = getattr(context_variables, "data", None)
-    if isinstance(data, dict):
-        return data.get(key, default)
-    if isinstance(context_variables, dict):
-        return context_variables.get(key, default)
-    return default
 
 
 def _ctx_set(context_variables: Any, key: str, value: Any) -> None:
@@ -61,7 +49,7 @@ def _append_generated_assets_context(
     assets: list[GeneratedMediaAsset],
 ) -> None:
     entries = [asset.model_dump(by_alias=False, mode="json") for asset in assets]
-    existing = _ctx_get(context_variables, "generated_media_assets", [])
+    existing = context_get(context_variables, "generated_media_assets", [])
     if not isinstance(existing, list):
         existing = []
     _ctx_set(context_variables, "generated_media_assets", [*existing, *entries])
@@ -93,8 +81,8 @@ async def harvest_generated_media_response(
     if not files:
         return []
 
-    app_id = str(_ctx_get(context_variables, "app_id", "") or "").strip()
-    chat_id = str(_ctx_get(context_variables, "chat_id", "") or "").strip()
+    app_id = str(context_get(context_variables, "app_id", "") or "").strip()
+    chat_id = str(context_get(context_variables, "chat_id", "") or "").strip()
     if not app_id or not chat_id:
         logger.debug("Generated media harvest skipped: missing app_id/chat_id")
         return []

@@ -20,6 +20,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.core.artifacts import ArtifactStore
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 from .app_context import get_current_app_intelligence_snapshot
 from .app_intelligence_jobs import AppIntelligenceIndexJob, get_latest_app_intelligence_index_job
@@ -295,7 +296,7 @@ def run_app_source_validation(
     )
     runnable = [item for item in planned if item.status == "planned"]
     warnings.extend(item.skip_reason or "" for item in planned if item.status == "skipped")
-    warnings = _dedupe(warnings)
+    warnings = dedupe_strings(warnings)
 
     if runnable and not confirm_execution:
         return _validation_result(
@@ -446,7 +447,7 @@ def _selected_kinds(
         kinds = [kind for kind in kinds if kind != "install"]
     if include_install and "install" not in kinds:
         kinds.insert(0, "install")
-    return _dedupe(kinds)
+    return dedupe_strings(kinds)
 
 
 def _command_candidates(framework_detection: dict[str, Any] | None) -> list[AppValidationCommandCandidate]:
@@ -884,7 +885,7 @@ def _validation_result(
         started_at=started.isoformat().replace("+00:00", "Z"),
         completed_at=completed.isoformat().replace("+00:00", "Z"),
         duration_ms=_elapsed_ms(start_monotonic),
-        warnings=_dedupe([str(item or "").strip() for item in warnings or []]),
+        warnings=dedupe_strings([str(item or "").strip() for item in warnings or []]),
     )
 
 
@@ -906,16 +907,6 @@ def _elapsed_ms(start_monotonic: float) -> int:
     return max(0, int((time.monotonic() - start_monotonic) * 1000))
 
 
-def _dedupe(values: Sequence[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for value in values:
-        text = str(value or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        out.append(text)
-    return out
 
 
 __all__ = [

@@ -20,24 +20,11 @@ from logs.logging_config import get_core_logger
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.tokens.guard import TokenUsageGuard
 from mozaiksai.core.tokens.manager import TokenManager
+from mozaiksai.core.utils.context_vars import context_get
 
 logger = get_core_logger("ag2_usage_middleware")
 
 
-def _ctx_get(context_variables: Any, key: str, default: Any = None) -> Any:
-    if context_variables is None:
-        return default
-    if hasattr(context_variables, "get"):
-        try:
-            return context_variables.get(key, default)
-        except Exception:
-            return default
-    data = getattr(context_variables, "data", None)
-    if isinstance(data, dict):
-        return data.get(key, default)
-    if isinstance(context_variables, dict):
-        return context_variables.get(key, default)
-    return default
 
 
 def _int_usage(value: Any) -> int:
@@ -79,7 +66,7 @@ def _required_tokens_for_call(context_variables: Any) -> int:
         "token_watchdog_required_tokens",
         "token_budget_required_tokens",
     ):
-        value = _ctx_get(context_variables, key)
+        value = context_get(context_variables, key)
         if value is not None:
             return _positive_int(value)
     return _positive_int(os.getenv("MOZAIKS_TOKEN_PREFLIGHT_REQUIRED_TOKENS"), default=1)
@@ -112,13 +99,13 @@ class MozaiksUsageMiddleware(BaseMiddleware):
         events: Sequence[BaseEvent],
         context: Context,
     ) -> ModelResponse:
-        raw_binding = _ctx_get(self._context_variables, "run_build_binding")
+        raw_binding = context_get(self._context_variables, "run_build_binding")
         binding = RunBuildBinding.model_validate(raw_binding) if raw_binding is not None else None
         await TokenUsageGuard().check_or_raise(
-            app_id=_text(_ctx_get(self._context_variables, "app_id", "")),
-            user_id=_text(_ctx_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
-            tenant_id=_text(_ctx_get(self._context_variables, "tenant_id", "")) or None,
-            workspace_id=_text(_ctx_get(self._context_variables, "workspace_id", "")) or None,
+            app_id=_text(context_get(self._context_variables, "app_id", "")),
+            user_id=_text(context_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
+            tenant_id=_text(context_get(self._context_variables, "tenant_id", "")) or None,
+            workspace_id=_text(context_get(self._context_variables, "workspace_id", "")) or None,
             required_tokens=_required_tokens_for_call(self._context_variables),
         )
 
@@ -143,12 +130,12 @@ class MozaiksUsageMiddleware(BaseMiddleware):
 
         try:
             await TokenManager.emit_usage_delta(
-                chat_id=_text(_ctx_get(self._context_variables, "chat_id", "")),
-                app_id=_text(_ctx_get(self._context_variables, "app_id", "")),
-                user_id=_text(_ctx_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
-                tenant_id=_text(_ctx_get(self._context_variables, "tenant_id", "")) or None,
-                workspace_id=_text(_ctx_get(self._context_variables, "workspace_id", "")) or None,
-                workflow_name=_text(_ctx_get(self._context_variables, "workflow_name", self._workflow_name)),
+                chat_id=_text(context_get(self._context_variables, "chat_id", "")),
+                app_id=_text(context_get(self._context_variables, "app_id", "")),
+                user_id=_text(context_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
+                tenant_id=_text(context_get(self._context_variables, "tenant_id", "")) or None,
+                workspace_id=_text(context_get(self._context_variables, "workspace_id", "")) or None,
+                workflow_name=_text(context_get(self._context_variables, "workflow_name", self._workflow_name)),
                 build_id=binding.build_id if binding else None,
                 agent_name=self._agent_name,
                 model_name=str(model_name) if model_name else self._model_name,

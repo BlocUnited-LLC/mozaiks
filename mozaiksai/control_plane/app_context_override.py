@@ -14,6 +14,7 @@ from mozaiksai.control_plane.app_context_policy import (
     AppContextPolicyDecision,
     AppContextPolicyResult,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 APP_CONTEXT_POLICY_OVERRIDE_WARNING = (
     "Human app-context policy override recorded; validation and promotion gates still apply."
@@ -69,7 +70,7 @@ class AppContextPolicyOverride(BaseModel):
     @field_validator("applies_to_paths")
     @classmethod
     def _normalize_paths(cls, value: list[str]) -> list[str]:
-        return _dedupe([_normalize_path(path) for path in value])
+        return dedupe_strings([_normalize_path(path) for path in value])
 
     @field_validator("applies_to_change_class", "applies_to_refinement_lane")
     @classmethod
@@ -100,7 +101,7 @@ def create_app_context_policy_override(
 
     resolved_decision = AppContextPolicyOverrideDecision(override_decision)
     resolved_reviewed_at = reviewed_at or datetime.now(UTC)
-    normalized_paths = _dedupe([_normalize_path(path) for path in applies_to_paths or []])
+    normalized_paths = dedupe_strings([_normalize_path(path) for path in applies_to_paths or []])
     payload = {
         "app_id": app_id,
         "request_id": request_id,
@@ -151,7 +152,7 @@ def apply_app_context_policy_override(
         policy_result=policy_result,
         override=resolved_override,
     )
-    warnings = _dedupe([*(getattr(plan, "warnings", []) or []), *resolved_override.warnings])
+    warnings = dedupe_strings([*(getattr(plan, "warnings", []) or []), *resolved_override.warnings])
     return plan.model_copy(
         update={
             "app_context_policy_override": resolved_override,
@@ -170,7 +171,7 @@ def _apply_decision_to_policy(
     if override.override_decision is not AppContextPolicyOverrideDecision.ALLOW_WITH_WARNING:
         return policy_result.model_copy(
             update={
-                "warnings": _dedupe([*policy_result.warnings, *override.warnings]),
+                "warnings": dedupe_strings([*policy_result.warnings, *override.warnings]),
             }
         )
 
@@ -179,13 +180,13 @@ def _apply_decision_to_policy(
             "decision": AppContextPolicyDecision.WARN,
             "allowed": True,
             "blocking": False,
-            "reasons": _dedupe(
+            "reasons": dedupe_strings(
                 [
                     *policy_result.reasons,
                     "Scoped human override allowed planning or staging to continue.",
                 ]
             ),
-            "warnings": _dedupe([*policy_result.warnings, *override.warnings]),
+            "warnings": dedupe_strings([*policy_result.warnings, *override.warnings]),
             "requires_context_refresh": False,
             "requires_human_override": False,
         }
@@ -210,7 +211,7 @@ def _validate_override_scope(
     if override.context_version_id and plan_context_version_id and override.context_version_id != plan_context_version_id:
         raise ValueError("Override context_version_id does not match the plan context")
 
-    plan_paths = _dedupe([_normalize_path(path) for path in getattr(plan, "affected_bundle_paths", []) or []])
+    plan_paths = dedupe_strings([_normalize_path(path) for path in getattr(plan, "affected_bundle_paths", []) or []])
     if override.applies_to_paths and override.applies_to_paths != plan_paths:
         raise ValueError("Override applies_to_paths does not match the plan affected paths")
 
@@ -271,16 +272,6 @@ def _normalize_path(path: str) -> str:
     return str(path or "").replace("\\", "/").strip().lstrip("/").lower()
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        deduped.append(normalized)
-    return deduped
 
 
 __all__ = [

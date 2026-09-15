@@ -21,6 +21,7 @@ from mozaiksai.core.app_context.refresh import (
     ContextRefreshResultStatus,
     ContextRefreshScope,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 from mozaiksai.core.workflow.pack.config import get_workflow_sequence, load_global_pack_graph
 from mozaiksai.core.workflow.pack.schema import normalize_step_groups
 
@@ -165,7 +166,7 @@ async def complete_context_refresh(
             new_context_version_id=None,
             status=ContextRefreshResultStatus.FAILED,
             stale_resolved=False,
-            warnings=_dedupe(warnings),
+            warnings=dedupe_strings(warnings),
             artifacts_created=[],
         )
 
@@ -183,7 +184,7 @@ async def complete_context_refresh(
             new_context_version_id=None,
             status=ContextRefreshResultStatus.MISSING_CONTEXT,
             stale_resolved=False,
-            warnings=_dedupe(warnings),
+            warnings=dedupe_strings(warnings),
             artifacts_created=[],
         )
 
@@ -225,7 +226,7 @@ async def complete_context_refresh(
         new_context_version_id=new_id,
         status=status,
         stale_resolved=stale_resolved,
-        warnings=_dedupe(warnings),
+        warnings=dedupe_strings(warnings),
         artifacts_created=artifacts_created,
     )
 
@@ -413,16 +414,6 @@ def _artifact_lifecycle_value(value: Any) -> str | None:
     return str(raw) if raw is not None else None
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        deduped.append(normalized)
-    return deduped
 
 
 __all__ = [

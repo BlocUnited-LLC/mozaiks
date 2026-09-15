@@ -71,7 +71,6 @@ from mozaiksai.control_plane.app_context_override import (
     AppContextPolicyOverride,
     AppContextPolicyOverrideDecision,
     _apply_decision_to_policy,
-    _dedupe,
     _normalize_override,
     _normalize_path,
     _normalize_policy,
@@ -84,6 +83,7 @@ from mozaiksai.control_plane.app_context_policy import (
     AppContextPolicyDecision,
     AppContextPolicyResult,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 # ---------------------------------------------------------------------------
 # Helpers to build test fixtures
@@ -153,23 +153,23 @@ class TestNormalizePath:
 
 class TestDedupe:
     def test_empty_list_returns_empty(self):
-        assert _dedupe([]) == []
+        assert dedupe_strings([]) == []
 
     def test_unique_values_preserved(self):
-        assert _dedupe(["a", "b", "c"]) == ["a", "b", "c"]
+        assert dedupe_strings(["a", "b", "c"]) == ["a", "b", "c"]
 
     def test_duplicates_removed_first_kept(self):
-        assert _dedupe(["a", "b", "a"]) == ["a", "b"]
+        assert dedupe_strings(["a", "b", "a"]) == ["a", "b"]
 
     def test_order_preserved(self):
-        assert _dedupe(["z", "a", "m"]) == ["z", "a", "m"]
+        assert dedupe_strings(["z", "a", "m"]) == ["z", "a", "m"]
 
     def test_empty_strings_excluded(self):
-        result = _dedupe(["a", "", "b"])
+        result = dedupe_strings(["a", "", "b"])
         assert result == ["a", "b"]
 
     def test_whitespace_strings_excluded(self):
-        result = _dedupe(["a", "  ", "b"])
+        result = dedupe_strings(["a", "  ", "b"])
         assert result == ["a", "b"]
 
 

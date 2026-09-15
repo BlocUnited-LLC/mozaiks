@@ -12,6 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from mozaiksai.core.media.types import MediaPromotionTargetValue
+from mozaiksai.core.utils.sequences import dedupe_strings
 from mozaiksai.core.workflow.reserved_context_keys import (
     require_application_context_name_allowed,
 )
@@ -36,16 +37,6 @@ def _optional_text(value: Any) -> str | None:
     return text or None
 
 
-def _normalize_string_list(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for raw in values:
-        text = str(raw or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        out.append(text)
-    return out
 
 
 class DeclarativeModel(BaseModel):
@@ -371,7 +362,7 @@ class ContextVariableSourceSpec(DeclarativeModel):
     def _normalize_string_lists(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        normalized = _normalize_string_list(value)
+        normalized = dedupe_strings(value)
         return normalized or None
 
 
@@ -420,7 +411,7 @@ class ContextVariableDefinitionSpec(DeclarativeModel):
     @field_validator("writer_ids")
     @classmethod
     def _normalize_writer_ids(cls, value: list[str]) -> list[str]:
-        return _normalize_string_list(value)
+        return dedupe_strings(value)
 
 
 class ContextAgentViewSpec(DeclarativeModel):
@@ -429,7 +420,7 @@ class ContextAgentViewSpec(DeclarativeModel):
     @field_validator("variables")
     @classmethod
     def _normalize_variables(cls, value: list[str]) -> list[str]:
-        normalized = _normalize_string_list(value)
+        normalized = dedupe_strings(value)
         for name in normalized:
             require_application_context_name_allowed(
                 name, where="context_variables.yaml agents.<name>.variables"
@@ -609,7 +600,7 @@ class ToolSpec(DeclarativeModel):
         if isinstance(value, str):
             return _required_text(value, field_name="agent")
         if isinstance(value, list):
-            normalized = _normalize_string_list([str(v) for v in value if isinstance(v, str)])
+            normalized = dedupe_strings([str(v) for v in value if isinstance(v, str)])
             if not normalized:
                 raise ValueError("agent list must include at least one non-empty string")
             return normalized
@@ -786,7 +777,7 @@ class UIConfig(DeclarativeModel):
     def _normalize_lists(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        return _normalize_string_list(value)
+        return dedupe_strings(value)
 
 
 class A2AClientConfig(DeclarativeModel):
@@ -801,7 +792,7 @@ class A2AClientConfig(DeclarativeModel):
     @field_validator("accepted_output_modes", "extensions", "supported_transports")
     @classmethod
     def _normalize_string_lists(cls, value: list[str]) -> list[str]:
-        return _normalize_string_list(value)
+        return dedupe_strings(value)
 
 
 class A2AAgentSpec(DeclarativeModel):
@@ -867,7 +858,7 @@ class StructuredOutputFieldSpec(DeclarativeModel):
     def _normalize_variants(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        normalized = _normalize_string_list(value)
+        normalized = dedupe_strings(value)
         return normalized or None
 
     @model_validator(mode="after")
@@ -933,7 +924,7 @@ class StructuredOutputUnionSpec(DeclarativeModel):
     @field_validator("variants")
     @classmethod
     def _validate_variants(cls, value: list[str]) -> list[str]:
-        normalized = _normalize_string_list(value)
+        normalized = dedupe_strings(value)
         if not normalized:
             raise ValueError("union.variants must not be empty")
         return normalized

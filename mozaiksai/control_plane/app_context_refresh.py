@@ -17,6 +17,7 @@ from mozaiksai.core.app_context.refresh import (
     ContextRefreshRequest,
     ContextRefreshScope,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 CONTEXT_REFRESH_REQUIRED_INPUTS = (
     "source_refs",
@@ -150,19 +151,9 @@ def _plan_warnings(
         )
     if not refresh_request.source_refs:
         warnings.append("Context refresh plan has no source refs; scan boundaries must be supplied before execution.")
-    return _dedupe(warnings)
+    return dedupe_strings(warnings)
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        deduped.append(normalized)
-    return deduped
 
 
 __all__ = [

@@ -64,7 +64,6 @@ Covers helpers NOT tested in test_app_context_impact_pure_helpers.py:
 from __future__ import annotations
 
 from mozaiksai.control_plane.app_context_impact import (
-    _dedupe,
     _edge_key,
     _node_path_hints,
     _node_search_text,
@@ -79,6 +78,7 @@ from mozaiksai.core.app_context.models import (
     GraphEdgeType,
     GraphNodeType,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 # ---------------------------------------------------------------------------
 # Helpers to build test nodes/edges
@@ -118,29 +118,29 @@ def _edge(
 
 class TestDedupe:
     def test_empty_list_returns_empty(self):
-        assert _dedupe([]) == []
+        assert dedupe_strings([]) == []
 
     def test_unique_values_preserved(self):
-        assert _dedupe(["a", "b", "c"]) == ["a", "b", "c"]
+        assert dedupe_strings(["a", "b", "c"]) == ["a", "b", "c"]
 
     def test_order_preserved(self):
-        result = _dedupe(["z", "a", "m"])
+        result = dedupe_strings(["z", "a", "m"])
         assert result == ["z", "a", "m"]
 
     def test_duplicate_first_kept(self):
-        result = _dedupe(["a", "b", "a"])
+        result = dedupe_strings(["a", "b", "a"])
         assert result == ["a", "b"]
 
     def test_whitespace_stripped_before_dedup(self):
-        result = _dedupe(["x", " x "])
+        result = dedupe_strings(["x", " x "])
         assert result == ["x"]
 
     def test_empty_strings_filtered(self):
-        result = _dedupe(["a", "", "b"])
+        result = dedupe_strings(["a", "", "b"])
         assert result == ["a", "b"]
 
     def test_whitespace_only_filtered(self):
-        result = _dedupe(["a", "  ", "b"])
+        result = dedupe_strings(["a", "  ", "b"])
         assert result == ["a", "b"]
 
 

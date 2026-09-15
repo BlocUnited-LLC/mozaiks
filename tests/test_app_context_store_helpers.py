@@ -106,7 +106,6 @@ import json
 from mozaiksai.core.app_context.store import (
     _action_ids_from_module_yaml,
     _collect_string_values,
-    _dedupe,
     _first_string,
     _integration_ids_from_structured_value,
     _json_bytes,
@@ -119,6 +118,7 @@ from mozaiksai.core.app_context.store import (
     _strings_from_value,
     _surface_id,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 # ---------------------------------------------------------------------------
 # 1. _surface_id
@@ -237,27 +237,27 @@ class TestNormalizeAppBundlePath:
 
 class TestDedupe:
     def test_empty_list_returns_empty(self):
-        assert _dedupe([]) == []
+        assert dedupe_strings([]) == []
 
     def test_unique_values_preserved_in_order(self):
-        assert _dedupe(["a", "b", "c"]) == ["a", "b", "c"]
+        assert dedupe_strings(["a", "b", "c"]) == ["a", "b", "c"]
 
     def test_duplicates_first_occurrence_kept(self):
-        result = _dedupe(["a", "b", "a", "c"])
+        result = dedupe_strings(["a", "b", "a", "c"])
         assert result == ["a", "b", "c"]
 
     def test_empty_strings_excluded(self):
-        result = _dedupe(["a", "", "b"])
+        result = dedupe_strings(["a", "", "b"])
         assert "" not in result
         assert result == ["a", "b"]
 
     def test_whitespace_only_excluded(self):
-        result = _dedupe(["a", "   ", "b"])
+        result = dedupe_strings(["a", "   ", "b"])
         assert len(result) == 2
 
     def test_none_in_list_cleaned(self):
         # str(None or "").strip() = "" → excluded
-        result = _dedupe(["a", None, "b"])
+        result = dedupe_strings(["a", None, "b"])
         assert result == ["a", "b"]
 
 
