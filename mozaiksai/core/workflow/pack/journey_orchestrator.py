@@ -314,6 +314,7 @@ class JourneyOrchestrator:
             self._ensure_connection_alias(
                 transport=transport,
                 source_conn=conn,
+                source_chat_id=chat_id,
                 target_chat_id=next_chat_id,
                 workflow_name=wf,
                 app_id=app_id,
@@ -399,6 +400,7 @@ class JourneyOrchestrator:
         *,
         transport: Any,
         source_conn: dict[str, Any],
+        source_chat_id: str,
         target_chat_id: str,
         workflow_name: str,
         app_id: str,
@@ -424,6 +426,7 @@ class JourneyOrchestrator:
             "app_id": app_id,
             "active": True,
             "ws_id": ws_id,
+            "aliased_from_chat_id": source_chat_id,
         }
         if frontend_context and isinstance(frontend_context, dict):
             transport.connections[target_chat_id]["frontend_context"] = frontend_context

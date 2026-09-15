@@ -12,6 +12,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- Workflow transition aliases are released without closing the source chat's
+  live WebSocket, so a reconnect cannot interrupt an in-progress build.
+
 
 
 
