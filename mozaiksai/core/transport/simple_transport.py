@@ -1615,7 +1615,11 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 await stale_ws.close(code=1001)
             except Exception:
                 pass
-            await self._cleanup_connection(chat_id)
+            # This is a takeover, not a departure: a workflow may be mid-run on
+            # this chat and waiting on the user. Release the dead socket, but
+            # leave the execution's pending input callbacks armed for the
+            # replacement connection.
+            await self._cleanup_connection(chat_id, execution_continues=True)
 
         self.connections[chat_id] = {
             "websocket": websocket,

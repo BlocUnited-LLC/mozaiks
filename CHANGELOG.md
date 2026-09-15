@@ -15,6 +15,15 @@ This project follows a practical pre-1.0 changelog format:
 
 
 
+
+### Fixed
+
+- A reconnect no longer kills the build running behind it. When a second
+  WebSocket arrived for a chat, evicting the stale one also dropped the pending
+  input-request callbacks a running workflow uses to receive the user's reply,
+  so the run could die mid-build. Eviction now releases the dead socket while
+  leaving the execution armed; a genuine disconnect still clears them.
+
 ### Added
 
 - Approval gates rendered by `ApprovalCard` now carry a stable
