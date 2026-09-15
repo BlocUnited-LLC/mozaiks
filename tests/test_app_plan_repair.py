@@ -474,3 +474,83 @@ def test_split_page_bundles_do_not_end_up_sharing_a_file() -> None:
     by_id = {t["task_id"]: t["owned_paths"] for t in bundles}
     assert "ui/pages/habits.yaml" in by_id["page_bundle_habits"]
     assert "ui/pages/dashboard.yaml" in by_id["page_bundle_dashboard"]
+
+
+def test_a_page_file_with_no_approved_page_is_dropped() -> None:
+    """Rewriting pages to the approved inventory can orphan a page file.
+
+    A live run approved exactly one page:
+
+        plan pages: [('Dashboard', '/dashboard')]
+          page_bundle_dashboard        -> ['app.json', 'ui/pages/dashboard.yaml']
+          page_bundle_habit_management -> ['ui/pages/habits.yaml']
+
+    The planner had invented a habits page. The repair replaced the inventory
+    but left the orphaned file owned, and materialization failed with
+    "ui/pages/habits.yaml: page has no approved plan identity".
+    """
+    plan = _plan_with_two_page_bundles()
+    # Only Dashboard is approved this time.
+    context = _Context(
+        {
+            "design_surface_map": _design_surface_map(),
+            "capability_packs": [],
+            "experience_spec": {"pages": [{"name": "Dashboard", "route": "/dashboard"}]},
+        }
+    )
+
+    repairs = _repair_coverage(plan, context)
+
+    assert any("not an approved page" in r for r in repairs)
+    owned = {
+        path
+        for task in plan["build_tasks"]
+        if task.get("task_type") == "page_bundle"
+        for path in task.get("owned_paths") or []
+    }
+    assert "ui/pages/habits.yaml" not in owned
+    assert owned == {"app.json", "ui/pages/dashboard.yaml"}
+
+
+def test_a_bundle_task_left_with_nothing_is_removed() -> None:
+    """A task owning no files would materialize nothing and fail the batch."""
+    plan = _plan_with_two_page_bundles()
+    context = _Context(
+        {
+            "design_surface_map": _design_surface_map(),
+            "capability_packs": [],
+            "experience_spec": {"pages": [{"name": "Dashboard", "route": "/dashboard"}]},
+        }
+    )
+
+    _repair_coverage(plan, context)
+
+    bundles = [t for t in plan["build_tasks"] if t.get("task_type") == "page_bundle"]
+    assert all(t.get("owned_paths") for t in bundles)
+    # And nothing still depends on a task that no longer exists.
+    ids = {str(t.get("task_id")) for t in plan["build_tasks"]}
+    for task in plan["build_tasks"]:
+        assert set(map(str, task.get("depends_on") or [])) <= ids
+
+
+def test_non_page_assets_are_not_dropped() -> None:
+    """Only orphaned page files go; other owned assets stay put."""
+    plan = _plan_with_two_page_bundles()
+    plan["build_tasks"][1]["owned_paths"] = ["ui/pages/habits.yaml", "brand/logo.svg"]
+    context = _Context(
+        {
+            "design_surface_map": _design_surface_map(),
+            "capability_packs": [],
+            "experience_spec": {"pages": [{"name": "Dashboard", "route": "/dashboard"}]},
+        }
+    )
+
+    _repair_coverage(plan, context)
+
+    kept = {
+        path
+        for task in plan["build_tasks"]
+        for path in task.get("owned_paths") or []
+    }
+    assert "brand/logo.svg" in kept
+    assert "ui/pages/habits.yaml" not in kept

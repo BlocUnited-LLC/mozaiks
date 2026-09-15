@@ -231,11 +231,19 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
 
         for task in bundle_tasks:
             mine = [path for path in required_paths if assigned.get(path) is task]
-            others = [
-                path
-                for path in (task.get("owned_paths") or [])
-                if str(path).lower() not in wanted_stems
-            ]
+            others: list[str] = []
+            for path in task.get("owned_paths") or []:
+                text = str(path)
+                if text.lower() in wanted_stems:
+                    continue
+                # Rewriting pages to the approved inventory can orphan a page
+                # file the planner invented. Keeping it fails materialization
+                # with "page has no approved plan identity", because no approved
+                # page claims that stem. Non-page assets are untouched.
+                if text.startswith("ui/pages/") and text.endswith((".yaml", ".yml")):
+                    repairs.append(f"{task.get('task_id')}: dropped {text!r}, not an approved page")
+                    continue
+                others.append(text)
             merged = others + mine
             if merged != list(task.get("owned_paths") or []):
                 task["owned_paths"] = merged
@@ -243,6 +251,22 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                     f"{task.get('task_id')}: page_bundle owns {len(mine)} of "
                     f"{len(required_paths)} page artifact(s), no shared ownership"
                 )
+
+        empty = [
+            task
+            for task in bundle_tasks
+            if task.get("task_type") == "page_bundle" and not (task.get("owned_paths") or [])
+        ]
+        if empty:
+            empty_ids = {str(task.get("task_id")) for task in empty}
+            tasks = [task for task in tasks if task not in empty]
+            for task in tasks:
+                depends = [d for d in (task.get("depends_on") or []) if str(d) not in empty_ids]
+                if len(depends) != len(task.get("depends_on") or []):
+                    task["depends_on"] = depends
+            for task_id in sorted(empty_ids):
+                repairs.append(f"dropped task {task_id!r}: no approved page left to build")
+            plan["build_tasks"] = tasks
 
     # 3. Every generated module needs its required files owned by a task of the
     #    right type. The required set is derived exactly as the validator does.
