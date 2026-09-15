@@ -230,3 +230,133 @@ def test_a_registered_managed_capability_is_kept() -> None:
 
     assert not any("dropped" in r for r in repairs)
     assert any(p["capability_pack_id"] == "notifications_pack" for p in plan["capability_packs"])
+
+
+from factory_app.workflows.AppGenerator.tools.app_plan_review import (  # noqa: E402
+    _repair_coverage,
+    validate_plan_coverage,
+)
+
+
+def _coverage_context() -> _Context:
+    return _Context(
+        {
+            "design_surface_map": _design_surface_map(),
+            "capability_packs": [],
+            "experience_spec": {
+                "pages": [
+                    {"name": "Dashboard", "route": "/dashboard"},
+                    {"name": "Habits", "route": "/habits"},
+                ]
+            },
+        }
+    )
+
+
+def _plan_missing_coverage() -> dict[str, Any]:
+    """The third live failure, once ownership passed.
+
+        Incomplete build plan:
+        - pages must preserve the approved name/route inventory:
+          [('Dashboard', '/dashboard'), ('Habits', '/habits')]
+        - habit_registry/business_services is incomplete; missing
+          ['.../account_data_handler.py', '.../policy.py']
+
+    Both name their own answer: the inventory comes from experience_spec and the
+    required file set is derived from the pack.
+    """
+    return {
+        "capability_packs": [
+            {
+                "capability_pack_id": "habits_module",
+                "surface_id": "habits_module",
+                "surface_kind": "module",
+                "capability_source": "generated_module",
+                "primary_entities": ["Habit", "HabitCheckIn"],
+                "user_data_scope": True,
+            }
+        ],
+        # The planner invented a page nobody approved and dropped one that was.
+        "pages": [{"name": "Dashboard", "route": "/dashboard"}, {"name": "Settings", "route": "/settings"}],
+        "build_tasks": [
+            {
+                "task_id": "t_contract",
+                "task_type": "module_contract",
+                "capability_pack_id": "habits_module",
+                "surface_id": "habits_module",
+                "owned_paths": ["modules/habits_module/module.yaml"],
+            },
+            {
+                "task_id": "t_services",
+                "task_type": "business_services",
+                "capability_pack_id": "habits_module",
+                "surface_id": "habits_module",
+                "owned_paths": [
+                    "modules/habits_module/backend/handler.py",
+                    "modules/habits_module/backend/service.py",
+                    "modules/habits_module/backend/repo.py",
+                ],
+            },
+            {
+                "task_id": "t_pages",
+                "task_type": "page_bundle",
+                "capability_pack_id": "habits_module",
+                "surface_id": "habits_module",
+                "owned_paths": [],
+            },
+        ],
+    }
+
+
+def test_coverage_failure_is_reproduced_before_repair() -> None:
+    with pytest.raises(ValueError) as excinfo:
+        validate_plan_coverage(_plan_missing_coverage(), _coverage_context())
+
+    message = str(excinfo.value)
+    assert "approved name/route inventory" in message
+    assert "business_services is incomplete" in message
+
+
+def test_coverage_repair_makes_the_plan_pass() -> None:
+    plan = _plan_missing_coverage()
+    context = _coverage_context()
+
+    repairs = _repair_coverage(plan, context)
+    assert repairs
+
+    # The assertion that matters: the real coverage validator accepts it.
+    validate_plan_coverage(plan, context)
+
+
+def test_coverage_repair_restores_the_approved_pages() -> None:
+    plan = _plan_missing_coverage()
+    _repair_coverage(plan, _coverage_context())
+
+    assert [(p["name"], p["route"]) for p in plan["pages"]] == [
+        ("Dashboard", "/dashboard"),
+        ("Habits", "/habits"),
+    ]
+    bundle = next(t for t in plan["build_tasks"] if t["task_type"] == "page_bundle")
+    assert "app.json" in bundle["owned_paths"]
+
+
+def test_coverage_repair_synthesizes_a_missing_task_type() -> None:
+    """A module with no data_models task at all still has to get one."""
+    plan = _plan_missing_coverage()
+    assert not any(t["task_type"] == "data_models" for t in plan["build_tasks"])
+
+    _repair_coverage(plan, _coverage_context())
+
+    models = [t for t in plan["build_tasks"] if t["task_type"] == "data_models"]
+    assert len(models) == 1
+    assert models[0]["initial_agent"] == "ModelAgent"
+    assert models[0]["depends_on"] == ["t_contract"]
+
+
+def test_coverage_repair_is_idempotent() -> None:
+    plan = _plan_missing_coverage()
+    context = _coverage_context()
+    _repair_coverage(plan, context)
+
+    assert _repair_coverage(plan, context) == []
+    validate_plan_coverage(plan, context)

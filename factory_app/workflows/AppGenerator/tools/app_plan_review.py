@@ -6,6 +6,7 @@ import logging
 from typing import Annotated, Any
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
+    _CANONICAL_INITIAL_AGENTS,
     _context_available_pack_map,
     _normalized_owned_paths,
     _pack_id_from_descriptor,
@@ -155,6 +156,114 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
 
     return repairs
 
+def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
+    """Supply the coverage facts the validator already computes.
+
+    With ownership repaired, a live run failed on two errors that both name
+    their own answer:
+
+      - pages must preserve the approved name/route inventory:
+        [('Dashboard', '/dashboard'), ('Habits', '/habits')]
+      - habit_registry/business_services is incomplete; missing
+        ['modules/habit_registry/backend/account_data_handler.py',
+         'modules/habit_registry/backend/policy.py']
+
+    The approved inventory comes from experience_spec and the required file set
+    is derived from the pack itself, so neither needs a model. Anything the
+    validator cannot derive is still left for it to reject.
+    """
+    repairs: list[str] = []
+    tasks = plan.get("build_tasks") or []
+    if not tasks or context.get("build_mode") == "revision" or context.get("brownfield_build_path"):
+        return repairs
+
+    # 1. The approved page inventory is authority.
+    experience = detach(context.get("experience_spec")) or {}
+    expected = [
+        (page["name"], page["route"])
+        for page in experience.get("pages") or []
+        if page.get("name") and page.get("route")
+    ]
+    if expected:
+        planned = plan.get("pages") or []
+        by_route = {page.get("route"): page for page in planned}
+        by_name = {page.get("name"): page for page in planned}
+        if {(p.get("name"), p.get("route")) for p in planned} != set(expected):
+            rebuilt = []
+            for name, route in expected:
+                existing = by_route.get(route) or by_name.get(name) or {}
+                page = dict(existing)
+                page["name"], page["route"] = name, route
+                rebuilt.append(page)
+            plan["pages"] = rebuilt
+            repairs.append(f"pages -> approved inventory {sorted(expected)}")
+
+    # 2. page_bundle must own app.json and every materialized page file.
+    page_paths = [f"ui/pages/{_page_file_stem(page)}.yaml" for page in plan.get("pages") or []]
+    bundle_tasks = [task for task in tasks if task.get("task_type") == "page_bundle"]
+    if bundle_tasks and page_paths:
+        bundle = bundle_tasks[0]
+        required_paths = ["app.json", *page_paths]
+        wanted_stems = {path.lower() for path in required_paths}
+        # Drop differently-cased spellings of the same file rather than keeping
+        # both, then add the canonical set back unconditionally - filtering and
+        # re-adding conditionally strips them on a second pass.
+        kept = [path for path in (bundle.get("owned_paths") or []) if str(path).lower() not in wanted_stems]
+        merged = kept + required_paths
+        if merged != list(bundle.get("owned_paths") or []):
+            bundle["owned_paths"] = merged
+            repairs.append(f"{bundle.get('task_id')}: page_bundle owns app.json and {len(page_paths)} page file(s)")
+
+    # 3. Every generated module needs its required files owned by a task of the
+    #    right type. The required set is derived exactly as the validator does.
+    for pack in plan.get("capability_packs") or []:
+        if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
+            continue
+        module_id = _pack_id_from_descriptor(pack)
+        module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
+        required: dict[str, set[str]] = {
+            "module_contract": {f"modules/{module_id}/module.yaml"},
+            "data_models": {f"modules/{module_id}/backend/schemas.py"},
+            "business_services": {f"modules/{module_id}/backend/{name}.py" for name in ("handler", "service")},
+        }
+        if pack.get("primary_entities"):
+            required["business_services"].update(
+                f"modules/{module_id}/backend/{name}.py" for name in ("repo", "policy")
+            )
+        if pack.get("user_data_scope") is True:
+            required["business_services"].add(f"modules/{module_id}/backend/account_data_handler.py")
+
+        contract_task = next(
+            (t.get("task_id") for t in module_tasks if t.get("task_type") == "module_contract"), None
+        )
+        for kind, paths in required.items():
+            typed = [t for t in module_tasks if t.get("task_type") == kind]
+            owned = {path for t in typed for path in _normalized_owned_paths(t)}
+            missing = sorted(paths - owned)
+            if not missing:
+                continue
+            if typed:
+                target = typed[0]
+                target["owned_paths"] = list(target.get("owned_paths") or []) + missing
+                repairs.append(f"{target.get('task_id')}: {kind} gained {missing}")
+            else:
+                synthesized = {
+                    "task_id": f"task_{module_id}_{kind}",
+                    "task_type": kind,
+                    "capability_pack_id": module_id,
+                    "surface_id": pack.get("surface_id"),
+                    "surface_kind": "module",
+                    "initial_agent": _CANONICAL_INITIAL_AGENTS[kind],
+                    "owned_paths": missing,
+                    "depends_on": [contract_task] if contract_task and kind != "module_contract" else [],
+                }
+                tasks.append(synthesized)
+                module_tasks.append(synthesized)
+                repairs.append(f"synthesized {synthesized['task_id']!r} owning {missing}")
+
+    plan["build_tasks"] = tasks
+    return repairs
+
 def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
     available = _context_available_pack_map(context)
     packs = plan.get("capability_packs") or []
@@ -272,7 +381,7 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
-        for repair in _repair_plan(plan, context_variables):
+        for repair in (*_repair_plan(plan, context_variables), *_repair_coverage(plan, context_variables)):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         validate_plan_origins(plan, context_variables)
         validate_plan_coverage(plan, context_variables)

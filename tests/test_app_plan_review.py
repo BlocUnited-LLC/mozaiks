@@ -91,18 +91,36 @@ def test_page_case_mismatch_reports_received_and_expected_paths_without_rewritin
     assert "ui/pages/Reports.yaml" in task["owned_paths"]
 
 
-def test_user_scoped_module_requires_planned_account_data_handler():
+def test_user_scoped_module_gets_its_account_data_handler_planned():
+    """The handler is required, and the review now supplies it rather than re-asking.
+
+    A user-scoped module must own backend/account_data_handler.py. Which file
+    that is, is derivable from the pack, so rejecting the plan over it cost
+    three model rounds and then the run - that is what killed every live build.
+    The review now adds the path and accepts the plan.
+
+    The guarantee is unchanged and still enforced where it matters: on the
+    generated bundle. test_user_scope_cannot_be_lost_during_module_materialization
+    below asserts _scan_planned_user_data_scope rejects output whose module.yaml
+    drops the scope or whose account_data_handler.py is missing. Planning the
+    file is bookkeeping; producing it is the safety property.
+    """
     plan = _plan()
     plan["capability_packs"][0]["user_data_scope"] = True
     context = _context()
-    rejected = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
-    assert rejected["outcome"] == "needs_revision"
-    assert "backend/account_data_handler.py" in rejected["error"]
-    service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services")
-    service["owned_paths"].append("modules/reports/backend/account_data_handler.py")
+
     accepted = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
     assert accepted["outcome"] == "ready", accepted
-    assert context.get("app_build_plan")["capability_packs"][0]["user_data_scope"] is True
+    cached = context.get("app_build_plan")
+    assert cached["capability_packs"][0]["user_data_scope"] is True
+    owned = {
+        path
+        for task in cached["build_tasks"]
+        if task.get("task_type") == "business_services"
+        for path in task.get("owned_paths") or []
+    }
+    assert "modules/reports/backend/account_data_handler.py" in owned
 
 
 def test_user_scope_cannot_be_lost_during_module_materialization():
