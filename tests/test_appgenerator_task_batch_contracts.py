@@ -362,10 +362,22 @@ def test_appgenerator_interview_has_an_explicit_human_reply_route() -> None:
     rules = handoffs["transition_rules"]
 
     user_rules = [rule for rule in rules if rule["source_agent"] == "user"]
-    assert user_rules[0]["target_agent"] == "InterviewAgent"
-    assert user_rules[0]["condition_key"] == "interview_complete"
-    assert user_rules[0]["condition_value"] is False
-    assert user_rules[1]["termination_reason"] == "workflow_failed"
+
+    # A user who asked to be brought a finished app is routed past the
+    # interview entirely. This has to be a routing rule: interview_complete
+    # only flips on the literal token NEXT from InterviewAgent, so a prompt
+    # instruction to skip is a request the model can decline - and in live
+    # runs it did, returning scope questions instead.
+    assert user_rules[0]["target_agent"] == "AppPlanAgent"
+    assert user_rules[0]["condition_key"] == "coding_participation"
+    assert user_rules[0]["condition_value"] == "autonomous"
+
+    # A guided user still reaches the interview, and it still has a human
+    # reply route, which is what this test exists to protect.
+    assert user_rules[1]["target_agent"] == "InterviewAgent"
+    assert user_rules[1]["condition_key"] == "interview_complete"
+    assert user_rules[1]["condition_value"] is False
+    assert user_rules[2]["termination_reason"] == "workflow_failed"
     interview_rules = [rule for rule in rules if rule["source_agent"] == "InterviewAgent"]
     assert [rule["target_agent"] for rule in interview_rules[:2]] == [
         "AppPlanAgent",
