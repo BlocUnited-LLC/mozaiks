@@ -39,6 +39,7 @@ from mozaiksai.core.adapters.ag2_network_runner import (
     AG2NetworkRunner,
     AG2NetworkRunnerRequest,
     _closed_reason_from_wal,
+    _json_safe_dict,
     _resume_pending_agent_turns,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
@@ -48,6 +49,18 @@ from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
 from mozaiksai.core.workflow.task_batches import parse_task_batches_config
+
+
+def test_channel_context_projects_large_source_bundle_to_artifact_reference() -> None:
+    projected = _json_safe_dict(
+        {
+            "source_context_bundle": {"file_contents": {"repo.py": "x" * 300_000}},
+            "source_context_artifact_version_id": "artifact_source_1",
+        }
+    )
+
+    assert projected["source_context_bundle"] is None
+    assert projected["source_context_artifact_version_id"] == "artifact_source_1"
 
 
 @pytest.fixture(autouse=True)
