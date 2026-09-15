@@ -32,6 +32,10 @@ from mozaiksai.core.workflow.context.authority import (
     build_context_authority_policy,
 )
 from mozaiksai.core.workflow.execution import lifecycle
+from mozaiksai.core.workflow.execution.network_graph import (
+    compile_transition_rules_to_graph,
+    resolve_next_agent,
+)
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
 from mozaiksai.hosts import studio
 from tests.test_session_launcher import (
@@ -150,10 +154,44 @@ async def test_refinement_retry_uses_saved_request_and_baseline_with_fresh_execu
         assert retry.pm._default._docs[chat_id] == original
     retry.service.begin_refinement_run.assert_not_awaited()
     retry.store.get_build_record.assert_awaited_once_with(app_id="target", build_record_id="baseline")
-    # The canonical initial agent stays InterviewAgent; its revision prompt, not
-    # a new runtime override, supplies the patch -> NEXT behavior.
+    # A retry still lands on InterviewAgent, and its revision prompt - not a new
+    # runtime override - supplies the patch -> NEXT behavior.
+    #
+    # The entry agent is now resolved from the transition graph rather than named
+    # in orchestrator.yaml, because that is the only point where a user who asked
+    # to be brought a finished app can be routed past the interview. A refinement
+    # retry does not carry that answer, participation defaults to guided, and the
+    # resolver therefore still picks InterviewAgent - which is what this test
+    # actually cares about, so it is asserted directly.
     directory = ROOT / "factory_app/workflows/AppGenerator"
-    assert yaml.safe_load((directory / "orchestrator.yaml").read_text())["initial_agent"] == "InterviewAgent"
+    assert yaml.safe_load((directory / "orchestrator.yaml").read_text())["initial_agent"] == "user"
+
+    rules = yaml.safe_load((directory / "transition_graph.yaml").read_text(encoding="utf-8"))[
+        "transition_rules"
+    ]
+    agent_names = sorted(
+        {
+            str(rule.get(key) or "").strip()
+            for rule in rules
+            for key in ("source_agent", "target_agent")
+            if str(rule.get(key) or "").strip() not in {"", "user", "terminate"}
+        }
+    )
+    agent_ids = {name: name for name in agent_names}
+    agent_ids["user"] = "user"
+    graph = compile_transition_rules_to_graph(
+        rules, initial_agent_name="user", agent_id_by_name=agent_ids
+    )
+    assert (
+        resolve_next_agent(
+            graph,
+            current_agent_name="user",
+            context_variables={"build_mode": "revision", "interview_complete": False},
+            agent_name_by_id={v: k for k, v in agent_ids.items()},
+            participant_order=["user", *agent_names],
+        )
+        == "InterviewAgent"
+    )
     agent = yaml.safe_load((directory / "agents.yaml").read_text(encoding="utf-8"))["agents"][0]
     prompt = "\n".join(section["content"] for section in agent["prompt_sections"])
     assert "ContextVariables.build_mode` equals `revision`" in prompt

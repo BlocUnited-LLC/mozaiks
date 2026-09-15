@@ -87,3 +87,65 @@ def test_only_an_explicit_choice_can_suppress_a_human_turn() -> None:
     # The bypass value and the default must differ, or an absent answer bypasses.
     definitions = _context_variables()["definitions"]
     assert definitions["coding_participation"]["source"]["default"] != bypass["condition_value"]
+
+
+def test_entry_agent_resolves_from_participation_before_the_first_turn() -> None:
+    """The bypass has to be evaluated at entry, not only after a user turn.
+
+    _resolve_executable_initial_agent compiles the transition rules and resolves
+    from "user" with this run's context - but only when initial_agent is the
+    symbolic "user". Naming an agent short-circuits it on its first line:
+
+        if normalized_initial.lower() not in _SPECIAL_USER_AGENT_NAMES:
+            return normalized_initial
+
+    AppGenerator named InterviewAgent, so the graph was never consulted and the
+    interview opened before any rule could be evaluated. That is why a routing
+    rule on source_agent "user" could not skip it: by the time a user turn
+    existed, the interview had already happened.
+    """
+    from mozaiksai.core.workflow.execution.network_graph import (
+        compile_transition_rules_to_graph,
+        resolve_next_agent,
+    )
+
+    orchestrator = yaml.safe_load((APP_GENERATOR_DIR / "orchestrator.yaml").read_text(encoding="utf-8"))
+    assert orchestrator["initial_agent"] == "user", (
+        "AppGenerator must resolve its entry agent through the transition graph; "
+        "naming an agent here bypasses participation entirely."
+    )
+
+    rules = yaml.safe_load((APP_GENERATOR_DIR / "transition_graph.yaml").read_text(encoding="utf-8"))[
+        "transition_rules"
+    ]
+    names = sorted(
+        {
+            str(rule.get(key) or "").strip()
+            for rule in rules
+            for key in ("source_agent", "target_agent")
+            if str(rule.get(key) or "").strip() not in {"", "user", "terminate"}
+        }
+    )
+    agent_ids = {name: name for name in names}
+    agent_ids["user"] = "user"
+    by_id = {v: k for k, v in agent_ids.items()}
+
+    def entry_for(participation: str | None) -> str:
+        context = {"interview_complete": False}
+        if participation is not None:
+            context["coding_participation"] = participation
+        graph = compile_transition_rules_to_graph(
+            rules, initial_agent_name="user", agent_id_by_name=agent_ids
+        )
+        return resolve_next_agent(
+            graph,
+            current_agent_name="user",
+            context_variables=context,
+            agent_name_by_id=by_id,
+            participant_order=["user", *names],
+        )
+
+    assert entry_for("autonomous") == "AppPlanAgent"
+    assert entry_for("guided") == "InterviewAgent"
+    # An unanswered run must still be interviewed.
+    assert entry_for(None) == "InterviewAgent"
