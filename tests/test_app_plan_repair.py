@@ -360,3 +360,50 @@ def test_coverage_repair_is_idempotent() -> None:
 
     assert _repair_coverage(plan, context) == []
     validate_plan_coverage(plan, context)
+
+
+def test_unbacked_provider_source_on_an_approved_surface_becomes_generated_module() -> None:
+    """The fourth live variant: app code labelled as somebody else's pack.
+
+        crud_pack: operator_pack requires an installed pack in capability_packs
+        context. For app-owned code use generated_module with
+        capability_pack_id=surface_id='habit_registry'
+
+    The surface IS approved, so dropping it would delete the app. The source is
+    a provider that is not installed, so validating it as-is always fails. The
+    validator prescribes the fix in its own message, so apply it.
+
+    Seen live as operator_pack; managed_capability reaches the same rule.
+    """
+    for source in ("operator_pack", "framework_pack", "managed_capability"):
+        plan = _plan_as_the_model_wrote_it()
+        plan["capability_packs"][0]["capability_source"] = source
+        context = _context()
+
+        repairs = _repair_plan(plan, context)
+
+        assert any("generated_module" in r for r in repairs), source
+        assert plan["capability_packs"][0]["capability_source"] == "generated_module"
+        assert plan["capability_packs"][0]["capability_pack_id"] == "habits_module"
+        # The real validator accepts it.
+        validate_plan_origins(plan, context)
+
+
+def test_an_installed_provider_pack_is_not_rewritten() -> None:
+    """Only unbacked sources are adopted; a real provider pack stays as it is."""
+    plan = _plan_as_the_model_wrote_it()
+    plan["capability_packs"][0]["capability_pack_id"] = "habits_module"
+    plan["capability_packs"][0]["capability_source"] = "framework_pack"
+    context = _Context(
+        {
+            "design_surface_map": _design_surface_map(),
+            "capability_packs": [
+                {"id": "habits_module", "capability_source": "framework_pack"}
+            ],
+        }
+    )
+
+    repairs = _repair_plan(plan, context)
+
+    assert not any("generated_module" in r for r in repairs)
+    assert plan["capability_packs"][0]["capability_source"] == "framework_pack"
