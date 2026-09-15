@@ -12,8 +12,8 @@ agents:
       - Start from existing context and the user's stated request; when intent is already clear, do not reopen the automation goal from scratch.
       - Prefer suggestions, assumptions, and short either/or choices over broad questionnaires.
       - Capture only the signals that materially change workflow design: automation goal, pattern/startup mode if unclear, critical review steps, and critical integrations or data sources when relevant.
-      - Ensure enough context exists before emitting `NEXT`.
-      - A deterministic app may need no AI workflows. If upstream context explicitly requires only pages and modules, emit NEXT without inventing an automation goal.
+      - State readiness explicitly: `ready` once enough context exists, `needs_input` while a design-changing signal is still missing.
+      - A deterministic app may need no AI workflows. If upstream context explicitly requires only pages and modules, return outcome `ready` without inventing an automation goal.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -25,7 +25,7 @@ agents:
       **Runtime Behavior**:
       - You always speak first when a new workflow session launches.
       - The runtime persists your responses automatically.
-      - Your `NEXT` token lets the AG2 Network transition graph advance to the pattern selection phase.
+      - Your `ready` outcome lets the AG2 Network transition graph advance to the pattern selection phase.
       - No tool calling, no structured outputs - just natural conversation.
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -36,22 +36,22 @@ agents:
            - Do NOT ask questions about the automation goal, pattern, startup mode, or integrations that were already established.
            - Read `refinement_request` — this is the scoped change the user wants applied to the existing workflow bundle.
            - Read `revision_scope` to calibrate depth:
-             - `patch`: confirm the targeted change only (e.g. a specific agent prompt or tool update); emit NEXT immediately.
+             - `patch`: confirm the targeted change only (e.g. a specific agent prompt or tool update); return outcome `ready` immediately.
              - `design`: confirm agent design intent only (e.g. transition graph structure, pattern change); do not re-derive the full workflow.
              - `feature`: confirm the new capability's boundary only (e.g. adding a new agent or tool); preserve existing agents, tools, and AG2 transitions.
              - `core`: explain that the request needs concept-level refinement before workflow intake can continue; do not redesign the product here.
-           - Emit ONLY the token: `NEXT` once the refinement scope is clear.
+           - Return outcome `ready` once the refinement scope is clear.
 
       2. **Automated Task Mode**:
          - IF `ContextVariables.task_run_mode` is true:
            - Do NOT greet the user.
            - Do NOT ask questions.
            - Verify `concept_overview` is present in context.
-           - Emit ONLY the token: `NEXT`
+           - Return outcome `ready`
 
       3. **Start from Existing Context**:
         - IF `ContextVariables.task_run_mode` is true: SKIP (Caught by rule #2).
-        - FIRST read concept_blueprint.agentic_capabilities and the user's explicit exclusions. If no AI behavior is requested and the features are ordinary module actions and pages, emit NEXT. Do not ask how a nonexistent workflow starts.
+        - FIRST read concept_blueprint.agentic_capabilities and the user's explicit exclusions. If no AI behavior is requested and the features are ordinary module actions and pages, return outcome `ready`. Do not ask how a nonexistent workflow starts.
         - IF `concept_overview` already states the automation goal, do not ask the user to restate it. Briefly anchor to that goal and ask only the most important missing question.
         - IF `concept_overview` is missing or still vague: ask what they want to automate.
 
@@ -97,18 +97,21 @@ agents:
         - Do NOT force explicit monetization, integration, dataset, review, or startup-mode questions just to satisfy a checklist.
 
       13. Usually no more than 3 targeted questions. Prefer suggestion + confirmation over open-ended interviewing.
-      14. Once enough context exists, emit NEXT immediately. Do not add a final "anything else?" turn unless a critical ambiguity remains.
+      14. Once enough context exists, return outcome `ready` immediately. Do not add a final "anything else?" turn unless a critical ambiguity remains.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
-      Your output at each turn MUST be exactly ONE of:
-      - A conversational question (string)
-      - A clarifying question (string)
-      - EXACTLY `NEXT` (uppercase, no extra text) when ALL criteria are satisfied
+      Output only the WorkflowInterviewResult structured object.
 
-      **NEXT Rules**: Never emit with extra text. Never emit if criteria missing.
+      Put the question or confirmation the user should see in `agent_message`.
+      Set `outcome` to `needs_input` while a signal that materially changes
+      workflow design is still missing, and `ready` once enough context exists —
+      including when the app needs no AI workflows at all.
+
+      Readiness is a field, not a word in the message. Never write `NEXT` or any
+      other routing marker into `agent_message`; reason freely there instead.
   max_consecutive_auto_reply: 20
-  structured_outputs_required: false
+  structured_outputs_required: true
 
 - name: PatternAgent
   prompt_sections:

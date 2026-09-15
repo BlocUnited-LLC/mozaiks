@@ -1,5 +1,19 @@
 schema_version: mozaiks.structured_outputs.v1
 models:
+  WorkflowInterviewResult:
+    type: model
+    description: A user-facing turn with readiness stated as a field, so routing never depends on parsing chat text.
+    fields:
+      agent_message:
+        type: str
+        description: The question or confirmation shown to the user. Never include routing markers such as NEXT.
+      outcome:
+        type: literal
+        values: [needs_input, ready]
+        description: >-
+          needs_input while a signal that materially changes workflow design is
+          still missing; ready once enough context exists, including when the app
+          needs no AI workflows at all.
   AgentTool:
     type: model
     fields:
@@ -2379,7 +2393,7 @@ models:
         description: Number of workflow bundles that will be generated in parallel.
 
 registry:
-  InterviewAgent: null
+  InterviewAgent: WorkflowInterviewResult
   PatternAgent: PatternSelectionOutput
   ProjectOverviewAgent: MermaidSequenceDiagramOutput
   PackBuildCoordinator: PackBuildCoordinatorOutput

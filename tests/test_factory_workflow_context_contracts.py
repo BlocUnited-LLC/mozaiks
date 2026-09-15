@@ -132,15 +132,29 @@ def test_app_acceptance_evidence_cannot_be_written_by_agent_text():
         assert not policy.can_write(key, writer_id=AGENT_TEXT_WRITER)
 
 
-def test_agentgenerator_interview_completion_uses_authorized_exact_sentinel() -> None:
+def test_agentgenerator_interview_readiness_is_not_writable_by_agent_text() -> None:
+    """Readiness routes the build, so model prose must not be able to set it.
+
+    This used to be an exact-match `NEXT` sentinel, which held the boundary but
+    required the model to emit a bare token with no preamble — it did not, and
+    the workflow hung (#591). Readiness is now a validated structured-output
+    field written by a deterministic tool. The boundary is the same; only the
+    mechanism changed, so the agent-text writer must still be refused.
+    """
     definitions = _definitions("AgentGenerator")
-    trigger = definitions["interview_complete"]["source"]["triggers"][0]
-    assert trigger["match"] == {"equals": "NEXT"}
+    readiness = definitions["interview_outcome"]
+
+    assert readiness["writer_ids"] == ["deterministic_tool"]
+    assert not readiness["source"].get("triggers"), (
+        "readiness must not be inferred from chat text"
+    )
+
     policy = build_context_authority_policy(
         workflow_name="AgentGenerator", definitions=definitions,
     )
-    policy.require_can_write("interview_complete", writer_id=SENTINEL_TEXT_TRIGGER_WRITER)
-    assert not policy.can_write("interview_complete", writer_id=AGENT_TEXT_WRITER)
+    policy.require_can_write("interview_outcome", writer_id="deterministic_tool")
+    assert not policy.can_write("interview_outcome", writer_id=AGENT_TEXT_WRITER)
+    assert not policy.can_write("interview_outcome", writer_id=SENTINEL_TEXT_TRIGGER_WRITER)
 
 
 @pytest.mark.parametrize("workflow_id", BUILD_SEQUENCE_WORKFLOWS)

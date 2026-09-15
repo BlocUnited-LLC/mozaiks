@@ -113,7 +113,10 @@ def test_unknown_design_surface_kind_is_rejected():
 
 def test_invalid_partition_has_bounded_correction_and_cannot_reuse_approval():
     path = Path(__file__).resolve().parents[1] / "factory_app/workflows/AgentGenerator/tools.yaml"
-    spec = yaml.safe_load(path.read_text(encoding="utf-8"))["tools"][0]["outcome"]
+    # Select by function, not position: the tools list is ordered by workflow
+    # stage, so inserting an earlier-stage tool silently retargeted this.
+    tools = yaml.safe_load(path.read_text(encoding="utf-8"))["tools"]
+    spec = next(t for t in tools if t["function"] == "pattern_selection")["outcome"]
     wrapped = wrap_tool_outcome(partition.pattern_selection, ToolOutcomeSpec.model_validate(spec))
     ctx = Context({"structured_output": {"PatternSelection": selection([workflow()])},
                    "design_surface_map": surface_map("module"), "pattern_selection_attempts": 0,
