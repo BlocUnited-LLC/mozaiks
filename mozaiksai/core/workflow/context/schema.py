@@ -239,4 +239,22 @@ __all__ = [
     "ContextTriggerSpec",
     "ContextTriggerMatch",
     "load_context_variables_config",
+    "CampaignOverview",
+    "AudienceProfile",
+    "MarketingInterviewOutput",
 ]
+from pydantic import BaseModel, Field
+from typing import List
+
+class CampaignOverview(BaseModel):
+    name: str = Field(description="Name of the marketing campaign")
+    objective: str = Field(description="Main goal of the campaign")
+
+class AudienceProfile(BaseModel):
+    target_persona: str = Field(description="Who the target audience is")
+    pain_points: List[str] = Field(description="List of customer pain points")
+
+class MarketingInterviewOutput(BaseModel):
+    campaign_overview: CampaignOverview
+    audience_profile: AudienceProfile
+    channel_strategy: List[str] = Field(description="Channels like email, linkedin, ads")
