@@ -4239,6 +4239,21 @@ const ChatPage = () => {
     } catch {}
   }, [cacheSeed, forceResetChat, currentChatId]);
 
+  // Close codes we initiated or were told about deliberately. Reconnecting
+  // after these produces a duplicate socket rather than recovering anything:
+  //   1000 normal — we called close()
+  //   1001 going away — the server evicted us for a newer connection
+  //   1005 no status — close() with no code, still our own doing
+  // Anything else (notably 1006, abnormal) means the link dropped under us and
+  // is worth retrying. An absent code is treated as unexpected so a transport
+  // that reports nothing still recovers.
+  const DELIBERATE_CLOSE_CODES = new Set([1000, 1001, 1005]);
+  const shouldReconnectAfterClose = (closeInfo) => {
+    const code = closeInfo?.code;
+    if (typeof code !== 'number') return true;
+    return !DELIBERATE_CLOSE_CODES.has(code);
+  };
+
   // Connect to streaming when API becomes available and chat ID exists
   useEffect(() => {
     if (!api) return;
@@ -4404,7 +4419,7 @@ const ChatPage = () => {
               setConnectionRetryNonce((prev) => prev + 1);
             }, 250);
           },
-          onClose: () => {
+          onClose: (closeInfo) => {
             if (!connection || wsRef.current !== connection) {
               return;
             }
@@ -4414,9 +4429,15 @@ const ChatPage = () => {
             connectionInProgressRef.current = false;
             wsRef.current = null;
             setWs(null);
-            setTimeout(() => {
-              setConnectionRetryNonce((prev) => prev + 1);
-            }, 250);
+            // Only a close we did not ask for is worth reconnecting from.
+            // Retrying a deliberate close raced the reconnect this effect was
+            // already making for the new chat, so a sequence transition opened
+            // two sockets for one chat and the server evicted the live one.
+            if (shouldReconnectAfterClose(closeInfo)) {
+              setTimeout(() => {
+                setConnectionRetryNonce((prev) => prev + 1);
+              }, 250);
+            }
           }
         },
         workflowName,
