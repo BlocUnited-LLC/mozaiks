@@ -17,6 +17,16 @@ This project follows a practical pre-1.0 changelog format:
 
 
 
+
+### Fixed
+
+- A workflow transition no longer opens a second WebSocket for the same chat.
+  Every close scheduled a reconnect, including closes the client itself caused,
+  so moving between workflows raced a retry against the connection being built
+  for the new chat and the server evicted the live one. The client now
+  reconnects only from an unexpected close; a deliberate close, or an eviction
+  by a newer connection, is left alone.
+
 ### Fixed
 
 - WebSocket connection identity is now allocated from a monotonic counter

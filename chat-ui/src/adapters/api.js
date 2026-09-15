@@ -534,11 +534,20 @@ export class WebSocketApiAdapter extends ApiAdapter {
       if (callbacks.onError) callbacks.onError(error);
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       const current = this._chatConnections.get(chatId);
       if (current && current !== connection) return;
       if (current === connection) this._chatConnections.delete(chatId);
-      if (callbacks.onClose) callbacks.onClose();
+      // Forward the close reason. Without it a caller cannot tell a close it
+      // asked for from a network drop, and reconnecting after a deliberate
+      // close opens a second socket for a chat that already has one.
+      if (callbacks.onClose) {
+        callbacks.onClose({
+          code: event?.code,
+          reason: event?.reason || '',
+          wasClean: Boolean(event?.wasClean),
+        });
+      }
     };
 
     const connection = {
