@@ -917,6 +917,14 @@ class WorkflowBridgeMixin:
                         )
                     except Exception as _ev_exc:
                         logger.debug("PROCESS_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
+                    # A paused run is resumable as soon as AG2 has returned its
+                    # checkpoint. Release the background-task slot before the
+                    # pause event reaches the UI so an immediate user reply is
+                    # not rejected as CHAT_BUSY.
+                    if run_status in {"paused", "in_progress"}:
+                        current_task = asyncio.current_task()
+                        if self._background_tasks.get(chat_id) is current_task:
+                            self._background_tasks.pop(chat_id, None)
                     return result
                 except Exception:
                     # Emit failed run_complete before re-raising so listeners can react
