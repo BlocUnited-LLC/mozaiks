@@ -40,7 +40,7 @@ COPY logs/ ./logs/
 COPY factory_app/ ./factory_app/
 COPY web_shell/ ./web_shell/
 COPY chat-ui/ ./chat-ui/
-RUN pip install --break-system-packages --no-cache-dir . \
+RUN pip install --no-cache-dir . --break-system-packages \
     && pip list --format=freeze > /opt/mozaiks/preview-constraints.txt \
     && npm ci --prefix web_shell --no-audit --no-fund \
     && useradd --create-home --uid 10001 sandbox \
