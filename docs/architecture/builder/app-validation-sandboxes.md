@@ -104,6 +104,29 @@ Containers use an unprivileged user, dropped capabilities, resource limits, and
 random loopback-only frontend/backend ports. No Docker socket, host workspace,
 or Factory database is mounted into the app.
 
+### Hosted E2B template setup
+
+The hosted E2B template must be derived from the same canonical preview image,
+not a second hand-maintained environment. Run the repository helper in dry-run
+mode to inspect the build:
+
+```bash
+python scripts/build_e2b_preview_template.py
+```
+
+After the operator has approved the hosted-provider cost, submit the explicit
+build:
+
+```bash
+python scripts/build_e2b_preview_template.py --name mozaiks-preview --confirm-paid-build
+```
+
+The helper consumes `infra/docker/Dockerfile.preview`, requires
+`E2B_API_KEY`, and prints only template/build identifiers. The resulting name
+or ID belongs in `E2B_TEMPLATE` or `SANDBOX_TEMPLATE`; credentials remain in
+the operator environment. The helper does not run automatically during app
+generation or CI.
+
 Only explicitly configured `MOZAIKS_PREVIEW_ENV_<NAME>` values become preview
 environment variables. Factory API keys, credentials, and database URLs are not
 inherited. Public apps may declare `authRequired: false`; authenticated apps
