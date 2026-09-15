@@ -1,4 +1,21 @@
 transition_rules:
+# "Build it for me" has to be enforced by routing, not requested in a prompt.
+# interview_complete only flips when InterviewAgent emits the literal token
+# NEXT, so skipping the interview meant asking the model to volunteer its own
+# removal. Live runs showed it does not: with coding_participation present,
+# readable, and an explicit prompt branch telling it to decide for itself, it
+# still returned a list of scope questions and waited.
+#
+# AppPlanAgent takes concept_overview, design_surface_map and the three design
+# documents from upstream steps and never reads interview_complete, so it has
+# everything it needs without the interview turn.
+- source_agent: user
+  target_agent: AppPlanAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: coding_participation
+  condition_value: autonomous
+  transition_target: AgentTarget
 - source_agent: user
   target_agent: InterviewAgent
   transition_type: condition
