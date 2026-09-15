@@ -59,3 +59,38 @@ def test_app_generator_interview_can_still_read_the_relayed_value() -> None:
     raw = yaml.safe_load((WORKFLOWS / "AppGenerator" / "context_variables.yaml").read_text(encoding="utf-8"))
 
     assert "coding_participation" in raw["agents"]["InterviewAgent"]["variables"]
+
+
+def test_the_relay_survives_being_routed_on() -> None:
+    """Declaring the key is not enough - the authority policy must allow the relay.
+
+    _project_launch_context keeps a relayed key only when
+    policy.can_write(key, TRANSITION_ROUTER_WRITER) is true, in a dict
+    comprehension with no error and no log. Referencing a key in a
+    transition_rule condition reclassifies it as closed routing state, which
+    strips that writer unless the key is in _TRANSITION_ROUTER_SEEDED_KEYS.
+
+    That is exactly what happened: coding_participation relayed correctly until
+    a routing rule referenced it, and then AppGenerator - the one workflow that
+    routes on it - silently stopped receiving it. Every YAML-level assertion
+    still passed. This one executes the real policy instead.
+    """
+    from mozaiksai.core.workflow.context.authority import (
+        TRANSITION_ROUTER_WRITER,
+        build_context_authority_policy,
+    )
+
+    for workflow in PARTICIPATION_RELAY:
+        definitions = _definitions(workflow)
+        graph = yaml.safe_load((WORKFLOWS / workflow / "transition_graph.yaml").read_text(encoding="utf-8"))
+        policy = build_context_authority_policy(
+            workflow_name=workflow,
+            definitions=definitions,
+            transition_rules=graph.get("transition_rules", []),
+        )
+        assert policy.can_write("coding_participation", writer_id=TRANSITION_ROUTER_WRITER), (
+            f"{workflow} declares coding_participation but the authority policy forbids the "
+            "transition router from writing it, so _project_launch_context drops it here "
+            "without an error. If this workflow routes on the key, add it to "
+            "_TRANSITION_ROUTER_SEEDED_KEYS."
+        )

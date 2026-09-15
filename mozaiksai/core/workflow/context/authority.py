@@ -142,8 +142,16 @@ _ROUTING_EXACT = {
     "sequence_status",
     "routing_mode",
 }
+# Keys a transition seeds into a journey and later steps must be able to relay.
+# Referencing one of these in a transition_rule condition reclassifies it as
+# closed routing state, which strips TRANSITION_ROUTER_WRITER - and
+# _project_launch_context filters relayed keys on exactly that writer, in a dict
+# comprehension with no error and no log. So a key becomes un-relayable by the
+# act of routing on it, silently, one hop after the workflow that reads it.
+# coding_participation hit this: it relayed correctly until a rule referenced it.
 _TRANSITION_ROUTER_SEEDED_KEYS = {
     "build_mode",
+    "coding_participation",
     "revision_scope",
     "sequence_status",
 }
