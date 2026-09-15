@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+import mozaiksai.core.app_context.indexer as indexer_module
 from mozaiksai.core.app_context import (
     APP_CONTEXT_GRAPH_ARTIFACT_KIND,
     APP_CONTEXT_INDEX_SCHEMA_VERSION,
@@ -44,6 +45,18 @@ class _MemoryArtifactStore:
         )
         self.created.append(artifact)
         return artifact
+
+
+class _MemoryContentStore:
+    backend_name = "memory"
+
+    def __init__(self) -> None:
+        self.payloads: dict[str, bytes] = {}
+
+    async def put_bundle(self, data: bytes, *, app_id: str, artifact_version_id: str) -> str:
+        ref = f"memory://{app_id}/{artifact_version_id}"
+        self.payloads[ref] = data
+        return ref
 
 
 def test_index_file_map_builds_canonical_source_corpus_graph_and_health() -> None:
@@ -123,3 +136,27 @@ async def test_persist_app_context_index_creates_source_and_graph_artifacts() ->
     metadata = store.created[0].commit_metadata.metadata
     assert metadata["summary_payload"]["bundle_id"] == indexed.source_corpus.bundle_id
     assert metadata["index_schema_version"] == APP_CONTEXT_INDEX_SCHEMA_VERSION
+
+
+@pytest.mark.asyncio
+async def test_large_source_context_payload_is_externalized(monkeypatch: pytest.MonkeyPatch) -> None:
+    indexed = index_file_map(
+        app_id="app_large",
+        artifact_version_id="av_large",
+        file_map={
+            f"src/module_{index}.py": f"value = {('x' * 50_000)!r}\n"
+            for index in range(100)
+        },
+    )
+    store = _MemoryArtifactStore()
+    content = _MemoryContentStore()
+    monkeypatch.setattr(indexer_module, "get_artifact_content_store", lambda: content)
+
+    persisted = await persist_app_context_index(index=indexed, artifact_store=store)
+
+    metadata = persisted.source_context_artifact.commit_metadata.metadata
+    summary = metadata["summary_payload"]
+    assert summary["content_ref"].startswith("memory://app_large/")
+    assert summary["content_size_bytes"] > 4_000_000
+    assert metadata["externalized"] is True
+    assert len(content.payloads) == 1
