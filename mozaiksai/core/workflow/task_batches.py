@@ -377,7 +377,9 @@ async def execute_task_batches_for_trigger(
         task_items = _normalize_task_items(raw_tasks)
         if not task_items:
             if wf_logger:
-                wf_logger.debug(
+                # A batch that finds nothing to do is the difference between a
+                # build that generates an app and one that silently does not.
+                wf_logger.info(
                     "[TASK_BATCH] %s produced no task items from %s",
                     batch.id,
                     batch.source.path,
@@ -385,7 +387,7 @@ async def execute_task_batches_for_trigger(
             continue
 
         if wf_logger:
-            wf_logger.debug(
+            wf_logger.info(
                 "[TASK_BATCH] Starting %s tasks=%d trigger=%s task_model=%s",
                 batch.id,
                 len(task_items),

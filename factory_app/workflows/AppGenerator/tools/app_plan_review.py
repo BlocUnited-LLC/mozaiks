@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
@@ -14,6 +15,8 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
+logger = logging.getLogger(__name__)
+
 
 def _clear_plan(context: Any) -> None:
     context.set("app_plan_ready", False)
@@ -21,6 +24,94 @@ def _clear_plan(context: Any) -> None:
     context.set("app_task_batch_items", [])
     context.set("app_task_batch_status", None)
 
+
+def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
+    """Fix plan fields whose correct value the validator already knows.
+
+    A live build of a habit tracker failed three times and killed the run on
+    four errors that were one mistake: the planner named its module after the
+    product category it came from ("crud_pack") instead of the approved surface
+    ("habits_module"), and the validator's own message said so - "must match its
+    approved surface_id". Every downstream ownership check then keyed off the
+    wrong name and failed too.
+
+    Rejecting a plan over a name the system can derive, and asking the model to
+    guess it again, costs three LLM rounds and then the whole run. Where the
+    approved design already states the answer, apply it and say so. Anything not
+    derivable is still rejected by the validators, unchanged.
+    """
+    repairs: list[str] = []
+    design = detach(context.get("design_surface_map")) or {}
+    packs = plan.get("capability_packs") or []
+
+    approved = {
+        surface["surface_id"]: surface
+        for surface in design.get("surfaces") or []
+        if surface.get("owner") == "app" and surface.get("surface_kind") == "module"
+    }
+
+    # 1. The approved surface_id is the module's identity. Adopt it.
+    renames: dict[str, str] = {}
+    for pack in packs:
+        surface_id = pack.get("surface_id")
+        surface = approved.get(surface_id)
+        if surface is None or pack.get("surface_kind") != "module":
+            continue
+        if pack.get("capability_source") not in {"generated_module", None, ""}:
+            continue
+        pack.setdefault("capability_source", "generated_module")
+        current = _pack_id_from_descriptor(pack)
+        if current != surface_id:
+            renames[str(current)] = str(surface_id)
+            pack["capability_pack_id"] = surface_id
+            repairs.append(f"capability_pack_id {current!r} -> approved surface_id {surface_id!r}")
+        approved_entities = list(surface.get("primary_entities") or [])
+        if set(pack.get("primary_entities") or []) != set(approved_entities):
+            pack["primary_entities"] = approved_entities
+            repairs.append(f"{surface_id}: primary_entities -> approved {approved_entities}")
+
+    if not renames:
+        return repairs
+
+    # 2. Tasks must agree with the pack they build, including the directory
+    #    their owned paths sit under - the rule is module_ids == {pack_id}.
+    pack_surface = {_pack_id_from_descriptor(p): p.get("surface_id") for p in packs}
+    for task in plan.get("build_tasks") or []:
+        pack_id = str(task.get("capability_pack_id") or "")
+        new_pack_id = renames.get(pack_id)
+        module_dirs = {
+            path.split("/")[1]
+            for path in _normalized_owned_paths(task)
+            if path.startswith("modules/") and len(path.split("/")) > 1
+        }
+        if new_pack_id is None and len(module_dirs) == 1:
+            # The directory is the other way of naming the same module.
+            new_pack_id = renames.get(next(iter(module_dirs)))
+        if new_pack_id is None:
+            continue
+
+        if task.get("capability_pack_id") != new_pack_id:
+            task["capability_pack_id"] = new_pack_id
+            repairs.append(f"{task.get('task_id')}: capability_pack_id -> {new_pack_id!r}")
+        surface_id = pack_surface.get(new_pack_id)
+        if surface_id and task.get("surface_id") != surface_id:
+            task["surface_id"] = surface_id
+            repairs.append(f"{task.get('task_id')}: surface_id -> {surface_id!r}")
+
+        stale = {d for d in module_dirs if d != new_pack_id}
+        if stale:
+            paths = list(task.get("owned_paths") or [])
+            for index, path in enumerate(paths):
+                parts = str(path).split("/")
+                if len(parts) > 1 and parts[0] == "modules" and parts[1] in stale:
+                    parts[1] = new_pack_id
+                    paths[index] = "/".join(parts)
+            task["owned_paths"] = paths
+            repairs.append(
+                f"{task.get('task_id')}: owned paths moved from modules/{sorted(stale)[0]}/ to modules/{new_pack_id}/"
+            )
+
+    return repairs
 
 def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
     available = _context_available_pack_map(context)
@@ -139,6 +230,8 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
+        for repair in _repair_plan(plan, context_variables):
+            logger.info("[AppGenerator] plan repaired: %s", repair)
         validate_plan_origins(plan, context_variables)
         validate_plan_coverage(plan, context_variables)
         app_build_plan(AppBuildPlan=plan, context_variables=context_variables)
@@ -152,7 +245,10 @@ def review_app_build_plan(
         context_variables.set("app_plan_feedback", feedback)
         outcome = "needs_revision" if attempts < 3 else "blocked"
         context_variables.set("app_plan_outcome", outcome)
-        return {"outcome": outcome, "error": feedback}
+        # Without ok=False the runtime's failure detector reads a rejection as
+        # success, so three rejected plans logged as three clean completions and
+        # the real validator errors never reached the log at all.
+        return {"ok": False, "outcome": outcome, "error": feedback}
     except BaseException:
         _clear_plan(context_variables)
         raise
