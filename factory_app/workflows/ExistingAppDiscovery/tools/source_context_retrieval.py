@@ -97,6 +97,11 @@ async def _source_context_bundle(context_variables: Any | None) -> dict[str, Any
         return value
 
     app_id = str(_ctx_get(context_variables, "app_id") or "").strip()
+    binding = _ctx_get(context_variables, "run_build_binding")
+    if isinstance(binding, dict):
+        target_app_id = str(binding.get("target_app_id") or "").strip()
+        if target_app_id:
+            app_id = target_app_id
     context_version_id = str(
         _ctx_get(context_variables, "current_app_context_version_id")
         or _ctx_get(context_variables, "current_context_version_id")

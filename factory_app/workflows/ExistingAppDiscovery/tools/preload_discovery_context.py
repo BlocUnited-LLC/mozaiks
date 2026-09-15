@@ -1781,7 +1781,11 @@ async def _preload_context_graph_pack(
     )
     _ctx_set(context_variables, "context_graph_pack", pack)
     _ctx_set(context_variables, "context_graph_catalog", catalog)
-    _ctx_set(context_variables, "source_context_bundle", source_corpus.model_dump(mode="json"))
+    # Keep the full corpus in the canonical AppContext artifact store. Workflow
+    # agents retrieve bounded chunks through source_context_retrieval tools;
+    # embedding the entire brownfield repo in every AG2 prompt makes large apps
+    # un-runnable and defeats the externalized artifact contract.
+    _ctx_set(context_variables, "source_context_bundle", None)
     _ctx_set(context_variables, "source_context_catalog", source_context_catalog)
     _ctx_set(context_variables, "app_intelligence_snapshot", app_intelligence_snapshot.model_dump(mode="json"))
     _ctx_set(context_variables, "app_intelligence_catalog", app_intelligence_catalog)
@@ -1795,6 +1799,9 @@ async def _preload_context_graph_pack(
         source_index=source_index,
         source_chat_id=str(_ctx_get(context_variables, "chat_id") or "") or None,
     )
+    if registration.get("app_context_version_id"):
+        _ctx_set(context_variables, "current_context_version_id", registration["app_context_version_id"])
+        _ctx_set(context_variables, "current_app_context_version_id", registration["app_context_version_id"])
     if registration.get("warning"):
         warnings = [*warnings, str(registration["warning"])]
         _ctx_set(context_variables, "context_graph_warnings", warnings)

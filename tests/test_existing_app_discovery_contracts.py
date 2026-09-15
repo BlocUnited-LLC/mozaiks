@@ -1000,7 +1000,8 @@ def test_existing_app_preload_builds_context_graph_pack_for_local_repo(
     assert context["context_graph_catalog"]["indexed_file_count"] >= 1
     assert context["context_graph_health"]["selected_file_count"] >= 1
     assert context["context_graph_pack"]["summary"]["scan"]["selected_file_count"] >= 1
-    assert context["source_context_bundle"]["schema_version"] == "mozaiks.source_context.bundle.v1"
+    # Full source is stored in AppContext and retrieved lazily by discovery tools.
+    assert context["source_context_bundle"] is None
     assert context["source_context_catalog"]["file_count"] >= 1
     assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
     assert context["app_intelligence_catalog"]["coverage"]["file_count"] >= 1
@@ -1276,8 +1277,8 @@ def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
     assert context["context_graph_health"]["source"] == "github_source_scan"
     assert context["context_graph_health"]["selected_file_count"] >= 3
     assert context["context_graph_health"]["skipped"]["sensitive_path"] == 1
-    assert context["source_context_bundle"]["schema_version"] == "mozaiks.source_context.bundle.v1"
-    assert "app/modules/listings/backend/service.py" in context["source_context_bundle"]["file_contents"]
+    # Full source is stored in AppContext and retrieved lazily by discovery tools.
+    assert context["source_context_bundle"] is None
     assert context["source_context_catalog"]["file_count"] >= 3
     assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
     assert context["app_intelligence_catalog"]["architecture"]["module_roots"]
