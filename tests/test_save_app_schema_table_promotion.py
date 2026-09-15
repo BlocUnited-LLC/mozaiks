@@ -1,5 +1,8 @@
 """A section that asks for filtering must get the primitive that provides it.
 
+    Note `search` is NOT one of these: AppDataTableConfig declares it too, so a
+    searchable DataTable is valid and must not be rewritten.
+
 A live build reached code generation for the first time and failed here:
 
     task batch 'app_build_tasks' failed at task 'page_bundle_task':
@@ -52,7 +55,6 @@ def test_the_live_failure_is_reproduced_without_promotion() -> None:
     [
         ("default_filter", "active"),
         ("default_sort", "name"),
-        ("search", True),
         ("search_placeholder", "Search habits"),
     ],
 )
@@ -82,3 +84,11 @@ def test_server_pagination_is_not_promoted() -> None:
     )
 
     assert normalized["primitive"] == "DataTable"
+
+
+def test_search_alone_does_not_promote() -> None:
+    """search is declared on AppDataTableConfig, so a searchable DataTable is valid."""
+    normalized = _normalize_page_section(_section(search=True))
+
+    assert normalized["primitive"] == "DataTable"
+    AppPageSection.model_validate(normalized)

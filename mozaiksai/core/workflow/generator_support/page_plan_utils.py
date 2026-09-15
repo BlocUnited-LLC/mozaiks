@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
+from functools import lru_cache
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -12,6 +14,8 @@ from pydantic import ValidationError
 from mozaiksai.core.runtime.app.page_schema import PageSchemaValidationError, validate_page_schema
 
 from .code_files import safe_relpath
+
+logger = logging.getLogger(__name__)
 
 
 def _slug(value: str) -> str:
@@ -34,6 +38,87 @@ def _page_stems(page: dict[str, Any]) -> set[str]:
     if route and route != "/":
         stems.add(_slug(route.strip("/").split("/")[-1]))
     return stems - {""}
+
+
+# ResourceTable extends DataTable. A section asking for a field only
+# ResourceTable declares is rejected as "Unknown runtime-affecting field is not
+# allowed", which failed live builds at ui/pages/habits.yaml and
+# ui/pages/dashboard.yaml. The fields are real; only the primitive was wrong.
+#
+# Derived from the models rather than listed, because a hand-written list got it
+# wrong: `search` is declared on AppDataTableConfig too, so promoting on it
+# rewrote valid DataTables. Deriving the difference cannot drift from the schema.
+#
+# Server pagination is left alone: AppResourceTableConfig accepts client
+# pagination only, so promoting there trades one rejection for another.
+def _resource_table_only_fields() -> frozenset[str]:
+    from mozaiksai.core.runtime.app.page_schema import (
+        AppDataTableConfig,
+        AppResourceTableConfig,
+    )
+
+    return frozenset(set(AppResourceTableConfig.model_fields) - set(AppDataTableConfig.model_fields))
+
+
+@lru_cache(maxsize=1)
+def resource_table_only_fields() -> frozenset[str]:
+    return _resource_table_only_fields()
+
+
+def promote_table_primitive(section: Any) -> bool:
+    """Give a section the table primitive that supports the fields it uses."""
+    if not isinstance(section, dict) or section.get("primitive") != "DataTable":
+        return False
+    config = section.get("config")
+    if not isinstance(config, dict):
+        return False
+    if not (resource_table_only_fields() & set(config)):
+        return False
+    if config.get("pagination_mode") == "server":
+        return False
+    section["primitive"] = "ResourceTable"
+    return True
+
+
+def promote_page_table_primitives(document: Any) -> int:
+    """Promote every eligible section in a page document, children included."""
+    if not isinstance(document, dict):
+        return 0
+    promoted = 0
+
+    def walk(sections: Any) -> None:
+        nonlocal promoted
+        if not isinstance(sections, list):
+            return
+        for section in sections:
+            if promote_table_primitive(section):
+                promoted += 1
+            if isinstance(section, dict):
+                config = section.get("config")
+                if isinstance(config, dict):
+                    walk(config.get("children"))
+
+    walk(document.get("sections"))
+    return promoted
+
+
+def normalize_planned_page_content(content: str, *, path: str = "") -> str:
+    """Return page YAML with table primitives corrected, or the original.
+
+    Materialized page content is written from the same map it is validated
+    from, so the correction has to reach the content rather than only the
+    validation - otherwise the file on disk keeps the rejected primitive.
+    """
+    try:
+        document = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return content
+    if not isinstance(document, dict):
+        return content
+    if not promote_page_table_primitives(document):
+        return content
+    logger.info("[pages] %s: promoted DataTable -> ResourceTable", path or "page")
+    return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 
 def validate_planned_page(content: str, planned: dict[str, Any], path: str) -> None:
