@@ -16,6 +16,15 @@ This project follows a practical pre-1.0 changelog format:
 
 
 
+
+### Fixed
+
+- WebSocket connection identity is now allocated from a monotonic counter
+  instead of the socket object's memory address. Addresses are reused after
+  garbage collection, so on a reconnect a departing socket's late cleanup could
+  compare equal to the connection that replaced it and tear down the live one —
+  defeating the guard meant to prevent exactly that.
+
 ### Fixed
 
 - A reconnect no longer kills the build running behind it. When a second
