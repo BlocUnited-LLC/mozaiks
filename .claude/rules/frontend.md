@@ -33,7 +33,10 @@ Mozaiks has four distinct UI surfaces. Before touching any UI code, identify whi
 - Do not create an AppPageSchema YAML for a route already owned by Custom Route UI
 
 ### Agentic UI quick rules
-- Python tool calls `send_ui_tool_event(component_name, display_type, payload)`
+- Python tool calls `emit_ui_surface(tool_id, payload, chat_id=..., workflow_name=..., display=...)`
+  from `mozaiksai.core.workflow.ui_tools`; the component comes from the `ui:`
+  block that `tool_id` resolves to in `tools.yaml`, not from an argument. Use
+  `use_ui_tool` when the surface must await a user response.
 - React component subscribes via `useAppEventBus('ui.tool.<name>', handler)`
 - Always two files generated together: Python tool + React component
 - User actions return via `onAction` prop; agent reads them from next turn context
