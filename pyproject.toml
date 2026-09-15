@@ -25,7 +25,7 @@ classifiers = [
 keywords = ["mozaiks", "ag2", "ai", "agents", "workflows", "multi-tenant", "runtime"]
 
 dependencies = [
-    "ag2[a2a,openai,tracing]==1.0.3",
+    "ag2[a2a,openai,tracing]==1.0.5",
     "a2a-sdk[grpc]>=1.1.0,<2",
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.20.0",
@@ -52,17 +52,17 @@ dependencies = [
 
 [project.optional-dependencies]
 gemini = [
-    "ag2[gemini]==1.0.3",
+    "ag2[gemini]==1.0.5",
 ]
 anthropic = [
-    "ag2[anthropic]==1.0.3",
+    "ag2[anthropic]==1.0.5",
 ]
 # ACP-backed CLI coding provider (Codex, Claude Code, OpenCode) for the
 # refinement control plane. The adapter binaries (e.g. the
 # @agentclientprotocol/claude-agent-acp npm package) are deployment-time
 # dependencies and are NOT installed by this extra.
 acp-coding = [
-    "ag2[acp]==1.0.3",
+    "ag2[acp]==1.0.5",
     "agent-client-protocol==0.12.1",
 ]
 azure = [
@@ -81,7 +81,7 @@ dev = [
     "mypy>=1.5.0",
     # dev installs the ACP extra so the fake-driven provider tests run in CI;
     # extra-free installs skip them via importorskip.
-    "ag2[acp]==1.0.3",
+    "ag2[acp]==1.0.5",
     "agent-client-protocol==0.12.1",
 ]
 docs = [
