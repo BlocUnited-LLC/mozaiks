@@ -67,6 +67,8 @@ from __future__ import annotations
 from enum import Enum
 from unittest.mock import MagicMock
 
+import pytest
+
 from mozaiksai.core.events.event_serialization import (
     extract_agent_name,
     normalize_text_content,
@@ -400,14 +402,19 @@ class TestDualWriteAppScope:
         result = dual_write_app_scope(doc, "my-app")
         assert result is doc
 
-    def test_empty_app_id_does_not_modify_doc(self):
+    def test_empty_app_id_is_refused_rather_than_written_untagged(self):
+        # Contract change: this previously returned the doc untagged. An
+        # untagged doc is invisible to every tenant filter and visible to any
+        # query that omits one, so the write now fails closed like the read.
         doc: dict = {"key": "val"}
-        dual_write_app_scope(doc, "")
+        with pytest.raises(ValueError):
+            dual_write_app_scope(doc, "")
         assert "app_id" not in doc
 
-    def test_whitespace_app_id_does_not_modify_doc(self):
+    def test_whitespace_app_id_is_refused_rather_than_written_untagged(self):
         doc: dict = {}
-        dual_write_app_scope(doc, "   ")
+        with pytest.raises(ValueError):
+            dual_write_app_scope(doc, "   ")
         assert "app_id" not in doc
 
     def test_strips_whitespace_before_writing(self):
