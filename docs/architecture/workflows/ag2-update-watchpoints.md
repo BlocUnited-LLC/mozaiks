@@ -16,9 +16,9 @@ replacement plan lives in
 
 Reviewed on September 1, 2026 against:
 
-- installed package: `ag2==1.0.3` from the `ag2` import package
-- declared dependencies: `ag2[a2a,openai,tracing]==1.0.3`,
-  `ag2[gemini]==1.0.3`, `ag2[anthropic]==1.0.3`, and `ag2[acp]==1.0.3`
+- installed package: `ag2==1.0.5` from the `ag2` import package
+- declared dependencies: `ag2[a2a,openai,tracing]==1.0.5`,
+  `ag2[gemini]==1.0.5`, `ag2[anthropic]==1.0.5`, and `ag2[acp]==1.0.5`
 - AG2 docs:
   - <https://docs.ag2.ai/docs/user-guide/network/overview/>
   - <https://docs.ag2.ai/docs/user-guide/network/hub_and_identity/>
@@ -33,7 +33,7 @@ Reviewed on September 1, 2026 against:
   - <https://docs.ag2.ai/docs/blog/2026/06/17/AG2-Agent-Harness/>
 
 Every current watchpoint and approved private/internal access was last verified
-against AG2 1.0.3. The exact dependency pin remains authoritative in
+against AG2 1.0.5. The exact dependency pin remains authoritative in
 `pyproject.toml`, `requirements.txt`, and
 `tests/test_ag2_dependency_contract.py`.
 
@@ -94,22 +94,22 @@ intent below remain authoritative for maintainers.
 
 | ID | AG2 surface | Mozaiks surface and current reason | Trigger and deletion/migration condition | Status | Last verified | Required verification |
 | --- | --- | --- | --- | --- | --- | --- |
-| `AG2-WP-001` | `Hub`/`AgentClient` workflow execution | `AG2NetworkRunner` adapts workflow YAML, app/session identity, artifact validation, and `RunResult` semantics. | When AG2 ships a stable high-level workflow runner, shrink this to request/result conversion. | `ACTIVE` | 1.0.3 | `test_ag2_network_execution_alignment.py` |
-| `AG2-WP-002` | Workflow turn-failure policy | The runner maps `HubListener.on_turn_failed` to a failed `RunResult` because the channel otherwise remains alive. | Delete the listener mapping when AG2 exposes a failed channel result or native close policy. | `ACTIVE` | 1.0.3 | `test_ag2_network_execution_alignment.py` |
-| `AG2-WP-003` | Round-end packet context updates | `_install_context_update_handler` wraps AG2's default handler so tool updates reach `EV_PACKET` before `WorkflowAdapter.fold(...)`. | Delete the wrapper when AG2 exposes a public packet transform or context-update hook. | `ACTIVE` | 1.0.3 | `test_ag2_network_execution_alignment.py`, `test_workflow_network_graph.py`, `test_ag2_network_tool_routing.py` |
-| `AG2-WP-004` | Source-scoped transition composition | Local conditions preserve YAML `source_agent` semantics; `SourceScopedToolCalled` remains a native `ToolCalled` subtype for packet recognition. | Replace them when `FromSpeaker` composes natively with context, tool, or expression conditions and native packet construction recognizes that composition. | `ACTIVE` | 1.0.3 | `test_workflow_network_graph.py`, `test_ag2_network_tool_routing.py` |
-| `AG2-WP-005` | Long-lived code environments | `SandboxPort` owns generated-app boot, preview URLs, session lifecycle, and budgets; AG2 tools currently execute snippets/processes. | Re-evaluate as a thin AG2 binding if `CodeEnvironment` gains long-lived servers and exposed ports. | `WATCH` | 1.0.3 | `test_sandbox_boundary_and_persistence.py`, `test_sandbox_shell_contract.py` |
-| `AG2-WP-006` | Workflow startup target | `BootstrapInitialDispatch` performs one initial human-to-agent dispatch without creating a reusable author transition. | Delete it when AG2 channels accept a native initial target. | `ACTIVE` | 1.0.3 | `test_ag2_network_execution_alignment.py`, `test_workflow_network_graph.py` |
-| `AG2-WP-007` | Workflow-agent response schema | Mozaiks validates canonical artifact contracts after packets; AG2 does not provide per-agent channel response pressure. | Adopt native `response_schema` for model pressure while retaining Mozaiks hard validation. | `WATCH` | 1.0.3 | `test_structured_output_runtime_contracts.py`, `test_structured_output_fail_closed.py` |
-| `AG2-WP-008` | Deterministic task graph | `AG2TaskBatchRunner` wraps pre-authorized turns in AG2 `Task`; Mozaiks still dependency-sorts, scopes paths, and merges artifacts. | Move lifecycle execution to AG2 when it supplies deterministic scheduling and lineage; keep product ownership checks. | `DEFERRED` | 1.0.3 | `test_task_batch_contracts.py`, `test_runtime_task_batch_smoke.py` |
-| `AG2-WP-009` | Parent/child workflow lineage | Parent planning and continuation share one AG2 channel; task workers still use standalone AG2 Task lifecycle streams. | Replace standalone task observation when AG2 supplies parent/child context, WAL lineage, cancellation, and observation. | `DEFERRED` | 1.0.3 | `test_runtime_task_batch_smoke.py`, `test_refinement_task_batch_smoke.py`, `test_ag2_network_execution_alignment.py` |
-| `AG2-WP-010` | Typed one-shot Consulting | The approved-generation smoke uses a direct AG2 task call because the single-agent Network coordinator did not close deterministically. | Move to Consulting when typed response, packet emission, and hard-close behavior are stable. | `DEFERRED` | 1.0.3 | `test_task_batch_contracts.py` |
-| `AG2-WP-011` | Typed one-shot Consulting | `AG2StructuredAgentRunner` performs refinement LLM checkpoints while Mozaiks retains artifact policy. | Adopt Consulting when it supports a typed one-question/one-response contract. | `WATCH` | 1.0.3 | `test_ag2_agent_runner.py` |
-| `AG2-WP-012` | App-scoped channel events | Mozaiks projects AG2 WAL events into app-scoped websocket and chat persistence contracts. | Shrink WAL polling when native subscriptions preserve those product boundaries. | `WATCH` | 1.0.3 | `test_ag2_network_execution_alignment.py` |
-| `AG2-WP-013` | Durable human attachment | `_attach_human_client` reconnects hydrated human identity because AG2 lacks public `HubClient.attach_human(...)`. | Delete the private fallback when AG2 exposes public human reattachment. | `ACTIVE` | 1.0.3 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-001` | `Hub`/`AgentClient` workflow execution | `AG2NetworkRunner` adapts workflow YAML, app/session identity, artifact validation, and `RunResult` semantics. | When AG2 ships a stable high-level workflow runner, shrink this to request/result conversion. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-002` | Workflow turn-failure policy | The runner maps `HubListener.on_turn_failed` to a failed `RunResult` because the channel otherwise remains alive. | Delete the listener mapping when AG2 exposes a failed channel result or native close policy. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-003` | Round-end packet context updates | `_install_context_update_handler` wraps AG2's default handler so tool updates reach `EV_PACKET` before `WorkflowAdapter.fold(...)`. | Delete the wrapper when AG2 exposes a public packet transform or context-update hook. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py`, `test_workflow_network_graph.py`, `test_ag2_network_tool_routing.py` |
+| `AG2-WP-004` | Source-scoped transition composition | Local conditions preserve YAML `source_agent` semantics; `SourceScopedToolCalled` remains a native `ToolCalled` subtype for packet recognition. | Replace them when `FromSpeaker` composes natively with context, tool, or expression conditions and native packet construction recognizes that composition. | `ACTIVE` | 1.0.5 | `test_workflow_network_graph.py`, `test_ag2_network_tool_routing.py` |
+| `AG2-WP-005` | Long-lived code environments | `SandboxPort` owns generated-app boot, preview URLs, session lifecycle, and budgets; AG2 tools currently execute snippets/processes. | Re-evaluate as a thin AG2 binding if `CodeEnvironment` gains long-lived servers and exposed ports. | `WATCH` | 1.0.5 | `test_sandbox_boundary_and_persistence.py`, `test_sandbox_shell_contract.py` |
+| `AG2-WP-006` | Workflow startup target | `BootstrapInitialDispatch` performs one initial human-to-agent dispatch without creating a reusable author transition. | Delete it when AG2 channels accept a native initial target. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py`, `test_workflow_network_graph.py` |
+| `AG2-WP-007` | Workflow-agent response schema | Mozaiks validates canonical artifact contracts after packets; AG2 does not provide per-agent channel response pressure. | Adopt native `response_schema` for model pressure while retaining Mozaiks hard validation. | `WATCH` | 1.0.5 | `test_structured_output_runtime_contracts.py`, `test_structured_output_fail_closed.py` |
+| `AG2-WP-008` | Deterministic task graph | `AG2TaskBatchRunner` wraps pre-authorized turns in AG2 `Task`; Mozaiks still dependency-sorts, scopes paths, and merges artifacts. | Move lifecycle execution to AG2 when it supplies deterministic scheduling and lineage; keep product ownership checks. | `DEFERRED` | 1.0.5 | `test_task_batch_contracts.py`, `test_runtime_task_batch_smoke.py` |
+| `AG2-WP-009` | Parent/child workflow lineage | Parent planning and continuation share one AG2 channel; task workers still use standalone AG2 Task lifecycle streams. | Replace standalone task observation when AG2 supplies parent/child context, WAL lineage, cancellation, and observation. | `DEFERRED` | 1.0.5 | `test_runtime_task_batch_smoke.py`, `test_refinement_task_batch_smoke.py`, `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-010` | Typed one-shot Consulting | The approved-generation smoke uses a direct AG2 task call because the single-agent Network coordinator did not close deterministically. | Move to Consulting when typed response, packet emission, and hard-close behavior are stable. | `DEFERRED` | 1.0.5 | `test_task_batch_contracts.py` |
+| `AG2-WP-011` | Typed one-shot Consulting | `AG2StructuredAgentRunner` performs refinement LLM checkpoints while Mozaiks retains artifact policy. | Adopt Consulting when it supports a typed one-question/one-response contract. | `WATCH` | 1.0.5 | `test_ag2_agent_runner.py` |
+| `AG2-WP-012` | App-scoped channel events | Mozaiks projects AG2 WAL events into app-scoped websocket and chat persistence contracts. | Shrink WAL polling when native subscriptions preserve those product boundaries. | `WATCH` | 1.0.5 | `test_ag2_network_execution_alignment.py` |
+| `AG2-WP-013` | Durable human attachment | `_attach_human_client` reconnects hydrated human identity because AG2 lacks public `HubClient.attach_human(...)`. | Delete the private fallback when AG2 exposes public human reattachment. | `ACTIVE` | 1.0.5 | `test_ag2_network_execution_alignment.py` |
 
 For `AG2-WP-003`, also recheck explicit broadcast audiences for declared
-self-edges. AG2 1.0.3 `Hub._dispatch` excludes the sender when `audience=None`,
+self-edges. AG2 1.0.5 `Hub._dispatch` excludes the sender when `audience=None`,
 while the default handler can process explicit self-delivery through `can_send`.
 The existing packet adapter includes all participants only for agents with a
 declared self-edge. `test_declared_self_transition_runs_again_and_then_terminates`
@@ -121,7 +121,7 @@ attribution described in [Declarative Config to AG2 Mapping](declarative-ag2-map
 when replacing the packet hook. Ordinary packet updates must not acquire
 deterministic-tool authority merely because a variable permits that writer.
 
-For `AG2-WP-004`, AG2 1.0.3 recognizes static routing tools through a top-level
+For `AG2-WP-004`, AG2 1.0.5 recognizes static routing tools through a top-level
 `isinstance(condition, ToolCalled)` check in its packet builder. A standalone
 condition that delegates only `evaluate()` is insufficient. The registered
 subclass preserves source checking at native graph selection and survives
@@ -137,9 +137,9 @@ register entry, a protecting test, and an upstream replacement trigger.
 
 | ID | AG2 symbol/surface | Mozaiks caller | Why the public API is insufficient | Risk | Protecting test | Upstream replacement trigger | Last verified |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `AG2-PRI-001` | `HubClient._ensure_connected_async`, `HubClient._cache_passport`, `HubClient._clients` | `_attach_human_client` in `ag2_network_runner.py` | `HubClient.attach(...)` supports agents, but 1.0.3 has no public human-identity reattachment API. | `HIGH` | `test_ag2_network_runner_hydrates_and_continues_same_channel_after_restart` | Public `attach_human(...)` or equivalent durable identity reconnection. | 1.0.3 |
-| `AG2-PRI-002` | `ag2.network.client.handlers.default_handler` | `_install_context_update_handler` in `ag2_network_runner.py` | There is no public round-end packet transform before workflow routing folds context updates. | `HIGH` | `test_ag2_network_execution_alignment.py`, `test_workflow_network_graph.py` | Public packet-transform or context-update hook. | 1.0.3 |
-| `AG2-PRI-003` | `ag2.network.policies.CHANNEL_STATE_DEP` | `AG2TaskBatchRunner` | Standalone `Agent.ask(...)` does not expose a typed public injection surface for the channel-state context expected by the worker. | `MEDIUM` | `test_task_batch_contracts.py` | Public typed task/ask context injection. | 1.0.3 |
+| `AG2-PRI-001` | `HubClient._ensure_connected_async`, `HubClient._cache_passport`, `HubClient._clients` | `_attach_human_client` in `ag2_network_runner.py` | `HubClient.attach(...)` supports agents, but 1.0.5 has no public human-identity reattachment API. | `HIGH` | `test_ag2_network_runner_hydrates_and_continues_same_channel_after_restart` | Public `attach_human(...)` or equivalent durable identity reconnection. | 1.0.5 |
+| `AG2-PRI-002` | `ag2.network.client.handlers.default_handler` | `_install_context_update_handler` in `ag2_network_runner.py` | There is no public round-end packet transform before workflow routing folds context updates. | `HIGH` | `test_ag2_network_execution_alignment.py`, `test_workflow_network_graph.py` | Public packet-transform or context-update hook. | 1.0.5 |
+| `AG2-PRI-003` | `ag2.network.policies.CHANNEL_STATE_DEP` | `AG2TaskBatchRunner` | Standalone `Agent.ask(...)` does not expose a typed public injection surface for the channel-state context expected by the worker. | `MEDIUM` | `test_task_batch_contracts.py` | Public typed task/ask context injection. | 1.0.5 |
 
 ## Supersession and Deletion Queue
 
@@ -160,7 +160,7 @@ it does not justify retaining both paths.
 
 ## Auxiliary Usage Provenance
 
-`AG2-WP-014` (`WATCH`, verified against installed `ag2==1.0.3` on
+`AG2-WP-014` (`WATCH`, verified against installed `ag2==1.0.5` on
 September 13, 2026): `ag2/agent.py` implements schema correction in
 `AgentReply.content` via `AgentReply.ask`. Per-ask middleware is not
 inherited, but agent-level middleware is reapplied. The auxiliary runner

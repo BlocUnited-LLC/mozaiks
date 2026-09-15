@@ -23,6 +23,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Updated the AG2 runtime dependency to `1.0.5`.
+
 - `web_shell` UI validation now fails when a surface declares its own copy of a
   shared design-system primitive (e.g. a local `Metric`). Import rules alone did
   not catch this: a hand-rolled component imports nothing and passed every check

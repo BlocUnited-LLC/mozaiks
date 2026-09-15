@@ -43,6 +43,21 @@ class _FakeAgent:
         _FakeAgent.created.append(self)
 
 
+class _PublishedEvents:
+    async def __aenter__(self) -> _PublishedEvents:
+        return self
+
+    async def __aexit__(self, *_args: Any) -> None:
+        return None
+
+    def done(self) -> bool:
+        return False
+
+
+def _retry_context() -> SimpleNamespace:
+    return SimpleNamespace(stream=SimpleNamespace(get=lambda _event: _PublishedEvents()))
+
+
 async def _fake_llm_config(*args: Any, **kwargs: Any) -> tuple[None, dict[str, Any]]:
     return None, {
         "config_list": [
@@ -225,7 +240,7 @@ async def test_retry_middleware_retries_provider_exception() -> None:
             raise RuntimeError("provider unavailable")
         return "ok"
 
-    result = await middleware.on_llm_call(_provider_call, [], {})
+    result = await middleware.on_llm_call(_provider_call, [], _retry_context())
 
     assert result == "ok"
     assert calls == 3
@@ -241,7 +256,7 @@ async def test_retry_middleware_does_not_repair_malformed_output() -> None:
         calls += 1
         return "{}"
 
-    result = await middleware.on_llm_call(_provider_call, [], {})
+    result = await middleware.on_llm_call(_provider_call, [], _retry_context())
 
     assert result == "{}"
     assert calls == 1
