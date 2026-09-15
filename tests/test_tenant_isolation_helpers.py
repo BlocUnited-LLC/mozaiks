@@ -36,7 +36,7 @@ from typing import Any
 
 import pytest
 
-from mozaiksai.core.multitenant.app_ids import build_app_scope_filter
+from mozaiksai.core.multitenant.app_ids import build_app_scope_filter, dual_write_app_scope
 
 # ---------------------------------------------------------------------------
 # build_app_scope_filter unit tests
@@ -180,3 +180,19 @@ def test_helper_ignores_records_without_app_id_field() -> None:
         queried_app_id="tenant_a",
         leaked_app_id="tenant_b",
     )
+
+
+@pytest.mark.parametrize("missing", ["", "   ", None, True, False])
+def test_dual_write_refuses_to_produce_an_untagged_document(missing) -> None:
+    # Reads fail closed via the __invalid__ sentinel; writes must too. An
+    # untagged document is invisible to every tenant filter and visible to any
+    # query that omits one.
+    with pytest.raises(ValueError):
+        dual_write_app_scope({"secret": "x"}, missing)
+
+
+def test_dual_write_tags_a_valid_app_id() -> None:
+    assert dual_write_app_scope({"secret": "x"}, " app_a ") == {
+        "secret": "x",
+        "app_id": "app_a",
+    }
