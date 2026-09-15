@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mozaiksai.control_plane.app_context import get_source_context_bundle_for_version
 from mozaiksai.core.app_context.intelligence import (
     build_app_intelligence_catalog,
     search_app_intelligence_snapshot,
@@ -21,7 +22,7 @@ async def search_preloaded_source_context(
     max_results: int = 12,
 ) -> dict[str, Any]:
     """Search the preloaded source corpus for code chunks relevant to a query."""
-    bundle = _source_context_bundle(context_variables)
+    bundle = await _source_context_bundle(context_variables)
     if not bundle:
         return {"present": False, "reason": "source_context_bundle_unavailable", "results": []}
     bounded_results = max(1, min(int(max_results or 12), 24))
@@ -66,7 +67,7 @@ async def read_preloaded_source_file(
     max_chars: int = 24_000,
 ) -> dict[str, Any]:
     """Read one indexed source file from the preloaded source corpus."""
-    bundle = _source_context_bundle(context_variables)
+    bundle = await _source_context_bundle(context_variables)
     if not bundle:
         return {"present": False, "path": str(path or ""), "reason": "source_context_bundle_unavailable"}
     bounded_chars = max(2_000, min(int(max_chars or 24_000), 80_000))
@@ -79,7 +80,7 @@ async def get_related_preloaded_source_files(
     max_results: int = 16,
 ) -> dict[str, Any]:
     """Return files related by relative imports or same-directory proximity."""
-    bundle = _source_context_bundle(context_variables)
+    bundle = await _source_context_bundle(context_variables)
     if not bundle:
         return {"present": False, "path": str(path or ""), "reason": "source_context_bundle_unavailable", "files": []}
     bounded_results = max(1, min(int(max_results or 16), 32))
@@ -90,9 +91,27 @@ async def get_related_preloaded_source_files(
     }
 
 
-def _source_context_bundle(context_variables: Any | None) -> dict[str, Any] | None:
+async def _source_context_bundle(context_variables: Any | None) -> dict[str, Any] | None:
     value = _ctx_get(context_variables, "source_context_bundle")
-    return value if isinstance(value, dict) else None
+    if isinstance(value, dict) and value:
+        return value
+
+    app_id = str(_ctx_get(context_variables, "app_id") or "").strip()
+    context_version_id = str(
+        _ctx_get(context_variables, "current_app_context_version_id")
+        or _ctx_get(context_variables, "current_context_version_id")
+        or ""
+    ).strip()
+    if not app_id or not context_version_id:
+        return None
+    try:
+        lookup = await get_source_context_bundle_for_version(
+            app_id=app_id,
+            context_version_id=context_version_id,
+        )
+    except Exception:
+        return None
+    return lookup.bundle.model_dump(mode="json") if lookup.bundle is not None else None
 
 
 def _app_intelligence_snapshot(context_variables: Any | None) -> dict[str, Any] | None:

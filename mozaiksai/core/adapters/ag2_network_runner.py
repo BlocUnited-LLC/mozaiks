@@ -87,7 +87,21 @@ def _json_safe(value: Any) -> Any:
 
 def _json_safe_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
     serialized = _json_safe(dict(value or {}))
-    return serialized if isinstance(serialized, dict) else {}
+    if not isinstance(serialized, dict):
+        return {}
+    # Source corpora are durable app-context artifacts, not channel state. A
+    # brownfield scan can contain millions of characters and overflow MongoDB's
+    # 16 MB document limit when AG2 appends its WAL. Retrieval tools resolve the
+    # artifact by context-version reference when this projection is applied.
+    source_bundle = serialized.get("source_context_bundle")
+    if isinstance(source_bundle, (dict, list)):
+        try:
+            source_size = len(json.dumps(source_bundle, ensure_ascii=False, separators=(",", ":")))
+        except (TypeError, ValueError):
+            source_size = 0
+        if source_size > 256_000:
+            serialized["source_context_bundle"] = None
+    return serialized
 
 
 def _authorized_context_updates(
