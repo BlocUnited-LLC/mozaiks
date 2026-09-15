@@ -869,6 +869,17 @@
       "provider": "azure",
       "source": "litellm"
     },
+    "azure/chat-latest": {
+      "cached_input_per_1m_usd": 0.5,
+      "input_per_1m_usd": 5.0,
+      "max_input_tokens": 272000,
+      "max_output_tokens": 128000,
+      "max_tokens": 128000,
+      "mode": "chat",
+      "output_per_1m_usd": 30.0,
+      "provider": "azure",
+      "source": "litellm"
+    },
     "azure/codex-mini": {
       "cached_input_per_1m_usd": 0.375,
       "input_per_1m_usd": 1.5,
@@ -2220,6 +2231,17 @@
       "provider": "azure",
       "source": "litellm"
     },
+    "azure/gpt-chat-latest": {
+      "cached_input_per_1m_usd": 0.5,
+      "input_per_1m_usd": 5.0,
+      "max_input_tokens": 272000,
+      "max_output_tokens": 128000,
+      "max_tokens": 128000,
+      "mode": "chat",
+      "output_per_1m_usd": 30.0,
+      "provider": "azure",
+      "source": "litellm"
+    },
     "azure/gpt-image-1": {
       "cached_input_per_1m_usd": 1.25,
       "input_per_1m_usd": 5.0,
@@ -2900,6 +2922,17 @@
       "max_tokens": 128000,
       "mode": "chat",
       "output_per_1m_usd": 55.0,
+      "provider": "azure",
+      "source": "litellm"
+    },
+    "azure/us/gpt-chat-latest": {
+      "cached_input_per_1m_usd": 0.55,
+      "input_per_1m_usd": 5.5,
+      "max_input_tokens": 272000,
+      "max_output_tokens": 128000,
+      "max_tokens": 128000,
+      "mode": "chat",
+      "output_per_1m_usd": 33.0,
       "provider": "azure",
       "source": "litellm"
     },
@@ -6239,6 +6272,7 @@
       "cached_input_per_1m_usd": 1.25,
       "input_per_1m_usd": 5.0,
       "mode": "image_generation",
+      "output_per_1m_usd": 10.0,
       "provider": "openai",
       "source": "litellm"
     },
@@ -8213,6 +8247,7 @@
       "source": "litellm"
     },
     "deep-research-pro-preview-12-2025": {
+      "cached_input_per_1m_usd": 0.2,
       "input_per_1m_usd": 2.0,
       "max_input_tokens": 65536,
       "max_output_tokens": 32768,
@@ -10819,13 +10854,13 @@
       "source": "litellm"
     },
     "fireworks_ai/accounts/fireworks/models/deepseek-v4-pro": {
-      "cached_input_per_1m_usd": 0.145,
-      "input_per_1m_usd": 1.74,
+      "cached_input_per_1m_usd": 0.6,
+      "input_per_1m_usd": 1.2,
       "max_input_tokens": 1048576,
       "max_output_tokens": 384000,
       "max_tokens": 384000,
       "mode": "chat",
-      "output_per_1m_usd": 3.48,
+      "output_per_1m_usd": 1.2,
       "provider": "fireworks_ai",
       "source": "litellm"
     },
@@ -12838,7 +12873,7 @@
       "source": "litellm"
     },
     "fireworks_ai/accounts/fireworks/models/qwen3-reranker-8b": {
-      "input_per_1m_usd": 0.0,
+      "input_per_1m_usd": 0.2,
       "max_input_tokens": 40960,
       "max_output_tokens": 40960,
       "max_tokens": 40960,
@@ -13130,6 +13165,14 @@
       "provider": "fireworks_ai",
       "source": "litellm"
     },
+    "fireworks_ai/accounts/fireworks/routers/glm-5p3-fast": {
+      "cached_input_per_1m_usd": 0.39,
+      "input_per_1m_usd": 2.1,
+      "mode": "chat",
+      "output_per_1m_usd": 6.6,
+      "provider": "fireworks_ai",
+      "source": "litellm"
+    },
     "fireworks_ai/accounts/fireworks/routers/kimi-k2p6-fast": {
       "cached_input_per_1m_usd": 0.3,
       "input_per_1m_usd": 2.0,
@@ -13207,13 +13250,13 @@
       "source": "litellm"
     },
     "fireworks_ai/deepseek-v4-pro": {
-      "cached_input_per_1m_usd": 0.145,
-      "input_per_1m_usd": 1.74,
+      "cached_input_per_1m_usd": 0.6,
+      "input_per_1m_usd": 1.2,
       "max_input_tokens": 1048576,
       "max_output_tokens": 384000,
       "max_tokens": 384000,
       "mode": "chat",
-      "output_per_1m_usd": 3.48,
+      "output_per_1m_usd": 1.2,
       "provider": "fireworks_ai",
       "source": "litellm"
     },
@@ -13569,26 +13612,6 @@
       "provider": "friendliai",
       "source": "litellm"
     },
-    "friendliai/meta-llama-3.1-70b-instruct": {
-      "input_per_1m_usd": 0.6,
-      "max_input_tokens": 8192,
-      "max_output_tokens": 8192,
-      "max_tokens": 8192,
-      "mode": "chat",
-      "output_per_1m_usd": 0.6,
-      "provider": "friendliai",
-      "source": "litellm"
-    },
-    "friendliai/meta-llama-3.1-8b-instruct": {
-      "input_per_1m_usd": 0.1,
-      "max_input_tokens": 8192,
-      "max_output_tokens": 8192,
-      "max_tokens": 8192,
-      "mode": "chat",
-      "output_per_1m_usd": 0.1,
-      "provider": "friendliai",
-      "source": "litellm"
-    },
     "friendliai/zai-org/GLM-5.1": {
       "cached_input_per_1m_usd": 0.26,
       "input_per_1m_usd": 1.4,
@@ -13781,12 +13804,12 @@
     },
     "gemini-2.0-flash": {
       "cached_input_per_1m_usd": 0.025,
-      "input_per_1m_usd": 0.1,
+      "input_per_1m_usd": 0.15,
       "max_input_tokens": 1048576,
       "max_output_tokens": 8192,
       "max_tokens": 8192,
       "mode": "chat",
-      "output_per_1m_usd": 0.4,
+      "output_per_1m_usd": 0.6,
       "provider": "vertex_ai-language-models",
       "source": "litellm"
     },
@@ -13978,6 +14001,7 @@
       "source": "litellm"
     },
     "gemini-3-pro-image": {
+      "cached_input_per_1m_usd": 0.2,
       "input_per_1m_usd": 2.0,
       "max_input_tokens": 65536,
       "max_output_tokens": 32768,
@@ -14009,6 +14033,7 @@
       "source": "litellm"
     },
     "gemini-3.1-flash-image": {
+      "cached_input_per_1m_usd": 0.05,
       "input_per_1m_usd": 0.5,
       "max_input_tokens": 65536,
       "max_output_tokens": 32768,
@@ -15864,21 +15889,21 @@
       "source": "litellm"
     },
     "gpt-4o-mini-tts": {
-      "input_per_1m_usd": 2.5,
+      "input_per_1m_usd": 0.6,
       "mode": "audio_speech",
       "output_per_1m_usd": 10.0,
       "provider": "openai",
       "source": "litellm"
     },
     "gpt-4o-mini-tts-2025-03-20": {
-      "input_per_1m_usd": 2.5,
+      "input_per_1m_usd": 0.6,
       "mode": "audio_speech",
       "output_per_1m_usd": 10.0,
       "provider": "openai",
       "source": "litellm"
     },
     "gpt-4o-mini-tts-2025-12-15": {
-      "input_per_1m_usd": 2.5,
+      "input_per_1m_usd": 0.6,
       "mode": "audio_speech",
       "output_per_1m_usd": 10.0,
       "provider": "openai",
@@ -16358,6 +16383,14 @@
       "provider": "openai",
       "source": "litellm"
     },
+    "gpt-5.5-cyber": {
+      "cached_input_per_1m_usd": 1.25,
+      "input_per_1m_usd": 12.5,
+      "mode": "chat",
+      "output_per_1m_usd": 75.0,
+      "provider": "openai",
+      "source": "litellm"
+    },
     "gpt-5.5-pro": {
       "input_per_1m_usd": 30.0,
       "max_input_tokens": 1050000,
@@ -16694,6 +16727,14 @@
       "max_tokens": 4096,
       "mode": "realtime",
       "output_per_1m_usd": 2.4,
+      "provider": "openai",
+      "source": "litellm"
+    },
+    "gpt-rosalind-research": {
+      "cached_input_per_1m_usd": 0.5,
+      "input_per_1m_usd": 5.0,
+      "mode": "chat",
+      "output_per_1m_usd": 25.0,
       "provider": "openai",
       "source": "litellm"
     },
@@ -28247,6 +28288,13 @@
       "provider": "together_ai",
       "source": "litellm"
     },
+    "together_ai/NousResearch/Nous-Hermes-2-Mixtral-8x7B-DPO": {
+      "input_per_1m_usd": 0.6,
+      "mode": "chat",
+      "output_per_1m_usd": 0.6,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
     "together_ai/Prism-ML/Ternary-Bonsai-27B": {
       "input_per_1m_usd": 0.0,
       "max_input_tokens": 262144,
@@ -28259,6 +28307,41 @@
     "together_ai/Qwen/QwQ-32B": {
       "input_per_1m_usd": 1.2,
       "max_input_tokens": 131072,
+      "mode": "chat",
+      "output_per_1m_usd": 1.2,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/Qwen/Qwen2-1.5B-Instruct": {
+      "input_per_1m_usd": 0.02,
+      "mode": "chat",
+      "output_per_1m_usd": 0.02,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/Qwen/Qwen2-72B-Instruct": {
+      "input_per_1m_usd": 0.9,
+      "mode": "chat",
+      "output_per_1m_usd": 0.9,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/Qwen/Qwen2-VL-72B-Instruct": {
+      "input_per_1m_usd": 1.2,
+      "mode": "chat",
+      "output_per_1m_usd": 1.2,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/Qwen/Qwen2.5-14B-Instruct": {
+      "input_per_1m_usd": 0.8,
+      "mode": "chat",
+      "output_per_1m_usd": 0.8,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/Qwen/Qwen2.5-72B-Instruct": {
+      "input_per_1m_usd": 1.2,
       "mode": "chat",
       "output_per_1m_usd": 1.2,
       "provider": "together_ai",
@@ -28277,6 +28360,20 @@
       "max_input_tokens": 32768,
       "mode": "chat",
       "output_per_1m_usd": 0.3,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/Qwen/Qwen2.5-Coder-32B-Instruct": {
+      "input_per_1m_usd": 0.8,
+      "mode": "chat",
+      "output_per_1m_usd": 0.8,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/Qwen/Qwen2.5-VL-72B-Instruct": {
+      "input_per_1m_usd": 1.95,
+      "mode": "chat",
+      "output_per_1m_usd": 8.0,
       "provider": "together_ai",
       "source": "litellm"
     },
@@ -28417,6 +28514,13 @@
       "provider": "together_ai",
       "source": "litellm"
     },
+    "together_ai/arcee-ai/trinity-mini": {
+      "input_per_1m_usd": 0.045,
+      "mode": "chat",
+      "output_per_1m_usd": 0.15,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
     "together_ai/arize-ai/qwen-2-1.5b-instruct": {
       "input_per_1m_usd": 0.1,
       "max_input_tokens": 32768,
@@ -28457,6 +28561,27 @@
       "max_input_tokens": 128000,
       "mode": "chat",
       "output_per_1m_usd": 2.19,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/deepseek-ai/DeepSeek-R1-Distill-Llama-70B": {
+      "input_per_1m_usd": 2.0,
+      "mode": "chat",
+      "output_per_1m_usd": 2.0,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B": {
+      "input_per_1m_usd": 0.18,
+      "mode": "chat",
+      "output_per_1m_usd": 0.18,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/deepseek-ai/DeepSeek-R1-Distill-Qwen-14B": {
+      "input_per_1m_usd": 1.6,
+      "mode": "chat",
+      "output_per_1m_usd": 1.6,
       "provider": "together_ai",
       "source": "litellm"
     },
@@ -28510,6 +28635,28 @@
       "provider": "together_ai",
       "source": "litellm"
     },
+    "together_ai/deepseek-ai/DeepSeek-V4.1-Flash": {
+      "cached_input_per_1m_usd": 0.006,
+      "input_per_1m_usd": 0.3,
+      "mode": "chat",
+      "output_per_1m_usd": 1.2,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/deepseek-ai/deepseek-coder-33b-instruct": {
+      "input_per_1m_usd": 0.8,
+      "mode": "chat",
+      "output_per_1m_usd": 0.8,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/google/gemma-2-27b-it": {
+      "input_per_1m_usd": 0.8,
+      "mode": "chat",
+      "output_per_1m_usd": 0.8,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
     "together_ai/google/gemma-3n-E4B-it": {
       "input_per_1m_usd": 0.06,
       "max_input_tokens": 32768,
@@ -28534,6 +28681,34 @@
       "max_tokens": 514,
       "mode": "embedding",
       "output_per_1m_usd": 0.02,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/meta-llama/Llama-3-8b-chat-hf": {
+      "input_per_1m_usd": 0.2,
+      "mode": "chat",
+      "output_per_1m_usd": 0.2,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/meta-llama/Llama-3.1-405B-Instruct": {
+      "input_per_1m_usd": 3.5,
+      "mode": "chat",
+      "output_per_1m_usd": 3.5,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/meta-llama/Llama-3.2-1B-Instruct": {
+      "input_per_1m_usd": 0.06,
+      "mode": "chat",
+      "output_per_1m_usd": 0.06,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/meta-llama/Llama-3.2-3B-Instruct": {
+      "input_per_1m_usd": 0.06,
+      "mode": "chat",
+      "output_per_1m_usd": 0.06,
       "provider": "together_ai",
       "source": "litellm"
     },
@@ -28571,6 +28746,20 @@
       "input_per_1m_usd": 0.2,
       "max_input_tokens": 1048576,
       "max_tokens": 1048576,
+      "mode": "chat",
+      "output_per_1m_usd": 0.2,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/meta-llama/Meta-Llama-3-70B-Instruct-Turbo": {
+      "input_per_1m_usd": 0.88,
+      "mode": "chat",
+      "output_per_1m_usd": 0.88,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/meta-llama/Meta-Llama-3-8B-Instruct": {
+      "input_per_1m_usd": 0.2,
       "mode": "chat",
       "output_per_1m_usd": 0.2,
       "provider": "together_ai",
@@ -28704,6 +28893,13 @@
       "max_tokens": 1048576,
       "mode": "chat",
       "output_per_1m_usd": 15.0,
+      "provider": "together_ai",
+      "source": "litellm"
+    },
+    "together_ai/nvidia/Llama-3.1-Nemotron-70B-Instruct-HF": {
+      "input_per_1m_usd": 0.88,
+      "mode": "chat",
+      "output_per_1m_usd": 0.88,
       "provider": "together_ai",
       "source": "litellm"
     },
@@ -31072,6 +31268,7 @@
       "source": "litellm"
     },
     "vertex_ai/deep-research-pro-preview-12-2025": {
+      "cached_input_per_1m_usd": 0.2,
       "input_per_1m_usd": 2.0,
       "max_input_tokens": 65536,
       "max_output_tokens": 32768,
@@ -31129,6 +31326,20 @@
       "provider": "vertex_ai-language-models",
       "source": "litellm"
     },
+    "vertex_ai/gemini-2.5-flash-native-audio": {
+      "input_per_1m_usd": 0.5,
+      "mode": "realtime",
+      "output_per_1m_usd": 2.0,
+      "provider": "vertex_ai",
+      "source": "litellm"
+    },
+    "vertex_ai/gemini-2.5-flash-preview-tts": {
+      "input_per_1m_usd": 0.5,
+      "mode": "audio_speech",
+      "output_per_1m_usd": 10.0,
+      "provider": "vertex_ai",
+      "source": "litellm"
+    },
     "vertex_ai/gemini-3-flash-preview": {
       "cached_input_per_1m_usd": 0.05,
       "input_per_1m_usd": 0.5,
@@ -31141,6 +31352,7 @@
       "source": "litellm"
     },
     "vertex_ai/gemini-3-pro-image": {
+      "cached_input_per_1m_usd": 0.2,
       "input_per_1m_usd": 2.0,
       "max_input_tokens": 65536,
       "max_output_tokens": 32768,
@@ -31172,6 +31384,7 @@
       "source": "litellm"
     },
     "vertex_ai/gemini-3.1-flash-image": {
+      "cached_input_per_1m_usd": 0.05,
       "input_per_1m_usd": 0.5,
       "max_input_tokens": 65536,
       "max_output_tokens": 32768,
@@ -31224,6 +31437,20 @@
       "provider": "vertex_ai-language-models",
       "source": "litellm"
     },
+    "vertex_ai/gemini-3.1-flash-live-preview": {
+      "input_per_1m_usd": 0.75,
+      "mode": "realtime",
+      "output_per_1m_usd": 4.5,
+      "provider": "vertex_ai",
+      "source": "litellm"
+    },
+    "vertex_ai/gemini-3.1-flash-tts-preview": {
+      "input_per_1m_usd": 1.0,
+      "mode": "audio_speech",
+      "output_per_1m_usd": 20.0,
+      "provider": "vertex_ai",
+      "source": "litellm"
+    },
     "vertex_ai/gemini-3.1-pro-preview": {
       "cached_input_per_1m_usd": 0.2,
       "input_per_1m_usd": 2.0,
@@ -31271,6 +31498,18 @@
     "vertex_ai/gemini-3.5-live-translate-preview": {
       "input_per_1m_usd": 3.5,
       "mode": "realtime",
+      "output_per_1m_usd": 21.0,
+      "provider": "vertex_ai",
+      "source": "litellm"
+    },
+    "vertex_ai/gemini-3.5-transcribe": {
+      "mode": "audio_transcription",
+      "output_per_1m_usd": 12.0,
+      "provider": "vertex_ai",
+      "source": "litellm"
+    },
+    "vertex_ai/gemini-3.5-transcribe-live": {
+      "mode": "audio_transcription",
       "output_per_1m_usd": 21.0,
       "provider": "vertex_ai",
       "source": "litellm"
@@ -31337,6 +31576,29 @@
       "max_tokens": 8192,
       "mode": "embedding",
       "output_per_1m_usd": 0.0,
+      "provider": "vertex_ai",
+      "source": "litellm"
+    },
+    "vertex_ai/gemini-omni-1.1-flash": {
+      "input_per_1m_usd": 1.5,
+      "mode": "chat",
+      "output_per_1m_usd": 9.0,
+      "provider": "vertex_ai",
+      "source": "litellm"
+    },
+    "vertex_ai/gemini-robotics-er-2": {
+      "cached_input_per_1m_usd": 0.1,
+      "input_per_1m_usd": 1.0,
+      "mode": "chat",
+      "output_per_1m_usd": 5.0,
+      "provider": "vertex_ai",
+      "source": "litellm"
+    },
+    "vertex_ai/gemma-4-26b-a4b-it": {
+      "cached_input_per_1m_usd": 0.015,
+      "input_per_1m_usd": 0.15,
+      "mode": "chat",
+      "output_per_1m_usd": 0.6,
       "provider": "vertex_ai",
       "source": "litellm"
     },
@@ -33445,10 +33707,10 @@
   },
   "schema_version": "mozaiks.usage_pricing.v1",
   "source": {
-    "content_sha256": "3a4af585f914a9bd079b6d25c239e8e59a39e581332fea3d4eacda90e4342611",
-    "fetched_at": "2026-09-14T18:18:31.247899+00:00",
+    "content_sha256": "68d287ec565357907d2059f9e3aa26182275cc0ef426905cc36f79f815acedb5",
+    "fetched_at": "2026-09-15T14:20:17.756683+00:00",
     "name": "litellm",
-    "source_revision": "\"35fd757f4eadafee45d25341cb0c8394f197c34832af2a83c898783924ca0df7\"",
+    "source_revision": "\"782e7e41c446a25bb8ad7fd33f2eb46e74e0151373973c6f22dcea5aad7f2f63\"",
     "url": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
   }
 }
