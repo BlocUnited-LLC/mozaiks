@@ -53,13 +53,23 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
 
     # 1. The approved surface_id is the module's identity. Adopt it.
     renames: dict[str, str] = {}
+    available_now = _context_available_pack_map(context)
     for pack in packs:
         surface_id = pack.get("surface_id")
         surface = approved.get(surface_id)
         if surface is None or pack.get("surface_kind") != "module":
             continue
-        if pack.get("capability_source") not in {"generated_module", None, ""}:
-            continue
+        source = pack.get("capability_source")
+        if source not in {"generated_module", None, ""}:
+            # A provider source with no installed provider, on a surface the
+            # design approved as app-owned, is app code mislabelled. The
+            # validator says so outright: "For app-owned code use
+            # generated_module with capability_pack_id=surface_id=...". Seen live
+            # as operator_pack, and previously as managed_capability.
+            if str(_pack_id_from_descriptor(pack)) in available_now:
+                continue
+            pack["capability_source"] = "generated_module"
+            repairs.append(f"{surface_id}: {source} with no installed provider -> generated_module")
         pack.setdefault("capability_source", "generated_module")
         current = _pack_id_from_descriptor(pack)
         if current != surface_id:
