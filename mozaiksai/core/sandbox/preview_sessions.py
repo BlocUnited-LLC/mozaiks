@@ -50,10 +50,19 @@ def _safe_relpath(raw: str) -> str | None:
 
 def resolve_preview_provider(env: dict[str, str] | None = None) -> tuple[str, SandboxPort]:
     env_map = os.environ if env is None else env
-    if str(env_map.get("E2B_API_KEY", "")).strip():
+    requested = str(env_map.get("MOZAIKS_PREVIEW_PROVIDER", "")).strip().lower()
+    if requested == "e2b":
+        if not str(env_map.get("E2B_API_KEY", "")).strip():
+            raise RuntimeError(
+                "E2B_API_KEY is required when MOZAIKS_PREVIEW_PROVIDER=e2b"
+            )
         from mozaiksai.core.adapters.e2b_sandbox import get_e2b_sandbox
 
         return "e2b", get_e2b_sandbox()
+    if requested not in {"", "docker"}:
+        raise ValueError(
+            f"Unsupported preview provider {requested!r}; expected 'docker' or 'e2b'"
+        )
     from mozaiksai.core.adapters.docker_sandbox import docker_available, get_docker_sandbox
 
     if docker_available():

@@ -17,6 +17,7 @@ from mozaiksai.core.sandbox.preview_sessions import (
     _safe_relpath,
     is_valid_artifact_id,
     is_valid_sandbox_id,
+    resolve_preview_provider,
 )
 from mozaiksai.hosts.routers.sandbox import create_sandbox_router
 
@@ -76,6 +77,43 @@ def test_id_validators():
     assert not is_valid_artifact_id("")
     assert is_valid_sandbox_id("a" * 128)
     assert not is_valid_sandbox_id("a" * 129)
+
+
+def test_preview_provider_defaults_to_docker_even_when_e2b_key_exists(monkeypatch):
+    import mozaiksai.core.adapters.docker_sandbox as docker_sandbox
+
+    adapter = object()
+    monkeypatch.setattr(docker_sandbox, "docker_available", lambda: True)
+    monkeypatch.setattr(docker_sandbox, "get_docker_sandbox", lambda: adapter)
+
+    provider, resolved = resolve_preview_provider({"E2B_API_KEY": "configured"})
+
+    assert provider == "docker"
+    assert resolved is adapter
+
+
+def test_preview_provider_requires_explicit_e2b_selection(monkeypatch):
+    import mozaiksai.core.adapters.e2b_sandbox as e2b_sandbox
+
+    adapter = object()
+    monkeypatch.setattr(e2b_sandbox, "get_e2b_sandbox", lambda: adapter)
+
+    provider, resolved = resolve_preview_provider(
+        {"E2B_API_KEY": "configured", "MOZAIKS_PREVIEW_PROVIDER": "e2b"}
+    )
+
+    assert provider == "e2b"
+    assert resolved is adapter
+
+
+def test_explicit_e2b_selection_requires_api_key():
+    with pytest.raises(RuntimeError, match="E2B_API_KEY"):
+        resolve_preview_provider({"MOZAIKS_PREVIEW_PROVIDER": "e2b"})
+
+
+def test_preview_provider_rejects_unknown_explicit_value():
+    with pytest.raises(ValueError, match="Unsupported preview provider"):
+        resolve_preview_provider({"MOZAIKS_PREVIEW_PROVIDER": "modal"})
 
 
 @pytest.mark.parametrize("path", ["/etc/passwd", "C:/outside", "../outside", "a/../../outside", "", ".", "a\x00b"])

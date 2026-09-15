@@ -11,8 +11,9 @@ ownership boundary against AG2's agent-level execution is defined in
 Resolution precedence: tool argument → `app_validation_strategy` context
 variable → `MOZAIKS_APP_VALIDATION_STRATEGY` env → automatic (`docker` when a
 daemon is reachable → `local` when npm exists → `skip`). E2B is never selected
-automatically: `E2B_API_KEY` makes the provider available, but the workflow or
-operator must explicitly select `e2b`.
+automatically: Docker is the default when available. E2B is selected only when
+the workflow or operator explicitly sets `MOZAIKS_PREVIEW_PROVIDER=e2b` and
+provides `E2B_API_KEY`.
 
 | Strategy | Runs where | Preview URL | Cost | Intended for |
 |----------|-----------|-------------|------|--------------|
@@ -54,9 +55,9 @@ user starts the new version explicitly.
   the registry's target and verifies the saved app-bundle binding and archive
   digest before allocating a sandbox. Binary assets are retained.
 - Provider resolution mirrors the validation ladder's preview-capable rungs:
-  e2b only when explicitly selected and configured, otherwise local Docker.
-  With neither, the create call returns 503 with a clear message
-  (`local`/`skip` builds have no live preview).
+  e2b only when `MOZAIKS_PREVIEW_PROVIDER=e2b` and its key are configured,
+  otherwise local Docker. With neither, the create call returns 503 with a
+  clear message (`local`/`skip` builds have no live preview).
 
 The canonical supervisor runs the existing platform host, shared web shell,
 and a private MongoDB in the sandbox. App files mount under `app/`, workflows
@@ -186,6 +187,7 @@ database containing builds or user records.
 | `DOCKER_SANDBOX_TIMEOUT` | `300` | docker container lifetime (seconds) |
 | `SANDBOX_TTL_MINUTES` | `30` | artifact preview-session TTL (also the e2b kill deadline) |
 | `SANDBOX_TEMPLATE` | provider default | artifact preview-session e2b template |
+| `MOZAIKS_PREVIEW_PROVIDER` | auto | `docker` (default) or explicit `e2b`; a key alone never selects E2B |
 | `SANDBOX_WORKDIR` | `/home/user/app` | e2b workspace root; Docker uses `/workspace` |
 | `MOZAIKS_PREVIEW_ENV_<NAME>` | unset | explicit preview-only environment, never implicit host inheritance |
 | `APP_VALIDATION_BUILD_OUTPUT_MAX_CHARS` | `20000` | persisted build-output trim |
