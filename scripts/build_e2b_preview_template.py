@@ -58,7 +58,7 @@ def build_template(
     except ImportError as exc:
         raise RuntimeError("Install the E2B extra before building: pip install 'mozaiks[e2b]'") from exc
 
-    template = Template().from_dockerfile(str(dockerfile))
+    template = Template(file_context_path=REPO_ROOT).from_dockerfile(str(dockerfile))
     result = Template.build(
         template,
         alias=template_name,
