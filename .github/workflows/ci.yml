@@ -303,6 +303,12 @@ jobs:
       - name: Support profile panel contract
         run: npm run test:support-panel
 
+      - name: Test wiring guard
+        run: npm run test:wiring
+
+      - name: UI contract tests
+        run: npm run test:ui-contracts
+
       - name: Browser auth contract
         run: npm run test:auth
 
