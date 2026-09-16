@@ -706,3 +706,44 @@ def test_the_ownership_error_states_how_many_it_found() -> None:
     with pytest.raises(ValueError) as raised:
         validate_plan_origins(plan, context)
     assert "(found 2)" in str(raised.value)
+
+
+def test_a_doubly_claimed_surface_keeps_its_packs_distinguishable() -> None:
+    """Live: "habit_registry: requires exactly one module capability (found 2)".
+
+    Two packs claiming one approved surface is the ambiguity the synthesis step
+    deliberately refuses to resolve. Adopting the surface_id on each would give
+    them identical capability_pack_ids - two distinguishable packs become twins,
+    and whoever later decides how to merge them loses the information needed to
+    do it.
+    """
+    plan = _plan_as_the_model_wrote_it()
+    plan["capability_packs"].append(
+        {
+            "capability_pack_id": "analytics_pack",
+            "surface_id": "habits_module",
+            "surface_kind": "module",
+            "capability_source": "generated_module",
+            "primary_entities": ["Habit"],
+        }
+    )
+
+    _repair_plan(plan, _context())
+
+    ids = [p["capability_pack_id"] for p in plan["capability_packs"]]
+    assert len(set(ids)) == len(ids), f"packs must stay distinguishable, got {ids}"
+    assert {"crud_pack", "analytics_pack"} == set(ids)
+
+    # And it is still rejected, with the count that makes it diagnosable.
+    with pytest.raises(ValueError) as excinfo:
+        validate_plan_origins(plan, _context())
+    assert "(found 2)" in str(excinfo.value)
+
+
+def test_a_singly_claimed_surface_is_still_adopted() -> None:
+    """The ambiguity guard must not disable the ordinary repair."""
+    plan = _plan_as_the_model_wrote_it()
+
+    _repair_plan(plan, _context())
+
+    assert plan["capability_packs"][0]["capability_pack_id"] == "habits_module"
