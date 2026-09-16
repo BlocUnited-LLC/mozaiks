@@ -97,3 +97,50 @@ def test_unparseable_content_is_passed_through() -> None:
     broken = "sections: [unclosed"
 
     assert normalize_planned_page_content(broken, path="ui/pages/x.yaml") == broken
+
+
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (  # noqa: E402
+    align_page_name_with_file,
+)
+
+
+def test_the_display_label_moves_to_title_and_the_name_follows_the_file() -> None:
+    """The live failure: the human label was put in `name`.
+
+        $.name: page_schema.name_mismatch: Page schema name must match the
+        requested page. Runtime page name must match file identity 'habits';
+        keep the display label in title.
+    """
+    document = {"name": "Habit Management", "route": "/habits", "sections": []}
+
+    assert align_page_name_with_file(document, "ui/pages/habits.yaml") == "Habit Management"
+    assert document["name"] == "habits"
+    assert document["title"] == "Habit Management"
+
+
+def test_an_existing_title_is_not_overwritten() -> None:
+    document = {"name": "Habit Management", "title": "Your Habits", "route": "/habits"}
+
+    align_page_name_with_file(document, "ui/pages/habits.yaml")
+
+    assert document["name"] == "habits"
+    assert document["title"] == "Your Habits"
+
+
+def test_a_matching_name_is_left_alone() -> None:
+    document = {"name": "habits", "route": "/habits"}
+
+    assert align_page_name_with_file(document, "ui/pages/habits.yaml") is None
+    assert "title" not in document
+
+
+def test_the_rename_reaches_the_written_content() -> None:
+    import yaml as _yaml
+
+    content = _yaml.safe_dump({"name": "Habit Management", "route": "/habits", "sections": []})
+
+    normalized = normalize_planned_page_content(content, path="ui/pages/habits.yaml")
+
+    document = _yaml.safe_load(normalized)
+    assert document["name"] == "habits"
+    assert document["title"] == "Habit Management"
