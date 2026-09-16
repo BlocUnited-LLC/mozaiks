@@ -280,7 +280,85 @@ def declare_the_intended_modal(document: Any) -> str | None:
     return modal_id
 
 
-def normalize_planned_page_content(content: str, *, path: str = "") -> str:
+_MODULE_ACTION_PATH = re.compile(r"(/api/modules/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)")
+
+
+def module_action_index(file_map: dict[str, str]) -> dict[str, set[str]]:
+    """Map module id -> declared action ids, read from generated module.yaml files."""
+    index: dict[str, set[str]] = {}
+    for path, content in (file_map or {}).items():
+        if not str(path).replace("\\", "/").endswith("/module.yaml"):
+            continue
+        try:
+            document = yaml.safe_load(content)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        module = document.get("module")
+        module_id = str((module or {}).get("id") or "").strip() if isinstance(module, dict) else ""
+        if not module_id:
+            continue
+        actions = document.get("actions")
+        index[module_id] = {
+            str(action.get("id")).strip()
+            for action in (actions if isinstance(actions, list) else [])
+            if isinstance(action, dict) and str(action.get("id") or "").strip()
+        }
+    return index
+
+
+def _retarget_one(match: re.Match[str], modules: dict[str, set[str]], seen: list[str]) -> str:
+    prefix, module_id, action_id = match.group(1), match.group(2), match.group(3)
+    if module_id in modules:
+        return match.group(0)
+    owners = sorted(owner for owner, actions in modules.items() if action_id in actions)
+    # Exactly one owner, or the rewrite would be a guess. Two modules declaring
+    # the same action id is a real ambiguity, and picking one silently would
+    # bind the page to a module the planner may not have meant - the same reason
+    # a doubly-claimed surface is left rejected rather than resolved.
+    if len(owners) != 1:
+        return match.group(0)
+    seen.append(f"{module_id}/{action_id} -> {owners[0]}/{action_id}")
+    return f"{prefix}{owners[0]}/{action_id}"
+
+
+def retarget_page_module_ids(document: Any, modules: dict[str, set[str]]) -> list[str]:
+    """Point canonical endpoints at the module that actually declares the action.
+
+    A live habit tracker emitted /api/modules/habits/create_habit against a
+    module whose id is habits_registry. The canonical FORM was right - the page
+    agent had the rule and followed it - but the identity was invented, so every
+    call 404s and acceptance reports the actions as orphaned.
+
+    Only an unknown module id is rewritten, and only when exactly one generated
+    module declares that action. A path already naming a real module is left
+    alone even if the action is missing: that is a different defect, and the
+    module.yaml is the contract, not this.
+    """
+    rewrites: list[str] = []
+    if not modules:
+        return rewrites
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {key: walk(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if isinstance(node, str) and "/api/modules/" in node:
+            return _MODULE_ACTION_PATH.sub(lambda m: _retarget_one(m, modules, rewrites), node)
+        return node
+
+    replaced = walk(document)
+    if rewrites and isinstance(document, dict) and isinstance(replaced, dict):
+        document.clear()
+        document.update(replaced)
+    return rewrites
+
+
+def normalize_planned_page_content(
+    content: str, *, path: str = "", modules: dict[str, set[str]] | None = None
+) -> str:
     """Return page YAML with table primitives corrected, or the original.
 
     Materialized page content is written from the same map it is validated
@@ -298,8 +376,9 @@ def normalize_planned_page_content(content: str, *, path: str = "") -> str:
     if declared:
         logger.info("[pages] %s: declared the intended Modal %r", path or "page", declared)
     retargeted = resolve_modal_action_targets(document)
+    remoduled = retarget_page_module_ids(document, modules or {})
     renamed = align_page_name_with_file(document, path)
-    if not promoted and not retargeted and renamed is None and not declared:
+    if not promoted and not retargeted and renamed is None and not declared and not remoduled:
         return content
     if renamed is not None:
         logger.info("[pages] %s: name %r -> file identity", path or "page", renamed)
@@ -307,6 +386,8 @@ def normalize_planned_page_content(content: str, *, path: str = "") -> str:
         logger.info("[pages] %s: promoted %d DataTable -> ResourceTable", path or "page", promoted)
     if retargeted:
         logger.info("[pages] %s: pointed %d modal action(s) at a declared Modal", path or "page", retargeted)
+    for rewrite in remoduled:
+        logger.info("[pages] %s: endpoint named no such module: %s", path or "page", rewrite)
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 
