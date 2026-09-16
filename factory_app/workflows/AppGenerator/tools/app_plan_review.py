@@ -347,6 +347,9 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                     "surface_id": pack.get("surface_id"),
                     "surface_kind": "module",
                     "initial_agent": _CANONICAL_INITIAL_AGENTS[kind],
+                    "execution_target": _CANONICAL_INITIAL_AGENTS[kind],
+                    "description": _synthesized_task_brief(kind, module_id, pack),
+                    "initial_message": _synthesized_task_brief(kind, module_id, pack),
                     "owned_paths": missing,
                     "depends_on": [contract_task] if contract_task and kind != "module_contract" else [],
                 }
@@ -356,6 +359,54 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
 
     plan["build_tasks"] = tasks
     return repairs
+
+# What each synthesized task tells its worker to do. A task the coverage
+# repair invents still has to run: task_batches rejects any task whose
+# prompt field is empty, so a task created without one does not merely lack
+# polish - it kills the build. Six such tasks ended a live run 55 seconds in.
+#
+# Phrasing follows the planner's own, so a synthesized task reads like the
+# ones beside it rather than announcing itself as machine-filled.
+_SYNTHESIZED_TASK_BRIEFS = {
+    "business_services": (
+        "Implement the services required for managing {subject} operations, "
+        "including the business logic and events the module contract declares."
+    ),
+    "data_models": (
+        "Create the data models required for the {subject} entity based on the "
+        "contract and persistence rules."
+    ),
+    "module_contract": (
+        "Define the module contract that outlines the actions and relationships "
+        "for managing {subject}."
+    ),
+    "persistence_contract": (
+        "Establish data ownership over the {subject} collection with its schema "
+        "and lifecycle policies in place."
+    ),
+    "data_migrations": (
+        "Define the additive migrations required for the {subject} entity."
+    ),
+    "service_foundation": (
+        "Establish the shared service foundation {subject} depends on."
+    ),
+}
+
+
+def _synthesized_task_brief(kind: str, module_id: str, pack: dict[str, Any]) -> str:
+    """Describe the work a synthesized task covers, from what the plan states.
+
+    The entity the pack owns is the subject where one exists, matching how the
+    planner writes these ("managing Tool operations"). A pack owning no entity
+    falls back to the module id, which is still specific enough to act on.
+    """
+    entities = [str(e).strip() for e in (pack.get("primary_entities") or []) if str(e).strip()]
+    subject = entities[0] if entities else str(module_id).replace("_", " ")
+    template = _SYNTHESIZED_TASK_BRIEFS.get(kind)
+    if template:
+        return template.format(subject=subject)
+    readable = str(kind).replace("_", " ")
+    return f"Complete the {readable} work for {subject} as the approved plan describes."
 
 _READ_OPERATION_PREFIXES = ("list_", "get_", "search_", "read_", "fetch_")
 
