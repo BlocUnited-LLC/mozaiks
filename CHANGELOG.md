@@ -23,6 +23,10 @@ This project follows a practical pre-1.0 changelog format:
   resolve against — so a correctly generated free app is no longer scored as a
   defect. A bundle with no modules reports the check as undeterminable rather
   than passing or failing it.
+- A build task the plan gate invents to cover a module's files now carries a
+  prompt describing the work. Without one the task executor rejects it, so a
+  repair meant to close a coverage gap instead ended the build — six such tasks
+  stopped a live run with nothing generated.
 
 ### Fixed
 
