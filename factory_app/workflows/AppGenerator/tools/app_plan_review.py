@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated, Any
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
@@ -345,6 +346,85 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
     plan["build_tasks"] = tasks
     return repairs
 
+_READ_OPERATION_PREFIXES = ("list_", "get_", "search_", "read_", "fetch_")
+
+
+def _plural_entity_slug(entity: str) -> str:
+    """Plural lowercase form of an entity, matching the convention in use.
+
+    Every other action id in a generated bundle is entity-based - the live
+    module declared create_habit and checkin_habit, and the page agent's own
+    worked example is list_tickets. Naming a synthesized read after the module
+    instead (list_habit_registry) would put a third convention in play, and the
+    page agent would most plausibly emit list_habits and orphan against an
+    action that exists under a name nobody guesses. That is harder to diagnose
+    than the missing action this repair exists to prevent.
+
+    The planner states the same rule for module ids: "use the plural lowercase
+    entity id".
+    """
+    slug = re.sub(r"(?<!^)(?=[A-Z])", "_", str(entity).strip()).lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", slug).strip("_")
+    if not slug:
+        return ""
+    if slug.endswith("y") and not slug.endswith(("ay", "ey", "iy", "oy", "uy")):
+        return f"{slug[:-1]}ies"
+    if slug.endswith(("s", "x", "z", "ch", "sh")):
+        return f"{slug}es"
+    return f"{slug}s"
+
+
+def _repair_missing_read_operation(plan: dict[str, Any], context: Any) -> list[str]:
+    """A module whose pages list its records must expose a way to read them.
+
+    A generated habit tracker shipped a module declaring create_habit and
+    checkin_habit and nothing else, while its dashboard rendered two tables of
+    habits. Acceptance rejected the bundle:
+
+        module_action_wiring: 3 page endpoint(s) reference unknown module actions
+          orphaned_pages:   dashboard/habit-overview, dashboard/habit-list,
+                            habits/habit-form/submit  -> all call /api/habits
+          orphaned_actions: habit_registry/create_habit, habit_registry/checkin_habit
+
+    A module that can create records but never list them is incoherent on its
+    own terms, whichever agent dropped the operation. The contract agent is
+    told to treat the planner's operations[] as a closed contract - "Emit every
+    named action exactly once" - so an operation added here reaches module.yaml,
+    and ServiceAgent implements it alongside the handlers it already writes.
+
+    Only genuine absence is filled. A pack that already declares any read is
+    left alone, including under names this does not recognise, because the
+    entity it reads is the planner's call and not derivable from the design.
+    """
+    repairs: list[str] = []
+    design = detach(context.get("design_surface_map")) or {}
+    approved = {
+        surface["surface_id"]: surface
+        for surface in design.get("surfaces") or []
+        if surface.get("owner") == "app" and surface.get("surface_kind") == "module"
+    }
+
+    for pack in plan.get("capability_packs") or []:
+        if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
+            continue
+        entities = [str(e) for e in (pack.get("primary_entities") or []) if str(e).strip()]
+        if not entities or pack.get("surface_id") not in approved:
+            continue
+        operations = [str(op) for op in (pack.get("operations") or []) if str(op).strip()]
+        if any(op.lower().startswith(_READ_OPERATION_PREFIXES) for op in operations):
+            continue
+
+        module_id = str(_pack_id_from_descriptor(pack))
+        # Name it after the entity, not the module - see _plural_entity_slug.
+        operation = f"list_{_plural_entity_slug(entities[0]) or module_id}"
+        pack["operations"] = [*operations, operation]
+        repairs.append(
+            f"{module_id}: owns {entities} with no read operation; declared {operation!r} "
+            "so its pages have something to read"
+        )
+    return repairs
+
+
 def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
     available = _context_available_pack_map(context)
     packs = plan.get("capability_packs") or []
@@ -462,7 +542,11 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
-        for repair in (*_repair_plan(plan, context_variables), *_repair_coverage(plan, context_variables)):
+        for repair in (
+            *_repair_plan(plan, context_variables),
+            *_repair_missing_read_operation(plan, context_variables),
+            *_repair_coverage(plan, context_variables),
+        ):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         validate_plan_origins(plan, context_variables)
         validate_plan_coverage(plan, context_variables)
