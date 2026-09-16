@@ -777,6 +777,7 @@ async def _await_workflow_with_pending_input_fallback(
 async def run_live_workflow_smoke(
     prompt: str = "Write a one-line joke about release engineering.",
     *,
+    app_id: str | None = None,
     timeout_seconds: float = 180.0,
     workflow_name: str = DEFAULT_ACTIVE_WORKFLOW,
     workflows_root: Path | None = None,
@@ -830,7 +831,10 @@ async def run_live_workflow_smoke(
     serve_task = asyncio.create_task(server.serve())
 
     pm = AG2PersistenceManager()
-    app_id = f"live-smoke-{uuid.uuid4().hex[:8]}"
+    resolved_app_id = str(app_id or f"live-smoke-{uuid.uuid4().hex[:8]}").strip()
+    if not resolved_app_id:
+        raise ValueError("app_id must not be empty")
+    app_id = resolved_app_id
     user_id = "smoke-user"
     chat_id = f"chat_{workflow_name.lower()}_{uuid.uuid4().hex[:8]}"
     events: list[dict[str, Any]] = []
