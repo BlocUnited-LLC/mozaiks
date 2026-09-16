@@ -197,10 +197,42 @@ def has_app_manifest(bundle: Bundle) -> Feedback:
 
 @scorer
 def has_subscription_catalog(bundle: Bundle) -> Feedback:
-    """A monetised app needs a plan catalog for entitlement to resolve against."""
+    """A monetised app needs a plan catalog for entitlement to resolve against.
+
+    Whether the app is monetised is read from the bundle, not assumed. An app
+    whose module actions declare no entitlement_gate has nothing for a plan to
+    resolve against, and SubscriptionContractDesigner deliberately emits no
+    catalog for it — it returns "No Contract Needed" and instructs downstream
+    generation not to create billing surfaces.
+
+    Scoring those apps FAIL penalised the pipeline for behaving correctly. The
+    first real generated bundle was a free tool-lending app and scored a false
+    FAIL here, which would have taught a corpus baseline that inventing an
+    unwanted plan catalog is better than honouring the design.
+    """
+    plans = bundle.subscriptions.get("plans")
+    gated = bundle.gated_capabilities()
+    if not bundle.modules:
+        # Nothing to judge. An empty or unparsable bundle is caught by the
+        # scorers that exist for it; passing it here would hand a broken
+        # bundle a free point and inflate its score.
+        return Feedback(
+            key="has_subscription_catalog",
+            score=None,
+            comment="no modules; monetisation is undeterminable",
+        )
+    if not gated:
+        return Feedback(
+            key="has_subscription_catalog",
+            score=PASS,
+            comment="no entitlement_gate declared; a free app needs no plan catalog",
+        )
     return Feedback(
         key="has_subscription_catalog",
-        score=PASS if bundle.subscriptions.get("plans") else FAIL,
+        score=PASS if plans else FAIL,
+        comment=None if plans else (
+            f"{len(gated)} gated action(s) but no plan catalog to resolve them"
+        ),
     )
 
 
