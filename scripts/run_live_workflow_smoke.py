@@ -239,6 +239,16 @@ def _build_workflow_user_reply_message(chat_id: str, response_text: str) -> dict
     }
 
 
+def _build_trigger_meta(workflow_name: str, journey_id: str | None) -> dict[str, str]:
+    """Build the session trigger metadata without inventing a journey identity."""
+
+    metadata = {"trigger_source": "chat", "requested_workflow_id": workflow_name}
+    normalized_journey_id = str(journey_id or "").strip()
+    if normalized_journey_id:
+        metadata["journey_id"] = normalized_journey_id
+    return metadata
+
+
 def _is_terminal_completion_event(event: dict[str, Any]) -> bool:
     event_type = str(event.get("type") or "")
     if event_type not in {"chat.run_complete", "chat.workflow_complete", "chat.workflow_completed", "chat.completed"}:
@@ -778,6 +788,7 @@ async def run_live_workflow_smoke(
     prompt: str = "Write a one-line joke about release engineering.",
     *,
     app_id: str | None = None,
+    journey_id: str | None = None,
     timeout_seconds: float = 180.0,
     workflow_name: str = DEFAULT_ACTIVE_WORKFLOW,
     workflows_root: Path | None = None,
@@ -850,7 +861,7 @@ async def run_live_workflow_smoke(
             workflow_id=workflow_name,
             user_id=user_id,
             context_variables=dict(initial_context or {}),
-            trigger_meta={"trigger_source": "chat", "requested_workflow_id": workflow_name},
+            trigger_meta=_build_trigger_meta(workflow_name, journey_id),
         )
 
         ws_url = f"ws://127.0.0.1:{port}/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"
@@ -1055,6 +1066,16 @@ def main() -> int:
     _configure_event_loop_policy()
     parser = argparse.ArgumentParser(description="Run live AG2 runtime smoke against a real workflow + LLM")
     parser.add_argument(
+        "--app-id",
+        default=None,
+        help="Explicit app identity for brownfield/build-bound smoke runs.",
+    )
+    parser.add_argument(
+        "--journey-id",
+        default=None,
+        help="Optional registered workflow sequence to pin at session creation.",
+    )
+    parser.add_argument(
         "--workflow",
         default=DEFAULT_ACTIVE_WORKFLOW,
         help=f"Workflow to execute for smoke validation (default: {DEFAULT_ACTIVE_WORKFLOW}).",
@@ -1144,6 +1165,8 @@ def main() -> int:
     result = asyncio.run(
         run_live_workflow_smoke(
             prompt=prompt,
+            app_id=str(args.app_id).strip() if args.app_id else None,
+            journey_id=str(args.journey_id).strip() if args.journey_id else None,
             timeout_seconds=args.timeout_seconds,
             workflow_name=args.workflow,
             workflows_root=Path(args.workflows_root),

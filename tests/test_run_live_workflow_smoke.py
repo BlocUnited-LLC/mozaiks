@@ -12,6 +12,7 @@ from scripts.run_live_workflow_smoke import (
     SmokeResult,
     _await_workflow_with_pending_input_fallback,
     _build_tool_call_response_payload,
+    _build_trigger_meta,
     _build_uvicorn_config,
     _build_workflow_user_reply_message,
     _collect_events,
@@ -139,6 +140,18 @@ def test_build_workflow_user_reply_message_uses_workflow_transport_fields() -> N
             "source": "live_workflow_smoke",
             "conversation_mode": "workflow",
         },
+    }
+
+
+def test_build_trigger_meta_pins_only_an_explicit_journey() -> None:
+    assert _build_trigger_meta("ValueEngine", None) == {
+        "trigger_source": "chat",
+        "requested_workflow_id": "ValueEngine",
+    }
+    assert _build_trigger_meta("ValueEngine", " full_rebuild ") == {
+        "trigger_source": "chat",
+        "requested_workflow_id": "ValueEngine",
+        "journey_id": "full_rebuild",
     }
 
 
