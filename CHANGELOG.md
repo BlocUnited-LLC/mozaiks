@@ -14,6 +14,16 @@ This project follows a practical pre-1.0 changelog format:
 
 
 
+
+### Fixed
+
+- Bundle eval no longer fails an app for having no subscription plans when the
+  app is deliberately free. Monetisation is now read from the bundle — an app
+  whose module actions declare no `entitlement_gate` has nothing for a plan to
+  resolve against — so a correctly generated free app is no longer scored as a
+  defect. A bundle with no modules reports the check as undeterminable rather
+  than passing or failing it.
+
 ### Fixed
 
 - AppGenerator no longer abandons a build when the plan omits a capability for
