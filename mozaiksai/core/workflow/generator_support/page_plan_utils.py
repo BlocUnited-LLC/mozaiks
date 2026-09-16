@@ -200,6 +200,84 @@ def align_page_name_with_file(document: Any, path: str) -> str | None:
         document["title"] = current
     document["name"] = stem
     return str(current) if current else ""
+def _modal_config_fields() -> frozenset[str]:
+    from mozaiksai.core.runtime.app.page_schema import _TOP_LEVEL_CONFIG_MODELS
+
+    model = _TOP_LEVEL_CONFIG_MODELS.get("Modal")
+    return frozenset(model.model_fields) if model is not None else frozenset()
+
+
+def _undeclared_modal_refs(document: Any, modal_ids: set[str]) -> list[str]:
+    refs: list[str] = []
+    for node in _iter_action_nodes(document):
+        if not isinstance(node, dict):
+            continue
+        if node.get("action_type") == "event" and node.get("event_type") in _MODAL_EVENT_TYPES:
+            payload = node.get("payload")
+            if isinstance(payload, dict):
+                value = payload.get("modal_id")
+                if isinstance(value, str) and value and value not in modal_ids:
+                    refs.append(value)
+    return refs
+
+
+def declare_the_intended_modal(document: Any) -> str | None:
+    """Turn the container that was clearly meant to be a dialog into one.
+
+    A page that wires modal open/close actions but declares no Modal fails, and
+    it cannot be repaired by pointing the action somewhere - there is nowhere to
+    point. Telling the agent the rule did not take, and four retries carrying
+    the validator message did not either.
+
+    There is one reading that is not a guess. If every undeclared reference on
+    the page names the SAME id, and exactly one container section holds one of
+    those references, that container is the dialog the agent was building: it
+    holds the form whose cancel closes the modal, and the trigger elsewhere
+    opens it. Making it a Modal is what the author already described.
+
+    Anything less determined is refused: several ids, several candidate
+    containers, or no container at all. Guessing there would move a section into
+    a dialog nobody asked to be hidden.
+
+    Config keys Modal does not accept cannot survive the change - the schema
+    forbids unknown runtime-affecting fields - so they are dropped and reported.
+    """
+    if not isinstance(document, dict):
+        return None
+    modal_ids = _collect_modal_ids(document)
+    if modal_ids:
+        return None
+    refs = set(_undeclared_modal_refs(document, modal_ids))
+    if len(refs) != 1:
+        return None
+    modal_id = next(iter(refs))
+
+    sections = document.get("sections")
+    if not isinstance(sections, list):
+        return None
+    candidates = [
+        section
+        for section in sections
+        if isinstance(section, dict)
+        and isinstance(section.get("config"), dict)
+        and isinstance(section["config"].get("children"), list)
+        and _undeclared_modal_refs(section, set())
+    ]
+    if len(candidates) != 1:
+        return None
+
+    section = candidates[0]
+    allowed = _modal_config_fields()
+    config = section.get("config") or {}
+    dropped = sorted(set(config) - allowed)
+    section["config"] = {key: value for key, value in config.items() if key in allowed}
+    if section.get("title") and not section["config"].get("title"):
+        section["config"]["title"] = section["title"]
+    section["primitive"] = "Modal"
+    section["id"] = modal_id
+    if dropped:
+        logger.info("[pages] modal %r dropped config keys Modal does not accept: %s", modal_id, dropped)
+    return modal_id
 
 
 def normalize_planned_page_content(content: str, *, path: str = "") -> str:
@@ -216,9 +294,12 @@ def normalize_planned_page_content(content: str, *, path: str = "") -> str:
     if not isinstance(document, dict):
         return content
     promoted = promote_page_table_primitives(document)
+    declared = declare_the_intended_modal(document)
+    if declared:
+        logger.info("[pages] %s: declared the intended Modal %r", path or "page", declared)
     retargeted = resolve_modal_action_targets(document)
     renamed = align_page_name_with_file(document, path)
-    if not promoted and not retargeted and renamed is None:
+    if not promoted and not retargeted and renamed is None and not declared:
         return content
     if renamed is not None:
         logger.info("[pages] %s: name %r -> file identity", path or "page", renamed)
