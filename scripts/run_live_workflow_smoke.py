@@ -789,6 +789,7 @@ async def run_live_workflow_smoke(
     *,
     app_id: str | None = None,
     build_registry_id: str | None = None,
+    user_id: str = "smoke-user",
     journey_id: str | None = None,
     timeout_seconds: float = 180.0,
     workflow_name: str = DEFAULT_ACTIVE_WORKFLOW,
@@ -847,7 +848,9 @@ async def run_live_workflow_smoke(
     if not resolved_app_id:
         raise ValueError("app_id must not be empty")
     app_id = resolved_app_id
-    user_id = "smoke-user"
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        raise ValueError("user_id must not be empty")
     chat_id = f"chat_{workflow_name.lower()}_{uuid.uuid4().hex[:8]}"
     events: list[dict[str, Any]] = []
     completed_successfully = False
@@ -1093,6 +1096,11 @@ def main() -> int:
         help="Optional hosted App Registry build id to bind factory workflows to an existing app.",
     )
     parser.add_argument(
+        "--user-id",
+        default="smoke-user",
+        help="Authenticated user id used for registry ownership checks (default: smoke-user).",
+    )
+    parser.add_argument(
         "--prompt-file",
         default=None,
         help="Optional text file containing the prompt to send into the workflow.",
@@ -1176,6 +1184,7 @@ def main() -> int:
             journey_id=str(args.journey_id).strip() if args.journey_id else None,
             timeout_seconds=args.timeout_seconds,
             build_registry_id=(str(args.build_registry_id).strip() if args.build_registry_id else None),
+            user_id=str(args.user_id).strip() if args.user_id else "smoke-user",
             workflow_name=args.workflow,
             workflows_root=Path(args.workflows_root),
             initial_context=initial_context,
