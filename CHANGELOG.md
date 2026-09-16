@@ -13,6 +13,14 @@ This project follows a practical pre-1.0 changelog format:
 ## Unreleased
 
 
+
+### Fixed
+
+- AppGenerator no longer abandons a build when the plan omits a capability for
+  an approved module. The design already states that module's identity, source
+  and entities, so the plan gate now fills the gap instead of rejecting the plan
+  — a rejected plan produced no build tasks and therefore no app bundle at all.
+
 ### Changed
 
 - Outcome-contract tools now log why they rejected a result, which attempt it

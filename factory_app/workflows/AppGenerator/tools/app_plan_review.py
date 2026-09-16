@@ -51,6 +51,33 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
         if surface.get("owner") == "app" and surface.get("surface_kind") == "module"
     }
 
+    # 0. An approved module surface with no capability at all. The design
+    #    states the identity and the entities; the source is generated_module
+    #    by definition for app-owned code. A live build lost its whole run to
+    #    two surfaces missing here, which then produced no build tasks and no
+    #    bundle. Only absence is repaired: several packs claiming one surface
+    #    is a genuine ambiguity and stays an error.
+    #    Only when every pack already maps to an approved surface. A pack
+    #    pointing somewhere unapproved is a mislabelled module, not a missing
+    #    one, and synthesizing here would duplicate it under two identities.
+    every_pack_is_approved = all(
+        pack.get("surface_id") in approved
+        for pack in packs
+        if pack.get("surface_kind") == "module"
+    )
+    for surface_id, surface in (approved.items() if every_pack_is_approved else []):
+        if any(pack.get("surface_id") == surface_id for pack in packs):
+            continue
+        packs.append({
+            "surface_id": surface_id,
+            "surface_kind": "module",
+            "capability_source": "generated_module",
+            "capability_pack_id": surface_id,
+            "primary_entities": list(surface.get("primary_entities") or []),
+        })
+        repairs.append(f"{surface_id}: approved module had no capability -> generated_module")
+    plan["capability_packs"] = packs
+
     # 1. The approved surface_id is the module's identity. Adopt it.
     renames: dict[str, str] = {}
     available_now = _context_available_pack_map(context)
@@ -340,7 +367,7 @@ def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
         surface_id = surface["surface_id"]
         matching = [pack for pack in packs if pack.get("surface_id") == surface_id]
         if len(matching) != 1 or matching[0].get("surface_kind") != "module" or matching[0].get("capability_source") not in {"generated_module", "framework_pack", "operator_pack"}:
-            errors.append(f"{surface_id}: the approved app-owned module requires exactly one module capability, normally generated_module; preserve its surface_id")
+            errors.append(f"{surface_id}: the approved app-owned module requires exactly one module capability, normally generated_module; preserve its surface_id (found {len(matching)})")
             continue
         pack = matching[0]
         if pack.get("capability_source") == "generated_module":
