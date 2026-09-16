@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated, Any
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
@@ -348,6 +349,31 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
 _READ_OPERATION_PREFIXES = ("list_", "get_", "search_", "read_", "fetch_")
 
 
+def _plural_entity_slug(entity: str) -> str:
+    """Plural lowercase form of an entity, matching the convention in use.
+
+    Every other action id in a generated bundle is entity-based - the live
+    module declared create_habit and checkin_habit, and the page agent's own
+    worked example is list_tickets. Naming a synthesized read after the module
+    instead (list_habit_registry) would put a third convention in play, and the
+    page agent would most plausibly emit list_habits and orphan against an
+    action that exists under a name nobody guesses. That is harder to diagnose
+    than the missing action this repair exists to prevent.
+
+    The planner states the same rule for module ids: "use the plural lowercase
+    entity id".
+    """
+    slug = re.sub(r"(?<!^)(?=[A-Z])", "_", str(entity).strip()).lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", slug).strip("_")
+    if not slug:
+        return ""
+    if slug.endswith("y") and not slug.endswith(("ay", "ey", "iy", "oy", "uy")):
+        return f"{slug[:-1]}ies"
+    if slug.endswith(("s", "x", "z", "ch", "sh")):
+        return f"{slug}es"
+    return f"{slug}s"
+
+
 def _repair_missing_read_operation(plan: dict[str, Any], context: Any) -> list[str]:
     """A module whose pages list its records must expose a way to read them.
 
@@ -389,7 +415,8 @@ def _repair_missing_read_operation(plan: dict[str, Any], context: Any) -> list[s
             continue
 
         module_id = str(_pack_id_from_descriptor(pack))
-        operation = f"list_{module_id}"
+        # Name it after the entity, not the module - see _plural_entity_slug.
+        operation = f"list_{_plural_entity_slug(entities[0]) or module_id}"
         pack["operations"] = [*operations, operation]
         repairs.append(
             f"{module_id}: owns {entities} with no read operation; declared {operation!r} "

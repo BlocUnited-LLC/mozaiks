@@ -76,7 +76,11 @@ def test_the_live_gap_is_filled() -> None:
 
     assert repairs
     operations = plan["capability_packs"][0]["operations"]
-    assert "list_habit_registry" in operations
+    # Named after the entity, matching create_habit and the page agent's own
+    # worked example list_tickets. list_habit_registry would be a third
+    # convention, and the page agent would emit list_habits and orphan against
+    # an action that exists under a name nobody guesses.
+    assert "list_habits" in operations
     # The planner's own operations are preserved, not replaced.
     assert "create_habit" in operations and "checkin_habit" in operations
 
@@ -118,3 +122,36 @@ def test_the_repair_is_idempotent() -> None:
 
     _repair_missing_read_operation(plan, context)
     assert _repair_missing_read_operation(plan, context) == []
+
+
+def test_the_read_is_named_after_the_entity_not_the_module() -> None:
+    """Three conventions were in play; this one must match the other two."""
+    plan = _plan(["create_habit"])
+    plan["capability_packs"][0]["capability_pack_id"] = "habit_registry"
+    plan["capability_packs"][0]["surface_id"] = "habit_registry"
+
+    _repair_missing_read_operation(plan, _context())
+
+    operations = plan["capability_packs"][0]["operations"]
+    assert "list_habits" in operations
+    assert "list_habit_registry" not in operations
+
+
+def test_entity_names_pluralise_the_way_the_convention_expects() -> None:
+    from factory_app.workflows.AppGenerator.tools.app_plan_review import _plural_entity_slug
+
+    assert _plural_entity_slug("Habit") == "habits"
+    assert _plural_entity_slug("HabitCheckIn") == "habit_check_ins"
+    assert _plural_entity_slug("Category") == "categories"
+    assert _plural_entity_slug("Box") == "boxes"
+    # A trailing vowel+y is not an -ies word.
+    assert _plural_entity_slug("Journey") == "journeys"
+
+
+def test_an_unusable_entity_name_falls_back_to_the_module() -> None:
+    """Better a module-named read than no read at all."""
+    plan = _plan(["create_thing"])
+    plan["capability_packs"][0]["primary_entities"] = ["   "]
+
+    # Blank entities mean the pack owns nothing nameable, so nothing is added.
+    assert _repair_missing_read_operation(plan, _context()) == []
