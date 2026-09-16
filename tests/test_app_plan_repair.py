@@ -554,3 +554,155 @@ def test_non_page_assets_are_not_dropped() -> None:
     }
     assert "brand/logo.svg" in kept
     assert "ui/pages/habits.yaml" not in kept
+
+
+def _two_approved_modules() -> dict[str, Any]:
+    """The shape a live tool-lending library build produced.
+
+    The design approved three app-owned modules; the planner emitted a
+    capability for one and omitted the other two.
+    """
+    return {
+        "surfaces": [
+            {
+                "surface_id": "catalogue_management",
+                "owner": "app",
+                "surface_kind": "module",
+                "primary_entities": ["Tool"],
+            },
+            {
+                "surface_id": "borrow_requests_management",
+                "owner": "app",
+                "surface_kind": "module",
+                "primary_entities": ["BorrowRequest"],
+            },
+            {
+                "surface_id": "overdue_management",
+                "owner": "app",
+                "surface_kind": "module",
+                "primary_entities": ["OverdueItem"],
+            },
+        ]
+    }
+
+
+def _plan_missing_two_capabilities() -> dict[str, Any]:
+    return {
+        "capability_packs": [
+            {
+                "capability_pack_id": "catalogue_management",
+                "surface_id": "catalogue_management",
+                "surface_kind": "module",
+                "capability_source": "generated_module",
+                "primary_entities": ["Tool"],
+            }
+        ],
+        "build_tasks": [
+            {
+                "task_id": "t1",
+                "capability_pack_id": "catalogue_management",
+                "surface_id": "catalogue_management",
+                "owned_paths": ["modules/catalogue/backend/handler.py"],
+            }
+        ],
+    }
+
+
+def test_an_approved_module_with_no_capability_is_repaired_not_rejected() -> None:
+    """The failure that ended a live run at stage 8.
+
+    Two approved modules had no capability pack. Review rejected the plan, the
+    task batch produced no items, and nothing was generated — `generated/apps`
+    stayed empty. Every value needed is in the approved design.
+    """
+    plan = _plan_missing_two_capabilities()
+    context = _Context({"design_surface_map": _two_approved_modules(), "capability_packs": []})
+
+    repairs = _repair_plan(plan, context)
+
+    assert any("borrow_requests_management" in line for line in repairs)
+    assert any("overdue_management" in line for line in repairs)
+
+    # The real validator, not the repair's own account of itself. It raises on
+    # any remaining error, so reaching the end is the assertion.
+    try:
+        validate_plan_origins(plan, context)
+    except ValueError as error:
+        assert "requires exactly one module capability" not in str(error), (
+            f"plan still fails ownership review after repair: {error}"
+        )
+
+
+def test_the_repaired_capability_carries_the_approved_identity() -> None:
+    plan = _plan_missing_two_capabilities()
+    context = _Context({"design_surface_map": _two_approved_modules(), "capability_packs": []})
+
+    _repair_plan(plan, context)
+
+    added = {
+        pack["surface_id"]: pack
+        for pack in plan["capability_packs"]
+        if pack["surface_id"] in {"borrow_requests_management", "overdue_management"}
+    }
+    assert set(added) == {"borrow_requests_management", "overdue_management"}
+    for surface_id, pack in added.items():
+        assert pack["capability_pack_id"] == surface_id, "identity is the approved surface_id"
+        assert pack["capability_source"] == "generated_module", "app-owned code is generated"
+    assert added["overdue_management"]["primary_entities"] == ["OverdueItem"], (
+        "the approved entities must be preserved, not invented"
+    )
+
+
+def test_an_existing_capability_is_left_alone() -> None:
+    """Repair fills absence; it must not overwrite what the planner chose."""
+    plan = _plan_missing_two_capabilities()
+    before = dict(plan["capability_packs"][0])
+    context = _Context({"design_surface_map": _two_approved_modules(), "capability_packs": []})
+
+    _repair_plan(plan, context)
+
+    kept = next(p for p in plan["capability_packs"] if p["surface_id"] == "catalogue_management")
+    assert kept["capability_pack_id"] == before["capability_pack_id"]
+    assert kept["primary_entities"] == before["primary_entities"]
+
+
+def test_two_capabilities_claiming_one_surface_is_still_an_error() -> None:
+    """Ambiguity is not derivable, so it stays rejected.
+
+    Absence has exactly one correct answer. A surface claimed twice does not,
+    and guessing which to drop would silently discard planner intent.
+    """
+    plan = _plan_missing_two_capabilities()
+    plan["capability_packs"].append({
+        "capability_pack_id": "catalogue_management_v2",
+        "surface_id": "catalogue_management",
+        "surface_kind": "module",
+        "capability_source": "generated_module",
+        "primary_entities": ["Tool"],
+    })
+    context = _Context({"design_surface_map": _two_approved_modules(), "capability_packs": []})
+
+    _repair_plan(plan, context)
+
+    with pytest.raises(ValueError) as raised:
+        validate_plan_origins(plan, context)
+    assert "requires exactly one module capability" in str(raised.value), (
+        "a doubly-claimed surface must still be rejected"
+    )
+
+
+def test_the_ownership_error_states_how_many_it_found() -> None:
+    """'not exactly one' is undiagnosable in a log without the count."""
+    plan = _plan_missing_two_capabilities()
+    plan["capability_packs"].append({
+        "capability_pack_id": "catalogue_management_v2",
+        "surface_id": "catalogue_management",
+        "surface_kind": "module",
+        "capability_source": "generated_module",
+        "primary_entities": ["Tool"],
+    })
+    context = _Context({"design_surface_map": _two_approved_modules(), "capability_packs": []})
+
+    with pytest.raises(ValueError) as raised:
+        validate_plan_origins(plan, context)
+    assert "(found 2)" in str(raised.value)
