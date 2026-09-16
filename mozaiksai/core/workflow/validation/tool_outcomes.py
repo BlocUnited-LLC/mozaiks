@@ -62,16 +62,24 @@ def wrap_tool_outcome(func: Callable, contract: ToolOutcomeSpec) -> Callable:
             )
             result = failure("invalid_tool_outcome")
             value = contract.error_value
-        elif value in contract.retry_on:
-            # The tool rejected its input and will be retried. The reason is
-            # usually already in the result; without it the retry loop is a
-            # silent countdown to termination.
+        else:
+            # An outcome carrying an error is a rejection, whatever it is named.
+            # Do not key this off retry_on: that lists which previous outcomes
+            # permit another call, and includes success values — pattern_selection
+            # allows a follow-up call after "selected". Keying off it reports
+            # healthy runs as retries.
             detail = result.get("error") if isinstance(result, Mapping) else None
-            logger.warning(
-                "TOOL_OUTCOME_RETRY tool=%s outcome=%s attempt=%s/%s reason=%s",
-                func.__name__, value, attempts, contract.max_attempts,
-                detail or "(tool reported none)",
-            )
+            if detail:
+                logger.warning(
+                    "TOOL_OUTCOME_REJECTED tool=%s outcome=%s attempt=%s/%s reason=%s",
+                    func.__name__, value, attempts, contract.max_attempts, detail,
+                )
+            elif value == contract.error_value:
+                logger.warning(
+                    "TOOL_OUTCOME_REJECTED tool=%s outcome=%s attempt=%s/%s reason=%s",
+                    func.__name__, value, attempts, contract.max_attempts,
+                    "(tool reported none)",
+                )
         context.set(contract.attempts_key, attempts)
         context.set(contract.context_key, value)
         return cast(Mapping, result)
