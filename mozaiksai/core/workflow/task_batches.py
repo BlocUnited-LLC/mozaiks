@@ -25,6 +25,7 @@ from .generator_support.code_files import (
 from .generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
+    module_action_index,
     normalize_planned_page_content,
     validate_planned_page,
 )
@@ -871,6 +872,7 @@ def _normalize_owned_page_files_from_plan(
         for stem in _page_stems(page):
             planned_by_stem.setdefault(stem, page)
 
+    modules = module_action_index(file_map)
     for path in owned_page_paths:
         stem = _page_stem_from_path(path)  # type: ignore[assignment]
         if not stem:
@@ -880,7 +882,7 @@ def _normalize_owned_page_files_from_plan(
             raise ValueError(f"{path}: page has no approved plan identity")
         if path not in file_map:
             raise ValueError(f"{path}: page worker did not materialize its owned page")
-        file_map[path] = normalize_planned_page_content(file_map[path], path=path)
+        file_map[path] = normalize_planned_page_content(file_map[path], path=path, modules=modules)
         validate_planned_page(file_map[path], planned, path)
     return [
         {"filename": filename, "content": content}
