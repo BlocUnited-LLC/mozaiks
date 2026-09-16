@@ -12,6 +12,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+
+### Changed
+
+- Outcome-contract tools now log why they rejected a result, which attempt it
+  was, and which budget ran out. A workflow that gave up previously recorded
+  only that a tool "completed successfully" several times before failing — the
+  reason existed in a context variable and never reached the log.
+
 ### Fixed
 
 - Workflow transition aliases are released without closing the source chat's

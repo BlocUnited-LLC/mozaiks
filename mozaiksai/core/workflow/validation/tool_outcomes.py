@@ -21,6 +21,13 @@ def wrap_tool_outcome(func: Callable, contract: ToolOutcomeSpec) -> Callable:
         raise ValueError(f"outcome tool {func.__name__!r} must accept context_variables")
 
     def failure(code: str) -> dict[str, Any]:
+        # A build that dies here otherwise reports only that a tool "completed
+        # successfully" N times. Say which budget ran out and on what.
+        logger.warning(
+            "TOOL_OUTCOME_FAILED tool=%s reason=%s key=%s attempts_key=%s max_attempts=%s",
+            func.__name__, code, contract.context_key, contract.attempts_key,
+            contract.max_attempts,
+        )
         return {contract.result_field: contract.error_value, "outcome_error": code}
 
     def begin(args: tuple, kwargs: dict) -> tuple[Any, int, dict | None]:
@@ -49,8 +56,22 @@ def wrap_tool_outcome(func: Callable, contract: ToolOutcomeSpec) -> Callable:
             result = result.model_dump(mode="json")
         value = result.get(contract.result_field) if isinstance(result, Mapping) else None
         if not isinstance(value, str) or value not in contract.values:
+            logger.warning(
+                "TOOL_OUTCOME_UNRECOGNISED tool=%s got=%r expected=%s",
+                func.__name__, value, contract.values,
+            )
             result = failure("invalid_tool_outcome")
             value = contract.error_value
+        elif value in contract.retry_on:
+            # The tool rejected its input and will be retried. The reason is
+            # usually already in the result; without it the retry loop is a
+            # silent countdown to termination.
+            detail = result.get("error") if isinstance(result, Mapping) else None
+            logger.warning(
+                "TOOL_OUTCOME_RETRY tool=%s outcome=%s attempt=%s/%s reason=%s",
+                func.__name__, value, attempts, contract.max_attempts,
+                detail or "(tool reported none)",
+            )
         context.set(contract.attempts_key, attempts)
         context.set(contract.context_key, value)
         return cast(Mapping, result)
