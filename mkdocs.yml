@@ -214,6 +214,7 @@ nav:
           - AppGenerator Context Debt: architecture/workflows/appgenerator-context-debt.md
           - End-to-End App Editing Loop: architecture/workflows/e2e-app-editing-loop.md
           - Refinement Harness Architecture: architecture/workflows/refinement-harness-architecture.md
+          - AG2 Harness and Journey Boundary: architecture/workflows/ag2-harness-journey-boundary.md
           - Session Router: architecture/workflows/session-router.md
           - Build Context Packs: architecture/workflows/build-context-packs.md
           - Multimodal Media: architecture/workflows/multimodal-media.md
