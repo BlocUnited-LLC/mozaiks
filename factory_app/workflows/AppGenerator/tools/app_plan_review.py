@@ -82,10 +82,21 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
     # 1. The approved surface_id is the module's identity. Adopt it.
     renames: dict[str, str] = {}
     available_now = _context_available_pack_map(context)
+    # A surface claimed by more than one pack is the ambiguity step 0 refuses to
+    # resolve, and adopting the surface_id on each would give them identical
+    # capability_pack_ids - turning two distinguishable packs into twins and
+    # making the ambiguity harder to read, or to merge later. Seen live:
+    # "habit_registry: requires exactly one module capability (found 2)".
+    claims: dict[str, int] = {}
+    for pack in packs:
+        if pack.get("surface_kind") == "module" and pack.get("surface_id") in approved:
+            claims[str(pack["surface_id"])] = claims.get(str(pack["surface_id"]), 0) + 1
     for pack in packs:
         surface_id = pack.get("surface_id")
         surface = approved.get(surface_id)
         if surface is None or pack.get("surface_kind") != "module":
+            continue
+        if claims.get(str(surface_id), 0) > 1:
             continue
         source = pack.get("capability_source")
         if source not in {"generated_module", None, ""}:
