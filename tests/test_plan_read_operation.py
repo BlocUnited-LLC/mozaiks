@@ -10,9 +10,23 @@ habits. Acceptance rejected the bundle:
       orphaned_actions: habit_registry/create_habit, habit_registry/checkin_habit
 
 A module that can create records but never list them is incoherent on its own
-terms. The contract agent treats the planner's operations[] as a closed
-contract, so an operation added at plan time reaches module.yaml and
-ServiceAgent implements it with the handlers it already writes.
+terms.
+
+The first version of this repair set operations[] and nothing else, on the
+belief that the contract agent read it. It does not - it is told to "Treat the
+action list in `current_build_task.initial_message` as a closed contract". So
+the repair was inert, and a later run proved it: the log said
+
+    plan repaired: habits_registry: owns ['Habit'] with no read operation;
+                   declared 'list_habits' so its pages have something to read
+
+and the module.yaml it produced declared create_habit and checkoff_habit and no
+read. The pages fell back to an invented /api/habits exactly as before.
+
+The repair fired, so the fix looked confirmed. "The repair fires" was never the
+same claim as "the action exists", and only the emitted bundle could tell them
+apart. That is why the tests below assert on the contract task's
+initial_message and not only on operations[].
 """
 
 from __future__ import annotations
@@ -64,7 +78,14 @@ def _plan(operations: list[str]) -> dict[str, Any]:
                 "operations": list(operations),
             }
         ],
-        "build_tasks": [],
+        "build_tasks": [
+            {
+                "task_id": "task_contract",
+                "task_type": "module_contract",
+                "capability_pack_id": "habit_registry",
+                "initial_message": "Entities: Habit. Actions: create_habit, checkin_habit.",
+            }
+        ],
     }
 
 
@@ -155,3 +176,31 @@ def test_an_unusable_entity_name_falls_back_to_the_module() -> None:
 
     # Blank entities mean the pack owns nothing nameable, so nothing is added.
     assert _repair_missing_read_operation(plan, _context()) == []
+
+
+def test_the_action_reaches_the_contract_the_agent_actually_reads() -> None:
+    """The bug: operations[] alone changed nothing in the emitted module.yaml."""
+    plan = _plan(["create_habit", "checkin_habit"])
+
+    _repair_missing_read_operation(plan, _context())
+
+    message = plan["build_tasks"][0]["initial_message"]
+    assert "list_habits" in message
+    # The planner's own instructions survive; the action is added to them.
+    assert "create_habit, checkin_habit" in message
+
+
+def test_a_module_with_no_contract_task_says_so_instead_of_claiming_success() -> None:
+    """A repair that cannot land must not log like one that did.
+
+    The whole cost of the original bug was a success line for work the bundle
+    never contained, which read as confirmation for two more iterations.
+    """
+    plan = _plan(["create_habit"])
+    plan["build_tasks"] = []
+
+    repairs = _repair_missing_read_operation(plan, _context())
+
+    assert len(repairs) == 1
+    assert "no module_contract task" in repairs[0]
+    assert "will ship without a read" in repairs[0]

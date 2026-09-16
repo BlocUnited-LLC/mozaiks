@@ -398,10 +398,16 @@ def _repair_missing_read_operation(plan: dict[str, Any], context: Any) -> list[s
           orphaned_actions: habit_registry/create_habit, habit_registry/checkin_habit
 
     A module that can create records but never list them is incoherent on its
-    own terms, whichever agent dropped the operation. The contract agent is
-    told to treat the planner's operations[] as a closed contract - "Emit every
-    named action exactly once" - so an operation added here reaches module.yaml,
-    and ServiceAgent implements it alongside the handlers it already writes.
+    own terms, whichever agent dropped the operation.
+
+    The operation has to be written into the owning module_contract task's
+    initial_message, not only into the pack. The contract agent is told to
+    "Treat the action list in `current_build_task.initial_message` as a closed
+    contract" - it never reads capability_packs[].operations. An earlier version
+    of this repair set operations[] alone and was inert: a live run logged
+    "declared 'list_habits'" and emitted a module.yaml with create and checkoff
+    and no read at all. The pages then had nothing to bind to and fell back to
+    an invented /api/habits.
 
     Only genuine absence is filled. A pack that already declares any read is
     left alone, including under names this does not recognise, because the
@@ -429,9 +435,33 @@ def _repair_missing_read_operation(plan: dict[str, Any], context: Any) -> list[s
         # Name it after the entity, not the module - see _plural_entity_slug.
         operation = f"list_{_plural_entity_slug(entities[0]) or module_id}"
         pack["operations"] = [*operations, operation]
+
+        contract = next(
+            (
+                task
+                for task in plan.get("build_tasks") or []
+                if task.get("task_type") == "module_contract"
+                and str(_pack_id_from_descriptor(task)) == module_id
+            ),
+            None,
+        )
+        if contract is None:
+            # Say so rather than logging a success the bundle will not contain.
+            repairs.append(
+                f"{module_id}: owns {entities} with no read operation and no module_contract "
+                f"task to declare {operation!r} in; the module will ship without a read"
+            )
+            continue
+        message = str(contract.get("initial_message") or "").rstrip()
+        note = (
+            f"Required action (added by plan review): `{operation}` - read action "
+            f"returning the {entities[0]} records the caller may see. Emit it in "
+            "actions[] with the other actions named above."
+        )
+        contract["initial_message"] = "\n\n".join(part for part in (message, note) if part)
         repairs.append(
             f"{module_id}: owns {entities} with no read operation; declared {operation!r} "
-            "so its pages have something to read"
+            f"in {contract.get('task_id')!r} so its pages have something to read"
         )
     return repairs
 
