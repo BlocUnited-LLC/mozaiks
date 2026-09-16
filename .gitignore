@@ -134,3 +134,6 @@ web_shell/.mozaiks-tailwind-sources/
 
 # Local quickstart workspace (generated output, contains copies of repo files)
 mozaiks-workspace/
+
+# Tail-harness run output (screenshots, per-run report) - regenerated every run.
+web_shell/live-tail/
