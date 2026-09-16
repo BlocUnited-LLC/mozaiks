@@ -173,6 +173,35 @@ def resolve_modal_action_targets(document: Any) -> int:
     return fixed
 
 
+def align_page_name_with_file(document: Any, path: str) -> str | None:
+    """Make a page's runtime name match the file it is written to.
+
+    A live build failed with:
+
+        $.name: page_schema.name_mismatch: Page schema name must match the
+        requested page. Runtime page name must match file identity 'habits';
+        keep the display label in title.
+
+    The name is the page's runtime identity and is fixed by the filename the
+    plan assigned. The agent had put the human label there instead. Both the
+    correct value and where the label belongs are stated by the validator, so
+    apply them: the stem becomes the name, and a label that would otherwise be
+    lost moves to title when title is empty.
+    """
+    if not isinstance(document, dict):
+        return None
+    stem = PurePosixPath(path).stem if path else ""
+    if not stem:
+        return None
+    current = document.get("name")
+    if current == stem:
+        return None
+    if current and not document.get("title"):
+        document["title"] = current
+    document["name"] = stem
+    return str(current) if current else ""
+
+
 def normalize_planned_page_content(content: str, *, path: str = "") -> str:
     """Return page YAML with table primitives corrected, or the original.
 
@@ -188,8 +217,11 @@ def normalize_planned_page_content(content: str, *, path: str = "") -> str:
         return content
     promoted = promote_page_table_primitives(document)
     retargeted = resolve_modal_action_targets(document)
-    if not promoted and not retargeted:
+    renamed = align_page_name_with_file(document, path)
+    if not promoted and not retargeted and renamed is None:
         return content
+    if renamed is not None:
+        logger.info("[pages] %s: name %r -> file identity", path or "page", renamed)
     if promoted:
         logger.info("[pages] %s: promoted %d DataTable -> ResourceTable", path or "page", promoted)
     if retargeted:
