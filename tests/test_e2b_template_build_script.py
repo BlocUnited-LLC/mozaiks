@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.build_e2b_preview_template import REPO_ROOT, build_template
+from scripts.build_e2b_preview_template import REPO_ROOT, _build_log, build_template
 
 
 def test_e2b_template_build_defaults_to_a_safe_dry_run(tmp_path: Path) -> None:
@@ -71,3 +71,25 @@ def test_e2b_template_build_uses_repository_as_copy_context(tmp_path: Path, monk
 
     assert result["status"] == "built"
     assert captured["file_context_path"] == REPO_ROOT
+
+
+def test_e2b_build_log_replaces_symbols_unsupported_by_windows_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Console:
+        encoding = "cp1252"
+
+        def write(self, value: str) -> int:
+            return len(value)
+
+        def flush(self) -> None:
+            return None
+
+    output: list[str] = []
+    console = Console()
+    monkeypatch.setattr("scripts.build_e2b_preview_template.sys.stdout", console)
+    monkeypatch.setattr("builtins.print", lambda value, **_: output.append(value))
+
+    _build_log(SimpleNamespace(message="Build finished → ready"))
+
+    assert output == ["Build finished ? ready"]

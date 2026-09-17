@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,11 @@ DEFAULT_TEMPLATE_NAME = "mozaiks-preview"
 
 def _build_log(entry: Any) -> None:
     message = getattr(entry, "message", None) or getattr(entry, "text", None) or str(entry)
-    print(message, flush=True)
+    # E2B build logs can contain Unicode symbols; keep Windows consoles from
+    # turning a completed hosted build into a local helper failure.
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    safe_message = str(message).encode(encoding, errors="replace").decode(encoding, errors="replace")
+    print(safe_message, flush=True)
 
 
 def build_template(
