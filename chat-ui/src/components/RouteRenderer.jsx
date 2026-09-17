@@ -262,8 +262,11 @@ function TransitionRoute({ route }) {
 
         throw new Error('Transition resolution returned an unsupported response');
       } catch (err) {
+        // Swallowing this stranded the user on a dead button: the balance gate
+        // rejects with a 400 whose detail explains exactly what to do, and it
+        // only ever reached the console. Let it reach the screen.
         console.error('❌ [TransitionRoute] transition resolution failed:', err);
-        return false;
+        throw err;
       }
     },
     [accumulatedContext, auth, currentJourneyId, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
