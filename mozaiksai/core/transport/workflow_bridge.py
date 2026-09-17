@@ -349,6 +349,44 @@ class WorkflowBridgeMixin:
             # boundary, so releasing on context exit lands on that boundary.
             try:
                 async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+                    # A process restart removes the in-memory AG2 callback.
+                    # If the durable session is still in progress, persist the
+                    # user's reply and use AG2's process-boundary resume path
+                    # instead of accidentally starting a second run.
+                    if (
+                        not is_resume_request
+                        and isinstance(message, str)
+                        and message.strip()
+                    ):
+                        pm = self._get_or_create_persistence_manager()
+                        session_exists = getattr(pm, "chat_session_exists", None)
+                        if callable(session_exists) and await session_exists(
+                            chat_id,
+                            app_id,
+                            workflow_name,
+                        ):
+                            await self._apply_user_text_context_updates(
+                                chat_id=chat_id,
+                                workflow_name=workflow_name,
+                                app_id=app_id,
+                                user_input=message,
+                            )
+                            append_user_message = getattr(pm, "append_run_user_message", None)
+                            if append_user_message is not None:
+                                await append_user_message(
+                                    chat_id=chat_id,
+                                    app_id=app_id,
+                                    content=message,
+                                    metadata={"source": "workflow_user", "user_id": user_id},
+                                )
+                            await self.process_incoming_user_message(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                content=message,
+                                source="http",
+                            )
+                            message = None
+                            is_resume_request = True
                     return await self._launch_workflow_run_locked(
                         chat_id=chat_id,
                         user_id=user_id,

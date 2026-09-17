@@ -892,6 +892,30 @@ class AG2PersistenceManager:
             if status is not WorkflowStatus.IN_PROGRESS:
                 raise ChatSessionTerminalError(status)
 
+    async def chat_session_exists(
+        self,
+        chat_id: str,
+        app_id: str,
+        workflow_name: str | None = None,
+    ) -> bool:
+        """Return whether an in-progress session exists for this app/workflow.
+
+        This is intentionally separate from ``assert_chat_resumable``: an
+        absent session is valid when starting a new run, while a present
+        in-progress session must be resumed after a process restart.
+        """
+        if not app_id:
+            raise ValueError("app_id is required")
+        query = {"_id": chat_id, **build_app_scope_filter(app_id)}
+        clean_workflow_name = str(workflow_name or "").strip()
+        if clean_workflow_name:
+            query["workflow_name"] = clean_workflow_name
+        coll = await self._coll()
+        doc = await coll.find_one(query, {"status": 1})
+        if not isinstance(doc, dict):
+            return False
+        return WorkflowStatus(doc.get("status")) is WorkflowStatus.IN_PROGRESS
+
     async def mark_chat_completed(self, chat_id: str, app_id: str | None = None) -> bool:
         return await self._mark_chat_terminal(chat_id, app_id, WorkflowStatus.COMPLETED)
 

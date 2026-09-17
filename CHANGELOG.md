@@ -12,6 +12,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- Persisted in-progress workflow sessions now resume through AG2 after a
+  process restart instead of starting a second run when the in-memory input
+  callback is gone.
 
 
 
