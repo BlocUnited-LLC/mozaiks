@@ -358,7 +358,7 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
 // Page content renderer
 // ---------------------------------------------------------------------------
 
-function PageContent({ page, padded = true }) {
+function PageContent({ page, padded = true, isOwner = false }) {
   if (!page) return null;
 
   const Component = page.component ? componentRegistry.getComponent(page.component) : null;
@@ -367,7 +367,7 @@ function PageContent({ page, padded = true }) {
   if (Component) {
     return (
       <div className={cls}>
-        <Component page={page} tab={page} data={page.data} />
+        <Component page={page} tab={page} data={page.data} isOwner={isOwner} />
       </div>
     );
   }
@@ -435,7 +435,7 @@ function TopNavLayout({ allPages, activePage, onSelect, isOwner }) {
           ))}
         </nav>
       </div>
-      <PageContent page={activePage} />
+      <PageContent page={activePage} isOwner={isOwner} />
     </>
   );
 }
@@ -487,7 +487,7 @@ function SidebarLeftLayout({ pagesBySection, activePage, onSelect, isOwner }) {
         })}
       </aside>
       <div className="flex-1 min-w-0 py-6 border-l border-border pl-6">
-        <PageContent page={activePage} padded={false} />
+        <PageContent page={activePage} padded={false} isOwner={isOwner} />
       </div>
     </div>
   );
@@ -582,7 +582,7 @@ function DrawerLayout({ allPages, pagesBySection, activePage, onSelect, isOwner 
 
       {/* Content */}
       <div className="px-5 sm:px-8">
-        <PageContent page={activePage} padded={false} />
+        <PageContent page={activePage} padded={false} isOwner={isOwner} />
       </div>
     </div>
   );
@@ -617,7 +617,7 @@ function IconRailLayout({ allPages, activePage, onSelect, isOwner }) {
         ))}
       </aside>
       <div className="flex-1 min-w-0 px-5 sm:px-8 py-6">
-        <PageContent page={activePage} padded={false} />
+        <PageContent page={activePage} padded={false} isOwner={isOwner} />
       </div>
     </div>
   );
