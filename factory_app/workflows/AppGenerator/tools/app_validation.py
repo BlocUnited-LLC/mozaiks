@@ -1939,6 +1939,56 @@ def _bundle_repair_request(
     return "\n".join(lines)
 
 
+
+def _wiring_repair_errors(
+    wiring_result: dict[str, Any], generated_files: dict[str, str]
+) -> list[str]:
+    """Phrase orphaned endpoints as repairable per-page errors.
+
+    A wiring failure already blocks acceptance, but it was never handed to
+    _prepare_bundle_repair, so the build failed without attempting a fix. The
+    repair loop already routes ui/pages/* to AppSchemaAgent, is bounded by
+    max_attempts, and stops on a repeated failure fingerprint - the errors just
+    never arrived.
+
+    Each message names the declared actions. A page agent told only "unknown
+    action" would guess again, which is how /api/habits and a delete_habit that
+    was never declared reached a bundle whose module contract was right there.
+    """
+    from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+        module_action_index,
+    )
+
+    if wiring_result.get("passed"):
+        return []
+    orphaned = wiring_result.get("orphaned_pages") or []
+    if not orphaned:
+        return []
+
+    index = module_action_index(generated_files)
+    declared = sorted(
+        f"/api/modules/{module_id}/{action}"
+        for module_id, actions in index.items()
+        for action in actions
+    )
+    available = ", ".join(declared) if declared else "none declared"
+
+    errors: list[str] = []
+    for item in orphaned:
+        page = str(item.get("page") or "").strip()
+        if not page:
+            continue
+        section = str(item.get("section") or "").strip()
+        where = f" section {section!r}" if section else ""
+        errors.append(
+            f"ui/pages/{page}.yaml:{where} endpoint {item.get('endpoint')!r} "
+            f"references no declared module action. Declared actions: {available}. "
+            "Bind the section to one of them, or remove the section if the app "
+            "does not need it. Do not invent an action id."
+        )
+    return errors
+
+
 def _prepare_bundle_repair(
     bundle_scan_result: dict[str, Any],
     context_variables: Any | None,
@@ -2393,7 +2443,8 @@ async def run_app_bundle_acceptance_gate(
     bundle_repair = _prepare_bundle_repair(
         {
             "passed": all(item["passed"] for item in (
-                bundle_scan_result, app_runtime_load_result, runtime_quality_result, module_implementation_result,
+                bundle_scan_result, app_runtime_load_result, runtime_quality_result,
+                module_implementation_result, wiring_result,
             )),
             "errors": [
                 *bundle_scan_result.get("errors", []),
@@ -2406,6 +2457,7 @@ async def run_app_bundle_acceptance_gate(
                     f"{item['path']}: {item['test']}: {item['error']} Fix: {item['fix_suggestion']}"
                     for item in module_implementation_result.get("failed_tests", [])
                 ],
+                *_wiring_repair_errors(wiring_result, generated_files),
             ],
         },
         context_variables,
