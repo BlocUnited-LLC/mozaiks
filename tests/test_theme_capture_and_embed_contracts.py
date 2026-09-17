@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from mozaiksai.core.workflow.context.adapter import create_context_container
 from tests.factory_context import factory_context
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -59,6 +60,18 @@ def test_theme_capture_uses_canonical_context_and_handoffs() -> None:
     lifecycle_tool = tools["lifecycle_tools"][0]
     assert lifecycle_tool["trigger"] == "before_chat"
     assert lifecycle_tool["function"] == "collect_prechat_theme_context"
+
+
+def test_theme_capture_preload_writes_runtime_context_container() -> None:
+    module = _load_module(
+        "factory_app/workflows/ThemeCapture/tools/preload_theme_capture_context.py",
+        "tests.preload_theme_capture_runtime_context",
+    )
+    context = create_context_container()
+
+    module._ctx_set(context, "preload_status", "ready")
+
+    assert context.get("preload_status") == "ready"
 
 
 def test_theme_capture_preload_collects_parent_theme_evidence() -> None:
