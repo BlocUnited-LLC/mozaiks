@@ -16,6 +16,39 @@ into an entry point.
 **Always work on `C:\Repos\BlocUnitedRepo\mozaiks` (this repo) and `C:\Repos\BlocUnitedRepo\mozaiks-app`.**
 Never read from or write to OneDrive paths (`C:\Users\...\OneDrive\...`). Those are stale copies, not the working repos.
 
+## Worktree Lifecycle And Cleanup
+
+Worktrees are disposable task workspaces, not additional sources of truth. The
+merged `origin/main` branch is the coordination baseline for agents and for
+cross-repository dependency updates.
+
+- Create one worktree per task from fresh `origin/main`.
+- Do not reuse an old worktree for a new task or branch from another open PR.
+- After a PR merges, preserve the worktree until any unpushed work is checked;
+  then remove it and prune its local branch when it is no longer needed.
+- Treat dirty worktrees, branches with unpushed commits, and detached snapshots
+  as `keep` until explicitly reviewed.
+- A deleted remote branch (`origin/<branch>: gone`) is only a cleanup
+  candidate. It is not proof that local files are disposable.
+- Run `scripts/prune_agent_worktrees.py` without `--apply` first. The script
+  must remain report-only by default; use `--apply` only after reviewing its
+  complete plan.
+- Never use `git reset --hard`, `git clean -fd`, or broad recursive deletion
+  as an agent cleanup shortcut.
+
+The cleanup script is deliberately conservative: it removes only clean
+worktrees whose branch is provably merged into `origin/main` or identified as
+the head of a merged PR. It keeps anything whose state cannot be established.
+
+## Pull Request Description Hygiene
+
+Pull request bodies are Markdown and must be sent to GitHub with actual line
+breaks. Do not pass escaped `\\n` sequences as a shell string; GitHub will
+render them literally. Prefer `gh pr create --body-file <file>` with a
+temporary, reviewed Markdown file, or use a shell-native literal here-string
+when creating or editing a PR. Preserve Markdown backticks and headings
+through the shell boundary, then inspect the rendered body with `gh pr view`.
+
 **Read [ARCHITECTURE.md](../ARCHITECTURE.md) first.** That file is the source of truth for how the system works.
 
 ## Host and Interface Boundaries

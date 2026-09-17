@@ -355,6 +355,25 @@ declared asset file. It excludes timestamps, absolute paths, worktree location,
 and transient generated metadata. The same pack content produces the same
 digest; material pack-content changes produce a different digest.
 
+Cross-repository generator inputs use the same content-addressed principle
+through `mozaiks.contract_identity.v1`. The identity records the immutable
+source commit, the canonical manifest of contract paths and file hashes, and
+the manifest digest. Consumers should resolve and pin the source commit before
+generation, record the identity in generated provenance, and refuse generation
+or promotion when the recorded identity no longer verifies. The reusable
+implementation is `mozaiksai.core.contract_identity`; the offline gate is:
+
+```text
+python scripts/verify_contract_identity.py \
+  --root <generated-bundle> \
+  --metadata <generated-bundle>/.mozaiks/contract_identity.json \
+  --source-commit <pinned-source-commit>
+```
+
+CI must compare against the consumer's pinned source commit, not the current
+tip of the source repository. A source repository may advance after a valid
+consumer build; that is a dependency-update event, not automatic drift.
+
 Generated bundles retain pack metadata in the existing
 `.mozaiks/pack_provenance.json` manifest:
 
