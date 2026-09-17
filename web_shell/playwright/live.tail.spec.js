@@ -19,7 +19,14 @@ import { fileURLToPath } from 'node:url';
 import { test } from '@playwright/test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(__dirname, '..', 'live-tail');
+// Vite watches web_shell, so writing here reloads the very page this drives.
+// A run died on exactly that: the report write emitted
+//   {"type":"full-reload","triggeredBy":".../web_shell/live-tail/tail-report.md"}
+// the composer stopped accepting input, and the stall read as a product defect
+// until the frame type gave it away. Output lives outside the watch root.
+const OUT = process.env.TAIL_OUT_DIR
+  ? path.resolve(process.env.TAIL_OUT_DIR)
+  : path.join(__dirname, '..', '..', '.local', 'live-tail');
 const LOG = path.join(OUT, 'tail-report.md');
 
 const IDEA =
