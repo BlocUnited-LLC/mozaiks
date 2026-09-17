@@ -35,6 +35,18 @@ git worktree add .local/worktrees/<task-name> origin/main -b cc/<short-descripti
 Do all work there, and remove it when done (`git worktree remove
 .local/worktrees/<task-name> --force`).
 
+After confirming a PR has merged, use the repository cleanup report before
+removing old agent worktrees:
+
+```bash
+python scripts/prune_agent_worktrees.py
+```
+
+This is a dry run. Review the complete report before using `--apply`. Never
+delete dirty, unpushed, or detached worktrees based only on their age or on a
+remote branch being deleted. The script is intentionally conservative and
+keeps work when GitHub state cannot be verified.
+
 ## Before Opening a PR — Local Verification Is Mandatory
 
 Do not push and open a PR on faith that CI will catch problems. Run locally
