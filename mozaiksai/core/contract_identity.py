@@ -80,8 +80,12 @@ def verify_contract_identity(
     manifest = metadata.get("contract_manifest")
     if not isinstance(manifest, Mapping) or not isinstance(manifest.get("files"), list):
         raise ContractIdentityError("contract_manifest.files must be a list")
-    paths = [entry.get("path") for entry in manifest["files"] if isinstance(entry, Mapping)]
-    if len(paths) != len(manifest["files"]) or not all(isinstance(path, str) for path in paths):
+    paths: list[str] = []
+    for entry in manifest["files"]:
+        if not isinstance(entry, Mapping) or not isinstance(entry.get("path"), str):
+            raise ContractIdentityError("contract manifest contains an invalid file entry")
+        paths.append(entry["path"])
+    if len(paths) != len(manifest["files"]):
         raise ContractIdentityError("contract manifest contains an invalid file entry")
     current = build_contract_manifest(root, paths)
     current_digest = manifest_digest(current)
