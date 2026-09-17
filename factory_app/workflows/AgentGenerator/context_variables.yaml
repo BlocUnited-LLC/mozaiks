@@ -728,6 +728,18 @@ definitions:
     source:
       type: computed
       default: 2
+  workflow_bundle_repair_failure_fingerprint:
+    type: string
+    description: Stable digest of the last workflow bundle repair failure evidence.
+    source:
+      type: computed
+      default: null
+  workflow_bundle_repair_no_progress:
+    type: boolean
+    description: True when a repair attempt reproduced the previous failure exactly.
+    source:
+      type: computed
+      default: false
   workflow_bundle_repair_failed_workflows:
     type: array
     description: Workflow names selected for the current repair pass.
