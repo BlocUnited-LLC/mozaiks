@@ -373,7 +373,17 @@ def extract_code_file_map_from_payload(
         for key, relative_path in _MODULE_CONTRACT_OUTPUT_PATHS.items():
             path = str(prefix / relative_path)
             if key in bundle and bundle[key] is None and path in file_map:
-                raise ValueError(f"module_contract.{key} is null but raw output emits {path}")
+                # Not a consistency nicety. Typed fields are materialized above -
+                # action schemas compiled, event entries normalized - and a raw
+                # file in code_files bypasses every bit of that. Accepting the
+                # raw file would ship a contract that never went through the
+                # typed pipeline, so the disagreement has to be an error and the
+                # typed field is the side that must win.
+                raise ValueError(
+                    f"module_contract.{key} is null but raw output emits {path}. "
+                    f"Set module_contract.{key} to the contract instead of emitting the file; "
+                    "a raw contract file skips schema materialization."
+                )
 
     return file_map
 

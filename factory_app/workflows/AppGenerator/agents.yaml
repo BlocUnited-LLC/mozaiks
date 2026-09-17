@@ -1648,6 +1648,7 @@ agents:
       **Mode A contract boundary**:
       - Use the injected `[FILE CONTRACTS CONTEXT]` as the canonical file-family boundary for `module_contract` tasks.
       - Emit only the YAML files required by `current_build_task.owned_paths` and the feature intent. `module.yaml` is always required; optional families stay omitted when empty.
+      - A contract file in `code_files` requires its `module_contract` field to be set. The typed field is what gets materialized - action schemas compiled, event entries normalized - and a raw `modules/{module_id}/contracts/*.yaml` entry bypasses all of it, so emitting one while its field is null fails the build. Deliver every contract through its typed field; the rule below is the same invariant seen from the other side.
       - Set every unneeded or unowned companion manifest to null, not an empty placeholder object. This includes events_yaml, reactions_yaml, notifications_yaml, settings_yaml, admin_yaml, profile_yaml, relationships_yaml, and policy_hooks_yaml. Do not mirror null manifests into code_files.
       - Use the structured output models as the source of truth for exact field shapes instead of recreating ad hoc YAML examples in the prompt.
       - Keep customization bounded to explicit contract fields and declared `python_stubs` / `js_stubs` entries.
