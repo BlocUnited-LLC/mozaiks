@@ -40,6 +40,15 @@ The cleanup script is deliberately conservative: it removes only clean
 worktrees whose branch is provably merged into `origin/main` or identified as
 the head of a merged PR. It keeps anything whose state cannot be established.
 
+## Pull Request Description Hygiene
+
+Pull request bodies are Markdown and must be sent to GitHub with actual line
+breaks. Do not pass escaped `\\n` sequences as a shell string; GitHub will
+render them literally. Prefer `gh pr create --body-file <file>` with a
+temporary, reviewed Markdown file, or use a shell-native literal here-string
+when creating or editing a PR. Preserve Markdown backticks and headings
+through the shell boundary, then inspect the rendered body with `gh pr view`.
+
 **Read [ARCHITECTURE.md](../ARCHITECTURE.md) first.** That file is the source of truth for how the system works.
 
 ## Host and Interface Boundaries
