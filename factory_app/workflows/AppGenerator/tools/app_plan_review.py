@@ -507,7 +507,10 @@ def _repair_missing_read_operation(plan: dict[str, Any], context: Any) -> list[s
         note = (
             f"Required action (added by plan review): `{operation}` - read action "
             f"returning the {entities[0]} records the caller may see. Emit it in "
-            "actions[] with the other actions named above."
+            "actions[] with the other actions named above. Its output_schema is an "
+            'object with one array property holding the records, not a bare '
+            '`type: "array"` - the renderer rejects a non-object schema that '
+            "declares properties or required."
         )
         contract["initial_message"] = "\n\n".join(part for part in (message, note) if part)
         repairs.append(
