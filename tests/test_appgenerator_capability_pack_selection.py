@@ -258,6 +258,10 @@ def test_messaging_inbox_entrypoint_is_profile_tab_not_global_shell_nav() -> Non
     assert tab["component"] == "MessagingProfileTab"
     assert route["path"] == "/messages"
     assert route["navigation"] == {"include": False}
+    component = (_pack_path("messaging") / "templates" / "ui" / "components" / "MessagingProfileTab.jsx").read_text(encoding="utf-8")
+    assert "get_thread" in component
+    assert "send_message" in component
+    assert "href={`/messages" not in component
 
 
 def test_support_pack_requires_messaging_and_stores_only_ticket_metadata() -> None:

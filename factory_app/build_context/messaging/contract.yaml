@@ -99,10 +99,12 @@ runtime_boundaries:
     rule: Hosted products may add announcements, operator routing, realtime fan-out, or product-specific moderation, but they must keep core thread/message persistence on the messages module and preserve domain.messages.* lifecycle events for create_thread, send_message, and mark_thread_read.
   - id: profile_tab_composition
     rule: >
-      The default DM inbox entrypoint is a profile tab declared in
-      modules/messages/contracts/profile.yaml and registered through ui/index.js.
-      Keep /messages as a focused conversation route, but do not add it to global
-      shell navigation or profile shortcut pills by default.
+      The default DM entrypoint is one profile-owned messaging workspace declared
+      in modules/messages/contracts/profile.yaml and registered through ui/index.js.
+      The workspace keeps friends (when the social pack is selected), conversations,
+      search, and the selected thread in one surface. Selecting a thread or friend
+      renders the conversation inline; /messages remains a hidden deep-link and
+      support fallback, never a global shell item or profile shortcut by default.
 
 facades: []
 

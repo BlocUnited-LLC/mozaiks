@@ -297,6 +297,10 @@ def test_messaging_route_manifest_declares_messages_page() -> None:
 def test_messaging_ui_component_exists() -> None:
     assert (TEMPLATES / "ui" / "pages" / "custom" / "Messages.jsx").exists()
     assert (TEMPLATES / "ui" / "components" / "MessagingProfileTab.jsx").exists()
+    source = (TEMPLATES / "ui" / "components" / "MessagingProfileTab.jsx").read_text(encoding="utf-8")
+    assert "get_thread" in source
+    assert "send_message" in source
+    assert "href={`/messages" not in source
 
 
 # ---------------------------------------------------------------------------
