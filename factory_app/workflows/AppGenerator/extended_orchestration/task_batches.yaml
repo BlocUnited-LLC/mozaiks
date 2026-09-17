@@ -24,7 +24,16 @@ batches:
     execution:
       concurrency: 8
       dependency_field: depends_on
-      failure_policy: fail_batch
+      # A single agent mistake used to discard every completed task in the run.
+      # A live build died on one module_contract task after 1.3h of work, taking
+      # five finished tasks with it, and the bundle-level repair loop never got
+      # to see anything because no bundle was ever produced.
+      #
+      # The scheduler already drains tasks whose dependency failed, marking them
+      # 'dependency X failed'. So this fails the dependent subtree and keeps the
+      # rest: a failed page_bundle costs that page, a failed module_contract
+      # costs its own modules's tasks, and acceptance still judges what arrived.
+      failure_policy: continue_with_available
       # One retry was not enough for mechanical contract errors. A live build
       # failed the whole batch on "Schema contract required names must match
       # property required flags" - a rule already stated in the agent's prompt,

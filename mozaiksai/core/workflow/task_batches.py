@@ -744,9 +744,15 @@ async def _run_one_task(
                     ]
                 _validate_task_output_ownership(batch, task, output)
             except ValueError as exc:
-                if _attempt == attempts - 1:
+                message = str(exc)
+                # An attempt that reproduces the previous error exactly has shown
+                # the feedback is not landing, and further attempts cost a model
+                # call each to prove it again. A live task burned all three on
+                # one identical message. Both repair loops already stop on this;
+                # this layer only counted.
+                if _attempt == attempts - 1 or message == last_error:
                     raise
-                last_error = str(exc)
+                last_error = message
                 rejected_output = candidate_json
                 continue
             break

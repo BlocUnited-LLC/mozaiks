@@ -10,8 +10,12 @@ the task still failed after both attempts.
 
 The feedback loop is sound - task_batches.py appends [TASK VALIDATION FEEDBACK]
 and [REJECTED TASK OUTPUT] to the retry prompt. What was short was the budget.
-With failure_policy fail_batch, one task giving up discards every completed
-task in the run, so attempts are far cheaper than the rebuild they prevent.
+
+The original justification here was fail_batch: one task giving up discarded
+every completed task in the run. That is no longer true - the batch now runs
+continue_with_available, so a failure costs its dependent subtree rather than
+the build. The budget still earns its keep, because that subtree is the module
+and every page bound to it, but it is no longer the whole run.
 """
 
 from pathlib import Path
@@ -42,11 +46,17 @@ def test_a_failing_task_gets_more_than_one_correction_attempt() -> None:
     )
 
 
-def test_the_budget_is_justified_by_fail_batch() -> None:
-    """If a single failure stopped only that task, the budget would matter less."""
+def test_a_failure_costs_its_subtree_and_not_the_build() -> None:
+    """This test previously asserted fail_batch, which was the defect.
+
+    A live build lost 1.3h and five completed tasks to one module_contract
+    failure. The scheduler already drains dependents of a failed task, so
+    continue_with_available stops the subtree and lets acceptance judge the
+    rest - which is the only way the bundle repair loop ever gets to run.
+    """
     execution = _execution()
 
-    assert execution["failure_policy"] == "fail_batch"
+    assert execution["failure_policy"] == "continue_with_available"
 
 
 def test_the_retry_prompt_still_carries_the_error_and_the_rejected_output() -> None:
