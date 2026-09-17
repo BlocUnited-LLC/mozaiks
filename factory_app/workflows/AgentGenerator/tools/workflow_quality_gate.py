@@ -9,6 +9,8 @@ meaning the prompts asked for.
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -863,6 +865,24 @@ def _repair_task_id_for_spec(spec: dict[str, Any]) -> str:
     return re.sub(r"[^a-z0-9]+", "_", workflow_name.lower()).strip("_")
 
 
+
+def _repair_failure_fingerprint(*, repair_kind: str, evidence: Any) -> str:
+    """Return a stable digest for deterministic repair no-progress checks.
+
+    Mirrors AppGenerator's _repair_failure_fingerprint deliberately. Two repair
+    loops that answer "did this retry change anything" differently is how the
+    drift started; a second dialect would continue it.
+    """
+    normalized = json.dumps(
+        {"repair_kind": repair_kind, "evidence": evidence},
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def _build_repair_request(
     *,
     workflow_issues: dict[str, list[str]],
@@ -894,6 +914,9 @@ def prepare_workflow_bundle_repair(
     workflow_issues = _workflow_issue_map(quality_gate)
     failed_workflows = sorted(workflow_issues)
     prior_attempts = int(_context_get(context_variables, "workflow_bundle_repair_count", 0) or 0)
+    previous_fingerprint = str(
+        _context_get(context_variables, "workflow_bundle_repair_failure_fingerprint", "") or ""
+    ).strip()
 
     if not failed_workflows:
         result = {
@@ -909,7 +932,22 @@ def prepare_workflow_bundle_repair(
         _context_set(context_variables, "workflow_bundle_repair_result", result)
         return result
 
-    if prior_attempts >= max_attempts:
+    # A retry that reproduces the same issues will keep reproducing them, and
+    # each attempt here regenerates entire workflow bundles. AppGenerator has
+    # stopped on this since its loop was written; this one only counted.
+    failure_fingerprint = _repair_failure_fingerprint(
+        repair_kind="workflow_bundle",
+        evidence={name: sorted(workflow_issues[name]) for name in failed_workflows},
+    )
+    no_progress = bool(
+        prior_attempts > 0
+        and previous_fingerprint
+        and previous_fingerprint == failure_fingerprint
+    )
+    _context_set(context_variables, "workflow_bundle_repair_failure_fingerprint", failure_fingerprint)
+    _context_set(context_variables, "workflow_bundle_repair_no_progress", no_progress)
+
+    if no_progress or prior_attempts >= max_attempts:
         repair_request = _build_repair_request(
             workflow_issues=workflow_issues,
             attempt=prior_attempts,
@@ -918,11 +956,17 @@ def prepare_workflow_bundle_repair(
         result = {
             "status": "blocked",
             "repairable": False,
-            "reason": "workflow_bundle_repair_attempts_exhausted",
+            "reason": (
+                "workflow_bundle_repair_no_progress"
+                if no_progress
+                else "workflow_bundle_repair_attempts_exhausted"
+            ),
             "failed_workflows": failed_workflows,
             "attempt": prior_attempts,
             "max_attempts": max_attempts,
             "repair_request": repair_request,
+            "failure_fingerprint": failure_fingerprint,
+            "no_progress": no_progress,
         }
         _context_set(context_variables, "workflow_bundle_repair_status", result["status"])
         _context_set(context_variables, "workflow_bundle_repair_request", repair_request)
@@ -993,6 +1037,8 @@ def prepare_workflow_bundle_repair(
         "max_attempts": max_attempts,
         "repair_request": repair_request,
         "repair_workflow_count": len(repair_specs),
+        "failure_fingerprint": failure_fingerprint,
+        "no_progress": False,
     }
     _context_set(context_variables, "workflow_bundle_repair_status", result["status"])
     _context_set(context_variables, "workflow_bundle_repair_active", True)
