@@ -109,6 +109,17 @@ export function TransitionScreen({ transitionId, onNavigate, context }) {
       });
   }, [transitionId, retryCount]);
 
+  // Every resolution goes through here so no call site can forget to handle a
+  // failure. Resolution is fire-and-forget at the click sites, so without this
+  // the only other outcome is an unhandled rejection and a dead-looking button.
+  const resolve = useCallback(
+    (option_id = null, contextVariables = {}) =>
+      Promise.resolve()
+        .then(() => onNavigate?.(option_id, contextVariables))
+        .catch((err) => setError(err?.message || 'Failed to resolve transition')),
+    [onNavigate]
+  );
+
   useEffect(() => {
     if (!transition) return;
 
@@ -116,7 +127,7 @@ export function TransitionScreen({ transitionId, onNavigate, context }) {
       ['silent', 'progress_view', 'prerequisite_redirect', 'chat_session'].includes(transition.transition_type)
     ) {
       const t = setTimeout(() => {
-        onNavigate?.(null);
+        resolve(null);
       }, 0);
       return () => clearTimeout(t);
     }
@@ -134,21 +145,16 @@ export function TransitionScreen({ transitionId, onNavigate, context }) {
     }
 
     const t = setTimeout(() => {
-      onNavigate?.(null);
+      resolve(null);
     }, 0);
 
     return () => clearTimeout(t);
-  }, [transition, onNavigate]);
+  }, [transition, resolve]);
 
-  const onResolve = useCallback(
-    (option_id, contextVariables = {}) => {
-      return onNavigate?.(option_id, contextVariables);
-    },
-    [onNavigate]
-  );
+  const onResolve = resolve;
 
   useAppEventBus('routing.transition.resolve', ({ option_id, context_variables }) => {
-    onNavigate?.(option_id ?? null, context_variables ?? {});
+    resolve(option_id ?? null, context_variables ?? {});
   });
 
   const handleRetry = useCallback(() => setRetryCount((n) => n + 1), []);
