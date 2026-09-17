@@ -2,13 +2,13 @@
 # Local, disposable app previews. This image is not a deployment artifact.
 FROM node:24-bookworm-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    MOZAIKS_WEB_SHELL_PATH=/opt/mozaiks/web_shell \
-    MOZAIKS_CHAT_UI_PATH=/opt/mozaiks/chat-ui \
-    MOZAIKS_FACTORY_APP_PATH=/opt/mozaiks/factory_app \
-    LOGS_BASE_DIR=/workspace/logs
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV MOZAIKS_WEB_SHELL_PATH=/opt/mozaiks/web_shell
+ENV MOZAIKS_CHAT_UI_PATH=/opt/mozaiks/chat-ui
+ENV MOZAIKS_FACTORY_APP_PATH=/opt/mozaiks/factory_app
+ENV LOGS_BASE_DIR=/workspace/logs
 
 WORKDIR /opt/mozaiks
 RUN apt-get update \
