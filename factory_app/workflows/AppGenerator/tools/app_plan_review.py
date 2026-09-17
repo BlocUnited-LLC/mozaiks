@@ -520,6 +520,53 @@ def _repair_missing_read_operation(plan: dict[str, Any], context: Any) -> list[s
     return repairs
 
 
+
+def _repair_page_contract_dependencies(plan: dict[str, Any], context: Any) -> list[str]:
+    """Let a page_bundle task see the module contracts it is told to copy from.
+
+    The page agent is instructed to "Copy every module action id exactly from
+    dependency module.yaml outputs". A task only receives the outputs of its
+    direct depends_on entries, and a live plan wired both page bundles to
+    data_models and business_services and not to module_contract - the task that
+    owns modules/*/module.yaml. So the agent was told to copy from a set that was
+    always empty, and it did the only other thing available: it guessed.
+
+    It guessed /api/modules/habits/create_habit for a module whose id is
+    habits_registry. The canonical form was right because the rule is stated
+    four times; the identity was invented because the contract never arrived.
+
+    Ordering already held - business_services depends on module_contract, so the
+    pages ran after it. Only visibility was missing.
+    """
+    repairs: list[str] = []
+    tasks = plan.get("build_tasks") or []
+    contracts = [
+        str(task.get("task_id"))
+        for task in tasks
+        if task.get("task_type") == "module_contract" and str(task.get("task_id") or "").strip()
+    ]
+    if not contracts:
+        return repairs
+
+    for task in tasks:
+        if task.get("task_type") != "page_bundle":
+            continue
+        declared = [str(dep) for dep in (task.get("depends_on") or []) if str(dep).strip()]
+        # Every module contract, not a guessed subset: which modules a page binds
+        # to is the page agent's call, and a page denied one contract is exactly
+        # the failure this repairs. They are already ordered ahead of pages, so
+        # naming them adds visibility and not serialization.
+        missing = [contract for contract in contracts if contract not in declared]
+        if not missing:
+            continue
+        task["depends_on"] = [*declared, *missing]
+        repairs.append(
+            f"{task.get('task_id')}: page_bundle could not see {missing}; "
+            "added so its endpoints can name the real module"
+        )
+    return repairs
+
+
 def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
     available = _context_available_pack_map(context)
     packs = plan.get("capability_packs") or []
@@ -641,6 +688,7 @@ def review_app_build_plan(
             *_repair_plan(plan, context_variables),
             *_repair_missing_read_operation(plan, context_variables),
             *_repair_coverage(plan, context_variables),
+            *_repair_page_contract_dependencies(plan, context_variables),
         ):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         validate_plan_origins(plan, context_variables)
