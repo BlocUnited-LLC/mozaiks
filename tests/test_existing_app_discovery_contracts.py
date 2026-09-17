@@ -14,6 +14,7 @@ from mozaiksai.core.artifacts.models import (
     ArtifactValidationStatus,
     ArtifactVersionDoc,
 )
+from mozaiksai.core.workflow.context.adapter import create_context_container
 from tests.factory_context import factory_context
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -677,6 +678,18 @@ def test_existing_app_preload_accepts_binding_without_discovery_input() -> None:
     assert context["app_intelligence_ready"] is False
     assert context["app_intelligence_status"] == "unavailable"
     assert context["app_intelligence_progress"]["stage"] == "unavailable"
+
+
+def test_existing_app_preload_writes_runtime_context_container() -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_runtime_context",
+    )
+    context = create_context_container()
+
+    module._ctx_set(context, "preload_status", "ready")
+
+    assert context.get("preload_status") == "ready"
 
 
 def test_create_route_enters_canonical_build_transition() -> None:

@@ -59,6 +59,10 @@ def _ctx_set(context_variables: Any, key: str, value: Any) -> None:
     if isinstance(store, dict):
         store[key] = value
         return
+    setter = getattr(store, "set", None)
+    if callable(setter):
+        setter(key, value)
+        return
     try:
         store[key] = value
     except Exception:
