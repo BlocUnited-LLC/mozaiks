@@ -12,6 +12,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.2.0 - 2026-09-18
+
 ### Fixed
 
 - Factory build validation stages canonical workspaces and compiles their Python
