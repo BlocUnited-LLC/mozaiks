@@ -408,6 +408,8 @@ def _synthesized_task_brief(kind: str, module_id: str, pack: dict[str, Any]) -> 
     readable = str(kind).replace("_", " ")
     return f"Complete the {readable} work for {subject} as the approved plan describes."
 
+WORD = chr(92) + "b"  # regex word boundary
+
 _READ_OPERATION_PREFIXES = ("list_", "get_", "search_", "read_", "fetch_")
 
 
@@ -613,6 +615,71 @@ def validate_plan_dependencies(plan: dict[str, Any], context: Any) -> None:
     )
 
 
+
+def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list[str]:
+    """Name the planner's operations in the task the contract agent reads.
+
+    ConfigMiddlewareAgent is told to "Treat the action list in
+    current_build_task.initial_message as a closed contract. Emit every named
+    action exactly once." Nothing guarantees that message names any actions.
+
+    A live plan declared operations ['create_habit', 'list_habits',
+    'record_checkin'] on the pack and gave the contract task this entire
+    initial_message:
+
+        Module to manage habits including creation, check-in recording,
+        and retrieval.
+
+    The closed contract was prose. The agent inferred create_habit and
+    record_checkin from "creation, check-in recording", missed "retrieval", and
+    shipped a module with no read at all. Its pages then bound to list_habits,
+    which no module declared, and acceptance rejected the bundle.
+
+    #634 covered the case where the planner omits a read entirely. This covers
+    the larger one: the planner declared the operation and it never reached the
+    agent. Operations already named in the message are left alone, so the two
+    repairs compose rather than duplicate.
+    """
+    repairs: list[str] = []
+    tasks = plan.get("build_tasks") or []
+
+    for pack in plan.get("capability_packs") or []:
+        if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
+            continue
+        operations = [str(op).strip() for op in (pack.get("operations") or []) if str(op).strip()]
+        if not operations:
+            continue
+        module_id = str(_pack_id_from_descriptor(pack))
+        contract = next(
+            (
+                task
+                for task in tasks
+                if task.get("task_type") == "module_contract"
+                and str(_pack_id_from_descriptor(task)) == module_id
+            ),
+            None,
+        )
+        if contract is None:
+            continue
+        message = str(contract.get("initial_message") or "").rstrip()
+        # Word-boundary, so record_checkin does not mask checkin.
+        missing = [op for op in operations if not re.search(WORD + re.escape(op) + WORD, message)]
+        if not missing:
+            continue
+        named = ", ".join(f"`{op}`" for op in operations)
+        note = (
+            f"Actions for this module (authoritative, from the approved plan): {named}. "
+            "Emit every one of them in actions[] exactly once, using these ids verbatim. "
+            "The prose above describes the module; this list defines it."
+        )
+        contract["initial_message"] = "\n\n".join(part for part in (message, note) if part)
+        repairs.append(
+            f"{module_id}: contract task {str(contract.get('task_id'))!r} did not name "
+            f"{missing}; added the approved operation list"
+        )
+    return repairs
+
+
 def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
     available = _context_available_pack_map(context)
     packs = plan.get("capability_packs") or []
@@ -734,6 +801,7 @@ def review_app_build_plan(
             *_repair_plan(plan, context_variables),
             *_repair_missing_read_operation(plan, context_variables),
             *_repair_coverage(plan, context_variables),
+            *_repair_contract_task_operations(plan, context_variables),
             *_repair_page_contract_dependencies(plan, context_variables),
         ):
             logger.info("[AppGenerator] plan repaired: %s", repair)
