@@ -22,7 +22,7 @@ test('artifact download authenticates and only completes after a successful down
   `;
   const bundle = await build({
     stdin: { contents: entry, resolveDir: shell, loader: 'jsx' }, bundle: true, write: false,
-    jsx: 'automatic', loader: { '.js': 'jsx' }, nodePaths: [path.join(shell, 'node_modules')],
+    jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl' }, nodePaths: [path.join(shell, 'node_modules')],
     alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
     define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'authenticated-test-session', setup(build) {
@@ -86,7 +86,7 @@ test('Continue displays rejection, prevents duplicate submissions, and awaits HT
   `;
   const bundle = await build({
     stdin: { contents: entry, resolveDir: shell, loader: 'jsx' }, bundle: true, write: false,
-    jsx: 'automatic', loader: { '.js': 'jsx' }, nodePaths: [path.join(shell, 'node_modules')],
+    jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl' }, nodePaths: [path.join(shell, 'node_modules')],
     alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
     define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'no-downloads', setup(build) {

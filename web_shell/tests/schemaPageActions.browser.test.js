@@ -74,7 +74,7 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
   `;
   const bundle = await build({
     stdin: { contents: entry, resolveDir: shell, loader: 'jsx' }, bundle: true, write: false,
-    jsx: 'automatic', loader: { '.js': 'jsx' }, nodePaths: [path.join(shell, 'node_modules')],
+    jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl' }, nodePaths: [path.join(shell, 'node_modules')],
     alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
     define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'test-boundaries', setup(build) {

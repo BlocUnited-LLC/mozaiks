@@ -44,7 +44,7 @@ async function fixture(t, { primitive = 'DataTable', serverMode = true } = {}) {
       import {PageRenderer} from ${JSON.stringify(path.join(root, 'chat-ui/src/ui/page-renderer/index.js'))};
       createRoot(document.getElementById('root')).render(<React.StrictMode><PageRenderer schema={${JSON.stringify(schema)}} /></React.StrictMode>);
     `, resolveDir: shell, loader: 'jsx' },
-    bundle: true, write: false, jsx: 'automatic', loader: { '.js': 'jsx' },
+    bundle: true, write: false, jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl' },
     nodePaths: [path.join(shell, 'node_modules')],
     alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
     define: { 'process.env.NODE_ENV': '"test"' },
