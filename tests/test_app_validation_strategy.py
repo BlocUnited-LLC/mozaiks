@@ -210,6 +210,25 @@ def test_validation_strategy_rejects_invalid_explicit_values() -> None:
         resolve_app_validation_strategy(requested="invalid", context_value=None)
 
 
+@pytest.mark.parametrize("requested,context", [("skip", "local"), ("docker", "skip"), (None, "skip")])
+def test_operator_strategy_cannot_be_overridden_by_build_inputs(requested, context):
+    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+        resolve_app_validation_strategy,
+    )
+    strategy, reason = resolve_app_validation_strategy(
+        env={"MOZAIKS_APP_VALIDATION_STRATEGY": "e2b"}, requested=requested, context_value=context,
+    )
+    assert (strategy, reason) == ("e2b", "resolved from environment")
+
+
+def test_invalid_operator_strategy_fails_before_a_build_can_override_it():
+    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+        resolve_app_validation_strategy,
+    )
+    with pytest.raises(ValueError, match="Unsupported"):
+        resolve_app_validation_strategy(env={"MOZAIKS_APP_VALIDATION_STRATEGY": "invalid"}, requested="skip")
+
+
 def test_validate_app_build_skip_strategy_persists_context() -> None:
     module = _import_workflow_module("workflows.AppGenerator.tools.app_validation")
     context = _Context({"workflow_name": "AppGenerator", "chat_id": "chat-1", "app_id": "app-1"})

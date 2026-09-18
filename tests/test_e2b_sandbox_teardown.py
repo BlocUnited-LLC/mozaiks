@@ -5,7 +5,7 @@ SandboxApi._cls_connect raises NotFoundException on HTTP 404;
 SandboxApi._cls_kill returns False on HTTP 404 and raises for other errors.
 """
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -21,7 +21,10 @@ sdk_errors = pytest.importorskip("e2b.exceptions")
 @pytest.fixture
 def sdk(monkeypatch):
     sandbox = SimpleNamespace(sandbox_id="provider-session", kill=Mock(return_value=True))
-    factory = SimpleNamespace(create=Mock(return_value=sandbox), connect=Mock(return_value=sandbox))
+    factory = SimpleNamespace(
+        create=Mock(return_value=sandbox), connect=Mock(return_value=sandbox),
+        get_info=Mock(return_value=SimpleNamespace(end_at=datetime.now(UTC) + timedelta(seconds=60))),
+    )
     monkeypatch.setattr(e2b_sandbox, "Sandbox", factory)
     return factory, sandbox
 
@@ -85,7 +88,7 @@ async def _expired_preview():
 async def test_expired_provider_session_does_not_block_manager_recovery(sdk, operation):
     factory, _ = sdk
     manager, state, socket, identity = await _expired_preview()
-    factory.connect.side_effect = sdk_errors.NotFoundException("Sandbox already expired")
+    sdk[1].kill.side_effect = sdk_errors.NotFoundException("Sandbox already expired")
 
     if operation == "status":
         with pytest.raises(KeyError, match="expired"):
@@ -105,7 +108,7 @@ async def test_provider_outage_keeps_manager_cleanup_state(sdk, error_type):
     factory, _ = sdk
     manager, state, socket, identity = await _expired_preview()
     error = error_type("Provider is unavailable")
-    factory.connect.side_effect = error
+    sdk[1].kill.side_effect = error
 
     with pytest.raises(error_type) as raised:
         await manager.create_or_reuse("artifact", **identity)

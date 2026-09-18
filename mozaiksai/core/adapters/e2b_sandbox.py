@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import posixpath
+from datetime import UTC, datetime
 from typing import Any
 
 from logs.logging_config import get_core_logger
@@ -32,6 +33,7 @@ class E2BSandboxAdapter:
         self._default_template = default_template or os.getenv("E2B_TEMPLATE") or None
         raw_timeout = default_timeout_seconds if default_timeout_seconds is not None else os.getenv("E2B_TIMEOUT")
         self._default_timeout_seconds = int(raw_timeout) if raw_timeout else 300
+        self._sessions: dict[str, Any] = {}
 
     def _require_sdk(self):
         if Sandbox is None:
@@ -57,9 +59,19 @@ class E2BSandboxAdapter:
         )
 
     async def _connect_sandbox(self, session_id: str, timeout_seconds: int | None = None):
+        if session_id in self._sessions:
+            sandbox = self._sessions[session_id]
+            if timeout_seconds is not None:
+                await asyncio.to_thread(sandbox.set_timeout, timeout_seconds)
+            return sandbox
         sandbox_cls = self._require_sdk()
-        timeout = timeout_seconds if timeout_seconds is not None else self._default_timeout_seconds
-        return await asyncio.to_thread(sandbox_cls.connect, session_id, timeout=timeout)
+        if timeout_seconds is None:
+            # SDK connect renews the lifetime; preserve the provider's deadline.
+            info = await asyncio.to_thread(sandbox_cls.get_info, session_id)
+            timeout_seconds = max(1, int((info.end_at - datetime.now(UTC)).total_seconds()))
+        sandbox = await asyncio.to_thread(sandbox_cls.connect, session_id, timeout=timeout_seconds)
+        self._sessions[session_id] = sandbox
+        return sandbox
 
     @staticmethod
     def _resolve_path(path: str, cwd: str | None) -> str:
@@ -79,13 +91,23 @@ class E2BSandboxAdapter:
     ) -> SandboxSessionInfo:
         sandbox_cls = self._require_sdk()
         timeout = timeout_seconds if timeout_seconds is not None else self._default_timeout_seconds
-        sandbox = await asyncio.to_thread(
+        creation = asyncio.create_task(asyncio.to_thread(
             sandbox_cls.create,
             template=template or self._default_template,
             timeout=timeout,
             metadata=metadata,
             envs=envs,
-        )
+        ))
+        try:
+            sandbox = await asyncio.shield(creation)
+        except asyncio.CancelledError:
+            try:
+                sandbox = await creation
+                await asyncio.to_thread(sandbox.kill)
+            except Exception as exc:
+                logger.error("cancelled_sandbox_cleanup_failed exception=%s", type(exc).__name__)
+            raise
+        self._sessions[sandbox.sandbox_id] = sandbox
         return self._session_info(sandbox, metadata={"template": template or self._default_template or "default"})
 
     async def connect(
@@ -195,6 +217,7 @@ class E2BSandboxAdapter:
             await asyncio.to_thread(sandbox.kill)
         except _NOT_FOUND_ERRORS:
             pass
+        self._sessions.pop(session_id, None)
         return True
 
     def capabilities(self) -> dict[str, Any]:

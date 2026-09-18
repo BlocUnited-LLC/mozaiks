@@ -8,10 +8,12 @@ import os
 import re
 import shlex
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from logs.logging_config import get_core_logger
@@ -70,6 +72,10 @@ def resolve_preview_provider(env: dict[str, str] | None = None) -> tuple[str, Sa
     raise RuntimeError("No preview sandbox available. Start the configured local Docker sandbox provider.")
 
 
+class PreviewCapacityError(RuntimeError):
+    """The configured host or owner preview limit has been reached."""
+
+
 @dataclass
 class PreviewSessionState:
     sandbox_id: str
@@ -101,6 +107,10 @@ class ArtifactPreviewSessionManager:
             raise ValueError("SANDBOX_TTL_MINUTES must be positive")
         self._template = os.getenv("SANDBOX_TEMPLATE") or None
         self._startup_timeout_seconds = startup_timeout_seconds
+        self._max_sessions = int(os.getenv("SANDBOX_MAX_SESSIONS", "0"))
+        self._max_owner_sessions = int(os.getenv("SANDBOX_MAX_OWNER_SESSIONS", "0"))
+        if min(self._max_sessions, self._max_owner_sessions) < 0:
+            raise ValueError("Sandbox session limits must be nonnegative")
 
     def _workdir(self, provider: str) -> str:
         root = "/workspace" if provider == "docker" else os.getenv("SANDBOX_WORKDIR", "/home/user/app")
@@ -149,13 +159,27 @@ class ArtifactPreviewSessionManager:
                 if existing.provider == provider and existing.status != "error" and not self._is_expired(existing):
                     return existing
                 await self.stop(existing.sandbox_id)
+            for candidate in list(self._sessions.values()):
+                if self._is_expired(candidate) or (candidate.status == "error" and candidate.session_id is None):
+                    await self.stop(candidate.sandbox_id)
+            if self._max_sessions and len(self._sessions) >= self._max_sessions:
+                raise PreviewCapacityError("Preview capacity reached; stop an existing preview or try again later")
+            owner_count = sum((item.app_id, item.user_id) == (app_id, user_id) for item in self._sessions.values())
+            if self._max_owner_sessions and owner_count >= self._max_owner_sessions:
+                raise PreviewCapacityError("Stop your existing preview before starting another")
             state = PreviewSessionState(
                 sandbox_id=uuid4().hex, artifact_id=artifact_id, app_id=app_id, user_id=user_id,
                 target_app_id=target_app_id, build_registry_id=build_registry_id,
                 provider=provider, created_at=_utcnow(),
             )
             # The host never forwards its own environment or credentials implicitly.
-            envs = {name[len(_ENV_PREFIX):]: value for name, value in os.environ.items() if name.startswith(_ENV_PREFIX)}
+            # E2B Dockerfile ENV applies at build time, not to created sessions.
+            envs = {
+                "MOZAIKS_WEB_SHELL_PATH": "/opt/mozaiks/web_shell",
+                "MOZAIKS_CHAT_UI_PATH": "/opt/mozaiks/chat-ui",
+                "MOZAIKS_FACTORY_APP_PATH": "/opt/mozaiks/factory_app",
+                **{name[len(_ENV_PREFIX):]: value for name, value in os.environ.items() if name.startswith(_ENV_PREFIX)},
+            }
             info = await adapter.create_session(
                 template=self._template, timeout_seconds=self._ttl_minutes * 60,
                 envs=envs,
@@ -260,6 +284,12 @@ class ArtifactPreviewSessionManager:
         state.last_error = message
         state.preview_url = None
         await self._broadcast(state.sandbox_id, {"type": "status", "status": "error", "error": message, "previewUrl": None})
+        if state.session_id:
+            try:
+                if await self._adapter(state.provider).terminate_session(session_id=state.session_id):
+                    state.session_id = None
+            except Exception as exc:
+                logger.warning("preview_cleanup_failed sandbox=%s exception=%s", state.sandbox_id, type(exc).__name__)
         return state
 
     async def start(self, sandbox_id: str) -> PreviewSessionState:
@@ -292,10 +322,16 @@ class ArtifactPreviewSessionManager:
                     f"{_RUNTIME} start --app-root {shlex.quote(self._workdir(state.provider) + '/app')} "
                     f"--preview-url {shlex.quote(url)} > /tmp/mozaiks-preview-start.log 2>&1"
                 )
-                result = await adapter.run_command(session_id=session_id, command=command, background=True)
+                result = await adapter.run_command(
+                    session_id=session_id, command=command, background=True,
+                    envs={"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": urlsplit(url).hostname or ""},
+                )
                 if not result.success:
                     return await self._fail(state, "Preview runtime process failed to start")
                 return await self._finish_start(state, _PREVIEW_PORT)
+            except asyncio.CancelledError:
+                await self._fail(state, "Preview startup cancelled")
+                raise
             except ValueError as exc:
                 return await self._fail(state, str(exc))
             except Exception as exc:
@@ -360,6 +396,35 @@ class ArtifactPreviewSessionManager:
                 except Exception:
                     pass
 
+    async def cleanup(self, *, expired_only: bool = True) -> None:
+        for state in list(self._sessions.values()):
+            if expired_only and state.status != "error" and not self._is_expired(state):
+                continue
+            try:
+                await self.stop(state.sandbox_id)
+            except Exception as exc:
+                logger.warning("preview_cleanup_failed sandbox=%s exception=%s", state.sandbox_id, type(exc).__name__)
+
+    async def _cleanup_loop(self) -> None:
+        while True:
+            await asyncio.sleep(15)
+            await self.cleanup()
+
+
+@asynccontextmanager
+async def preview_sessions_lifespan(_app):
+    manager = get_artifact_preview_sessions()
+    task = asyncio.create_task(manager._cleanup_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        await manager.cleanup(expired_only=False)
+
 
 _manager: ArtifactPreviewSessionManager | None = None
 
@@ -379,4 +444,5 @@ def reset_artifact_preview_sessions() -> None:
 __all__ = [
     "ArtifactPreviewSessionManager", "PreviewSessionState", "get_artifact_preview_sessions",
     "is_valid_artifact_id", "is_valid_sandbox_id", "reset_artifact_preview_sessions", "resolve_preview_provider",
+    "PreviewCapacityError", "preview_sessions_lifespan",
 ]

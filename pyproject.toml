@@ -99,7 +99,7 @@ tracing = [
     "opentelemetry-exporter-otlp>=1.27.0",
 ]
 e2b = [
-    "e2b-code-interpreter>=0.0.10",
+    "e2b-code-interpreter>=2.10.0,<3",
 ]
 
 [project.scripts]

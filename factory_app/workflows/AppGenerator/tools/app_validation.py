@@ -972,7 +972,7 @@ async def _run_sandbox_validation(
     try:
         adapter = get_sandbox_adapter(strategy)
     except Exception as exc:
-        logger.error("Failed to acquire sandbox adapter strategy=%s: %s", strategy, exc, exc_info=True)
+        logger.error("sandbox_adapter_unavailable strategy=%s exception=%s", strategy, type(exc).__name__)
         return {
             **_base_result(strategy=strategy, status="failed"),
             "errors": ["Validation infrastructure unavailable."],
@@ -981,6 +981,11 @@ async def _run_sandbox_validation(
     result = _base_result(strategy=strategy, status="passed")
     session_id: str | None = None
     try:
+        if strategy == "e2b" and os.getenv("E2B_TIMEOUT"):
+            configured_timeout = int(os.environ["E2B_TIMEOUT"])
+            if configured_timeout <= 0:
+                raise ValueError("E2B_TIMEOUT must be positive")
+            timeout_seconds = min(timeout_seconds, configured_timeout)
         session = await adapter.create_session(
             timeout_seconds=timeout_seconds,
             metadata=session_metadata or {"purpose": "app_validation"},
@@ -1070,19 +1075,20 @@ async def _run_sandbox_validation(
 
         return result
     except Exception as exc:
-        return {
-            **result,
-            "success": False,
-            "validation_status": "failed",
-            "errors": [f"{strategy} validation error: {exc}"],
-            "preview_url": None,
-        }
+        logger.warning("sandbox_validation_failed strategy=%s exception=%s", strategy, type(exc).__name__)
+        result.update(success=False, validation_status="failed", errors=["Sandbox validation failed."], preview_url=None)
+        return result
     finally:
         if session_id is not None:
             try:
-                await adapter.terminate_session(session_id=session_id)
-            except Exception:
-                pass
+                result["sandbox_terminated"] = bool(await adapter.terminate_session(session_id=session_id))
+            except Exception as exc:
+                logger.error("sandbox_cleanup_failed session=%s exception=%s", session_id, type(exc).__name__)
+                result["sandbox_terminated"] = False
+            result["preview_url"] = None
+            if not result["sandbox_terminated"]:
+                result.update(success=False, validation_status="failed")
+                result["errors"].append("Sandbox cleanup could not be confirmed; retry cleanup using the recorded session ID.")
 
 
 async def _run_local_validation(

@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Explicit server-side app validation strategy now takes precedence over tool
+  and workflow inputs. E2B preview polling no longer renews sandbox lifetime;
+  failed/expired previews and graceful shutdown attempt provider cleanup.
+  Configurable process/owner preview limits reject excess allocations with 429.
+  One-shot validation fails when sandbox teardown cannot be confirmed and no
+  longer returns a URL for a terminated sandbox.
+
 - Persisted in-progress workflow sessions now resume through AG2 after a
   process restart instead of starting a second run when the in-memory input
   callback is gone.
@@ -41,6 +48,9 @@ This project follows a practical pre-1.0 changelog format:
   — a rejected plan produced no build tasks and therefore no app bundle at all.
 
 ### Changed
+
+- The optional E2B integration requires the tested 2.x code-interpreter SDK
+  (`>=2.10.0,<3`) rather than legacy SDK versions.
 
 - Outcome-contract tools now log why they rejected a result, which attempt it
   was, and which budget ran out. A workflow that gave up previously recorded

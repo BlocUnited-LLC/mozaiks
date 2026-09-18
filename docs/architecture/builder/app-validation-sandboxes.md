@@ -8,12 +8,15 @@ ownership boundary against AG2's agent-level execution is defined in
 
 ## Strategies
 
-Resolution precedence: tool argument → `app_validation_strategy` context
-variable → `MOZAIKS_APP_VALIDATION_STRATEGY` env → automatic (`docker` when a
+Resolution precedence: explicit `MOZAIKS_APP_VALIDATION_STRATEGY` environment
+setting → tool argument → `app_validation_strategy` context variable → automatic (`docker` when a
 daemon is reachable → `local` when npm exists → `skip`). E2B is never selected
 automatically: Docker is the default when available. E2B is selected only when
-the workflow or operator explicitly sets `MOZAIKS_PREVIEW_PROVIDER=e2b` and
-provides `E2B_API_KEY`.
+the workflow or operator explicitly selects it. Build validation uses
+`MOZAIKS_APP_VALIDATION_STRATEGY=e2b`; artifact preview uses the separate
+`MOZAIKS_PREVIEW_PROVIDER=e2b`. Both require `E2B_API_KEY`.
+An operator setting is authoritative: generated tool arguments cannot bypass it
+by selecting `skip`, `local`, or another provider. Invalid operator values fail.
 
 | Strategy | Runs where | Preview URL | Cost | Intended for |
 |----------|-----------|-------------|------|--------------|
@@ -90,7 +93,7 @@ File synchronization rejects destination aliases before provider writes. Docker
 extracts files as its configured sandbox user so later replacement and deletion
 work without root privileges. A partial or cancelled sync invalidates the session;
 recreate it rather than launching a partially updated app. Cleanup retains state
-unless the provider confirms termination or that the sandbox is already absent.
+  unless the provider confirms termination or that the sandbox is already absent.
 
 ### Local Docker setup
 
@@ -131,7 +134,9 @@ generation or CI.
 
 Only explicitly configured `MOZAIKS_PREVIEW_ENV_<NAME>` values become preview
 environment variables. Factory API keys, credentials, and database URLs are not
-inherited. Public apps may declare `authRequired: false`; authenticated apps
+inherited. The manager also supplies the canonical image's three nonsecret
+frontend/Factory resource paths, because E2B template-build ENV is not retained
+as session environment. Public apps may declare `authRequired: false`; authenticated apps
 cannot silently disable authentication. Configure their existing OIDC provider
 and register each target app client with the published preview callback origin.
 For local JWT validation, a typical explicit configuration is:
@@ -164,6 +169,27 @@ database containing builds or user records.
 
 ## What persists
 
+One-shot validation always stops its sandbox and clears `preview_url`; its
+result is not an interactive preview. `sandbox_terminated` records confirmed
+cleanup. Unconfirmed cleanup fails validation rather than reporting success.
+Interactive artifact previews are owned separately by Studio. Failed starts
+stop immediately, expired sessions are swept every 15 seconds, and graceful
+host shutdown attempts to stop every owned preview. Provider outages retain
+session identity for cleanup retries; the provider-side deadline is the final
+backstop after a process crash. Polling and normal file/command operations do
+not renew the E2B deadline. Supervisor launch allows only the exact
+provider-published hostname via Vite's
+`__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`, not arbitrary hosts or all provider
+subdomains. Explicit `E2B_TIMEOUT` caps one-shot validation even when a tool
+requests a longer timeout.
+
+`SANDBOX_MAX_SESSIONS` and `SANDBOX_MAX_OWNER_SESSIONS` limit concurrent
+artifact previews before allocation. Zero means unlimited for local operators.
+Exhaustion returns HTTP `429` with `Retry-After: 15`. These limits and ownership
+records are process-local, not distributed quotas: use one Studio worker and
+one replica until ownership and admission have a shared durable implementation.
+They do not impose a billing budget or concurrency cap on one-shot validation.
+
 - The validation result (status, strategy, errors, trimmed build output,
   `sandbox_session_id`, `sandbox_provider`, `preview_url`) lands in workflow
   context and in the build record's `commit_metadata.metadata`.
@@ -186,6 +212,8 @@ database containing builds or user records.
 | `DOCKER_SANDBOX_IMAGE` | `mozaiks-sandbox:local` | locally built Docker adapter image |
 | `DOCKER_SANDBOX_TIMEOUT` | `300` | docker container lifetime (seconds) |
 | `SANDBOX_TTL_MINUTES` | `30` | artifact preview-session TTL (also the e2b kill deadline) |
+| `SANDBOX_MAX_SESSIONS` | `0` | process-local concurrent artifact preview limit; zero is unlimited |
+| `SANDBOX_MAX_OWNER_SESSIONS` | `0` | concurrent previews per host app/user; zero is unlimited |
 | `SANDBOX_TEMPLATE` | provider default | artifact preview-session e2b template |
 | `MOZAIKS_PREVIEW_PROVIDER` | auto | `docker` (default) or explicit `e2b`; a key alone never selects E2B |
 | `SANDBOX_WORKDIR` | `/home/user/app` | e2b workspace root; Docker uses `/workspace` |
@@ -201,6 +229,19 @@ setting an API key alone is insufficient. Hosted isolation, authenticated
 ingress, per-user concurrency quotas, and billing admission need verification
 before allowing external users. A local Docker preview is not a hardened
 multi-tenant execution service.
+
+## Opt-in live smoke
+
+```bash
+MOZAIKS_RUN_GENERATED_APP_E2B_SMOKE=1 python -m pytest tests/test_generated_app_e2b_smoke.py -q -s --no-cov
+```
+
+This runs a Factory-materialized fixture through the real E2B supervisor, frontend proxy, backend, and module
+action, then confirms the provider no longer knows the sandbox. It requires
+`E2B_API_KEY` and `E2B_TEMPLATE`, spends provider credits, and is never enabled
+by ordinary CI. This is runtime coverage, not a live-LLM Factory journey.
+Optional `MOZAIKS_E2B_SMOKE_PLAYWRIGHT_MODULE` (an installed Playwright module
+path) and `MOZAIKS_E2B_SMOKE_SCREENSHOT_DIR` enable desktop/mobile UI checks.
 
 ## Non-goals
 
