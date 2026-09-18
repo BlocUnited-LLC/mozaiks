@@ -258,8 +258,6 @@ class MarketingInterviewOutput(BaseModel):
     campaign_overview: CampaignOverview
     audience_profile: AudienceProfile
     channel_strategy: List[str] = Field(description="Channels like email, linkedin, ads")
-    from typing import List, Optional
-from pydantic import BaseModel, Field
 
 class ContentItem(BaseModel):
     title: str = Field(description="Title or topic of the marketing content piece")
