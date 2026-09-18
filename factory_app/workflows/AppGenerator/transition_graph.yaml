@@ -46,6 +46,19 @@ transition_rules:
   condition_key: app_plan_outcome
   condition_value: needs_revision
   transition_target: AgentTarget
+# A blocked plan has spent its repair budget and will not improve by being asked
+# again. Without this it fell through to the unconditional terminate below, but
+# only after the task batch triggered on an empty app_task_batch_items and the
+# run died as a generic workflow_failed - discarding the four named ownership
+# errors review had already produced. Terminating here keeps the reason.
+- source_agent: AppPlanAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_plan_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 - source_agent: AppPlanAgent
   target_agent: terminate
   transition_type: after_turn
