@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from unittest.mock import AsyncMock
 
@@ -14,9 +15,11 @@ from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
 from mozaiksai.core.sandbox.preview_sessions import (
     ArtifactPreviewSessionManager,
+    PreviewCapacityError,
     _safe_relpath,
     is_valid_artifact_id,
     is_valid_sandbox_id,
+    preview_sessions_lifespan,
     resolve_preview_provider,
 )
 from mozaiksai.hosts.routers.sandbox import create_sandbox_router
@@ -145,6 +148,9 @@ async def test_only_explicit_preview_environment_is_forwarded(monkeypatch):
     adapter = FakeSandboxAdapter()
     await _create(_manager(adapter))
     env = adapter.calls[0][1]["envs"]
+    assert env["MOZAIKS_WEB_SHELL_PATH"] == "/opt/mozaiks/web_shell"
+    assert env["MOZAIKS_CHAT_UI_PATH"] == "/opt/mozaiks/chat-ui"
+    assert env["MOZAIKS_FACTORY_APP_PATH"] == "/opt/mozaiks/factory_app"
     assert env["VITE_OIDC_AUTHORITY"] == "http://local-idp"
     assert "OPENAI_API_KEY" not in env
     assert "MONGO_URI" not in env
@@ -226,6 +232,8 @@ async def test_start_uses_canonical_runtime_and_real_health_check():
     assert commands[0].endswith("preview_runtime stop")
     assert "preview-constraints.txt" in commands[1]
     assert "preview_runtime start --app-root /workspace/app" in commands[2]
+    launch = next(data for kind, data in adapter.calls if kind == "run_command" and "preview_runtime start" in data["command"])
+    assert launch["envs"] == {"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": "preview.example"}
     assert commands[3].endswith("preview_runtime check --port 3000 --app-root /workspace/app")
 
 
@@ -309,6 +317,62 @@ async def test_stop_cleans_up_even_when_websocket_is_already_closed():
     await manager.stop(state.sandbox_id)
     assert not manager._sessions and not manager._artifact_to_sandbox
     assert any(kind == "terminate_session" for kind, _ in adapter.calls)
+
+
+@pytest.mark.asyncio
+async def test_owner_and_host_limits_allow_reuse_and_release_capacity(monkeypatch):
+    monkeypatch.setenv("SANDBOX_MAX_SESSIONS", "2")
+    monkeypatch.setenv("SANDBOX_MAX_OWNER_SESSIONS", "1")
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    assert (await _create(manager)).sandbox_id == state.sandbox_id
+    with pytest.raises(PreviewCapacityError, match="existing preview"):
+        await _create(manager, "other-artifact")
+    second = await _create(manager, user_id="second")
+    with pytest.raises(PreviewCapacityError, match="capacity"):
+        await _create(manager, user_id="third")
+    await manager.stop(second.sandbox_id)
+    assert (await _create(manager, user_id="third")).session_id
+
+
+@pytest.mark.asyncio
+async def test_concurrent_creations_never_exceed_configured_capacity(monkeypatch):
+    monkeypatch.setenv("SANDBOX_MAX_SESSIONS", "1")
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    results = await asyncio.gather(*(_create(manager, user_id=str(i)) for i in range(4)), return_exceptions=True)
+    assert sum(isinstance(item, PreviewCapacityError) for item in results) == 3
+    assert len([call for call in adapter.calls if call[0] == "create_session"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_background_cleanup_and_lifespan_shutdown_release_sessions(monkeypatch):
+    import mozaiksai.core.sandbox.preview_sessions as sessions
+    manager = _manager(FakeSandboxAdapter())
+    monkeypatch.setattr(sessions, "_manager", manager)
+    async with preview_sessions_lifespan(None):
+        expired = await _create(manager)
+        expired.created_at -= timedelta(minutes=31)
+        await manager.cleanup()
+        assert not manager._sessions
+        await _create(manager)
+    assert not manager._sessions
+
+
+@pytest.mark.asyncio
+async def test_failure_terminates_sandbox_without_hiding_cleanup_outages():
+    adapter = FakeSandboxAdapter()
+    manager = _manager(adapter)
+    state = await _create(manager)
+    await manager.start(state.sandbox_id)
+    assert state.session_id is None
+    assert any(kind == "terminate_session" for kind, _ in adapter.calls)
+    other = await _create(manager)
+    adapter.terminate_session = AsyncMock(side_effect=ConnectionError())
+    await manager.start(other.sandbox_id)
+    assert other.session_id is not None
+    assert manager._sessions[other.sandbox_id] is other
 
 
 @pytest.fixture
@@ -398,3 +462,14 @@ def test_provider_failure_is_503_without_raw_error(api_client):
     response = client.post(CREATE_URL)
     assert response.status_code == 503
     assert "secret-value" not in response.text
+
+
+def test_capacity_exhaustion_returns_429_without_allocating(api_client):
+    import mozaiksai.core.sandbox.preview_sessions as sessions
+
+    client, adapter, _ = api_client
+    sessions._manager.create_or_reuse = AsyncMock(side_effect=PreviewCapacityError("Preview capacity reached"))
+    response = client.post(CREATE_URL)
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "15"
+    assert not adapter.calls

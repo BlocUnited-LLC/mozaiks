@@ -24,7 +24,7 @@ const ui = path.join(path.dirname(shell), 'chat-ui/src');
 const compiled = await build({
   entryPoints: [path.join(ui, 'core/ui/ApprovalCard.js')],
   bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic',
-  loader: { '.js': 'jsx', '.css': 'empty' },
+  loader: { '.js': 'jsx', '.css': 'empty', '.png': 'dataurl' },
   external: ['react', 'react/jsx-runtime'],
   nodePaths: [path.join(shell, 'node_modules')],
 });

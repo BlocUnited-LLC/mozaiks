@@ -22,6 +22,7 @@ from mozaiksai.core.sandbox import (
     is_valid_artifact_id,
     is_valid_sandbox_id,
 )
+from mozaiksai.core.sandbox.preview_sessions import PreviewCapacityError
 
 _logger = logging.getLogger(__name__)
 _Status = Literal["starting", "running", "error"]
@@ -97,6 +98,8 @@ def create_sandbox_router(
                     await manager.stop(state.sandbox_id)
                     raise
             return {"sandboxId": state.sandbox_id}
+        except PreviewCapacityError as exc:
+            raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "15"}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:

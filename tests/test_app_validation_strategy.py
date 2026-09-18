@@ -26,8 +26,9 @@ def test_validation_workspace_preserves_source_bytes(tmp_path, line_ending):
 
 
 @pytest.fixture(autouse=True)
-def _clean_factory_app_syspath():
+def _clean_factory_app_syspath(monkeypatch):
     """Ensure factory_app/ is on sys.path during the test and clean up imported workflow modules after."""
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
     added = _FACTORY_APP_PATH not in sys.path
     if added:
         sys.path.insert(0, _FACTORY_APP_PATH)
@@ -208,6 +209,25 @@ def test_validation_strategy_rejects_invalid_explicit_values() -> None:
 
     with pytest.raises(ValueError):
         resolve_app_validation_strategy(requested="invalid", context_value=None)
+
+
+@pytest.mark.parametrize("requested,context", [("skip", "local"), ("docker", "skip"), (None, "skip")])
+def test_operator_strategy_cannot_be_overridden_by_build_inputs(requested, context):
+    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+        resolve_app_validation_strategy,
+    )
+    strategy, reason = resolve_app_validation_strategy(
+        env={"MOZAIKS_APP_VALIDATION_STRATEGY": "e2b"}, requested=requested, context_value=context,
+    )
+    assert (strategy, reason) == ("e2b", "resolved from environment")
+
+
+def test_invalid_operator_strategy_fails_before_a_build_can_override_it():
+    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+        resolve_app_validation_strategy,
+    )
+    with pytest.raises(ValueError, match="Unsupported"):
+        resolve_app_validation_strategy(env={"MOZAIKS_APP_VALIDATION_STRATEGY": "invalid"}, requested="skip")
 
 
 def test_validate_app_build_skip_strategy_persists_context() -> None:

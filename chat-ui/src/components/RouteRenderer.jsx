@@ -359,11 +359,9 @@ function ShellChromeLayout({ children, route }) {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[var(--color-background)] text-[var(--color-text-primary)]">
-      <img
-        src={chatBackgroundSrc}
-        alt=""
-        className="fixed inset-0 -z-10 h-full w-full object-cover"
-      />
+      {chatBackgroundSrc && (
+        <img src={chatBackgroundSrc} alt="" className="fixed inset-0 -z-10 h-full w-full object-cover" />
+      )}
       {(showHeaderDesktop || showHeaderMobile) && (
         <div className={headerClassName}>
           <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} route={route} shellMode={shellMode} />

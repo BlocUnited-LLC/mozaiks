@@ -105,6 +105,7 @@ from mozaiksai.core.runtime.app.studio_summary import (
     load_build_state_from_db,
     save_build_state_to_db,
 )
+from mozaiksai.core.sandbox.preview_sessions import preview_sessions_lifespan
 from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
 from mozaiksai.core.session.build_binding import (
     BuildIdentity,
@@ -137,9 +138,11 @@ from mozaiksai.hosts.platform import (
     resolve_app_root,
 )
 from mozaiksai.hosts.routers.sandbox import create_sandbox_router
+from mozaiksai.hosts.runtime import register_app_lifespan
 
 app = platform_app.app
 register_repo_host_bootstrap(app, "studio")
+register_app_lifespan(app, preview_sessions_lifespan)
 logger = get_workflow_logger("studio_app")
 
 _BUNDLE_MAX_TEXT_FILES = 200

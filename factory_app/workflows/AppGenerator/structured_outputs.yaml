@@ -1967,6 +1967,7 @@ models:
         type: literal
         values:
         - e2b
+        - docker
         - local
         - skip
         description: Validation strategy requested or resolved for this run.
@@ -1982,7 +1983,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Preview URL to the running app (if started).
+        description: Null for disposable build validation; interactive preview sessions are managed separately.
       errors:
         type: list
         items: ValidationErrorEntry
@@ -2011,12 +2012,13 @@ models:
         type: literal
         values:
         - e2b
+        - docker
         - local
         - skip
-        description: Requested validation strategy. Use context app_validation_strategy when provided; otherwise choose skip for smoke or local/e2b when explicitly configured.
+        description: Requested validation strategy. Copy context app_validation_strategy when provided. Operator environment policy takes precedence over this request.
       start_dev_server:
         type: bool
-        description: Whether validation may start a preview/dev server when the strategy supports it.
+        description: Set false for canonical apps; interactive preview sessions are managed separately.
       timeout_seconds:
         type: int
         description: Maximum validation runtime in seconds.

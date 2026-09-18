@@ -1,6 +1,7 @@
-const DEFAULT_BRAND_LOGO_SRC = '/assets/mozaik_logo.svg';
-const DEFAULT_BRAND_LOGO_FALLBACK_SRC = '/assets/mozaik.png';
-const DEFAULT_CHAT_BACKGROUND_SRC = '/assets/chat_bg_template.png';
+import defaultBrandLogo from '../assets/mozaik.png';
+
+const DEFAULT_BRAND_LOGO_SRC = defaultBrandLogo;
+const DEFAULT_BRAND_LOGO_FALLBACK_SRC = defaultBrandLogo;
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
 
@@ -18,7 +19,7 @@ export function getBrandLoadingIconSrc(theme) {
 export function getChatBackgroundSrc(theme) {
   return isNonEmptyString(theme?.branding?.chatbackgroundImage)
     ? theme.branding.chatbackgroundImage
-    : DEFAULT_CHAT_BACKGROUND_SRC;
+    : null;
 }
 
 export function applyBrandImageFallback(event, fallbackSrc = DEFAULT_BRAND_LOGO_FALLBACK_SRC) {
@@ -36,5 +37,4 @@ export function applyBrandImageFallback(event, fallbackSrc = DEFAULT_BRAND_LOGO_
 export {
   DEFAULT_BRAND_LOGO_SRC,
   DEFAULT_BRAND_LOGO_FALLBACK_SRC,
-  DEFAULT_CHAT_BACKGROUND_SRC,
 };

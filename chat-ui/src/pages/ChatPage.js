@@ -6227,11 +6227,9 @@ const ChatPage = () => {
           context={pendingTransitionContext}
         />
       )}
-      <img
-        src={chatBackgroundSrc}
-        alt=""
-        className="z-[-10] fixed sm:-w-auto w-full h-full top-0 object-cover"
-      />
+      {chatBackgroundSrc && (
+        <img src={chatBackgroundSrc} alt="" className="z-[-10] fixed sm:-w-auto w-full h-full top-0 object-cover" />
+      )}
       <Header 
         user={user}
         chatTheme={chatTheme}

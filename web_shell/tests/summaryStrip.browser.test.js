@@ -105,7 +105,7 @@ test('SummaryStrip intrinsic layout in the browser', async (t) => {
   `;
   const bundle = await build({
     stdin: { contents: entry, resolveDir: shell, loader: 'jsx' }, bundle: true, write: false,
-    jsx: 'automatic', loader: { '.js': 'jsx' }, nodePaths: [path.join(shell, 'node_modules')],
+    jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl' }, nodePaths: [path.join(shell, 'node_modules')],
     define: { 'process.env.NODE_ENV': '"test"' },
   });
   const styles = await postcss([tailwindcss()]).process(

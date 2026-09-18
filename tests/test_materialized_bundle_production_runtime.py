@@ -84,6 +84,7 @@ async def _assemble_from_payload(
     build_timestamp: str = BUILD_TIMESTAMP,
     plan_payload: dict[str, Any] | None = None,
     task_outputs: dict[str, dict[str, Any]] | None = None,
+    captured_theme_config: dict[str, Any] | None = None,
 ) -> tuple[dict[str, str], _Context]:
     models = _load_models()
     typed_plan = models["AppBuildPlanOutput"].model_validate(plan_payload or _plan_payload())
@@ -96,6 +97,7 @@ async def _assemble_from_payload(
             "readiness_profile": "host_operator_platform",
             "evidence_mode": "local_no_spend",
             "capability_packs": _selected_packs(),
+            "captured_theme_config": captured_theme_config,
         }
     )
     plan = typed_plan.AppBuildPlan.model_dump(mode="json")

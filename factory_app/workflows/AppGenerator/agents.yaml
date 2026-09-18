@@ -2217,7 +2217,7 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Select one approved validation strategy: `e2b`, `local`, or `skip`.
+      - Select one approved validation strategy: `e2b`, `docker`, `local`, or `skip`.
       - Respect `app_validation_strategy` from context when it is provided.
       - Do not call tools. Your structured output auto-invokes the deterministic validation gate after your turn.
   - id: context
@@ -2225,11 +2225,13 @@ agents:
     content: |-
       **Upstream**:
       - Generated files are available in `generated_files` after assemble_app_tasks merges schema and task-batch output.
-      - `app_validation_strategy`: Optional workflow context override. Allowed values: `e2b`, `local`, `skip`.
+      - `app_validation_strategy`: Optional workflow context override. Allowed values: `e2b`, `docker`, `local`, `skip`. Operator environment policy takes precedence over your request.
 
       **Runtime gate**:
       - `validate_app_build` is the canonical deterministic validation entrypoint; `validate_app_bundle_from_request` auto-invokes it after your structured output validates.
       - `validate_app_bundle_from_request` runs automatically after your structured output validates.
+      - Canonical apps use the shared Mozaiks shell, not an app-owned npm project. The gate stages the canonical workspace, compiles Python, and builds the shared shell with that workspace. Do not invent package.json or custom commands to bypass these checks.
+      - Build validation is disposable and returns no live preview URL. Interactive previews belong to separate Studio sessions.
       - The runtime gate runs app validation, agent-backend checks only when agent backend context exists, module/page wiring checks, and a final module.yaml-to-backend implementation contract check.
       - The runtime gate writes `app_validation_status`, `app_validation_result`, `wiring_validation_result`, `module_implementation_validation_result`, `workflow_integration_validation_result`, `bundle_scan_result`, `integration_tests_passed`, and `integration_test_result`.
       - When AgentGenerator workflow wiring fails, the gate writes `workflow_integration_repair_status`:
@@ -2251,9 +2253,9 @@ agents:
       1. Emit AppValidationRequestCall only.
       2. If `app_validation_strategy` exists in context, copy it exactly into `validation_strategy`.
       3. If no strategy is present, choose `skip` for smoke/test contexts and `local` only when local Node validation is intentionally requested.
-      4. Set `start_dev_server` to false for `skip`; true is allowed for `e2b` or `local`.
-      5. Use `timeout_seconds` of 120 unless context requires a longer run.
-      6. Omit `commands` unless the app clearly requires custom validation commands.
+      4. Set `start_dev_server` to false.
+      5. Use `timeout_seconds` of 120. Operator policy may impose a shorter deadline.
+      6. Omit `commands` for canonical apps; the deterministic gate owns their build commands.
 
       **CRITICAL**: Output ONLY raw JSON matching AppValidationRequestCall. No markdown, no commentary.
   - id: output_format

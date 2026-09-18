@@ -45,7 +45,7 @@ test('concept review renders, submits once, rejects transport errors, and resets
   `;
   const bundle = await build({
     stdin: {contents: entry, resolveDir: shell, loader: 'jsx'}, bundle: true, write: false,
-    jsx: 'automatic', loader: {'.js': 'jsx'}, nodePaths: [path.join(shell, 'node_modules')],
+    jsx: 'automatic', loader: {'.js': 'jsx', '.png': 'dataurl'}, nodePaths: [path.join(shell, 'node_modules')],
     alias: {'@mozaiks/chat-ui': path.join(root, 'chat-ui/src')},
   });
   const styles = await postcss([tailwindcss()]).process(
