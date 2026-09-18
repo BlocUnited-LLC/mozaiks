@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
