@@ -19,6 +19,10 @@ SERVICE_PACKAGE_MARKER_PATHS = frozenset({
 # the registry they were captured against.
 POST_BASELINE_FAMILY_PATHS = SERVICE_PACKAGE_MARKER_PATHS | frozenset({
     "config/metrics.yaml",
+    # Registered after these captures for the same reason as metrics.yaml: the
+    # platform's profile-layout endpoint reads app/config/profile.yaml and the
+    # scanner was rejecting it as noncanonical.
+    "config/profile.yaml",
 })
 
 

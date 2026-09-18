@@ -87,7 +87,11 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # (config/targets.json). Aggregate identity moves because the registry digest
 # is part of it; test_service_package_markers_preserve_existing_units_and_gaps
 # proves all 61 unit bodies and all earlier gaps are still byte-identical.
-_GOLDEN_PLAN_DIGEST = "206d747ce24af3720e8155aa316005bc77aaeb25174ab15699424d1e1e282994"
+# Moved once since introduction, by registering config/profile.yaml as a
+# layout-registry family. The plan digest covers the registry, so any
+# deliberate family addition moves it; the property this test protects is
+# that a fresh interpreter derives the SAME digest, which is asserted below.
+_GOLDEN_PLAN_DIGEST = "fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be"
 
 
 def _registry():
