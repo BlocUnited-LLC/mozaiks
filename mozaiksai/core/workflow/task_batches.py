@@ -521,6 +521,23 @@ async def _execute_one_batch(
 
         ready = resolved
         if not ready:
+            if blocked_by_failed:
+                # Draining is not classification. A task whose dependency was
+                # itself drained in this pass was read from `pending` before the
+                # drain, so it was neither resolved nor blocked and is still
+                # pending - raising here would call a resolvable graph cyclic.
+                #
+                # Two-level chains hit this every time: module_contract fails,
+                # data_models is drained for depending on it, and
+                # business_services depends on both. Live error:
+                #   unresolved or cyclic dependencies:
+                #   {'business_services_habit': ['module_contract_habit',
+                #                                'data_models_habit']}
+                # all three of which were in the batch.
+                #
+                # Unreachable until failures stopped being fatal: with
+                # fail_batch the first failure raised before any drain.
+                continue
             if pending:
                 # Nothing resolved and pending is still non-empty → genuine cycle.
                 unresolved = {
