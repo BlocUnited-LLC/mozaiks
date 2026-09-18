@@ -596,8 +596,18 @@ class UnifiedWorkflowManager:
             if workflow_info.module:
                 try:
                     module_name = getattr(workflow_info.module, "__name__", "")
-                    if module_name and module_name in sys.modules:
-                        importlib.reload(workflow_info.module)
+                    # importlib.reload requires sys.modules[name] to BE this object:
+                    #     if sys.modules.get(name) is not module: raise ImportError
+                    # Checking presence instead of identity let a stale handle
+                    # through, and reload raised "module workflows.AppGenerator
+                    # not in sys.modules" about a name that was plainly there -
+                    # an error that reads like a missing module and is actually a
+                    # replaced one. Reload the object sys.modules holds now, and
+                    # keep it, so the handle stops being stale.
+                    live = sys.modules.get(module_name) if module_name else None
+                    if live is not None:
+                        reloaded = importlib.reload(live)
+                        workflow_info.module = reloaded
                         logger.info("Reloaded workflow module: %s", workflow_name)
                     else:
                         logger.debug(
