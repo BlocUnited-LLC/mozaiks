@@ -655,6 +655,7 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
     return (
         _family(ArtifactKind.APP_MANIFEST, LayoutOwner.PLATFORM, Requirement.REQUIRED, app, "app.json", ValidatorIdentifier.APP_LOADER, RuntimeConsumerIdentifier.APP_LOADER, inputs=application_inputs),
         _family(ArtifactKind.APP_CONFIG, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "config/ai.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST),
+        _family(ArtifactKind.APP_CONFIG, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "config/profile.yaml", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST),
         _family(ArtifactKind.APP_AUTH_CONFIG, LayoutOwner.PLATFORM, Requirement.CONDITIONAL, app, "config/auth.yaml", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_AUTH_ENABLED, inputs=auth_inputs),
         _family(ArtifactKind.APP_CONFIG, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "config/asset_manifest.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_ASSETS_SELECTED, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_INTEGRATIONS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/integrations.yaml", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_INTEGRATIONS_SELECTED, inputs=integration_inputs),
