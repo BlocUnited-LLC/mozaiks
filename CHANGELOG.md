@@ -50,7 +50,7 @@ This project follows a practical pre-1.0 changelog format:
 ### Changed
 
 - The optional E2B integration requires the tested 2.x code-interpreter SDK
-  (`>=2.10.0,<3`) rather than legacy SDK versions.
+  (`>=2.10.0,<3`).
 
 - Outcome-contract tools now log why they rejected a result, which attempt it
   was, and which budget ran out. A workflow that gave up previously recorded
