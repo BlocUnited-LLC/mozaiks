@@ -182,6 +182,15 @@ agents:
       - Use `module` for durable deterministic business logic under `app/modules/*`.
       - For every `module` surface, describe the deterministic action boundary clearly enough for downstream generation of `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py`.
       - Use `workflow` for agentic orchestration lanes.
+      - Declare a `workflow` surface only when the approved concept asks for one.
+        `agentic_capabilities` on the approved concept blueprint records whether the
+        user wants agentic behavior at all; when it is empty or absent, the app is
+        deterministic and the surface map must contain no `workflow` surface. An
+        opportunity you can imagine for the app is not a request the user made.
+      - This is a hard constraint, not a preference. Downstream pattern selection
+        compares its workflow partition against this surface map and rejects a
+        mismatch; a `workflow` surface the concept never asked for fails the build
+        with no path back to the user to renegotiate it.
       - Use `app_policy` for app-level declarative policy/config artifacts such as `config/subscriptions.yaml`.
       - Use `refinement` for app-owned Studio/build/session/refinement coordination that needs its own declarative refinement harness.
       - Treat `refinement` as an app-owned semantic coordination surface above workflows and modules, not as a synonym for any agentic workflow.
