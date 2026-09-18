@@ -245,12 +245,9 @@ auto-merge is not proof you signed off. Forgot on the last commit? Fix it
 before pushing with `git commit --amend -s --no-edit`; for several unsigned
 commits, `git rebase --signoff origin/main`.
 
-Primary repo ownership (avoids overlap by default):
-
-| Repo | Primary agent |
-|------|--------------|
-| `mozaiks` (OSS) | Claude Code |
-| `mozaiks-app` (hosted product) | Codex |
+Ownership is per task, not per repo: both Claude Code and Codex work in both
+repos, concurrently. Claim work with an early draft PR after checking
+`gh pr list --state open`, and work in a worktree.
 
 See `.claude/rules/multi-agent-coordination.md` for full rules.
 
