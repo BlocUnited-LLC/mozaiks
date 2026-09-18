@@ -258,3 +258,21 @@ class MarketingInterviewOutput(BaseModel):
     campaign_overview: CampaignOverview
     audience_profile: AudienceProfile
     channel_strategy: List[str] = Field(description="Channels like email, linkedin, ads")
+    from typing import List, Optional
+from pydantic import BaseModel, Field
+
+class ContentItem(BaseModel):
+    title: str = Field(description="Title or topic of the marketing content piece")
+    platform: str = Field(description="Social media platform e.g., LinkedIn, Twitter, Instagram")
+    scheduled_date: str = Field(description="Scheduled date and time for publishing")
+    content_format: str = Field(description="Format of the content e.g., text, image, video, carousel")
+    caption_or_copy: str = Field(description="Main caption or post copy")
+
+class MarketingContentCalendar(BaseModel):
+    campaign_name: str = Field(description="Name of the associated campaign")
+    content_items: List[ContentItem] = Field(description="List of scheduled content items for the calendar")
+
+class SocialAPIConfig(BaseModel):
+    platform_name: str = Field(description="Name of the social media platform")
+    api_endpoint: str = Field(description="Target API endpoint for integration")
+    integration_status: str = Field(description="Current status of the API connection e.g., active, pending")
