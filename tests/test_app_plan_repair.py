@@ -105,7 +105,10 @@ def test_the_live_failure_is_reproduced_before_repair() -> None:
 
     message = str(excinfo.value)
     assert "must match its approved surface_id" in message
-    assert "must resolve to one declared module capability" in message
+    # The ownership rejection now names the signal that disagrees and the value
+    # to set, rather than restating all three and leaving the agent to guess.
+    assert "capability_pack_id is the module directory it writes" in message
+    assert "'habits'" in message
     # One mistake, many errors - which is why re-asking the model never helped.
     # The live run produced exactly four; this fixture also drifts
     # primary_entities, so pin the shape rather than an exact count.

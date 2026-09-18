@@ -205,7 +205,8 @@ def test_product_category_is_not_an_installed_framework_pack():
 def test_module_tasks_cannot_silently_normalize_a_different_identity():
     plan = _plan()
     plan["build_tasks"][0]["capability_pack_id"] = "invented"
-    with pytest.raises(ValueError, match="module task capability_pack_id"):
+    # The rejection now names the fault: an id matching no declared capability.
+    with pytest.raises(ValueError, match="matches 0 declared capabilities"):
         validate_plan_origins(plan, _context())
 
 
