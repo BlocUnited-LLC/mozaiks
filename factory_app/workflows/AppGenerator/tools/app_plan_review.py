@@ -567,6 +567,52 @@ def _repair_page_contract_dependencies(plan: dict[str, Any], context: Any) -> li
     return repairs
 
 
+def validate_plan_dependencies(plan: dict[str, Any], context: Any) -> None:
+    """Every depends_on must name a task the plan actually declares.
+
+    Nothing checked this. The repairs above only strip dependencies on tasks
+    they themselves removed, so a task the planner never declared in the first
+    place survived review and killed the run at batch-build time instead:
+
+        AG2 turn failed for AppPlanAgent: task batch 'app_build_tasks' has
+        unresolved or cyclic dependencies: {'task_completion_4': [...]}
+
+    That is a fatal ValueError with no feedback path, so the plan is discarded
+    and the build is over. Raising here routes the same problem into the normal
+    revision loop, where the agent is told which ids are missing.
+
+    Rejecting rather than dropping the edge is deliberate. A task waiting on
+    an id that was never declared usually means the planner intended that work
+    and omitted it; silently deleting the dependency would hand back a plan
+    that looks valid and builds an app missing whatever those tasks owned.
+    """
+    tasks = plan.get("build_tasks") or []
+    declared = {
+        str(task.get("task_id"))
+        for task in tasks
+        if str(task.get("task_id") or "").strip()
+    }
+    dangling = {}
+    for task in tasks:
+        missing = [
+            str(dep)
+            for dep in (task.get("depends_on") or [])
+            if str(dep).strip() and str(dep) not in declared
+        ]
+        if missing:
+            dangling[str(task.get("task_id"))] = missing
+    if not dangling:
+        return
+    detail = "; ".join(
+        f"{task_id} waits on {missing}" for task_id, missing in sorted(dangling.items())
+    )
+    raise ValueError(
+        "Every depends_on must name a task_id this plan declares. "
+        f"{detail}. Either declare the missing tasks, or drop the dependency "
+        "if the work is already covered by a task that is present."
+    )
+
+
 def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
     available = _context_available_pack_map(context)
     packs = plan.get("capability_packs") or []
@@ -691,6 +737,7 @@ def review_app_build_plan(
             *_repair_page_contract_dependencies(plan, context_variables),
         ):
             logger.info("[AppGenerator] plan repaired: %s", repair)
+        validate_plan_dependencies(plan, context_variables)
         validate_plan_origins(plan, context_variables)
         validate_plan_coverage(plan, context_variables)
         app_build_plan(AppBuildPlan=plan, context_variables=context_variables)
