@@ -16,8 +16,20 @@ const path = require('node:path');
         await page.getByRole('heading', { name: 'Reports', exact: true }).waitFor({ timeout: 30000 });
         const reports = name === 'desktop' ? page.getByRole('table') : page.locator('article');
         await reports.getByText('Readiness', { exact: true }).waitFor({ timeout: 30000 });
+        await page.getByText('Deterministic Reports', { exact: true }).first().waitFor({ timeout: 30000 });
+        await page.evaluate(() => document.fonts.ready);
+        await page.waitForFunction(() => Array.from(document.images).every(img => {
+          const rect = img.getBoundingClientRect();
+          const inViewport = rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+          return !inViewport || !img.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+            || (img.complete && img.naturalWidth > 0);
+        }));
       } catch (error) {
         console.log(`${name} failed UI:`, await page.locator('body').innerText(), errors);
+        console.log('Image diagnostics:', await page.locator('img').evaluateAll(images => images.map(img => ({
+          src: img.src, visible: img.checkVisibility({ opacityProperty: true, visibilityProperty: true }),
+          complete: img.complete, naturalWidth: img.naturalWidth, rect: img.getBoundingClientRect().toJSON(),
+        }))));
         await page.screenshot({ path: path.join(process.argv[4], `${name}-failed.png`), fullPage: true });
         throw error;
       }

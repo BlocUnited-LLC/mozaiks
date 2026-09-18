@@ -1352,7 +1352,7 @@ definitions:
     type: string
     description: >
       Requested validation strategy for AppGenerator code validation. Allowed values:
-      e2b | local | skip. Null lets the validation tool resolve a runtime-appropriate
+      e2b | docker | local | skip. Null lets the validation tool resolve a runtime-appropriate
       default.
     source:
       type: state

@@ -20,8 +20,8 @@ by selecting `skip`, `local`, or another provider. Invalid operator values fail.
 
 | Strategy | Runs where | Preview URL | Cost | Intended for |
 |----------|-----------|-------------|------|--------------|
-| `e2b` | Hosted e2b cloud sandbox | yes | per sandbox-minute (COGS) | Hosted product — browser-only users |
-| `docker` | Local Docker container | yes (published preview ports, random host binding) | free | OSS self-hosters / local dev |
+| `e2b` | Hosted e2b cloud sandbox | separate Studio session | per sandbox-minute (COGS) | Hosted product — browser-only users |
+| `docker` | Local Docker container | separate Studio session | free | OSS self-hosters / local dev |
 | `local` | Current machine (npm) | no | free | Quick local checks without Docker |
 | `skip` | — | no | — | CI/deterministic tests; integration checks still gate export |
 
@@ -29,6 +29,16 @@ All sandbox strategies route through the `SandboxPort` seam
 (`mozaiksai/core/ports/sandbox.py`, Tier 1 stable) and its adapters.
 Sandboxes are **ephemeral workspaces, never truth stores** — outcomes
 persist into build records; the sandbox itself is disposable.
+
+Canonical app bundles do not own an npm project. Build validation stages bundle
+members into the existing standalone workspace layout, compiles generated Python,
+and builds the packaged shared web shell against that app workspace. Agent-provided
+commands cannot replace these checks. The same checks run for Docker, E2B, and
+explicit local validation; local validation requires installed shared shell dependencies.
+Compilation does not bind or invent app identity before export. Static acceptance
+still checks schemas, references, module implementation, and runtime loading.
+Interactive runtime/browser acceptance is a separate step, not implied by a build.
+One-shot validation always terminates its sandbox and returns `preview_url: null`.
 
 ## Operating Rule
 

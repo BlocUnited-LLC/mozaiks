@@ -26,8 +26,9 @@ def test_validation_workspace_preserves_source_bytes(tmp_path, line_ending):
 
 
 @pytest.fixture(autouse=True)
-def _clean_factory_app_syspath():
+def _clean_factory_app_syspath(monkeypatch):
     """Ensure factory_app/ is on sys.path during the test and clean up imported workflow modules after."""
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
     added = _FACTORY_APP_PATH not in sys.path
     if added:
         sys.path.insert(0, _FACTORY_APP_PATH)

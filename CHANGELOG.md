@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Factory build validation stages canonical workspaces and compiles their Python
+  and shared shell rather than expecting app-owned npm projects. Validation agent
+  schemas and prompts now include the runtime's Docker strategy.
+
 - Explicit server-side app validation strategy now takes precedence over tool
   and workflow inputs. E2B preview polling no longer renews sandbox lifetime;
   failed/expired previews and graceful shutdown attempt provider cleanup.

@@ -40,6 +40,24 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def sandbox_workspace_root(provider: str) -> str:
+    root = "/workspace" if provider == "docker" else os.getenv("SANDBOX_WORKDIR", "/home/user/app")
+    path = PurePosixPath(root)
+    if not path.is_absolute() or str(path) == "/" or ".." in path.parts or "\x00" in root:
+        raise ValueError("SANDBOX_WORKDIR must be an absolute sandbox path")
+    return str(path).rstrip("/")
+
+
+def sandbox_resource_environment() -> dict[str, str]:
+    # Dockerfile ENV is build-time only in E2B; credentials require explicit opt-in.
+    return {
+        "MOZAIKS_WEB_SHELL_PATH": "/opt/mozaiks/web_shell",
+        "MOZAIKS_CHAT_UI_PATH": "/opt/mozaiks/chat-ui",
+        "MOZAIKS_FACTORY_APP_PATH": "/opt/mozaiks/factory_app",
+        **{name[len(_ENV_PREFIX):]: value for name, value in os.environ.items() if name.startswith(_ENV_PREFIX)},
+    }
+
+
 def _safe_relpath(raw: str) -> str | None:
     value = str(raw or "").replace("\\", "/")
     path = PurePosixPath(value)
@@ -113,8 +131,7 @@ class ArtifactPreviewSessionManager:
             raise ValueError("Sandbox session limits must be nonnegative")
 
     def _workdir(self, provider: str) -> str:
-        root = "/workspace" if provider == "docker" else os.getenv("SANDBOX_WORKDIR", "/home/user/app")
-        return root.rstrip("/")
+        return sandbox_workspace_root(provider)
 
     def _adapter(self, provider: str) -> SandboxPort:
         resolved_provider, adapter = self._provider_resolver()
@@ -172,14 +189,7 @@ class ArtifactPreviewSessionManager:
                 target_app_id=target_app_id, build_registry_id=build_registry_id,
                 provider=provider, created_at=_utcnow(),
             )
-            # The host never forwards its own environment or credentials implicitly.
-            # E2B Dockerfile ENV applies at build time, not to created sessions.
-            envs = {
-                "MOZAIKS_WEB_SHELL_PATH": "/opt/mozaiks/web_shell",
-                "MOZAIKS_CHAT_UI_PATH": "/opt/mozaiks/chat-ui",
-                "MOZAIKS_FACTORY_APP_PATH": "/opt/mozaiks/factory_app",
-                **{name[len(_ENV_PREFIX):]: value for name, value in os.environ.items() if name.startswith(_ENV_PREFIX)},
-            }
+            envs = sandbox_resource_environment()
             info = await adapter.create_session(
                 template=self._template, timeout_seconds=self._ttl_minutes * 60,
                 envs=envs,

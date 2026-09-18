@@ -17,6 +17,8 @@ import json
 import logging
 import os
 import re
+import shlex
+import subprocess
 import sys
 import tempfile
 
@@ -72,7 +74,7 @@ def _safe_relpath(raw: str) -> str | None:
     p = PurePosixPath(path)
     if p.is_absolute():
         return None
-    if any(part in {".."} for part in p.parts):
+    if any(part in {".."} for part in p.parts) or ":" in path or "\x00" in path or str(p) == ".":
         return None
     return str(p)
 
@@ -951,6 +953,41 @@ def validate_module_implementation_contract(files: dict[str, str]) -> dict[str, 
     }
 
 
+def _canonical_workspace_files(files: dict[str, str]) -> dict[str, str]:
+    from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
+
+    staged: dict[str, str] = {}
+    for path, content in files.items():
+        if not _safe_relpath(path):
+            raise ValueError("Invalid app validation file path")
+        destination = app_bundle_workspace_path(path)
+        if destination in staged:
+            raise ValueError("Conflicting app validation file destinations")
+        staged[destination] = content
+    return staged
+
+
+def _canonical_build_steps(root: str, shell: str, *, sandbox: bool) -> list[tuple[str, str]]:
+    join = shlex.join if sandbox or os.name != "nt" else subprocess.list2cmdline
+    python = "python" if sandbox else sys.executable
+    return [
+        (join([python, "-m", "compileall", "-q", "."]), root),
+        (join(["node", f"{shell}/node_modules/vite/bin/vite.js", "build", "--outDir", f"{root}/build"]), shell),
+    ]
+
+
+def _canonical_build_environment(root: str) -> dict[str, str]:
+    return {
+        "PLATFORM_PATH": f"{root}/app",
+        "MOZAIKS_APP_WORKSPACE_PATH": root,
+        "MOZAIKS_WORKFLOWS_PATH": f"{root}/workflows",
+        "MOZAIKS_HOST": "platform",
+        "VITE_MOZAIKS_HOST": "platform",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "CI": "1",
+    }
+
+
 async def _run_sandbox_validation(
     *,
     strategy: str,
@@ -968,6 +1005,10 @@ async def _run_sandbox_validation(
     outcome is durable evidence rather than an ephemeral local variable.
     """
     from mozaiksai.core.adapters import get_sandbox_adapter
+    from mozaiksai.core.sandbox.preview_sessions import (
+        sandbox_resource_environment,
+        sandbox_workspace_root,
+    )
 
     try:
         adapter = get_sandbox_adapter(strategy)
@@ -981,6 +1022,15 @@ async def _run_sandbox_validation(
     result = _base_result(strategy=strategy, status="passed")
     session_id: str | None = None
     try:
+        canonical = "app.json" in resolved_files
+        root = sandbox_workspace_root(strategy) if canonical else None
+        staged = _canonical_workspace_files(resolved_files) if canonical else resolved_files
+        resource_env = sandbox_resource_environment() if canonical else {}
+        build_env = _canonical_build_environment(root) if root is not None else {}
+        steps = (
+            _canonical_build_steps(root, resource_env["MOZAIKS_WEB_SHELL_PATH"], sandbox=True)
+            if root is not None else [(cmd, None) for cmd in commands]
+        )
         if strategy == "e2b" and os.getenv("E2B_TIMEOUT"):
             configured_timeout = int(os.environ["E2B_TIMEOUT"])
             if configured_timeout <= 0:
@@ -989,15 +1039,18 @@ async def _run_sandbox_validation(
         session = await adapter.create_session(
             timeout_seconds=timeout_seconds,
             metadata=session_metadata or {"purpose": "app_validation"},
+            **({"envs": {**resource_env, **build_env}} if canonical else {}),
         )
         session_id = session.session_id
         result["sandbox_session_id"] = session_id
         result["sandbox_provider"] = session.provider
 
-        await adapter.write_files(session_id=session_id, files=resolved_files)
+        await adapter.write_files(session_id=session_id, files=staged, **({"cwd": root} if root is not None else {}))
 
-        for cmd in commands:
+        for cmd, cwd in steps:
             if not _is_safe_build_command(cmd):
+                if canonical:
+                    raise ValueError("Invalid canonical build command configuration")
                 result["warnings"].append(
                     f"Skipped unsafe validation command (contains shell metacharacters): {cmd!r}"
                 )
@@ -1006,6 +1059,7 @@ async def _run_sandbox_validation(
                 session_id=session_id,
                 command=cmd,
                 timeout_seconds=float(timeout_seconds),
+                **({"cwd": cwd, "envs": build_env} if cwd is not None else {}),
             )
             _append_command_output(
                 result,
@@ -1025,7 +1079,7 @@ async def _run_sandbox_validation(
 
         result["parsed_errors"] = parse_build_errors(result.get("build_output", ""))
 
-        if result["validation_status"] == "passed":
+        if not canonical and result["validation_status"] == "passed":
             try:
                 pkg_content = await adapter.read_file(session_id=session_id, path="package.json")
                 scripts = _read_package_scripts_from_text(str(pkg_content))
@@ -1041,7 +1095,7 @@ async def _run_sandbox_validation(
             except Exception:
                 pass
 
-        if result["validation_status"] == "passed" and start_dev_server:
+        if not canonical and result["validation_status"] == "passed" and start_dev_server:
             try:
                 preview_port = int(os.getenv("SANDBOX_PREVIEW_PORT", "3000"))
                 try:
@@ -1111,17 +1165,30 @@ async def _run_local_validation(
     try:
         with tempfile.TemporaryDirectory(prefix="mozaiks-app-validation-") as temp_dir:
             root = Path(temp_dir)
-            _write_files_to_dir(root, resolved_files)
+            canonical = "app.json" in resolved_files
+            _write_files_to_dir(root, _canonical_workspace_files(resolved_files) if canonical else resolved_files)
+            if canonical:
+                from mozaiksai.resources import resolve_web_shell_root
 
-            for cmd in commands:
+                shell = resolve_web_shell_root()
+                if shell is None or not (shell / "node_modules/vite/bin/vite.js").is_file():
+                    raise ValueError("Install shared web shell dependencies before local app validation")
+                env.update(_canonical_build_environment(root.as_posix()))
+                steps = _canonical_build_steps(root.as_posix(), shell.as_posix(), sandbox=False)
+            else:
+                steps = [(cmd, str(root)) for cmd in commands]
+
+            for cmd, cwd in steps:
                 if not _is_safe_build_command(cmd):
+                    if canonical:
+                        raise ValueError("Invalid canonical build command configuration")
                     result["warnings"].append(
                         f"Skipped unsafe validation command (contains shell metacharacters): {cmd!r}"
                     )
                     continue
                 exit_code, stdout, stderr = await _run_local_command(
                     command=cmd,
-                    cwd=root,
+                    cwd=Path(cwd),
                     timeout_seconds=timeout_seconds,
                     env=env,
                 )
@@ -1136,7 +1203,7 @@ async def _run_local_validation(
 
             result["parsed_errors"] = parse_build_errors(result.get("build_output", ""))
 
-            if result["validation_status"] == "passed":
+            if not canonical and result["validation_status"] == "passed":
                 scripts = _read_package_scripts_from_dir(root)
                 if "test" in scripts:
                     exit_code, stdout, stderr = await _run_local_command(

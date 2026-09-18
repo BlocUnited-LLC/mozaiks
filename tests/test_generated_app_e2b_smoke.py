@@ -50,6 +50,13 @@ async def test_factory_materialized_app_runs_in_e2b_and_is_terminated(monkeypatc
     manifest = json.loads(files["app.json"])
     manifest["appId"] = "deterministic-reports"
     files["app.json"] = json.dumps(manifest)
+    from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_build
+
+    monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "e2b")
+    validation = await validate_app_build(files, start_dev_server=False)
+    assert validation["validation_status"] == "passed", validation
+    assert validation["sandbox_terminated"] and validation["preview_url"] is None
+    print(f"E2B Factory build validation passed and terminated session={validation['sandbox_session_id']}", flush=True)
     adapter = E2BSandboxAdapter()
     manager = ArtifactPreviewSessionManager(provider_resolver=lambda: ("e2b", adapter))
     state = await manager.create_or_reuse(
