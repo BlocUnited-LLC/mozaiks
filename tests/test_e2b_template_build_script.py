@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.build_e2b_preview_template import REPO_ROOT, _build_log, build_template
+from scripts.build_e2b_preview_template import _build_log, build_template
 
 
 def test_e2b_template_build_defaults_to_a_safe_dry_run(tmp_path: Path) -> None:
@@ -41,7 +41,7 @@ def test_e2b_template_name_is_closed_and_lowercase(tmp_path: Path) -> None:
         raise AssertionError("invalid E2B template name was accepted")
 
 
-def test_e2b_template_build_uses_repository_as_copy_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_e2b_template_build_uses_stable_minimal_copy_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     dockerfile = tmp_path / "Dockerfile.preview"
     dockerfile.write_text("FROM python:3.12-slim\nCOPY pyproject.toml /app/\n", encoding="utf-8")
     captured: dict[str, object] = {}
@@ -56,6 +56,10 @@ def test_e2b_template_build_uses_repository_as_copy_context(tmp_path: Path, monk
 
         @staticmethod
         def build(template, **kwargs):
+            context_root = Path(captured["file_context_path"])
+            captured["has_dockerfile"] = (context_root / "Dockerfile.preview").is_file()
+            captured["has_pyproject"] = (context_root / "pyproject.toml").is_file()
+            captured["has_git"] = (context_root / ".git").exists()
             return SimpleNamespace(template_id="template-id", build_id="build-id")
 
     monkeypatch.setitem(sys.modules, "e2b", SimpleNamespace(Template=FakeTemplate))
@@ -70,7 +74,11 @@ def test_e2b_template_build_uses_repository_as_copy_context(tmp_path: Path, monk
     )
 
     assert result["status"] == "built"
-    assert captured["file_context_path"] == REPO_ROOT
+    context_root = Path(captured["file_context_path"])
+    assert context_root != tmp_path
+    assert captured["has_dockerfile"] is True
+    assert captured["has_pyproject"] is True
+    assert captured["has_git"] is False
 
 
 def test_e2b_build_log_replaces_symbols_unsupported_by_windows_console(

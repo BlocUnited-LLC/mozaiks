@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DOCKERFILE = REPO_ROOT / "infra" / "docker" / "Dockerfile.preview"
 DEFAULT_TEMPLATE_NAME = "mozaiks-preview"
 
+# Keep hosted uploads stable and bounded. The live checkout contains mutable
+# worktrees, caches, logs, and generated artifacts that must not be part of a
+# preview image build context.
+_PREVIEW_CONTEXT_FILES = ("pyproject.toml", "setup.py", "MANIFEST.in", "README.md", "LICENSE")
+_PREVIEW_CONTEXT_DIRECTORIES = (
+    "mozaiks",
+    "mozaiksai",
+    "mozaiks_cli",
+    "logs",
+    "factory_app",
+    "web_shell",
+    "chat-ui",
+)
+
 
 def _build_log(entry: Any) -> None:
     message = getattr(entry, "message", None) or getattr(entry, "text", None) or str(entry)
@@ -27,6 +43,29 @@ def _build_log(entry: Any) -> None:
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
     safe_message = str(message).encode(encoding, errors="replace").decode(encoding, errors="replace")
     print(safe_message, flush=True)
+
+
+def _stage_preview_context(dockerfile: Path) -> tempfile.TemporaryDirectory[str]:
+    context = tempfile.TemporaryDirectory(prefix="mozaiks-e2b-preview-")
+    context_root = Path(context.name)
+    for relative_path in _PREVIEW_CONTEXT_FILES:
+        source = REPO_ROOT / relative_path
+        if not source.is_file():
+            context.cleanup()
+            raise FileNotFoundError(f"E2B preview context file not found: {source}")
+        shutil.copy2(source, context_root / relative_path)
+    for relative_path in _PREVIEW_CONTEXT_DIRECTORIES:
+        source = REPO_ROOT / relative_path
+        if not source.is_dir():
+            context.cleanup()
+            raise FileNotFoundError(f"E2B preview context directory not found: {source}")
+        shutil.copytree(
+            source,
+            context_root / relative_path,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+        )
+    shutil.copy2(dockerfile, context_root / "Dockerfile.preview")
+    return context
 
 
 def build_template(
@@ -63,14 +102,21 @@ def build_template(
     except ImportError as exc:
         raise RuntimeError("Install the E2B extra before building: pip install 'mozaiks[e2b]'") from exc
 
-    template = Template(file_context_path=REPO_ROOT).from_dockerfile(str(dockerfile))
-    result = Template.build(
-        template,
-        alias=template_name,
-        cpu_count=cpu_count,
-        memory_mb=memory_mb,
-        on_build_logs=_build_log,
-    )
+    context = _stage_preview_context(dockerfile)
+    try:
+        context_root = Path(context.name)
+        template = Template(file_context_path=context_root).from_dockerfile(
+            str(context_root / "Dockerfile.preview")
+        )
+        result = Template.build(
+            template,
+            alias=template_name,
+            cpu_count=cpu_count,
+            memory_mb=memory_mb,
+            on_build_logs=_build_log,
+        )
+    finally:
+        context.cleanup()
     return {
         "status": "built",
         "template_name": template_name,
