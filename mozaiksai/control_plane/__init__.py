@@ -78,6 +78,10 @@ from .contracts import (
     StagedPatchProposal,
     safe_artifact_relpath,
 )
+from .execution_context import (
+    ApprovedExecutionContext,
+    build_coding_request_from_execution_context,
+)
 from .executor import (
     ControlPlaneToolExecutionError,
     ControlPlaneToolExecutor,
@@ -255,6 +259,8 @@ __all__ = [
     "ControlPlaneToolExecutor",
     "ControlPlaneToolExecutorPort",
     "ControlPlaneToolResult",
+    "ApprovedExecutionContext",
+    "build_coding_request_from_execution_context",
     "ControlPlaneToolsManifest",
     "ContextRefreshLaunchResult",
     "ContextRefreshLaunchStatus",
