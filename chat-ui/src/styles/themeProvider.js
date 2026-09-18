@@ -238,7 +238,7 @@ const BARE_FALLBACK_THEME = {
   },
   branding: {
     name: 'App',
-    chatbackgroundImage: '/assets/chat_bg_template.png',
+    chatbackgroundImage: null,
     loadingIcon: null,
   },
   primitives: THEME_TOKEN_DEFAULTS.primitives,
@@ -722,7 +722,7 @@ function themeConfigToTheme(config, basePath) {
   // --- Fallback warnings ---
   const _bn = identity.name || 'theme';
   if (!assets.chatbackgroundImage)
-    console.warn(`⚠️ [THEME] [${_bn}] assets.chatbackgroundImage not set — using fallback: chat_bg_template.png`);
+    console.warn(`⚠️ [THEME] [${_bn}] assets.chatbackgroundImage not set — using solid background`);
   if (!assets.logo)
     console.warn(`⚠️ [THEME] [${_bn}] assets.logo not set — header logo will be missing`);
   if (!assets.favicon)

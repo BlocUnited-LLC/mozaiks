@@ -39,6 +39,9 @@ Compilation does not bind or invent app identity before export. Static acceptanc
 still checks schemas, references, module implementation, and runtime loading.
 Interactive runtime/browser acceptance is a separate step, not implied by a build.
 One-shot validation always terminates its sandbox and returns `preview_url: null`.
+The shared shell bundles its fallback logo and does not require undeclared
+app-owned background images. Existing preview templates must be rebuilt to pick
+up frontend changes; host-side lifecycle updates do not update template contents.
 
 ## Operating Rule
 

@@ -1,4 +1,4 @@
-"""Opt-in paid runtime smoke, not a live-LLM generation journey."""
+"""Opt-in canonical runtime smokes, not a live-LLM generation journey."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from mozaiksai.core.adapters.docker_sandbox import DockerSandboxAdapter
 from mozaiksai.core.adapters.e2b_sandbox import E2BSandboxAdapter
 from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
 from tests.test_continuous_deterministic_materialization import _load_models, _typed_task_outputs
@@ -28,12 +29,26 @@ def _request(url, payload=None):
         return json.load(response)
 
 
+async def _assert_absent(provider, session_id):
+    if provider == "e2b":
+        from e2b import Sandbox
+        from e2b.exceptions import NotFoundException
+
+        with pytest.raises(NotFoundException):
+            await asyncio.to_thread(Sandbox.get_info, session_id)
+    else:
+        result = await asyncio.to_thread(subprocess.run, ["docker", "inspect", session_id], capture_output=True, text=True)
+        assert result.returncode != 0 and "No such" in result.stderr
+
+
 @pytest.mark.asyncio
 @pytest.mark.flaky(reruns=0)
-async def test_factory_materialized_app_runs_in_e2b_and_is_terminated(monkeypatch):
-    if os.getenv("MOZAIKS_RUN_GENERATED_APP_E2B_SMOKE") != "1":
-        pytest.skip("set MOZAIKS_RUN_GENERATED_APP_E2B_SMOKE=1 to authorize the paid smoke")
-    assert os.getenv("E2B_API_KEY") and os.getenv("E2B_TEMPLATE")
+@pytest.mark.parametrize("provider", ["e2b", "docker"])
+async def test_factory_materialized_app_builds_runs_and_is_terminated(monkeypatch, provider):
+    if os.getenv(f"MOZAIKS_RUN_GENERATED_APP_{provider.upper()}_SMOKE") != "1":
+        pytest.skip(f"set MOZAIKS_RUN_GENERATED_APP_{provider.upper()}_SMOKE=1 to authorize this smoke")
+    if provider == "e2b":
+        assert os.getenv("E2B_API_KEY") and os.getenv("E2B_TEMPLATE")
     monkeypatch.setenv("SANDBOX_TTL_MINUTES", "5")
     monkeypatch.setenv("SANDBOX_MAX_SESSIONS", "1")
     monkeypatch.delenv("SANDBOX_TEMPLATE", raising=False)
@@ -51,25 +66,31 @@ async def test_factory_materialized_app_runs_in_e2b_and_is_terminated(monkeypatc
     manifest["appId"] = "deterministic-reports"
     files["app.json"] = json.dumps(manifest)
     from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_build
+    from mozaiksai.core import adapters
 
-    monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "e2b")
+    adapter = (
+        E2BSandboxAdapter() if provider == "e2b"
+        else DockerSandboxAdapter(image=os.environ["MOZAIKS_SMOKE_DOCKER_IMAGE"])
+    )
+    monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda _: adapter)
+    monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", provider)
     validation = await validate_app_build(files, start_dev_server=False)
     assert validation["validation_status"] == "passed", validation
     assert validation["sandbox_terminated"] and validation["preview_url"] is None
-    print(f"E2B Factory build validation passed and terminated session={validation['sandbox_session_id']}", flush=True)
-    adapter = E2BSandboxAdapter()
-    manager = ArtifactPreviewSessionManager(provider_resolver=lambda: ("e2b", adapter))
+    await _assert_absent(provider, validation["sandbox_session_id"])
+    print(f"{provider} Factory build validation passed and terminated session={validation['sandbox_session_id']}", flush=True)
+    manager = ArtifactPreviewSessionManager(provider_resolver=lambda: (provider, adapter))
     state = await manager.create_or_reuse(
         "runtime-smoke", app_id="factory", user_id="smoke", target_app_id="deterministic-reports",
         build_registry_id="runtime-smoke",
     )
     session_id = state.session_id
-    print(f"E2B smoke allocated session={session_id}", flush=True)
+    print(f"{provider} smoke allocated session={session_id}", flush=True)
     try:
         await manager.sync(state.sandbox_id, [{"path": path, "content": text} for path, text in files.items()], [])
         await manager.start(state.sandbox_id)
         assert state.status == "running", state.last_error
-        print(f"E2B smoke preview={state.preview_url}", flush=True)
+        print(f"{provider} smoke preview={state.preview_url}", flush=True)
         health = await asyncio.to_thread(_request, f"{state.preview_url}/api/health")
         assert health["status"] == "healthy"
         page = await asyncio.to_thread(_request, f"{state.preview_url}/api/pages/reports")
@@ -88,10 +109,6 @@ async def test_factory_materialized_app_runs_in_e2b_and_is_terminated(monkeypatc
             )
     finally:
         await manager.stop(state.sandbox_id)
-        assert not manager._sessions and not adapter._sessions
-        from e2b import Sandbox
-        from e2b.exceptions import NotFoundException
-
-        with pytest.raises(NotFoundException):
-            await asyncio.to_thread(Sandbox.get_info, session_id)
-        print(f"E2B smoke termination confirmed session={session_id}", flush=True)
+        assert not manager._sessions
+        await _assert_absent(provider, session_id)
+        print(f"{provider} smoke termination confirmed session={session_id}", flush=True)
