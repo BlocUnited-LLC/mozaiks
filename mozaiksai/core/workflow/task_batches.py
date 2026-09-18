@@ -380,9 +380,14 @@ async def execute_task_batches_for_trigger(
         if not task_items:
             if wf_logger:
                 # A batch that finds nothing to do is the difference between a
-                # build that generates an app and one that silently does not.
-                wf_logger.info(
-                    "[TASK_BATCH] %s produced no task items from %s",
+                # build that generates an app and one that silently does not -
+                # which is exactly why this cannot be INFO. A live run ended
+                # here, the workflow failed with a generic workflow_failed, and
+                # the real reason (plan review had rejected the plan with four
+                # named ownership errors) was three thousand log lines earlier.
+                wf_logger.warning(
+                    "[TASK_BATCH] %s produced no task items from %s; "
+                    "the agent that populates it did not, so nothing will be built",
                     batch.id,
                     batch.source.path,
                 )
