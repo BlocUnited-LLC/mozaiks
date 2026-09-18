@@ -22,6 +22,13 @@ CANONICAL_APP_CONFIG_FILES = frozenset(
         "config/asset_manifest.json",
         "config/integrations.yaml",
         APP_METRICS_CONFIG_PATH,
+        # Read by the platform's profile-layout endpoint, which resolves
+        # app_root / "config" / "profile.yaml" and falls back to "top_nav".
+        # AppGenerator is told to write it ("this IS written to the generated
+        # app as app/config/profile.yaml"), the runtime consumes it, and the
+        # bundle scanner rejected it as noncanonical - failing every bundle
+        # that followed the instruction.
+        "config/profile.yaml",
         APP_REFINEMENT_POLICY_CONFIG_PATH,
         "config/shell.json",
         "config/subscriptions.yaml",
