@@ -717,8 +717,29 @@ def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
             continue
         pack_id = task.get("capability_pack_id")
         matching = [pack for pack in packs if _pack_id_from_descriptor(pack) == pack_id]
-        if len(matching) != 1 or module_ids != {pack_id} or task.get("surface_id") != matching[0].get("surface_id"):
-            errors.append(f"{task.get('task_id')}: module task capability_pack_id={pack_id!r}, surface_id={task.get('surface_id')!r}, path modules={sorted(module_ids)} must resolve to one declared module capability")
+        task_id = task.get("task_id")
+        # One message for three different faults told the agent a disagreement
+        # existed but not which signal was wrong or what to set it to. A live
+        # build spent all three revision attempts re-emitting the same mismatch.
+        if len(matching) != 1:
+            declared = sorted({str(_pack_id_from_descriptor(pack)) for pack in packs})
+            errors.append(
+                f"{task_id}: capability_pack_id={pack_id!r} matches "
+                f"{len(matching)} declared capabilities; it must name exactly one of {declared}"
+            )
+        elif module_ids != {pack_id}:
+            errors.append(
+                f"{task_id}: this task owns {sorted(module_ids)} under modules/ and declares "
+                f"surface_id={task.get('surface_id')!r}, but claims capability_pack_id={pack_id!r}. "
+                "A module task's capability_pack_id is the module directory it writes. Set it to "
+                f"{sorted(module_ids)[0]!r}, or move the files to the module that capability owns."
+            )
+        elif task.get("surface_id") != matching[0].get("surface_id"):
+            errors.append(
+                f"{task_id}: surface_id={task.get('surface_id')!r} disagrees with capability "
+                f"{pack_id!r}, which declares surface_id={matching[0].get('surface_id')!r}. "
+                "Use the capability's surface_id."
+            )
 
     if errors:
         raise ValueError("Plan ownership errors:\n- " + "\n- ".join(errors))
