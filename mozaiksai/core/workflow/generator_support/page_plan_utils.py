@@ -159,12 +159,22 @@ def resolve_modal_action_targets(document: Any) -> int:
             enclosing = str(node["id"])
         if node.get("action_type") == "event" and node.get("event_type") in _MODAL_EVENT_TYPES:
             payload = node.get("payload")
+            # An action that names no payload at all is the commonest shape of
+            # this defect, and it used to be the one shape this skipped: the
+            # enclosing Modal is just as unambiguous whether the payload is
+            # empty or absent. A live build lost its whole repair budget to four
+            # such actions, each inside a Modal this function could see.
+            if payload is None:
+                payload = {}
             if isinstance(payload, dict):
                 current = payload.get("modal_id")
                 if not isinstance(current, str) or current not in modal_ids:
                     target = enclosing or sole_modal
                     if target:
                         payload["modal_id"] = target
+                        # Attach only once there is something to carry, so an
+                        # unresolvable action is left exactly as it was found.
+                        node["payload"] = payload
                         fixed += 1
         for value in node.values():
             walk(value, enclosing)
