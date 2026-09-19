@@ -1,5 +1,6 @@
 import ast
 import json
+import logging
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 
@@ -7,6 +8,7 @@ import yaml
 from pydantic import Field
 
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
@@ -26,6 +28,8 @@ from .materialize_app_config_contracts import materialize_app_config_contracts
 from .resolve_managed_capability_templates import resolve_managed_capability_templates
 from .save_app_schema import resolve_app_theme_config
 
+logger = logging.getLogger(__name__)
+
 
 def _is_truthy(value: Any) -> bool:
     if isinstance(value, bool):
@@ -35,9 +39,30 @@ def _is_truthy(value: Any) -> bool:
     return bool(value)
 
 
+def _failed_batch_task_ids(task_results: Any) -> set[str]:
+    """Task ids the batch recorded as failed, from either record it writes.
+
+    `_build_batch_outputs` writes both `_failed` (id -> detail) and
+    `_meta.failed_tasks` (id list); read both so a shape change in one does not
+    silently turn a partial build back into a hard stop.
+    """
+    if not isinstance(task_results, dict):
+        return set()
+    failed: set[str] = set()
+    raw_failed = task_results.get("_failed")
+    if isinstance(raw_failed, dict):
+        failed.update(str(task_id) for task_id in raw_failed)
+    meta = task_results.get("_meta")
+    if isinstance(meta, dict):
+        for task_id in meta.get("failed_tasks") or []:
+            failed.add(str(task_id))
+    return failed
+
+
 def _apply_planned_page_contracts(
     code_files: list[dict[str, Any]],
     app_build_plan: Any,
+    failed_task_ids: set[str] | None = None,
 ) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
@@ -53,16 +78,40 @@ def _apply_planned_page_contracts(
 
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename") and f.get("content") is not None}
     modules = module_action_index(file_map)
+    failed_tasks = failed_task_ids or set()
     for task in tasks:
         if str(task.get("task_type") or "").strip() != "page_bundle":
             continue
+        task_id = str(task.get("task_id") or "").strip()
         for raw_path in task.get("owned_paths") or []:
-            path = str(raw_path or "").replace("\\", "/").strip()
+            # file_map keys are safe_relpath-canonical because every producer
+            # runs them through it. Canonicalize this side with the same rule so
+            # a plan path written as "./ui/pages/x.yaml" still matches the file
+            # the worker emitted as "ui/pages/x.yaml".
+            path = safe_relpath(str(raw_path or ""))
+            if not path:
+                continue
             stem = _page_stem_from_path(path)  # type: ignore[assignment]
             if not stem or stem not in planned_by_stem:
                 continue
             if path not in file_map:
-                raise ValueError(f"{path}: missing planned page during assembly")
+                # A task that failed never got to write its files. The batch runs
+                # failure_policy: continue_with_available and the router sends a
+                # partial batch here on purpose, so acceptance can judge what was
+                # produced and the repair loop can act on it. Raising here instead
+                # ends the run on the one path that was built to survive.
+                if task_id and task_id in failed_tasks:
+                    logger.info(
+                        "[AppGenerator] planned page %s not assembled: owning task %r failed",
+                        path,
+                        task_id,
+                    )
+                    continue
+                owner = f" owned by task {task_id!r}" if task_id else ""
+                raise ValueError(
+                    f"{path}: missing planned page during assembly{owner}; "
+                    "the task reported no failure, so the page was expected to exist"
+                )
             file_map[path] = normalize_planned_page_content(file_map[path], path=path, modules=modules)
             validate_planned_page(file_map[path], planned_by_stem[stem], path)
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
@@ -399,7 +448,15 @@ async def assemble_app_tasks(
     )
     code_files = result.get("code_files", [])
 
-    code_files = _apply_planned_page_contracts(code_files, app_build_plan)
+    code_files = _apply_planned_page_contracts(
+        code_files,
+        app_build_plan,
+        failed_task_ids=_failed_batch_task_ids(
+            detach(context_variables.get("app_task_batch_results"))
+            if context_variables and hasattr(context_variables, "get")
+            else None
+        ),
+    )
     code_files = _apply_module_handler_method_alignment(code_files)
     code_files = _apply_entitlement_gates(code_files, context_variables=context_variables)
     code_files = _apply_managed_capability_templates(
