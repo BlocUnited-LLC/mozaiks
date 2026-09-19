@@ -15,6 +15,10 @@ It drives an **already-running** stack; it starts nothing itself.
 npx playwright test --config=live-traversal/traversal.config.js
 ```
 
+The Python interpreter for the evidence probe is resolved in order:
+`MOZAIKS_TRAVERSAL_PYTHON`, a repo-local `.venv`, then `python3`/`python` on
+PATH. Nothing is hardcoded, so this runs on any checkout.
+
 Prerequisites, all of which have silently produced false results before:
 
 1. **Studio running** on `:3000` (vite) and `:8000` (backend).
@@ -27,20 +31,39 @@ Prerequisites, all of which have silently produced false results before:
 
 ## Reading the result
 
-| Verdict | Meaning |
-|---|---|
-| `BUNDLE PRODUCED - n files, chat <id>` | a chat **this run drove** produced files |
-| `NO BUNDLE - none of our N chat(s) produced files` | ran, did not fail, produced nothing |
-| `WORKFLOW FAILED in <stage>` | a workflow died; the backend log has the reason |
-| `BLOCKED - <reason>` | never ran — e.g. the token gate rejected it |
-| `UNKNOWN - the bundle probe failed` | the probe could not answer; **not** a negative |
+**Only one outcome passes.** Every other verdict throws, so the process exit code
+and the verdict agree. Earlier versions logged a failure and exited `0`; four
+consecutive failed traversals were recorded as four passing tests.
 
-The distinction between the last three and `NO BUNDLE` is the point. They demand
-completely different investigations and used to print the same line.
+| Verdict | Passes? | Meaning |
+|---|---|---|
+| `VALIDATED ARTIFACT - <id> (<status>, n files)` | yes | an artifact from this run's chats reached `lifecycle_status: current` **and** carries a validation result |
+| `NOT VALIDATED - ...` | no | an accepted artifact exists but nothing validated it |
+| `NO ACCEPTED ARTIFACT - ...` | no | files were written; none promoted to the accepted version |
+| `NO BUNDLE - none of our N chat(s) produced files` | no | ran, did not fail, produced nothing |
+| `WORKFLOW FAILED in <stage>` | no | a workflow died; the backend log has the reason |
+| `BLOCKED - <reason>` | no | never ran — e.g. the token gate rejected it |
+| `UNKNOWN - the evidence probe failed` | no | the probe could not answer; an unmeasured run is not a passing run |
+
+`artifacts/verdict.json` holds the structured outcome, provenance, chat ids,
+workflow sequence, and the artifact rows behind the verdict.
+
+### A caveat about validation
+
+`app_validation_status` on `ArtifactVersions` is populated only when an app
+validation actually runs. At the time of writing it is absent on effectively
+every record in a development database, and the one exception reads `skipped`.
+So `VALIDATED ARTIFACT` is currently **unreachable in practice** — that is the
+honest state of the loop, not a bug in the harness. `NOT VALIDATED` is the
+verdict to expect from an otherwise complete build, and it distinguishes "the
+build finished but nothing checked it" from "the build did not finish".
 
 ## Diagnostics it emits
 
-- `CHAT` — every chat id this run drove; bundles are attributed to these only
+- `PROVENANCE` — OSS SHA and branch, and the installed package path and version
+  the probe's interpreter actually imports, so a result can be tied to the code
+  that produced it
+- `CHAT` — every chat id this run drove; bundles and artifacts are attributed to these only
 - `GATE` — a gate it clicked, by `data-testid` handle or by label
 - `GATE_INERT` / `GATE_FORGIVEN` — a gate that changed nothing twice is skipped,
   then retried rather than retired: a healthy gate once looked inert and the run
