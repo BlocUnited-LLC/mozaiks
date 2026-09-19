@@ -29,6 +29,7 @@ mode that has cost the most time on this workflow.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 import pytest
@@ -238,6 +239,7 @@ def test_a_registered_managed_capability_is_kept() -> None:
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (  # noqa: E402
     _repair_coverage,
     validate_plan_coverage,
+    validate_plan_dependencies,
 )
 
 
@@ -363,6 +365,109 @@ def test_coverage_repair_is_idempotent() -> None:
 
     assert _repair_coverage(plan, context) == []
     validate_plan_coverage(plan, context)
+
+
+def test_synthesized_module_lanes_receive_their_direct_contract_dependencies() -> None:
+    plan = _plan_missing_coverage()
+    plan["build_tasks"] = [
+        task for task in plan["build_tasks"] if task["task_type"] == "page_bundle"
+    ]
+    plan["build_tasks"].append({
+        "task_id": "app_persistence",
+        "task_type": "persistence_contract",
+        "owned_paths": ["data/contract.json"],
+    })
+
+    _repair_coverage(plan, _coverage_context())
+
+    by_kind = {task["task_type"]: task for task in plan["build_tasks"]}
+    contract = by_kind["module_contract"]["task_id"]
+    models = by_kind["data_models"]["task_id"]
+    assert by_kind["module_contract"]["depends_on"] == []
+    assert by_kind["data_models"]["depends_on"] == [contract, "app_persistence"]
+    assert by_kind["business_services"]["depends_on"] == [contract, models, "app_persistence"]
+    validate_plan_dependencies(plan, _coverage_context())
+    validate_plan_coverage(plan, _coverage_context())
+
+
+def test_module_dependency_normalization_preserves_existing_edges() -> None:
+    plan = _plan_missing_coverage()
+    plan["build_tasks"].append({
+        "task_id": "service_foundation",
+        "task_type": "service_foundation",
+        "owned_paths": ["services/config.py"],
+    })
+    service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services")
+    service["depends_on"] = ["service_foundation", "t_contract"]
+
+    _repair_coverage(plan, _coverage_context())
+
+    assert service["depends_on"] == [
+        "service_foundation", "t_contract", "task_habits_module_data_models",
+    ]
+    validate_plan_dependencies(plan, _coverage_context())
+
+
+def test_synthesis_keeps_each_modules_prerequisites_separate_and_is_idempotent() -> None:
+    plan = _plan_missing_coverage()
+    plan["build_tasks"] = [
+        task for task in plan["build_tasks"] if task["task_type"] == "page_bundle"
+    ]
+    plan["capability_packs"].append({
+        "capability_pack_id": "reminders",
+        "surface_id": "reminders",
+        "surface_kind": "module",
+        "capability_source": "generated_module",
+        "primary_entities": ["Reminder"],
+    })
+    _repair_coverage(plan, _coverage_context())
+
+    for module_id in ("habits_module", "reminders"):
+        by_kind = {
+            task["task_type"]: task
+            for task in plan["build_tasks"]
+            if task.get("capability_pack_id") == module_id
+        }
+        assert by_kind["data_models"]["depends_on"] == [by_kind["module_contract"]["task_id"]]
+        assert by_kind["business_services"]["depends_on"] == [
+            by_kind["module_contract"]["task_id"], by_kind["data_models"]["task_id"],
+        ]
+    normalized = deepcopy(plan)
+    assert _repair_coverage(plan, _coverage_context()) == []
+    assert plan == normalized
+    validate_plan_dependencies(plan, _coverage_context())
+
+
+def test_module_dependencies_reject_ambiguous_artifact_owners() -> None:
+    plan = _plan_missing_coverage()
+    duplicate = deepcopy(plan["build_tasks"][0])
+    duplicate["task_id"] = "other_contract"
+    plan["build_tasks"].append(duplicate)
+
+    with pytest.raises(ValueError, match="expected exactly one module_contract task owner"):
+        _repair_coverage(plan, _coverage_context())
+
+
+def test_plan_review_rejects_a_cycle_instead_of_removing_a_required_dependency() -> None:
+    plan = _plan_missing_coverage()
+    plan["build_tasks"][0]["depends_on"] = ["t_services"]
+    _repair_coverage(plan, _coverage_context())
+
+    with pytest.raises(ValueError, match="dependency cycle detected"):
+        validate_plan_dependencies(plan, _coverage_context())
+    assert plan["build_tasks"][0]["depends_on"] == ["t_services"]
+
+
+@pytest.mark.parametrize("mode", [{"build_mode": "revision"}, {"brownfield_build_path": True}])
+def test_module_dependency_synthesis_does_not_rewrite_refinement_plans(mode) -> None:
+    plan = _plan_missing_coverage()
+    before = deepcopy(plan)
+    context = _coverage_context()
+    for key, value in mode.items():
+        context.set(key, value)
+
+    assert _repair_coverage(plan, context) == []
+    assert plan == before
 
 
 def test_unbacked_provider_source_on_an_approved_surface_becomes_generated_module() -> None:

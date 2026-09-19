@@ -63,6 +63,62 @@ def test_complete_plan_is_cached_without_losing_typed_fields():
     assert context.get("app_build_plan")["revenue_model"] == "free"
 
 
+def test_review_queues_synthesized_module_workers_with_actual_prerequisites():
+    plan = _plan()
+    page = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    page["depends_on"] = []
+    plan["build_tasks"] = [page]
+    context = _context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "ready", result
+    tasks = {task["task_type"]: task for task in context.get("app_task_batch_items")}
+    contract_id = tasks["module_contract"]["task_id"]
+    models_id = tasks["data_models"]["task_id"]
+    assert list(tasks["data_models"]["depends_on"]) == [contract_id]
+    assert list(tasks["business_services"]["depends_on"]) == [contract_id, models_id]
+    for kind in ("data_models", "business_services"):
+        assert tasks[kind]["current_build_task"]["depends_on"] == tasks[kind]["depends_on"]
+    assert contract_id in tasks["page_bundle"]["depends_on"]
+
+
+def test_review_routes_a_dependency_cycle_to_feedback_before_queuing_workers():
+    plan = _plan()
+    contract = next(task for task in plan["build_tasks"] if task["task_type"] == "module_contract")
+    contract["depends_on"] = ["reports.services"]
+    context = _context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "needs_revision"
+    assert "dependency cycle detected" in result["error"]
+    assert not context.get("app_task_batch_items")
+
+
+def test_review_rechecks_dependencies_after_merging_persistence_tasks():
+    plan = _plan()
+    contract = next(task for task in plan["build_tasks"] if task["task_type"] == "module_contract")
+    contract["depends_on"] = ["persistence_before"]
+    for task_id, dependencies in (
+        ("persistence_before", []), ("persistence_after", [contract["task_id"]]),
+    ):
+        plan["build_tasks"].append({
+            "task_id": task_id, "task_type": "persistence_contract",
+            "capability_pack_id": "reports", "surface_id": "reports", "surface_kind": "module",
+            "initial_agent": "DatabaseAgent", "execution_target": "AppGenerator",
+            "description": "Declare persistence", "initial_message": "Emit the app data contract.",
+            "owned_paths": ["data/contract.json"], "depends_on": dependencies,
+        })
+    context = _context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "needs_revision"
+    assert "dependency cycle detected" in result["error"]
+    assert not context.get("app_task_batch_items")
+
+
 @pytest.mark.parametrize("filename", ["app.json", "ui/pages/reports.yaml", "modules/reports/module.yaml", "modules/reports/backend/schemas.py", "modules/reports/backend/handler.py", "modules/reports/backend/service.py", "modules/reports/backend/repo.py", "modules/reports/backend/policy.py"])
 def test_incomplete_plan_reports_every_missing_file(filename):
     plan = _plan()
