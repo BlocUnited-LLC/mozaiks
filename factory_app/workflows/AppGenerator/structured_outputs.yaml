@@ -3525,7 +3525,25 @@ models:
         type: AppPrimitiveValue
         description: Deterministic scalar value. Open-ended nested objects are not allowed in strict UI contracts.
 
+  # Keeps the name every reference site already uses, so the five variants
+  # reach all 14 fan-in positions without touching any of them.
   AppPageAction:
+    type: union
+    variants:
+    - AppNavigateAction
+    - AppSubmitAction
+    - AppDeleteAction
+    - AppEventAction
+    - AppWorkflowAction
+
+  # Page actions are five closed variants keyed by action_type. Each variant
+  # declares only the fields that behave on it, so a navigate action without a
+  # route or an event action without an event type is unrepresentable rather
+  # than rejected later: the provider's strict schema forbids the missing field
+  # and forbids the foreign ones. Do not reintroduce a flat action model with
+  # every field nullable -- that shape is what let three separate defects reach
+  # one page and spend a whole repair budget one at a time.
+  AppNavigateAction:
     type: model
     fields:
       id:
@@ -3543,41 +3561,6 @@ models:
         - str
         - 'null'
         description: Optional visual variant hint for Button-backed actions.
-      action_type:
-        type: literal
-        values:
-        - navigate
-        - event
-        - workflow
-        - submit
-        - delete
-        description: How this action behaves.
-      href:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Safe absolute route or API/module endpoint starting with /. Required for navigate, submit, and delete actions. Module submit/delete actions need one fixed /api/modules/{module_id}/{action_id}; never null or a conditional create/update URL. Navigation routes support {field} interpolation. Use null for event/workflow actions that do not use a URL, never an empty string or a modal id.
-      event_type:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: "Event emitted on click (event actions only, e.g. ui.modal.open)."
-      workflow_id:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Runtime workflow registry id to launch when action_type=workflow. Never use workflow capability ids here.
-      context_variables:
-        type: optional_list
-        items: AppPrimitiveKeyValue
-        description: Optional deterministic context_variables entries for workflow actions. save_app_schema persists these as an object.
-      payload:
-        type: optional_list
-        items: AppPrimitiveKeyValue
-        description: Generic scalar payload entries used by event, submit, or delete actions. save_app_schema persists these as an object.
       requires_selection:
         type: bool
         description: Whether a row/item must be selected before this action is enabled.
@@ -3586,6 +3569,172 @@ models:
         type: bool
         description: Whether modal-backed action execution should close the modal automatically.
         default: true
+      action_type:
+        type: literal
+        values:
+        - navigate
+        description: Moves the user to another app route.
+      href:
+        type: str
+        description: Safe absolute app route starting with /. Navigation routes support {field} interpolation. Required.
+  AppSubmitAction:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable action id. Recommended when the action may be referenced by selection or empty-state handling.
+      label:
+        type: str
+        description: Display label for the action.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant hint for Button-backed actions.
+      requires_selection:
+        type: bool
+        description: Whether a row/item must be selected before this action is enabled.
+        default: false
+      closes_modal:
+        type: bool
+        description: Whether modal-backed action execution should close the modal automatically.
+        default: true
+      action_type:
+        type: literal
+        values:
+        - submit
+        description: Sends form or selection data to one module action endpoint.
+      href:
+        type: str
+        description: One fixed /api/modules/{module_id}/{action_id} endpoint. Never a conditional create/update URL -- keep separate create/edit forms, each with its own fixed href. Required.
+      payload:
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Deterministic scalar payload entries. Bind form values with {form.field} or a selected row with selected_row. Persisted as an object.
+  AppDeleteAction:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable action id. Recommended when the action may be referenced by selection or empty-state handling.
+      label:
+        type: str
+        description: Display label for the action.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant hint for Button-backed actions.
+      requires_selection:
+        type: bool
+        description: Whether a row/item must be selected before this action is enabled.
+        default: false
+      closes_modal:
+        type: bool
+        description: Whether modal-backed action execution should close the modal automatically.
+        default: true
+      action_type:
+        type: literal
+        values:
+        - delete
+        description: Removes the selected record through one module action endpoint.
+      href:
+        type: str
+        description: One fixed /api/modules/{module_id}/{action_id} endpoint for the delete command. Required.
+      payload:
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Deterministic scalar payload entries identifying the record. Persisted as an object.
+  AppEventAction:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable action id. Recommended when the action may be referenced by selection or empty-state handling.
+      label:
+        type: str
+        description: Display label for the action.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant hint for Button-backed actions.
+      requires_selection:
+        type: bool
+        description: Whether a row/item must be selected before this action is enabled.
+        default: false
+      closes_modal:
+        type: bool
+        description: Whether modal-backed action execution should close the modal automatically.
+        default: true
+      action_type:
+        type: literal
+        values:
+        - event
+        description: Emits a ui.* event on the page instead of navigating or calling an endpoint.
+      event_type:
+        type: str
+        description: Event emitted on click, from the ui.* family (for example ui.modal.open, ui.modal.close). Required.
+      modal_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: For ui.modal.open and ui.modal.close, the id of a Modal section declared on this same page. Materialized into the persisted payload as modal_id. Use null for events that do not target a modal.
+      payload:
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Deterministic scalar payload entries carried by the event. Persisted as an object.
+  AppWorkflowAction:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable action id. Recommended when the action may be referenced by selection or empty-state handling.
+      label:
+        type: str
+        description: Display label for the action.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant hint for Button-backed actions.
+      requires_selection:
+        type: bool
+        description: Whether a row/item must be selected before this action is enabled.
+        default: false
+      closes_modal:
+        type: bool
+        description: Whether modal-backed action execution should close the modal automatically.
+        default: true
+      action_type:
+        type: literal
+        values:
+        - workflow
+        description: Launches a runtime workflow.
+      workflow_id:
+        type: str
+        description: Runtime workflow registry id to launch. Never a workflow capability id. Required.
+      context_variables:
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Deterministic context_variables entries for the workflow launch. Persisted as an object.
 
   AppTableColumn:
     type: model

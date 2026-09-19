@@ -124,6 +124,71 @@ def _collect_modal_ids(document: Any) -> set[str]:
     }
 
 
+def materialize_modal_targets(document: Any) -> int:
+    """Fold a typed AppEventAction.modal_id into the payload the page serves.
+
+    The action contract names the modal target as its own typed field, because
+    a target buried in a free-form payload is a field no schema can require.
+    Everything downstream -- the runtime check, the event bus, the Modal
+    component -- addresses it as ``payload.modal_id``, so exactly one place
+    projects the typed field onto the transport shape, and it is this one.
+
+    Shape-aware on purpose. The save lane folds key/value lists into dicts
+    before it gets here; the task-batch lane writes the structured output
+    verbatim, so the payload is still a list of {key, value} entries. A
+    dict-only fold would silently skip every page the batch lane produces.
+
+    The typed field wins over whatever the payload already carried: it is the
+    author's stated target, while a payload entry may be a leftover the
+    resolver guessed. Run this before resolve_modal_action_targets so the
+    resolver only fills in targets nobody stated.
+    """
+    if not isinstance(document, dict):
+        return 0
+    folded = 0
+
+    def walk(node: Any) -> None:
+        nonlocal folded
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        if node.get("action_type") == "event":
+            # Always remove it, whatever it held. modal_id is a field of the
+            # action contract, not of the page the runtime loads -- and the
+            # provider's strict schema makes every event action carry the key,
+            # so a non-modal event would otherwise arrive at a runtime model
+            # that forbids unknown fields and be rejected for a field it was
+            # required to send.
+            target = node.pop("modal_id", None)
+            if node.get("event_type") in _MODAL_EVENT_TYPES and isinstance(target, str) and target.strip():
+                _set_payload_entry(node, "modal_id", target.strip())
+                folded += 1
+        for value in node.values():
+            walk(value)
+
+    walk(document.get("sections"))
+    return folded
+
+
+def _set_payload_entry(action: dict[str, Any], key: str, value: str) -> None:
+    """Write one payload entry in whichever shape the action already uses."""
+    payload = action.get("payload")
+    if isinstance(payload, list):
+        for entry in payload:
+            if isinstance(entry, dict) and entry.get("key") == key:
+                entry["value"] = value
+                return
+        payload.append({"key": key, "value": value})
+        return
+    if not isinstance(payload, dict):
+        payload = {}
+        action["payload"] = payload
+    payload[key] = value
+
+
 def resolve_modal_action_targets(document: Any) -> int:
     """Point modal open/close actions at a Modal that exists on the page.
 
@@ -382,13 +447,15 @@ def normalize_planned_page_content(
     if not isinstance(document, dict):
         return content
     promoted = promote_page_table_primitives(document)
+    # Before the resolver: a stated target must not be overwritten by a guess.
+    materialized = materialize_modal_targets(document)
     declared = declare_the_intended_modal(document)
     if declared:
         logger.info("[pages] %s: declared the intended Modal %r", path or "page", declared)
     retargeted = resolve_modal_action_targets(document)
     remoduled = retarget_page_module_ids(document, modules or {})
     renamed = align_page_name_with_file(document, path)
-    if not promoted and not retargeted and renamed is None and not declared and not remoduled:
+    if not promoted and not retargeted and renamed is None and not declared and not remoduled and not materialized:
         return content
     if renamed is not None:
         logger.info("[pages] %s: name %r -> file identity", path or "page", renamed)
@@ -396,9 +463,38 @@ def normalize_planned_page_content(
         logger.info("[pages] %s: promoted %d DataTable -> ResourceTable", path or "page", promoted)
     if retargeted:
         logger.info("[pages] %s: pointed %d modal action(s) at a declared Modal", path or "page", retargeted)
+    if materialized:
+        logger.info("[pages] %s: carried %d typed modal target(s) into the payload", path or "page", materialized)
     for rewrite in remoduled:
         logger.info("[pages] %s: endpoint named no such module: %s", path or "page", rewrite)
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
+
+
+# The runtime sanitizes validation text to "Field value does not match the
+# registered page-schema contract", which tells a repairing agent nothing about
+# WHICH rule it broke. These five messages are written by the page contract
+# itself and contain no author input, so they are safe to relay verbatim. Kept
+# in one place because both validation lanes need them and a second copy would
+# drift the moment the contract reworded one.
+_RELAYABLE_ACTION_MESSAGES = frozenset({
+    "Value error, navigate actions require href",
+    "Value error, submit actions require href",
+    "Value error, delete actions require href",
+    "Value error, event actions require event_type",
+    "Value error, workflow actions require workflow_id",
+})
+
+
+def relayable_action_reasons(error: Exception) -> list[str]:
+    """Input-free reasons behind a page rejection, or nothing if none apply."""
+    cause = getattr(error, "__cause__", None)
+    if not isinstance(cause, ValidationError):
+        return []
+    return sorted({
+        item["msg"].removeprefix("Value error, ")
+        for item in cause.errors(include_input=False, include_context=False, include_url=False)
+        if item["type"] == "value_error" and item["msg"] in _RELAYABLE_ACTION_MESSAGES
+    })
 
 
 def validate_planned_page(content: str, planned: dict[str, Any], path: str) -> None:
@@ -412,22 +508,9 @@ def validate_planned_page(content: str, planned: dict[str, Any], path: str) -> N
             raise ValueError(f"route must preserve approved {planned['route']!r}")
     except PageSchemaValidationError as error:
         details = "; ".join(f"{item.location}: {item.code}: {item.message}" for item in error.diagnostics)
-        if isinstance(error.__cause__, ValidationError):
-            # Only relay known input-free runtime messages, never rejected values or arbitrary validator text.
-            action_messages = {
-                "Value error, navigate actions require href",
-                "Value error, submit actions require href",
-                "Value error, delete actions require href",
-                "Value error, event actions require event_type",
-                "Value error, workflow actions require workflow_id",
-            }
-            reasons = sorted({
-                item["msg"].removeprefix("Value error, ")
-                for item in error.__cause__.errors(include_input=False, include_context=False, include_url=False)
-                if item["type"] == "value_error" and item["msg"] in action_messages
-            })
-            if reasons:
-                details += " Action requirements: " + "; ".join(reasons) + "."
+        reasons = relayable_action_reasons(error)
+        if reasons:
+            details += " Action requirements: " + "; ".join(reasons) + "."
         if any(item.code == "page_schema.name_mismatch" for item in error.diagnostics):
             details += f" Runtime page name must match file identity {expected_name!r}; keep the display label in title."
         raise ValueError(f"{path}: {details}") from error

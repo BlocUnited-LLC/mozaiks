@@ -15,9 +15,11 @@ fail, because guessing between several modals would silently wire the wrong one
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    materialize_modal_targets,
     resolve_modal_action_targets,
 )
 
@@ -363,3 +365,121 @@ def test_the_four_actions_from_the_live_run_all_resolve() -> None:
         config = page["sections"][section_index]["config"]
         assert config["actions"][1]["payload"]["modal_id"] == modal_id
         assert config["children"][0]["config"]["cancel_action"]["payload"]["modal_id"] == modal_id
+
+
+def test_a_typed_modal_target_is_carried_into_the_payload() -> None:
+    """The contract names the target; the transport still reads payload.modal_id.
+
+    Exactly one place projects one onto the other, so the schema can require a
+    field the runtime, the event bus and the Modal component never learn about.
+    """
+    page = {
+        "name": "dashboard",
+        "route": "/dashboard",
+        "sections": [{
+            "id": "create-task-modal",
+            "primitive": "Modal",
+            "config": {"actions": [{
+                "action_type": "event", "event_type": "ui.modal.close",
+                "label": "Cancel", "modal_id": "create-task-modal",
+            }]},
+        }],
+    }
+
+    assert materialize_modal_targets(page) == 1
+
+    action = page["sections"][0]["config"]["actions"][0]
+    assert action["payload"] == {"modal_id": "create-task-modal"}
+    assert "modal_id" not in action, "the typed field is projected, not duplicated"
+
+
+def test_the_fold_works_on_the_shape_each_lane_produces() -> None:
+    """The save lane folds key/value lists to dicts first; the batch lane does not.
+
+    A dict-only fold would silently skip every page the batch lane writes.
+    """
+    def page(payload):
+        action = {"action_type": "event", "event_type": "ui.modal.open",
+                  "label": "New", "modal_id": "m"}
+        if payload is not None:
+            action["payload"] = payload
+        return {"name": "d", "route": "/d", "sections": [
+            {"id": "m", "primitive": "Modal", "config": {"actions": [action]}}]}
+
+    batch = page([{"key": "source", "value": "toolbar"}])
+    assert materialize_modal_targets(batch) == 1
+    assert batch["sections"][0]["config"]["actions"][0]["payload"] == [
+        {"key": "source", "value": "toolbar"}, {"key": "modal_id", "value": "m"},
+    ]
+
+    save = page({"source": "toolbar"})
+    assert materialize_modal_targets(save) == 1
+    assert save["sections"][0]["config"]["actions"][0]["payload"] == {
+        "source": "toolbar", "modal_id": "m",
+    }
+
+
+def test_a_stated_target_is_not_overwritten_by_the_resolver() -> None:
+    """Fold before resolve, or an explicit cross-modal target gets silently rewired.
+
+    The resolver's rule is 'an action inside a Modal means that Modal'. That is
+    the right guess when nobody said, and the wrong one when somebody did.
+    """
+    page = {
+        "name": "d", "route": "/d",
+        "sections": [
+            {"id": "modal-a", "primitive": "Modal", "config": {"actions": [{
+                "action_type": "event", "event_type": "ui.modal.close",
+                "label": "Close B", "modal_id": "modal-b",
+            }]}},
+            {"id": "modal-b", "primitive": "Modal", "config": {}},
+        ],
+    }
+
+    materialize_modal_targets(page)
+    resolve_modal_action_targets(page)
+
+    assert page["sections"][0]["config"]["actions"][0]["payload"]["modal_id"] == "modal-b"
+
+
+def test_the_typed_target_beats_a_leftover_payload_entry() -> None:
+    page = {"name": "d", "route": "/d", "sections": [{
+        "id": "m", "primitive": "Modal", "config": {"actions": [{
+            "action_type": "event", "event_type": "ui.modal.close", "label": "X",
+            "modal_id": "m", "payload": {"modal_id": "stale-guess"},
+        }]},
+    }]}
+
+    materialize_modal_targets(page)
+
+    assert page["sections"][0]["config"]["actions"][0]["payload"]["modal_id"] == "m"
+
+
+def test_the_fold_is_idempotent_because_both_lanes_run_it() -> None:
+    """Pages are normalized at save and again at assembly."""
+    page = {"name": "d", "route": "/d", "sections": [{
+        "id": "m", "primitive": "Modal", "config": {"actions": [{
+            "action_type": "event", "event_type": "ui.modal.open",
+            "label": "X", "modal_id": "m",
+        }]},
+    }]}
+
+    assert materialize_modal_targets(page) == 1
+    snapshot = copy.deepcopy(page)
+    assert materialize_modal_targets(page) == 0
+    assert page == snapshot
+
+
+def test_a_null_target_is_dropped_rather_than_folded() -> None:
+    """Not every ui.* event addresses a modal."""
+    page = {"name": "d", "route": "/d", "sections": [{
+        "id": "m", "primitive": "Modal", "config": {"actions": [{
+            "action_type": "event", "event_type": "ui.datatable.refresh",
+            "label": "Refresh", "modal_id": None,
+        }]},
+    }]}
+
+    assert materialize_modal_targets(page) == 0
+    action = page["sections"][0]["config"]["actions"][0]
+    assert "modal_id" not in action
+    assert "payload" not in action

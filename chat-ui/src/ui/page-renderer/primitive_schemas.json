@@ -19,7 +19,7 @@
       "page_size": "integer — default 20 — Positive integer. Explicit 1-100 is required for server mode.",
       "search": "boolean — default true",
       "search_keys": "array of string — Client mode row keys searched within loaded rows only. Omitted/null uses all column keys; [] searches no fields. Server mode does not apply these keys or send them: the module must implement the requested literal search fields across its full owned dataset.",
-      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,modal_id?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
       "empty": "{title?,message?,action?}"
     }
   },
@@ -82,7 +82,7 @@
       "title": "string",
       "description": "string",
       "size": "string: small|medium|large|full — default medium",
-      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,modal_id?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
       "children": "array of {id?,primitive,title?,config?}"
     }
   },
@@ -172,7 +172,7 @@
       "message": "string — REQUIRED",
       "variant": "string: info|success|warning|destructive",
       "dismissible": "boolean",
-      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}"
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,modal_id?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}"
     }
   },
   "ActionButton": {
@@ -210,7 +210,7 @@
     "properties": {
       "title": "string — REQUIRED",
       "subtitle": "string",
-      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,modal_id?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
       "title_font": "string: body|heading"
     }
   },
@@ -258,7 +258,7 @@
       "search_keys": "array of string — Row keys searched within loaded rows only. Omitted/null uses all column keys; [] searches no fields. Set explicit keys to exclude other columns, such as notes. Does not fetch server rows.",
       "filters": "array of {label,value,field?,match_values?}",
       "default_sort": "string",
-      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,modal_id?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
       "empty": "{title?,message?,error_title?,error_message?,retry_label?,action?}"
     }
   },
