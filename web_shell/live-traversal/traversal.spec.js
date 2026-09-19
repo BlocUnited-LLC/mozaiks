@@ -26,23 +26,37 @@ fs.mkdirSync(OUT, { recursive: true });
 // Generated code lands in ChatSessions.generated_files in Mongo, not on disk.
 // A harness watching generated/apps reports a finished build as NO BUNDLE —
 // it did exactly that while a 17-file app sat in the database.
-const VENV_PY = 'c:/Repos/BlocUnitedRepo/mozaiks/.venv/Scripts/python.exe';
-const COUNTER = path.join(__dirname, 'count_generated.py');
+const PROBE = path.join(__dirname, 'run_evidence.py');
+const REPO_ROOT = path.resolve(__dirname, '../..');
 
-const bundleState = () => {
-  try {
-    const raw = execFileSync(VENV_PY, [COUNTER], { encoding: 'utf8', timeout: 20000 });
-    return JSON.parse(raw);
-  } catch (err) {
-    // Never let a measurement failure masquerade as "no bundle".
-    note('BUNDLE_PROBE_FAILED', String(err.message || err).slice(0, 120));
-    return null;
+// An absolute interpreter path pinned this harness to one machine. Resolve it:
+// explicit override, then a repo-local venv, then whatever is on PATH.
+const pythonCandidates = () => {
+  const explicit = process.env.MOZAIKS_TRAVERSAL_PYTHON;
+  const venv = process.platform === 'win32'
+    ? path.join(REPO_ROOT, '.venv/Scripts/python.exe')
+    : path.join(REPO_ROOT, '.venv/bin/python');
+  return [explicit, fs.existsSync(venv) ? venv : null, 'python3', 'python'].filter(Boolean);
+};
+
+let resolvedPython = null;
+const runProbe = (args = []) => {
+  const errors = [];
+  for (const candidate of resolvedPython ? [resolvedPython] : pythonCandidates()) {
+    try {
+      const raw = execFileSync(candidate, [PROBE, ...args], { encoding: 'utf8', timeout: 30000 });
+      resolvedPython = candidate;
+      return JSON.parse(raw);
+    } catch (err) {
+      errors.push(`${candidate}: ${String(err.message || err).slice(0, 80)}`);
+    }
   }
+  // Never let a measurement failure masquerade as "no bundle".
+  note('EVIDENCE_PROBE_FAILED', errors.join(' | ').slice(0, 300));
+  return null;
 };
-const bundleCount = () => {
-  const state = bundleState();
-  return state === null ? -1 : state.bundles;
-};
+
+const bundleState = () => runProbe();
 
 // Chats this run drove. Another agent finishing a build while we are mid-run
 // raises the global count, and a harness that watches the count calls their
@@ -52,9 +66,102 @@ const myChats = new Set();
 const myBundle = () => {
   const state = bundleState();
   if (state === null) return undefined;          // probe failed: not a negative
-  return (state.detail || []).find(
+  return (state.bundles || []).find(
     (b) => myChats.has(String(b.chat_id)) && (b.file_count || 0) > 0,
   ) || null;
+};
+
+// What was running, so a result can be tied to the code that produced it. A
+// whole session was once spent debugging fixes against a stack that did not
+// contain them; the run looked identical either way.
+const provenance = {
+  started_at: new Date().toISOString(),
+  package_path: null,
+  package_version: null,
+  oss_sha: null,
+  oss_branch: null,
+};
+
+const recordProvenance = () => {
+  try {
+    provenance.oss_sha = execFileSync('git', ['rev-parse', 'HEAD'],
+      { cwd: REPO_ROOT, encoding: 'utf8', timeout: 10000 }).trim();
+    provenance.oss_branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'],
+      { cwd: REPO_ROOT, encoding: 'utf8', timeout: 10000 }).trim();
+  } catch (err) {
+    note('PROVENANCE_PARTIAL', `git: ${String(err.message || err).slice(0, 80)}`);
+  }
+  // Ask the interpreter that will read the database, not this checkout: the
+  // installed package is what the backend imports, and the two can differ.
+  const script = 'import mozaiksai,json;'
+    + 'from importlib.metadata import version;'
+    + 'print(json.dumps({"path": mozaiksai.__file__, "version": version("mozaiks")}))';
+  for (const candidate of resolvedPython ? [resolvedPython] : pythonCandidates()) {
+    try {
+      const raw = execFileSync(candidate, ['-c', script], { encoding: 'utf8', timeout: 20000 });
+      const info = JSON.parse(raw);
+      provenance.package_path = info.path;
+      provenance.package_version = info.version;
+      resolvedPython = candidate;
+      break;
+    } catch { /* try the next interpreter */ }
+  }
+  note('PROVENANCE', `sha=${provenance.oss_sha || '?'} branch=${provenance.oss_branch || '?'} `
+    + `pkg=${provenance.package_version || '?'} at ${provenance.package_path || '?'}`);
+};
+
+// One place that decides pass or fail, so no outcome can be logged as a
+// problem while the process exits 0.
+const judge = ({ evidence, blocked, failedIn, chats }) => {
+  const notes = [];
+  if (blocked) {
+    return { ok: false, outcome: 'BLOCKED', summary: `BLOCKED - ${String(blocked).slice(0, 120)}`,
+      notes: ['the product was never exercised; this says nothing about the build'] };
+  }
+  if (evidence === null) {
+    return { ok: false, outcome: 'UNKNOWN', summary: 'UNKNOWN - the evidence probe failed',
+      notes: ['no claim either way; an unmeasured run is not a passing run'] };
+  }
+
+  const ours = [...chats];
+  const bundles = (evidence.bundles || []).filter((b) => ours.includes(String(b.chat_id)) && (b.file_count || 0) > 0);
+  const artifacts = (evidence.artifacts || []).filter((a) => ours.includes(String(a.source_chat_id)));
+  const accepted = artifacts.filter((a) => a.lifecycle_status === 'current' && (a.file_count || 0) > 0);
+  // Absent is not a pass. app_validation_status is only set when a validation
+  // actually ran, and "skipped" records that one deliberately did not.
+  const validated = accepted.filter(
+    (a) => a.app_validation_status && !['skipped', 'failed', 'error'].includes(String(a.app_validation_status)),
+  );
+
+  const inventory = `bundles=${bundles.length} artifacts=${artifacts.length} `
+    + `accepted=${accepted.length} validated=${validated.length}`;
+
+  if (failedIn) {
+    return { ok: false, outcome: 'WORKFLOW_FAILED', summary: `WORKFLOW FAILED in ${failedIn}`,
+      notes: [inventory, 'the backend log holds the reason; the UI only says workflow_failed'],
+      bundles, artifacts };
+  }
+  if (!bundles.length) {
+    return { ok: false, outcome: 'NO_BUNDLE', summary: `NO BUNDLE - none of our ${ours.length} chat(s) produced files`,
+      notes: [inventory], bundles, artifacts };
+  }
+  if (!accepted.length) {
+    return { ok: false, outcome: 'NO_ACCEPTED_ARTIFACT',
+      summary: `NO ACCEPTED ARTIFACT - ${bundles.length} bundle(s) but no ArtifactVersion at lifecycle_status='current'`,
+      notes: [inventory, 'files were written; nothing was promoted to the accepted version'],
+      bundles, artifacts };
+  }
+  if (!validated.length) {
+    return { ok: false, outcome: 'NOT_VALIDATED',
+      summary: `NOT VALIDATED - accepted artifact(s) ${accepted.map((a) => a.artifact_version_id).join(', ')} carry no validation result`,
+      notes: [inventory,
+        `app_validation_status: ${accepted.map((a) => String(a.app_validation_status)).join(', ')}`,
+        'an unvalidated build is not a proven one, however complete it looks'],
+      bundles, artifacts };
+  }
+  return { ok: true, outcome: 'VALIDATED_ARTIFACT',
+    summary: `VALIDATED ARTIFACT - ${validated.map((a) => `${a.artifact_version_id} (${a.app_validation_status}, ${a.file_count} files)`).join('; ')}`,
+    notes: [inventory], bundles, artifacts };
 };
 
 const log = [];
@@ -120,13 +227,16 @@ const GATES = [
 ];
 const REVERSING = new Set(['cancel', 'request_changes', 'reject', 'back']);
 
-test('traversal: idea to generated bundle', async ({ page }) => {
-  const start = bundleCount();
-  if (start < 0) {
-    note('RESULT', 'ABORTED - cannot read generated_files; a run measured by a broken probe proves nothing');
-    return;
+test('traversal: idea to accepted, validated artifact', async ({ page }) => {
+  recordProvenance();
+  const baseline = bundleState();
+  if (baseline === null) {
+    // Returning here used to leave the run green. A run measured by a broken
+    // probe proves nothing, and "proves nothing" is not a pass.
+    note('RESULT', 'ABORTED - cannot read run evidence');
+    throw new Error('traversal aborted: the evidence probe could not be run; see EVIDENCE_PROBE_FAILED');
   }
-  note('BASELINE', `${start} bundle(s) recorded`);
+  note('BASELINE', `${(baseline.bundles || []).length} bundle(s), ${(baseline.artifacts || []).length} artifact(s) already recorded`);
 
   page.on('console', (m) => {
     if (m.type() === 'error') note('BROWSER_ERROR', m.text().slice(0, 180));
@@ -334,25 +444,20 @@ test('traversal: idea to generated bundle', async ({ page }) => {
   }
 
   await page.screenshot({ path: path.join(OUT, '99-final.png'), fullPage: true }).catch(() => {});
-  const end = bundleCount();
   note('WORKFLOWS_SEEN', [...seen].join(' -> '));
-  note('BUNDLES', `start=${start} end=${end}`);
-  if (blocked) {
-    note('RESULT', `BLOCKED - ${blocked.slice(0, 90)}`);
-    note('NOTE', 'the product was never exercised; this says nothing about the build');
-  } else if (end < 0) {
-    note('RESULT', 'UNKNOWN - the bundle probe failed; not reporting a negative');
-  } else if (failedIn) {
-    const mine = myBundle();
-    note('RESULT', `WORKFLOW FAILED in ${failedIn}`);
-    note('NOTE', mine
-      ? 'a bundle exists from an earlier stage; the run still did not complete'
-      : 'check the backend log for the failure reason; the UI only says workflow_failed');
-  } else {
-    const mine = myBundle();
-    if (mine === undefined) note('RESULT', 'UNKNOWN - the bundle probe failed; not reporting a negative');
-    else if (mine) note('RESULT', `BUNDLE PRODUCED - ${mine.file_count} files, chat ${String(mine.chat_id).slice(0, 8)}`);
-    else note('RESULT', `NO BUNDLE - none of our ${myChats.size} chat(s) produced files`);
-  }
+  note('CHATS', [...myChats].join(', ') || '(none)');
   note('FINAL_URL', page.url());
+  note('FINISHED_AT', new Date().toISOString());
+
+  const evidence = runProbe();
+  const verdict = judge({ evidence, blocked, failedIn, chats: myChats });
+  note('RESULT', verdict.summary);
+  for (const line of verdict.notes) note('NOTE', line);
+  fs.writeFileSync(path.join(OUT, 'verdict.json'),
+    JSON.stringify({ ...verdict, provenance, chats: [...myChats], workflows: [...seen] }, null, 2), 'utf8');
+
+  // The whole point: a run that did not produce an accepted, validated artifact
+  // is a failing run. Reporting it in a log while exiting 0 is how four
+  // consecutive failed traversals were recorded as four passing tests.
+  if (!verdict.ok) throw new Error(verdict.summary);
 });
