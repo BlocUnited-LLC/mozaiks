@@ -134,6 +134,44 @@ def _canonical_surface_map(raw: Any) -> dict[str, Any]:
     return {"surfaces": surfaces}
 
 
+def _reject_undeclared_workflow_surfaces(
+    surface_map: dict[str, Any],
+    concept_blueprint: Any,
+) -> None:
+    """A workflow surface the approved concept never asked for is not allowed.
+
+    The agent is already told this in its prompt, and it mostly obeys. Mostly is
+    not a contract: a live build of a tool-lending library whose concept recorded
+    `agentic_capabilities: []` still got
+
+        surface_map: module tool_catalog, workflow borrow_requests, ui_only overdue_list
+
+    Nothing here caught it, so it travelled three stages before `pattern_selection`
+    compared the partition against the map and refused it -- terminal, no feedback
+    path, no way back to the user. Refusing it at the boundary where it is written
+    turns that into a rejection DesignDocs can act on, in the run that produced it.
+    """
+    if not isinstance(concept_blueprint, dict):
+        return  # no approved concept in scope; nothing to judge against
+    if "agentic_capabilities" not in concept_blueprint:
+        return
+    if concept_blueprint.get("agentic_capabilities"):
+        return
+    declared = [
+        str(surface.get("surface_id"))
+        for surface in surface_map.get("surfaces") or []
+        if surface.get("surface_kind") == "workflow"
+    ]
+    if not declared:
+        return
+    raise ValueError(
+        f"surface_map declares workflow surfaces {declared}, but the approved concept "
+        "records no agentic capabilities. Realize them as module or ui_only surfaces, "
+        "or leave them out: an app that was not asked for AI cannot declare an AI "
+        "workflow, and downstream pattern selection rejects the mismatch outright."
+    )
+
+
 def _canonical_data_contract(
     raw: Any,
     *,
@@ -383,6 +421,10 @@ async def save_design_docs_bundle(
         backend_markdown = str(bundle.get("backend_markdown") or "").strip()
         database_markdown = str(bundle.get("database_markdown") or "").strip()
         surface_map = _canonical_surface_map(bundle.get("surface_map"))
+        _reject_undeclared_workflow_surfaces(
+            surface_map,
+            _cv_get(context_variables, "concept_blueprint"),
+        )
         experience_spec = _canonical_experience_spec(
             bundle.get("experience_spec"),
             surface_map=surface_map,
