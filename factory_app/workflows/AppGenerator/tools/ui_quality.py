@@ -141,6 +141,11 @@ def review_ui_quality(
         )
     warnings = dedupe(warnings)
 
+    # This gate is invoked once per AppUIQualityAgent turn, from the prompt
+    # middleware, and each invocation that asks for a revision spends one of
+    # the configured attempts. It ran twice per turn once -- the middleware
+    # before the reply and an auto tool after it -- so a budget of two was
+    # gone after a single turn and the agent got one revision, not two.
     prior_attempts = _as_int(
         _context_get(context_variables, "app_ui_quality_revision_count", 0), 0
     )

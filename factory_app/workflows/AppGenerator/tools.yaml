@@ -18,16 +18,6 @@ tools:
   tool_type: Agent_Tool
   auto_tool_call: true
   bind_to_agent: false
-- agent: AppUIQualityAgent
-  file: ui_quality.py
-  function: review_ui_quality
-  description: >
-    Review persisted AppSchemaAgent output for production UI quality issues and
-    set app_ui_quality_status to passed, needs_revision, or blocked for the
-    AppGenerator handoff gate.
-  tool_type: Agent_Tool
-  auto_tool_call: true
-  bind_to_agent: false
 - agent: ModuleContractQualityAgent
   file: review_module_contract_quality.py
   function: review_module_contract_quality
