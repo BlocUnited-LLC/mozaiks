@@ -2541,7 +2541,7 @@ agents:
       7. Put state transitions and event publication in `backend/service.py` when that file is declared.
       8. Put persistence queries/writes in `backend/repo.py` when that file is declared.
       9. Put authorization, ownership, tenant/workspace resource filters, and transition checks in `backend/policy.py` when that file is declared. The policy layer should derive scope from the runtime context, not from caller-supplied params.
-      10. Put DTOs, enums, and normalization helpers in `backend/schemas.py` only when that file is included in `current_build_task.owned_paths`. Otherwise import and use the schemas.py helpers produced by the upstream `data_models` task.
+      10. Put DTOs, enums, and normalization helpers in `backend/schemas.py` only when that file is included in `current_build_task.owned_paths`. Otherwise import and use the typed shapes already accepted for this module: they arrive in `dependency_task_outputs` and are importable from the module's `.schemas` module. Reuse those definitions rather than restating them locally.
       10a. Align every repo collection call with `data_contract` ownership. Non-persistent modules should not invent database logic.
       11. Publish the corresponding event from `events.yaml` only after the repo confirms an actual owned mutation, using the exact namespaced event type declared there. Follow the injected FILE CONTRACTS CONTEXT for paging, literal versus regex search, and write-result handling. A not-found or idempotent no-op response follows the declared action contract, not a global HTTP status policy; never fabricate mutation success or its event.
       11a. When a module action declares input fields such as `ticket_id` and `new_status`, handler.py receives those fields in `**params`; service.py and repo.py must read `params["ticket_id"]` / `params["new_status"]` or pass the params mapping through. For settings actions that declare fields like `default_queue` and `sla_hours`, read those exact fields directly; do not invent `params["settings"]`. Do not call `params.get("payload")` unless the action schema actually has a `payload` field.
@@ -2566,9 +2566,13 @@ agents:
               from services.integrations.{pack_id}_client import {PackIdClient}
           Do NOT call the managed capability module API directly from service logic.
       20a. For list_* actions, serialize each repo record through an explicit allowlist helper before returning.
-           Define a module-local helper in backend/schemas.py — for example,
-           `_serialize_{entity}_row(record: Mapping[str, Any]) -> dict[str, Any]` — that returns
+           Import that helper from the module's `.schemas` module, whose accepted definitions arrive
+           in `dependency_task_outputs` — for example,
+           `_serialize_{entity}_row(record: Mapping[str, Any]) -> dict[str, Any]` — returning
            only the fields declared in module.yaml output_schema items.properties.
+           If the accepted schemas module does not supply one, define it in a file this task owns
+           (`backend/service.py`). Never create or edit `backend/schemas.py` to add it: that file
+           belongs to another task in this batch, and emitting it fails the whole batch.
            Never return raw repo documents from a list_* service method. The allowlist pattern
            ensures unknown fields added in future DB migrations cannot leak into caller responses.
            Example:
@@ -2632,21 +2636,13 @@ agents:
             "purpose": "Owns authorization and ownership checks for task actions.",
             "contract_refs": ["module_yaml.permissions[*]", "module_yaml.actions[*].permissions"],
             "content": "class TaskManagerPolicy:\n    async def require_create(self, *, ctx, payload):\n        user_id = getattr(ctx, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n"
-          },
-          {
-            "path": "modules/task_manager/backend/schemas.py",
-            "kind": "schemas",
-            "purpose": "Owns typed DTOs and normalization helpers for task actions.",
-            "contract_refs": ["module_yaml.actions[*].input_schema", "module_yaml.actions[*].output_schema"],
-            "content": "class CreateTaskInput:\n    def __init__(self, *, title: str):\n        self.title = title\n\n    @classmethod\n    def from_payload(cls, payload: dict):\n        title = str((payload or {}).get(\"title\") or \"\").strip()\n        if not title:\n            raise ValueError(\"title is required\")\n        return cls(title=title)\n\n\nclass TaskCreatedOutput:\n    @staticmethod\n    def from_record(record: dict):\n        return {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n"
           }
         ],
         "code_files": [
           { "filename": "modules/task_manager/backend/handler.py", "content": "from .service import TaskManagerService\n\n\nclass TaskManagerModule:\n    def __init__(self):\n        self.service = TaskManagerService()\n\n    async def create_task(self, ctx, **params):\n        return await self.service.create_task(ctx=ctx, **params)\n" },
           { "filename": "modules/task_manager/backend/service.py", "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        await self.policy.require_create(ctx=ctx, payload=payload)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await ctx.emit(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n" },
           { "filename": "modules/task_manager/backend/repo.py", "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id or document.get(\"task_id\", \"\"))\n        return document\n" },
-          { "filename": "modules/task_manager/backend/policy.py", "content": "class TaskManagerPolicy:\n    async def require_create(self, *, ctx, payload):\n        user_id = getattr(ctx, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n" },
-          { "filename": "modules/task_manager/backend/schemas.py", "content": "class CreateTaskInput:\n    def __init__(self, *, title: str):\n        self.title = title\n\n    @classmethod\n    def from_payload(cls, payload: dict):\n        title = str((payload or {}).get(\"title\") or \"\").strip()\n        if not title:\n            raise ValueError(\"title is required\")\n        return cls(title=title)\n\n\nclass TaskCreatedOutput:\n    @staticmethod\n    def from_record(record: dict):\n        return {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n" }
+          { "filename": "modules/task_manager/backend/policy.py", "content": "class TaskManagerPolicy:\n    async def require_create(self, *, ctx, payload):\n        user_id = getattr(ctx, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n" }
         ],
         "agent_message": "Implemented task_manager backend stubs."
       }
