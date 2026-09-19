@@ -520,11 +520,10 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_key"] == "app_ui_quality_status"
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_value"] == "blocked"
 
-    assert ("AppUIQualityAgent", "review_ui_quality") in tool_entries
-    assert (
-        tool_entries[("AppUIQualityAgent", "review_ui_quality")]["auto_tool_call"]
-        is True
-    )
+    # The gate is not an auto tool. It advances the revision counter, and an
+    # auto tool runs after the reply the handoff has already been routed on --
+    # so binding it here only spent a second attempt on the same turn.
+    assert ("AppUIQualityAgent", "review_ui_quality") not in tool_entries
     assert ("AppUIQualityAgent", "review_ui_acceptance") not in tool_entries
 
     assert any(
@@ -617,3 +616,108 @@ def test_app_ui_quality_hook_persists_previous_schema_before_handoff(
     assert context.data["app_pages"][0]["route"] == "/tickets"
 
 
+
+
+def _revising_context() -> _Context:
+    """A context whose warnings always ask for another revision."""
+    return _Context(
+        {
+            "app_ui_quality_warnings": [
+                "Dashboard has 8 top-level sections; keep collection pages scan-first."
+            ],
+            "app_ui_quality_revision_count": 0,
+        }
+    )
+
+
+def test_a_budget_of_two_permits_two_revisions_and_refuses_a_third() -> None:
+    """The configured budget has to be the budget the agent actually gets.
+
+    It was not. The gate ran twice per AppUIQualityAgent turn -- once from the
+    prompt middleware before the reply, once from an auto tool after it -- and
+    each run that asked for a revision spent an attempt. A budget of two was
+    gone after a single turn, so the agent was blocked having revised once.
+    """
+    context = _revising_context()
+
+    first = ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=2)
+    assert first["status"] == "needs_revision"
+    assert first["revision_count"] == 1
+
+    second = ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=2)
+    assert second["status"] == "needs_revision", "the second attempt must still be allowed"
+    assert second["revision_count"] == 2
+
+    third = ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=2)
+    assert third["status"] == "blocked", "a third attempt must not be allowed"
+    assert third["revision_count"] == 2, "a blocked run must not spend another attempt"
+
+
+def test_each_gate_run_spends_exactly_one_attempt() -> None:
+    context = _revising_context()
+
+    for expected in (1, 2):
+        before = context.data.get("app_ui_quality_revision_count", 0)
+        ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=5)
+        after = context.data["app_ui_quality_revision_count"]
+        assert after == before + 1 == expected, f"one run moved the count {before} -> {after}"
+
+
+def test_the_quality_gate_has_exactly_one_caller() -> None:
+    """Two callers is the defect: the count advances per call, not per turn.
+
+    The prompt middleware owns the gate because AG2 evaluates handoff
+    conditions immediately after the agent reply, and routing reads the status
+    this gate writes. An auto tool runs after that point, so it cannot serve
+    the handoff -- it could only re-run the gate and spend a second attempt.
+    """
+    root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows" / "AppGenerator"
+    tools = yaml.safe_load((root / "tools.yaml").read_text(encoding="utf-8"))
+    rows = tools if isinstance(tools, list) else tools.get("tools", tools)
+    bindings = [
+        entry for entry in rows
+        if isinstance(entry, dict) and entry.get("function") == "review_ui_quality"
+    ]
+    assert bindings == [], f"the gate must not also be an auto tool: {bindings}"
+
+    middleware = yaml.safe_load((root / "middleware.yaml").read_text(encoding="utf-8"))
+    hooks = middleware if isinstance(middleware, list) else middleware.get("prompt_middleware", [])
+    assert any(
+        hook.get("agent") == "AppUIQualityAgent"
+        and hook.get("function") == "run_app_ui_quality_gate"
+        for hook in hooks
+    ), "the prompt middleware hook is the gate's only caller and must stay registered"
+
+
+def test_a_passing_run_never_spends_an_attempt() -> None:
+    """The gate re-audits the persisted schema, so a clean page is the pass case."""
+    context = _Context(
+        {
+            "app_ui_quality_warnings": [],
+            "app_ui_quality_revision_count": 1,
+            "app_schema_ready": True,
+            "app_manifest": {"app_name": "Support Operations"},
+            "app_pages": [
+                {
+                    "schema_version": "mozaiks.app_page.v1",
+                    "name": "Tickets",
+                    "route": "/tickets",
+                    "title": "Tickets",
+                    "page_type": "record_list",
+                    "layout": "full-width",
+                    "sections": [
+                        {
+                            "id": "tickets-header",
+                            "primitive": "PageHeader",
+                            "config": {"title": "Tickets"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    result = ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=2)
+
+    assert result["status"] == "passed"
+    assert result["revision_count"] == 1, "a pass must leave the remaining budget intact"
