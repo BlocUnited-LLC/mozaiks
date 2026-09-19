@@ -271,6 +271,16 @@ class TestOrchestratorConfigRequiredText:
 # ---------------------------------------------------------------------------
 
 class TestAgentSpecPromptShape:
+    @pytest.mark.parametrize("policy", ["allow", "block"])
+    def test_pending_turn_replay_is_explicit(self, policy):
+        agent = AgentSpec(name="Worker", structured_outputs_required=False, system_message="Hi", pending_turn_replay=policy)
+        assert agent.pending_turn_replay == policy
+
+    @pytest.mark.parametrize("policy", [None, False, "retry"])
+    def test_pending_turn_replay_rejects_unknown_values(self, policy):
+        with pytest.raises(ValidationError, match="pending_turn_replay"):
+            AgentSpec(name="Worker", structured_outputs_required=False, system_message="Hi", pending_turn_replay=policy)
+
     def test_no_prompt_sections_and_no_system_message_raises(self):
         with pytest.raises(ValidationError, match="must provide"):
             AgentSpec(name="MyAgent", structured_outputs_required=False)

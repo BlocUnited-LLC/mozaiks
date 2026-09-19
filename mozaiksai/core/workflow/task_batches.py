@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
@@ -145,6 +147,49 @@ class TaskBatchResult(BaseModel):
         return text
 
 
+class TaskBatchRecovery(BaseModel):
+    """Policy trigger for bounded continuation of the original task inventory."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trigger_agent: str = Field(min_length=1)
+    request_key: str = Field(min_length=1)
+    outcome_key: str = Field(min_length=1)
+    status_key: str = Field(min_length=1)
+    input_keys: list[str] = Field(default_factory=list)
+
+
+class TaskBatchRecoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    batch_id: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    input_fingerprint: str = Field(min_length=1)
+    root_task_ids: list[str] = Field(min_length=1)
+
+
+class TaskBatchFailure(BaseModel):
+    """Execution evidence, never an inferred replacement for a missing error."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    status: Literal["failed"] = "failed"
+    failure_kind: Literal["output_rejected", "dependency_blocked", "execution_failed", "interrupted"]
+    error: str
+    worker_agent: str
+    attempts: int = Field(default=0, ge=0)
+    recoverable: bool = False
+    rejected_output: dict[str, Any] | None = None
+    blocked_by: list[str] = Field(default_factory=list)
+
+
+class _TaskRejected(ValueError):
+    def __init__(self, evidence: TaskBatchFailure):
+        super().__init__(evidence.error)
+        self.evidence = evidence.model_dump(mode="json")
+
+
 class TaskBatchConveyor(BaseModel):
     """Minimal decomposition-driven task conveyor declaration.
 
@@ -226,6 +271,7 @@ class TaskBatchSpec(BaseModel):
     worker: TaskBatchWorker = Field(default_factory=TaskBatchWorker)
     execution: TaskBatchExecution = Field(default_factory=TaskBatchExecution)
     result: TaskBatchResult
+    recovery: TaskBatchRecovery | None = None
     allowed_execution_agents: list[str] = Field(default_factory=list, exclude=True)
 
     @field_validator("id", "trigger_agent")
@@ -245,6 +291,19 @@ class TaskBatchSpec(BaseModel):
             if text and text not in agents:
                 agents.append(text)
         return agents
+
+    @model_validator(mode="after")
+    def _validate_recovery(self) -> TaskBatchSpec:
+        if self.recovery:
+            if self.source.kind != "context_variable":
+                raise ValueError("recoverable batches require an authoritative context_variable task inventory")
+            if self.recovery.trigger_agent == self.trigger_agent:
+                raise ValueError("recovery trigger must differ from the initial batch trigger")
+            keys = [self.result.context_key, self.result.status_key, self.recovery.request_key,
+                    self.recovery.outcome_key, self.recovery.status_key]
+            if len(set(keys)) != len(keys):
+                raise ValueError("task batch recovery and result context keys must be distinct")
+        return self
 
 
 class TaskBatchesConfig(BaseModel):
@@ -342,6 +401,8 @@ async def execute_task_batches_for_trigger(
     fresh_agents_per_task: bool = True,
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     context_authority_policy: ContextAuthorityPolicy | None = None,
+    checkpoint: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    parent_channel_id: str | None = None,
 ) -> dict[str, Any]:
     """Execute workflow-local task batches triggered by an agent turn.
 
@@ -354,13 +415,30 @@ async def execute_task_batches_for_trigger(
         return {}
 
     matching_batches = [
-        batch for batch in batches_config.batches if batch.trigger_agent == trigger_agent
+        batch for batch in batches_config.batches
+        if batch.trigger_agent == trigger_agent
+        or (batch.recovery and batch.recovery.trigger_agent == trigger_agent)
     ]
     if not matching_batches:
         return {}
 
     results: dict[str, Any] = {}
     for batch in matching_batches:
+        recovery_request = None
+        if batch.recovery and batch.recovery.trigger_agent == trigger_agent:
+            context_variables[batch.recovery.status_key] = "idle"
+            context_variables[batch.recovery.outcome_key] = {}
+            raw_request = context_variables.get(batch.recovery.request_key)
+            if not raw_request:
+                continue
+            try:
+                recovery_request = TaskBatchRecoveryRequest.model_validate(raw_request)
+            except ValueError as exc:
+                context_variables[batch.recovery.outcome_key] = {
+                    "status": "blocked", "blocked_reasons": [f"invalid recovery request: {exc}"],
+                }
+                context_variables[batch.recovery.status_key] = "blocked"
+                continue
         source_payload = (
             structured_output
             if batch.source.kind == "structured_output"
@@ -378,6 +456,12 @@ async def execute_task_batches_for_trigger(
         raw_tasks = resolve_path_value(source_payload, batch.source.path)
         task_items = _normalize_task_items(raw_tasks)
         if not task_items:
+            if recovery_request and batch.recovery:
+                context_variables[batch.recovery.status_key] = "blocked"
+                context_variables[batch.recovery.outcome_key] = {
+                    "status": "blocked", "request_id": recovery_request.request_id,
+                    "recovered_tasks": [], "blocked_reasons": ["approved task inventory is unavailable"],
+                }
             if wf_logger:
                 # A batch that finds nothing to do is the difference between a
                 # build that generates an app and one that silently does not -
@@ -428,6 +512,9 @@ async def execute_task_batches_for_trigger(
                 fresh_agents_per_task=fresh_agents_per_task,
                 agents_factory=agents_factory,
                 context_authority_policy=context_authority_policy,
+                checkpoint=checkpoint,
+                parent_channel_id=parent_channel_id,
+                recovery_request=recovery_request,
             )
         except Exception:
             context_variables[batch.result.status_key] = "failed"
@@ -463,6 +550,112 @@ async def execute_task_batches_for_trigger(
     return results
 
 
+def task_evidence_digest(value: Any) -> str:
+    """Stable digest for approved inputs and accepted task-output evidence."""
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def task_inventory_digest(task_items: list[dict[str, Any]]) -> str:
+    """Bind final acceptance to the original normalized execution inventory."""
+    return task_evidence_digest(_normalize_task_items(task_items))
+
+
+def _batch_input_fingerprint(
+    *, workflow_name: str, batch: TaskBatchSpec, task_items: list[dict[str, Any]],
+    context_variables: dict[str, Any], chat_id: str | None, app_id: str | None,
+    parent_channel_id: str | None,
+) -> str:
+    workflow_path = resolve_workflow_path(workflow_name)
+    contracts = {}
+    if workflow_path:
+        for name in ("agents.yaml", "structured_outputs.yaml", "tools.yaml", "middleware.yaml",
+                     "context_variables.yaml", "transition_graph.yaml"):
+            path = workflow_path / name
+            if path.exists():
+                contracts[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return task_evidence_digest({
+        "workflow": workflow_name, "chat_id": chat_id, "app_id": app_id, "parent_channel_id": parent_channel_id,
+        "batch": batch.model_dump(mode="json"), "tasks": task_items, "contracts": contracts,
+        "inputs": {key: context_variables.get(key) for key in batch.recovery.input_keys} if batch.recovery else {},
+    })
+
+
+def _restore_batch_for_recovery(
+    *, batch: TaskBatchSpec, task_items: list[dict[str, Any]], previous: Any,
+    fingerprint: str, request: TaskBatchRecoveryRequest,
+    parent_channel_id: str | None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], set[str]]:
+    if not isinstance(previous, dict):
+        raise ValueError("original task execution evidence is unavailable")
+    meta = copy.deepcopy(previous.get("_meta") or {})
+    if not parent_channel_id or meta.get("parent_channel_id") != parent_channel_id:
+        raise ValueError("missing or changed parent AG2 channel lineage; automatic recovery is blocked")
+    if meta.get("evidence_version") != 1 or meta.get("input_fingerprint") != fingerprint:
+        raise ValueError("missing or incompatible original task input evidence")
+    if request.batch_id != batch.id or request.input_fingerprint != fingerprint:
+        raise ValueError("recovery request does not identify the current approved task inventory")
+    if meta.get("in_flight"):
+        raise ValueError("interrupted task attempts have an uncertain outcome; automatic replay is blocked")
+    if request.request_id in (meta.get("recovery_request_ids") or []):
+        raise ValueError("recovery request has already been consumed")
+    completed_ids = meta.get("completed_tasks") or []
+    failed = copy.deepcopy(previous.get("_failed") or {})
+    if not isinstance(failed, dict) or any(not isinstance(record, dict) for record in failed.values()):
+        raise ValueError("original task failure evidence is malformed")
+    tasks = {str(item["task_id"]): item for item in task_items}
+    if set(completed_ids) & set(failed) or set(completed_ids) | set(failed) != set(tasks):
+        raise ValueError("original execution evidence does not cover the complete task inventory")
+    completed = {}
+    for task_id, record in failed.items():
+        if task_id not in tasks or record.get("worker_agent") != str(tasks[task_id].get(batch.worker.agent_field) or ""):
+            raise ValueError(f"original failed task ownership is invalid for {task_id}")
+        if record.get("failure_kind") == "dependency_blocked" and record.get("attempts") != 0:
+            raise ValueError(f"blocked task {task_id} has inconsistent execution evidence")
+    for task_id in completed_ids:
+        output = previous.get(task_id)
+        if not isinstance(output, dict) or (meta.get("accepted_output_digests") or {}).get(task_id) != task_evidence_digest(output):
+            raise ValueError(f"accepted output evidence is missing or changed for {task_id}")
+        if output.get("_task_id") != task_id:
+            raise ValueError(f"accepted output identity is invalid for {task_id}")
+        _reject_task_output_identity_drift(tasks[task_id], output)
+        _validate_task_output_ownership(batch, tasks[task_id], output)
+        _validate_exclusive_task_paths(tasks[task_id], output, task_items)
+        if any(dep not in completed_ids for dep in _task_dependencies(tasks[task_id], batch.execution.dependency_field)):
+            raise ValueError(f"accepted task {task_id} has an unaccepted prerequisite")
+        completed[task_id] = copy.deepcopy(output)
+    roots = set(request.root_task_ids)
+    if len(roots) != len(request.root_task_ids):
+        raise ValueError("duplicate recovery roots")
+    for task_id in roots:
+        record = failed.get(task_id)
+        if not isinstance(record, dict):
+            raise ValueError(f"original failure evidence is unavailable for {task_id}")
+        evidence = TaskBatchFailure.model_validate(record)
+        attempts = (meta.get("task_attempts") or {}).get(task_id)
+        if (
+            evidence.failure_kind != "output_rejected" or not evidence.recoverable
+            or not evidence.error or evidence.rejected_output is None
+            or attempts != evidence.attempts or type(attempts) is not int or attempts < 1
+            or attempts >= batch.execution.retry_limit + 1
+            or task_id in (meta.get("recovery_attempted_tasks") or [])
+        ):
+            raise ValueError(f"task {task_id} has no eligible bounded correction")
+        if any(dep not in completed for dep in _task_dependencies(tasks[task_id], batch.execution.dependency_field)):
+            raise ValueError(f"task {task_id} still has a failed or uncertain prerequisite")
+    resumed = set(roots)
+    while True:
+        descendants = {
+            task_id for task_id, record in failed.items()
+            if record.get("failure_kind") == "dependency_blocked"
+            and any(dep in resumed for dep in _task_dependencies(tasks[task_id], batch.execution.dependency_field))
+        }
+        expanded = resumed | descendants
+        if expanded == resumed:
+            break
+        resumed = expanded
+    return completed, failed, meta, resumed
+
+
 async def _execute_one_batch(
     *,
     workflow_name: str,
@@ -477,6 +670,9 @@ async def _execute_one_batch(
     fresh_agents_per_task: bool,
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None,
     context_authority_policy: ContextAuthorityPolicy | None,
+    checkpoint: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    recovery_request: TaskBatchRecoveryRequest | None = None,
+    parent_channel_id: str | None = None,
 ) -> dict[str, Any]:
     pending = {str(item["task_id"]): item for item in task_items}
     try:
@@ -489,6 +685,128 @@ async def _execute_one_batch(
         raise ValueError(f"task batch {batch.id!r} has unresolved or cyclic dependencies: {exc}") from exc
     completed: dict[str, dict[str, Any]] = {}
     failed: dict[str, dict[str, Any]] = {}
+    metadata: dict[str, Any] = {}
+    recovery_failures: dict[str, Any] = {}
+    resumed: set[str] = set()
+    if batch.recovery:
+        fingerprint = _batch_input_fingerprint(
+            workflow_name=workflow_name, batch=batch, task_items=task_items,
+            context_variables=context_variables, chat_id=chat_id, app_id=app_id,
+            parent_channel_id=parent_channel_id,
+        )
+        previous = context_variables.get(batch.result.context_key)
+        if recovery_request:
+            try:
+                completed, failed, metadata, resumed = _restore_batch_for_recovery(
+                    batch=batch, task_items=task_items, previous=previous,
+                    fingerprint=fingerprint, request=recovery_request,
+                    parent_channel_id=parent_channel_id,
+                )
+                if checkpoint is None:
+                    raise ValueError("durable task checkpoint is unavailable")
+            except ValueError as exc:
+                outcome = {"status": "blocked", "request_id": recovery_request.request_id,
+                           "recovered_tasks": [], "blocked_reasons": [str(exc)]}
+                context_variables[batch.recovery.outcome_key] = outcome
+                context_variables[batch.recovery.status_key] = "blocked"
+                original = previous if isinstance(previous, dict) else {}
+                return {"status": str(original.get("_meta", {}).get("status") or "failed"),
+                        "outputs": original, "completed_tasks": [], "failed_tasks": [], "recovery": outcome}
+            pending = {task_id: item for task_id, item in pending.items() if task_id in resumed}
+            recovery_failures = {task_id: failed[task_id] for task_id in recovery_request.root_task_ids}
+            failed = {task_id: record for task_id, record in failed.items() if task_id not in resumed}
+            metadata["recovery_attempted_tasks"] = [
+                *metadata.get("recovery_attempted_tasks", []), *recovery_request.root_task_ids,
+            ]
+            metadata["request_id"] = recovery_request.request_id
+            metadata.setdefault("recovery_request_ids", []).append(recovery_request.request_id)
+            context_variables[batch.recovery.status_key] = "running"
+        else:
+            if not parent_channel_id:
+                raise ValueError("recoverable task batches require parent AG2 channel lineage")
+            if previous:
+                raise ValueError("task batch already has execution evidence; initial dispatch cannot replay it")
+            if checkpoint is None:
+                raise ValueError("recoverable task batches require a durable task checkpoint")
+            metadata = {"evidence_version": 1, "input_fingerprint": fingerprint, "task_attempts": {},
+                        "parent_channel_id": parent_channel_id,
+                        "task_inventory_digest": task_inventory_digest(task_items),
+                        "input_digests": {key: task_evidence_digest(context_variables.get(key)) for key in batch.recovery.input_keys},
+                        "accepted_output_digests": {}, "recovery_attempted_tasks": [], "in_flight": {},
+                        "failure_history": {}, "recovery_request_ids": []}
+
+    state_lock = asyncio.Lock()
+
+    async def persist(status: str = "running") -> None:
+        if batch.recovery:
+            metadata["pending_tasks"] = list(pending)
+        outputs = _build_batch_outputs(batch=batch, completed=completed, failed=failed,
+                                       task_count=len(task_items), status=status, metadata=metadata)
+        context_variables[batch.result.context_key] = copy.deepcopy(outputs)
+        context_variables[batch.result.status_key] = status
+        if checkpoint:
+            updates = {batch.result.context_key: copy.deepcopy(outputs), batch.result.status_key: status}
+            if batch.recovery and batch.recovery.outcome_key in context_variables:
+                updates[batch.recovery.outcome_key] = copy.deepcopy(context_variables[batch.recovery.outcome_key])
+                updates[batch.recovery.status_key] = context_variables.get(batch.recovery.status_key, "idle")
+            await checkpoint(updates)
+
+    async def before_attempt(task_id: str, attempt: int) -> None:
+        if not batch.recovery:
+            return
+        async with state_lock:
+            metadata["task_attempts"][task_id] = attempt
+            metadata["in_flight"][task_id] = {"attempt": attempt, "request_id": metadata.get("request_id")}
+            await persist()
+
+    async def execute_task(item: dict[str, Any], semaphore: asyncio.Semaphore, outputs: dict[str, Any]) -> Any:
+        task_id = str(item["task_id"])
+        try:
+            outcome = await _run_one_task(
+                workflow_name=workflow_name, batch=batch, task=item, all_task_items=task_items,
+                base_context=context_variables, completed_task_outputs=dict(completed), current_batch_outputs=outputs,
+                agents=agents, chat_id=chat_id, app_id=app_id, user_id=user_id, semaphore=semaphore,
+                fresh_agents_per_task=fresh_agents_per_task, agents_factory=agents_factory,
+                context_authority_policy=context_authority_policy, before_attempt=before_attempt,
+                prior_failure=recovery_failures.get(task_id), recovery_episode=recovery_request is not None,
+            )
+        except asyncio.CancelledError:
+            if batch.recovery:
+                async with state_lock:
+                    failed[task_id] = TaskBatchFailure(
+                        task_id=task_id, failure_kind="interrupted",
+                        error=f"task {task_id!r} was interrupted; its attempt outcome is uncertain",
+                        worker_agent=str(item.get(batch.worker.agent_field) or ""),
+                        attempts=metadata["task_attempts"].get(task_id, 0),
+                    ).model_dump(mode="json")
+                    metadata.setdefault("failure_history", {}).setdefault(task_id, []).append(copy.deepcopy(failed[task_id]))
+                    # Retain the in-flight reservation even if recording this
+                    # cancellation succeeds. A restart must not repeat the call.
+                    await persist()
+            raise
+        except Exception as exc:
+            outcome = exc
+        async with state_lock:
+            pending.pop(task_id, None)
+            if isinstance(outcome, Exception):
+                failed[task_id] = outcome.evidence if isinstance(outcome, _TaskRejected) else TaskBatchFailure(
+                    task_id=task_id, failure_kind="execution_failed", error=str(outcome),
+                    worker_agent=str(item.get(batch.worker.agent_field) or ""),
+                    attempts=(metadata.get("task_attempts") or {}).get(task_id, 0),
+                ).model_dump(mode="json")
+                if batch.recovery:
+                    metadata.setdefault("failure_history", {}).setdefault(task_id, []).append(copy.deepcopy(failed[task_id]))
+            else:
+                completed[task_id] = outcome
+                if batch.recovery:
+                    metadata["accepted_output_digests"][task_id] = task_evidence_digest(outcome)
+            if batch.recovery:
+                metadata["in_flight"].pop(task_id, None)
+                await persist()
+        return outcome
+
+    if batch.recovery:
+        await persist()
 
     while pending:
         # A task is "resolved" when all its dependencies have settled (completed or failed).
@@ -512,12 +830,14 @@ async def _execute_one_batch(
                 d for d in _task_dependencies(item, batch.execution.dependency_field)
                 if str(d) in failed
             )
-            failed[task_id] = {
-                "task_id": task_id,
-                "status": "failed",
-                "error": f"dependency '{failed_dep}' failed",
-                "worker_agent": str(item.get(batch.worker.agent_field) or ""),
-            }
+            failed[task_id] = TaskBatchFailure(
+                task_id=task_id, failure_kind="dependency_blocked",
+                error=f"dependency '{failed_dep}' failed",
+                worker_agent=str(item.get(batch.worker.agent_field) or ""),
+                blocked_by=[dep for dep in _task_dependencies(item, batch.execution.dependency_field) if dep in failed],
+            ).model_dump(mode="json")
+            if batch.recovery:
+                metadata.setdefault("failure_history", {}).setdefault(task_id, []).append(copy.deepcopy(failed[task_id]))
 
         ready = resolved
         if not ready:
@@ -556,26 +876,11 @@ async def _execute_one_batch(
             failed=failed,
             task_count=len(task_items),
             status="running",
+            metadata=metadata,
         )
         settled = await asyncio.gather(
             *[
-                _run_one_task(
-                    workflow_name=workflow_name,
-                    batch=batch,
-                    task=item,
-                    all_task_items=task_items,
-                    base_context=context_variables,
-                    completed_task_outputs=completed,
-                    current_batch_outputs=current_batch_outputs,
-                    agents=agents,
-                    chat_id=chat_id,
-                    app_id=app_id,
-                    user_id=user_id,
-                    semaphore=semaphore,
-                    fresh_agents_per_task=fresh_agents_per_task,
-                    agents_factory=agents_factory,
-                    context_authority_policy=context_authority_policy,
-                )
+                execute_task(item, semaphore, current_batch_outputs)
                 for item in ready
             ],
             return_exceptions=True,
@@ -583,37 +888,18 @@ async def _execute_one_batch(
 
         for task, outcome in zip(ready, settled, strict=False):
             task_id = str(task["task_id"])
-            pending.pop(task_id, None)
+            if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
+                raise outcome
             if isinstance(outcome, Exception):
-                failed[task_id] = {
-                    "task_id": task_id,
-                    "status": "failed",
-                    "error": str(outcome),
-                    "worker_agent": str(task.get(batch.worker.agent_field) or ""),
-                }
                 if batch.execution.failure_policy == "fail_batch":
-                    context_variables[batch.result.context_key] = _build_batch_outputs(
-                        batch=batch,
-                        completed=completed,
-                        failed=failed,
-                        task_count=len(task_items),
-                        status="failed",
-                    )
+                    await persist("failed")
                     raise RuntimeError(
                         f"task batch {batch.id!r} failed at task {task_id!r}: {outcome}"
                     ) from outcome
                 continue
-            completed[task_id] = outcome  # type: ignore[assignment]
 
         if pending:
-            context_variables[batch.result.context_key] = _build_batch_outputs(
-                batch=batch,
-                completed=completed,
-                failed=failed,
-                task_count=len(task_items),
-                status="running",
-            )
-            context_variables[batch.result.status_key] = "running"
+            await persist()
 
     status = "completed"
     if failed:
@@ -622,12 +908,26 @@ async def _execute_one_batch(
             if batch.execution.failure_policy == "continue_with_available"
             else "completed_with_errors"
         )
+    if recovery_request and batch.recovery:
+        remaining = sorted(resumed & set(failed))
+        outcome = {
+            "status": "blocked" if remaining else "completed", "request_id": recovery_request.request_id,
+            "recovered_tasks": sorted(resumed & set(completed)),
+            "blocked_reasons": [failed[task_id]["error"] for task_id in remaining],
+        }
+        metadata["recovery_result"] = outcome
+        context_variables[batch.recovery.outcome_key] = outcome
+        context_variables[batch.recovery.status_key] = (
+            "partial" if remaining and outcome["recovered_tasks"] else outcome["status"]
+        )
+    await persist(status)
     outputs = _build_batch_outputs(
         batch=batch,
         completed=completed,
         failed=failed,
         task_count=len(task_items),
         status=status,
+        metadata=metadata,
     )
     return {
         "status": status,
@@ -654,6 +954,9 @@ async def _run_one_task(
     fresh_agents_per_task: bool,
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None,
     context_authority_policy: ContextAuthorityPolicy | None,
+    before_attempt: Callable[[str, int], Awaitable[None]] | None = None,
+    prior_failure: dict[str, Any] | None = None,
+    recovery_episode: bool = False,
 ) -> dict[str, Any]:
     agent_name = str(task.get(batch.worker.agent_field) or "").strip()
     prompt = str(task.get(batch.worker.prompt_field) or "").strip()
@@ -704,9 +1007,14 @@ async def _run_one_task(
     async with semaphore:
         runner_result = None
         attempts = batch.execution.retry_limit + 1
-        last_error: str | None = None
-        rejected_output: str | None = None
-        for _attempt in range(attempts):
+        spent = int((prior_failure or {}).get("attempts") or 0)
+        last_error: str | None = (prior_failure or {}).get("error")
+        rejected_output: str | None = (
+            json.dumps(prior_failure["rejected_output"], separators=(",", ":"), default=str)
+            if prior_failure and prior_failure.get("rejected_output") is not None else None
+        )
+        stop_at = min(attempts, spent + 1) if prior_failure else attempts
+        for _attempt in range(spent, stop_at):
             attempt_prompt = scoped_prompt
             if last_error:
                 attempt_prompt += (
@@ -722,6 +1030,8 @@ async def _run_one_task(
                         "Correct the reported errors and return the complete task output.\n"
                         f"{rejected_output}"
                     )
+            if before_attempt:
+                await before_attempt(str(task["task_id"]), _attempt + 1)
             runner_result = await AG2TaskBatchRunner().run(
                 AG2TaskBatchRunnerRequest(
                     workflow_name=workflow_name,
@@ -765,6 +1075,7 @@ async def _run_one_task(
                         if _page_stem_from_path(path)
                     ]
                 _validate_task_output_ownership(batch, task, output)
+                _validate_exclusive_task_paths(task, output, all_task_items)
             except ValueError as exc:
                 message = str(exc)
                 # An attempt that reproduces the previous error exactly has shown
@@ -772,16 +1083,25 @@ async def _run_one_task(
                 # call each to prove it again. A live task burned all three on
                 # one identical message. Both repair loops already stop on this;
                 # this layer only counted.
-                if _attempt == attempts - 1 or message == last_error:
-                    raise
+                deferred = bool(batch.recovery and not recovery_episode)
+                if deferred or _attempt == stop_at - 1 or message == last_error:
+                    raise _TaskRejected(TaskBatchFailure(
+                        task_id=str(task["task_id"]), failure_kind="output_rejected", error=message,
+                        worker_agent=agent_name, attempts=_attempt + 1,
+                        rejected_output=json.loads(candidate_json) if candidate_json is not None else None,
+                        recoverable=bool(deferred and candidate_json is not None
+                                         and _attempt + 1 < attempts and message != last_error),
+                    )) from exc
                 last_error = message
                 rejected_output = candidate_json
                 continue
             break
         else:
-            raise RuntimeError(
-                f"AG2 task lifecycle failed for task {task.get('task_id')!r}: {last_error or 'unknown error'}"
-            )
+            raise _TaskRejected(TaskBatchFailure(
+                task_id=str(task["task_id"]), failure_kind="execution_failed",
+                error=f"AG2 task lifecycle failed for task {task.get('task_id')!r}: {last_error or 'unknown error'}",
+                worker_agent=agent_name, attempts=stop_at,
+            ))
 
     _stamp_task_output_identity(task, output)
     output.setdefault("_task_id", str(task["task_id"]))
@@ -968,7 +1288,7 @@ def _validate_task_output_ownership(
             f"task batch {batch.id!r} task {task_id!r} did not emit any code files"
         )
 
-    optional_paths = _optional_task_output_paths(task)
+    optional_paths = optional_task_output_paths(task)
     unexpected = sorted(emitted_paths.difference(owned_paths).difference(optional_paths))
     if unexpected:
         raise ValueError(
@@ -980,6 +1300,20 @@ def _validate_task_output_ownership(
         raise ValueError(
             f"task batch {batch.id!r} task {task_id!r} did not emit required owned_paths: {missing}"
         )
+
+
+def _validate_exclusive_task_paths(
+    task: dict[str, Any], output: dict[str, Any], task_items: list[dict[str, Any]],
+) -> None:
+    emitted = set(extract_code_file_map_from_payload(output))
+    for other in task_items:
+        if other["task_id"] == task["task_id"]:
+            continue
+        conflicts = sorted(emitted & set(_normalize_owned_paths(other.get("owned_paths"))))
+        if conflicts:
+            raise ValueError(
+                f"task {task['task_id']!r} emitted paths owned by task {other['task_id']!r}: {conflicts}"
+            )
 
 
 def _build_task_context(
@@ -994,26 +1328,32 @@ def _build_task_context(
     app_id: str | None,
     user_id: str | None,
 ) -> dict[str, Any]:
-    task_context = dict(base_context)
+    task_context = copy.deepcopy(base_context)
+    embedded_context = task.get("context_variables")
+    if isinstance(embedded_context, Mapping):
+        task_context.update(copy.deepcopy(dict(embedded_context)))
+    for field_name in batch.worker.context_fields:
+        if field_name in task:
+            task_context[field_name] = copy.deepcopy(task[field_name])
     task_context["task_run_mode"] = True
     task_context["current_task_batch_id"] = batch.id
     task_context["current_task_id"] = str(task["task_id"])
-    task_context["current_task"] = dict(task)
+    task_context["current_task"] = copy.deepcopy(task)
     task_context["decomposition_plan"] = {
         "batch_id": batch.id,
-        "tasks": [dict(item) for item in all_task_items],
+        "tasks": copy.deepcopy(all_task_items),
     }
     task_context["current_build_task_id"] = str(task["task_id"])
     task_context["current_build_task_type"] = str(task.get("task_type") or "")
-    task_context["current_build_task"] = dict(task)
+    task_context["current_build_task"] = copy.deepcopy(task)
     task_dependencies = _task_dependencies(task, batch.execution.dependency_field)
-    task_context["completed_task_outputs"] = dict(completed_task_outputs)
+    task_context["completed_task_outputs"] = copy.deepcopy(completed_task_outputs)
     task_context["dependency_task_outputs"] = {
-        dep: completed_task_outputs[dep]
+        dep: copy.deepcopy(completed_task_outputs[dep])
         for dep in task_dependencies
         if dep in completed_task_outputs
     }
-    task_context[batch.result.context_key] = dict(current_batch_outputs)
+    task_context[batch.result.context_key] = copy.deepcopy(current_batch_outputs)
     task_context[batch.result.status_key] = str(
         (current_batch_outputs.get("_meta") or {}).get("status") or "running"
     )
@@ -1024,17 +1364,11 @@ def _build_task_context(
     if user_id:
         task_context["user_id"] = user_id
 
-    embedded_context = task.get("context_variables")
-    if isinstance(embedded_context, Mapping):
-        task_context.update(dict(embedded_context))
-
-    for field_name in batch.worker.context_fields:
-        if field_name in task:
-            task_context[field_name] = task[field_name]
     return task_context
 
 
-def _optional_task_output_paths(task: dict[str, Any]) -> set[str]:
+def optional_task_output_paths(task: dict[str, Any]) -> set[str]:
+    """Canonical companion paths permitted but not required for a task output."""
     task_type = str(task.get("task_type") or "").strip()
     if task_type == "page_bundle":
         return {
@@ -1069,11 +1403,13 @@ def _build_batch_outputs(
     failed: dict[str, dict[str, Any]],
     task_count: int,
     status: str,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     outputs: dict[str, Any] = dict(completed)
     if failed:
         outputs["_failed"] = dict(failed)
     outputs["_meta"] = {
+        **(metadata or {}),
         "batch_id": batch.id,
         "status": status,
         "task_count": task_count,
@@ -1186,6 +1522,9 @@ async def _emit_task_batch_status(
 __all__ = [
     "TaskBatchExecution",
     "TaskBatchConveyor",
+    "TaskBatchFailure",
+    "TaskBatchRecovery",
+    "TaskBatchRecoveryRequest",
     "TaskBatchResult",
     "TaskBatchSource",
     "TaskBatchSpec",
@@ -1194,6 +1533,9 @@ __all__ = [
     "get_task_batches_path",
     "load_task_batches_config",
     "parse_task_batches_config",
+    "optional_task_output_paths",
+    "task_evidence_digest",
+    "task_inventory_digest",
     "execute_task_batches_for_trigger",
     "resolve_path_value",
     "workflow_has_task_batches",

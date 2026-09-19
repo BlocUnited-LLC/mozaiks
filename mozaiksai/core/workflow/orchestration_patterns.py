@@ -1002,13 +1002,31 @@ async def run_workflow_orchestration(
                 wf_logger=wf_logger,
             )
             matching_batches = [
-                batch for batch in task_batches_config.batches if batch.trigger_agent == agent_name
+                batch for batch in task_batches_config.batches
+                if batch.trigger_agent == agent_name
+                or (batch.recovery and batch.recovery.trigger_agent == agent_name)
             ] if task_batches_config is not None else []
             if not matching_batches:
                 return
 
             from .agents.factory import _workflow_tool_invocation
             from .task_batches import execute_task_batches_for_trigger
+
+            def _batch_written_keys(batch: Any) -> tuple[str, ...]:
+                return (batch.result.context_key, batch.result.status_key) + (
+                    (batch.recovery.outcome_key, batch.recovery.status_key) if batch.recovery else ()
+                )
+
+            async def _checkpoint_batch(updates: dict[str, Any]) -> None:
+                from mozaiksai.core.adapters.ag2_network_runner import checkpoint_agent_context
+
+                allowed = {key for batch in matching_batches for key in _batch_written_keys(batch)}
+                if set(updates) - allowed:
+                    raise ValueError("task batch checkpoint contains undeclared result keys")
+                with _workflow_tool_invocation(context_bridge, writer_id=TASK_BATCH_WRITER):
+                    for key, value in updates.items():
+                        context_bridge.set(key, value)
+                await checkpoint_agent_context()
 
             body = (getattr(packet, "event_data", {}) or {}).get("body")
             if isinstance(body, str):
@@ -1033,12 +1051,14 @@ async def run_workflow_orchestration(
                     fresh_agents_per_task=True,
                     agents_factory=agents_factory,
                     context_authority_policy=context_authority_policy,
+                    checkpoint=_checkpoint_batch,
+                    parent_channel_id=str(getattr(packet, "channel_id", "") or ""),
                 )
             finally:
                 # Only the declared batch results may enter the parent workflow.
                 with _workflow_tool_invocation(context_bridge, writer_id=TASK_BATCH_WRITER):
                     for batch in matching_batches:
-                        for key in (batch.result.context_key, batch.result.status_key):
+                        for key in _batch_written_keys(batch):
                             if key in batch_context:
                                 context_bridge.set(key, batch_context[key])
 

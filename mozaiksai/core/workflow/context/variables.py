@@ -455,6 +455,9 @@ def _task_batch_context_keys(workflow_name: str) -> set[str]:
         for batch in config.batches:
             keys.add(batch.result.context_key)
             keys.add(batch.result.status_key)
+            if batch.recovery:
+                keys.add(batch.recovery.outcome_key)
+                keys.add(batch.recovery.status_key)
         return {key for key in keys if key}
     except Exception:
         return set()
