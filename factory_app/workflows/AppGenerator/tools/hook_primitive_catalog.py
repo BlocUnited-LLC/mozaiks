@@ -26,7 +26,7 @@ def inject_primitive_catalog(agent: Any, messages: list[dict[str, Any]]) -> None
             "- Validate both top-level page sections and nested Grid child primitives against this catalog.\n"
             "- If the page needs a richer UX, compose it from these shipped primitives instead of inventing a new primitive."
             "\n- The current approved app_build_plan overrides older design docs: preserve app name, field optionality, and requested scope."
-            "\n- ui.modal.open/close payload uses modal_id, never modalId. The id must name a Modal on the same page."
+            "\n- ui.modal.open/close actions set modal_id, never modalId. The id must name a Modal on the same page."
             "\n- Table actions pass the selected record into the modal as selected_row. Edit forms declare initial_values_key: selected_row."
             "\n- Do not render editable identifier, ownership, or server timestamp fields. For update/delete payloads bind identifiers with {selected_row.<id_field>}."
             "\n- An explicit submit payload must include each editable field using {form.<field_name>}; null payload sends the form values."

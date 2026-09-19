@@ -804,7 +804,10 @@ def test_save_app_schema_rejects_submit_action_without_resolvable_href(monkeypat
         }
     ]
 
-    with pytest.raises(ValueError, match=r"submit_action\.href is required for submit actions"):
+    # The tool no longer re-implements the per-variant requirement: the action
+    # contract owns it, and the rejection now carries the runtime's own reason
+    # rather than a second copy of the rule that could drift from it.
+    with pytest.raises(ValueError, match=r"submit actions require href"):
         save_app_schema_module.save_app_schema(
             manifest=_base_manifest(),
             pages=[page],

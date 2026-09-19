@@ -35,7 +35,10 @@ from mozaiksai.core.runtime.app.provenance import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    materialize_modal_targets,
     promote_table_primitive,
+    relayable_action_reasons,
+    resolve_modal_action_targets,
     resource_table_only_fields,
 )
 from mozaiksai.core.workflow.ui_primitives import (
@@ -819,16 +822,11 @@ def _validate_action(action: Any, *, path: str) -> None:
     if not _is_non_empty_string(action.get("label")):
         raise ValueError(f"{path}.label is required")
 
+    # action_type is the discriminator: every variant declares it, so an action
+    # that arrives without one did not come from the contract.
     action_type = action.get("action_type")
     if not _is_non_empty_string(action_type):
-        if _is_non_empty_string(action.get("event_type")):
-            action_type = "event"
-        elif _is_non_empty_string(action.get("workflow_id")):
-            action_type = "workflow"
-        elif _is_non_empty_string(action.get("href")):
-            action_type = "navigate"
-        else:
-            raise ValueError(f"{path}.action_type is required")
+        raise ValueError(f"{path}.action_type is required")
 
     if action_type not in VALID_ACTION_TYPES:
         raise ValueError(f"{path}.action_type must be one of {sorted(VALID_ACTION_TYPES)}")
@@ -855,14 +853,6 @@ def _validate_action(action: Any, *, path: str) -> None:
     if closes_modal is not None and not isinstance(closes_modal, bool):
         raise ValueError(f"{path}.closes_modal must be a boolean")
 
-    if action_type == "navigate" and not _is_non_empty_string(action.get("href")):
-        raise ValueError(f"{path}.href is required for navigate actions")
-    if action_type == "event" and not _is_non_empty_string(action.get("event_type")):
-        raise ValueError(f"{path}.event_type is required for event actions")
-    if action_type == "workflow" and not _is_non_empty_string(action.get("workflow_id")):
-        raise ValueError(f"{path}.workflow_id is required for workflow actions")
-    if action_type in {"submit", "delete"} and not _is_non_empty_string(action.get("href")):
-        raise ValueError(f"{path}.href is required for {action_type} actions")
 
 
 def _validate_action_list(actions: Any, *, path: str) -> None:
@@ -1744,7 +1734,21 @@ def save_app_schema(
             custom_route_bundle = detach(_context_get(context_variables, "app_custom_route_bundle"))
     if page_list and not isinstance(page_list, list):
         raise ValueError("save_app_schema: pages must be a list")
+    # Still earns its place: the contract makes submit.href unskippable for
+    # generated actions, but baseline pages merged above never passed through
+    # it, and those are exactly the ones that can still arrive without a route.
     _repair_missing_submit_hrefs(page_list, context_variables)
+    # The same deterministic repairs the task-batch lane runs. This lane used to
+    # validate without them, so a defect the repo already knew how to fix was
+    # reported to the agent instead of corrected -- and a repair budget went on
+    # four modal targets that were sitting inside the Modal that owned them.
+    # Applied to baseline pages too: they are merged in above without ever
+    # passing through _normalize_page_schema.
+    for page in page_list:
+        if not isinstance(page, dict):
+            continue
+        materialize_modal_targets(page)
+        resolve_modal_action_targets(page)
 
     theme_config_patch = _strip_none(_to_plain(theme_config_patch))
     resolved_theme_config = resolve_app_theme_config(
@@ -1755,6 +1759,10 @@ def save_app_schema(
     data_contract = _strip_none(_to_plain(data_contract))
     custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
 
+    # One rejection carries every defect it can see. Reporting the first one and
+    # stopping meant a page with three independent faults needed three turns
+    # against a two-turn budget, and the run died one fix short.
+    page_defects: list[str] = []
     for page in page_list:
         if not isinstance(page, dict):
             raise ValueError("Each entry in pages must be a dict (AppPageSchema)")
@@ -1797,11 +1805,26 @@ def save_app_schema(
         try:
             validate_page_schema(page)
         except PageSchemaValidationError as exc:
-            formatted = "; ".join(
-                f"{diagnostic.location}: {diagnostic.code}"
+            # Carry the reason, not just the code. These messages are built by
+            # the runtime's own sanitizer, so they name the rule without ever
+            # echoing the author's value back at them.
+            reasons = relayable_action_reasons(exc)
+            page_defects.extend(
+                f"Page '{page.get('name')}' {diagnostic.location}: {diagnostic.code}"
+                + (f" - {diagnostic.message}" if diagnostic.message else "")
                 for diagnostic in exc.diagnostics
             )
-            raise ValueError(f"Page '{page.get('name')}' violates mozaiks.app_page.v1: {formatted}") from exc
+            if reasons:
+                page_defects.append(
+                    f"Page '{page.get('name')}' action requirements: " + "; ".join(reasons)
+                )
+
+    if page_defects:
+        # Sorted so the same page always produces the same text: the repair loop
+        # fingerprints this to decide whether an attempt made progress.
+        raise ValueError(
+            "Pages violate mozaiks.app_page.v1: " + "; ".join(sorted(page_defects))
+        )
 
     if not page_list and custom_route_bundle is None:
         raise ValueError("save_app_schema: at least one declarative page or custom route bundle is required")

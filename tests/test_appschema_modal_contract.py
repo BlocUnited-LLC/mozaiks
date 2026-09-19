@@ -33,7 +33,9 @@ def _app_schema_prompt() -> str:
 def test_the_agent_is_told_a_referenced_modal_must_exist() -> None:
     prompt = _app_schema_prompt()
 
-    assert "MUST equal the `id` of a `Modal` section you declared on this same page" in prompt
+    # The target is a typed field on the action now, not a payload key the
+    # agent has to know to write; the rule it must satisfy is unchanged.
+    assert "MUST set `modal_id` to the `id` of a `Modal` section you declared on this same page" in prompt
     assert "fails the whole page build" in prompt
 
 

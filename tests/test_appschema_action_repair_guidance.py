@@ -116,9 +116,13 @@ def test_live_primitive_hook_explains_fixed_endpoint_form_binding():
 def test_structured_form_guidance_explains_fixed_href_and_split_forms():
     config = yaml.safe_load((ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8"))
     models = config["models"]
-    href = models["AppPageAction"]["fields"]["href"]["description"]
+    # AppPageAction is the union of the five variants; href is declared by the
+    # variants that can carry one, so the guidance lives there.
+    assert models["AppPageAction"]["type"] == "union"
+    submit_href = models["AppSubmitAction"]["fields"]["href"]["description"]
     submit = models["AppFormConfig"]["fields"]["submit_action"]["description"]
-    assert "fixed" in href
+    assert "fixed" in submit_href
+    assert "separate create/edit" in submit_href
     assert "separate create/edit" in submit
     assert "href" in submit
 

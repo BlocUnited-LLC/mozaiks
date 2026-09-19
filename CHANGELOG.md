@@ -12,6 +12,24 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- Generated page actions are now five closed shapes chosen by `action_type`
+  (`navigate`, `submit`, `delete`, `event`, `workflow`) instead of one shape
+  with every field nullable. Each declares only the fields that behave on it,
+  so `href` on a navigate action, `event_type` on an event action and
+  `workflow_id` on a workflow action are required by the contract rather than
+  checked after the fact, and a field belonging to another shape is refused.
+- `ui.modal.open` / `ui.modal.close` actions name their target in a typed
+  `modal_id` field. It is projected into the served `payload.modal_id` during
+  materialization, so the runtime, the event bus and the Modal component are
+  unchanged.
+- A page rejection from `save_app_schema` now reports every defect it can see
+  in one message, with the reason behind each, instead of stopping at the
+  first. Page validation also runs the same deterministic modal repairs the
+  task-batch lane already ran, including on baseline pages merged during a
+  repair.
+
 ## 0.2.0 - 2026-09-18
 
 ### Fixed
