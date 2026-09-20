@@ -25,10 +25,8 @@ from mozaiksai.core.workflow.execution.network_graph import (
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
 
-@pytest.mark.parametrize("repair_target,next_agent", [
-    ("ServiceAgent", "AppValidationAgent"), (None, "ModuleRuntimeQualityAgent"),
-])
-def test_appgenerator_backend_repair_returns_directly_to_acceptance(repair_target, next_agent):
+@pytest.mark.parametrize("repair_target", ["ServiceAgent", None])
+def test_appgenerator_backend_output_always_crosses_runtime_quality(repair_target):
     root = Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator"
     rules = yaml.safe_load((root / "transition_graph.yaml").read_text(encoding="utf-8"))["transition_rules"]
     config = yaml.safe_load((root / "agents.yaml").read_text(encoding="utf-8"))
@@ -40,7 +38,7 @@ def test_appgenerator_backend_repair_returns_directly_to_acceptance(repair_targe
     assert resolve_next_agent(
         graph, current_agent_name="ServiceAgent",
         context_variables={"bundle_repair_target": repair_target, "task_run_mode": False},
-    ) == next_agent
+    ) == "ModuleRuntimeQualityAgent"
 
 
 def test_transition_graph_uses_only_canonical_terminate_literal():
@@ -665,13 +663,11 @@ def test_appgenerator_validation_routes_repair_context_before_user_fallback():
             participant_order=participant_order,
         )
 
-    assert route({"workflow_integration_repair_status": "needs_revision"}) == "ConfigMiddlewareAgent"
     assert route({"bundle_repair_target": "AppSchemaAgent"}) == "AppSchemaAgent"
     assert route({"bundle_repair_target": "ConfigMiddlewareAgent"}) == "ConfigMiddlewareAgent"
     assert route({"bundle_repair_target": "ServiceAgent"}) == "ServiceAgent"
     assert route({"bundle_repair_target": "FrontendStubAgent"}) == "FrontendStubAgent"
     assert route({"bundle_repair_status": "blocked"}) == "user"
-    assert route({"workflow_integration_repair_status": "blocked"}) == "user"
     assert route({"app_validation_status": "failed"}) == "user"
     assert route({"integration_tests_passed": True}) == "DownloadAgent"
     assert route({}) == "user"

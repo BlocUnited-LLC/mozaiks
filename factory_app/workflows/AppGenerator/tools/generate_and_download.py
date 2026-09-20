@@ -492,18 +492,18 @@ async def _inject_agent_context_env(*, files_map: dict[str, str], app_id: str, c
 
 
 def _export_repair_outcome(acceptance: dict[str, Any]) -> str:
-    integration = acceptance.get("workflow_integration_repair") or {}
     bundle = acceptance.get("bundle_repair") or {}
-    if integration.get("status") == "blocked" or bundle.get("status") == "blocked":
-        return "blocked"
-    if integration.get("status") == "needs_revision":
-        return "repair_integration"
+    if acceptance.get("task_recovery_request"):
+        return "repair_tasks"
     if bundle.get("status") == "needs_revision":
         return {
             "AppSchemaAgent": "repair_schema",
             "DatabaseAgent": "repair_database",
             "ConfigMiddlewareAgent": "repair_integration",
             "ServiceAgent": "repair_service",
+            "ModelAgent": "repair_models",
+            "ControllerAgent": "repair_controller",
+            "RefinementHarnessAgent": "repair_harness",
             "FrontendStubAgent": "repair_frontend",
         }.get(str(bundle.get("target_agent") or ""), "blocked")
     return "blocked"

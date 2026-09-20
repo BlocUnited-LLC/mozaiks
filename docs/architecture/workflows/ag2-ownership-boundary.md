@@ -55,6 +55,16 @@ the graph. This uses AG2's existing
 [channel context primitive](https://docs.ag2.ai/docs/user-guide/network/context_variables/),
 not a second persistence or routing authority.
 
+Opted-in Factory recovery uses that same batch and checkpoint seam. The approved
+inventory and original DAG remain authoritative; accepted tasks are preserved,
+eligible rejected prerequisites receive one bounded correction, and descendants
+resume only after their prerequisites succeed. Pre-dispatch reservations and
+settled results use authorized `EV_CONTEXT_SET` writes. Missing evidence and
+uncertain interrupted attempts remain blocked. Factory selects repair policy;
+AG2 still executes workers and advances the declared graph. See
+[ADR 0011](../../adr/0011-factory-bounded-task-recovery.md) for contracts, budgets,
+acceptance, migration, and rollback.
+
 For an agent with a declared self-edge, the packet adapter supplies an explicit
 audience containing all workflow participants, including the sender. AG2 1.0.3
 excludes the sender from a default broadcast, otherwise leaving that self-edge
@@ -220,6 +230,15 @@ development and test runs. An operator or hosted deployment may supply any
 AG2-compatible implementation (Memory, Sqlite, Disk, Redis, Locked, or a
 custom duck-typed store) without modifying OSS code.
 
+The canonical `AG2OrchestrationAdapter` injects the existing tenant/chat-scoped
+`MongoAG2KnowledgeStore` before reaching this seam. Its resume path requires the
+original channel. Factory task recovery binds evidence to the actual packet's
+channel ID, and the adapter hydrates the context bridge from current Hub state
+before agent execution and auto tools. A new channel or stale bridge cannot
+reset an interrupted attempt or a repair budget. Direct in-memory callers must
+retain their store and channel for recovery; no separate persistence layer is
+introduced.
+
 **Lifecycle contract:**
 - One Hub is opened per workflow run (or per live session kept alive for
   paused runs).
@@ -261,6 +280,14 @@ this boundary if AG2 supplies an atomic per-client round hook or serialized
 concurrent redelivery in its default handler. See the upstream
 [client handler contract](https://docs.ag2.ai/docs/user-guide/network/agent_clients/)
 and [reconnect contract](https://docs.ag2.ai/docs/user-guide/network/distributed/).
+
+`AgentSpec.pending_turn_replay` declares `allow` (the default) or `block`.
+Before replaying pending turns, the adapter checks AG2's persisted pending
+records against this policy. A blocked participant stops resume with its agent
+and channel identified; a fresh delivery is unaffected. AppGenerator uses this
+for artifact workers whose interrupted execution must remain uncertain. AG2
+continues to own pending records and replay; the policy adds no attempt store
+or scheduler.
 
 ## Review Checklist
 

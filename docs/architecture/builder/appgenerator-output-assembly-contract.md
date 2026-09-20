@@ -31,13 +31,20 @@ feed the existing deterministic materializers; bounded implementation tasks
 provide Python/React source through `CodeFile` entries. Assembly combines those
 outputs with explicitly declared capability-pack templates.
 
-The existing task-batch retry budget includes deterministic materialization and
-file-ownership validation. Invalid worker output is not merged. A remaining
-attempt receives the validation error and must satisfy the original task;
-exhaustion stops the build and persists failure diagnostics.
+The existing task-batch attempt budget includes deterministic materialization and
+file-ownership validation. Invalid worker output is not merged. AppGenerator
+retains the first output rejection for one Factory-authorized correction through
+the same AG2 batch, within the original four-call ceiling. Dependencies continue
+to drain when a prerequisite fails. Successful outputs and original failure
+history remain authoritative; assembly writes a separate summary. Eligible
+prerequisites and blocked descendants resume without replaying successful tasks.
+Missing evidence, stale inputs, and uncertain interrupted attempts remain blocked.
+See [ADR 0011](../../adr/0011-factory-bounded-task-recovery.md).
+
 AppPlanAgent clears stale plan/task state before validating a replacement.
-Only a completed declared task batch may advance it to assembly; a rejected
-or empty plan cannot fall through to standalone page generation.
+Completed or partial batches advance to assembly; incomplete assembly goes directly
+to validation before auth scaffolding can require absent app files. A rejected or
+empty plan cannot fall through to standalone page generation.
 
 The workflow-owned `review_app_build_plan` tool validates the strict AppBuildPlan
 model, registered pack origins, approved app-owned module identities, page
@@ -577,88 +584,52 @@ modules must not invent workflow capabilities absent from that metadata, and a
 workflow trigger event must not also route to a different generated workflow
 capability unless that route is declared by the same metadata.
 
-When workflow integration fails, the acceptance gate writes a bounded repair
-contract before export can proceed:
+Workflow integration, generated-bundle, module, runtime, functional, and planned
+completeness diagnostics share one artifact-repair policy. The approved task
+inventory determines each exact path's owner. The gate persists:
 
-- `workflow_integration_repair_status`
-- `workflow_integration_repair_count`
-- `workflow_integration_repair_request`
-- `workflow_integration_repair_failed_tests`
-- `workflow_integration_repair_result`
+- `bundle_repair_status`, `bundle_repair_target`, and `bundle_repair_request`
+- `bundle_repair_attempt_count` and `bundle_repair_max_attempts`
+- `bundle_repair_errors`, failure fingerprint, and no-progress projection
+- `bundle_repair_result`, including the active task, allowed paths, request ID,
+  settled response state, history, and every deferred diagnostic
 
-`needs_revision` routes back to `ConfigMiddlewareAgent`, which runs in
-workflow-integration repair mode. That mode emits only corrected module contract
-YAML for the affected module, using AgentGenerator workflow metadata and the
-injected `[WORKFLOW INTEGRATION CONTRACT]` as authority. It must not regenerate
-backend Python, frontend code, pages, data contracts, service foundation files,
-or unrelated modules. After the configured attempt limit, the status becomes
-`blocked` and the workflow returns to the user.
+A failed or unstarted prerequisite uses `app_task_recovery_request` on the
+existing batch rather than artifact repair. `app_task_recovery_result` retains
+the outcome; `app_task_recovery_status` projects completed/partial progress back
+to assembly. Unknown root diagnostics are never reconstructed.
 
-When the generated-bundle scanner, runtime loading, runtime-quality checks, or
-module implementation validation fails, the same acceptance gate writes a bundle
-repair contract before export can proceed:
+Accepted tasks may receive a scoped artifact correction. The same two-proposal
+budget covers all artifact diagnostics. A repeated, rejected, or interrupted
+lane stays blocked while an independent eligible owner can use a remaining
+proposal. Each save validates the entire candidate before applying any change;
+foreign writes/deletions are rejected, and unrelated accepted output is preserved.
+Canonical optional-path rules cannot override another explicit task owner.
 
-- `bundle_repair_status`
-- `bundle_repair_target`
-- `bundle_repair_attempt_count`
-- `bundle_repair_max_attempts`
-- `bundle_repair_request`
-- `bundle_repair_errors`
-- `bundle_repair_result`
+The graph routes schema, module-contract, and service repairs through their
+quality gates and back to complete-bundle acceptance. It also supports ModelAgent,
+DatabaseAgent, ControllerAgent, RefinementHarnessAgent, and FrontendStubAgent as
+explicit owners. It never selects ServiceAgent merely because a diagnostic
+contains `backend/`; `schemas.py` belongs to its approved ModelAgent task.
 
-Both workflow-integration and generated-bundle repair contracts also persist a
-stable failure fingerprint and a `no_progress` flag. The acceptance gate
-normalizes the current failure evidence and hashes it before scheduling a repair.
-If validation after a repair produces the identical fingerprint, the gate marks
-the repair `blocked` immediately instead of spending another model turn on the
-same unchanged failure. A changed fingerprint may consume the next bounded
-attempt. Passing validation clears the fingerprint and no-progress state.
+Acceptance requires all planned required files and accepted task evidence in the
+final snapshot, including revision baseline preservation. A class rename cannot
+complete an absent action method. A successful import cannot waive the workspace
+subclass contract. Missing files, changed plan/evidence, and unresolved quality
+findings block export. Passing evidence binds the plan, inventory/results, build
+binding, and exact file contents; GitHub export checks the actual archive against
+that digest. Final snapshot validation cannot refill omissions from historical
+worker output.
 
-This makes the repair controller deterministic:
+Offline regressions live in `tests/test_appgenerator_bounded_recovery.py`,
+`tests/test_appgenerator_task_integrity.py`, and
+`tests/test_appgenerator_recovery_routing.py`. They prove original rejection
+retention, bounded AG2 correction, released descendants, complete acceptance,
+unauthorized-write rejection, and blocked exhausted/interrupted recovery.
 
-1. observe validation evidence
-2. classify the narrowest owning agent
-3. emit a bounded repair request
-4. apply only that agent's owned file delta
-5. re-run the authoritative acceptance gate
-6. stop on pass, repeated evidence, or attempt exhaustion
-
-Agent prompts may propose a patch, but they do not decide whether the loop
-continues. The acceptance gate, failure fingerprint, ownership table, and retry
-budget are the control authority.
-
-The automated repair controller currently covers workflow-integration failures,
-generated-bundle scanner failures, runtime loading/quality, and module
-implementation failures. Missing handler classes, methods, and invalid signatures
-carry the exact path and validator guidance into the existing owning-agent repair
-lane. A successful Python import does not waive the canonical workspace-subclass
-contract. These failures share the existing budget and no-progress guard; they do
-not gain a separate retry allowance. Other acceptance failures still fail
-closed to the user. Browser interaction evidence (console errors, failed network
-requests, screenshots, and replayable user-flow assertions) is not yet a
-first-class automatic repair input. Closing that gap requires a typed,
-environment-scoped verification-evidence contract that maps each failure to an
-owning agent and replays the same scenario after the patch. Browser evidence may
-inform repair, but it must not bypass deterministic acceptance, review, or
-promotion.
-
-The target must be the narrowest owning agent: `AppSchemaAgent` for page/schema
-endpoint drift, `ConfigMiddlewareAgent` for config or managed-capability client
-drift, `ServiceAgent` for backend Python/service drift, and `FrontendStubAgent`
-for generated frontend helper drift. A repair agent may remove stale or invalid
-artifacts by emitting `deleted_files`; `AssemblyAgent`, the acceptance gate, and
-`DownloadAgent` all apply those deletions before validation or packaging.
-
-Deterministic smoke coverage:
-
-```powershell
-python scripts\smoke_appgenerator_live_acceptance.py --repair-loop
-```
-
-This smoke injects an app-local token wallet ledger, verifies that scanner
-repair routes to `ServiceAgent`, applies `deleted_files`, re-runs acceptance,
-checks the export gate, and proves packaging no longer contains the removed
-artifact.
+Browser interaction evidence remains a separate validation-environment contract.
+E2B workspace failures do not authorize worker changes or an app-owned npm project.
+Live installed-package acceptance is coordinated separately after the OSS change.
 
 When a build/export context requests deployment output, or the generated files
 already contain `deployment.manifest.json`, `Dockerfile`, `docker-compose.yml`,

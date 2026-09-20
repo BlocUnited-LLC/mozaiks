@@ -365,14 +365,26 @@ def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_
     from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 
     monkeypatch.setattr(AppRegistryService, "update_build_status", AsyncMock(return_value={"success": True}))
-    monkeypatch.setattr(module, "run_app_bundle_acceptance_gate", AsyncMock(return_value={
-        "passed": True, "status": "passed", "bundle_scan": {"errors": []},
-        "validation_evidence": {"completed": ["bundle_scan"], "failed": []},
-    }))
+    async def accepted_snapshot(*, files, context_variables, **_kwargs):
+        from factory_app.workflows.AppGenerator.tools.task_integrity import artifact_snapshot_digest
+
+        context_variables.set("generated_files", files)
+        context_variables.set("app_build_plan", {"build_tasks": []})
+        accepted = {
+            "passed": True, "status": "passed", "bundle_scan": {"errors": []},
+            "validation_evidence": {"completed": ["bundle_scan"], "failed": []},
+            "snapshot_digest": artifact_snapshot_digest(context_variables, files),
+        }
+        context_variables.set("app_bundle_acceptance_result", accepted)
+        context_variables.set("app_bundle_acceptance_status", "passed")
+        context_variables.set("app_validation_status", "skipped")
+        context_variables.set("integration_tests_passed", True)
+        return accepted
+
+    monkeypatch.setattr(module, "run_app_bundle_acceptance_gate", accepted_snapshot)
     monkeypatch.setattr(module, "use_ui_tool", AsyncMock(return_value={
         "status": "completed", "action": "export_to_github",
     }))
-    monkeypatch.setattr(module, "resolve_export_gate", lambda context: {"allow_export": True, "reasons": []})
     monkeypatch.setattr(module, "export_app_code_to_github", AsyncMock(
         return_value=export_result,
         side_effect=TimeoutError("export timed out") if export_result == "exception" else None,
@@ -386,6 +398,29 @@ def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_
     assert result["status"] == ("success" if succeeded else "error")
     assert result["outcome"] == ("ready" if succeeded else "blocked")
     assert Path(result["bundle_zip"]).exists()
+
+
+@pytest.mark.parametrize("agent,outcome", [
+    ("AppSchemaAgent", "repair_schema"), ("ConfigMiddlewareAgent", "repair_integration"),
+    ("ModelAgent", "repair_models"), ("ServiceAgent", "repair_service"),
+    ("ControllerAgent", "repair_controller"), ("FrontendStubAgent", "repair_frontend"),
+    ("DatabaseAgent", "repair_database"), ("UnapprovedAgent", "blocked"),
+])
+def test_export_failure_uses_the_selected_canonical_repair_lane(agent, outcome):
+    result = generate_and_download_module._export_repair_outcome({
+        "bundle_repair": {"status": "needs_revision", "target_agent": agent},
+    })
+
+    assert result == outcome
+
+
+def test_export_failure_routes_evidenced_task_recovery_before_artifact_repair():
+    result = generate_and_download_module._export_repair_outcome({
+        "task_recovery_request": {"root_task_ids": ["failed_service"]},
+        "bundle_repair": {"status": "needs_revision", "target_agent": "ServiceAgent"},
+    })
+
+    assert result == "repair_tasks"
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
+from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from mozaiksai.core.runtime.app.loader import AppLoader
 from scripts.smoke_agentgenerator_live_pack import run_live_agentgenerator_pack_smoke
@@ -28,7 +29,7 @@ DEFAULT_APP_ID = "support-operations-live-acceptance"
 DEFAULT_WORKFLOW_NAME = "TicketBatchTriageWorkflow"
 DEFAULT_WORKFLOW_CAPABILITY_ID = "ticket-batch-triage-workflow"
 DEFAULT_TRIGGER_EVENT_TYPE = "domain.support_ticket.batch_requested"
-FORBIDDEN_APP_LOCAL_LEDGER_PATH = "modules/support_tickets/backend/token_wallet_ledger.py"
+SUPPORT_HANDLER_PATH = "modules/support_tickets/backend/handler.py"
 
 
 class SmokeContext:
@@ -478,6 +479,48 @@ def batch_request_document(*, priority=None):
     }
 
 
+def build_appgenerator_acceptance_task_state(files: dict[str, str]) -> dict[str, Any]:
+    """Declare the deterministic fixture's task ownership and accepted contributions."""
+    prefix = "modules/support_tickets/"
+    lanes = [
+        ("persistence", "persistence_contract", "DatabaseAgent", ["data/contract.json"], []),
+        ("contract", "module_contract", "ConfigMiddlewareAgent", [
+            prefix + "module.yaml", prefix + "contracts/events.yaml", prefix + "contracts/reactions.yaml",
+        ], ["persistence"]),
+        ("models", "data_models", "ModelAgent", [prefix + "backend/schemas.py"], ["contract", "persistence"]),
+        ("services", "business_services", "ServiceAgent", [
+            prefix + "backend/handler.py", prefix + "backend/service.py", prefix + "backend/repo.py",
+        ], ["contract", "models", "persistence"]),
+        ("pages", "page_bundle", "AppSchemaAgent", [
+            "app.json", "config/ai.json", "config/shell.json", "ui/route_manifest.json", "ui/pages/support_tickets.yaml",
+        ], ["contract", "services"]),
+    ]
+    tasks = [
+        {"task_id": "support_" + lane, "task_type": task_type, "initial_agent": agent,
+         "capability_pack_id": "support_tickets", "owned_paths": paths,
+         "depends_on": ["support_" + dependency for dependency in dependencies]}
+        for lane, task_type, agent, paths, dependencies in lanes
+    ]
+    return {
+        "app_build_plan": {
+            "build_tasks": tasks,
+            "pages": [{"name": "SupportTickets", "route": "/support-tickets"}],
+            "capability_packs": [{
+                "capability_pack_id": "support_tickets", "surface_id": "support_tickets",
+                "surface_kind": "module", "capability_source": "generated_module",
+                "operations": ["list_tickets", "create_ticket", "request_batch_triage"],
+            }],
+        },
+        "app_task_batch_results": {
+            task["task_id"]: {"code_files": [
+                {"filename": path, "content": files[path]}
+                for path in task["owned_paths"] if path in files
+            ]}
+            for task in tasks
+        },
+    }
+
+
 def _write_files(root: Path, files: dict[str, str]) -> None:
     for rel_path, content in files.items():
         target = root / rel_path
@@ -528,19 +571,7 @@ async def validate_appgenerator_acceptance_handoff(
             "generated_workflow_capability_id": integration.get("capability_id"),
             "generated_workflow_startup_mode": integration.get("startup_mode"),
             "generated_workflow_trigger_events": integration.get("trigger_events") or [],
-            "app_build_plan": {
-                "capability_packs": [
-                    {
-                        "module_id": "support_tickets",
-                        "actions": [
-                            "list_tickets",
-                            "create_ticket",
-                            "request_batch_triage",
-                        ],
-                        "workflow_capability_ids": [integration.get("capability_id")],
-                    }
-                ]
-            },
+            **build_appgenerator_acceptance_task_state(files),
         }
     )
 
@@ -578,14 +609,15 @@ async def validate_appgenerator_acceptance_handoff(
 
 
 async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
-    """Prove AppGenerator can repair scanner-blocking bundle drift before export."""
+    """Prove a scoped handler correction preserves accepted work before export."""
 
     integration = default_workflow_integration()
     files = build_appgenerator_acceptance_files(integration)
-    files[FORBIDDEN_APP_LOCAL_LEDGER_PATH] = (
-        "class TokenWalletLedger:\n"
-        "    pass\n"
+    accepted_handler = files[SUPPORT_HANDLER_PATH]
+    files[SUPPORT_HANDLER_PATH] = accepted_handler.replace(
+        "class SupportTicketsModule:", "class UndeclaredSupportHandler:",
     )
+    unrelated = {path: content for path, content in files.items() if path != SUPPORT_HANDLER_PATH}
     context = SmokeContext(
         {
             "workflow_name": "AppGenerator",
@@ -598,6 +630,7 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
             "generated_workflow_capability_id": integration["capability_id"],
             "generated_workflow_startup_mode": integration["startup_mode"],
             "generated_workflow_trigger_events": integration["trigger_events"],
+            **build_appgenerator_acceptance_task_state(files),
         }
     )
 
@@ -605,7 +638,10 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
         files=files,
         context_variables=context,
     )
-    context.set("deleted_files", [FORBIDDEN_APP_LOCAL_LEDGER_PATH])
+    context.set("structured_output", {
+        "code_files": [{"filename": SUPPORT_HANDLER_PATH, "content": accepted_handler}],
+    })
+    saved = save_generated_code(context)
     repaired_acceptance = await run_app_bundle_acceptance_gate(context_variables=context)
     export_gate = resolve_export_gate(context)
 
@@ -615,17 +651,7 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
 
     packaged_files = _merge_bundle_sources(
         context_variables=context,
-        collected={
-            "AuthScaffoldAgent": {
-                "code_files": [
-                    {
-                        "filename": "Dockerfile",
-                        "content": "FROM python:3.13-slim\n",
-                    }
-                ]
-            },
-            "ServiceAgent": {"deleted_files": [FORBIDDEN_APP_LOCAL_LEDGER_PATH]},
-        },
+        collected={},
     )
     runtime_loader = await _load_runtime_app(
         dict(context.get("generated_files") or {}),
@@ -634,22 +660,22 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
 
     errors: list[str] = []
     if initial_acceptance.get("passed"):
-        errors.append("Initial bundle unexpectedly passed despite an app-local token wallet ledger.")
+        errors.append("Initial bundle unexpectedly passed despite its undeclared handler class.")
     initial_repair = initial_acceptance.get("bundle_repair") or {}
     if initial_repair.get("status") != "needs_revision":
-        errors.append("Initial scanner failure did not schedule a repair pass.")
+        errors.append("Initial handler failure did not schedule a repair pass.")
     if initial_repair.get("target_agent") != "ServiceAgent":
-        errors.append("Initial scanner failure did not route repair to ServiceAgent.")
+        errors.append("Initial handler failure did not route repair to ServiceAgent.")
+    if saved.get("saved_files") != [SUPPORT_HANDLER_PATH]:
+        errors.append("Scoped repair did not save exactly the handler file.")
     if repaired_acceptance.get("passed") is not True:
         errors.append("Repaired bundle acceptance did not pass.")
     if (repaired_acceptance.get("bundle_repair") or {}).get("status") != "passed":
         errors.append("Bundle repair status did not reset to passed.")
-    if FORBIDDEN_APP_LOCAL_LEDGER_PATH in (context.get("generated_files") or {}):
-        errors.append("Repaired generated_files still contains the deleted app-local ledger.")
-    if FORBIDDEN_APP_LOCAL_LEDGER_PATH in packaged_files:
-        errors.append("Download packaging merge still contains the deleted app-local ledger.")
-    if "Dockerfile" not in packaged_files:
-        errors.append("Download packaging merge did not preserve persisted AuthScaffoldAgent output.")
+    if packaged_files.get(SUPPORT_HANDLER_PATH) != accepted_handler:
+        errors.append("Download packaging merge lost the corrected handler implementation.")
+    if any(packaged_files.get(path) != content for path, content in unrelated.items()):
+        errors.append("Scoped repair changed unrelated accepted output.")
     if not export_gate.get("allow_export"):
         errors.extend(str(reason) for reason in export_gate.get("reasons") or [])
     if not runtime_loader.get("loaded"):
@@ -659,7 +685,7 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
         {
             "success": not errors,
             "validation_errors": errors,
-            "forbidden_path": FORBIDDEN_APP_LOCAL_LEDGER_PATH,
+            "repaired_path": SUPPORT_HANDLER_PATH,
             "initial_acceptance_status": initial_acceptance.get("status"),
             "initial_bundle_repair": initial_repair,
             "repaired_acceptance_status": repaired_acceptance.get("status"),
@@ -667,8 +693,8 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
             "export_gate": export_gate,
             "packaging": {
                 "file_count": len(packaged_files),
-                "removed_forbidden_path": FORBIDDEN_APP_LOCAL_LEDGER_PATH not in packaged_files,
-                "preserved_infra_output": "Dockerfile" in packaged_files,
+                "handler_matches_contract": packaged_files.get(SUPPORT_HANDLER_PATH) == accepted_handler,
+                "preserved_unrelated_output": all(packaged_files.get(path) == content for path, content in unrelated.items()),
             },
             "runtime_loader": runtime_loader,
             "context": context.to_dict(),
@@ -765,7 +791,7 @@ def main() -> int:
     parser.add_argument(
         "--repair-loop",
         action="store_true",
-        help="Run the deterministic AppGenerator scanner repair and export-gate smoke.",
+        help="Run the deterministic AppGenerator ownership-scoped handler repair and export-gate smoke.",
     )
     parser.add_argument(
         "--enable-telemetry",

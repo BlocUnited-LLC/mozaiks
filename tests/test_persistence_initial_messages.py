@@ -243,11 +243,30 @@ async def test_registered_factory_workflow_persistence_resume_round_trip(
     monkeypatch,
     authentic_workflow_policies,
 ):
+    from mozaiksai.core.workflow.task_batches import TaskBatchFailure
+
     workflow_name = "AppGenerator"
     variables = {
         "task_run_mode": True,
-        "workflow_integration_repair_status": "needs_revision",
+        "bundle_repair_status": "needs_revision",
         "app_validation_status": "failed",
+        "app_task_batch_results": {
+            "contract": {"code_files": [{"filename": "modules/example/module.yaml", "content": "module: {}"}]},
+            "_failed": {
+                "service": TaskBatchFailure(
+                    task_id="service", worker_agent="ServiceAgent", failure_kind="output_rejected",
+                    error="foreign owned path", attempts=1, recoverable=True,
+                    rejected_output={"code_files": [{"filename": "modules/example/backend/schemas.py", "content": "class Record: ..."}]},
+                ).model_dump(mode="json"),
+                "page": TaskBatchFailure(
+                    task_id="page", worker_agent="AppSchemaAgent", failure_kind="dependency_blocked",
+                    error="dependency 'service' failed", blocked_by=["service"],
+                ).model_dump(mode="json"),
+            },
+            "_meta": {"evidence_version": 1, "in_flight": {"service": {"attempt": 2}}},
+        },
+        "app_task_recovery_status": "blocked",
+        "app_task_recovery_result": {"status": "blocked", "error": "unsettled attempt"},
     }
     expected = dict(variables)
     manager = AG2PersistenceManager()

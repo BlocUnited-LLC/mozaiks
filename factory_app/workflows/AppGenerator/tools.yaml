@@ -1,5 +1,5 @@
 tools:
-- agent: [DatabaseAgent, ConfigMiddlewareAgent, ModelAgent, ServiceAgent, FrontendStubAgent, ControllerAgent]
+- agent: [DatabaseAgent, ConfigMiddlewareAgent, ModelAgent, ServiceAgent, FrontendStubAgent, ControllerAgent, RefinementHarnessAgent]
   file: code_file_utils.py
   function: save_generated_code
   description: Persist validated generated file outputs and deletions before quality checks and repair routing.
@@ -189,10 +189,10 @@ tools:
     context_key: app_bundle_export_outcome
     attempts_key: app_bundle_export_attempts
     result_field: outcome
-    values: [ready, repair_schema, repair_database, repair_integration, repair_service, repair_frontend, cancelled, blocked]
+    values: [ready, repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness, cancelled, blocked]
     error_value: blocked
     max_attempts: 3
-    retry_on: [repair_schema, repair_database, repair_integration, repair_service, repair_frontend]
+    retry_on: [repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness]
   ui:
     component: AppWorkbench
     mode: artifact

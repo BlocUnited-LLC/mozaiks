@@ -134,12 +134,20 @@ async def materialize_fixture(monkeypatch: pytest.MonkeyPatch) -> tuple[dict, di
         })
 
     monkeypatch.setattr(AG2TaskBatchRunner, "run", run)
+    checkpoints = []
+
+    async def checkpoint(updates):
+        checkpoints.append(deepcopy(updates))
+
     await execute_task_batches_for_trigger(
         workflow_name="AppGenerator", trigger_agent="AppPlanAgent", batches_config=config,
         agents={item["initial_agent"]: object() for item in items}, context_variables=context.data,
         chat_id="retirement-chat", app_id="retirement-acceptance", user_id="test-user", fresh_agents_per_task=False,
+        checkpoint=checkpoint,
+        parent_channel_id="test-parent-channel",
     )
     assert context.get("app_task_batch_status") == "completed"
+    assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"] == {}
     assert set(seen) == {item["task_id"] for item in items}
     results = deepcopy(context.get("app_task_batch_results"))
     context.set("code_files", [{"filename": f"workflows/DocumentAnalysis/{path}", "content": content} for path, content in data["workflow_files"].items()])
