@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator plan review no longer fails on its first attempt. The
+  `app_task_batch_status` context variable listed only the task batch runner as
+  an authorized writer, which locked out the declared workflow tools that set it
+  and ended every build with a `context_authority.rejected` error before any
+  plan was validated.
 - App download and validation now use admitted current artifacts and repairs.
   Historical worker responses cannot restore rejected changes/deletions or
   overwrite a newer authorized repair, and migration registration preserves

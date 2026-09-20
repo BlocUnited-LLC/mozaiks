@@ -1083,7 +1083,12 @@ definitions:
   app_task_batch_status:
     type: string
     authority_class: closed_writer_quality_state
-    writer_ids: [task_batch]
+    # app_build_plan and review_app_build_plan write this key as declared
+    # workflow tools, so deterministic_tool belongs here alongside the batch
+    # runner. An explicit writer_ids replaces the inferred set rather than
+    # extending it, and a writer missing from it is relabelled context_bridge
+    # before the authority check, so omitting one reads as a bridge rejection.
+    writer_ids: [deterministic_tool, task_batch]
     persisted: true
     description: >
       Status of AppGenerator task batch execution: planned | running |
