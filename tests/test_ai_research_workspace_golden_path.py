@@ -22,6 +22,9 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
     assemble_app_tasks,
 )
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
+from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
+    materialize_app_config_contracts,
+)
 from factory_app.workflows.SubscriptionContractDesigner.tools import (
     save_subscription_contract as subscription_module,
 )
@@ -31,6 +34,7 @@ from mozaiksai.core.session.build_context import (
     load_build_context,
 )
 from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
+from tests.app_task_replay_helpers import execute_file_replay
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_CONTEXT_ROOT = REPO_ROOT / "factory_app" / "build_context" / "mozaikspay"
@@ -180,8 +184,11 @@ def _research_module_task() -> dict[str, Any]:
         "initial_agent": "ConfigMiddlewareAgent",
         "description": "Declare saved research and workflow launch actions.",
         "initial_message": "Generate the canonical research module contract.",
-        "owned_paths": ["modules/research/module.yaml"],
-        "depends_on": ["research.subscription_config"],
+        "owned_paths": [
+            "modules/research/module.yaml", "modules/research/contracts/events.yaml",
+            "modules/research/contracts/reactions.yaml",
+        ],
+        "depends_on": ["research.subscription_config", "research.persistence"],
         "acceptance_criteria": ["execute_research is gated by research.execute."],
     }
 
@@ -197,14 +204,42 @@ def _research_page_task() -> dict[str, Any]:
         "initial_agent": "AppSchemaAgent",
         "description": "Generate the research workspace page.",
         "initial_message": "Generate a schema page for saved research and research execution.",
-        "owned_paths": ["app.json", "ui/pages/research.yaml"],
-        "depends_on": ["research.module"],
+        "owned_paths": [
+            "app.json", "config/ai.json", "config/shell.json",
+            "ui/route_manifest.json", "ui/pages/research.yaml",
+        ],
+        "depends_on": ["research.module", "research.services"],
         "acceptance_criteria": ["Research actions bind through the research module."],
     }
 
 
 def _build_plan(mozaikspay_pack: dict[str, Any]) -> dict[str, Any]:
-    tasks = [_subscription_task(), _research_module_task(), _research_page_task()]
+    tasks = [
+        _subscription_task(), _research_module_task(), _research_page_task(),
+        {
+            **_research_module_task(), "task_id": "research.persistence", "task_type": "persistence_contract",
+            "initial_agent": "DatabaseAgent", "owned_paths": ["data/contract.json"], "depends_on": [],
+            "description": "Declare research and subscription persistence.",
+            "initial_message": "Emit the approved research persistence contract.",
+        },
+        {
+            **_research_module_task(), "task_id": "research.models", "task_type": "data_models",
+            "initial_agent": "ModelAgent", "owned_paths": ["modules/research/backend/schemas.py"],
+            "depends_on": ["research.module", "research.persistence"],
+            "description": "Define typed research records.",
+            "initial_message": "Implement research record schemas from the supplied module and persistence contracts.",
+        },
+        {
+            **_research_module_task(), "task_id": "research.services", "task_type": "business_services",
+            "initial_agent": "ServiceAgent",
+            "owned_paths": [f"modules/research/backend/{name}.py" for name in (
+                "__init__", "handler", "service", "repo", "policy",
+            )],
+            "depends_on": ["research.module", "research.models", "research.persistence"],
+            "description": "Implement research actions behind the module contract.",
+            "initial_message": "Implement research actions using the supplied schemas and persistence contracts.",
+        },
+    ]
     return {
         "agent_message": "Deterministic AI Research Workspace plan ready.",
         "app_kind": "saas",
@@ -581,6 +616,7 @@ async def test_ai_research_workspace_offline_golden_path(
     agents. This test does not prove raw-prompt generation, live AG2 execution,
     live MozaiksPay fulfillment, or monthly execution-count enforcement.
     """
+    monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     product_request = (
         "Build an AI Research Workspace with saved results, Free and Pro plans, "
         "MozaiksPay billing, gated AI research, usage visibility, and deployment output."
@@ -649,12 +685,14 @@ async def test_ai_research_workspace_offline_golden_path(
     assert workflow_info is not None
     assert workflow_info["status"] == "loaded", workflow_info
 
-    context.set(
-        "code_files",
-        [{"filename": path, "content": content} for path, content in _research_files().items()],
-    )
+    candidates = _research_files()
+    candidates.update({file["filename"]: file["content"] for file in materialize_app_config_contracts(
+        app_id="research", app_build_plan=normalized_plan, context_variables=context,
+    )})
+    accepted = await execute_file_replay(monkeypatch, context.values, candidates)
     context.set("workflow_name", "AppGenerator")
     assembled = await assemble_app_tasks(context_variables=context)
+    assert context.get("app_task_batch_results") == accepted
     files = {entry["filename"]: entry["content"] for entry in assembled["code_files"]}
 
     subscriptions = yaml.safe_load(files["config/subscriptions.yaml"])
@@ -685,6 +723,8 @@ async def test_ai_research_workspace_offline_golden_path(
         "module_implementation",
         "module_runtime_quality",
         "module_wiring",
+        "planned_completeness",
+        "schema_quality",
         "workflow_integration",
     }
     assert acceptance["agent_backend"]["checks"][0]["id"] == "agent_backend_integration_not_required"

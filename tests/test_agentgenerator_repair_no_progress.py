@@ -1,27 +1,11 @@
-"""A repair that changes nothing must stop, not spend another attempt.
+"""Workflow bundle repair stops on unchanged findings within its finite budget."""
 
-Three repair loops exist across the factory workflows:
-
-    bundle_repair_*               AppGenerator    fingerprint + no_progress
-    workflow_integration_repair_* AppGenerator    fingerprint + no_progress
-    workflow_bundle_repair_*      AgentGenerator  neither
-
-The third was copied from the pattern and drifted. It counted attempts and
-never asked whether an attempt had achieved anything, so a retry reproducing
-the identical quality-gate issues burned the remaining budget - and each
-attempt here regenerates entire workflow bundles, not a single file.
-
-The fingerprint is computed the same way AppGenerator computes it. Two loops
-answering "did this retry change anything" differently is how the drift
-started; a second dialect would continue it.
-"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from factory_app.workflows.AgentGenerator.tools.workflow_quality_gate import (
-    _repair_failure_fingerprint,
     prepare_workflow_bundle_repair,
 )
 
@@ -104,16 +88,18 @@ def test_the_attempt_budget_still_blocks_when_progress_keeps_happening() -> None
     assert result["no_progress"] is False
 
 
-def test_the_fingerprint_matches_the_appgenerator_digest() -> None:
-    """Same input, same digest - the loops must agree on what 'unchanged' means."""
-    from factory_app.workflows.AppGenerator.tools.app_validation import (
-        _repair_failure_fingerprint as app_fingerprint,
-    )
+def test_reordered_workflow_findings_do_not_authorize_another_attempt() -> None:
+    context = _Context()
+    gate = _gate()
+    gate["structure"]["workflows"].append({"workflow_name": "beta", "errors": ["missing agents.yaml"]})
+    first = _repair(context, gate)
+    gate["structure"]["workflows"].reverse()
 
-    evidence = {"alpha": ["one", "two"]}
-    assert _repair_failure_fingerprint(repair_kind="k", evidence=evidence) == app_fingerprint(
-        repair_kind="k", evidence=evidence
-    )
+    repeated = _repair(context, gate)
+
+    assert repeated["status"] == "blocked"
+    assert repeated["no_progress"] is True
+    assert repeated["attempt"] == first["attempt"]
 
 
 def test_the_new_keys_are_declared_so_a_transition_can_read_them() -> None:

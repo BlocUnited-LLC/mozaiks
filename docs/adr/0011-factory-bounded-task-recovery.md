@@ -128,6 +128,14 @@ remains a separate operator-coordinated check.
 
 ## Architecture fit and rejected alternatives
 
+These are public runtime and workflow contracts over one app's approved plan and
+execution evidence. The deterministic repair policy uses no learned rankings,
+private customer corpus, or cross-app outcome data. MIT publication supports the
+same generation guarantees for self-hosted apps; the OSS/commercial boundary is
+unchanged. Recovery is additive to `TaskBatchesConfig` version 1 and writes
+`evidence_version: 1`; `pending_turn_replay` is an additive optional `AgentSpec`
+field. The coordinated package revision owns these contracts and their migration.
+
 This preserves ADR 0007's semantic authority and ADR 0010's separation of agent
 execution from generated-app validation. The direction recorded in issue #411
 was evaluated: this repair connects existing approved contracts and their

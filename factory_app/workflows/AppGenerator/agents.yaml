@@ -743,7 +743,8 @@ agents:
   - id: repair_scope
     heading: '[OWNED REPAIR CONTRACT]'
     content: |-
-      When task_run_mode is false and bundle_repair_target is AppSchemaAgent, repair only current_build_task.
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
       bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
       Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
       Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
@@ -1330,7 +1331,8 @@ agents:
   - id: repair_scope
     heading: '[OWNED REPAIR CONTRACT]'
     content: |-
-      When task_run_mode is false and bundle_repair_target is DatabaseAgent, repair only current_build_task.
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
       bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
       Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
       Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
@@ -1549,7 +1551,8 @@ agents:
   - id: repair_scope
     heading: '[OWNED REPAIR CONTRACT]'
     content: |-
-      When task_run_mode is false and bundle_repair_target is ConfigMiddlewareAgent, repair only current_build_task.
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
       bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
       Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
       Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
@@ -1992,7 +1995,8 @@ agents:
   - id: repair_scope
     heading: '[OWNED REPAIR CONTRACT]'
     content: |-
-      When task_run_mode is false and bundle_repair_target is RefinementHarnessAgent, repair only current_build_task.
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
       bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve unrelated accepted files and all required planned artifacts.
       Read dependency_task_outputs and generated_files, then use the existing typed refinement_harness materializer. Do not invent missing root diagnostics or report blocked work as complete.
   - id: role
@@ -2148,7 +2152,8 @@ agents:
   - id: repair_scope
     heading: '[OWNED REPAIR CONTRACT]'
     content: |-
-      When task_run_mode is false and bundle_repair_target is ModelAgent, repair only current_build_task.
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
       bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
       Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
       Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
@@ -2463,7 +2468,8 @@ agents:
   - id: repair_scope
     heading: '[OWNED REPAIR CONTRACT]'
     content: |-
-      When task_run_mode is false and bundle_repair_target is ServiceAgent, repair only current_build_task.
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
       bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
       Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
       Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
@@ -2729,7 +2735,8 @@ agents:
   - id: repair_scope
     heading: '[OWNED REPAIR CONTRACT]'
     content: |-
-      When task_run_mode is false and bundle_repair_target is FrontendStubAgent, repair only current_build_task.
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
       bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
       Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
       Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
@@ -2854,7 +2861,8 @@ agents:
   - id: repair_scope
     heading: '[OWNED REPAIR CONTRACT]'
     content: |-
-      When task_run_mode is false and bundle_repair_target is ControllerAgent, repair only current_build_task.
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
       bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
       Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
       Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.

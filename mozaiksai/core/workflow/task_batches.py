@@ -1078,11 +1078,8 @@ async def _run_one_task(
                 _validate_exclusive_task_paths(task, output, all_task_items)
             except ValueError as exc:
                 message = str(exc)
-                # An attempt that reproduces the previous error exactly has shown
-                # the feedback is not landing, and further attempts cost a model
-                # call each to prove it again. A live task burned all three on
-                # one identical message. Both repair loops already stop on this;
-                # this layer only counted.
+                # Repeated rejection is no progress. Opted-in batches retain the
+                # first rejection so Factory can select one bounded correction.
                 deferred = bool(batch.recovery and not recovery_episode)
                 if deferred or _attempt == stop_at - 1 or message == last_error:
                     raise _TaskRejected(TaskBatchFailure(

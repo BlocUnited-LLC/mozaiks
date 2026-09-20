@@ -20,6 +20,9 @@ from factory_app.workflows.AppGenerator.tools.generate_and_download import (
     _deployment_env_for_capability_packs,
 )
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    resolve_managed_capability_templates,
+)
 from mozaiksai.core.billing.fulfillment import BillingFulfillmentCommand, BillingFulfillmentService
 from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
@@ -28,6 +31,7 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, M
 from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
+from tests.app_task_replay_helpers import execute_file_replay
 from tests.factory_context import factory_context
 from tests.module_authority_test_helpers import enforce_authority
 from tests.test_generated_saas_subscription_runtime_acceptance import (
@@ -355,7 +359,7 @@ def _subscriptions_yaml() -> str:
 
 
 def _mozaikspay_replay_plan() -> dict[str, Any]:
-    return _base_plan(
+    plan = _base_plan(
         monetization_provider="mozaiks_pay",
         pages=[
             {
@@ -454,6 +458,54 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
             },
         ],
     )
+    plan["pages"].append({"name": "Pricing", "route": "/pricing", "purpose": "Choose a subscription plan."})
+    tasks = {task["task_id"]: task for task in plan["build_tasks"]}
+    tasks["mozaikspay.adapter"]["owned_paths"].extend([
+        "services/integrations/__init__.py",
+    ])
+    tasks["mozaikspay.pages"]["owned_paths"].extend([
+        "app.json", "config/ai.json", "config/shell.json", "ui/pages/pricing.yaml",
+    ])
+    tasks["mozaikspay.pages"]["depends_on"].extend([
+        "mozaikspay.billing_services", "reports.services", "subscriptions.config",
+    ])
+    module_task = tasks["mozaikspay.billing_facade_contract"]
+    plan["build_tasks"].extend([
+        {
+            **module_task, "task_id": "mozaikspay.billing_models", "task_type": "data_models",
+            "capability_pack_id": "billing_portal", "initial_agent": "ModelAgent",
+            "owned_paths": ["modules/billing_portal/backend/schemas.py"],
+            "depends_on": ["mozaikspay.billing_facade_contract"],
+            "description": "Materialize billing facade schemas from the selected pack.",
+            "initial_message": "Emit the selected billing facade's schema template.",
+        },
+        {
+            **module_task, "task_id": "mozaikspay.billing_services", "task_type": "business_services",
+            "capability_pack_id": "billing_portal", "initial_agent": "ServiceAgent",
+            "owned_paths": [f"modules/billing_portal/backend/{name}.py" for name in (
+                "__init__", "handler", "base_handler", "service",
+            )],
+            "depends_on": ["mozaikspay.billing_facade_contract", "mozaikspay.billing_models", "mozaikspay.adapter"],
+            "description": "Materialize billing actions from the selected pack.",
+            "initial_message": "Emit the selected billing facade's implementation templates.",
+        },
+        {
+            **module_task, "task_id": "reports.contract", "capability_pack_id": "reports", "surface_id": "reports",
+            "owned_paths": ["modules/reports/module.yaml"], "depends_on": ["subscriptions.config"],
+            "description": "Declare the subscription-gated report action.",
+            "initial_message": "Emit the reports module contract with its declared entitlement gate.",
+        },
+        {
+            **module_task, "task_id": "reports.services", "task_type": "business_services",
+            "capability_pack_id": "reports", "surface_id": "reports", "initial_agent": "ServiceAgent",
+            "owned_paths": ["modules/reports/backend/__init__.py", "modules/reports/backend/handler.py"],
+            "depends_on": ["reports.contract"],
+            "description": "Implement the declared report action.",
+            "initial_message": "Implement the reports handler from the supplied module contract.",
+        },
+    ])
+    plan["generation_order"] = [task["task_id"] for task in plan["build_tasks"]]
+    return plan
 
 
 def _mozaikspay_task_outputs() -> dict[str, Any]:
@@ -645,6 +697,7 @@ async def test_managed_wallet_replay_normalizes_assembles_and_scans(tmp_path: Pa
 async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     # A previously loaded app's regular package must not shadow this replay's
     # authored services package. The scoped path also restores loader additions.
     prior_app = tmp_path / "prior-app"
@@ -661,7 +714,9 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
             "app_id": "mozaikspay-replay",
             "capability_packs": [descriptor],
             "operator_contracts": [contract],
-            "app_task_batch_results": _mozaikspay_task_outputs(),
+            # Empty package scaffolding is an assembly input; the task planner
+            # permits integration files but does not own this root marker.
+            "code_files": [{"filename": "services/__init__.py", "content": ""}],
         }
     )
 
@@ -686,7 +741,14 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
         "/api/modules/billing_portal/get_usage_status"
     )
 
+    candidates = {file["filename"]: file["content"] for file in resolve_managed_capability_templates(
+        ctx.get("capability_packs"), context_variables=ctx,
+    )}
+    candidates.update({file["filename"]: file["content"] for output in _mozaikspay_task_outputs().values()
+                       for file in output["code_files"]})
+    accepted = await execute_file_replay(monkeypatch, ctx.data, candidates)
     assembled = await assemble_app_tasks(context_variables=ctx)
+    assert ctx.get("app_task_batch_results") == accepted
     files = _file_map(assembled)
     deployment_env = _deployment_env_for_capability_packs(ctx.get("capability_packs"))
     files.update(
@@ -740,7 +802,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
         context_variables=ctx,
     )
 
-    assert validation["status"] == "success"
+    assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
     assert validation["app_bundle_acceptance_result"]["status"] == "passed"
     assert ctx.get("app_bundle_acceptance_status") == "passed"
     assert ctx.get("bundle_scan_result")["passed"] is True

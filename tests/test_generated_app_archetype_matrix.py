@@ -693,8 +693,13 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
 
     task_batches = load_task_batches_config("AppGenerator", workflows_root=WORKFLOWS_ROOT)
     assert task_batches is not None
+    checkpoints: list[dict[str, Any]] = []
+
+    async def checkpoint(updates: dict[str, Any]) -> None:
+        checkpoints.append(deepcopy(updates))
 
     async def _fake_run(self: Any, request: Any) -> AG2TaskBatchRunnerResult:  # noqa: ARG001
+        assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"][request.task_id]
         task = dict(request.context_variables.get("current_build_task") or {})
         output = _app_task_output(
             spec,
@@ -729,9 +734,13 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
             app_id=ctx.get("app_id"),
             user_id="matrix-user",
             fresh_agents_per_task=False,
+            checkpoint=checkpoint,
+            parent_channel_id=f"{spec.app_id}-matrix-parent",
         )
     finally:
         ag2_task_batch_runner.AG2TaskBatchRunner.run = original_run
+
+    assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"] == {}
 
     assembled = await assemble_app_tasks(context_variables=ctx)
     files = _file_map(assembled)
