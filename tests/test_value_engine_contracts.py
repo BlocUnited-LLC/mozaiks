@@ -20,7 +20,9 @@ def test_value_engine_interview_agent_infers_recognizable_concept_shorthand() ->
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
     orchestrator = yaml.safe_load((VALUE_ENGINE_DIR / "orchestrator.yaml").read_text(encoding="utf-8"))
 
-    assert "Polymarket for AI startups" in agents_text
+    # Deliberately a pattern, not a product. A named, buildable example in the
+    # prompt is the app the agent reaches for when the user supplies nothing.
+    assert '"<KnownProduct> for <Audience>"' in agents_text
     assert 'Do NOT ask "what niche or user group?"' in agents_text
     assert "For recognizable shorthand, you MUST include concrete pain points and app directions" in agents_text
     assert "Present one flexible working direction plus 1-2 lighter suggestion angles" in agents_text
@@ -31,8 +33,9 @@ def test_value_engine_interview_agent_keeps_domain_signal_instead_of_generic_fal
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
 
     assert "Never discard a domain signal" in agents_text
-    assert '"Polymarket for AI startups" + "gamblers"' in agents_text
-    assert "Do not propose unrelated categories such as mental health, personal finance, or remote collaboration." in agents_text
+    assert '"<KnownProduct> for <Audience>" plus a later detail' in agents_text
+    assert "never switches category" in agents_text
+    assert "Do not answer with an unrelated vertical." in agents_text
 
 
 def test_value_engine_interview_agent_bans_generic_questions_after_shorthand() -> None:
@@ -45,26 +48,87 @@ def test_value_engine_interview_agent_bans_generic_questions_after_shorthand() -
     assert "What niche?" in agents_text
     assert "Which one should I use?" in agents_text
     assert "Which of these resonates?" in agents_text
-    assert "fragmented startup signal" in agents_text
-    assert "market-implied confidence around AI companies" in agents_text
+    assert "Anchor your reading in the mechanic the known product is famous for" in agents_text
+    assert "never from any product named in these instructions" in agents_text
+
+
+def test_value_engine_interview_agent_never_invents_an_app_the_user_did_not_describe() -> None:
+    """A live run produced a full concept for an app nobody asked for.
+
+    The user described a habit tracker. The agent never registered it, kept
+    asking "What do you want to build?", and on bare affirmations emitted a
+    finished blueprint for "AI Startup Market" - a Polymarket-style investment
+    platform - which was then recorded as approved. The only concrete product
+    in this prompt is its own shorthand example, and the output matched it,
+    down to the "market prediction analysis" anchor.
+
+    The example stays, because it teaches real shorthand handling. What must
+    hold is that it can never become the product.
+    """
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+
+    assert "are illustrations of how to read" in agents_text
+    assert "They are never candidate products." in agents_text
+    assert "blueprint an app the user has not described" in agents_text
+    assert "you have nothing to propose" in agents_text
+
+
+def test_value_engine_affirmation_does_not_authorise_an_invented_direction() -> None:
+    """"Yes" to nothing is not consent to choose the product for the user."""
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+
+    # The old rule read: short affirmations "= user is happy. Emit NEXT." with
+    # no requirement that anything had been established first, so a user who
+    # only ever said "yes" advanced straight into a fabricated concept.
+    assert "happy with what is ALREADY on the table" in agents_text
+    assert "Emit NEXT only if a concrete app direction actually exists" in agents_text
+    assert "an affirmation is not an answer" in agents_text
+    assert "Agreement is never permission to pick the product for them." in agents_text
 
 
 def test_value_engine_interview_agent_must_recommend_when_user_delegates_choice() -> None:
+    """Delegation must produce a decision, never the question handed back."""
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
 
-    assert "If the user delegates choice" in agents_text
-    assert "Give one working direction as your suggested starting point" in agents_text
-    assert "do not ask them to choose" in agents_text
-    assert "Do not hard-code launch/funding milestones, traders, founders, or betting mechanics as the only path" in agents_text
+    assert "make the call yourself and say what you chose" in agents_text
+    assert "Never hand the decision back" in agents_text
+    assert "decide and move on. Do not hand the choice back" in agents_text
 
 
-def test_value_engine_interview_agent_uses_working_hypothesis_not_overconfident_assumption() -> None:
+def test_value_engine_interview_agent_proposes_with_a_default_and_an_alternative() -> None:
+    """The advisory shape: carry a default, and leave the door open.
+
+    A recommendation with no default is a survey question in disguise; a
+    recommendation with no alternative railroads the user. Both halves are
+    load-bearing for the conversation feeling like expertise.
+    """
     agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
 
-    assert "working direction" in agents_text
-    assert "working direction as your suggested starting point" in agents_text
+    assert "ALWAYS carry a default" in agents_text
+    assert "OPEN THE DOOR" in agents_text
+    assert "Never present a numbered menu and ask them to choose" in agents_text
     assert "I would assume [target user]" not in agents_text
     assert "traders bet on verifiable launch/funding/traction milestones" not in agents_text
+
+
+def test_value_engine_interview_agent_is_grounded_in_the_buildable_menu() -> None:
+    """Proposals must name things the generator can actually build.
+
+    The menu is injected by prompt middleware; without that wiring the agent
+    has no inventory and falls back to generic discovery questions.
+    """
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+    middleware = yaml.safe_load((VALUE_ENGINE_DIR / "middleware.yaml").read_text(encoding="utf-8"))
+
+    assert "[BUILDABLE MENU]" in agents_text
+    assert "Never promise anything absent from [BUILDABLE MENU]" in agents_text
+
+    hooks = [
+        entry for entry in middleware["prompt_middleware"]
+        if entry.get("function") == "inject_buildable_menu_context"
+    ]
+    assert len(hooks) == 1, "the buildable menu hook must be wired exactly once"
+    assert hooks[0]["agent"] == "ValueInterviewAgent"
 
 
 def test_value_engine_interview_complete_trigger_still_uses_exact_next() -> None:

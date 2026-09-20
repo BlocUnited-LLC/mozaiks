@@ -20,6 +20,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.core.artifacts import ArtifactStore
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 from .app_context import get_current_app_intelligence_snapshot
 from .app_intelligence_jobs import AppIntelligenceIndexJob, get_latest_app_intelligence_index_job
@@ -295,7 +296,7 @@ def run_app_source_validation(
     )
     runnable = [item for item in planned if item.status == "planned"]
     warnings.extend(item.skip_reason or "" for item in planned if item.status == "skipped")
-    warnings = _dedupe(warnings)
+    warnings = dedupe_strings(warnings)
 
     if runnable and not confirm_execution:
         return _validation_result(
@@ -363,6 +364,7 @@ async def run_current_app_source_validation(
     *,
     app_id: str,
     artifact_store: ArtifactStore | None = None,
+    workspace_root: str | Path | None = None,
     allowed_kinds: Sequence[str] | None = None,
     include_install: bool = False,
     max_commands: int = 4,
@@ -371,7 +373,7 @@ async def run_current_app_source_validation(
     confirm_execution: bool = False,
     copy_workspace: bool = True,
 ) -> AppSourceValidationResult:
-    """Run validation against the current App Intelligence source root."""
+    """Validate an explicit staged workspace or the App Intelligence source root."""
     resolved_app_id = str(app_id or "").strip()
     if not resolved_app_id:
         raise ValueError("app_id is required")
@@ -382,7 +384,8 @@ async def run_current_app_source_validation(
         artifact_store=artifact_store,
         latest_job=latest_job,
     )
-    workspace_root = _workspace_root_from_job(latest_job)
+    explicit_workspace = workspace_root is not None
+    workspace_root = workspace_root if explicit_workspace else _workspace_root_from_job(latest_job)
 
     return await to_thread(
         run_app_source_validation,
@@ -396,18 +399,40 @@ async def run_current_app_source_validation(
         overlay_files=overlay_files,
         confirm_execution=confirm_execution,
         copy_workspace=copy_workspace,
-        source="app_intelligence_context",
+        source="explicit_workspace" if explicit_workspace else "app_intelligence_context",
     )
 
 
 def run_app_validation_fallback_checks(workspace_root: str | Path) -> list[AppValidationFallbackCheckResult]:
     """Run deterministic fallback checks when app commands are unavailable."""
     root = Path(workspace_root).expanduser().resolve()
-    return [
+    checks = [
         _json_manifest_check(root),
         _python_syntax_check(root),
         _yaml_manifest_check(root),
     ]
+    app_root = root if (root / "app.json").is_file() else root / "app"
+    if (app_root / "app.json").is_file():
+        from mozaiksai.core.runtime.app.page_schema import (
+            build_page_action_index_from_module_contracts,
+            load_app_page_schemas,
+        )
+
+        try:
+            load_app_page_schemas(
+                app_root, action_index=build_page_action_index_from_module_contracts(app_root),
+                ask_context_index=build_page_action_index_from_module_contracts(app_root, ask_context_only=True),
+            )
+        except Exception as exc:
+            checks.append(AppValidationFallbackCheckResult(
+                name="mozaiks_page_contracts", status="failed", reason=str(exc),
+            ))
+        else:
+            checks.append(AppValidationFallbackCheckResult(
+                name="mozaiks_page_contracts", status="passed",
+                reason="Page schemas and module action references satisfy runtime contracts.",
+            ))
+    return checks
 
 
 def _selected_kinds(
@@ -422,7 +447,7 @@ def _selected_kinds(
         kinds = [kind for kind in kinds if kind != "install"]
     if include_install and "install" not in kinds:
         kinds.insert(0, "install")
-    return _dedupe(kinds)
+    return dedupe_strings(kinds)
 
 
 def _command_candidates(framework_detection: dict[str, Any] | None) -> list[AppValidationCommandCandidate]:
@@ -860,7 +885,7 @@ def _validation_result(
         started_at=started.isoformat().replace("+00:00", "Z"),
         completed_at=completed.isoformat().replace("+00:00", "Z"),
         duration_ms=_elapsed_ms(start_monotonic),
-        warnings=_dedupe([str(item or "").strip() for item in warnings or []]),
+        warnings=dedupe_strings([str(item or "").strip() for item in warnings or []]),
     )
 
 
@@ -882,16 +907,6 @@ def _elapsed_ms(start_monotonic: float) -> int:
     return max(0, int((time.monotonic() - start_monotonic) * 1000))
 
 
-def _dedupe(values: Sequence[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for value in values:
-        text = str(value or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        out.append(text)
-    return out
 
 
 __all__ = [

@@ -1,9 +1,27 @@
 # ThemeCapture Context Variables
 #
-# Uses the canonical definitions/agents contract so NEXT-triggered handoffs work
-# the same way they do in the rest of the platform workflows.
+# The interview owns clarification; analysis proceeds directly to assembly.
 
 definitions:
+  theme_save_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: blocked}
+  theme_save_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: 0}
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
   app_url:
     type: string
     description: Optional live URL used to preload deterministic theme evidence.
@@ -169,6 +187,27 @@ definitions:
       type: state
       default: null
 
+  concept_overview:
+    type: string
+    description: Product summary from the approved ValueEngine concept blueprint.
+    source:
+      type: state
+      default: null
+
+  value_proposition:
+    type: string
+    description: Approved concept's value proposition, used to justify a visual direction.
+    source:
+      type: state
+      default: null
+
+  target_user:
+    type: string
+    description: Approved concept's primary user, used to justify a visual direction.
+    source:
+      type: state
+      default: null
+
   tech_stack:
     type: string
     description: Optional frontend stack summary from discovery.
@@ -315,31 +354,22 @@ definitions:
       type: state
       default: {}
 
-  interview_complete:
-    type: boolean
-    description: True when ThemeInterviewAgent emits NEXT.
+  interview_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Validated interview readiness, not inferred from chat text.
     source:
       type: state
-      default: false
-      triggers:
-        - type: agent_text
-          agent: ThemeInterviewAgent
-          ui_hidden: true
-          match:
-            equals: NEXT
+      default: blocked
 
-  analysis_complete:
-    type: boolean
-    description: True when ThemeAnalysisAgent emits NEXT.
-    source:
-      type: state
-      default: false
-      triggers:
-        - type: agent_text
-          agent: ThemeAnalysisAgent
-          ui_hidden: true
-          match:
-            equals: NEXT
+  interview_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: 0}
 
   captured_theme_config:
     type: object
@@ -358,6 +388,9 @@ definitions:
 agents:
   ThemeInterviewAgent:
     variables:
+      - concept_overview
+      - value_proposition
+      - target_user
       - app_url
       - css_snapshot
       - screenshot_description
@@ -400,7 +433,7 @@ agents:
       - preload_status
       - preload_summary
       - theme_capture_evidence
-      - interview_complete
+      - interview_outcome
 
   ThemeAnalysisAgent:
     variables:
@@ -429,8 +462,7 @@ agents:
       - preload_status
       - preload_summary
       - theme_capture_evidence
-      - interview_complete
-      - analysis_complete
+      - interview_outcome
 
   ThemeConfigAssemblerAgent:
     variables:

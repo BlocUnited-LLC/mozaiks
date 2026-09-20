@@ -10,9 +10,10 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_exp
 from scripts.smoke_appgenerator_live_acceptance import (
     DEFAULT_TRIGGER_EVENT_TYPE,
     DEFAULT_WORKFLOW_CAPABILITY_ID,
-    FORBIDDEN_APP_LOCAL_LEDGER_PATH,
+    SUPPORT_HANDLER_PATH,
     SmokeContext,
     build_appgenerator_acceptance_files,
+    build_appgenerator_acceptance_task_state,
     default_workflow_integration,
     run_deterministic_appgenerator_repair_loop_smoke,
     run_live_agentgenerator_to_appgenerator_acceptance_smoke,
@@ -40,21 +41,21 @@ async def test_appgenerator_acceptance_handoff_fixture_passes_deterministic_gate
 
 
 @pytest.mark.asyncio
-async def test_appgenerator_repair_loop_smoke_routes_deletes_and_exports() -> None:
+async def test_appgenerator_repair_loop_scopes_handler_correction_and_exports() -> None:
     result = await run_deterministic_appgenerator_repair_loop_smoke()
 
     assert result["success"] is True, result["validation_errors"]
-    assert result["forbidden_path"] == FORBIDDEN_APP_LOCAL_LEDGER_PATH
+    assert result["repaired_path"] == SUPPORT_HANDLER_PATH
     assert result["initial_acceptance_status"] == "failed"
     assert result["initial_bundle_repair"]["status"] == "needs_revision"
     assert result["initial_bundle_repair"]["target_agent"] == "ServiceAgent"
     assert result["repaired_acceptance_status"] == "passed"
     assert result["repaired_bundle_repair"]["status"] == "passed"
     assert result["export_gate"]["allow_export"] is True
-    assert result["packaging"]["removed_forbidden_path"] is True
-    assert result["packaging"]["preserved_infra_output"] is True
+    assert result["packaging"]["handler_matches_contract"] is True
+    assert result["packaging"]["preserved_unrelated_output"] is True
     assert result["runtime_loader"]["loaded"] is True
-    assert FORBIDDEN_APP_LOCAL_LEDGER_PATH not in result["context"]["generated_files"]
+    assert "class SupportTicketsModule:" in result["context"]["generated_files"][SUPPORT_HANDLER_PATH]
 
 
 def test_appgenerator_acceptance_fixture_wires_workflow_capability_not_raw_workflow_name() -> None:
@@ -85,6 +86,7 @@ async def test_appgenerator_acceptance_blocks_missing_workflow_reaction() -> Non
             "generated_workflow_capability_id": integration["capability_id"],
             "generated_workflow_startup_mode": integration["startup_mode"],
             "generated_workflow_trigger_events": integration["trigger_events"],
+            **build_appgenerator_acceptance_task_state(files),
         }
     )
 
@@ -93,11 +95,12 @@ async def test_appgenerator_acceptance_blocks_missing_workflow_reaction() -> Non
     assert result["passed"] is False
     assert "workflow_integration" in result["validation_evidence"]["failed"]
     assert context.get("workflow_integration_validation_passed") is False
-    assert result["workflow_integration_repair"]["status"] == "needs_revision"
-    assert result["workflow_integration_repair"]["attempt"] == 1
-    assert context.get("workflow_integration_repair_status") == "needs_revision"
-    assert context.get("workflow_integration_repair_count") == 1
-    assert "workflow_trigger_reaction_declared" in context.get("workflow_integration_repair_request")
+    assert result["bundle_repair"]["status"] == "needs_revision", result["bundle_repair"]
+    assert result["bundle_repair"]["target_agent"] == "ConfigMiddlewareAgent"
+    assert result["bundle_repair"]["attempt"] == 1
+    assert context.get("bundle_repair_status") == "needs_revision"
+    assert context.get("bundle_repair_attempt_count") == 1
+    assert "workflow_trigger_reaction_declared" in context.get("bundle_repair_request")
     assert resolve_export_gate(context)["allow_export"] is False
     assert any(
         item["gate"] == "workflow_integration"
@@ -128,6 +131,7 @@ async def test_appgenerator_acceptance_blocks_workflow_trigger_capability_drift(
             "generated_workflow_trigger_events": drifted_trigger_events,
             "app_validation_status": "skipped",
             "app_validation_strategy_used": "skip",
+            **build_appgenerator_acceptance_task_state(files),
         }
     )
 
@@ -137,8 +141,9 @@ async def test_appgenerator_acceptance_blocks_workflow_trigger_capability_drift(
     assert result["passed"] is False
     assert gate["allow_export"] is False
     assert "workflow_integration" in result["validation_evidence"]["failed"]
-    assert result["workflow_integration_repair"]["status"] == "needs_revision"
-    assert context.get("workflow_integration_repair_status") == "needs_revision"
+    assert result["bundle_repair"]["status"] == "blocked"
+    assert result["bundle_repair"]["attempt"] == 0
+    assert context.get("bundle_repair_status") == "blocked"
     assert any(
         item["gate"] == "workflow_integration"
         and item["test"] == "workflow_trigger_capability_id_mismatch"
@@ -176,6 +181,7 @@ async def test_appgenerator_acceptance_blocks_invented_workflow_route() -> None:
             "generated_workflow_trigger_events": integration["trigger_events"],
             "app_validation_status": "skipped",
             "app_validation_strategy_used": "skip",
+            **build_appgenerator_acceptance_task_state(files),
         }
     )
 
@@ -190,8 +196,9 @@ async def test_appgenerator_acceptance_blocks_invented_workflow_route() -> None:
     assert resolve_export_gate(context)["allow_export"] is False
     assert "workflow_capability_not_in_metadata" in failed_tests
     assert "workflow_trigger_ambiguous_workflow_reaction" in failed_tests
-    assert result["workflow_integration_repair"]["status"] == "needs_revision"
-    assert context.get("workflow_integration_repair_status") == "needs_revision"
+    assert result["bundle_repair"]["status"] == "needs_revision"
+    assert result["bundle_repair"]["target_agent"] == "ConfigMiddlewareAgent"
+    assert context.get("bundle_repair_status") == "needs_revision"
 
 
 @pytest.mark.asyncio
@@ -253,7 +260,7 @@ async def test_appgenerator_acceptance_requires_deployment_artifacts_for_product
 
 
 @pytest.mark.asyncio
-async def test_appgenerator_acceptance_blocks_workflow_integration_repair_after_max_attempts() -> None:
+async def test_appgenerator_acceptance_blocks_integration_repair_after_global_budget() -> None:
     integration = default_workflow_integration()
     files = build_appgenerator_acceptance_files(integration)
     del files["modules/support_tickets/contracts/reactions.yaml"]
@@ -267,18 +274,19 @@ async def test_appgenerator_acceptance_blocks_workflow_integration_repair_after_
             "generated_workflow_capability_id": integration["capability_id"],
             "generated_workflow_startup_mode": integration["startup_mode"],
             "generated_workflow_trigger_events": integration["trigger_events"],
-            "workflow_integration_repair_count": 2,
+            "bundle_repair_attempt_count": 2,
+            **build_appgenerator_acceptance_task_state(files),
         }
     )
 
     result = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
 
     assert result["passed"] is False
-    assert result["workflow_integration_repair"]["status"] == "blocked"
-    assert result["workflow_integration_repair"]["attempt"] == 2
-    assert result["workflow_integration_repair"]["repairable"] is False
-    assert context.get("workflow_integration_repair_status") == "blocked"
-    assert context.get("workflow_integration_repair_count") == 2
+    assert result["bundle_repair"]["status"] == "blocked"
+    assert result["bundle_repair"]["attempt"] == 2
+    assert result["bundle_repair"]["repairable"] is False
+    assert context.get("bundle_repair_status") == "blocked"
+    assert context.get("bundle_repair_attempt_count") == 2
     assert resolve_export_gate(context)["allow_export"] is False
 
 

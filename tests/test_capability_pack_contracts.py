@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -119,9 +121,10 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
     assert "domain-specific profile records" in content
     assert "host-owned `/api/me` account/profile contract" in content
-    assert '"capability_packs": [' in content
-    assert '"capability_pack_id": null' in content
-    assert '\n        "workflows": [' in content
+    assert "minimum complete set of `capability_packs`" in content
+    assert "surface_id for capability_pack_id" in content
+    assert "AppBuildPlanOutput JSON" in content
+    assert '\n        "workflows": [' not in content
 
 
 def test_docs_do_not_describe_required_integrations_as_string_list() -> None:
@@ -1005,11 +1008,14 @@ def test_app_build_plan_tool_rejects_refinement_harness_non_yaml_prompt() -> Non
 
 
 def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(monkeypatch) -> None:
+    from tests.factory_context import factory_context
+
     module = _load_module(
         "factory_app/workflows/ValueEngine/tools/manifest.py",
         "tests.valueengine_manifest_direct",
     )
-    module._HAS_PERSISTENCE = False
+    store = SimpleNamespace(save_concept=AsyncMock(), finish_concept_review=AsyncMock(return_value=True))
+    monkeypatch.setattr(module, "BuilderArtifactStore", lambda: store)
     emitted = {}
     summary_artifact = {}
 
@@ -1017,17 +1023,19 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(m
         emitted["component"] = component
         emitted["payload"] = payload
         emitted["kwargs"] = kwargs
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
 
     async def _fake_persist_summary_artifact(**kwargs):
         summary_artifact.update(kwargs)
         return type("ArtifactVersion", (), {"id": "av_concept_1"})()
 
-    module.emit_ui_surface = _fake_emit
+    module.use_ui_tool = _fake_emit
     monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
 
     context = _Context(
         chat_id="chat_value_123",
         app_id="app_123",
+        run_build_binding=factory_context({"app_id": "app_123"})["run_build_binding"],
         user_id="user_123",
         workflow_name="ValueEngine",
         structured_output={
@@ -1061,7 +1069,7 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(m
     assert manifest["brand_intent"]["style_summary"] == "Cinematic sci-fi creator platform"
     assert manifest["app_ui_requirements"] == ["Need an immersive dark shell with strong visual hierarchy"]
     assert manifest["capability_pack_hints"] == ["messaging_pack"]
-    assert emitted["component"] == "ConceptBlueprint"
+    assert emitted["component"] == "save_value_manifest"
     assert emitted["payload"]["blueprint"]["brand_intent"]["appearance_hint"] == "dark"
     assert emitted["payload"]["blueprint"]["agentic_capabilities"] == ["thread_summary"]
     assert summary_artifact["artifact_kind"] == "concept"

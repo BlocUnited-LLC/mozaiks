@@ -147,13 +147,14 @@ class TestCapabilitySourceSchema:
         assert "capability_source" in models["AppCapabilityPack"]["fields"], \
             "AppCapabilityPack missing capability_source field"
 
-    def test_capability_source_is_optional_str(self):
+    def test_capability_source_is_required_finite_origin(self):
         models = _read_yaml(
             "factory_app/workflows/AppGenerator/structured_outputs.yaml"
         )["models"]
         cs = models["AppCapabilityPack"]["fields"]["capability_source"]
-        assert cs.get("type") == "optional_str", \
-            f"capability_source.type should be optional_str, got {cs.get('type')!r}"
+        assert cs["type"] == "literal"
+        assert cs.get("required", True) is True
+        assert "generated_module" in cs["values"]
 
     def test_capability_source_description_covers_managed_capability(self):
         models = _read_yaml(
@@ -986,11 +987,11 @@ class TestAgentsYamlManagedAdapterGuidance:
     def test_appplanagent_integration_adapters_phase_present(self):
         assert "integration-adapters" in self._text
 
-    def test_output_format_contains_provider_neutral_adapter_task_example(self):
-        assert "task_managed_payments_adapter" in self._text
+    def test_output_format_uses_registered_provider_contract(self):
+        assert "For a registered managed pack, plan its declared facade" in self._text
 
     def test_output_format_contains_integrations_path_example(self):
-        assert "services/integrations/managed_payments_client.py" in self._text
+        assert "services/integrations/{pack_id}_client.py" in self._text
 
     def test_output_format_contains_adapter_task_batch_spec(self):
         assert "current_build_task_type" in self._text
@@ -998,8 +999,8 @@ class TestAgentsYamlManagedAdapterGuidance:
 
     def test_appplanagent_preserves_structured_required_integrations(self):
         assert "Preserve any pack-declared `required_integrations` as structured connector objects" in self._text
-        assert "\"required_fields\"" in self._text
-        assert "\"frontend_safe\": false" in self._text
+        assert "required_fields" in self._text
+        assert '`frontend_safe: false`' in self._text
 
 
 # ---------------------------------------------------------------------------
@@ -1103,24 +1104,31 @@ class TestManagedAdapterSurfaceKindValidation:
 
 
 # ---------------------------------------------------------------------------
-# 9. Task batch item shape for managed capability adapter task
+# 9. Planning output has one canonical schema, without retired examples
 # ---------------------------------------------------------------------------
 
-class TestTaskBatchSpecShape:
-    def test_output_format_task_batch_has_task_type_api_surface(self):
-        text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
-        assert '"current_build_task_type": "api_surface"' in text
+class TestPlannerOutputContract:
+    @pytest.fixture(autouse=True)
+    def _planner_output(self):
+        agents = _read_yaml("factory_app/workflows/AppGenerator/agents.yaml")["agents"]
+        planner = next(agent for agent in agents if agent["name"] == "AppPlanAgent")
+        self.output = next(section["content"] for section in planner["prompt_sections"]
+                           if section["id"] == "output_format")
 
-    def test_output_format_task_batch_has_provider_neutral_adapter_owned_path(self):
-        text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
-        assert '"services/integrations/managed_payments_client.py"' in text
+    def test_provider_schema_is_only_output_shape(self):
+        assert "AppBuildPlanOutput response schema" in self.output
+        assert "The only root field is AppBuildPlan" in self.output
+        assert "```" not in self.output
 
-    def test_output_format_task_batch_has_surface_kind_external_integration(self):
-        text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
-        # The task batch item for adapter work should carry surface_kind.
-        assert '"surface_kind": "external_integration"' in text
+    def test_task_context_does_not_duplicate_shared_inputs(self):
+        assert "Workers inherit app_build_plan and dependency_task_outputs" in self.output
+        assert "Task context_variables contain only task-local overrides" in self.output
 
-    def test_output_format_task_batch_initial_agent_is_controller(self):
-        text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
-        assert '"initial_agent": "ControllerAgent"' in text
+    def test_output_does_not_expand_page_schemas(self):
+        assert "Do not expand nested modal/page schemas during planning" in self.output
+        assert "JSON-encoded partial config string or null" in self.output
+
+    def test_managed_adapter_uses_canonical_owner_and_path(self):
+        assert "services/integrations/{pack_id}_client.py" in self.output
+        assert "api_surface task with `initial_agent: ControllerAgent`" in " ".join(self.output.split())
 

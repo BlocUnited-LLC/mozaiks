@@ -9,9 +9,11 @@ their own business checks succeed.
 """
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
+from uuid import uuid4
 
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -44,6 +46,68 @@ TokenWalletStatus = Literal["pending", "applied", "rejected"]
 
 _CREDIT_OPERATIONS = {"allocation", "credit", "refund", "adjustment_credit"}
 _DEBIT_OPERATIONS = {"usage_debit", "debit", "adjustment_debit"}
+
+# Bounded attempts to take ownership of a movement's reservation. Every losing
+# attempt observes a strictly changed reservation — inserted, adopted, or
+# finalized — so contention resolves in a couple of rounds or is not
+# contention at all.
+_RESERVATION_ATTEMPTS = 5
+
+
+class TokenWalletReservationUnavailable(RuntimeError):
+    """The durable reservation for a movement could not be acquired.
+
+    Reported instead of moving the balance. A credit recorded without the
+    entry that explains it is worse than a credit that has to be retried.
+    """
+
+    def __init__(self, *, entry_id: str) -> None:
+        self.entry_id = entry_id
+        super().__init__(
+            f"token wallet reservation could not be acquired for entry {entry_id!r}"
+        )
+
+
+# Rejection reason for a movement refused because a newer revision of the same
+# entitlement subject has already committed.
+STALE_SUBJECT_REVISION_REASON = "stale_subject_revision"
+
+# Sub-document on the balance holding the highest revision committed per
+# entitlement subject. Nested under one key so the balance keeps exactly one
+# ordering surface no matter how many subjects share a wallet scope.
+_SUBJECT_REVISIONS_FIELD = "subject_revisions"
+
+
+def _subject_revision_path(subject_key: str | None) -> str | None:
+    """Dotted path holding one subject's committed revision, or None.
+
+    The key is sanitized to hex-safe characters because it becomes a Mongo
+    field name: a dot would silently create nesting and a `$` would be
+    rejected, so an opaque caller identity must never reach the path raw.
+    """
+    key = str(subject_key or "").strip()
+    if not key:
+        return None
+    safe = "".join(char for char in key if char.isalnum() or char in "_-")
+    if not safe:
+        return None
+    return f"{_SUBJECT_REVISIONS_FIELD}.{safe}"
+
+
+def _subject_revision_is_stale(
+    balance: dict[str, Any] | None,
+    revision_path: str | None,
+    subject_revision: int | None,
+) -> bool:
+    """Did this balance already commit a strictly newer revision?"""
+    if balance is None or revision_path is None or subject_revision is None:
+        return False
+    committed = (balance.get(_SUBJECT_REVISIONS_FIELD) or {}).get(
+        revision_path.split(".", 1)[-1]
+    )
+    return isinstance(committed, int) and committed > subject_revision
+
+
 _FORBIDDEN_METADATA_KEY_FRAGMENTS = (
     "secret",
     "password",
@@ -210,6 +274,24 @@ def _entry_id(scope: TokenWalletScope, idempotency_key: str) -> str:
     return f"token_wallet_entry:{digest}"
 
 
+def _observed_reservation_predicate(existing: Mapping[str, Any]) -> dict[str, Any]:
+    """Compare-and-swap against exactly what was observed, absence included.
+
+    An entry written before reservations were tracked carries neither field.
+    Reading a missing field as Python `None` or `0` and then querying for that
+    value is not the same question: Mongo matches `{"field": 0}` only against a
+    stored zero, so the swap would never match the very record it is trying to
+    take over — and a movement whose balance already committed would become
+    unrecoverable. Absence is a state, so it is compared as one.
+    """
+    predicate: dict[str, Any] = {}
+    for field in ("reservation_owner", "reservation_generation"):
+        predicate[field] = (
+            existing[field] if field in existing else {"$exists": False}
+        )
+    return predicate
+
+
 def _idempotency_conflict(existing: dict[str, Any], requested: dict[str, Any]) -> bool:
     for key in ("balance_id", "operation", "direction", "amount", "signed_amount"):
         if existing.get(key) != requested.get(key):
@@ -240,6 +322,8 @@ def _empty_balance(scope: TokenWalletScope) -> dict[str, Any]:
 def public_balance(balance: dict[str, Any] | None, scope: TokenWalletScope | None = None) -> dict[str, Any]:
     data = dict(balance or (_empty_balance(scope) if scope else {}))
     data.pop("applied_entry_ids", None)
+    # Internal ordering state, never part of the public balance surface.
+    data.pop(_SUBJECT_REVISIONS_FIELD, None)
     for key in ("balance", "total_allocated", "total_credited", "total_spent", "total_refunded", "entry_count"):
         data[key] = _positive_int(data.get(key))
     if "_id" in data:
@@ -252,6 +336,9 @@ def public_balance(balance: dict[str, Any] | None, scope: TokenWalletScope | Non
 
 def public_entry(entry: dict[str, Any]) -> dict[str, Any]:
     data = dict(entry or {})
+    # Internal reservation bookkeeping, never part of the public entry surface.
+    data.pop("reservation_owner", None)
+    data.pop("reservation_generation", None)
     if "_id" in data:
         data["entry_id"] = data.pop("_id")
     for key in ("created_at", "updated_at", "applied_at", "rejected_at"):
@@ -293,6 +380,77 @@ class TokenWalletLedger:
             self._indexes_ready = True
         return balances, entries
 
+    async def _acquire_entry_reservation(
+        self,
+        entries: Any,
+        *,
+        entry_id: str,
+        entry: dict[str, Any],
+        reservation_owner: str,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        """Take positive ownership of this movement's durable reservation.
+
+        Returns None once this invocation owns a pending reservation, or the
+        existing terminal entry when the movement already settled. It never
+        returns "nothing happened": the caller may only touch the balance after
+        a None, so there is no path where a balance moves under a reservation
+        somebody else holds — or under none at all.
+
+        Each attempt re-reads before acting, because every observation here can
+        be invalidated the instant after it is made. A pending reservation may
+        be deleted by the attempt that made it, adopted by a newer entitled
+        revision, or finalized. So adoption is a compare-and-swap on the exact
+        observed owner AND generation, and a lost swap is not a failure — it
+        means the world moved, so look again and answer the new state. The
+        generation is what makes an owner that is handed back and forth still
+        distinguishable.
+
+        Attempts are bounded. Contention that will not settle is an operational
+        outcome, not a licence to write anyway.
+        """
+        for _attempt in range(_RESERVATION_ATTEMPTS):
+            existing = await entries.find_one({"_id": entry_id})
+            if existing is None:
+                try:
+                    await entries.insert_one(entry)
+                    return None
+                except DuplicateKeyError:
+                    # Someone reserved between the read and the insert.
+                    continue
+
+            if _idempotency_conflict(existing, entry):
+                raise ValueError(
+                    "idempotency_key was reused with different token wallet entry data"
+                )
+
+            status = existing.get("status")
+            if status in {"applied", "rejected"}:
+                return dict(existing)
+
+            if status != "pending":
+                continue
+
+            adopted = await entries.find_one_and_update(
+                {
+                    "_id": entry_id,
+                    "status": "pending",
+                    **_observed_reservation_predicate(existing),
+                },
+                {
+                    "$set": {
+                        "reservation_owner": reservation_owner,
+                        "updated_at": now,
+                    },
+                    "$inc": {"reservation_generation": 1},
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+            if adopted is not None:
+                return None
+
+        raise TokenWalletReservationUnavailable(entry_id=entry_id)
+
     async def record_entry(
         self,
         *,
@@ -309,7 +467,21 @@ class TokenWalletLedger:
         metadata: dict[str, Any] | None = None,
         allow_negative_balance: bool = False,
         usage_event_id: str | None = None,
+        subject_key: str | None = None,
+        subject_revision: int | None = None,
     ) -> TokenWalletEntryResult:
+        """Record one idempotent wallet movement.
+
+        ``subject_key`` / ``subject_revision`` are an optional ordering fence.
+        When both are supplied, the movement commits only while this revision
+        is the newest one seen for that subject, and the check happens inside
+        the same single-document update that changes the balance — so a
+        revision that lost the race cannot mint anything, even if it was
+        already mid-flight when the newer one committed. The ledger never
+        interprets ``subject_key``; it is an opaque identity owned by whatever
+        ordering authority the caller uses. Omit both for unordered movements
+        (the default), which behave exactly as before.
+        """
         if operation not in _CREDIT_OPERATIONS and operation not in _DEBIT_OPERATIONS:
             raise ValueError(f"unsupported token wallet operation: {operation}")
         resolved_amount = _positive_int(amount)
@@ -329,6 +501,7 @@ class TokenWalletLedger:
             preferred_scope=preferred_scope,
         )
         entry_id = _entry_id(scope, idempotency_value)
+        reservation_owner = f"rsv_{uuid4().hex}"
         now = _now()
         balance_seed = {
             "_id": scope.balance_id,
@@ -356,6 +529,12 @@ class TokenWalletLedger:
             "amount": resolved_amount,
             "signed_amount": signed_amount,
             "status": "pending",
+            # Who currently owns this reservation. A stale attempt may only
+            # clean up a reservation it still owns; if a newer valid revision
+            # has adopted it, ownership has moved and the stale cleanup must
+            # not touch it.
+            "reservation_owner": reservation_owner,
+            "reservation_generation": 0,
             "source": _text(source) or "runtime",
             "reason": _text(reason) or None,
             "metadata": _safe_metadata(metadata),
@@ -365,30 +544,24 @@ class TokenWalletLedger:
         }
 
         balances, entries = await self._collections()
-        existing = await entries.find_one({"_id": entry_id}, {"_id": 0})
-        if existing and _idempotency_conflict(existing, entry):
-            raise ValueError("idempotency_key was reused with different token wallet entry data")
-        if existing and existing.get("status") in {"applied", "rejected"}:
+        # No balance may move without this invocation positively owning the
+        # durable reservation that represents the movement. "I looked and
+        # something was there" is not ownership: the reservation may be
+        # deleted, adopted, or finalized between the read and the write.
+        acquired = await self._acquire_entry_reservation(
+            entries,
+            entry_id=entry_id,
+            entry=entry,
+            reservation_owner=reservation_owner,
+            now=now,
+        )
+        if acquired is not None:
             balance_doc = await balances.find_one({"_id": scope.balance_id})
             return TokenWalletEntryResult(
-                status=str(existing.get("status") or "applied"),  # type: ignore[arg-type]
-                entry=public_entry(existing),
+                status=str(acquired.get("status") or "applied"),  # type: ignore[arg-type]
+                entry=public_entry(acquired),
                 balance=public_balance(balance_doc, scope),
             )
-        if existing is None:
-            try:
-                await entries.insert_one(entry)
-            except DuplicateKeyError:
-                existing = await entries.find_one({"_id": entry_id})
-                if existing and _idempotency_conflict(existing, entry):
-                    raise ValueError("idempotency_key was reused with different token wallet entry data") from None
-                if existing and existing.get("status") in {"applied", "rejected"}:
-                    balance_doc = await balances.find_one({"_id": scope.balance_id})
-                    return TokenWalletEntryResult(
-                        status=str(existing.get("status") or "applied"),  # type: ignore[arg-type]
-                        entry=public_entry(existing),
-                        balance=public_balance(balance_doc, scope),
-                    )
 
         update_filter: dict[str, Any] = {
             "_id": scope.balance_id,
@@ -396,6 +569,20 @@ class TokenWalletLedger:
         }
         if direction == "debit" and not allow_negative_balance:
             update_filter["balance"] = {"$gte": resolved_amount}
+
+        revision_path = _subject_revision_path(subject_key)
+        fenced = revision_path is not None and subject_revision is not None
+        if revision_path is not None and subject_revision is not None:
+            # The ordering predicate rides in the SAME filter as the balance
+            # mutation, so "am I still current?" and "apply the movement" are
+            # one atomic act. Checking the subject's revision separately and
+            # then writing would leave a window for a newer revision to commit
+            # in between — which is exactly the stale-allowance race.
+            update_filter["$or"] = [
+                {revision_path: {"$exists": False}},
+                {revision_path: None},
+                {revision_path: {"$lte": subject_revision}},
+            ]
 
         inc: dict[str, int] = {
             "balance": signed_amount,
@@ -410,27 +597,66 @@ class TokenWalletLedger:
         else:
             inc["total_spent"] = resolved_amount
 
-        balance_doc = await balances.find_one_and_update(
-            update_filter,
-            {
-                "$setOnInsert": balance_seed,
-                "$set": {
-                    "updated_at": now,
-                },
-                "$inc": inc,
-                "$addToSet": {"applied_entry_ids": entry_id},
+        update_document: dict[str, Any] = {
+            "$setOnInsert": balance_seed,
+            "$set": {
+                "updated_at": now,
             },
-            upsert=direction == "credit",
-            return_document=ReturnDocument.AFTER,
-        )
+            "$inc": inc,
+            "$addToSet": {"applied_entry_ids": entry_id},
+        }
+        if fenced:
+            update_document["$max"] = {revision_path: subject_revision}
+
+        try:
+            balance_doc = await balances.find_one_and_update(
+                update_filter,
+                update_document,
+                upsert=direction == "credit",
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            # An upserting credit whose filter missed because the balance
+            # already exists: the deterministic _id collides. Treat it as a
+            # miss and classify below.
+            balance_doc = None
 
         if balance_doc is None:
             current_balance = await balances.find_one({"_id": scope.balance_id})
             if current_balance and entry_id in set(current_balance.get("applied_entry_ids") or []):
-                applied_entry = await self._mark_entry_applied(entries, entry_id, current_balance)
+                applied_entry = await self._mark_entry_applied(
+                    entries, entry_id, current_balance, entry=entry
+                )
                 return TokenWalletEntryResult(
                     status="applied",
                     entry=public_entry(applied_entry),
+                    balance=public_balance(current_balance, scope),
+                )
+            if fenced and _subject_revision_is_stale(
+                current_balance, revision_path, subject_revision
+            ):
+                # A stale movement must leave no trace under the identity that
+                # a SUCCESSFUL allocation owns. That identity is plan- and
+                # period-scoped, so persisting a rejection here would block the
+                # allocation a later valid revision of the same plan and period
+                # is entitled to make — the stale attempt would permanently
+                # deny a legitimate one. Roll back the reservation we made and
+                # report the refusal without recording it.
+                await entries.delete_one(
+                    {
+                        "_id": entry_id,
+                        "status": "pending",
+                        "reservation_owner": reservation_owner,
+                    }
+                )
+                stale_entry = {
+                    **entry,
+                    "status": "rejected",
+                    "rejection_reason": STALE_SUBJECT_REVISION_REASON,
+                }
+                return TokenWalletEntryResult(
+                    status="rejected",
+                    entry=public_entry(stale_entry),
                     balance=public_balance(current_balance, scope),
                 )
             rejected_entry = await self._mark_entry_rejected(
@@ -445,15 +671,37 @@ class TokenWalletLedger:
                 balance=public_balance(current_balance, scope),
             )
 
-        applied_entry = await self._mark_entry_applied(entries, entry_id, balance_doc)
+        applied_entry = await self._mark_entry_applied(
+            entries, entry_id, balance_doc, entry=entry
+        )
         return TokenWalletEntryResult(
             status="applied",
             entry=public_entry(applied_entry),
             balance=public_balance(balance_doc, scope),
         )
 
-    async def _mark_entry_applied(self, entries: Any, entry_id: str, balance: dict[str, Any]) -> dict[str, Any]:
+    async def _mark_entry_applied(
+        self,
+        entries: Any,
+        entry_id: str,
+        balance: dict[str, Any],
+        *,
+        entry: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Finalize the entry that explains a balance the wallet already moved.
+
+        The write is an upsert on the movement's own facts. Reaching here means
+        the balance counts this entry, so the entry must exist and must say so
+        — an `applied` result whose entry document is absent would report a
+        credit with no wallet or amount behind it. The reservation this
+        invocation owns cannot ordinarily be removed underneath it, but the
+        postcondition does not depend on that being true: if the document is
+        gone, it is restored rather than papered over with an empty lookup.
+        """
         now = _now()
+        seed = {key: value for key, value in entry.items() if key != "_id"}
+        for key in ("status", "updated_at"):
+            seed.pop(key, None)
         await entries.update_one(
             {"_id": entry_id},
             {
@@ -462,10 +710,15 @@ class TokenWalletLedger:
                     "balance_after": int(balance.get("balance") or 0),
                     "applied_at": now,
                     "updated_at": now,
-                }
+                },
+                "$setOnInsert": seed,
             },
+            upsert=True,
         )
-        return await entries.find_one({"_id": entry_id}, {"_id": 0}) or {}
+        applied = await entries.find_one({"_id": entry_id}, {"_id": 0})
+        if not applied:
+            raise TokenWalletReservationUnavailable(entry_id=entry_id)
+        return dict(applied)
 
     async def _mark_entry_rejected(
         self,
@@ -592,6 +845,79 @@ class TokenWalletLedger:
         docs = await cursor.to_list(length=bounded_limit)
         return [public_entry(doc) for doc in docs]
 
+    async def advance_subject_revision(
+        self,
+        *,
+        app_id: str,
+        wallet_id: str = "ai_tokens",
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        preferred_scope: Literal["user", "tenant"] | None = None,
+        subject_key: str,
+        subject_revision: int,
+    ) -> bool:
+        """Advance this subject's ordering head, moving no balance.
+
+        A revision that legitimately credits nothing — a cancellation, a plan
+        with no allowance, a return to a plan whose period allocation already
+        exists — still supersedes everything older. If the head only moved when
+        tokens were minted it would mean "last revision that minted", not
+        "latest accepted revision", and a delayed older allowance would sail
+        past it.
+
+        Returns False when a strictly newer revision already holds the head, in
+        which case nothing is written — a meaning-bearing decline, not a
+        successful no-op. Equal revisions succeed so that a retry, or the
+        allowance belonging to the very revision that advanced the head, is not
+        fenced out by its own claim. Operational failures propagate: a caller
+        must be able to tell "someone newer won" from "the write did not
+        happen", because only the first means the command was overtaken.
+        """
+        revision_path = _subject_revision_path(subject_key)
+        if revision_path is None:
+            return False
+        scope = _scope_for(
+            app_id=app_id,
+            wallet_id=wallet_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            preferred_scope=preferred_scope,
+        )
+        balances, _entries = await self._collections()
+        now = _now()
+        try:
+            updated = await balances.find_one_and_update(
+                {
+                    "_id": scope.balance_id,
+                    "$or": [
+                        {revision_path: {"$exists": False}},
+                        {revision_path: None},
+                        {revision_path: {"$lte": subject_revision}},
+                    ],
+                },
+                {
+                    "$setOnInsert": {
+                        "_id": scope.balance_id,
+                        "app_id": scope.app_id,
+                        "wallet_id": scope.wallet_id,
+                        "scope_type": scope.scope_type,
+                        "scope_id": scope.scope_id,
+                        "user_id": scope.user_id,
+                        "tenant_id": scope.tenant_id,
+                        "created_at": now,
+                    },
+                    "$set": {"updated_at": now},
+                    "$max": {revision_path: subject_revision},
+                },
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            # The balance exists but a newer revision holds the head, so the
+            # filtered upsert collided on the deterministic balance id.
+            return False
+        return updated is not None
+
     async def ensure_plan_allowances(
         self,
         *,
@@ -603,6 +929,8 @@ class TokenWalletLedger:
         user_id: str | None = None,
         tenant_id: str | None = None,
         period_start: datetime | None = None,
+        subject_key: str | None = None,
+        subject_revision: int | None = None,
     ) -> list[TokenWalletEntryResult]:
         plan = None
         resolved_plan_id = _text(plan_id)
@@ -670,6 +998,8 @@ class TokenWalletLedger:
                         "cadence": allowance.cadence,
                         "period_key": period_key,
                     },
+                    subject_key=subject_key,
+                    subject_revision=subject_revision,
                 )
             )
         return results

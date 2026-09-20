@@ -112,6 +112,10 @@ async def get_page_schema(name: str, request: Request):
             page_path,
             expected_name=name,
             action_index=action_index,
+            ask_context_index={
+                module: frozenset(action for action, safe in actions.items() if safe is True)
+                for module, actions in getattr(request.app.state, "module_ask_context_actions", {}).items()
+            },
         )
         return JSONResponse(content=schema.model_dump(mode="json", exclude_none=True))
     except PageSchemaValidationError as exc:

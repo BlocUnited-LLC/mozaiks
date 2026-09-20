@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mozaiksai.core.session.model import SessionLifecycle, TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
+from mozaiksai.core.usage.context import AuxiliaryUsageContext
 from mozaiksai.core.workflow.pack.config import (
     get_workflow_sequence,
     load_global_pack_graph,
@@ -269,9 +270,15 @@ class RefinementRequest(BaseModel):
     raw_user_request: str = ""
     source_surface: str | None = None
     app_id: str | None = None
+    target_app_id: str | None = None
     user_id: str | None = None
+    usage_context: AuxiliaryUsageContext | None = Field(default=None, exclude=True, repr=False)
     requested_workflow_id: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def artifact_app_id(self) -> str | None:
+        return self.target_app_id or self.app_id
 
     @field_validator("build_family")
     @classmethod
@@ -533,13 +540,14 @@ class RefinementTriggerRouteResolver:
         paths = RefinementTriggerRouteResolver._manifest_paths_from_extra(request.extra)
         if paths:
             return paths
-        if not request.app_id or not request.build_record_id:
+        artifact_app_id = request.artifact_app_id
+        if not request.app_id or not artifact_app_id or not request.build_record_id:
             return []
         try:
             from mozaiksai.core.artifacts.store import ArtifactStore
 
             artifact = await ArtifactStore().get_build_record(
-                app_id=request.app_id,
+                app_id=artifact_app_id,
                 build_record_id=request.build_record_id,
             )
         except Exception as exc:
@@ -754,7 +762,7 @@ class RefinementTriggerRouteResolver:
 
     @staticmethod
     def _is_integration_config_path(path: str) -> bool:
-        return bool(re.fullmatch(r"config/integrations[^/]*\.json", path))
+        return bool(re.fullmatch(r"config/integrations[^/]*\.yaml", path))
 
     @staticmethod
     def _is_integration_doc_path(path: str) -> bool:
@@ -831,7 +839,7 @@ class RefinementTriggerRouteResolver:
                 "modules/*/backend/service.py",
                 "modules/*/backend/schemas.py",
                 "modules/*/module.yaml",
-                "config/integrations*.json",
+                "config/integrations*.yaml",
                 "docs/integrations*.md",
             ]
             if cls._is_ui_facing_request(request=request, intent=intent):
@@ -1378,14 +1386,15 @@ class RefinementTriggerRouteResolver:
         there is no point classifying the user's change request if the upstream
         artifacts it depends on are already out of date.
         """
-        if not request.app_id:
+        artifact_app_id = request.artifact_app_id
+        if not request.app_id or not artifact_app_id:
             return None
         try:
             from mozaiksai.core.artifacts.store import (
                 ArtifactStore,  # local import avoids circular dep
             )
             store = ArtifactStore()
-            stale = await store.get_stale_artifact_families(app_id=request.app_id)
+            stale = await store.get_stale_artifact_families(app_id=artifact_app_id)
         except Exception as exc:
             _logger.debug("STALE_ARTIFACT_LOOKUP_FAILED app=%s: %s", request.app_id, exc)
             return None
@@ -1460,7 +1469,9 @@ class RefinementTriggerRouteResolver:
             build_record_id=request.build_record_id,
             source_surface=request.source_surface,
             app_id=request.app_id,
+            target_app_id=request.target_app_id,
             user_id=request.user_id,
+            usage_context=request.usage_context,
             requested_workflow_id=request.requested_workflow_id,
             extra=request.extra,
         )
@@ -1690,6 +1701,7 @@ class RefinementTriggerRouteResolver:
             ctx = ControlPlaneToolContext(
                 checkpoint="route_requested",
                 app_id=request.app_id,
+                target_app_id=request.target_app_id,
                 extra={"previous_app_bundle_ref": previous_app_bundle_ref},
             )
             result = await fn(context=ctx)
@@ -1817,7 +1829,7 @@ class RefinementTriggerRouteResolver:
 
     @staticmethod
     async def _current_app_context_seed(request: RefinementRequest) -> dict[str, Any]:
-        app_id = str(request.app_id or "").strip()
+        app_id = str(request.artifact_app_id or "").strip()
         if not app_id:
             return {
                 "app_context_summary": {
@@ -1886,14 +1898,17 @@ class RefinementTriggerRouteResolver:
         *,
         payload: dict[str, Any],
         app_id: str | None = None,
+        target_app_id: str | None = None,
         user_id: str | None = None,
         requested_workflow_id: str | None = None,
         default_source_surface: str | None = None,
+        usage_context: AuxiliaryUsageContext | None = None,
     ) -> RefinementRequest | None:
         nested_request = payload.get("refinement_request")
         if not isinstance(nested_request, dict):
             return None
         request_payload = dict(nested_request)
+        request_payload["usage_context"] = usage_context
         request_payload.setdefault("extra", {})
         if not isinstance(request_payload["extra"], dict):
             request_payload["extra"] = {}
@@ -1923,6 +1938,7 @@ class RefinementTriggerRouteResolver:
             or request_payload["build_family"]
         )
         request_payload["app_id"] = str(app_id or "").strip() or None
+        request_payload["target_app_id"] = target_app_id
         request_payload["user_id"] = str(user_id or "").strip() or None
         request_payload["requested_workflow_id"] = str(requested_workflow_id or "").strip() or None
         if default_source_surface and not request_payload.get("source_surface"):
@@ -1952,6 +1968,7 @@ class RefinementTriggerRouteResolver:
         return self.request_from_payload(
             payload=payload,
             app_id=trigger.app_id,
+            target_app_id=trigger.target_app_id,
             user_id=trigger.user_id,
             requested_workflow_id=trigger.workflow_id,
             default_source_surface=default_source_surface,

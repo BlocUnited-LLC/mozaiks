@@ -3,10 +3,12 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = get_workflow_logger("design_docs")
 
@@ -113,15 +115,10 @@ def _extract_bundle(context_variables: Any) -> dict[str, Any] | None:
     if context_variables is None:
         return None
 
-    raw = _cv_get(context_variables, "structured_output")
-    if not isinstance(raw, dict):
-        raw = _cv_get(context_variables, "DesignDocsBundle")
+    raw = detach(_cv_get(context_variables, "structured_output"))
     if not isinstance(raw, dict):
         return None
 
-    nested = raw.get("DesignDocsBundle")
-    if isinstance(nested, dict):
-        return nested
     return raw
 
 
@@ -135,6 +132,44 @@ def _canonical_surface_map(raw: Any) -> dict[str, Any]:
         if not isinstance(surface, dict):
             raise ValueError(f"surface_map.surfaces[{idx}] must be an object")
     return {"surfaces": surfaces}
+
+
+def _reject_undeclared_workflow_surfaces(
+    surface_map: dict[str, Any],
+    concept_blueprint: Any,
+) -> None:
+    """A workflow surface the approved concept never asked for is not allowed.
+
+    The agent is already told this in its prompt, and it mostly obeys. Mostly is
+    not a contract: a live build of a tool-lending library whose concept recorded
+    `agentic_capabilities: []` still got
+
+        surface_map: module tool_catalog, workflow borrow_requests, ui_only overdue_list
+
+    Nothing here caught it, so it travelled three stages before `pattern_selection`
+    compared the partition against the map and refused it -- terminal, no feedback
+    path, no way back to the user. Refusing it at the boundary where it is written
+    turns that into a rejection DesignDocs can act on, in the run that produced it.
+    """
+    if not isinstance(concept_blueprint, dict):
+        return  # no approved concept in scope; nothing to judge against
+    if "agentic_capabilities" not in concept_blueprint:
+        return
+    if concept_blueprint.get("agentic_capabilities"):
+        return
+    declared = [
+        str(surface.get("surface_id"))
+        for surface in surface_map.get("surfaces") or []
+        if surface.get("surface_kind") == "workflow"
+    ]
+    if not declared:
+        return
+    raise ValueError(
+        f"surface_map declares workflow surfaces {declared}, but the approved concept "
+        "records no agentic capabilities. Realize them as module or ui_only surfaces, "
+        "or leave them out: an app that was not asked for AI cannot declare an AI "
+        "workflow, and downstream pattern selection rejects the mismatch outright."
+    )
 
 
 def _canonical_data_contract(
@@ -234,7 +269,7 @@ def _inject_backend_surface_map(backend_markdown: str, surface_map: dict[str, An
         flags=re.MULTILINE | re.DOTALL,
     )
     if pattern.search(doc):
-        return pattern.sub(block + "\n\n", doc, count=1).strip()
+        return pattern.sub(lambda _: block + "\n\n", doc, count=1).strip()
     return doc.rstrip() + "\n\n" + block
 
 
@@ -305,7 +340,7 @@ async def save_design_doc(
     content: str,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    app_id = _cv_get(context_variables, "app_id")
+    app_id = require_build_binding(context_variables).target_app_id
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
 
@@ -365,13 +400,14 @@ async def save_design_docs_bundle(
     *,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    app_id = _cv_get(context_variables, "app_id")
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
     artifact_version_id = _cv_get(context_variables, "artifact_version_id")
-    build_id = _cv_get(context_variables, "build_id") or chat_id
+    build_id = binding.build_id
     revision_scope = _cv_get(context_variables, "revision_scope")
-    build_mode = _cv_get(context_variables, "build_mode")
+    build_mode = "revision" if binding.phase == "refinement" else "genesis"
 
     if not app_id or not isinstance(app_id, str):
         return {"ok": False, "reason": "missing_app_id"}
@@ -385,6 +421,10 @@ async def save_design_docs_bundle(
         backend_markdown = str(bundle.get("backend_markdown") or "").strip()
         database_markdown = str(bundle.get("database_markdown") or "").strip()
         surface_map = _canonical_surface_map(bundle.get("surface_map"))
+        _reject_undeclared_workflow_surfaces(
+            surface_map,
+            _cv_get(context_variables, "concept_blueprint"),
+        )
         experience_spec = _canonical_experience_spec(
             bundle.get("experience_spec"),
             surface_map=surface_map,
@@ -491,6 +531,7 @@ async def save_design_docs_bundle(
         "app_id": app_id,
         "stage": normalized_stage,
         "kinds": list(_DOC_KINDS),
+        "outcome": "saved",
         "surface_count": len(surface_map.get("surfaces", [])),
         "page_count": len(experience_spec.get("pages", [])),
         "data_surface_count": len(data_contract.get("surfaces", [])),

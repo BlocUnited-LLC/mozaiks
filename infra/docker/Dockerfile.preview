@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1
+# Local, disposable app previews. This image is not a deployment artifact.
+FROM node:24-bookworm-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV MOZAIKS_WEB_SHELL_PATH=/opt/mozaiks/web_shell
+ENV MOZAIKS_CHAT_UI_PATH=/opt/mozaiks/chat-ui
+ENV MOZAIKS_FACTORY_APP_PATH=/opt/mozaiks/factory_app
+ENV LOGS_BASE_DIR=/workspace/logs
+
+WORKDIR /opt/mozaiks
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        libcurl4 \
+        libgssapi-krb5-2 \
+        liblzma5 \
+        libssl3 \
+        python3 \
+        python3-pip \
+    && curl -fsSL https://pgp.mongodb.com/server-7.0.asc \
+        | gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg \
+    && echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
+        > /etc/apt/sources.list.d/mongodb-org-7.0.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends mongodb-org-server \
+    && ln -s /usr/bin/python3 /usr/local/bin/python \
+    && python --version \
+    && mongod --version \
+    && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml setup.py MANIFEST.in README.md LICENSE ./
+COPY mozaiks/ ./mozaiks/
+COPY mozaiksai/ ./mozaiksai/
+COPY mozaiks_cli/ ./mozaiks_cli/
+COPY logs/ ./logs/
+COPY factory_app/ ./factory_app/
+COPY web_shell/ ./web_shell/
+COPY chat-ui/ ./chat-ui/
+RUN pip install --no-cache-dir . --break-system-packages \
+    && pip list --format=freeze > /opt/mozaiks/preview-constraints.txt \
+    && npm ci --prefix web_shell --no-audit --no-fund \
+    && useradd --create-home --uid 10001 sandbox \
+    && mkdir -p /workspace/app /workspace/logs \
+    && chown -R sandbox:sandbox /workspace /opt/mozaiks/web_shell
+
+USER sandbox
+WORKDIR /workspace
+EXPOSE 3000 8000
+CMD ["sleep", "1800"]

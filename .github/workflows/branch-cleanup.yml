@@ -45,6 +45,7 @@ jobs:
 
           deleted=()
           flagged=()
+          salvaged=()
 
           for ref in $(git branch -r | grep -v 'HEAD' | sed 's|origin/||'); do
             if [ "$ref" == "main" ]; then
@@ -68,11 +69,26 @@ jobs:
               echo "Deleting merged branch: $ref"
               git push origin --delete "$ref" || true
               deleted+=("$ref (merged)")
+              # No salvage tag: commits are already reachable from main.
             elif [ "$state" == "CLOSED" ]; then
               if [ "$age_days" -ge "$CLOSED_GRACE_DAYS" ]; then
+                # Deleting a closed-unmerged branch is the only case that makes
+                # commits unreachable. Tag first so the work stays recoverable;
+                # this workflow never sweeps tags.
+                tag="salvage/${ref}"
+                if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+                  echo "Salvage tag $tag already exists for $ref"
+                elif git push origin "refs/remotes/origin/${ref}:refs/tags/${tag}"; then
+                  echo "Tagged $ref as $tag before deletion"
+                  salvaged+=("$tag")
+                else
+                  echo "Could not tag $ref; leaving branch in place for manual review"
+                  flagged+=("$ref (salvage tag failed, branch NOT deleted)")
+                  continue
+                fi
                 echo "Deleting abandoned branch: $ref (closed ${age_days}d ago)"
                 git push origin --delete "$ref" || true
-                deleted+=("$ref (closed, ${age_days}d ago)")
+                deleted+=("$ref (closed, ${age_days}d ago, salvaged as $tag)")
               else
                 flagged+=("$ref (closed ${age_days}d ago, still in grace period)")
               fi
@@ -87,4 +103,10 @@ jobs:
             echo ""
             echo "### Left for manual review (${#flagged[@]})"
             if [ "${#flagged[@]}" -eq 0 ]; then echo "_none_"; else printf -- '- %s\n' "${flagged[@]}"; fi
+            echo ""
+            echo "### Salvage tags created (${#salvaged[@]})"
+            echo ""
+            echo "Abandoned branches are tagged before deletion, so no work becomes"
+            echo "unreachable. Recover one with: git fetch origin refs/tags/<tag>"
+            if [ "${#salvaged[@]}" -eq 0 ]; then echo "_none_"; else printf -- '- %s\n' "${salvaged[@]}"; fi
           } >> "$GITHUB_STEP_SUMMARY"

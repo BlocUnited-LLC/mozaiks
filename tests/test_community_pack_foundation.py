@@ -229,6 +229,25 @@ def test_unknown_capability_source_rejected() -> None:
     assert any(d.field == "pack.capability_source" for d in result.errors)
 
 
+def test_explicit_operator_pack_capability_source_accepted() -> None:
+    """The normalize_pack_descriptor default must also be declarable explicitly."""
+    from factory_app.workflows.AppGenerator.tools.pack_context_schema import validate_pack_context
+
+    context: dict[str, Any] = {
+        "context_id": "explicit_default",
+        "applies_to_workflows": ["AppGenerator"],
+        "assets": [],
+        "pack": {
+            "id": "explicit_default",
+            "status": "active",
+            "version": "0.1.0",
+            "capability_source": "operator_pack",
+        },
+    }
+    result = validate_pack_context(context)
+    assert result.valid, [d.message for d in result.errors]
+
+
 # ---------------------------------------------------------------------------
 # 3. Dependency validation: satisfied requirement passes
 # ---------------------------------------------------------------------------

@@ -53,15 +53,6 @@ Covers pure helpers NOT tested by test_generated_bundle_scanner.py
     - nested ownership kind derivation from parent surface_kind
     - non-dict surface items skipped
 
-  _find_raw_secret_fields:
-    - empty dict → []
-    - flat dict with secret key → path reported
-    - nested dict → dotted path reported
-    - list of dicts → indexed path reported
-    - non-secret key → not reported
-    - empty string value → not reported
-    - non-dict/list value → nothing reported
-
   _pack_id_from_descriptor:
     - non-dict → ""
     - capability_pack_id field → returned
@@ -98,7 +89,6 @@ from pathlib import Path
 
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
     _declared_module_id_from_yaml,
-    _find_raw_secret_fields,
     _forbidden_output_prefixes_from_pack,
     _is_scannable,
     _iter_api_endpoint_literals,
@@ -367,51 +357,6 @@ class TestModuleSurfaceIds:
             "surfaces": ["string_item", {"surface_id": "tickets", "surface_kind": "module"}]
         }
         assert _module_surface_ids(contract) == {"tickets"}
-
-
-# ---------------------------------------------------------------------------
-# 8. _find_raw_secret_fields
-# ---------------------------------------------------------------------------
-
-class TestFindRawSecretFields:
-    def test_empty_dict_returns_empty(self):
-        assert _find_raw_secret_fields({}) == []
-
-    def test_flat_secret_key_reported(self):
-        result = _find_raw_secret_fields({"api_key": "sk-abc"})
-        assert "api_key" in result
-
-    def test_nested_dotted_path_reported(self):
-        result = _find_raw_secret_fields({"outer": {"token": "abc123"}})
-        assert "outer.token" in result
-
-    def test_list_of_dicts_indexed_path(self):
-        result = _find_raw_secret_fields([{"password": "secret"}])
-        assert "0.password" in result
-
-    def test_non_secret_key_not_reported(self):
-        result = _find_raw_secret_fields({"username": "alice"})
-        assert result == []
-
-    def test_empty_string_value_not_reported(self):
-        result = _find_raw_secret_fields({"api_key": ""})
-        assert result == []
-
-    def test_none_value_not_reported(self):
-        result = _find_raw_secret_fields({"api_key": None})
-        assert result == []
-
-    def test_deeply_nested(self):
-        result = _find_raw_secret_fields({"a": {"b": {"secret_value": "xyz"}}})
-        assert "a.b.secret_value" in result
-
-    def test_webhook_secret_reported(self):
-        result = _find_raw_secret_fields({"webhook_secret": "whsec_abc"})
-        assert "webhook_secret" in result
-
-    def test_connection_string_reported(self):
-        result = _find_raw_secret_fields({"connection_string": "mongodb://user:pass@host"})
-        assert "connection_string" in result
 
 
 # ---------------------------------------------------------------------------

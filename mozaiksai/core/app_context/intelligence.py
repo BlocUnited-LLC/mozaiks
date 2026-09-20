@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mozaiksai.core.utils.sequences import dedupe_strings
+
 from .framework_detection import detect_frameworks_from_file_map
 from .models import AppContextGraph, GraphNodeType
 from .source_corpus import SourceCorpusBundle
@@ -70,7 +72,7 @@ def build_app_intelligence_snapshot(
     priority_counts = Counter(file.priority_label for file in bundle.files)
     node_counts = Counter(node.node_type.value for node in graph.nodes)
     edge_counts = Counter(edge.edge_type.value for edge in graph.edges)
-    source_ref_ids = _dedupe([ref.source_ref_id for ref in graph.source_refs] + [ref.source_ref_id for ref in bundle.source_refs])
+    source_ref_ids = dedupe_strings([ref.source_ref_id for ref in graph.source_refs] + [ref.source_ref_id for ref in bundle.source_refs])
 
     architecture = _architecture_summary(bundle=bundle, graph=graph)
     framework_detection = detect_frameworks_from_file_map(dict(bundle.file_contents or {}))
@@ -146,7 +148,7 @@ def build_app_intelligence_snapshot(
         data_surfaces=data_surfaces,
         risk_hints=risk_hints,
         agent_context_policy=_agent_context_policy(),
-        warnings=_dedupe([*list(bundle.warnings), *list(warnings or [])]),
+        warnings=dedupe_strings([*list(bundle.warnings), *list(warnings or [])]),
         metadata=dict(metadata or {}),
     )
 
@@ -340,7 +342,7 @@ def _ownership_summary(*, bundle: SourceCorpusBundle, graph: AppContextGraph) ->
 
     return {
         "ownership_counts": dict(sorted(ownership_counts.items())),
-        "review_paths": _dedupe(review_paths)[:80],
+        "review_paths": dedupe_strings(review_paths)[:80],
         "editable_source_roots": [
             item
             for item in _top_source_roots(bundle)
@@ -627,7 +629,7 @@ def _paths_connected_to_node(*, graph: AppContextGraph, node_id: str) -> list[st
             path = metadata.get("path") or metadata.get("source_path")
             if path:
                 paths.append(str(path))
-    return _dedupe(paths)
+    return dedupe_strings(paths)
 
 
 def _file_hint(file: Any) -> dict[str, Any]:
@@ -722,13 +724,6 @@ def _coerce_snapshot(value: AppIntelligenceSnapshot | dict[str, Any]) -> AppInte
     return value if isinstance(value, AppIntelligenceSnapshot) else AppIntelligenceSnapshot.model_validate(value)
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    out: list[str] = []
-    for value in values:
-        clean = str(value or "").strip()
-        if clean and clean not in out:
-            out.append(clean)
-    return out
 
 
 def _dedupe_dicts(items: list[dict[str, Any]], *, key_fields: tuple[str, ...]) -> list[dict[str, Any]]:

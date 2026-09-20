@@ -23,6 +23,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from mozaiksai.core.runtime.composition.extensions import get_workflow_lifecycle_hooks
+from mozaiksai.core.runtime.persistence.distributed_lock import (
+    ChatLeaseLostError,
+    ChatLockAuthorityUnavailableError,
+    LockAcquisitionError,
+    chat_execution_lease,
+    chat_lock_resource,
+)
 from mozaiksai.core.transport.session_registry import session_registry
 
 if TYPE_CHECKING:
@@ -259,16 +266,35 @@ class WorkflowBridgeMixin:
             if callable(get_live_run):
                 live_run = get_live_run(chat_id)
             if live_run is not None and isinstance(message, str) and message.strip():
-                return await self._continue_live_ag2_workflow_run(
-                    live_run=live_run,
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    workflow_name=workflow_name,
-                    message=message,
-                    app_id=app_id,
-                )
+                # Continuing a paused run restarts mutable execution: it needs
+                # the same chat execution lease as a fresh start/resume.
+                try:
+                    async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+                        return await self._continue_live_ag2_workflow_run(
+                            live_run=live_run,
+                            chat_id=chat_id,
+                            user_id=user_id,
+                            workflow_name=workflow_name,
+                            message=message,
+                            app_id=app_id,
+                        )
+                except LockAcquisitionError as lock_err:
+                    if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                        raise
+                    return await self._reject_chat_locked(chat_id=chat_id, busy=True)
+                except ChatLockAuthorityUnavailableError as lock_err:
+                    if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                        raise
+                    return await self._reject_chat_locked(chat_id=chat_id, busy=False)
+                except ChatLeaseLostError as lock_err:
+                    if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                        raise
+                    return await self._reject_chat_lease_lost(chat_id=chat_id)
 
             if has_active_session and active_callbacks:
+                rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+                if rejection is not None:
+                    return rejection
                 # Route to existing AG2 session via WebSocket callback mechanism
                 logger.debug("[SMART_ROUTING] Continuing existing AG2 session for chat %s", chat_id)
 
@@ -317,140 +343,73 @@ class WorkflowBridgeMixin:
             logger.debug("[SMART_ROUTING] Starting new workflow for chat %s", chat_id)
             starting_new_workflow = True
 
-            from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
-            from mozaiksai.core.ports.orchestration import ResumeRequest, RunRequest
-
-            if message or is_resume_request:
-                try:
-                    pm = self._get_or_create_persistence_manager()
-                    pending = await pm.get_pending_input_request(
-                        chat_id=chat_id,
-                        app_id=app_id,
-                    )
-                    if pending:
-                        await pm.clear_pending_input_request(
-                            chat_id=chat_id,
-                            app_id=app_id,
-                        )
-                        logger.debug(
-                            "[SMART_ROUTING] Cleared persisted pending input request %s before launching workflow for chat %s",
-                            pending.get("request_id"),
+            # Same-chat distributed exclusion: hold the chat execution lease
+            # for the entire mutable start/resume. adapter.run()/.resume()
+            # return exactly at a durably persisted terminal or human-waiting
+            # boundary, so releasing on context exit lands on that boundary.
+            try:
+                async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+                    # A process restart removes the in-memory AG2 callback.
+                    # If the durable session is still in progress, persist the
+                    # user's reply and use AG2's process-boundary resume path
+                    # instead of accidentally starting a second run.
+                    if (
+                        not is_resume_request
+                        and isinstance(message, str)
+                        and message.strip()
+                    ):
+                        pm = self._get_or_create_persistence_manager()
+                        session_exists = getattr(pm, "chat_session_exists", None)
+                        if callable(session_exists) and await session_exists(
                             chat_id,
-                        )
-                except Exception as clear_err:
-                    logger.debug(
-                        "[SMART_ROUTING] Failed clearing persisted pending input request for %s: %s", chat_id, clear_err)
-
-            # Only persist and echo user message when starting NEW workflows
-            # For existing sessions, the message goes directly to AG2 via callback
-            if message:
-                try:
-                    await self._apply_user_text_context_updates(
-                        chat_id=chat_id,
-                        workflow_name=workflow_name,
-                        app_id=app_id,
-                        user_input=message,
-                    )
-                except Exception as trigger_err:
-                    logger.debug("[SMART_ROUTING] user_text trigger update skipped for new run %s: %s", chat_id, trigger_err)
-                try:
-                    pm = self._get_or_create_persistence_manager()
-                    append_user_message = getattr(pm, "append_run_user_message", None)
-                    if append_user_message is not None:
-                        await append_user_message(
-                            chat_id=chat_id,
-                            app_id=app_id,
-                            content=str(message or ""),
-                            metadata={"source": "workflow_user", "user_id": user_id},
-                        )
-                    await self.process_incoming_user_message(
+                            app_id,
+                            workflow_name,
+                        ):
+                            await self._apply_user_text_context_updates(
+                                chat_id=chat_id,
+                                workflow_name=workflow_name,
+                                app_id=app_id,
+                                user_input=message,
+                            )
+                            append_user_message = getattr(pm, "append_run_user_message", None)
+                            if append_user_message is not None:
+                                await append_user_message(
+                                    chat_id=chat_id,
+                                    app_id=app_id,
+                                    content=message,
+                                    metadata={"source": "workflow_user", "user_id": user_id},
+                                )
+                            await self.process_incoming_user_message(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                content=message,
+                                source="http",
+                            )
+                            message = None
+                            is_resume_request = True
+                    return await self._launch_workflow_run_locked(
                         chat_id=chat_id,
                         user_id=user_id,
-                        content=message,
-                        source='http'
+                        workflow_name=workflow_name,
+                        message=message,
+                        app_id=app_id,
+                        initial_agent_name_override=initial_agent_name_override,
+                        is_resume_request=is_resume_request,
+                        emit_execution_started=_emit_execution_started,
+                        emit_execution_completed=_emit_execution_completed,
                     )
-                except Exception as persist_err:
-                    logger.debug("Early persistence of user message failed (non-fatal): %s", persist_err)
-
-            # Build lifecycle reporting (best-effort; non-blocking).
-            if _emit_execution_started is not None:
-                try:
-                    _t = asyncio.create_task(
-                        _emit_execution_started(
-                            app_id=app_id,
-                            execution_id=chat_id,
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            workflow_name=workflow_name,
-                        )
-                    )
-                    _t.add_done_callback(
-                        lambda t: logger.debug("EXECUTION_STARTED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
-                        if not t.cancelled() and t.exception() is not None
-                        else None
-                    )
-                except Exception as _ev_exc:
-                    logger.debug("EXECUTION_STARTED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
-
-            # Launch orchestration via OrchestrationPort (engine-agnostic).
-            # A missing message plus an explicit initial-agent override means the
-            # caller is resuming an existing chat, not starting a fresh run.
-            adapter = get_ag2_adapter()
-            if is_resume_request:
-                run_result = await adapter.resume(ResumeRequest(
-                    workflow_name=workflow_name,
-                    app_id=app_id,
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    resume_agent=initial_agent_name_override,
-                ))
-            else:
-                run_result = await adapter.run(RunRequest(
-                    workflow_name=workflow_name,
-                    app_id=app_id,
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    initial_message=None,  # already persisted & sent upstream
-                    initial_agent_name_override=initial_agent_name_override,
-                ))
-
-            run_status = getattr(run_result, "status", None)
-            run_status_value = str(getattr(run_status, "value", run_status or "completed"))
-
-            if _emit_execution_completed is not None and run_status_value == "completed":
-                try:
-                    _t = asyncio.create_task(
-                        _emit_execution_completed(
-                            app_id=app_id,
-                            execution_id=chat_id,
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            workflow_name=workflow_name,
-                        )
-                    )
-                    _t.add_done_callback(
-                        lambda t: logger.debug("EXECUTION_COMPLETED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
-                        if not t.cancelled() and t.exception() is not None
-                        else None
-                    )
-                except Exception as _ev_exc:
-                    logger.debug("EXECUTION_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
-
-            await self._emit_synthetic_run_complete_if_needed(
-                chat_id=chat_id,
-                workflow_name=workflow_name,
-                run_status_value=run_status_value,
-            )
-
-            route = "workflow_resume" if is_resume_request else "new_workflow"
-            message_text = "Workflow resumed successfully." if is_resume_request else "Workflow started successfully."
-            return {
-                "status": "success",
-                "chat_id": chat_id,
-                "message": message_text,
-                "route": route,
-                "run_status": run_status_value,
-            }
+            except LockAcquisitionError as lock_err:
+                if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                    raise
+                return await self._reject_chat_locked(chat_id=chat_id, busy=True)
+            except ChatLockAuthorityUnavailableError as lock_err:
+                if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                    raise
+                return await self._reject_chat_locked(chat_id=chat_id, busy=False)
+            except ChatLeaseLostError as lock_err:
+                if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                    raise
+                return await self._reject_chat_lease_lost(chat_id=chat_id)
 
         except Exception as e:
             # Surface token denial before the generic failure path so the UI
@@ -497,9 +456,12 @@ class WorkflowBridgeMixin:
             # Clear stuck REVISING state so the next refinement request can route correctly.
             if app_id and user_id:
                 try:
-                    from mozaiksai.core.session.router import get_session_router
+                    from mozaiksai.core.session.router import get_session_router_for_chat
+                    revision_router = await get_session_router_for_chat(
+                        app_id=app_id, user_id=user_id, chat_id=chat_id,
+                    )
                     _rev_task = asyncio.create_task(
-                        get_session_router().fail_active_revision(
+                        revision_router.fail_active_revision(
                             app_id=app_id,
                             user_id=user_id,
                             workflow_id=workflow_name,
@@ -519,6 +481,229 @@ class WorkflowBridgeMixin:
             )
             return {"status": "error", "chat_id": chat_id, "message": "Workflow execution failed"}
 
+    async def _reject_chat_locked(self, *, chat_id: str, busy: bool) -> dict[str, Any]:
+        """Fail closed before any session/WAL mutation with a distinct diagnostic."""
+        if busy:
+            logger.warning(
+                "CHAT_LOCK_BUSY chat=%s — another execution holds this chat's lease", chat_id
+            )
+            await self.send_error(
+                error_message="This chat is already executing elsewhere. Please retry shortly.",
+                error_code="CHAT_LOCK_BUSY",
+                chat_id=chat_id,
+            )
+            return {
+                "status": "busy",
+                "chat_id": chat_id,
+                "message": "Chat is locked by another execution.",
+                "route": "chat_lock_busy",
+            }
+        logger.error(
+            "CHAT_LOCK_AUTHORITY_UNAVAILABLE chat=%s — refusing execution before session/WAL mutation",
+            chat_id,
+        )
+        await self.send_error(
+            error_message="Chat execution is temporarily unavailable. Please retry shortly.",
+            error_code="CHAT_LOCK_UNAVAILABLE",
+            chat_id=chat_id,
+        )
+        return {
+            "status": "error",
+            "chat_id": chat_id,
+            "message": "Chat lock authority unavailable.",
+            "route": "chat_lock_unavailable",
+        }
+
+    async def _reject_chat_lease_lost(self, *, chat_id: str) -> dict[str, Any]:
+        """Report a run aborted after its distributed lease was lost."""
+        logger.error("CHAT_LOCK_RENEWAL_LOST chat=%s — protected execution aborted", chat_id)
+        await self.send_error(
+            error_message="Chat execution ownership was lost. Please retry shortly.",
+            error_code="CHAT_LOCK_LOST",
+            chat_id=chat_id,
+        )
+        return {
+            "status": "error",
+            "chat_id": chat_id,
+            "message": "Chat execution lease lost.",
+            "route": "chat_lock_lost",
+        }
+
+    async def _reject_terminal_session(self, *, chat_id: str, app_id: str) -> dict[str, Any] | None:
+        from mozaiksai.core.data.persistence.persistence_manager import ChatSessionTerminalError
+
+        try:
+            await self._get_or_create_persistence_manager().assert_chat_resumable(chat_id, app_id)
+        except ChatSessionTerminalError as exc:
+            await self.send_error(
+                error_message="This workflow session has ended. Start a new run to continue.",
+                error_code="WORKFLOW_SESSION_TERMINAL",
+                chat_id=chat_id,
+            )
+            return {
+                "status": "error", "chat_id": chat_id, "route": "terminal_session",
+                "run_status": str(exc.status), "error_code": "WORKFLOW_SESSION_TERMINAL",
+            }
+        return None
+
+    async def _launch_workflow_run_locked(
+        self,
+        *,
+        chat_id: str,
+        user_id: str | None,
+        workflow_name: str,
+        message: str | None,
+        app_id: str,
+        initial_agent_name_override: str | None,
+        is_resume_request: bool,
+        emit_execution_started: Any,
+        emit_execution_completed: Any,
+    ) -> dict[str, Any]:
+        """Start or resume a workflow run for a chat.
+
+        The caller must hold the chat execution lease for this
+        (app_id, chat_id); every durable session/WAL mutation of the
+        start/resume path happens inside this method.
+        """
+        from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
+        from mozaiksai.core.ports.orchestration import ResumeRequest, RunRequest
+
+        rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+        if rejection is not None:
+            return rejection
+
+        if message or is_resume_request:
+            try:
+                pm = self._get_or_create_persistence_manager()
+                pending = await pm.get_pending_input_request(
+                    chat_id=chat_id,
+                    app_id=app_id,
+                )
+                if pending:
+                    await pm.clear_pending_input_request(
+                        chat_id=chat_id,
+                        app_id=app_id,
+                    )
+                    logger.debug(
+                        "[SMART_ROUTING] Cleared persisted pending input request %s before launching workflow for chat %s",
+                        pending.get("request_id"),
+                        chat_id,
+                    )
+            except Exception as clear_err:
+                logger.debug(
+                    "[SMART_ROUTING] Failed clearing persisted pending input request for %s: %s", chat_id, clear_err)
+
+        # Only persist and echo user message when starting NEW workflows
+        # For existing sessions, the message goes directly to AG2 via callback
+        if message:
+            try:
+                await self._apply_user_text_context_updates(
+                    chat_id=chat_id,
+                    workflow_name=workflow_name,
+                    app_id=app_id,
+                    user_input=message,
+                )
+            except Exception as trigger_err:
+                logger.debug("[SMART_ROUTING] user_text trigger update skipped for new run %s: %s", chat_id, trigger_err)
+            try:
+                pm = self._get_or_create_persistence_manager()
+                append_user_message = getattr(pm, "append_run_user_message", None)
+                if append_user_message is not None:
+                    await append_user_message(
+                        chat_id=chat_id,
+                        app_id=app_id,
+                        content=str(message or ""),
+                        metadata={"source": "workflow_user", "user_id": user_id},
+                    )
+                await self.process_incoming_user_message(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    content=message,
+                    source='http'
+                )
+            except Exception as persist_err:
+                logger.debug("Early persistence of user message failed (non-fatal): %s", persist_err)
+
+        # Build lifecycle reporting (best-effort; non-blocking).
+        if emit_execution_started is not None:
+            try:
+                _t = asyncio.create_task(
+                    emit_execution_started(
+                        app_id=app_id,
+                        execution_id=chat_id,
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        workflow_name=workflow_name,
+                    )
+                )
+                _t.add_done_callback(
+                    lambda t: logger.debug("EXECUTION_STARTED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
+                    if not t.cancelled() and t.exception() is not None
+                    else None
+                )
+            except Exception as _ev_exc:
+                logger.debug("EXECUTION_STARTED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
+
+        # Launch orchestration via OrchestrationPort (engine-agnostic).
+        # A missing message plus an explicit initial-agent override means the
+        # caller is resuming an existing chat, not starting a fresh run.
+        adapter = get_ag2_adapter()
+        if is_resume_request:
+            run_result = await adapter.resume(ResumeRequest(
+                workflow_name=workflow_name,
+                app_id=app_id,
+                chat_id=chat_id,
+                user_id=user_id,
+                resume_agent=initial_agent_name_override,
+            ))
+        else:
+            run_result = await adapter.run(RunRequest(
+                workflow_name=workflow_name,
+                app_id=app_id,
+                chat_id=chat_id,
+                user_id=user_id,
+                initial_message=None,  # already persisted & sent upstream
+                initial_agent_name_override=initial_agent_name_override,
+            ))
+
+        run_status = getattr(run_result, "status", None)
+        run_status_value = str(getattr(run_status, "value", run_status or "completed"))
+
+        if emit_execution_completed is not None and run_status_value == "completed":
+            try:
+                _t = asyncio.create_task(
+                    emit_execution_completed(
+                        app_id=app_id,
+                        execution_id=chat_id,
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        workflow_name=workflow_name,
+                    )
+                )
+                _t.add_done_callback(
+                    lambda t: logger.debug("EXECUTION_COMPLETED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
+                    if not t.cancelled() and t.exception() is not None
+                    else None
+                )
+            except Exception as _ev_exc:
+                logger.debug("EXECUTION_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
+
+        await self._emit_synthetic_run_complete_if_needed(
+            chat_id=chat_id,
+            workflow_name=workflow_name,
+            run_status_value=run_status_value,
+        )
+
+        route = "workflow_resume" if is_resume_request else "new_workflow"
+        message_text = "Workflow resumed successfully." if is_resume_request else "Workflow started successfully."
+        return {
+            "status": "success",
+            "chat_id": chat_id,
+            "message": message_text,
+            "route": route,
+            "run_status": run_status_value,
+        }
+
     async def _continue_live_ag2_workflow_run(
         self,
         *,
@@ -533,10 +718,14 @@ class WorkflowBridgeMixin:
 
         from mozaiksai.core.ports.orchestration import RunStatus
         from mozaiksai.core.workflow.orchestration_patterns import (
-            _emit_validated_structured_outputs_from_runner_result,
             _last_agent_name_from_runner_result,
             _project_ag2_wal_to_mozaiks_transport,
+            _structured_output_validation_failed,
         )
+
+        rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+        if rejection is not None:
+            return rejection
 
         context_updates = await self._apply_user_text_context_updates(
             chat_id=chat_id,
@@ -564,6 +753,8 @@ class WorkflowBridgeMixin:
             message,
             context_updates=context_updates,
         )
+        if runner_result.status is RunStatus.FAILED:
+            await pm.mark_chat_failed(chat_id, app_id=app_id)
         manager = getattr(self, "_derived_context_managers", {}).get(chat_id)
         try:
             from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
@@ -572,29 +763,18 @@ class WorkflowBridgeMixin:
         except Exception:
             structured_registry = {}
         ctx = dict(getattr(runner_result, "context_variables", {}) or {})
-        await _emit_validated_structured_outputs_from_runner_result(
-            runner_result=runner_result,
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-            app_id=app_id,
-            user_id=user_id,
-            turn_sequence_start=0,
-            context_vars_dict=ctx,
-            context_bridge=None,
-            structured_registry=structured_registry,
-            wf_logger=logger,
-        )
-        await _project_ag2_wal_to_mozaiks_transport(
-            runner_result=runner_result,
-            transport=self,
-            persistence_manager=pm,
-            chat_id=chat_id,
-            app_id=app_id,
-            agent_name_by_id=runner_result.agent_name_by_id,
-            initial_sequence=0,
-            derived_context_manager=manager,
-            structured_registry=structured_registry,
-        )
+        if not _structured_output_validation_failed(runner_result):
+            await _project_ag2_wal_to_mozaiks_transport(
+                runner_result=runner_result,
+                transport=self,
+                persistence_manager=pm,
+                chat_id=chat_id,
+                app_id=app_id,
+                agent_name_by_id=runner_result.agent_name_by_id,
+                initial_sequence=0,
+                derived_context_manager=manager,
+                structured_registry=structured_registry,
+            )
 
         if ctx:
             await pm.persist_context_variables(
@@ -619,6 +799,36 @@ class WorkflowBridgeMixin:
             register_live_run = getattr(self, "register_live_ag2_workflow_run", None)
             if callable(register_live_run):
                 register_live_run(chat_id, live_run)
+
+        if run_failed:
+            # Match initial orchestration's declared failure hooks before reporting settlement.
+            from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
+
+            try:
+                await get_lifecycle_manager(workflow_name).execute_trigger(
+                    "on_fail",
+                    context_variables=ctx,
+                    app_id=app_id,
+                    execution_id=chat_id,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    workflow_name=workflow_name,
+                    error=runner_result.error,
+                )
+            except Exception as lifecycle_err:
+                logger.warning("LIVE_AG2_ON_FAIL_FAILED chat=%s: %s", chat_id, lifecycle_err)
+            if user_id:
+                try:
+                    from mozaiksai.core.session.router import get_session_router_for_chat
+
+                    revision_router = await get_session_router_for_chat(
+                        app_id=app_id, user_id=user_id, chat_id=chat_id,
+                    )
+                    await revision_router.fail_active_revision(
+                        app_id=app_id, user_id=user_id, workflow_id=workflow_name,
+                    )
+                except Exception as revision_err:
+                    logger.warning("LIVE_AG2_REVISION_FAIL_FAILED chat=%s: %s", chat_id, revision_err)
 
         if awaiting_user_input:
             await self.send_event_to_ui(
@@ -745,6 +955,14 @@ class WorkflowBridgeMixin:
                         )
                     except Exception as _ev_exc:
                         logger.debug("PROCESS_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
+                    # A paused run is resumable as soon as AG2 has returned its
+                    # checkpoint. Release the background-task slot before the
+                    # pause event reaches the UI so an immediate user reply is
+                    # not rejected as CHAT_BUSY.
+                    if run_status in {"paused", "in_progress"}:
+                        current_task = asyncio.current_task()
+                        if self._background_tasks.get(chat_id) is current_task:
+                            self._background_tasks.pop(chat_id, None)
                     return result
                 except Exception:
                     # Emit failed run_complete before re-raising so listeners can react

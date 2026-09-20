@@ -206,6 +206,7 @@ def _write_source_bundle(root: Path) -> None:
 def _make_request(*, request_id: str, staging_root: Path) -> CodingWorkerRequest:
     return CodingWorkerRequest(
         app_id=_APP_ID,
+        user_id="owner",
         build_family="app_bundle",
         build_key="app_bundle",
         build_record_id=_ARTIFACT_VERSION_ID,
@@ -275,7 +276,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
     artifact_store = _CapturingArtifactStore(child_id="av_child_promotion_001")
     agent_instances: list[_FakeAgent] = []
 
-    def _factory(system_prompt: str, llm_config: dict[str, Any]) -> _FakeAgent:
+    def _factory(system_prompt: str, llm_config: dict[str, Any], *, middleware: list) -> _FakeAgent:
         agent = _FakeAgent(system_prompt, llm_config, _dashboard_plan())
         agent_instances.append(agent)
         return agent
@@ -294,7 +295,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
 
     # Coding worker result assertions
     assert result.eligible is True
-    assert result.status == "validated"
+    assert result.status == "planned"
     assert result.applied_files[_DASHBOARD_PATH] == _DASHBOARD_UPDATED
     assert result.metadata["build_record_id"] == "av_child_promotion_001"
     assert "artifact_persistence_error" not in result.metadata
@@ -305,7 +306,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
     assert call["build_family"] == "app_bundle"
     assert call["build_key"] == "app_bundle"
     assert call["lifecycle_status"].value == "draft"
-    assert call["validation_status"].value in {"passed", "skipped"}
+    assert call["validation_status"].value == "skipped"
     applied = call["commit_metadata"]["metadata"]["applied_paths"]
     assert _DASHBOARD_PATH in applied
 
@@ -389,7 +390,7 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
     artifact_store = _CapturingArtifactStore(child_id="av_child_promo_contract")
 
     worker = ScopedRefinementCodingWorker(
-        agent_factory=lambda sp, lc: _FakeAgent(sp, lc, _dashboard_plan()),
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc, _dashboard_plan()),
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -402,6 +403,7 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
     result = await worker.execute(
         CodingWorkerRequest(
             app_id=_APP_ID,
+            user_id="owner",
             build_family="app_bundle",
             build_key="app_bundle",
             build_record_id="av_parent_promo",
@@ -418,7 +420,7 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
         )
     )
 
-    assert result.status == "validated"
+    assert result.status == "planned"
     assert result.metadata["build_record_id"] == "av_child_promo_contract"
 
     call = artifact_store.last_call
@@ -450,7 +452,7 @@ async def test_broken_artifact_store_sets_failed_status_and_surfaces_error(tmp_p
             raise RuntimeError("artifact store unavailable")
 
     worker = ScopedRefinementCodingWorker(
-        agent_factory=lambda sp, lc: _FakeAgent(sp, lc, _dashboard_plan()),
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc, _dashboard_plan()),
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -462,6 +464,7 @@ async def test_broken_artifact_store_sets_failed_status_and_surfaces_error(tmp_p
     result = await worker.execute(
         CodingWorkerRequest(
             app_id=_APP_ID,
+            user_id="owner",
             build_family="app_bundle",
             build_key="app_bundle",
             build_record_id="av_parent_broken",
@@ -671,7 +674,7 @@ async def test_coding_worker_rejects_out_of_scope_edits_in_integration(tmp_path:
     )
 
     worker = ScopedRefinementCodingWorker(
-        agent_factory=lambda sp, lc: _FakeAgent(sp, lc, out_of_scope_plan),
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc, out_of_scope_plan),
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -683,6 +686,7 @@ async def test_coding_worker_rejects_out_of_scope_edits_in_integration(tmp_path:
     result = await worker.execute(
         CodingWorkerRequest(
             app_id=_APP_ID,
+            user_id="owner",
             build_family="app_bundle",
             build_key="app_bundle",
             build_record_id="av_scope_guard",

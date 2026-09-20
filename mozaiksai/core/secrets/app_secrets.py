@@ -11,6 +11,8 @@ from typing import Any, Literal, Protocol, cast
 from mozaiksai.core.runtime.app.paths import APP_SECURITY_SECRETS_PATH
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 
+from .contract import SecretContractError, validate_secret_contract
+
 SecretSource = Literal["env", "azure_key_vault", "missing", "invalid"]
 _DEFAULT_SECRET_NAME_SUFFIX = "_SECRET_NAME"
 _DEFAULT_VAULT_NAME_ENV = "AZURE_KEY_VAULT_NAME"
@@ -86,10 +88,8 @@ def _candidate_app_roots(app_root: str | os.PathLike[str] | None = None) -> list
 
 
 def default_secret_contract_path(app_root: str | os.PathLike[str] | None = None) -> Path:
-    for root in _candidate_app_roots(app_root):
-        candidate = root / APP_SECURITY_SECRETS_PATH
-        if candidate.exists():
-            return candidate
+    # The selected app owns its policy even when it has no optional contract.
+    # Never borrow a secret manifest from another workspace or the Factory.
     return _candidate_app_roots(app_root)[0] / APP_SECURITY_SECRETS_PATH
 
 
@@ -113,14 +113,16 @@ def load_secret_contract(
 ) -> dict[str, Any]:
     path = _secret_contract_path(app_root=app_root, contract_path=contract_path)
     if not path.exists():
+        if contract_path is not None or os.getenv("MOZAIKS_SECRETS_CONFIG_PATH", "").strip():
+            raise SecretContractError("Configured secret contract does not exist")
         return {}
     try:
         import yaml
 
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+    except (OSError, UnicodeError, yaml.YAMLError):
+        raise SecretContractError("Secret contract must be readable valid YAML") from None
+    return validate_secret_contract(data).model_dump(mode="json", exclude_none=True, exclude_unset=True)
 
 
 def _azure_provider_config(contract: dict[str, Any]) -> dict[str, Any]:
@@ -158,7 +160,7 @@ def _declared_secret_name(env_name: str, contract: dict[str, Any]) -> str:
         secret_name = str(azure.get("secret_name") or "").strip()
         if secret_name:
             return secret_name
-    return str(entry.get("secret_name") or "").strip() if isinstance(entry, dict) else ""
+    return ""
 
 
 def _vault_name(contract: dict[str, Any]) -> str:
@@ -192,10 +194,14 @@ def inspect_secret_config(
     contract = load_secret_contract(app_root=app_root, contract_path=contract_path)
     direct = os.getenv(env_name, "").strip()
     ref_env = _secret_ref_env(env_name, contract)
+    declared = bool(_secret_entry(contract, env_name))
+    if (contract.get("provider") or {}).get("type") == "env":
+        return SecretConfig(
+            env_name, "env" if direct else "missing", bool(direct), ref_env, declared=declared,
+        )
     secret_name = os.getenv(ref_env, "").strip() or _declared_secret_name(env_name, contract)
     vault_url = _vault_url(contract)
     vault_name = _vault_name(contract) or None
-    declared = bool(_secret_entry(contract, env_name))
 
     if direct:
         return SecretConfig(env_name, "env", True, ref_env, None, bool(vault_url), vault_name, declared)
@@ -223,6 +229,12 @@ def resolve_secret(
     direct = os.getenv(env_name, "").strip()
     if direct:
         return direct
+    if (contract.get("provider") or {}).get("type") == "env":
+        raise SecretResolutionError(
+            f"{env_name} is not configured. The app's env provider requires {env_name}.",
+            env_name=env_name,
+            source="missing",
+        )
 
     ref_env = _secret_ref_env(env_name, contract)
     secret_name = os.getenv(ref_env, "").strip() or _declared_secret_name(env_name, contract)

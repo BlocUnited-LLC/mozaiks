@@ -136,7 +136,6 @@ class WorkspaceSupportService:
             participant_ids=[],
             thread_type="support",
             scope_type="app",
-            scope_id=subject_app_id,
             subject_app_id=subject_app_id,
             related_type="workspace_support.request",
             related_id=request_id,
@@ -217,7 +216,6 @@ class WorkspaceSupportService:
             participant_ids=participant_ids,
             thread_type="support",
             scope_type="app",
-            scope_id=subject_app_id,
             subject_app_id=subject_app_id,
             related_type="workspace_support.request",
             related_id=request_id,
@@ -259,13 +257,13 @@ class WorkspaceSupportService:
         page_url: str | None = None,
         page_title: str | None = None,
         severity: str = "low",
-        app_id: str | None = None,
+        subject_app_id: str | None = None,
         conversation_transcript: list[dict[str, Any]] | None = None,
     ) -> dict:
         now = datetime.now(tz=UTC)
         request_id = f"sr_{uuid4().hex}"
         created_at = now.isoformat()
-        subject_app_id = self._subject_app_id(ctx, app_id)
+        subject_app_id = self._subject_app_id(ctx, subject_app_id)
         transcript = _clean_transcript_messages(conversation_transcript)
 
         doc = {
@@ -301,20 +299,13 @@ class WorkspaceSupportService:
             len(transcript),
             page_title,
         )
-        try:
-            await self._request_collection(ctx).insert_one(doc)
-            logger.info(
-                "workspace_support: support request stored request_id=%s subject_app_id=%s user_id=%s",
-                request_id,
-                subject_app_id,
-                getattr(ctx, "user_id", None),
-            )
-        except Exception:
-            logger.warning(
-                "workspace_support: persistence unavailable, support request %s not stored",
-                request_id,
-                exc_info=True,
-            )
+        await self._request_collection(ctx).insert_one(doc)
+        logger.info(
+            "workspace_support: support request stored request_id=%s subject_app_id=%s user_id=%s",
+            request_id,
+            subject_app_id,
+            getattr(ctx, "user_id", None),
+        )
 
         message_thread_id = None
         try:
@@ -385,7 +376,7 @@ class WorkspaceSupportService:
         status: str = "all",
         limit: int = 50,
         scope: str = "user",
-        app_id: str | None = None,
+        subject_app_id: str | None = None,
     ) -> dict:
         scope = str(scope or "user").strip().lower()
         if scope not in {"user", "app", "workspace"}:
@@ -397,33 +388,24 @@ class WorkspaceSupportService:
         if status != "all":
             query["status"] = status
         if scope == "app":
-            query["subject_app_id"] = self._subject_app_id(ctx, app_id)
-        elif scope == "workspace" and app_id:
-            query["subject_app_id"] = self._subject_app_id(ctx, app_id)
-        elif scope == "user" and app_id:
-            query["subject_app_id"] = self._subject_app_id(ctx, app_id)
+            query["subject_app_id"] = self._subject_app_id(ctx, subject_app_id)
+        elif subject_app_id:
+            query["subject_app_id"] = self._subject_app_id(ctx, subject_app_id)
 
         logger.info(
             "workspace_support: list_support_requests start runtime_app_id=%s subject_app_id_filter=%s user_id=%s scope=%s status=%s query=%s",
             getattr(ctx, "app_id", None),
-            app_id,
+            subject_app_id,
             getattr(ctx, "user_id", None),
             scope,
             status,
             query,
         )
-        try:
-            requests = await self._request_collection(ctx).find_many(
-                query,
-                limit=limit,
-                sort=[("created_at", -1)],
-            )
-        except Exception:
-            logger.warning(
-                "workspace_support: persistence unavailable, returning empty list",
-                exc_info=True,
-            )
-            requests = []
+        requests = await self._request_collection(ctx).find_many(
+            query,
+            limit=limit,
+            sort=[("created_at", -1)],
+        )
 
         serialized_requests = [_json_safe_document(dict(req)) for req in requests]
         logger.info(
@@ -437,6 +419,7 @@ class WorkspaceSupportService:
             thread_id = req.get("message_thread_id")
             if not thread_id:
                 req["messages"] = []
+                req["error"] = "Support conversation unavailable."
                 logger.warning(
                     "workspace_support: support request has no message thread request_id=%s",
                     req.get("request_id"),
@@ -449,6 +432,16 @@ class WorkspaceSupportService:
                     message_limit=100,
                     allow_nonparticipant_reader=True,
                 )
+                if thread_result.get("error") or not thread_result.get("thread"):
+                    req["messages"] = []
+                    req["error"] = "Support conversation unavailable."
+                    logger.warning(
+                        "workspace_support: support message thread unavailable request_id=%s thread_id=%s error=%s",
+                        req.get("request_id"),
+                        thread_id,
+                        thread_result.get("error"),
+                    )
+                    continue
                 req["messages"] = [
                     {
                         "role": m.get("sender_role", "user"),
@@ -479,6 +472,7 @@ class WorkspaceSupportService:
                     exc_info=True,
                 )
                 req["messages"] = []
+                req["error"] = "Support conversation unavailable."
 
         for req in serialized_requests:
             subject_app_id = req.get("subject_app_id") or req.get("app_id") or getattr(ctx, "app_id", None)
@@ -515,6 +509,13 @@ class WorkspaceSupportService:
             )
             return {"success": False, "error": "support request not found"}
 
+        sender_role = "operator" if sender_role == "operator" else "user"
+        if sender_role == "operator":
+            if not self._can_manage_support(ctx):
+                raise PermissionError("operator support replies require workspace_support.manage")
+        elif not self._can_mutate_request(ctx, dict(request_doc)):
+            raise PermissionError("users can only reply to their own support requests")
+
         thread_id = None
         try:
             thread_id = await self._ensure_message_thread_for_request(
@@ -538,18 +539,6 @@ class WorkspaceSupportService:
 
         ticket_user_id = str((request_doc or {}).get("user_id") or "").strip()
         subject_app_id = self._subject_app_id(ctx, request_doc.get("subject_app_id") or request_doc.get("app_id"))
-        sender_role = "operator" if sender_role == "operator" else "user"
-        current_user_id = str(getattr(ctx, "user_id", "") or "").strip()
-        if sender_role == "operator" and not self._can_manage_support(ctx):
-            raise PermissionError("operator support replies require workspace_support.manage")
-        if (
-            sender_role == "user"
-            and ticket_user_id
-            and current_user_id
-            and current_user_id != ticket_user_id
-            and not self._can_manage_support(ctx)
-        ):
-            raise PermissionError("users can only reply to their own support requests")
 
         recipient_ids = [ticket_user_id] if sender_role == "operator" and ticket_user_id else None
         result = await self.messages.send_message(
@@ -836,12 +825,12 @@ class WorkspaceSupportService:
         session_id: str | None = None,
         workflow_name: str | None = None,
         rating: int = 1,
-        app_id: str | None = None,
+        subject_app_id: str | None = None,
     ) -> dict:
         now = datetime.now(tz=UTC)
         feedback_id = f"fb_{int(now.timestamp())}"
         created_at = now.isoformat()
-        subject_app_id = self._subject_app_id(ctx, app_id)
+        subject_app_id = self._subject_app_id(ctx, subject_app_id)
 
         doc = {
             "feedback_id": feedback_id,

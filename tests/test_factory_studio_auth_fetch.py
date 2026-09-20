@@ -57,11 +57,33 @@ def test_workspace_studio_data_uses_authenticated_fetch_for_apps_endpoint() -> N
     assert "fetch(`${API_BASE}/api/studio/apps`)" not in source
 
 
+def test_support_pages_use_authenticated_fetch_for_profile_and_module_actions() -> None:
+    for page_name in ("UserSupportPage.jsx", "AppSupportPage.jsx"):
+        source = _read(PAGES / page_name)
+        assert "import { studioFetch } from './studioApi.js'" in source
+        assert "studioFetch('/api/me')" in source
+        actions = ("list_support_requests",)
+        if page_name == "AppSupportPage.jsx":
+            actions += ("add_support_message", "update_support_request_status", "delete_support_request")
+        for action in actions:
+            assert f"studioFetch('/api/modules/workspace_support/{action}'" in source
+        assert "fetch(" not in source.replace("studioFetch(", "")
+
+
+def test_workspace_support_overview_surfaces_queue_failures() -> None:
+    source = _read(PAGES / "UserSupportPage.jsx")
+    assert "setSupportError(err?.message || 'Support chats could not be loaded.')" in source
+    assert 'message={error || supportError}' in source
+    assert "fetchSupportRequests({ scope: 'app', appId }).catch(() => null)" not in source
+
+
 def test_app_studio_data_uses_authenticated_fetch_for_studio_and_admin_routes() -> None:
     source = _read(PAGES / "useAppStudioData.js")
 
     assert "import { studioFetch } from './studioApi.js'" in source
-    assert "studioFetch(`/api/studio/overview?app_id=${encodeURIComponent(appId)}`)" in source
+    assert "studioFetch(`/api/studio/overview?${buildScope}`)" in source
+    assert "studioFetch(`/api/studio/build?${buildScope}`)" in source
+    assert "`build_registry_id=${encodeURIComponent(buildRegistryId)}`" in source
     assert "studioFetch(`/api/admin/stats?app_id=${encodeURIComponent(appId)}`)" in source
     assert "studioFetch(`/api/studio/apps/${encodeURIComponent(appId)}/context`)" in source
     assert "fetch(`${API_BASE}/api/studio/" not in source
@@ -80,8 +102,8 @@ def test_app_build_review_uses_authenticated_fetch_for_artifact_routes() -> None
     source = _read(PAGES / "AppBuildReviewPage.jsx")
 
     assert "import { studioFetch } from './studioApi.js'" in source
-    assert "studioFetch(\n    `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${endpoint}?app_id=${encodeURIComponent(appId)}`" in source
-    assert "studioFetch(\n          `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review?app_id=${encodeURIComponent(appId)}`" in source
+    assert "studioFetch(\n    `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${endpoint}?build_registry_id=${encodeURIComponent(buildRegistryId)}`" in source
+    assert "studioFetch(\n          `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review?build_registry_id=${encodeURIComponent(buildRegistryId)}`" in source
     assert "fetch(\n    `${API_BASE}/api/studio/build/artifacts/" not in source
     assert "fetch(\n          `${API_BASE}/api/studio/build/artifacts/" not in source
 
@@ -98,8 +120,8 @@ def test_app_workbench_uses_authenticated_fetch_for_artifact_review_actions() ->
     source = _read(ROOT / "factory_app" / "workflows" / "AppGenerator" / "ui" / "AppWorkbench.js")
 
     assert "import { studioFetch } from '../../../app/admin/pages/studioApi.js';" in source
-    assert "studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review`)" in source
-    assert "studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`" in source
+    assert "studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review${artifactQuery}`)" in source
+    assert "studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}${artifactQuery}`" in source
     assert "fetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review`)" not in source
     assert "fetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`" not in source
 

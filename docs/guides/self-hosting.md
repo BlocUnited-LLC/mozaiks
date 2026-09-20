@@ -14,10 +14,11 @@ When you self-host Mozaiks, three things need to run:
 | --- | --- | --- |
 | **Mozaiks** | The main application — Studio, AI workflows, and the app runtime | Yes |
 | **MongoDB** | A database that stores your apps, build history, and chat sessions | Yes |
-| **Keycloak** | A login server that handles user authentication | Optional for local dev, recommended for production |
+| **OIDC provider** | A login server, such as Keycloak, that authenticates users | Required for authenticated deployments; optional for explicit local development |
 
-The simplest setup runs Mozaiks and MongoDB. Keycloak adds proper user login
-and is needed when real users will sign into your apps.
+The simplest local setup runs Mozaiks and MongoDB with authentication explicitly
+disabled. Authenticated deployments configure an OIDC provider and a public
+browser client. The included Compose stack provides Keycloak as one option.
 
 ---
 
@@ -31,8 +32,10 @@ start Mozaiks with two commands from the repo root:
 # Build the Mozaiks container image
 docker build -t mozaiks -f infra/docker/Dockerfile .
 
-# Run it
-docker run -p 8000:8000 \
+# Run it locally with explicit development access
+docker run -p 127.0.0.1:8000:8000 \
+  -e ENV=development -e ENVIRONMENT=development \
+  -e AUTH_ENABLED=false -e AUTH_ANON_ROLES=admin,user \
   -e MONGO_URI="mongodb://your-mongo-host:27017/mozaiks" \
   -e OPENAI_API_KEY="sk-..." \
   mozaiks
@@ -41,7 +44,12 @@ docker run -p 8000:8000 \
 Open **http://localhost:8000** — Studio is running.
 
 !!! note "Using Anthropic instead of OpenAI?"
-    Replace `OPENAI_API_KEY` with `ANTHROPIC_API_KEY="sk-ant-..."`.
+    Set `LLM_PRIMARY_API_TYPE=anthropic` and replace `OPENAI_API_KEY` with
+    `ANTHROPIC_API_KEY="sk-ant-..."`. Supply the intended model through
+    `LLM_PRIMARY_MODEL`.
+
+For authenticated access, configure the issuer, audience, public browser client,
+and callback described in [Factory security](factory-security.md).
 
 **What just happened:** Docker built a container image from the `Dockerfile` in
 `infra/docker/`. Think of a container image like a self-contained box that has
@@ -265,16 +273,17 @@ what — so Mozaiks doesn't have to build any of that itself.
 
 | Situation | Auth setting |
 | --- | --- |
-| Local development, just you | `AUTH_ENABLED=false` in `.env` — skip Keycloak entirely |
-| Team internal use | Keycloak recommended — controls who can log in |
-| Public-facing production | Keycloak required |
+| Local development, just you | Explicit development environment, `AUTH_ENABLED=false`, and intended local roles |
+| Team internal use | Configure an OIDC provider, such as Keycloak, and the browser client |
+| Public-facing production | Authentication enabled with a configured provider and backend token validation |
 
 ### What Mozaiks pre-configures
 
-The Docker Compose stack imports the Mozaiks realm into Keycloak automatically.
-You don't have to set up realms, clients, or redirect URIs by hand — it's all in
+The Docker Compose stack imports the Mozaiks realm from
 `factory_app/app/brand/realm-export.json`. That file is a repo-local Keycloak
-seed for the OSS compose stack. Generated apps should carry provider-neutral
+seed for the OSS compose stack. Verify the registered callback and origins for
+your actual browser URL, and configure the public `VITE_OIDC_*` settings alongside
+backend auth settings. Generated apps carry provider-neutral
 auth behavior in `app/config/auth.yaml`; provider-specific realm export or
 social-login setup remains an operator/host concern.
 

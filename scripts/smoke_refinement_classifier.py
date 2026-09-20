@@ -55,11 +55,11 @@ def base_manifest() -> list[dict[str, Any]]:
         {"path": "config/shell.json"},
         {"path": "data/contract.json"},
         {"path": "data/migrations/001_initial.json"},
-        {"path": "config/integrations.json"},
+        {"path": "config/integrations.yaml"},
         {"path": "docs/integrations.md"},
         {"path": "services/integrations/analytics_provider_client.py"},
         {"path": "services/integrations/analytics_provider_secret.py"},
-        {"path": "config/integrations.credentials.json"},
+        {"path": "config/integrations.credentials.yaml"},
         {"path": "modules/projects/module.yaml"},
         {"path": "modules/projects/contracts/events.yaml"},
         {"path": "modules/projects/contracts/admin.yaml"},
@@ -248,6 +248,8 @@ async def run_smoke() -> dict[str, Any]:
     for case in SMOKE_CASES:
         request = resolver.request_from_payload(
             payload=_request_payload(case),
+            app_id="refinement-classifier-smoke-app",
+            user_id="refinement-classifier-smoke-user",
             requested_workflow_id="AppGenerator",
         )
         if request is None:

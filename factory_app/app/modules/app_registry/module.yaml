@@ -14,60 +14,16 @@ permissions:
     description: Create app records and update lifecycle state.
 actions:
   - id: create_app_record
-    description: Create or reopen an app lifecycle record.
+    description: Allocate a new app record owned by the current user.
     handler_method: create_app_record
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         name:
           type: string
-          description: Optional real app name. Omit while the app is still provisional.
-        name_source:
-          type: string
-          enum:
-            - provisional
-            - value_engine_concept
-            - imported_app
-            - manual
         description:
           type: string
-        status:
-          type: string
-          enum:
-            - draft
-            - building
-            - review
-            - configuring
-            - deploying
-            - active
-            - needs_revision
-            - archived
-        app_id:
-          type: string
-        chat_app_id:
-          type: string
-          description: Factory session app id used to resume the build chat.
-        active_chat_id:
-          type: string
-          description: Current chat session that owns the active build.
-        active_workflow_id:
-          type: string
-          description: Current workflow that should be resumed while the build is active.
-        build_context_profile:
-          type: object
-          description: Compact summary of selected build contexts, packs, and catalog inputs for this app build.
-        current_build_run:
-          type: object
-          description: Active build run pointer used by Studio continue-build and control-plane re-entry.
-        app_context:
-          type: object
-          description: >
-            Arbitrary capability-pack-owned metadata attached to the app record.
-            The app_registry module does not interpret this field. Capability packs
-            that need app-scoped state (e.g. governance mode, participation policy
-            pointer, campaign config) declare their own keys under app_context via
-            their pack manifest and own the read/write contract for those keys.
-            Apps should write only keys declared by an active capability pack.
     output_schema:
       type: object
       properties:
@@ -77,53 +33,6 @@ actions:
           type: object
     permissions:
       - app_registry.write
-    emits:
-      - domain.app_registry.app_created
-  - id: update_build_status
-    description: Update the lifecycle state for an existing app record.
-    handler_method: update_build_status
-    input_schema:
-      type: object
-      required:
-        - build_registry_id
-        - status
-      properties:
-        build_registry_id:
-          type: string
-        status:
-          type: string
-          enum:
-            - draft
-            - building
-            - review
-            - configuring
-            - deploying
-            - active
-            - needs_revision
-            - archived
-        bundle_path:
-          type: string
-        artifact_version_id:
-          type: string
-        workflow_sequence:
-          type: string
-        active_chat_id:
-          type: string
-        active_workflow_id:
-          type: string
-        current_build_run:
-          type: object
-    output_schema:
-      type: object
-      properties:
-        success:
-          type: boolean
-        app:
-          type: object
-    permissions:
-      - app_registry.write
-    emits:
-      - domain.app_registry.status_changed
   - id: list_apps
     description: List app records for the current user scope.
     handler_method: list_apps
@@ -139,7 +48,7 @@ actions:
     permissions:
       - app_registry.read
   - id: get_app_record
-    description: Fetch one app lifecycle record by app id or build registry id.
+    description: Fetch an owned app lifecycle record by app id or build registry id.
     handler_method: get_app_record
     input_schema:
       type: object
@@ -155,27 +64,6 @@ actions:
           type: object
     permissions:
       - app_registry.read
-  - id: promote_build
-    description: Promote a reviewed app bundle from 'review' to 'active'. Only valid when lifecycle state is 'review'.
-    handler_method: promote_build
-    input_schema:
-      type: object
-      required:
-        - build_registry_id
-      properties:
-        build_registry_id:
-          type: string
-    output_schema:
-      type: object
-      properties:
-        success:
-          type: boolean
-        app:
-          type: object
-    permissions:
-      - app_registry.write
-    emits:
-      - domain.app_registry.app_promoted
 capabilities:
   - capability_id: app_registry.list
     kind: action

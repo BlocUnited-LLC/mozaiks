@@ -40,6 +40,12 @@
   --color-input: hsl(var(--mz-input));
   --color-ring: hsl(var(--mz-ring));
 
+  /* Shared page content measure. Tailwind v4 maps the --container-* namespace
+     onto max-w-* utilities, so this is what makes `max-w-content` real. Its
+     value is set at runtime from theme_config.json `content_width`, letting an
+     app widen or narrow every page surface without touching page code. */
+  --container-content: var(--mz-content-max, 96rem);
+
   --radius-lg: var(--mz-radius);
   --radius-md: calc(var(--mz-radius) - 2px);
   --radius-sm: calc(var(--mz-radius) - 4px);

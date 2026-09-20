@@ -1,17 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-
-async function moduleAction(moduleId, actionId, payload = {}, appId = null) {
-  const query = appId ? `?app_id=${encodeURIComponent(appId)}` : ''
-  const response = await fetch(`/api/modules/${moduleId}/${actionId}${query}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) {
-    throw new Error(`${moduleId}.${actionId} failed with ${response.status}`)
-  }
-  return response.json()
-}
+import { moduleAction } from '../../../lib/moduleApi.js'
 
 function resolveAppId() {
   if (typeof window === 'undefined') return 'default'
@@ -45,7 +33,7 @@ export default function Support() {
         scope: 'user',
         app_id: appId,
         limit: 50,
-      }, appId)
+      })
       const items = Array.isArray(result.requests) ? result.requests : []
       setRequests(items)
       if (!activeRequestId && items.length > 0) setActiveRequestId(items[0].request_id)
@@ -62,12 +50,18 @@ export default function Support() {
       setMessages([])
       return
     }
-    const result = await moduleAction('messages', 'get_thread', {
-      thread_id: request.message_thread_id,
-      message_limit: 100,
-    }, appId)
-    setActiveThread(result.thread || null)
-    setMessages(Array.isArray(result.messages) ? result.messages : [])
+    try {
+      const result = await moduleAction('support', 'get_support_conversation', {
+        request_id: request.request_id,
+      })
+      if (!result.success) throw new Error(result.error || 'Support conversation could not be loaded.')
+      setActiveThread(result.thread || null)
+      setMessages(Array.isArray(result.messages) ? result.messages : [])
+    } catch (err) {
+      setActiveThread(null)
+      setMessages([])
+      setError(err.message || 'Support conversation could not be loaded.')
+    }
   }, [appId])
 
   useEffect(() => {
@@ -82,50 +76,41 @@ export default function Support() {
     event.preventDefault()
     const body = draft.trim()
     if (!body) return
-    const created = await moduleAction('support', 'create_support_request', {
-      message: body,
-      subject: body.slice(0, 80),
-      severity: 'low',
-      app_id: appId,
-    }, appId)
-    const request = created.request
-    const threadResult = await moduleAction('messages', 'create_thread', {
-      title: titleForRequest(request),
-      participant_ids: [],
-      thread_type: 'support',
-      scope_type: 'app',
-      scope_id: appId,
-      subject_app_id: appId,
-      related_type: 'support.request',
-      related_id: request.request_id,
-      metadata: { request_id: request.request_id },
-    }, appId)
-    const threadId = threadResult.thread?.thread_id
-    if (threadId) {
-      await moduleAction('support', 'link_message_thread', {
-        request_id: request.request_id,
-        message_thread_id: threadId,
-      }, appId)
-      await moduleAction('messages', 'send_message', {
-        thread_id: threadId,
-        body,
-      }, appId)
+    try {
+      setError(null)
+      const created = await moduleAction('support', 'create_support_request', {
+        message: body,
+        subject: body.slice(0, 80),
+        severity: 'low',
+        app_id: appId,
+      })
+      if (!created.success || !created.request) {
+        throw new Error(created.error || 'Support request could not be created.')
+      }
+      setDraft('')
+      await loadRequests()
+      setActiveRequestId(created.request.request_id)
+    } catch (err) {
+      setError(err.message || 'Support request could not be created.')
     }
-    setDraft('')
-    await loadRequests()
-    setActiveRequestId(request.request_id)
   }
 
   async function handleReply(event) {
     event.preventDefault()
     const body = newMessage.trim()
     if (!body || !activeRequest?.message_thread_id) return
-    await moduleAction('messages', 'send_message', {
-      thread_id: activeRequest.message_thread_id,
-      body,
-    }, appId)
-    setNewMessage('')
-    await loadThread(activeRequest)
+    try {
+      setError(null)
+      const sent = await moduleAction('support', 'reply_support_request', {
+        request_id: activeRequest.request_id,
+        body,
+      })
+      if (!sent.success) throw new Error(sent.error || 'Support reply could not be sent.')
+      setNewMessage('')
+      await loadThread(activeRequest)
+    } catch (err) {
+      setError(err.message || 'Support reply could not be sent.')
+    }
   }
 
   return (

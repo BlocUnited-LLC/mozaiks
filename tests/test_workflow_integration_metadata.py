@@ -7,8 +7,24 @@ from factory_app.workflows._shared.workflow_integration import (
     apply_workflow_integration_context,
     extract_workflow_integration_metadata_from_bundle_entries,
     hydrate_workflow_integration_context_from_latest_artifact,
+    normalize_workflow_integration_metadata,
     workflow_name_to_capability_id,
 )
+from tests.factory_context import factory_context
+
+
+def test_explicit_empty_workflow_metadata_clears_stale_runtime_bindings():
+    from mozaiksai.core.workflow.context.frozen import freeze
+
+    metadata = extract_workflow_integration_metadata_from_bundle_entries([], bundle_name="Client Ledger")
+    assert metadata["workflows"] == []
+    assert metadata["primary_workflow"] is None
+    context = {"generated_workflow_name": "OldWorkflow", "generated_workflow_capability_id": "old"}
+    assert apply_workflow_integration_context(context, freeze(metadata)) is not None
+    assert context["generated_workflow_name"] is None
+    assert context["generated_workflow_capability_id"] is None
+    assert normalize_workflow_integration_metadata({}) is None
+    assert normalize_workflow_integration_metadata({"workflows": [{}]}) is None
 
 
 def _metadata() -> dict:
@@ -56,6 +72,7 @@ def test_extract_workflow_integration_metadata_from_bundle_entries() -> None:
                     {
                         "filename": "orchestrator.yaml",
                         "content": """
+schema_version: mozaiks.orchestrator.v1
 workflow_name: TicketBatchTriageWorkflow
 workflow_startup_mode: BackendOnly
 triggers:
@@ -110,7 +127,7 @@ def test_hydrate_workflow_integration_context_from_latest_artifact() -> None:
         ),
     )
     store = _FakeArtifactStore(artifact)
-    context = {"app_id": "app-1"}
+    context = factory_context({"app_id": "app-1"})
 
     result = asyncio.run(
         hydrate_workflow_integration_context_from_latest_artifact(

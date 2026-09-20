@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from mozaiksai.core.transport.handlers import input_handlers as input_handlers_module
@@ -21,6 +23,7 @@ class _FakeTransport:
         self.api_calls: list[dict] = []
         self.process_calls: list[dict] = []
         self.errors: list[tuple[str, str]] = []
+        self._background_tasks: dict[str, asyncio.Task] = {}
 
     def _get_conn_meta(self, chat_id: str) -> dict:
         assert chat_id == "chat-1"
@@ -114,6 +117,7 @@ async def test_handle_user_input_submit_routes_workflow_mode_messages_back_to_or
         "chat-1",
         websocket,
     )
+    await transport._background_tasks["chat-1"]
 
     assert transport.api_calls == [
         {
@@ -134,4 +138,49 @@ async def test_handle_user_input_submit_routes_workflow_mode_messages_back_to_or
             "timestamp": websocket.sent[0]["timestamp"],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_workflow_input_releases_receiver_while_tool_response_is_pending(monkeypatch) -> None:
+    transport = _FakeTransport({"workflow_name": "Smoke", "app_id": "app-1", "user_id": "user-1"})
+    websocket = _FakeWebSocket()
+    entered, approval = asyncio.Event(), asyncio.Event()
+
+    async def resume(**kwargs):
+        entered.set()
+        await approval.wait()
+
+    transport.handle_user_input_from_api = resume
+    await asyncio.wait_for(handle_user_input_submit(
+        transport, {"text": "Continue"}, "chat-1", websocket,
+    ), timeout=1)
+    task = transport._background_tasks["chat-1"]
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert not task.done()
+        assert websocket.sent[-1]["type"] == "chat.input_ack"
+        await handle_user_input_submit(transport, {"text": "Duplicate"}, "chat-1", websocket)
+        assert transport.errors[-1][1] == "CHAT_BUSY"
+        assert transport._background_tasks["chat-1"] is task
+        approval.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert transport._background_tasks == {}
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_workflow_input_background_failure_is_reported_and_untracked() -> None:
+    transport = _FakeTransport({"workflow_name": "Smoke", "app_id": "app-1"})
+    websocket = _FakeWebSocket()
+
+    async def resume(**kwargs):
+        raise RuntimeError("controlled resume failure")
+
+    transport.handle_user_input_from_api = resume
+    await handle_user_input_submit(transport, {"text": "Continue"}, "chat-1", websocket)
+    await transport._background_tasks["chat-1"]
+    assert transport.errors[-1][1] == "USER_MESSAGE_FAILED"
+    assert transport._background_tasks == {}
 

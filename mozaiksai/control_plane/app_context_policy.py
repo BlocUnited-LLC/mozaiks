@@ -15,6 +15,7 @@ from mozaiksai.control_plane.app_context import (
 )
 from mozaiksai.control_plane.app_context_impact import AppContextImpactHints
 from mozaiksai.control_plane.contracts import RefinementLane
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 APP_CONTEXT_REQUIRED_BLOCK_WARNING = (
     "Current App Intelligence context must be indexed and current before refinement can proceed."
@@ -53,7 +54,7 @@ def evaluate_app_context_policy(
 ) -> AppContextPolicyResult:
     summary = _normalize_summary(app_context_summary)
     paths = [_normalize_path(path) for path in affected_bundle_paths or []]
-    warnings = _dedupe([*(validation_warnings or []), *_context_warnings(summary)])
+    warnings = dedupe_strings([*(validation_warnings or []), *_context_warnings(summary)])
     risky_signals = _risky_signals(
         summary=summary,
         change_class=change_class,
@@ -80,7 +81,7 @@ def evaluate_app_context_policy(
         blocking=True,
         risk_level=risk_level,
         reasons=["Refinement requires current App Intelligence context."],
-        warnings=_dedupe([*warnings, APP_CONTEXT_REQUIRED_BLOCK_WARNING]),
+        warnings=dedupe_strings([*warnings, APP_CONTEXT_REQUIRED_BLOCK_WARNING]),
         risky_signals=risky_signals,
         requires_context_refresh=True,
     )
@@ -100,22 +101,22 @@ def enrich_app_context_policy_with_graph_hints(
     if hints is None:
         return result
 
-    graph_warnings = _dedupe(
+    graph_warnings = dedupe_strings(
         [
             *hints.ownership_warnings,
             *hints.risk_warnings,
             hints.stale_graph_warning or "",
         ]
     )
-    graph_explanations = _dedupe([f"AppContextGraph: {explanation}" for explanation in hints.explanations])
+    graph_explanations = dedupe_strings([f"AppContextGraph: {explanation}" for explanation in hints.explanations])
     if not graph_warnings and not graph_explanations:
         return result
 
     return result.model_copy(
         update={
-            "warnings": _dedupe([*result.warnings, *graph_warnings, *graph_explanations]),
-            "graph_warnings": _dedupe([*result.graph_warnings, *graph_warnings]),
-            "graph_explanations": _dedupe([*result.graph_explanations, *graph_explanations]),
+            "warnings": dedupe_strings([*result.warnings, *graph_warnings, *graph_explanations]),
+            "graph_warnings": dedupe_strings([*result.graph_warnings, *graph_warnings]),
+            "graph_explanations": dedupe_strings([*result.graph_explanations, *graph_explanations]),
         }
     )
 
@@ -183,7 +184,7 @@ def _risky_signals(
     if _is_brownfield_source_affecting(summary, affected_bundle_paths, lane):
         signals.append("brownfield_source_affecting_change")
 
-    return _dedupe(signals)
+    return dedupe_strings(signals)
 
 
 def _touches_module_or_backend(paths: list[str]) -> bool:
@@ -251,16 +252,6 @@ def _normalize_path(path: str) -> str:
     return "/".join(parts).lower()
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        deduped.append(normalized)
-    return deduped
 
 
 __all__ = [

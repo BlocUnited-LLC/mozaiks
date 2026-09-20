@@ -62,11 +62,16 @@ if _PYDANTIC:
             assembly for deterministic template materialization.
             None in OSS/dev contexts where no template files are needed.
         status
-            "active" | "placeholder". Only active packs should be passed to
-            factory workflows. Operators filter before launch.
+            "active" | "inactive" | "archived". Only active packs should be
+            passed to factory workflows. Operators filter before launch.
         capability_source
-            Taxonomy label: "managed_capability" | "framework_pack" | "host_universal"
-            | "generated_module" | "external_adapter".
+            Taxonomy label. Valid values are defined by
+            mozaiksai.core.session.build_context_schema.VALID_CAPABILITY_SOURCES:
+            "config_file" | "managed_capability" | "generated_module" |
+            "operator_extension" | "operator_pack" | "external_adapter" |
+            "framework_pack". Descriptors normalized from a build-context
+            context.yaml default to "operator_pack"; this model's default stays
+            "managed_capability" for existing operator constructors.
         """
         id: str
         display_name: str = ""

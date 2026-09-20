@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
-import { Alert } from '@mozaiks/chat-ui/ui'
+import { Alert, InsightList } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
@@ -26,8 +26,11 @@ import {
   getPlanStateLabel,
   normalizeAppStatus,
 } from './appStudioModel.js'
+import { DEFAULT_ANALYTICS_PERIOD, buildInsightItems } from './analyticsModel.js'
+import MetricDetailPanel from './MetricDetailPanel.jsx'
 import { studioFetch } from './studioApi.js'
 import { useAppStudioData } from './useAppStudioData.js'
+import { useAppAnalytics } from './useStudioAnalytics.js'
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -63,14 +66,16 @@ function approvalTone(state) {
 }
 
 function runStatusTone(status) {
-  if (status === 2) return 'success'
-  if (status === 1) return 'primary'
+  if (status === 2) return 'destructive'
+  if (status === 1) return 'success'
+  if (status === 0) return 'primary'
   return 'default'
 }
 
 function runStatusLabel(status) {
-  if (status === 2) return 'Completed'
-  if (status === 1) return 'Running'
+  if (status === 2) return 'Failed'
+  if (status === 1) return 'Completed'
+  if (status === 0) return 'Running'
   return 'Unknown'
 }
 
@@ -582,6 +587,8 @@ function AppIntelligencePanel({ context, appId }) {
 export default function AppOverviewPage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode, refresh } = useAppStudioData(appId)
+  const { data: analytics } = useAppAnalytics(appId, DEFAULT_ANALYTICS_PERIOD)
+  const [detailMetricId, setDetailMetricId] = useState(null)
   const snapshot = useMemo(() => getAppStudioSnapshot(appId, data, dataMode), [appId, data, dataMode])
 
   if (loading) return <StudioLoadingState label="Loading App Overview…" />
@@ -605,12 +612,38 @@ export default function AppOverviewPage() {
   const nextStep = getLifecycleGuidance(lifecycle)
   const dashboardMetrics = buildDashboardMetrics(snapshot, totalCost, totalRuns)
 
+  // The deterministic analytics service is the single authority for these
+  // KPIs, so its values override whatever the app summary record carries.
+  const analyticsMetrics = analytics?.metrics || null
+  if (analyticsMetrics) {
+    if (analyticsMetrics.mrr?.available) dashboardMetrics.mrr = analyticsMetrics.mrr.value
+    if (analyticsMetrics.active_users?.available) {
+      dashboardMetrics.activeUsers = analyticsMetrics.active_users.value
+    }
+    if (analyticsMetrics.total_users?.available) {
+      dashboardMetrics.totalUsers = analyticsMetrics.total_users.value
+    }
+  }
+  const appInsights = buildInsightItems(analytics?.insights, {
+    onSelect: (insight) => setDetailMetricId(insight.metric_id || 'mrr'),
+  })
+
   const kpiItems = [
     {
       id: 'revenue',
       label: 'Revenue',
-      value: formatCurrencyValue(dashboardMetrics.revenue, 'Pending'),
-      detail: dashboardMetrics.mrr != null ? `${formatCurrencyValue(dashboardMetrics.mrr, '$0.00')} MRR` : null,
+      // Prefer total revenue; fall back to showing MRR as the headline when
+      // that's the revenue fact we actually have.
+      value: dashboardMetrics.revenue != null
+        ? formatCurrencyValue(dashboardMetrics.revenue, 'Pending')
+        : dashboardMetrics.mrr != null
+          ? `${formatCurrencyValue(dashboardMetrics.mrr, 'Pending')}`
+          : 'Pending',
+      detail: dashboardMetrics.revenue != null && dashboardMetrics.mrr != null
+        ? `${formatCurrencyValue(dashboardMetrics.mrr, '$0.00')} MRR`
+        : dashboardMetrics.revenue == null && dashboardMetrics.mrr != null
+          ? 'MRR'
+          : null,
     },
     {
       id: 'cost',
@@ -658,6 +691,8 @@ export default function AppOverviewPage() {
 
         <KpiGrid items={kpiItems} />
 
+        {appInsights.length > 0 && <InsightList items={appInsights} />}
+
         {isApprovalPending && (
           <Alert variant="warning">
             This build is waiting for approval before it can proceed. Open Build Studio to review the plan and respond.
@@ -695,6 +730,16 @@ export default function AppOverviewPage() {
         {cfReport && <CarryForwardReportPanel report={cfReport} />}
 
       </div>
+
+      <MetricDetailPanel
+        open={Boolean(detailMetricId)}
+        appId={appId}
+        appName={data?.summary?.app?.name || appId}
+        metricId={detailMetricId}
+        period={DEFAULT_ANALYTICS_PERIOD}
+        registry={analytics?.registry || null}
+        onClose={() => setDetailMetricId(null)}
+      />
     </WorkspaceLayout>
   )
 }

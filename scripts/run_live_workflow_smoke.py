@@ -147,10 +147,8 @@ async def _verify_mongo_available() -> None:
     client = get_mongo_client()
     try:
         await client.admin.command("ping")
-    except Exception as exc:
-        raise RuntimeError(
-            f"MongoDB is configured but unreachable via MONGO_URI={os.getenv('MONGO_URI')!r}: {exc}"
-        ) from exc
+    except Exception:
+        raise RuntimeError("MongoDB is configured but unreachable") from None
 
 
 async def _wait_for_server(server: uvicorn.Server, timeout_seconds: float = 20.0) -> None:
@@ -179,19 +177,14 @@ def _extract_json_object_from_text(value: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _extract_latest_structured_output(doc: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(doc, dict):
-        return {}
-    messages = doc.get("messages")
-    if not isinstance(messages, list):
-        return {}
-    for message in reversed(messages):
-        if not isinstance(message, dict):
+def _extract_latest_structured_output(run_events: list[Any]) -> dict[str, Any]:
+    from ag2.events import ModelResponse
+
+    # Structured packets are intentionally hidden from UI replay history.
+    for event in reversed(run_events):
+        if not isinstance(event, ModelResponse):
             continue
-        structured = message.get("structured_output")
-        if isinstance(structured, dict) and structured:
-            return structured
-        parsed = _extract_json_object_from_text(message.get("content"))
+        parsed = _extract_json_object_from_text(event.content)
         if parsed:
             return parsed
     return {}
@@ -244,6 +237,16 @@ def _build_workflow_user_reply_message(chat_id: str, response_text: str) -> dict
             "conversation_mode": "workflow",
         },
     }
+
+
+def _build_trigger_meta(workflow_name: str, journey_id: str | None) -> dict[str, str]:
+    """Build the session trigger metadata without inventing a journey identity."""
+
+    metadata = {"trigger_source": "chat", "requested_workflow_id": workflow_name}
+    normalized_journey_id = str(journey_id or "").strip()
+    if normalized_journey_id:
+        metadata["journey_id"] = normalized_journey_id
+    return metadata
 
 
 def _is_terminal_completion_event(event: dict[str, Any]) -> bool:
@@ -417,7 +420,10 @@ def _pop_tool_response_payload(
         queue = response_queues.get(candidate)
         if not queue:
             continue
-        return _normalize_tool_response_payload(queue.popleft())
+        response = _normalize_tool_response_payload(queue.popleft())
+        if (data.get("payload") or {}).get("review_id") and "review_id" not in response:
+            response["review_id"] = (data.get("payload") or {}).get("review_id")
+        return response
     return None
 
 
@@ -552,6 +558,7 @@ async def _collect_events(
 
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     completion_grace_deadline: float | None = None
+    answered_pause = False
 
     while True:
         now = asyncio.get_running_loop().time()
@@ -627,6 +634,8 @@ async def _collect_events(
         if event_type == "chat.tool_call" and isinstance(data, dict):
             tool_call_id = str(data.get("tool_call_id") or "").strip()
             awaiting_response = bool(data.get("awaiting_response"))
+            if not awaiting_response:
+                continue
             response_payload: dict[str, Any] | None = None
             used_queue = False
             if _is_input_request_tool_call(data):
@@ -672,6 +681,7 @@ async def _collect_events(
                 await websocket.send(
                     json.dumps(_build_workflow_user_reply_message(chat_id, reply_text))
                 )
+                answered_pause = True
                 completion_grace_deadline = None
                 continue
 
@@ -681,10 +691,16 @@ async def _collect_events(
             awaiting_user_input = bool(data.get("awaiting_user_input")) if isinstance(data, dict) else False
             is_paused = (
                 awaiting_user_input
-                or str(status_value).strip() == "0"
+                or str(status_value).strip() in {"0", "paused"}
                 or reason_value in {"awaiting_user_input", "paused"}
             )
             if is_paused:
+                # awaiting_reply and run_complete describe the same pause.
+                # A submitted reply starts another live AG2 turn, not a one-second shutdown.
+                if answered_pause:
+                    answered_pause = False
+                    completion_grace_deadline = None
+                    continue
                 reply_text, used_queue = _peek_input_reply(
                     events=events,
                     reply_rules=contextual_reply_rules,
@@ -771,6 +787,10 @@ async def _await_workflow_with_pending_input_fallback(
 async def run_live_workflow_smoke(
     prompt: str = "Write a one-line joke about release engineering.",
     *,
+    app_id: str | None = None,
+    build_registry_id: str | None = None,
+    user_id: str = "smoke-user",
+    journey_id: str | None = None,
     timeout_seconds: float = 180.0,
     workflow_name: str = DEFAULT_ACTIVE_WORKFLOW,
     workflows_root: Path | None = None,
@@ -795,6 +815,8 @@ async def run_live_workflow_smoke(
     await _verify_mongo_available()
 
     from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+    from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+    from mozaiksai.core.session.launcher import create_routed_chat_session
     from mozaiksai.core.transport.simple_transport import SimpleTransport
     from mozaiksai.core.workflow.workflow_manager import get_workflow_manager, initialize_workflows
     from mozaiksai.factory import create_mozaiks_app
@@ -807,14 +829,28 @@ async def run_live_workflow_smoke(
     if info.get("status") != "loaded":
         raise RuntimeError(f"Workflow failed to load: {workflow_name} -> {info.get('error')}")
 
+    definitions = (manager.get_config(workflow_name).get("context_variables") or {}).get("definitions") or {}
+    is_factory_build = "run_build_binding" in definitions
+    if is_factory_build:
+        from factory_app.workflows._shared.platform.build_target import bind_factory_session
+
+        get_platform_hooks().register_bundle(
+            {"chat_session_fields": bind_factory_session}, source="mozaiks.studio", prepend=True,
+        )
+
     app = create_mozaiks_app(workflow_dir=str(effective_root), debug=False)
     port = _find_free_port()
     server = uvicorn.Server(_build_uvicorn_config(app, port))
     serve_task = asyncio.create_task(server.serve())
 
     pm = AG2PersistenceManager()
-    app_id = f"live-smoke-{uuid.uuid4().hex[:8]}"
-    user_id = "smoke-user"
+    resolved_app_id = str(app_id or f"live-smoke-{uuid.uuid4().hex[:8]}").strip()
+    if not resolved_app_id:
+        raise ValueError("app_id must not be empty")
+    app_id = resolved_app_id
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        raise ValueError("user_id must not be empty")
     chat_id = f"chat_{workflow_name.lower()}_{uuid.uuid4().hex[:8]}"
     events: list[dict[str, Any]] = []
     completed_successfully = False
@@ -822,12 +858,15 @@ async def run_live_workflow_smoke(
 
     try:
         await _wait_for_server(server)
-        await pm.create_chat_session(
+        await create_routed_chat_session(
+            persistence_manager=pm,
             chat_id=chat_id,
             app_id=app_id,
-            workflow_name=workflow_name,
+            build_registry_id=build_registry_id,
+            workflow_id=workflow_name,
             user_id=user_id,
-            extra_fields=initial_context if isinstance(initial_context, dict) else None,
+            context_variables=dict(initial_context or {}),
+            trigger_meta=_build_trigger_meta(workflow_name, journey_id),
         )
 
         ws_url = f"ws://127.0.0.1:{port}/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"
@@ -845,14 +884,15 @@ async def run_live_workflow_smoke(
                 coll = await pm._coll()
                 doc = await coll.find_one(
                     {"_id": chat_id, "app_id": app_id},
-                    {"pending_input_request": 1, "messages": 1},
+                    {"pending_input_request": 1},
                 )
                 pending_input = (doc or {}).get("pending_input_request")
                 if not isinstance(pending_input, dict):
                     return None
 
                 assistant_message = None
-                for message in reversed((doc or {}).get("messages") or []):
+                history = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
+                for message in reversed(history):
                     if not isinstance(message, dict):
                         continue
                     role = str(message.get("role") or "").strip().lower()
@@ -945,7 +985,8 @@ async def run_live_workflow_smoke(
                     app_id=app_id,
                     timeout_seconds=15.0,
                 )
-            structured_output = _extract_latest_structured_output(final_doc)
+            run_events = await pm.load_run_events(chat_id=chat_id, app_id=app_id)
+            structured_output = _extract_latest_structured_output(run_events)
             final_context = _extract_final_context(final_doc)
             try:
                 from mozaiksai.core.data.persistence.connector_store import ConnectorStore
@@ -992,7 +1033,7 @@ async def run_live_workflow_smoke(
             observed_event_types=observed_event_types,
         )
     finally:
-        if completed_successfully:
+        if completed_successfully and not is_factory_build:
             try:
                 coll = await pm._coll()
                 await coll.delete_many({"app_id": app_id})
@@ -1030,6 +1071,16 @@ def main() -> int:
     _configure_event_loop_policy()
     parser = argparse.ArgumentParser(description="Run live AG2 runtime smoke against a real workflow + LLM")
     parser.add_argument(
+        "--app-id",
+        default=None,
+        help="Explicit app identity for brownfield/build-bound smoke runs.",
+    )
+    parser.add_argument(
+        "--journey-id",
+        default=None,
+        help="Optional registered workflow sequence to pin at session creation.",
+    )
+    parser.add_argument(
         "--workflow",
         default=DEFAULT_ACTIVE_WORKFLOW,
         help=f"Workflow to execute for smoke validation (default: {DEFAULT_ACTIVE_WORKFLOW}).",
@@ -1038,6 +1089,16 @@ def main() -> int:
         "--prompt",
         default="Write a one-line joke about release engineering.",
         help="Prompt to send into the workflow.",
+    )
+    parser.add_argument(
+        "--build-registry-id",
+        default=None,
+        help="Optional hosted App Registry build id to bind factory workflows to an existing app.",
+    )
+    parser.add_argument(
+        "--user-id",
+        default="smoke-user",
+        help="Authenticated user id used for registry ownership checks (default: smoke-user).",
     )
     parser.add_argument(
         "--prompt-file",
@@ -1119,7 +1180,11 @@ def main() -> int:
     result = asyncio.run(
         run_live_workflow_smoke(
             prompt=prompt,
+            app_id=str(args.app_id).strip() if args.app_id else None,
+            journey_id=str(args.journey_id).strip() if args.journey_id else None,
             timeout_seconds=args.timeout_seconds,
+            build_registry_id=(str(args.build_registry_id).strip() if args.build_registry_id else None),
+            user_id=str(args.user_id).strip() if args.user_id else "smoke-user",
             workflow_name=args.workflow,
             workflows_root=Path(args.workflows_root),
             initial_context=initial_context,

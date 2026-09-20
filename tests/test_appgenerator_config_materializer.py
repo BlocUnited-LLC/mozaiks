@@ -15,6 +15,7 @@ from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts i
     materialize_app_config_contracts,
 )
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 
 
 class _Context:
@@ -204,10 +205,13 @@ def test_materialize_subscriptions_yaml_rejects_unknown_schema() -> None:
         _materialize_subscriptions_yaml(context_variables=context)
 
 
-def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app() -> None:
+@pytest.mark.parametrize("frozen", [False, True])
+def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app(frozen: bool) -> None:
     cfg = _saas_subscription_config_file()
     original = deepcopy(cfg)
     context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+    if frozen:
+        context = ContextVariablesBridge(context.data)
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -453,7 +457,8 @@ def _module_yaml_content(actions: list[dict]) -> str:
     return yaml.safe_dump(data, sort_keys=False)
 
 
-def test_apply_entitlement_gates_sets_gates_from_contract() -> None:
+@pytest.mark.parametrize("frozen", [False, True])
+def test_apply_entitlement_gates_sets_gates_from_contract(frozen: bool) -> None:
     module_yaml = _module_yaml_content(
         [
             {"id": "list_reports", "handler_method": "list_reports", "permissions": ["reports.read"]},
@@ -472,6 +477,8 @@ def test_apply_entitlement_gates_sets_gates_from_contract() -> None:
     )
     code_files = [{"filename": "modules/analytics/module.yaml", "content": module_yaml}]
 
+    if frozen:
+        context = ContextVariablesBridge(context.data)
     result = _apply_entitlement_gates(code_files, context_variables=context)
 
     updated = {f["filename"]: yaml.safe_load(f["content"]) for f in result}

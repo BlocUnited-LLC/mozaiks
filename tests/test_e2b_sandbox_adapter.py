@@ -94,7 +94,7 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
         cwd="/workspace",
     )
     assert write_result["count"] == 1
-    assert connected.files.writes == [("/workspace/src/App.tsx", "console.log('hi')")]
+    assert created.files.writes == [("/workspace/src/App.tsx", "console.log('hi')")]
 
     read_result = await adapter.read_file(session_id="sbx_123", path="/workspace/src/App.tsx")
     assert read_result == "contents:/workspace/src/App.tsx"
@@ -120,8 +120,68 @@ async def test_e2b_adapter_uses_real_sdk_shape(monkeypatch) -> None:
 
     extended = await adapter.extend_session(session_id="sbx_123", timeout_seconds=900)
     assert extended.session_id == "sbx_123"
-    assert connected.timeout == 900
+    assert created.timeout == 900
 
     terminated = await adapter.terminate_session(session_id="sbx_123")
     assert terminated is True
-    assert connected.killed is True
+    assert created.killed is True
+
+
+@pytest.mark.asyncio
+async def test_ordinary_io_does_not_renew_the_provider_timeout(monkeypatch):
+    from unittest.mock import Mock
+    factory = Mock()
+    factory.create.return_value = _FakeSandbox()
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter(default_timeout_seconds=60)
+    session = await adapter.create_session()
+    for _ in range(3):
+        await adapter.run_command(session_id=session.session_id, command="true")
+        await adapter.get_preview_url(session_id=session.session_id, port=3000)
+    factory.connect.assert_not_called()
+    assert factory.create.call_args.kwargs["timeout"] == 60
+
+
+@pytest.mark.asyncio
+async def test_reconnect_preserves_the_remaining_provider_deadline(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    factory = Mock()
+    factory.get_info.return_value = SimpleNamespace(end_at=datetime.now(UTC) + timedelta(seconds=45))
+    factory.connect.return_value = _FakeSandbox()
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    await adapter.read_file(session_id="sbx_123", path="/tmp/file")
+    assert 1 <= factory.connect.call_args.kwargs["timeout"] <= 45
+    await adapter.read_file(session_id="sbx_123", path="/tmp/file")
+    factory.connect.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_allocation_waits_for_creation_and_kills_the_sandbox(monkeypatch):
+    import asyncio
+    import threading
+    from unittest.mock import Mock
+
+    started, release = threading.Event(), threading.Event()
+    sandbox = _FakeSandbox()
+
+    def create(**kwargs):
+        started.set()
+        assert release.wait(timeout=5)
+        return sandbox
+
+    factory = Mock()
+    factory.create.side_effect = create
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter()
+    task = asyncio.create_task(adapter.create_session())
+    assert await asyncio.to_thread(started.wait, 5)
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert sandbox.killed
+    assert not adapter._sessions

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
-from factory_app.workflows.AppGenerator.tools.render_infra_scaffold import save_infra_scaffold
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import save_auth_scaffold
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
 from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
@@ -24,7 +24,6 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
 from mozaiksai.core.validation import GeneratedAppValidationRequest, scan_functional_generated_app
 from mozaiksai.core.validation.generated_app import validate_generated_app_bundle
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    _page_from_plan,
     _page_stem_from_path,
 )
 from mozaiksai.core.workflow.task_batches import (
@@ -32,6 +31,8 @@ from mozaiksai.core.workflow.task_batches import (
     load_task_batches_config,
 )
 from mozaiksai.hosts import platform
+from tests.factory_context import factory_context
+from tests.page_plan_fixtures import _page_from_plan
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = WORKSPACE / "tests" / "fixtures" / "appplan_saas_entitlement_dispatch_output.json"
@@ -40,7 +41,7 @@ WORKFLOWS_ROOT = WORKSPACE / "factory_app" / "workflows"
 
 class _Context:
     def __init__(self, initial: dict[str, Any] | None = None) -> None:
-        self.data: dict[str, Any] = dict(initial or {})
+        self.data: dict[str, Any] = factory_context(initial)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
@@ -526,8 +527,8 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "    config:\n"
                         "      actions:\n"
                         "        - label: Export Report\n"
-                        "          action_type: event\n"
-                        "          event_type: ui.modal.open\n"
+                        "          action_type: submit\n"
+                        "          href: /api/modules/reports/export_report\n"
                     ),
                 },
             ],
@@ -586,6 +587,11 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
 
     original_run = ag2_task_batch_runner.AG2TaskBatchRunner.run
     ag2_task_batch_runner.AG2TaskBatchRunner.run = _app_builder_runner()
+    checkpoints: list[dict[str, Any]] = []
+
+    async def checkpoint(updates: dict[str, Any]) -> None:
+        checkpoints.append(deepcopy(updates))
+
     try:
         await execute_task_batches_for_trigger(
             workflow_name="AppGenerator",
@@ -603,18 +609,30 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
             app_id=ctx.get("app_id"),
             user_id="user-1",
             fresh_agents_per_task=False,
+            checkpoint=checkpoint,
+            parent_channel_id="test-parent-channel",
         )
     finally:
         ag2_task_batch_runner.AG2TaskBatchRunner.run = original_run
 
+    assert checkpoints[-1]["app_task_batch_status"] == "completed"
+    assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"] == {}
+    assert set(checkpoints[-1]["app_task_batch_results"]["_meta"]["completed_tasks"]) == {
+        task["task_id"] for task in ctx.get("app_task_batch_items")
+    }
+
     assembled = await assemble_app_tasks(context_variables=ctx)
     files = _file_map(assembled)
-    scaffold = await save_infra_scaffold(
-        emit_infra=False,
-        emit_auth_adapter=True,
+    scaffold = await save_auth_scaffold(
         context_variables=ctx.data,
     )
     files.update(_file_map(scaffold))
+
+    # This fixture stops before export; apply the same final route composition
+    # that generate_and_download performs before its acceptance gate.
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import compose_bundle_auth_routes
+
+    compose_bundle_auth_routes(files)
 
     validation = validate_generated_app_bundle(
         GeneratedAppValidationRequest(

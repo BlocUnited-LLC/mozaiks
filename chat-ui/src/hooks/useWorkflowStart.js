@@ -26,10 +26,11 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
+import { authFetch } from '../adapters/api';
 
 const CHAT_TRIGGER_SOURCE = 'chat';
 
-const buildWorkflowChatUrl = (workflowId, chatId = null, contextVariables = null) => {
+const buildWorkflowChatUrl = (workflowId, chatId = null, contextVariables = null, appId = null) => {
   const params = new URLSearchParams({
     mode: 'workflow',
     workflow: String(workflowId || ''),
@@ -37,6 +38,7 @@ const buildWorkflowChatUrl = (workflowId, chatId = null, contextVariables = null
   if (chatId) {
     params.set('chat_id', String(chatId));
   }
+  if (appId) params.set('app_id', String(appId));
   if (contextVariables && Object.keys(contextVariables).length > 0) {
     params.set('context', JSON.stringify(contextVariables));
   }
@@ -66,7 +68,7 @@ const resolveWorkflowUserId = (user, overrideUserId) => {
 
 export function useWorkflowStart() {
   const navigate = useNavigate();
-  const { user, config } = useChatUI();
+  const { user, config, auth } = useChatUI();
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -79,6 +81,10 @@ export function useWorkflowStart() {
         journey_id = null,
         app_id = null,
         user_id = null,
+        build_registry_id = null,
+        source_chat_id = null,
+        retry_failed = false,
+        signal = null,
       } = options;
       const resolvedAppId = resolveWorkflowAppId(config, user, app_id);
       const resolvedUserId = resolveWorkflowUserId(user, user_id);
@@ -101,6 +107,9 @@ export function useWorkflowStart() {
           context_variables: contextVariables,
           app_id: resolvedAppId,
           user_id: resolvedUserId,
+          ...(build_registry_id ? { build_registry_id } : {}),
+          ...(source_chat_id ? { source_chat_id } : {}),
+          ...(retry_failed ? { retry_failed: true } : {}),
           // workflow_id is optional for refinement triggers — backend router resolves it
           ...(workflowId ? { workflow_id: workflowId } : {}),
           ...(action_id ? { action_id } : {}),
@@ -108,11 +117,12 @@ export function useWorkflowStart() {
           ...(trigger_payload && Object.keys(trigger_payload).length > 0 ? { trigger_payload } : {}),
         };
 
-        const res = await fetch('/api/workflows/trigger', {
+        const res = await authFetch('/api/workflows/trigger', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        });
+          ...(signal ? { signal } : {}),
+        }, { auth });
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -120,12 +130,20 @@ export function useWorkflowStart() {
         }
 
         const payload = await res.json();
+        if (signal?.aborted) return null;
         const { chat_id, workflow_id } = payload || {};
+        if (source_chat_id && (
+          typeof chat_id !== 'string' || !chat_id.trim() || chat_id === source_chat_id
+          || typeof workflow_id !== 'string' || !workflow_id.trim()
+        )) {
+          throw new Error('The server did not confirm a new workflow session.');
+        }
         if (chat_id && workflow_id) {
-          navigate(buildWorkflowChatUrl(workflow_id, chat_id));
+          navigate(buildWorkflowChatUrl(workflow_id, chat_id, null, app_id));
         }
         return payload;
       } catch (err) {
+        if (signal?.aborted) return null;
         setError(err.message);
         console.error('❌ [useWorkflowStart] trigger failed:', err);
         return null;
@@ -133,7 +151,7 @@ export function useWorkflowStart() {
         setStarting(false);
       }
     },
-    [config, navigate, user]
+    [auth, config, navigate, user]
   );
 
   return { startWorkflow, starting, error };

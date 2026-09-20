@@ -312,7 +312,7 @@ def _resolve_template_value(template: Any, context: Any, app_id: str) -> Any:
     except Exception:
         base_value = getattr(context, base_name, None)
     for part in parts[1:]:
-        if isinstance(base_value, dict):
+        if isinstance(base_value, Mapping):
             base_value = base_value.get(part)
         else:
             base_value = getattr(base_value, part, None)
@@ -455,6 +455,9 @@ def _task_batch_context_keys(workflow_name: str) -> set[str]:
         for batch in config.batches:
             keys.add(batch.result.context_key)
             keys.add(batch.result.status_key)
+            if batch.recovery:
+                keys.add(batch.recovery.outcome_key)
+                keys.add(batch.recovery.status_key)
         return {key for key in keys if key}
     except Exception:
         return set()
@@ -588,7 +591,12 @@ async def _get_database_schema_async(database_name: str) -> dict[str, Any]:
 # Main loader
 # ---------------------------------------------------------------------------
 
-async def _load_context_async(workflow_name: str, app_id: str | None):
+async def _load_context_async(
+    workflow_name: str,
+    app_id: str | None,
+    *,
+    runtime_context: dict[str, Any] | None = None,
+):
     business_logger.debug("Loading context for workflow=%s", workflow_name)
     context = _create_minimal_context(workflow_name, app_id)
     internal_app_id = app_id or ""
@@ -644,6 +652,16 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
     context._mozaiks_context_authority_policy = authority_policy
     context._mozaiks_context_writer_id = RUNTIME_SYSTEM_WRITER
 
+    # Resolve server-owned inputs first, independent of YAML declaration order.
+    # Artifact queries may depend on them; absence must never broaden a query.
+    for name, definition in definitions.items():
+        if definition.source.type != "runtime":
+            continue
+        value = (runtime_context or {}).get(name)
+        if value is None and definition.source.required:
+            raise ValueError(f"Required runtime context '{name}' is missing for '{workflow_name}'")
+        context.set(name, value)
+
     default_db = _database_defaults(raw_context_section)
     fallbacks = _load_data_reference_fallbacks()
     data_entity_managers: list[DataEntityManager] = []
@@ -652,6 +670,8 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
         source = definition.source
         source_type = source.type
 
+        if source_type == "runtime":
+            continue
         if source_type == "config":
             value = _resolve_config(definition)
             context.set(name, value)
@@ -720,12 +740,10 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
     if data_entity_managers:
         context._mozaiks_data_entity_managers = data_entity_managers
 
-    # Expose definitions and agent plan on the context container for downstream consumers
+    # Expose definitions for downstream context consumers.
     if definitions:
         context._mozaiks_context_definitions = definitions
     context._mozaiks_context_authority_policy = authority_policy
-    if plan.agents:
-        context._mozaiks_context_agents = plan.agents
 
     # Log context summary
     try:

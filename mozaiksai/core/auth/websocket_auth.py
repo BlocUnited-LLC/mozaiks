@@ -22,11 +22,14 @@ Usage:
             await websocket.close(code=1008, reason="Access denied")
             return
 
-        await websocket.accept()
+        await accept_websocket(websocket)
         ...
 """
 
+import base64
+import binascii
 import os
+import re
 from dataclasses import dataclass
 
 from fastapi import WebSocket
@@ -46,6 +49,150 @@ WS_CLOSE_POLICY_VIOLATION = 1008
 WS_CLOSE_AUTH_REQUIRED = 1008
 WS_CLOSE_AUTH_INVALID = 1008
 WS_CLOSE_ACCESS_DENIED = 1008
+
+# Bounded refusal reason for a credential whose *encoding* is malformed. Kept distinct
+# from "Missing access_token" so an invalid wire representation is never reported — or
+# diagnosed — as an absent credential. It names no credential material.
+WS_REASON_MALFORMED_CREDENTIAL = "Malformed bearer credential encoding"
+
+
+# The browser WebSocket API cannot set request headers, so a browser client cannot
+# send `Authorization: Bearer ...` on the handshake. The only header a browser can
+# influence is `Sec-WebSocket-Protocol`, via `new WebSocket(url, protocols)`.
+#
+# Clients therefore offer two subprotocol values:
+#
+#     [WS_BEARER_SUBPROTOCOL, base64url(access_token)]
+#
+# The credential travels in a handshake header rather than the URL, so it stays out
+# of access logs, browser history, `Referer`, and bookmark/share surfaces — the
+# reasons query-param tokens are rejected by default. The token is base64url-encoded
+# (no padding) so that any credential shape remains a legal RFC 7230 header token.
+#
+# The server selects only WS_BEARER_SUBPROTOCOL on accept; the encoded credential is
+# never echoed back in the handshake response.
+WS_BEARER_SUBPROTOCOL = "mozaiks.bearer.v1"
+
+
+def _offered_subprotocols(websocket: WebSocket) -> list[str]:
+    """
+    Return the subprotocols the client offered, exactly as received.
+
+    Values are deliberately not stripped or filtered. ASGI servers already split and
+    trim the `Sec-WebSocket-Protocol` header, so trimming again here would only serve
+    to silently normalize a malformed credential (for example one carrying embedded
+    whitespace) into an acceptable one, and dropping empty entries would shift the
+    credential's position relative to its marker.
+    """
+    scope = getattr(websocket, "scope", None) or {}
+    offered = scope.get("subprotocols") or []
+    return [str(value) for value in offered]
+
+
+class MalformedBearerCredential(Exception):
+    """The bearer subprotocol was offered with a credential that is not canonical base64url."""
+
+
+# The credential component must be canonical, unpadded base64url and nothing else.
+# `=` and whitespace are deliberately absent: padding is a wire-format violation and
+# whitespace can never appear inside a handshake subprotocol token.
+_BEARER_CREDENTIAL_ALPHABET = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _decode_bearer_subprotocol(value: str) -> str | None:
+    """
+    Strictly decode a canonical unpadded base64url credential.
+
+    Returns the decoded token only when `value` is *exactly* the canonical unpadded
+    base64url encoding of a UTF-8 string. Malformed input is refused, never repaired:
+    illegal characters, whitespace, `=` padding, trailing garbage, impossible lengths,
+    invalid UTF-8, and non-canonical encodings that set unused trailing bits all return
+    None. Nothing is stripped, normalized, or partially decoded, so a malformed
+    representation can never be silently turned back into a usable credential.
+    """
+    if not _BEARER_CREDENTIAL_ALPHABET.fullmatch(value):
+        return None
+
+    # A base64 quantum is four characters; a remainder of one cannot encode any byte.
+    if len(value) % 4 == 1:
+        return None
+
+    # Padding is reconstructed only to satisfy the strict decoder; the wire
+    # representation itself stays unpadded. `validate=True` makes base64 reject stray
+    # characters instead of discarding them (the default silently drops them, which is
+    # exactly how trailing garbage used to slip through). The alphabet check above is
+    # still required: with altchars, `validate` would accept standard-base64 `+` and
+    # `/`, which are not legal in a base64url representation.
+    try:
+        raw = base64.b64decode(
+            value + "=" * (-len(value) % 4), altchars=b"-_", validate=True
+        )
+    except (binascii.Error, ValueError):
+        return None
+
+    # Canonicality: re-encoding must reproduce the supplied representation exactly.
+    # This is what rejects non-canonical encodings such as "QR", which decodes to the
+    # same byte as the canonical "QQ" only because the unused trailing bits are ignored.
+    if base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=") != value:
+        return None
+
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def extract_subprotocol_bearer_token(websocket: WebSocket) -> str | None:
+    """
+    Extract the bearer token a browser client carried in `Sec-WebSocket-Protocol`.
+
+    Returns None when the client did not offer the Mozaiks bearer subprotocol, or
+    offered the marker with no credential beside it at all.
+
+    Raises MalformedBearerCredential when a credential *is* present but is not a
+    canonical unpadded base64url representation, so that a malformed encoding is
+    refused outright rather than falling through to another transport. Never logs
+    the credential.
+    """
+    offered = _offered_subprotocols(websocket)
+    try:
+        marker_index = offered.index(WS_BEARER_SUBPROTOCOL)
+    except ValueError:
+        return None
+
+    credential_index = marker_index + 1
+    if credential_index >= len(offered):
+        logger.warning("WebSocket bearer subprotocol offered without a credential value")
+        return None
+
+    token = _decode_bearer_subprotocol(offered[credential_index])
+    if token is None:
+        # Refuse the connection outright rather than falling through to another
+        # transport: the client explicitly claimed this credential channel.
+        logger.warning("WebSocket bearer subprotocol credential was not canonical base64url")
+        raise MalformedBearerCredential
+    return token
+
+
+def negotiated_subprotocol(websocket: WebSocket) -> str | None:
+    """Return the subprotocol to echo on accept, or None when the client offered none."""
+    if WS_BEARER_SUBPROTOCOL in _offered_subprotocols(websocket):
+        return WS_BEARER_SUBPROTOCOL
+    return None
+
+
+async def accept_websocket(websocket: WebSocket) -> None:
+    """
+    Accept a WebSocket, completing subprotocol negotiation when the client used one.
+
+    RFC 6455 requires the server to select a subprotocol the client offered, so only
+    the marker is echoed — never the credential value beside it.
+    """
+    subprotocol = negotiated_subprotocol(websocket)
+    if subprotocol:
+        await websocket.accept(subprotocol=subprotocol)
+        return
+    await websocket.accept()
 
 
 @dataclass
@@ -122,7 +269,13 @@ async def authenticate_websocket(
 
     Token is extracted from:
     1. `access_token` parameter passed directly
-    2. `access_token` query parameter (if MOZAIKS_WS_ALLOW_QUERY_TOKEN=true)
+    2. the `Sec-WebSocket-Protocol` bearer subprotocol (the browser path)
+    3. `access_token` query parameter (if MOZAIKS_WS_ALLOW_QUERY_TOKEN=true)
+
+    A bearer subprotocol credential must be canonical unpadded base64url. A malformed
+    representation closes the connection with WS_REASON_MALFORMED_CREDENTIAL before the
+    auth adapter is consulted; it is never repaired, normalized, or retried on another
+    transport.
 
     Args:
         websocket: The WebSocket connection to authenticate
@@ -143,7 +296,7 @@ async def authenticate_websocket(
             if user is None:
                 return  # Already closed
 
-            await websocket.accept()
+            await accept_websocket(websocket)
             # Use websocket.state.user_id
     """
     # Get the configured auth adapter
@@ -174,6 +327,21 @@ async def authenticate_websocket(
 
     # Extract token
     token = access_token
+
+    # Browser clients carry the credential in the `Sec-WebSocket-Protocol` handshake
+    # header. This is the normal production browser path and needs no opt-in.
+    if not token:
+        try:
+            token = extract_subprotocol_bearer_token(websocket)
+        except MalformedBearerCredential:
+            # Fail closed on the claimed channel: do not fall through to the query
+            # param, and do not hand the adapter a token recovered from a malformed
+            # representation.
+            await websocket.close(
+                code=WS_CLOSE_POLICY_VIOLATION,
+                reason=WS_REASON_MALFORMED_CREDENTIAL,
+            )
+            return None
 
     # Query-param token extraction is disabled by default.
     # Tokens in query params appear in server logs, browser history, and proxy logs.
@@ -268,7 +436,7 @@ async def require_resource_ownership(
         if not await require_resource_ownership(websocket, chat.user_id):
             return  # Already closed with 1008
 
-        await websocket.accept()
+        await accept_websocket(websocket)
     """
     token_user_id = getattr(websocket.state, "user_id", None)
 

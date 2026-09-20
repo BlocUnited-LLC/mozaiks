@@ -28,8 +28,17 @@ HTTP:
 - Send `Authorization: Bearer <token>` on protected routes.
 
 WebSocket:
-- Connect with `access_token` query parameter:
-  - `ws://<host>/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}?access_token=<jwt>`
+- Carry the token in the `Sec-WebSocket-Protocol` handshake header, offering the marker
+  followed by the base64url-encoded (unpadded) token:
+  - endpoint: `wss://<host>/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}`
+  - subprotocols: `["mozaiks.bearer.v1", "<base64url(jwt)>"]`
+- The server validates the token through the same auth adapter as HTTP routes and
+  selects `mozaiks.bearer.v1` on accept. Missing or invalid credentials close with 1008.
+- Native clients that can set request headers may instead pass the token however their
+  WebSocket stack allows, as long as it does not go in the URL.
+- The `?access_token=<jwt>` query form is rejected unless
+  `MOZAIKS_WS_ALLOW_QUERY_TOKEN=true`, which is a local-development opt-in only —
+  URL-borne tokens leak into logs, history, and shared links.
 
 Auth-disabled local mode (`AUTH_ENABLED=false`) is supported for local development, but production clients should always run with auth enabled.
 
@@ -83,8 +92,18 @@ Auth-disabled local mode (`AUTH_ENABLED=false`) is supported for local developme
 ## Connect
 - Endpoint:
   - `/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}`
+- Optional query parameters:
+  - `suppress_history_replay=1` — skip the on-connect replay of an
+    in-progress run's history.
+  - `transport_purpose=ask_carrier` — declare an ask-mode (general-mode-only)
+    connection at connect time. The runtime then never resolves the carrier
+    onto a workflow session, never binds it in the session router, never
+    auto-starts a workflow, and never replays workflow history into it. The
+    `{workflow_name}` path segment is ignored for these connections (clients
+    send the literal `ask`), and the carrier chat document is persisted with
+    `transport_purpose: "ask_carrier"` so session listings exclude it.
 
-After connection, runtime emits initial chat metadata event so clients can align local cache and artifact state.
+After connection, runtime emits initial chat metadata event so clients can align local cache and artifact state. Ask-carrier connections skip this event and reply to `chat.enter_general_mode` with `chat.mode_changed` instead.
 
 ## Client → Runtime messages
 
@@ -98,8 +117,12 @@ After connection, runtime emits initial chat metadata event so clients can align
 }
 ```
 
-Optional fields:
-- none
+Optional `context` keys for ask-mode messages:
+- `page_context` — the current page's declared description (`meta.ai_context`),
+  appended to the ask system prompt.
+- `page_path` — the current page's route pattern (e.g. `/support`). The
+  runtime uses it to resolve the page's declared `meta.ask_context` read-only
+  module actions server-side; the client never names actions directly.
 
 ## UI tool response
 ```json

@@ -33,6 +33,20 @@ bootstrap/replay, and reconnectable UI state.
 Current implemented workflow-run persistence contract:
 
 - `ChatSessions` is run metadata and UI-state projection, not canonical execution history.
+- Its `WorkflowStatus` is `0` (in progress, including pauses), `1` (completed),
+  or `2` (failed). Failure writes `failed_at`, duration, and a session-version
+  increment before failure hooks or terminal UI delivery, and clears pending
+  input without discarding artifacts. A terminal status cannot be overwritten
+  by another outcome. Only completed sessions satisfy workflow prerequisites.
+- Failed sessions reject websocket reconnection and execution input. Both
+  completed and failed sessions reject direct orchestration re-entry. Pauses,
+  admission denials, lease loss, and cancellation do not mark a session failed.
+  Retrying a failed workflow requires a new session, not replay of that run.
+- A closed chat-scoped AG2 channel also blocks opening a replacement channel,
+  even for older session projections left at `0`. This uses AG2's existing WAL,
+  not Factory build receipts or a second runtime state store. A receipt-only
+  historical failure with no terminal AG2 state cannot be inferred generically;
+  this change does not migrate historical records or inspect product outcomes.
 - AG2 run history is persisted separately through the AG2 stream storage adapters and is the source of truth for execution re-entry and UI replay.
 - While the backend process still owns a paused AG2 workflow channel, user
   replies continue that live AG2 channel first. Persisted AG2 events are the
@@ -40,7 +54,7 @@ Current implemented workflow-run persistence contract:
   longer available.
 - AG2 agent-turn, LLM-call, tool-call, and HITL telemetry is emitted through AG2
   beta `TelemetryMiddleware` as OpenTelemetry spans.
-- LLM token usage is emitted by Mozaiks AG2 1.0 beta usage middleware as
+- LLM token usage is emitted by Mozaiks AG2 1.0 usage middleware as
   `chat.usage_delta` events and stored in `RuntimeUsageEvents`. This ledger is
   measurement-only. It does not enforce entitlements, quotas, pricing, or
   hosted billing.
@@ -79,6 +93,14 @@ Framework-owned pipeline artifacts produced and consumed by `factory_app`:
 
 These collections hold the durable handoff between workflow stages such as
 `ValueEngine`, `DesignDocs`, `AgentGenerator`, and `AppGenerator`.
+
+Versioned `BuildRecord` documents in `ArtifactVersions` use the unique key
+`(app_id, build_family, build_key, version_number)`. Counters in
+`ArtifactVersionCounters` use `(app_id, build_family, build_key)`. Store
+initialization installs these indexes for canonical records and removes only
+the known obsolete unique indexes over `artifact_kind` and `artifact_key`.
+Existing documents are not deleted or rewritten. An unexpected index definition
+or conflicting canonical data fails initialization and requires operator review.
 
 ### 2b. Platform Connector Metadata
 
@@ -234,6 +256,36 @@ definition changes require an explicit operator compatibility migration.
 App business data database names are resolved from an injected adapter value,
 then `MOZAIKS_APP_DATABASE_NAME`, then `MOZAIKS_APPS_DATABASE`, then
 `mozaiks_apps`.
+
+Account export and deletion dispatch registered module `AccountDataHandler`
+implementations through the platform's `/api/account/export` and `/api/account`
+routes. The routes use the authenticated principal's app and user identity and
+the existing app-data database accessor; they do not read the workflow runtime's
+persistence manager. App-data alias consumers additionally honor
+`MOZAIKS_APP_DATA_DATABASE_NAME` before the app database settings above. Handlers
+resolve their own collection contracts and enforce app/user ownership. Factory's
+onboarding module exercises this path with canonical generated collection names;
+an alias manifest is not required merely to resolve the account database.
+
+AppGenerator's ServiceAgent owns generated `backend/account_data_handler.py`;
+the materializer preserves its `ServiceOutput.python_files` content, rather than
+generating a deletion policy from module stubs. The existing account-data file
+contract and hook supply raw Motor API guidance and the current
+`mozaiksai.core.runtime.persistence.naming.collection_name_for` signature.
+For a repo using `ctx.persistence.collection(module_id, entity_name)`, the handler
+must use those same IDs with `collection_name_for(app_id=app_id, ...)` and omit
+`app_slug`, matching the standard executor. Literal collections, aliases,
+external bindings, and custom contexts retain their declared storage contract;
+the generated-name helper is not a universal alias resolver.
+
+Raw database access does not inject scope: deletion and export queries must
+include app identity and the user's ownership fields, even in an app-specific
+physical collection. Preserve the module's existing deletion or anonymization
+policy. Account exports must also be JSON-safe before reaching `JSONResponse`:
+exclude storage `_id` or stringify ObjectId values, and encode datetimes as
+ISO 8601 strings, including nested values. The contract's export example is
+tested against real BSON values and JSON serialization; this verifies guidance
+and materialization, not arbitrary model-generated implementations.
 
 Migration history records use `in_progress`, `applied`, and `failed`. The
 `mozaiksai.AppDatabaseMigrations` collection also acts as the migration lock:

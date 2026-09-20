@@ -429,11 +429,18 @@ class TestBlockedDeferredPhasePattern:
 class TestAppGeneratorRoutesToProposalOnly:
 
     def test_agents_yaml_routes_planning_workflows_to_proposal_only(self):
-        text = _read(AGENTS_YAML)
-        # AppPlanAgent must guide proposal_only selection for planning workflows
+        planner = next(
+            agent for agent in _load_yaml(AGENTS_YAML)["agents"]
+            if agent["name"] == "AppPlanAgent"
+        )
+        instructions = next(
+            section["content"] for section in planner["prompt_sections"]
+            if section["id"] == "instructions"
+        )
+        # The planning purpose must select the archetype in the same instruction.
         assert re.search(
-            r"proposal_only.{0,200}(plan|assess|recommend|compliance|migration|remediation)",
-            text, re.DOTALL | re.IGNORECASE
+            r"\b(plan|assess|recommend)\b[^\n]*\buse\b[^\n]*`proposal_only`",
+            instructions, re.IGNORECASE
         ), "AppPlanAgent must route planning/assessment workflows to proposal_only"
 
     def test_proposal_only_select_when_includes_planning_examples(self):

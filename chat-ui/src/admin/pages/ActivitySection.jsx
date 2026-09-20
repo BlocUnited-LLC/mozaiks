@@ -41,6 +41,7 @@ function SessionsPanel() {
             <tbody>
               {sessions.map((s) => {
                 const completed = s.status === 1
+                const failed = s.status === 2
                 const tokens = (s.usage_prompt_tokens_final ?? 0) + (s.usage_completion_tokens_final ?? 0)
                 const started = s.created_at ? new Date(s.created_at).toLocaleString() : '—'
                 return (
@@ -48,8 +49,8 @@ function SessionsPanel() {
                     <td className="px-3 py-2 font-medium text-foreground">{s.workflow_name}</td>
                     <td className="px-3 py-2 text-muted-foreground">{s.app_id}</td>
                     <td className="px-3 py-2">
-                      <Badge variant={completed ? 'success' : 'warning'}>
-                        {completed ? 'complete' : 'in progress'}
+                      <Badge variant={completed ? 'success' : failed ? 'error' : 'warning'}>
+                        {completed ? 'complete' : failed ? 'failed' : 'in progress'}
                       </Badge>
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">

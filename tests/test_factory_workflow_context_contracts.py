@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
 import yaml
+
+from mozaiksai.core.workflow.context.authority import (
+    AGENT_TEXT_WRITER,
+    SENTINEL_TEXT_TRIGGER_WRITER,
+    build_context_authority_policy,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
@@ -89,9 +96,65 @@ def _definitions(workflow_id: str) -> dict:
     return _load_context_variables(workflow_id).get("definitions") or {}
 
 
+def test_agentgenerator_attachments_use_execution_session_scope():
+    from mozaiksai.core.workflow.context.variables import _materialize_query_template
+
+    source = _definitions("AgentGenerator")["chat_attachments"]["source"]
+    assert source["collection"] == "ChatSessions"
+    query = _materialize_query_template(source["query_template"], {
+        "chat_id": "execution-chat", "run_build_binding": {"target_app_id": "generated-app"},
+    }, app_id="factory-host")
+    assert query == {"app_id": "factory-host", "_id": "execution-chat"}
+
+
 def _agent_variables(workflow_id: str, agent_name: str) -> set[str]:
     agents = _load_context_variables(workflow_id).get("agents") or {}
     return set((agents.get(agent_name) or {}).get("variables") or [])
+
+
+def test_appgenerator_tool_state_writes_are_declared_and_authorized():
+    definitions = _definitions("AppGenerator")
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=definitions)
+    for path in (WORKFLOWS_ROOT / "AppGenerator" / "tools").glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "_context_set" and len(node.args) >= 3
+                    and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+                continue
+            key = node.args[1].value
+            assert key in definitions, f"{path.name} writes undeclared state {key}"
+            policy.require_can_write(key, writer_id="deterministic_tool")
+
+
+def test_app_acceptance_evidence_cannot_be_written_by_agent_text():
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=_definitions("AppGenerator"))
+    for key in ("app_bundle_acceptance_status", "app_bundle_acceptance_result", "app_bundle_validation_evidence"):
+        assert not policy.can_write(key, writer_id=AGENT_TEXT_WRITER)
+
+
+def test_agentgenerator_interview_readiness_is_not_writable_by_agent_text() -> None:
+    """Readiness routes the build, so model prose must not be able to set it.
+
+    This used to be an exact-match `NEXT` sentinel, which held the boundary but
+    required the model to emit a bare token with no preamble — it did not, and
+    the workflow hung (#591). Readiness is now a validated structured-output
+    field written by a deterministic tool. The boundary is the same; only the
+    mechanism changed, so the agent-text writer must still be refused.
+    """
+    definitions = _definitions("AgentGenerator")
+    readiness = definitions["interview_outcome"]
+
+    assert readiness["writer_ids"] == ["deterministic_tool"]
+    assert not readiness["source"].get("triggers"), (
+        "readiness must not be inferred from chat text"
+    )
+
+    policy = build_context_authority_policy(
+        workflow_name="AgentGenerator", definitions=definitions,
+    )
+    policy.require_can_write("interview_outcome", writer_id="deterministic_tool")
+    assert not policy.can_write("interview_outcome", writer_id=AGENT_TEXT_WRITER)
+    assert not policy.can_write("interview_outcome", writer_id=SENTINEL_TEXT_TRIGGER_WRITER)
 
 
 @pytest.mark.parametrize("workflow_id", BUILD_SEQUENCE_WORKFLOWS)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -7,10 +9,129 @@ from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload as extract_appgenerator_code_file_map,
 )
+from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
+from mozaiksai.core.runtime.composition.schema_validation import validate_json_schema
+from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
 )
+from mozaiksai.core.workflow.outputs.structured import build_models_from_config
+
+
+def _typed_schema():
+    return {
+        "type": "object", "description": None, "required": ["name"], "items_type": None,
+        "properties": [
+            {"name": "name", "type": "string", "description": "Customer name", "required": True,
+             "enum_values": ["Alice", "Bob"], "items_type": None},
+            {"name": "tags", "type": "array", "description": None, "required": False,
+             "enum_values": [], "items_type": "string"},
+        ],
+    }
+
+
+def test_typed_schema_materialization_matches_runtime_validation_without_mutating_source():
+    schema = _typed_schema()
+    payload = {"module_contract": {
+        "module_id": "customers",
+        "module_yaml": {"actions": [{"input_schema": schema, "output_schema": schema}],
+                        "capabilities": [{"input_schema": schema}]},
+        "events_yaml": {"events": [{"payload_schema": schema}]},
+    }}
+    files = extract_code_file_map_from_payload(payload)
+    manifest = yaml.safe_load(files["modules/customers/module.yaml"])
+    event_schema = yaml.safe_load(files["modules/customers/contracts/events.yaml"])["events"][0]["payload_schema"]
+    request = manifest["actions"][0]["input_schema"]
+    assert request == manifest["capabilities"][0]["input_schema"]
+    import_closed_contract_schema(request)
+    for compiled in (request, manifest["actions"][0]["output_schema"], event_schema):
+        assert validate_json_schema({"name": "Alice", "tags": ["staff"]}, compiled) is None
+        assert validate_json_schema({"name": "Unknown"}, compiled).category == "value_invalid"
+        assert validate_json_schema({}, compiled).category == "value_invalid"
+        assert validate_json_schema({"name": "Alice", "tags": [2]}, compiled).category == "value_invalid"
+    assert validate_json_schema({"name": "Alice", "extra": True}, request).category == "value_invalid"
+    assert schema == _typed_schema()
+
+
+@pytest.mark.parametrize("invalid", ["duplicate", "required", "array_type", "nested_object"])
+def test_typed_schema_materialization_rejects_unrepresentable_contracts(invalid):
+    schema = _typed_schema()
+    if invalid == "duplicate":
+        schema["properties"].append(dict(schema["properties"][0]))
+    elif invalid == "required":
+        schema["required"] = []
+    elif invalid == "array_type":
+        schema["properties"][1]["items_type"] = "imaginary"
+    else:
+        schema["properties"][1]["type"] = "object"
+        schema["properties"][1]["items_type"] = None
+    with pytest.raises(ValueError):
+        extract_code_file_map_from_payload({"module_contract": {
+            "module_id": "customers", "module_yaml": {"actions": [{"input_schema": schema}]},
+        }})
+
+
+def test_module_only_bundle_round_trips_through_generator_and_runtime_contracts() -> None:
+    config = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator/structured_outputs.yaml")
+        .read_text(encoding="utf-8")
+    )
+    bundle_model = build_models_from_config(config["models"])["ModuleContractBundle"]
+    bundle = bundle_model.model_validate({
+        "module_id": "customers",
+        "module_yaml": {
+            "schema_version": "mozaiks.module.v1",
+            "module": {
+                "id": "customers", "display_name": "Customers", "version": "1.0.0",
+                "type": "standard", "description": "Customer records", "owner": "app",
+                "visibility": "private", "handler": "backend.handler:CustomersModule",
+                "user_data_scope": False,
+            },
+            "permissions": [], "actions": [], "capabilities": [],
+        },
+        **dict.fromkeys([
+            "events_yaml", "reactions_yaml", "notifications_yaml", "settings_yaml", "admin_yaml",
+            "profile_yaml", "relationships_yaml", "policy_hooks_yaml", "runtime_extensions_yaml",
+        ]),
+        "python_stubs": [], "js_stubs": [],
+    })
+
+    file_map = extract_code_file_map_from_payload({"module_contract": bundle.model_dump(mode="json")})
+
+    assert set(file_map) == {"modules/customers/module.yaml"}
+    module = ModuleDefinition.model_validate(yaml.safe_load(file_map["modules/customers/module.yaml"]))
+    assert module.name == "customers"
+
+
+@pytest.mark.parametrize("name", [
+    "events", "reactions", "notifications", "settings", "admin", "profile", "relationships", "policy_hooks",
+])
+def test_null_module_manifest_cannot_be_resurrected_by_raw_output(name: str) -> None:
+    payload = {
+        "module_contract": {"module_id": "customers", f"{name}_yaml": None},
+        "code_files": [{"filename": f"modules/customers/contracts/{name}.yaml", "content": "{}"}],
+    }
+    with pytest.raises(ValueError, match=f"module_contract.{name}_yaml is null"):
+        extract_code_file_map_from_payload(payload)
+
+
+def test_extract_code_file_map_preserves_empty_package_markers() -> None:
+    payload = {
+        "code_files": [
+            {"filename": "services/__init__.py", "content": ""},
+            {
+                "filename": "services/integrations/__init__.py",
+                "content": "",
+                "filecontent": "raise RuntimeError('must not override explicit empty content')",
+            },
+            {"filename": "services/missing.py", "content": None},
+        ],
+    }
+
+    expected = {"services/__init__.py": "", "services/integrations/__init__.py": ""}
+    assert extract_code_file_map_from_payload(payload) == expected
+    assert {item["filename"]: item["content"] for item in _merge_code_files([payload])} == expected
 
 
 def test_extract_code_file_map_materializes_typed_service_output() -> None:

@@ -73,6 +73,11 @@ dist/
 *.local
 /package-lock.json
 
+# Agent worktrees (checkouts, not sources). .local/worktrees/ is matched only
+# incidentally by the Node `*.local` rule above; name both deliberately.
+.codex-worktrees/
+.local/worktrees/
+
 # Runtime outputs
 .tmp/
 tmp/
@@ -80,6 +85,10 @@ logs/logs/
 logs/agent_outputs/
 logs/workflow_converter/
 generated_apps/
+# Generator output staged for validation/promotion is never source. A live
+# Studio run writes app-intelligence artifacts here; one already reached main
+# this way before it was ignored.
+generated/app_intelligence/
 uploads/
 mozaiks-platform/
 
@@ -125,3 +134,7 @@ web_shell/.mozaiks-tailwind-sources/
 
 # Local quickstart workspace (generated output, contains copies of repo files)
 mozaiks-workspace/
+
+# Tail-harness run output (screenshots, per-run report) - regenerated every run.
+web_shell/live-tail/
+.local/live-tail/

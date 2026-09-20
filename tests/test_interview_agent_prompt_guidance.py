@@ -14,7 +14,7 @@ def test_value_engine_prompt_stays_route_bounded_and_non_exhaustive() -> None:
 
     assert 'do NOT ask whether they already have an existing app' in source
     assert 'You do not need to ask every category directly.' in source
-    assert 'Competitor/market depth belongs to ResearchAgent.' in source
+    assert 'Competitor/market depth belongs in the research findings.' in source
 
 
 def test_appgenerator_prompt_prefers_context_and_assumption_forward_guidance() -> None:
@@ -49,4 +49,5 @@ def test_interview_orchestrators_use_guidance_language() -> None:
 
     assert 'guide the user to a concrete app direction' in value_orchestrator
     assert 'guide the user through only the missing deterministic' in app_orchestrator
-    assert 'guide the user with assumptions or suggestions' in agent_orchestrator
+    assert 'only a missing question that changes the required AI workflow design' in agent_orchestrator
+    assert 'NEXT' in agent_orchestrator

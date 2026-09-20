@@ -84,7 +84,6 @@ from pathlib import Path
 from mozaiksai.control_plane.app_context_impact import AppContextImpactHints
 from mozaiksai.control_plane.dry_run import (
     _app_context_impact_warnings,
-    _dedupe,
     _has_database_review_impact,
     _has_integration_impact,
     _has_managed_facade_impact,
@@ -94,6 +93,7 @@ from mozaiksai.control_plane.dry_run import (
     _stable_request_id,
     _staging_area_for,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 # ---------------------------------------------------------------------------
 # 1. _dedupe
@@ -101,35 +101,35 @@ from mozaiksai.control_plane.dry_run import (
 
 class TestDedupe:
     def test_removes_duplicates(self):
-        result = _dedupe(["a", "b", "a", "c"])
+        result = dedupe_strings(["a", "b", "a", "c"])
         assert result == ["a", "b", "c"]
 
     def test_preserves_order(self):
-        result = _dedupe(["c", "b", "a"])
+        result = dedupe_strings(["c", "b", "a"])
         assert result == ["c", "b", "a"]
 
     def test_strips_whitespace_before_dedup(self):
-        result = _dedupe(["  a  ", "a"])
+        result = dedupe_strings(["  a  ", "a"])
         assert result == ["a"]
 
     def test_removes_empty_strings(self):
-        result = _dedupe(["a", "", "b"])
+        result = dedupe_strings(["a", "", "b"])
         assert result == ["a", "b"]
 
     def test_removes_whitespace_only_strings(self):
-        result = _dedupe(["a", "   ", "b"])
+        result = dedupe_strings(["a", "   ", "b"])
         assert result == ["a", "b"]
 
     def test_empty_list_returns_empty(self):
-        assert _dedupe([]) == []
+        assert dedupe_strings([]) == []
 
     def test_all_duplicates_single_result(self):
-        result = _dedupe(["x", "x", "x"])
+        result = dedupe_strings(["x", "x", "x"])
         assert result == ["x"]
 
     def test_strips_then_dedupes(self):
         # "a" and "  a  " both normalize to "a"
-        result = _dedupe(["a", "  a  ", "b"])
+        result = dedupe_strings(["a", "  a  ", "b"])
         assert result == ["a", "b"]
 
 

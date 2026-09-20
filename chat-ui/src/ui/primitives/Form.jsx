@@ -18,14 +18,14 @@
  *   type         {string}    — "text" | "email" | "password" | "number" | "textarea" | "select" | "checkbox"
  *   required     {boolean}
  *   placeholder  {string}
- *   default_value {any}
+ *   default_value {string|number|boolean|null}
  *   options      {Array<{value, label}>}  — for select
  *
  * Agent event: ui.form.set_field
  *   payload: { component_id, field, value }
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Input } from '../base/components/input.jsx';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../base/components/select.jsx';
 import { Button } from './Button.jsx';
@@ -41,9 +41,9 @@ const GRID_COL_CLASS = {
   6: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6',
 };
 
-function buildInitialValues(fields) {
+function buildInitialValues(fields, initialValues) {
   return Object.fromEntries(
-    fields.map((f) => [f.name, f.default_value ?? (f.type === 'checkbox' ? false : '')])
+    fields.map((f) => [f.name, initialValues?.[f.name] ?? f.default_value ?? (f.type === 'checkbox' ? false : '')])
   );
 }
 
@@ -111,6 +111,7 @@ function FieldRenderer({ field, value, onChange, disabled, fieldId }) {
 export function Form({
   id,
   fields = [],
+  initial_values = null,
   layout = 'vertical',
   columns = 2,
   submit_label = 'Submit',
@@ -120,9 +121,13 @@ export function Form({
   disabled = false,
   className,
 }) {
-  const [values, setValues]  = useState(() => buildInitialValues(fields));
+  const [values, setValues]  = useState(() => buildInitialValues(fields, initial_values));
   const [errors, setErrors]  = useState({});
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    setValues(buildInitialValues(fields, initial_values));
+    setErrors({});
+  }, [initial_values]);
 
   const setField = useCallback((name, value) => {
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -137,7 +142,8 @@ export function Form({
   const validate = () => {
     const newErrors = {};
     for (const f of fields) {
-      if (f.required && !values[f.name] && values[f.name] !== false) {
+      const value = values[f.name];
+      if (f.required && ((typeof value === 'string' && !value.trim()) || (!value && value !== false))) {
         newErrors[f.name] = `${f.label} is required`;
       }
     }
@@ -183,14 +189,14 @@ export function Form({
           );
         })}
       </div>
-      <div className="mt-6 flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-end">
-        <Button
+      {(onSubmit || onCancel) && <div className="mt-6 flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-end">
+        {onSubmit && <Button
           type="submit"
           label={loading ? 'Saving…' : submit_label}
           variant="primary"
           className="w-full sm:w-auto"
           disabled={disabled || loading}
-        />
+        />}
         {onCancel && (
           <Button
             type="button"
@@ -201,7 +207,7 @@ export function Form({
             disabled={loading}
           />
         )}
-      </div>
+      </div>}
     </form>
   );
 }

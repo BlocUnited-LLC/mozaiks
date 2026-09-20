@@ -1,0 +1,132 @@
+"""
+Synthetic pages for plan-driven test fixtures, not runtime materialization.
+"""
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from mozaiksai.core.workflow.generator_support.page_plan_utils import _slug
+
+
+def _decode_config_hint(value: Any) -> dict[str, Any]:
+    """Decode a JSON-encoded config_hint string to a dict, or return {} on failure."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+            return decoded if isinstance(decoded, dict) else {}
+        except (json.JSONDecodeError, ValueError):
+            return {}
+    return {}
+
+
+def _default_table_columns(page: dict[str, Any]) -> list[str]:
+    fields: list[str] = ["id"]
+    for key in ("primary_entities", "primary_actions"):
+        raw_values = page.get(key)
+        if not isinstance(raw_values, list):
+            continue
+        for raw in raw_values:
+            value = _slug(str(raw or ""))
+            if value and value not in fields:
+                fields.append(value)
+            if len(fields) >= 3:
+                return fields
+    for value in ("name", "status"):
+        if value not in fields:
+            fields.append(value)
+    return fields[:3]
+
+
+def _canonical_section_config(primitive: str, config: dict[str, Any], page: dict[str, Any], title: str) -> dict[str, Any]:
+    """Fill deterministic required primitive scaffolding for AppBuildPlan hints."""
+    normalized = dict(config)
+    if primitive in {"DataTable", "ResourceTable"} and not isinstance(normalized.get("columns"), list):
+        normalized["columns"] = _default_table_columns(page)
+    elif primitive == "Form" and not isinstance(normalized.get("fields"), list):
+        normalized["fields"] = []
+    elif primitive == "PageHeader" and not isinstance(normalized.get("title"), str):
+        normalized["title"] = title
+    elif primitive == "SummaryStrip" and not isinstance(normalized.get("items"), list):
+        normalized["items"] = [{"label": title, "value": None}]
+    elif primitive == "ActionButton":
+        api_endpoint = normalized.pop("api_endpoint", None)
+        if not isinstance(normalized.get("actions"), list):
+            if isinstance(api_endpoint, str) and api_endpoint.startswith("/api/"):
+                normalized["actions"] = [
+                    {
+                        "label": title,
+                        "action_type": "submit",
+                        "href": api_endpoint,
+                    }
+                ]
+            else:
+                normalized["actions"] = []
+    return normalized
+
+
+def _page_from_plan(page: dict[str, Any], stem: str) -> dict[str, Any]:
+    title = str(page.get("title") or page.get("name") or stem.replace("_", " ").title()).strip()
+    route = str(page.get("route") or f"/{stem.replace('_', '-')}").strip()
+    sections: list[dict[str, Any]] = []
+    hints = page.get("sections_hint")
+    if isinstance(hints, list):
+        for index, hint in enumerate(hints):
+            if not isinstance(hint, dict):
+                continue
+            primitive = str(hint.get("primitive") or "PageHeader").strip()
+            section_id = str(hint.get("section_id_hint") or f"{stem}-{index + 1}").strip()
+            sections.append(
+                {
+                    "id": section_id,
+                    "primitive": primitive,
+                    "title": hint.get("title_hint"),
+                    "config": _canonical_section_config(
+                        primitive,
+                        _decode_config_hint(hint.get("config_hint")),
+                        page,
+                        title,
+                    ),
+                    "event_triggers": [],
+                    "roles": None,
+                }
+            )
+    if not sections:
+        sections.append(
+            {
+                "id": f"{stem}-header",
+                "primitive": "PageHeader",
+                "title": None,
+                "config": {"title": title, "subtitle": str(page.get("purpose") or "").strip()},
+                "event_triggers": [],
+                "roles": None,
+            }
+        )
+    return {
+        "schema_version": "mozaiks.app_page.v1",
+        "name": str(page.get("name") or title).strip(),
+        "route": route,
+        "title": title,
+        "page_type": str(page.get("page_type_hint") or page.get("page_type") or "record_list").strip(),
+        "layout": str(page.get("layout") or "full-width").strip(),
+        "shell_mode": str(page.get("shell_mode") or page.get("shell_mode_hint") or "workspace").strip(),
+        "roles": page.get("roles"),
+        "navigation": {
+            "id": stem,
+            "label": title,
+            "icon": None,
+            "scope": "global",
+            "order": 10,
+            "visible": True,
+            "placement": None,
+        },
+        "sections": sections,
+    }
+
+
+__all__ = [
+    "_decode_config_hint",
+    "_page_from_plan",
+]

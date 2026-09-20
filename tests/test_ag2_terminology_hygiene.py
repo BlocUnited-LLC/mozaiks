@@ -52,6 +52,8 @@ _FORBIDDEN_PATTERNS = [
         r"\bLocalShellTool\b",
         r"\bAG2RunnerAdapter\b",
         r"\bAG2 beta\b",
+        r"\bAG2 1\.0 beta\b",
+        r"docs\.ag2\.ai/latest/docs/beta/",
         r"\bAutoGen\b",
         r"\bautogen_ai_agents\b",
         r"formerly\s+autogen",

@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from tests.factory_context import factory_context
+
 
 def _load_save_app_schema_module():
     workspace = Path(__file__).resolve().parents[1]
@@ -32,7 +35,7 @@ save_app_schema_module = _load_save_app_schema_module()
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -61,6 +64,147 @@ def _base_page():
         "layout": "grid",
         "sections": [{"id": "hero", "primitive": "Panel", "config": {"title": "Overview"}}],
     }
+
+
+def test_partial_schema_repair_preserves_pages_and_updates_validation_bundle(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    dashboard = _base_page()
+    customers = {**_base_page(), "name": "Customers", "route": "/customers", "title": "Customers"}
+    backend = "class Handler: ..."
+    context = _Context({
+        "generated_files": {
+            "ui/pages/Dashboard.yaml": yaml.safe_dump(dashboard),
+            "ui/pages/Customers.yaml": yaml.safe_dump(customers),
+            "modules/customers/backend/handler.py": backend,
+        },
+        "code_files": [{"filename": "ui/pages/Customers.yaml", "content": yaml.safe_dump(customers)}],
+    })
+    customers["title"] = "My Customers"
+
+    save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[customers], context_variables=context,
+    )
+
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
+
+    files = admitted_app_file_map(context)
+    assert files["modules/customers/backend/handler.py"] == backend
+    assert yaml.safe_load(files["ui/pages/Dashboard.yaml"]) == dashboard
+    assert yaml.safe_load(files["ui/pages/Customers.yaml"])["title"] == "My Customers"
+    assert {page["route"] for page in context.get("app_pages")} == {"/dashboard", "/customers"}
+    assert json.loads(files["app.json"])["startup"]["landing_spot"] == "/dashboard"
+
+
+def _page_repair_context(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    context = _Context()
+    save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[_base_page()], context_variables=context,
+    )
+    tasks = [
+        {"task_id": "page", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+         "owned_paths": ["ui/pages/Dashboard.yaml"], "depends_on": []},
+        {"task_id": "config", "task_type": "app_config", "initial_agent": "ConfigMiddlewareAgent",
+         "owned_paths": ["config/shell.json"], "depends_on": []},
+    ]
+    context.set("app_build_plan", {"build_tasks": tasks})
+    context.set("app_task_batch_items", tasks)
+    context.set("bundle_repair_target", "AppSchemaAgent")
+    context.set("bundle_repair_result", {"active": {
+        "task_id": "page", "target_agent": "AppSchemaAgent", "request_id": "page-repair-1",
+        "allowed_paths": ["ui/pages/Dashboard.yaml"], "status": "selected",
+    }})
+    return context
+
+
+def test_schema_repair_checks_materialized_ownership_before_any_bundle_mutation(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    context = _page_repair_context(tmp_path, monkeypatch)
+    before = deepcopy(context.data)
+    output_dir = Path(context.get("generated_app_dir"))
+    disk_before = {path.relative_to(output_dir).as_posix(): path.read_bytes()
+                   for path in output_dir.rglob("*") if path.is_file()}
+    changed = {**_base_page(), "title": "Repaired dashboard"}
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[changed], shell_config={"navigation": {}},
+        context_variables=context,
+    )
+
+    assert "repair rejected" in result
+    assert "config/shell.json" in result
+    assert context.get("generated_files") == before["generated_files"]
+    assert context.get("code_files") == before["code_files"]
+    assert context.get("app_pages") == before["app_pages"]
+    assert context.get("bundle_repair_result")["active"]["status"] == "rejected"
+    assert {path.relative_to(output_dir).as_posix(): path.read_bytes()
+            for path in output_dir.rglob("*") if path.is_file()} == disk_before
+
+
+def test_schema_repair_preserves_deterministic_scaffolds_and_unrelated_bytes(tmp_path, monkeypatch):
+    context = _page_repair_context(tmp_path, monkeypatch)
+    before = dict(context.get("generated_files"))
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[{**_base_page(), "title": "Repaired dashboard"}],
+        context_variables=context,
+    )
+
+    assert "repair rejected" not in result
+    assert context.get("bundle_repair_result")["active"]["status"] == "responded"
+    assert yaml.safe_load(context.get("generated_files")["ui/pages/Dashboard.yaml"])["title"] == "Repaired dashboard"
+    for path, content in before.items():
+        if path != "ui/pages/Dashboard.yaml":
+            assert context.get("generated_files")[path] == content
+
+
+def test_invalid_page_repair_is_rejected_before_context_or_disk_changes(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    context = _page_repair_context(tmp_path, monkeypatch)
+    before = deepcopy(context.data)
+    output_dir = Path(context.get("generated_app_dir"))
+    disk_before = {path.relative_to(output_dir).as_posix(): path.read_bytes()
+                   for path in output_dir.rglob("*") if path.is_file()}
+    invalid_page = {**_base_page(), "sections": []}
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[invalid_page], context_variables=context,
+    )
+
+    assert "repair rejected" in result
+    assert "at least one section" in result
+    assert context.get("bundle_repair_result")["active"]["status"] == "rejected"
+    assert context.get("app_pages") == before["app_pages"]
+    assert context.get("code_files") == before["code_files"]
+    assert context.get("generated_files") == before["generated_files"]
+    assert {path.relative_to(output_dir).as_posix(): path.read_bytes()
+            for path in output_dir.rglob("*") if path.is_file()} == disk_before
+    context.set("bundle_repair_result", {})
+    context.set("bundle_repair_target", None)
+    with pytest.raises(ValueError, match="at least one section"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(), pages=[invalid_page], context_variables=context,
+        )
+
+
+def test_schema_repair_filesystem_failure_remains_uncertain(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    context = _page_repair_context(tmp_path, monkeypatch)
+    before = deepcopy(context.data)
+
+    def unavailable(*args, **kwargs):
+        raise OSError("storage unavailable")
+
+    monkeypatch.setattr(save_app_schema_module, "_persist_to_filesystem", unavailable)
+    with pytest.raises(RuntimeError, match="Could not write schema files to disk"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(), pages=[_base_page()], context_variables=context,
+        )
+    assert context.get("bundle_repair_result")["active"]["status"] == "selected"
+    assert context.data == before
 
 
 def _canonical_page():
@@ -286,7 +430,7 @@ def test_save_app_schema_accepts_empty_primitive(monkeypatch, tmp_path: Path) ->
     )
 
     assert "App: Ops Portal" in result
-    assert "Empty" in context.data["available_page_primitives"]
+    assert context.data["app_schema_ready"] is True
 
 
 def test_save_app_schema_accepts_workflow_action(monkeypatch, tmp_path: Path) -> None:
@@ -770,7 +914,10 @@ def test_save_app_schema_rejects_submit_action_without_resolvable_href(monkeypat
         }
     ]
 
-    with pytest.raises(ValueError, match=r"submit_action\.href is required for submit actions"):
+    # The tool no longer re-implements the per-variant requirement: the action
+    # contract owns it, and the rejection now carries the runtime's own reason
+    # rather than a second copy of the rule that could drift from it.
+    with pytest.raises(ValueError, match=r"submit actions require href"):
         save_app_schema_module.save_app_schema(
             manifest=_base_manifest(),
             pages=[page],
@@ -1104,18 +1251,30 @@ def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path:
 
 
 def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
-    context = _Context({"data_contract": _data_contract()})
+    from mozaiksai.core.workflow.agents.factory import _workflow_tool_invocation
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+    from mozaiksai.core.workflow.context.schema import load_context_variables_config
 
-    result = save_app_schema_module.save_app_schema(
-        manifest=_base_manifest(),
-        pages=[_base_page()],
-        context_variables=context,
-    )
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    root = Path(__file__).resolve().parents[1]
+    config = load_context_variables_config(yaml.safe_load(
+        (root / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"),
+    ))
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=config.definitions)
+    context = ContextVariablesBridge(factory_context({"data_contract": _data_contract()}), authority_policy=policy)
+    context._bind_run(("AppGenerator", "test-app", "test-chat"), policy)
+    with _workflow_tool_invocation(context):
+        result = save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[_base_page()],
+            context_variables=context,
+        )
 
     data_contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
     assert data_contract["surfaces"][0]["surface_id"] == "users"
-    assert context.data["app_data_contract"]["policies"]["default_scope_field"] == "app_id"
+    assert context.get("data_contract")["policies"]["default_scope_field"] == "app_id"
+    assert context.get("app_data_contract") is None
+    assert context.get("app_schema_ready") is True
     assert "data/contract.json" in result
 
 
@@ -1135,7 +1294,7 @@ def test_save_app_schema_writes_to_generated_artifact_root(monkeypatch, tmp_path
     generated_root = tmp_path / "generated"
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
     monkeypatch.delenv("MOZAIKS_APP_ID", raising=False)
-    context = _Context({"app_id": "app/one", "build_id": "build one"})
+    context = _Context({"app_id": "app-one", "build_id": "build-one"})
 
     save_app_schema_module.save_app_schema(
         manifest=_base_manifest(),
@@ -1148,7 +1307,7 @@ def test_save_app_schema_writes_to_generated_artifact_root(monkeypatch, tmp_path
     provenance = yaml.safe_load((output_dir / "provenance.yaml").read_text(encoding="utf-8"))
     assert provenance["schema_version"] == "mozaiks.provenance.v1"
     assert provenance["created_with"]["workflow"] == "AppGenerator"
-    assert provenance["created_with"]["build_id"] == "build one"
+    assert provenance["created_with"]["build_id"] == "build-one"
     assert (output_dir / "ui" / "pages" / "Dashboard.yaml").exists()
     assert context.data["generated_app_dir"] == str(output_dir)
 

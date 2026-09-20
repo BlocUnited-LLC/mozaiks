@@ -17,6 +17,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageRenderer } from '../page-renderer/index.js';
+import { authFetch } from '../../adapters/api.js';
 
 function LoadingPage() {
   return (
@@ -74,7 +75,7 @@ export function SchemaPage({ route }) {
     setLoading(true);
     setError(null);
 
-    fetch(`/api/pages/${encodeURIComponent(schemaName)}`, {
+    authFetch(`/api/pages/${encodeURIComponent(schemaName)}`, {
       headers: { 'Content-Type': 'application/json' },
     })
       .then((res) => {

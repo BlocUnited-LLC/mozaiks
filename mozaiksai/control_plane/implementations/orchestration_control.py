@@ -19,6 +19,8 @@ from mozaiksai.control_plane.contracts import (
     CodingWorkerResult,
     ContractSurfacePlan,
     HarnessDecision,
+    ProposedFileChange,
+    StagedPatchProposal,
     SurfacePlanExecutionResult,
 )
 from mozaiksai.control_plane.invalidation import (
@@ -33,8 +35,10 @@ from mozaiksai.control_plane.metrics import (
 from mozaiksai.control_plane.refinement_tracking import record_refinement_event
 from mozaiksai.control_plane.runtime import ControlPlaneCheckpointRuntime
 from mozaiksai.core.artifacts import ArtifactStore
+from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
+from mozaiksai.core.usage.context import AuxiliaryUsageContext, resolve_auxiliary_usage_context
 
 from .coding_worker import ScopedRefinementCodingWorker, get_coding_worker
 from .contract_surface_planner import ContractSurfacePlanner, get_contract_surface_planner
@@ -135,18 +139,22 @@ class OrchestrationControlHarness:
         *,
         payload: dict,
         app_id: str | None = None,
+        target_app_id: str | None = None,
         user_id: str | None = None,
         requested_workflow_id: str | None = None,
         default_source_surface: str | None = None,
+        usage_context: AuxiliaryUsageContext | None = None,
     ) -> RefinementRequest | None:
         """Normalize a builder refinement payload into the typed request contract."""
 
         return self._refinement_resolver.request_from_payload(
             payload=payload,
             app_id=app_id,
+            target_app_id=target_app_id,
             user_id=user_id,
             requested_workflow_id=requested_workflow_id,
             default_source_surface=default_source_surface,
+            usage_context=usage_context,
         )
 
     async def route_refinement_request(
@@ -266,6 +274,37 @@ class OrchestrationControlHarness:
     def build_harness_decision(self, routing_decision: RefinementRoutingDecision) -> HarnessDecision:
         return self._decision_policy.for_workflow_route(routing_decision)
 
+    async def finalize_surface_output(
+        self, *, plan: ContractSurfacePlan, result: SurfacePlanExecutionResult,
+        refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
+        workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
+    ) -> CodingWorkerResult:
+        if result.status != "success" or plan.requires_schema_migration or plan.build_family != "app_bundle":
+            return CodingWorkerResult(eligible=True, status="failed", error="Surface output requires workflow completion")
+        owned_paths = {path for surface in plan.surfaces for path in surface.affected_paths}
+        if not result.all_files or set(result.all_files) - owned_paths:
+            raise ValueError("Surface output is empty or outside its declared scope")
+        app_id = refinement_request.app_id
+        if not app_id:
+            raise ValueError("Surface output requires an execution host app_id")
+        request = CodingWorkerRequest(
+            app_id=app_id, target_app_id=refinement_request.target_app_id,
+            user_id=refinement_request.user_id, run_build_binding=run_build_binding,
+            build_family=refinement_request.build_family, build_key=refinement_request.normalized_build_key(),
+            build_record_id=refinement_request.build_record_id, requested_workflow_id=routing_decision.workflow_id,
+            raw_user_request=refinement_request.raw_user_request, change_class=plan.change_class,
+            source_surface=refinement_request.source_surface,
+            files={path: workspace_files.get(path, "") for path in owned_paths},
+            baseline_files=workspace_files, validation_strategy="local",
+        )
+        proposal = StagedPatchProposal(
+            proposal_id=run_build_binding.build_id, provider_id="contract_surface_regeneration",
+            status="completed", summary=plan.summary, rationale=plan.summary,
+            owned_paths=sorted(owned_paths), needs_human_review=True,
+            changed_files=[ProposedFileChange(path=path, content=content) for path, content in result.all_files.items()],
+        )
+        return await self._coding_worker.finalize_proposal(request, proposal)
+
     def build_coding_request(
         self,
         *,
@@ -282,7 +321,9 @@ class OrchestrationControlHarness:
         safe_files = files if isinstance(files, dict) else {}
         return CodingWorkerRequest(
             app_id=str(refinement_request.app_id or "").strip(),
+            target_app_id=refinement_request.target_app_id,
             user_id=str(refinement_request.user_id or "").strip() or None,
+            usage_context=refinement_request.usage_context,
             build_family=refinement_request.build_family,
             build_key=refinement_request.normalized_build_key(),
             build_record_id=refinement_request.build_record_id,
@@ -338,6 +379,15 @@ class OrchestrationControlHarness:
             metadata["explicit_file_count"] = len(request.files)
             return request.model_copy(update={"metadata": metadata}), decision
 
+        refinement_request = refinement_request.model_copy(update={
+            "app_id": request.app_id,
+            "user_id": request.user_id,
+            "target_app_id": request.target_app_id,
+            "usage_context": resolve_auxiliary_usage_context(
+                app_id=request.app_id, user_id=request.user_id, context=request.usage_context,
+                target_app_id=request.artifact_app_id, run_build_binding=request.run_build_binding,
+            ),
+        })
         proposal = await self._scope_proposer.propose(
             refinement_request=refinement_request,
             routing_decision=routing_decision,
@@ -430,6 +480,7 @@ class OrchestrationControlHarness:
     def build_coding_result_decision(
         self,
         request: CodingWorkerRequest,
+        result: CodingWorkerResult,
     ) -> HarnessDecision:
         routing_payload = request.context_seed.get("routing_decision")
         if not isinstance(routing_payload, dict):
@@ -438,6 +489,7 @@ class OrchestrationControlHarness:
         return self._decision_policy.for_coding_result(
             routing_decision=routing_decision,
             selected_paths=list((request.metadata or {}).get("selected_file_paths") or []),
+            result=result,
         )
 
 _harness: OrchestrationControlHarness | None = None

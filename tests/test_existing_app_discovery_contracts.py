@@ -14,6 +14,8 @@ from mozaiksai.core.artifacts.models import (
     ArtifactValidationStatus,
     ArtifactVersionDoc,
 )
+from mozaiksai.core.workflow.context.adapter import create_context_container
+from tests.factory_context import factory_context
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 
@@ -37,6 +39,9 @@ def _load_module(relative_path: str, module_name: str):
 
 
 class _Context(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(factory_context(dict(*args, **kwargs)))
+
     def get(self, key, default=None):
         return super().get(key, default)
 
@@ -658,12 +663,12 @@ def test_workflow_component_registration_is_hmr_safe() -> None:
     assert "return initializeWorkflows(registerComponent)" in app_source
 
 
-def test_existing_app_preload_mutates_an_empty_context_container() -> None:
+def test_existing_app_preload_accepts_binding_without_discovery_input() -> None:
     module = _load_module(
         "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
         "tests.preload_discovery_empty_context",
     )
-    context: dict[str, object] = {}
+    context: dict[str, object] = factory_context()
 
     result = asyncio.run(module.collect_prechat_discovery_context(context_variables=context))
 
@@ -673,6 +678,18 @@ def test_existing_app_preload_mutates_an_empty_context_container() -> None:
     assert context["app_intelligence_ready"] is False
     assert context["app_intelligence_status"] == "unavailable"
     assert context["app_intelligence_progress"]["stage"] == "unavailable"
+
+
+def test_existing_app_preload_writes_runtime_context_container() -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_runtime_context",
+    )
+    context = create_context_container()
+
+    module._ctx_set(context, "preload_status", "ready")
+
+    assert context.get("preload_status") == "ready"
 
 
 def test_create_route_enters_canonical_build_transition() -> None:
@@ -699,11 +716,16 @@ def test_new_app_entry_routes_into_valueengine_first() -> None:
     assert build_journey["steps"][1]["workflows"] == ["ValueEngine"]
     assert build_journey["steps"][2]["workflows"] == ["ThemeCapture"]
     assert build_journey["steps"][3]["transition"] == "coding_journey_selector"
-    assert build_journey["steps"][4]["transition"] == "database_setup_selector"
-    assert build_journey["steps"][5]["workflows"] == ["DesignDocs"]
-    assert build_journey["steps"][6]["workflows"] == ["SubscriptionContractDesigner"]
-    assert build_journey["steps"][7]["workflows"] == ["AgentGenerator"]
-    assert build_journey["steps"][8]["workflows"] == ["AppGenerator"]
+    # No database gate: it blocked the build on a question the build does not
+    # need answered, and every option led here anyway.
+    assert build_journey["steps"][4]["workflows"] == ["DesignDocs"]
+    assert build_journey["steps"][5]["workflows"] == ["SubscriptionContractDesigner"]
+    assert build_journey["steps"][6]["workflows"] == ["AgentGenerator"]
+    assert build_journey["steps"][7]["workflows"] == ["AppGenerator"]
+    assert all(
+        step.get("transition") != "database_setup_selector"
+        for step in build_journey["steps"]
+    )
 
     transition_map = {item["id"]: item for item in registry["transitions"]}
     app_type_selector = transition_map["app_type_selector"]
@@ -746,6 +768,8 @@ def test_existing_app_entry_routes_into_discovery_with_context() -> None:
     coding_options = {item["id"]: item for item in coding_selector["options"]}
     assert coding_options["autonomous"]["route_to"] == "DesignDocs"
     assert coding_options["guided"]["route_to"] == "DesignDocs"
+    for option in ("autonomous", "guided"):
+        assert coding_options[option]["context_variables"]["database_setup_mode"] == "local"
     assert coding_options["autonomous"]["context_variables"]["design_docs_hitl"] is False
     assert coding_options["guided"]["context_variables"]["design_docs_hitl"] is True
 
@@ -800,6 +824,7 @@ def test_brownfield_path_selector_routes_into_discovery_with_context() -> None:
         "SubscriptionContractDesigner",
         "AgentGenerator",
         "AppGenerator",
+        "SecurityReadiness",
     ]
 
     # brownfield_overlay_generation sequence
@@ -988,7 +1013,8 @@ def test_existing_app_preload_builds_context_graph_pack_for_local_repo(
     assert context["context_graph_catalog"]["indexed_file_count"] >= 1
     assert context["context_graph_health"]["selected_file_count"] >= 1
     assert context["context_graph_pack"]["summary"]["scan"]["selected_file_count"] >= 1
-    assert context["source_context_bundle"]["schema_version"] == "mozaiks.source_context.bundle.v1"
+    # Full source is stored in AppContext and retrieved lazily by discovery tools.
+    assert context["source_context_bundle"] is None
     assert context["source_context_catalog"]["file_count"] >= 1
     assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
     assert context["app_intelligence_catalog"]["coverage"]["file_count"] >= 1
@@ -1264,8 +1290,8 @@ def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
     assert context["context_graph_health"]["source"] == "github_source_scan"
     assert context["context_graph_health"]["selected_file_count"] >= 3
     assert context["context_graph_health"]["skipped"]["sensitive_path"] == 1
-    assert context["source_context_bundle"]["schema_version"] == "mozaiks.source_context.bundle.v1"
-    assert "app/modules/listings/backend/service.py" in context["source_context_bundle"]["file_contents"]
+    # Full source is stored in AppContext and retrieved lazily by discovery tools.
+    assert context["source_context_bundle"] is None
     assert context["source_context_catalog"]["file_count"] >= 3
     assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
     assert context["app_intelligence_catalog"]["architecture"]["module_roots"]

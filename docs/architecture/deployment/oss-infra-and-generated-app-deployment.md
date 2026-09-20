@@ -188,13 +188,13 @@ consumption yet.
 Resolved in this pass:
 
 1. `infra/docker/Dockerfile` no longer references removed root files
-   (`run_server.py`, `shared_app.py`, `workflows/`, `config/`). It installs the
+   (the removed root launcher and stale workspace paths). It installs the
    real `mozaiks` package from `pyproject.toml` and serves `factory_app/`
    through `mozaiks serve . --host studio`.
 2. `infra/helm/mozaiks/values.yaml` liveness probe now targets the route that
    actually exists (`/api/health/live`), not `/api/health/liveness`.
 3. `infra/compose/docker-compose.yml`'s dev `app` service no longer runs a
-   `watchmedo`/`run_server.py` command with no matching dependency; it runs
+   removed-launcher command with no matching dependency; it runs
    `mozaiks serve . --host studio --reload` against the bind-mounted repo.
 4. CI now has an `infra-build` job (`.github/workflows/ci.yml`) that builds
    `infra/docker/Dockerfile`, smoke-runs the image against a real MongoDB

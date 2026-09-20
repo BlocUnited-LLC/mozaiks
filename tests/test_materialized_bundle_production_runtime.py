@@ -42,7 +42,7 @@ def _restore_global_runtime_state() -> Any:
     from mozaiksai.core.workflow.outputs import structured
 
     adapter_registry = dict(auth_registry._adapter_registry)
-    adapter_instance = auth_registry._adapter_instance
+    adapter_cache = auth_registry._adapter_cache
     workflow_instance = workflow_manager.UnifiedWorkflowManager._instance
     workflow_models = dict(structured._workflow_models)
     workflow_registries = dict(structured._workflow_registries)
@@ -60,7 +60,7 @@ def _restore_global_runtime_state() -> Any:
     finally:
         auth_registry._adapter_registry.clear()
         auth_registry._adapter_registry.update(adapter_registry)
-        auth_registry._adapter_instance = adapter_instance
+        auth_registry._adapter_cache = adapter_cache
         workflow_manager.UnifiedWorkflowManager._instance = workflow_instance
         structured._workflow_models.clear()
         structured._workflow_models.update(workflow_models)
@@ -84,6 +84,7 @@ async def _assemble_from_payload(
     build_timestamp: str = BUILD_TIMESTAMP,
     plan_payload: dict[str, Any] | None = None,
     task_outputs: dict[str, dict[str, Any]] | None = None,
+    captured_theme_config: dict[str, Any] | None = None,
 ) -> tuple[dict[str, str], _Context]:
     models = _load_models()
     typed_plan = models["AppBuildPlanOutput"].model_validate(plan_payload or _plan_payload())
@@ -96,6 +97,7 @@ async def _assemble_from_payload(
             "readiness_profile": "host_operator_platform",
             "evidence_mode": "local_no_spend",
             "capability_packs": _selected_packs(),
+            "captured_theme_config": captured_theme_config,
         }
     )
     plan = typed_plan.AppBuildPlan.model_dump(mode="json")
@@ -216,6 +218,20 @@ async def test_exact_materialized_file_map_validates_boots_and_executes_http(
     saved = _save_platform_state(platform)
     platform.executor_registry = ExecutorRegistry()
     platform.app.state.executor_registry = platform.executor_registry
+    platform.app.state.subscriptions_config = None
+    platform.app.state.startup_degraded = False
+    platform.app.state.startup_degraded_reason = None
+    platform.app.state.failed_module_names = []
+    platform.app.state.page_schemas = {}
+    platform.app.state.module_action_surfaces = {}
+    platform.app.state.workflow_capability_routes = {}
+    platform.app.state.database_index_readiness = None
+    for state_attr in ("module_event_router", "workflow_trigger_guard"):
+        if hasattr(platform.app.state, state_attr):
+            delattr(platform.app.state, state_attr)
+    runtime_services = getattr(platform, "_runtime_services", None)
+    if isinstance(runtime_services, list):
+        runtime_services.clear()
     monkeypatch.setattr(platform.runtime_app, "mongo_client", fake_mongo_client)
     try:
         with TestClient(platform.app, raise_server_exceptions=False) as client:
@@ -275,18 +291,10 @@ async def test_materialized_broken_handler_fails_before_bootable(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_materialized_unresolved_page_action_fails_before_bootable() -> None:
-    broken_plan = deepcopy(_plan_payload())
-    section_hint = broken_plan["AppBuildPlan"]["pages"][0]["sections_hint"][0]
-    section_hint["config_hint"] = json.dumps(
-        {
-            "columns": ["id", "title", "status"],
-            "api_endpoint": "/api/modules/reports/archive_reports",
-            "search": True,
-        },
-        sort_keys=True,
-    )
-
-    files, context = await _assemble_from_payload(plan_payload=broken_plan)
+    outputs = _typed_task_outputs(_load_models())
+    page_output = next(value for value in outputs.values() if value.get("pages"))
+    page_output["pages"][0]["sections"][0]["config"]["api_endpoint"] = "/api/modules/reports/archive_reports"
+    files, context = await _assemble_from_payload(task_outputs=outputs)
 
     scanner_errors = scan_generated_bundle(files, capability_packs=_selected_packs())
     assert any("archive_reports" in error for error in scanner_errors)

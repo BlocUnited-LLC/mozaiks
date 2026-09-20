@@ -58,6 +58,9 @@ class SemanticGraphError(ValueError):
 class SemanticNodeKind(StrEnum):
     """Closed, versioned node-kind set for ``mozaiks.semantic_graph.v1``."""
 
+    APPLICATION = "application"
+    AUTH = "auth"
+    INTEGRATION = "integration"
     SURFACE = "surface"
     PAGE = "page"
     SECTION = "section"
@@ -71,13 +74,16 @@ class SemanticNodeKind(StrEnum):
     DATA_COLLECTION = "data_collection"
     DATA_ALIAS = "data_alias"
     WORKFLOW = "workflow"
+    WORKFLOW_CAPABILITY = "workflow_capability"
+    WORKFLOW_CAPABILITY_BINDING = "workflow_capability_binding"
+    WORKFLOW_RESULT = "workflow_result"
     TRIGGER = "trigger"
     PLAN = "plan"
     PRODUCT = "product"
     METER = "meter"
     LIMIT = "limit"
     DEPLOYMENT_TARGET = "deployment_target"
-    STUB_DECLARATION = "stub_declaration"
+    ARTIFACT_DECLARATION = "artifact_declaration"
 
 
 class SemanticEdgeKind(StrEnum):
@@ -466,6 +472,14 @@ class SemanticGraphV2(SemanticsModel):
     @model_validator(mode="after")
     def _validate_graph(self) -> SemanticGraphV2:
         _validate_graph_structure(self)
+        for singleton_kind in (SemanticNodeKind.APPLICATION, SemanticNodeKind.AUTH):
+            matching_nodes = [
+                node.node_id for node in self.nodes if node.kind is singleton_kind
+            ]
+            if len(matching_nodes) > 1:
+                raise ValueError(
+                    f"semantic graph v2 permits at most one {singleton_kind.value} node"
+                )
         for node in self.nodes:
             if node.payload_ref.scope != self.scope:
                 raise ValueError(

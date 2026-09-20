@@ -33,6 +33,8 @@ from mozaiksai.core.artifacts import (
     RefinementSessionStatus,
 )
 from mozaiksai.core.auth import reset_auth_adapter
+from mozaiksai.core.session.build_binding import RunBuildBinding
+from tests.test_studio_artifact_restore import _AppRegistryServiceDouble
 
 
 def _write_source_bundle(root: Path) -> None:
@@ -298,6 +300,9 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     source_service_before = (source_bundle / "modules" / "projects" / "backend" / "service.py").read_text(encoding="utf-8")
 
     app_id = "sample_app"
+    binding = RunBuildBinding(
+        build_registry_id="appreg_1", target_app_id=app_id, build_id="build_1", phase="refinement",
+    )
     request_id = "refine_smoke_001"
     plan = dry_run.build_refinement_execution_plan_from_route(
         request="Change the dashboard page title to prioritize reports.",
@@ -399,6 +404,7 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
         source_artifact_version_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
         promotion_result=promotion_result,
+        run_build_binding=binding,
     )
     assert draft_result.artifact_kind == "app_bundle"
     assert draft_result.lifecycle_status == ArtifactLifecycleStatus.DRAFT
@@ -406,9 +412,14 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     assert draft_result.metadata["refinement"]["request_id"] == request_id
     assert draft_result.metadata["refinement"]["review"]["status"] == "promotion_ready"
     assert draft_result.metadata["refinement"]["validation_evidence"]["source"] == "refinement_validation_runner"
+    for key, value in binding.model_dump().items():
+        assert draft_result.metadata[key] == value
 
     bundle_entries = _bundle_entries(Path(draft_result.artifact_path))
     assert bundle_entries == {
+        "app.json",
+        "modules/projects/module.yaml",
+        "modules/projects/backend/service.py",
         "ui/index.js",
         "ui/pages/custom/ReportsOverviewPage.jsx",
         "ui/pages/dashboard.yaml",
@@ -425,6 +436,10 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     runtime_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: artifact_store)
     monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
+    monkeypatch.setenv("MOZAIKS_WORKSPACES_PATH", str(tmp_path / "workspaces"))
+    monkeypatch.setattr(studio_app, "_resolve_studio_scope", lambda *args, **kwargs: ("factory", "demo-user"))
+    registry = _AppRegistryServiceDouble(app_id=app_id, artifact_version_id=draft_result.artifact_version_id)
+    monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: registry)
     monkeypatch.setattr(
         studio_app,
         "prepare_routed_workflow_launch",
@@ -452,14 +467,14 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     )
 
     draft_review_response = TestClient(studio_app.app).get(
-        f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/review"
+        f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/review?build_registry_id=appreg_1"
     )
     assert draft_review_response.status_code == 200
     assert draft_review_response.json()["review"]["write_back_mode"] == "generated_artifact"
     assert draft_review_response.json()["review"]["write_back_target"] is None
 
     draft_promote_response = TestClient(studio_app.app).post(
-        f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/promote"
+        f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/promote?build_registry_id=appreg_1"
     )
     assert draft_promote_response.status_code == 409
     assert "current artifact versions" in draft_promote_response.json()["detail"]
@@ -478,17 +493,18 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     assert accepted_result.metadata["acceptance"]["accepted_by"] == "reviewer_1"
 
     client = TestClient(studio_app.app)
-    promote_response = client.post(f"/api/studio/build/artifacts/{accepted_result.artifact_version_id}/promote")
+    promote_response = client.post(
+        f"/api/studio/build/artifacts/{accepted_result.artifact_version_id}/promote?build_registry_id=appreg_1",
+    )
     assert promote_response.status_code == 200
     payload = promote_response.json()
     assert payload["promoted"] is True
     assert payload["build_family"] == "app_bundle"
-    assert payload["restored_files"] == [
-        "ui/index.js",
-        "ui/pages/custom/ReportsOverviewPage.jsx",
-        "ui/pages/dashboard.yaml",
-        "ui/route_manifest.json",
-    ]
+    assert payload["restored_files"] == sorted(f"app/{path}" for path in bundle_entries)
+    assert not list(runtime_root.iterdir())
+    runtime_root = tmp_path / "workspaces" / app_id / accepted_result.artifact_version_id / "app"
+    assert (runtime_root / "app.json").read_text(encoding="utf-8") == (source_bundle / "app.json").read_text(encoding="utf-8")
+    assert (runtime_root / "modules/projects/backend/service.py").read_text(encoding="utf-8") == source_service_before
     assert "refinement_plan.json" not in payload["restored_files"]
     assert "affected_paths.json" not in payload["restored_files"]
     assert "refinement_review.json" not in payload["restored_files"]

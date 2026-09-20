@@ -1,14 +1,20 @@
 import ast
+import json
+import logging
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 
 import yaml
 from pydantic import Field
 
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    _page_from_plan,
     _page_stem_from_path,
     _page_stems,
+    module_action_index,
+    normalize_planned_page_content,
+    validate_planned_page,
 )
 
 from .assembly_phase import assemble_features
@@ -17,9 +23,12 @@ from .code_file_utils import (
     extract_code_file_entries_from_payload,
     extract_deleted_file_paths_from_payload,
 )
-from .generate_module_interface_files import generate_module_interface_files
+from .hydrate_app_revision_context import hydrate_app_revision_context
 from .materialize_app_config_contracts import materialize_app_config_contracts
 from .resolve_managed_capability_templates import resolve_managed_capability_templates
+from .save_app_schema import resolve_app_theme_config
+
+logger = logging.getLogger(__name__)
 
 
 def _is_truthy(value: Any) -> bool:
@@ -30,9 +39,30 @@ def _is_truthy(value: Any) -> bool:
     return bool(value)
 
 
+def _failed_batch_task_ids(task_results: Any) -> set[str]:
+    """Task ids the batch recorded as failed, from either record it writes.
+
+    `_build_batch_outputs` writes both `_failed` (id -> detail) and
+    `_meta.failed_tasks` (id list); read both so a shape change in one does not
+    silently turn a partial build back into a hard stop.
+    """
+    if not isinstance(task_results, dict):
+        return set()
+    failed: set[str] = set()
+    raw_failed = task_results.get("_failed")
+    if isinstance(raw_failed, dict):
+        failed.update(str(task_id) for task_id in raw_failed)
+    meta = task_results.get("_meta")
+    if isinstance(meta, dict):
+        for task_id in meta.get("failed_tasks") or []:
+            failed.add(str(task_id))
+    return failed
+
+
 def _apply_planned_page_contracts(
     code_files: list[dict[str, Any]],
     app_build_plan: Any,
+    failed_task_ids: set[str] | None = None,
 ) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
@@ -47,20 +77,43 @@ def _apply_planned_page_contracts(
             planned_by_stem.setdefault(stem, page)
 
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename") and f.get("content") is not None}
+    modules = module_action_index(file_map)
+    failed_tasks = failed_task_ids or set()
     for task in tasks:
         if str(task.get("task_type") or "").strip() != "page_bundle":
             continue
+        task_id = str(task.get("task_id") or "").strip()
         for raw_path in task.get("owned_paths") or []:
-            path = str(raw_path or "").replace("\\", "/").strip()
+            # file_map keys are safe_relpath-canonical because every producer
+            # runs them through it. Canonicalize this side with the same rule so
+            # a plan path written as "./ui/pages/x.yaml" still matches the file
+            # the worker emitted as "ui/pages/x.yaml".
+            path = safe_relpath(str(raw_path or ""))
+            if not path:
+                continue
             stem = _page_stem_from_path(path)  # type: ignore[assignment]
             if not stem or stem not in planned_by_stem:
                 continue
-            file_map[path] = yaml.safe_dump(
-                _page_from_plan(planned_by_stem[stem], stem),
-                allow_unicode=True,
-                sort_keys=False,
-                default_flow_style=False,
-            )
+            if path not in file_map:
+                # A task that failed never got to write its files. The batch runs
+                # failure_policy: continue_with_available and the router sends a
+                # partial batch here on purpose, so acceptance can judge what was
+                # produced and the repair loop can act on it. Raising here instead
+                # ends the run on the one path that was built to survive.
+                if task_id and task_id in failed_tasks:
+                    logger.info(
+                        "[AppGenerator] planned page %s not assembled: owning task %r failed",
+                        path,
+                        task_id,
+                    )
+                    continue
+                owner = f" owned by task {task_id!r}" if task_id else ""
+                raise ValueError(
+                    f"{path}: missing planned page during assembly{owner}; "
+                    "the task reported no failure, so the page was expected to exist"
+                )
+            file_map[path] = normalize_planned_page_content(file_map[path], path=path, modules=modules)
+            validate_planned_page(file_map[path], planned_by_stem[stem], path)
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
@@ -145,7 +198,7 @@ def _apply_managed_capability_templates(
 
     capability_packs = None
     if context_variables and hasattr(context_variables, "get"):
-        capability_packs = context_variables.get("capability_packs")
+        capability_packs = detach(context_variables.get("capability_packs"))
     if not capability_packs:
         capability_packs = app_build_plan.get("capability_packs")
     if not isinstance(capability_packs, list):
@@ -172,6 +225,14 @@ def _apply_app_config_contracts(
     context_variables: Any,
 ) -> list[dict[str, str]]:
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
+    captured_theme = (
+        context_variables.get("captured_theme_config") if context_variables is not None else None
+    )
+    theme_path = "brand/theme_config.json"
+    theme_patch = json.loads(file_map[theme_path]) if theme_path in file_map else None
+    resolved_theme = resolve_app_theme_config(captured_theme, theme_patch)
+    if resolved_theme is not None:
+        file_map[theme_path] = json.dumps(resolved_theme, indent=2, ensure_ascii=False)
     for file in materialize_app_config_contracts(
         app_id=app_id,
         app_build_plan=app_build_plan,
@@ -185,7 +246,7 @@ def _context_code_file_output(context_variables: Any | None) -> dict[str, list[d
     if context_variables is None or not hasattr(context_variables, "get"):
         return None
     try:
-        raw = context_variables.get("code_files")
+        raw = detach(context_variables.get("code_files"))
     except Exception:
         raw = None
     code_files = extract_code_file_entries_from_payload({"code_files": raw})
@@ -198,7 +259,7 @@ def _context_deleted_files(context_variables: Any | None) -> list[str]:
     if context_variables is None or not hasattr(context_variables, "get"):
         return []
     try:
-        raw = context_variables.get("deleted_files")
+        raw = detach(context_variables.get("deleted_files"))
     except Exception:
         raw = None
     return extract_deleted_file_paths_from_payload({"deleted_files": raw})
@@ -220,7 +281,7 @@ def _apply_entitlement_gates(
         return code_files
 
     def _ctx(key: str) -> Any:
-        return context_variables.get(key) if hasattr(context_variables, "get") else None
+        return detach(context_variables.get(key)) if hasattr(context_variables, "get") else None
 
     # Build a map: {module_id: {action_id: capability_id}} from module_contract_updates
     gates_by_module: dict[str, dict[str, str]] = {}
@@ -302,16 +363,23 @@ async def assemble_app_tasks(
         Field(description="AG2-injected workflow context variables."),
     ] = None,
 ) -> dict[str, Any]:
+    await hydrate_app_revision_context(context_variables)
     app_id = None
     feature_outputs: list[dict[str, Any]] = []
     inject_key: str | None = None
 
     if context_variables and hasattr(context_variables, "get"):
+        existing_files = detach(context_variables.get("generated_files")) or {}
+        if existing_files:
+            feature_outputs.append({"code_files": [
+                {"filename": path, "content": content}
+                for path, content in sorted(existing_files.items())
+            ]})
         schema_ready = _is_truthy(context_variables.get("app_schema_ready"))
         if schema_ready:
             quality_status = context_variables.get("app_ui_quality_status")
             if quality_status != "passed":
-                warnings = context_variables.get("app_ui_quality_warnings") or []
+                warnings = detach(context_variables.get("app_ui_quality_warnings")) or []
                 warning_text = ""
                 if isinstance(warnings, list) and warnings:
                     warning_text = " Warnings: " + "; ".join(str(item) for item in warnings)
@@ -328,10 +396,12 @@ async def assemble_app_tasks(
                 )
             feature_outputs.append({"code_files": schema_code_files})
 
-        app_id = context_variables.get("app_id")
+        from factory_app.workflows._shared.platform.build_target import require_build_binding
+
+        app_id = require_build_binding(context_variables).target_app_id
         inject_key = "app_task_batch_results"
 
-        merged = context_variables.get(inject_key)
+        merged = detach(context_variables.get(inject_key))
         if isinstance(merged, dict):
             candidate_values: Any = (
                 merged.get("task_results")
@@ -358,7 +428,9 @@ async def assemble_app_tasks(
     if not app_id:
         raise ValueError("app_id is required to assemble task outputs")
 
-    if not feature_outputs:
+    if not feature_outputs and not _failed_batch_task_ids(
+        detach(context_variables.get("app_task_batch_results")) if context_variables else None
+    ):
         raise ValueError("No AppGenerator schema artifacts, task batch outputs, or accumulated code files are available for assembly")
 
     result = await assemble_features(
@@ -371,24 +443,22 @@ async def assemble_app_tasks(
         ),
     )
 
-    # Merge module_interface.yaml files generated from agent_backend_integration tasks.
-    # AppPlanAgent already reasoned about module action dependencies and stored them as
-    # structured context_variables on each task — this tool just serializes them to YAML.
     app_build_plan = (
-        context_variables.get("app_build_plan")
+        detach(context_variables.get("app_build_plan"))
         if context_variables and hasattr(context_variables, "get")
         else None
     )
-    interface_files = generate_module_interface_files(app_build_plan)
     code_files = result.get("code_files", [])
-    if interface_files:
-        # Merge by filename (interface files take precedence over any stub)
-        file_map = {f["filename"]: f["content"] for f in code_files}
-        for f in interface_files:
-            file_map[f["filename"]] = f["content"]
-        code_files = [{"filename": k, "content": v} for k, v in sorted(file_map.items())]
 
-    code_files = _apply_planned_page_contracts(code_files, app_build_plan)
+    code_files = _apply_planned_page_contracts(
+        code_files,
+        app_build_plan,
+        failed_task_ids=_failed_batch_task_ids(
+            detach(context_variables.get("app_task_batch_results"))
+            if context_variables and hasattr(context_variables, "get")
+            else None
+        ),
+    )
     code_files = _apply_module_handler_method_alignment(code_files)
     code_files = _apply_entitlement_gates(code_files, context_variables=context_variables)
     code_files = _apply_managed_capability_templates(
@@ -414,7 +484,7 @@ async def assemble_app_tasks(
                 {str(f["filename"]): str(f["content"]) for f in code_files},
             )
             context_variables.set("assembled_source", "schema_and_task_batch_outputs")
-            task_results = context_variables.get("app_task_batch_results")
+            task_results = detach(context_variables.get("app_task_batch_results"))
             if isinstance(task_results, dict):
                 meta = task_results.get("_meta") if isinstance(task_results.get("_meta"), dict) else {}
                 context_variables.set(
@@ -431,20 +501,10 @@ async def assemble_app_tasks(
                         ],
                     },
                 )
-                context_variables.set(
-                    "app_task_batch_results",
-                    {
-                        "_meta": meta,
-                        "assembled": True,
-                        "result_context_key": "app_task_batch_results_summary",
-                    },
-                )
         except Exception:
             pass
 
     status_note = result.get("message") or "Assembled app task outputs into one bundle."
-    if interface_files:
-        status_note = f"{status_note} (+{len(interface_files)} module_interface.yaml)"
     if isinstance(inject_key, str) and inject_key:
         status_note = f"{status_note} (source={inject_key})"
 

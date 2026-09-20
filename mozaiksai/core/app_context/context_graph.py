@@ -25,6 +25,8 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+from mozaiksai.core.utils.sequences import dedupe_strings
+
 from .models import (
     AppContextGraph,
     AppContextGraphEdge,
@@ -1163,7 +1165,7 @@ def _extract_python(content: str) -> tuple[list[ExtractedSymbol], list[str], lis
         for match in _PY_IMPORT_RE.findall(content)
         if (match[0] or match[1])
     ]
-    return symbols, _dedupe(imports), references
+    return symbols, dedupe_strings(imports), references
 
 
 def _extract_javascript_like(content: str) -> tuple[list[ExtractedSymbol], list[str], list[ExtractedReference]]:
@@ -1183,7 +1185,7 @@ def _extract_javascript_like(content: str) -> tuple[list[ExtractedSymbol], list[
                     )
                 )
     imports = [match.strip() for match in _JS_IMPORT_RE.findall(content) if match.strip()]
-    return symbols, _dedupe(imports), _extract_javascript_references(content)
+    return symbols, dedupe_strings(imports), _extract_javascript_references(content)
 
 
 class _PythonAstVisitor(ast.NodeVisitor):
@@ -1652,9 +1654,9 @@ def _string_values(value: Any) -> list[str]:
                 name = _first_text(item, "type", "event_type", "event", "name", "id")
                 if name:
                     out.append(name)
-        return _dedupe(out)
+        return dedupe_strings(out)
     if isinstance(value, dict):
-        return _dedupe(str(key) for key in value if str(key).strip())
+        return dedupe_strings(str(key) for key in value if str(key).strip())
     return []
 
 
@@ -1931,13 +1933,6 @@ def _first_text(data: dict[str, Any], *keys: str) -> str | None:
     return None
 
 
-def _dedupe(values: Iterable[str]) -> list[str]:
-    out: list[str] = []
-    for value in values:
-        candidate = str(value or "").strip()
-        if candidate and candidate not in out:
-            out.append(candidate)
-    return out
 
 
 def _clean_metadata(value: dict[str, Any] | None) -> dict[str, Any]:

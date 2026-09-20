@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from mozaiksai.core.audit import AuditRecord, get_audit_logger
 from mozaiksai.core.audit.audit_logger import AuditEventKind, _hash_inputs
 from mozaiksai.core.auth import UserPrincipal, optional_user
-from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+from mozaiksai.core.auth.adapters.registry import is_auth_explicitly_disabled
 from mozaiksai.core.auth.dependencies import validate_path_app_id
 from mozaiksai.core.billing import (
     BillingFulfillmentCommand,
@@ -55,20 +55,40 @@ def _authorize_fulfillment(
     if _valid_internal_api_key(request):
         return "internal_api_key"
 
-    if principal is not None:
-        if (
+    # Privileged-principal path: requires authenticated provenance — the
+    # principal must have come through a real bearer-token validation by the
+    # configured auth adapter. Role/scope strings alone are not authority:
+    # anonymous/demo principals and request-scoped dev personas can carry
+    # admin-looking roles and scopes, and none of them are authenticated.
+    if (
+        principal is not None
+        and principal.is_authenticated
+        and (
             principal.has_role("admin")
             or principal.has_scope("billing.admin")
             or principal.has_scope("billing.fulfillment.apply")
-        ):
-            return principal.user_id
+        )
+    ):
+        return principal.user_id
 
-    if not is_auth_enabled() and not os.getenv("INTERNAL_API_KEY", "").strip():
+    # Local-development exception, fully separate from the authenticated-admin
+    # path: the operator must have explicitly declared no-auth operation
+    # (AUTH_ENABLED=false or AUTH_PROVIDER=none), which the canonical auth
+    # resolution rejects outright in protected environments
+    # (staging/production) — so this branch cannot open there even if startup
+    # validation was somehow bypassed. Implicit demo mode (auth merely
+    # unconfigured) and a missing/misconfigured INTERNAL_API_KEY fail closed
+    # instead of turning this ingress into an unauthenticated endpoint.
+    if is_auth_explicitly_disabled() and not os.getenv("INTERNAL_API_KEY", "").strip():
         return principal.user_id if principal is not None else "local_dev"
 
     raise HTTPException(
         status_code=403,
-        detail="Billing fulfillment requires an internal API key or billing admin scope.",
+        detail=(
+            "Billing fulfillment requires an internal API key, an authenticated "
+            "billing admin, or explicitly disabled authentication "
+            "(AUTH_ENABLED=false) in local development."
+        ),
     )
 
 

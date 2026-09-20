@@ -6,6 +6,9 @@ from pathlib import Path
 
 import yaml
 
+from mozaiksai.core.workflow.context.adapter import create_context_container
+from tests.factory_context import factory_context
+
 WORKSPACE = Path(__file__).resolve().parents[1]
 
 
@@ -35,16 +38,13 @@ def test_theme_capture_uses_canonical_context_and_handoffs() -> None:
     assert "definitions" in context_vars
     assert "agents" in context_vars
 
-    interview = context_vars["definitions"]["interview_complete"]
-    analysis = context_vars["definitions"]["analysis_complete"]
+    assert "interview_complete" not in context_vars["definitions"]
+    interview = context_vars["definitions"]["interview_outcome"]
+    assert "analysis_complete" not in context_vars["definitions"]
 
-    interview_trigger = interview["source"]["triggers"][0]
-    analysis_trigger = analysis["source"]["triggers"][0]
-
-    assert interview_trigger["agent"] == "ThemeInterviewAgent"
-    assert interview_trigger["match"]["equals"] == "NEXT"
-    assert analysis_trigger["agent"] == "ThemeAnalysisAgent"
-    assert analysis_trigger["match"]["equals"] == "NEXT"
+    assert interview["authority_class"] == "closed_writer_routing_state"
+    assert interview["writer_ids"] == ["deterministic_tool"]
+    assert "triggers" not in interview["source"]
 
     route_pairs = {
         (item["source_agent"], item["target_agent"])
@@ -52,10 +52,26 @@ def test_theme_capture_uses_canonical_context_and_handoffs() -> None:
     }
     assert ("ThemeInterviewAgent", "ThemeAnalysisAgent") in route_pairs
     assert ("ThemeAnalysisAgent", "ThemeConfigAssemblerAgent") in route_pairs
+    assert ("ThemeAnalysisAgent", "user") not in route_pairs
+    assert "ThemeAnalysisAgent" not in _read_yaml(
+        "factory_app/workflows/ThemeCapture/ui_config.yaml"
+    )["visual_agents"]
 
     lifecycle_tool = tools["lifecycle_tools"][0]
     assert lifecycle_tool["trigger"] == "before_chat"
     assert lifecycle_tool["function"] == "collect_prechat_theme_context"
+
+
+def test_theme_capture_preload_writes_runtime_context_container() -> None:
+    module = _load_module(
+        "factory_app/workflows/ThemeCapture/tools/preload_theme_capture_context.py",
+        "tests.preload_theme_capture_runtime_context",
+    )
+    context = create_context_container()
+
+    module._ctx_set(context, "preload_status", "ready")
+
+    assert context.get("preload_status") == "ready"
 
 
 def test_theme_capture_preload_collects_parent_theme_evidence() -> None:
@@ -197,7 +213,12 @@ def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> 
         return type("ArtifactVersion", (), {"id": "av_theme_capture_1"})()
 
     monkeypatch.setattr(module, "emit_ui_surface", _fake_emit)
-    monkeypatch.setattr(module, "_HAS_PERSISTENCE", False)
+    class Store:
+        async def save_theme_capture(self, **kwargs):
+            from bson import BSON
+            BSON.encode(kwargs)
+
+    monkeypatch.setattr(module, "BuilderArtifactStore", Store)
     monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
 
     context = {
@@ -219,7 +240,7 @@ def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> 
             "ui": {},
         },
         "chat_id": "chat-123",
-        "app_id": "mozaiks-platform",
+        **factory_context({"app_id": "mozaiks-platform"}),
         "app_url": "https://example.test",
     }
 

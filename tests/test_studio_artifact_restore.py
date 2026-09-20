@@ -6,6 +6,7 @@ import json
 import stat
 import zipfile
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +20,7 @@ from mozaiksai.core.artifacts import (
     RefinementSessionStatus,
 )
 from mozaiksai.core.auth import reset_auth_adapter
+from mozaiksai.hosts import shell_config
 
 
 def _write_bundle_zip(zip_path: Path, entries: dict[str, str], *, symlink_entry: tuple[str, str] | None = None) -> None:
@@ -45,7 +47,10 @@ def _version(
     files_manifest: list[dict[str, object]] | None = None,
     commit_metadata_extra: dict[str, object] | None = None,
 ) -> ArtifactVersionDoc:
-    metadata: dict[str, object] = {"artifact_path": str(zip_path)}
+    metadata: dict[str, object] = {
+        "artifact_path": str(zip_path), "build_registry_id": "appreg_1",
+        "target_app_id": "app_1", "build_id": "build_1", "phase": "refinement",
+    }
     metadata.update(commit_metadata_extra or {})
     if refinement_request_id is not None:
         metadata["refinement"] = {
@@ -139,23 +144,32 @@ class _AppRegistryServiceDouble:
         app_id: str = "app_1",
         lifecycle_state: str = "review",
         build_registry_id: str = "appreg_1",
+        artifact_version_id: str = "av_registry_1",
     ) -> None:
         self.app = {
             "build_registry_id": build_registry_id,
             "app_id": app_id,
+            "chat_app_id": "factory",
+            "current_build_run": {"build_id": "build_1", "artifact_version_id": artifact_version_id},
             "lifecycle_state": lifecycle_state,
             "bundle_path": "generated/apps/app_1/build_1/app",
         }
         self.promote_calls: list[dict[str, str | None]] = []
 
-    async def get_app_record(self, *, app_id: str | None = None, build_registry_id: str | None = None):
+    async def get_app_record(self, *, owner_user_id: str, app_id: str | None = None, build_registry_id: str | None = None):
+        assert owner_user_id == "demo-user"
         if build_registry_id == self.app["build_registry_id"] or app_id == self.app["app_id"]:
             return {"app": dict(self.app)}
         return {"app": None}
 
-    async def promote_build(self, *, build_registry_id: str, promoted_by: str | None):
+    async def promote_build(
+        self, *, build_registry_id: str, promoted_by: str, bundle_path: str,
+        expected_build_id: str, expected_artifact_version_id: str,
+    ):
+        assert expected_build_id == self.app["current_build_run"]["build_id"]
+        assert expected_artifact_version_id == self.app["current_build_run"]["artifact_version_id"]
         self.promote_calls.append({"build_registry_id": build_registry_id, "promoted_by": promoted_by})
-        self.app = {**self.app, "lifecycle_state": "active"}
+        self.app = {**self.app, "lifecycle_state": "active", "bundle_path": bundle_path}
         return {"success": True, "app": dict(self.app)}
 
 
@@ -171,8 +185,56 @@ def _studio_app(monkeypatch):
 def _promote_client(monkeypatch, runtime_root: Path, store: _PromoteStore):
     studio_app = _studio_app(monkeypatch)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
-    monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: runtime_root)
+    monkeypatch.setattr(
+        studio_app, "_start_studio_app_intelligence_index_job",
+        AsyncMock(return_value={"status": "queued"}),
+    )
+    monkeypatch.setenv("MOZAIKS_WORKSPACES_PATH", str(runtime_root.parent / "workspaces"))
+    monkeypatch.setattr(studio_app, "_resolve_studio_scope", lambda *args, **kwargs: ("factory", "demo-user"))
+    registry = _AppRegistryServiceDouble(artifact_version_id=store.version.id)
+    monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: registry)
     return studio_app, TestClient(studio_app.app)
+
+
+def test_restore_materializes_accepted_version_without_claiming_rollback(monkeypatch, tmp_path):
+    bundle_zip = tmp_path / "accepted.zip"
+    _write_bundle_zip(bundle_zip, {"app.json": '{"appId":"app_1"}'})
+    version = _version(
+        artifact_version_id="av_accepted", zip_path=bundle_zip,
+        lifecycle_status=ArtifactLifecycleStatus.SUPERSEDED,
+    )
+    runtime_root = tmp_path / "factory"
+    studio, client = _promote_client(monkeypatch, runtime_root, _PromoteStore(version))
+    registry = studio._get_app_registry_service()
+    before = dict(registry.app)
+    response = client.post(
+        "/api/studio/build/restore?build_registry_id=appreg_1",
+        json={"artifact_version_id": version.id},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["restored"] is True
+    assert body["active_version_changed"] is False
+    assert "reverted" not in body
+    assert (Path(body["target_path"]) / "app" / "app.json").exists()
+    assert registry.app == before
+    assert registry.promote_calls == []
+    assert not runtime_root.exists()
+
+
+@pytest.mark.parametrize("status", [ArtifactLifecycleStatus.DRAFT, ArtifactLifecycleStatus.DELETED])
+def test_restore_rejects_unaccepted_version(monkeypatch, tmp_path, status):
+    bundle_zip = tmp_path / "unaccepted.zip"
+    _write_bundle_zip(bundle_zip, {"app.json": '{}'})
+    version = _version(artifact_version_id="av_draft", zip_path=bundle_zip, lifecycle_status=status)
+    _, client = _promote_client(monkeypatch, tmp_path / "factory", _PromoteStore(version))
+    response = client.post(
+        "/api/studio/build/restore?build_registry_id=appreg_1",
+        json={"artifact_version_id": version.id},
+    )
+    assert response.status_code == 409
+    assert not (tmp_path / "workspaces").exists()
 
 
 def test_promote_restores_current_app_bundle_from_staged_refinement(monkeypatch, tmp_path: Path) -> None:
@@ -199,25 +261,28 @@ def test_promote_restores_current_app_bundle_from_staged_refinement(monkeypatch,
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version, sessions=[session])
     studio_app, client = _promote_client(monkeypatch, runtime_root, store)
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
 
     monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", lambda **kwargs: pytest.fail("workflow launch should not run"))
     monkeypatch.setattr(studio_app, "launch_prepared_workflow", lambda *args, **kwargs: pytest.fail("workflow launch should not run"))
 
-    response = client.post("/api/studio/build/artifacts/av_current_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_current_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 200
     body = response.json()
     assert body["promoted"] is True
-    assert body["target_path"] == str(runtime_root)
+    assert body["target_path"] == str(runtime_root.parent)
     assert (runtime_root / "GeneratedApp" / "src" / "App.jsx").read_text(encoding="utf-8") == (
         "export default function App() { return <div>Promoted</div>; }\n"
     )
     assert (runtime_root / "GeneratedApp" / "package.json").read_text(encoding="utf-8") == "{\"name\":\"demo\"}\n"
-    assert body["restored_files"] == ["GeneratedApp/package.json", "GeneratedApp/src/App.jsx"]
+    assert body["restored_files"] == ["app/GeneratedApp/package.json", "app/GeneratedApp/src/App.jsx"]
     assert store.updated_sessions[-1]["status"] == RefinementSessionStatus.PROMOTED
-    assert body["app_registry"] is None
+    assert body["app_registry"]["app"]["lifecycle_state"] == "active"
     assert body["review"]["review_status"] == "promoted"
-    # promotion changes the live app root, so an App Intelligence refresh is
+    # promotion installs a separate workspace, so an App Intelligence refresh is
     # always attempted and reported (best-effort: failure never blocks promote)
     assert "app_intelligence_refresh" in body
     assert body["app_intelligence_refresh"] is not None
@@ -247,15 +312,18 @@ def test_promote_refuses_override_for_coding_produced_artifacts(monkeypatch, tmp
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version)
     _, client = _promote_client(monkeypatch, runtime_root, store)
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
 
-    blocked = client.post("/api/studio/build/artifacts/av_skipped_validation_1/promote")
+    blocked = client.post("/api/studio/build/artifacts/av_skipped_validation_1/promote?build_registry_id=appreg_1")
 
     assert blocked.status_code == 409
     assert "validation_status='passed' is required" in blocked.json()["detail"]
     assert not (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
 
     overridden = client.post(
-        "/api/studio/build/artifacts/av_skipped_validation_1/promote",
+        "/api/studio/build/artifacts/av_skipped_validation_1/promote?build_registry_id=appreg_1",
         json={"allow_validation_override": True},
     )
 
@@ -284,9 +352,12 @@ def test_promote_allows_override_for_non_coding_artifacts(monkeypatch, tmp_path:
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version)
     _, client = _promote_client(monkeypatch, runtime_root, store)
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
 
     allowed = client.post(
-        "/api/studio/build/artifacts/av_skipped_plain_1/promote",
+        "/api/studio/build/artifacts/av_skipped_plain_1/promote?build_registry_id=appreg_1",
         json={"allow_validation_override": True},
     )
 
@@ -316,12 +387,15 @@ def test_promote_restores_artifact_and_marks_app_registry_active(monkeypatch, tm
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version)
     studio_app, client = _promote_client(monkeypatch, runtime_root, store)
-    app_registry = _AppRegistryServiceDouble()
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
+    app_registry = _AppRegistryServiceDouble(artifact_version_id=version.id)
     monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: app_registry)
 
     response = client.post(
-        "/api/studio/build/artifacts/av_registry_1/promote?app_id=app_1",
-        json={"build_registry_id": "appreg_1"},
+        "/api/studio/build/artifacts/av_registry_1/promote?build_registry_id=appreg_1",
+        json={},
     )
 
     assert response.status_code == 200
@@ -421,7 +495,7 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
         ),
         "GeneratedApp/workflows/SupportWorkflow/orchestrator.yaml": "\n".join(
             [
-                "workflow_name: SupportWorkflow",
+                "schema_version: mozaiks.orchestrator.v1\nworkflow_name: SupportWorkflow",
                 "workflow_startup_mode: AgentDriven",
             ]
         ),
@@ -441,24 +515,26 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
     runtime_root = tmp_path / "active_app"
     store = _PromoteStore(version)
     studio_app, client = _promote_client(monkeypatch, runtime_root, store)
-    app_registry = _AppRegistryServiceDouble()
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
+    app_registry = _AppRegistryServiceDouble(artifact_version_id=version.id)
     monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: app_registry)
 
     response = client.post(
-        "/api/studio/build/artifacts/av_platform_root_1/promote?app_id=app_1",
-        json={"build_registry_id": "appreg_1"},
+        "/api/studio/build/artifacts/av_platform_root_1/promote?build_registry_id=appreg_1",
+        json={},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["promoted"] is True
-    assert "app.json" in body["restored_files"]
+    assert "app/app.json" in body["restored_files"]
     assert "GeneratedApp/app.json" not in body["restored_files"]
     assert (runtime_root / "app.json").exists()
     assert not (runtime_root / "GeneratedApp" / "app.json").exists()
 
     from mozaiksai.core.runtime.app.loader import AppLoader
-    from mozaiksai.hosts import platform as platform_app
 
     loaded = asyncio.run(AppLoader.load(str(runtime_root)))
     assert loaded.definition.name == "Golden Path App"
@@ -466,9 +542,9 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
     assert [page.name for page in loaded.definition.pages] == ["dashboard"]
     assert [workflow.name for workflow in loaded.definition.workflows] == ["SupportWorkflow"]
 
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: runtime_root)
-    monkeypatch.setattr(platform_app, "resolve_active_app_root", lambda: runtime_root)
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: runtime_root)
+    monkeypatch.setattr(shell_config, "resolve_active_app_root", lambda: runtime_root)
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
     assert shell["appId"] == "app_1"
     assert shell["appName"] == "Golden Path App"
     assert shell["landing_spot"] == "/dashboard"
@@ -497,12 +573,15 @@ def test_promote_rejects_registry_record_not_in_review(monkeypatch, tmp_path: Pa
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version)
     studio_app, client = _promote_client(monkeypatch, runtime_root, store)
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
     app_registry = _AppRegistryServiceDouble(lifecycle_state="active")
     monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: app_registry)
 
     response = client.post(
-        "/api/studio/build/artifacts/av_registry_active_1/promote?app_id=app_1",
-        json={"build_registry_id": "appreg_1"},
+        "/api/studio/build/artifacts/av_registry_active_1/promote?build_registry_id=appreg_1",
+        json={},
     )
 
     assert response.status_code == 409
@@ -522,7 +601,7 @@ def test_promote_rejects_draft_app_bundle(monkeypatch, tmp_path: Path) -> None:
     store = _PromoteStore(version)
     _, client = _promote_client(monkeypatch, tmp_path / "runtime_app", store)
 
-    response = client.post("/api/studio/build/artifacts/av_draft_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_draft_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 409
     assert "current artifact versions" in response.json()["detail"]
@@ -540,7 +619,7 @@ def test_promote_rejects_non_app_bundle_artifact(monkeypatch, tmp_path: Path) ->
     store = _PromoteStore(version)
     _, client = _promote_client(monkeypatch, tmp_path / "runtime_app", store)
 
-    response = client.post("/api/studio/build/artifacts/av_workflow_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_workflow_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 400
     assert "Unsupported artifact kind" in response.json()["detail"]
@@ -565,7 +644,7 @@ def test_promote_rejects_missing_artifact_path(monkeypatch, tmp_path: Path) -> N
     store = _PromoteStore(version)
     _, client = _promote_client(monkeypatch, tmp_path / "runtime_app", store)
 
-    response = client.post("/api/studio/build/artifacts/av_missing_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_missing_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 400
     assert "no restorable file path" in response.json()["detail"]
@@ -584,7 +663,7 @@ def test_promote_rejects_missing_file_manifest(monkeypatch, tmp_path: Path) -> N
     store = _PromoteStore(version)
     _, client = _promote_client(monkeypatch, tmp_path / "runtime_app", store)
 
-    response = client.post("/api/studio/build/artifacts/av_no_manifest_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_no_manifest_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 400
     assert "file manifest" in response.json()["detail"]
@@ -616,8 +695,11 @@ def test_promote_skips_metadata_and_backup_entries(monkeypatch, tmp_path: Path) 
     store = _PromoteStore(version)
     runtime_root = tmp_path / "runtime_app"
     _, client = _promote_client(monkeypatch, runtime_root, store)
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
 
-    response = client.post("/api/studio/build/artifacts/av_current_meta_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_current_meta_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 200
     assert (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
@@ -651,8 +733,11 @@ def test_promote_blocks_path_traversal_entries(monkeypatch, tmp_path: Path) -> N
     store = _PromoteStore(version)
     runtime_root = tmp_path / "runtime_app"
     _, client = _promote_client(monkeypatch, runtime_root, store)
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
 
-    response = client.post("/api/studio/build/artifacts/av_traversal_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_traversal_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 400
     assert "Unsafe artifact archive entry" in response.json()["detail"]
@@ -681,8 +766,11 @@ def test_promote_blocks_absolute_path_entries(monkeypatch, tmp_path: Path) -> No
     store = _PromoteStore(version)
     runtime_root = tmp_path / "runtime_app"
     _, client = _promote_client(monkeypatch, runtime_root, store)
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
 
-    response = client.post("/api/studio/build/artifacts/av_absolute_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_absolute_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 400
     assert "Unsafe artifact archive entry" in response.json()["detail"]
@@ -711,8 +799,11 @@ def test_promote_skips_symlink_entries(monkeypatch, tmp_path: Path) -> None:
     store = _PromoteStore(version)
     runtime_root = tmp_path / "runtime_app"
     _, client = _promote_client(monkeypatch, runtime_root, store)
+    factory_root = runtime_root
+    runtime_root = runtime_root.parent / "workspaces" / "app_1" / version.id / "app"
+    assert not factory_root.exists()
 
-    response = client.post("/api/studio/build/artifacts/av_symlink_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_symlink_1/promote?build_registry_id=appreg_1")
 
     assert response.status_code == 200
     assert (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()

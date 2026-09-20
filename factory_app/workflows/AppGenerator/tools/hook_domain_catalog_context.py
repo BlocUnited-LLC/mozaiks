@@ -30,7 +30,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
 
 logger = logging.getLogger(__name__)
 
@@ -81,49 +81,6 @@ def _load_catalog() -> dict[str, Any] | None:
         logger.warning("domain_catalogs.yaml could not be loaded: %s", exc)
         return None
 
-
-def _update_section(agent: Any, header: str, body: str) -> None:
-    """Append or replace a named section in the agent system message."""
-    try:
-        current: str = (
-            getattr(agent, "system_message", None)
-            or getattr(agent, "_system_message", "")
-            or ""
-        )
-        section = f"{header}\n{body}"
-
-        if header in current:
-            # Replace existing section, preserving anything that follows.
-            pre, _, rest = current.partition(header)
-            next_section_idx = rest.find("\n\n[")
-            after = rest[next_section_idx:] if next_section_idx > 0 else ""
-            new_message = f"{pre.rstrip()}\n\n{section}{after}"
-        else:
-            new_message = f"{current}\n\n{section}" if current else section
-
-        if new_message == current:
-            return
-
-        updater = getattr(agent, "update_system_message", None)
-        if callable(updater):
-            updater(new_message)
-        elif hasattr(agent, "_system_message"):
-            agent._system_message = new_message
-        else:
-            agent._system_message = new_message
-
-    except Exception as exc:
-        logger.error(
-            "[%s] Failed to update system message section %s: %s",
-            getattr(agent, "name", "?"),
-            header,
-            exc,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Domain scoring
-# ---------------------------------------------------------------------------
 
 def _collect_concept_text(context_variables: dict[str, Any], messages: list[dict[str, Any]]) -> str:
     """Collect all available concept signal text for domain scoring."""
@@ -294,12 +251,14 @@ def _build_manifest_guard_body(
         "Declared YAML files for this module (generate ONLY these):",
     ]
     for f in declared_sorted:
-        lines.append(f"  - modules/{module_id}/{f}")
+        relative = f if f in {"module.yaml", "runtime_extensions.yaml"} else f"contracts/{f}"
+        lines.append(f"  - modules/{module_id}/{relative}")
 
     if omitted:
         lines.append("Files NOT declared for this module (do NOT generate):")
         for f in omitted:
-            lines.append(f"  - modules/{module_id}/{f}  ← omit")
+            relative = f if f in {"module.yaml", "runtime_extensions.yaml"} else f"contracts/{f}"
+            lines.append(f"  - modules/{module_id}/{relative}  ← omit")
 
     lines += [
         "",
@@ -345,7 +304,7 @@ def inject_domain_catalog_context(agent: Any, messages: list[dict[str, Any]]) ->
         top_domains = _select_top_domains(catalog, concept_text)
 
         body = _build_app_plan_body(catalog, top_domains, all_domain_keys)
-        _update_section(agent, _DOMAIN_CONTEXT_HEADER, body)
+        update_agent_section(agent, _DOMAIN_CONTEXT_HEADER, body)
 
         logger.info(
             "[%s] Injected domain catalog context (top domains: %s)",
@@ -409,7 +368,22 @@ def inject_module_file_manifest_guard(agent: Any, messages: list[dict[str, Any]]
                 declared_yaml_files = manifest_yaml | {"module.yaml"}
 
         body = _build_manifest_guard_body(module_id, declared_yaml_files, owned_paths)
-        _update_section(agent, _MANIFEST_GUARD_HEADER, body)
+        plan = context_variables.get("app_build_plan") or {}
+        planned_events = [
+            event for event in plan.get("event_flows") or []
+            if event.get("producer_pack_id") == module_id
+        ]
+        if planned_events:
+            body += "\nExplicit planned event bindings (preserve these exact names):"
+            for event in planned_events:
+                body += f"\n  - {event['producing_action']} emits {event['event_type']}"
+        for pack in plan.get("capability_packs") or []:
+            if pack.get("capability_pack_id") == module_id and "user_data_scope" in pack:
+                scope = bool(pack["user_data_scope"])
+                body += f"\nPlanned module.user_data_scope MUST be {str(scope).lower()}."
+                if scope:
+                    body += " Declare backend/account_data_handler.py with kind account_data_handler in python_stubs; its implementation belongs in the business_services task output."
+        update_agent_section(agent, _MANIFEST_GUARD_HEADER, body)
 
         logger.info(
             "[%s] Injected module file manifest guard (module=%s, declared=%s)",
@@ -426,7 +400,6 @@ __all__ = [
     "inject_domain_catalog_context",
     "inject_module_file_manifest_guard",
 ]
-
 
 
 

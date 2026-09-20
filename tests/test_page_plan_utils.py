@@ -47,12 +47,59 @@ Covers:
 from __future__ import annotations
 
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    _decode_config_hint,
-    _page_from_plan,
     _page_stem_from_path,
     _page_stems,
     _slug,
 )
+from tests.page_plan_fixtures import _decode_config_hint, _page_from_plan
+
+
+def test_runtime_page_validation_rejects_invalid_hint_shaped_configs():
+    import pytest
+    import yaml
+
+    from mozaiksai.core.workflow.generator_support.page_plan_utils import validate_planned_page
+
+    page = {
+        "schema_version": "mozaiks.app_page.v1", "name": "Customers", "route": "/customers",
+        "title": "Customers", "page_type": "record_list", "layout": "full-width",
+        "sections": [{"id": "table", "primitive": "DataTable", "config": {"columns": ["name"], "search": ["name"]}}],
+    }
+    with pytest.raises(ValueError, match="page_schema.bool_type"):
+        validate_planned_page(yaml.safe_dump(page), {"name": "Customers", "route": "/customers"}, "ui/pages/customers.yaml")
+
+
+def test_runtime_page_validation_rejects_route_drift():
+    import pytest
+    import yaml
+
+    from mozaiksai.core.workflow.generator_support.page_plan_utils import validate_planned_page
+
+    page = {
+        "schema_version": "mozaiks.app_page.v1", "name": "Customers", "route": "/invented",
+        "title": "Customers", "page_type": "record_list", "layout": "full-width",
+        "sections": [{"id": "header", "primitive": "PageHeader", "config": {"title": "Customers"}}],
+    }
+    with pytest.raises(ValueError, match="route must preserve"):
+        validate_planned_page(yaml.safe_dump(page), {"name": "Customers", "route": "/customers"}, "ui/pages/customers.yaml")
+
+
+def test_runtime_page_identity_is_owned_filename_not_planner_display_label():
+    import pytest
+    import yaml
+
+    from mozaiksai.core.workflow.generator_support.page_plan_utils import validate_planned_page
+
+    page = {
+        "schema_version": "mozaiks.app_page.v1", "name": "customers", "route": "/customers",
+        "title": "Customer Registry", "page_type": "record_list", "layout": "full-width",
+        "sections": [{"id": "header", "primitive": "PageHeader", "config": {"title": "Customer Registry"}}],
+    }
+    planned = {"name": "Customer Registry", "route": "/customers"}
+    validate_planned_page(yaml.safe_dump(page), planned, "ui/pages/customers.yaml")
+    page["name"] = "Customer Registry"
+    with pytest.raises(ValueError, match="Runtime page name must match file identity 'customers'"):
+        validate_planned_page(yaml.safe_dump(page), planned, "ui/pages/customers.yaml")
 
 # ---------------------------------------------------------------------------
 # 1. _slug

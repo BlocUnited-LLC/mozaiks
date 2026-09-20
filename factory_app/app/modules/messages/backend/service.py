@@ -4,7 +4,14 @@ import inspect
 import logging
 from typing import Any
 
-from .policy import actor_id, is_participant, participant_thread_query
+from .policy import (
+    actor_id,
+    current_scope_query,
+    is_participant,
+    participant_thread_query,
+    resolve_scope,
+    thread_identity_queries,
+)
 from .repo import MessageRepo, ReadStateRepo, ThreadRepo
 from .schemas import (
     MAX_MESSAGE_LENGTH,
@@ -35,6 +42,13 @@ class MessageService:
         self.messages = messages or MessageRepo()
         self.reads = reads or ReadStateRepo()
 
+    async def _get_authorized_thread(self, ctx, *, thread_id: str) -> dict[str, Any] | None:
+        for query in thread_identity_queries(ctx, thread_id=thread_id):
+            thread = await self.threads.get(ctx, query=query)
+            if thread:
+                return thread
+        return None
+
     async def _emit(self, ctx, event_type: str, payload: dict[str, Any]) -> None:
         emit = getattr(ctx, "emit", None)
         if emit is None:
@@ -58,11 +72,11 @@ class MessageService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         created_by = actor_id(ctx)
-        resolved_scope_id = scope_id or (getattr(ctx, "workspace_id", None) if scope_type == "workspace" else getattr(ctx, "app_id", None))
-        resolved_subject_app_id = subject_app_id or (getattr(ctx, "app_id", None) if scope_type == "app" else None)
+        resolved_scope_type, resolved_scope_id = resolve_scope(ctx, scope_type=scope_type, scope_id=scope_id)
+        resolved_subject_app_id = subject_app_id or (getattr(ctx, "app_id", None) if resolved_scope_type == "app" else None)
         thread = build_thread_record(
             created_by=created_by,
-            scope_type=scope_type,
+            scope_type=resolved_scope_type,
             scope_id=resolved_scope_id,
             subject_app_id=resolved_subject_app_id,
             title=title,
@@ -126,9 +140,9 @@ class MessageService:
         if thread_type:
             query["thread_type"] = normalize_thread_type(thread_type)
         if scope_type:
-            query["scope_type"] = normalize_scope_type(scope_type)
+            query.update(current_scope_query(ctx, scope_type=normalize_scope_type(scope_type), scope_id=scope_id))
         if scope_id:
-            query["scope_id"] = normalize_string(scope_id)
+            query.update(current_scope_query(ctx, scope_type=scope_type, scope_id=normalize_string(scope_id)))
         if subject_app_id:
             query["subject_app_id"] = normalize_string(subject_app_id)
         if related_type:
@@ -162,7 +176,7 @@ class MessageService:
         message_limit: int = 50,
         allow_nonparticipant_reader: bool = False,
     ) -> dict[str, Any]:
-        thread = await self.threads.get(ctx, thread_id=thread_id)
+        thread = await self._get_authorized_thread(ctx, thread_id=thread_id)
         if not thread:
             logger.warning("messages: get_thread not found thread_id=%s user_id=%s", thread_id, actor_id(ctx))
             return {"thread": None, "messages": [], "error": "thread not found"}
@@ -176,7 +190,7 @@ class MessageService:
             return {"thread": None, "messages": [], "error": "access denied"}
         messages = await self.messages.list(
             ctx,
-            thread_id=thread_id,
+            query={"thread_id": thread_id, "is_deleted": {"$ne": True}},
             limit=coerce_limit(message_limit, default=50, maximum=200),
         )
         logger.info(
@@ -212,7 +226,7 @@ class MessageService:
             )
             return {"success": False, "error": f"message exceeds {MAX_MESSAGE_LENGTH} character limit"}
 
-        thread = await self.threads.get(ctx, thread_id=thread_id)
+        thread = await self._get_authorized_thread(ctx, thread_id=thread_id)
         if not thread:
             logger.warning("messages: send_message thread not found thread_id=%s sender_role=%s", thread_id, sender_role)
             return {"success": False, "error": "thread not found"}
@@ -258,6 +272,11 @@ class MessageService:
         await self.threads.update_last_message(
             ctx,
             thread_id=thread_id,
+            query={
+                "thread_id": thread_id,
+                "scope_type": thread.get("scope_type"),
+                "scope_id": thread.get("scope_id"),
+            },
             updated_at=message["created_at"],
             preview=preview,
             participant_ids=participant_ids,
@@ -300,12 +319,19 @@ class MessageService:
         return {"success": True, "message": dict(message)}
 
     async def mark_thread_read(self, ctx, *, thread_id: str) -> dict[str, Any]:
-        thread = await self.threads.get(ctx, thread_id=thread_id)
+        thread = await self._get_authorized_thread(ctx, thread_id=thread_id)
         user_id = actor_id(ctx)
         if not thread or not is_participant(thread, user_id):
             logger.warning("messages: mark_thread_read rejected thread_id=%s user_id=%s", thread_id, user_id)
             return {"success": False, "error": "thread not found"}
-        await self.reads.upsert(ctx, thread_id=thread_id, user_id=user_id, read_at=timestamp_now())
+        await self.reads.upsert(
+            ctx,
+            thread_id=thread_id,
+            user_id=user_id,
+            read_at=timestamp_now(),
+            scope_type=thread.get("scope_type"),
+            scope_id=thread.get("scope_id"),
+        )
         await self._emit(ctx, "domain.messages.thread_read", {"thread_id": thread_id, "user_id": user_id})
         logger.info("messages: mark_thread_read complete thread_id=%s user_id=%s", thread_id, user_id)
         return {"success": True}

@@ -343,3 +343,48 @@ async def test_module_action_raw_body_keeps_declared_app_id_param(monkeypatch):
 
     assert executor.requests[0].params["app_id"] == "demo-app"
     assert executor.requests[0].app_id == "demo-app"
+
+
+@pytest.mark.asyncio
+async def test_support_subject_app_id_does_not_override_authenticated_runtime_scope(monkeypatch):
+    executor = _FakeModuleExecutor(
+        action_schemas={
+            "workspace_support": {
+                "create_support_request": {
+                    "input": {"properties": {"message": {}, "subject_app_id": {}}},
+                },
+            },
+        }
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                failed_module_names=[],
+                executor_registry=SimpleNamespace(module_executor=executor),
+                module_action_surfaces={},
+            )
+        ),
+        query_params={},
+        headers={},
+    )
+
+    async def _scope(**kwargs):
+        requested = kwargs["requested_scope"]
+        return {**requested, "permissions": []}
+
+    monkeypatch.setattr(module_router, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(module_router, "get_platform_hooks", lambda: SimpleNamespace(call_module_scope=_scope))
+
+    await module_router._execute_module_action(
+        module_name="workspace_support",
+        action_name="create_support_request",
+        request=request,
+        principal=SimpleNamespace(
+            user_id="user_1", scopes=[], tenant_id=None, workspace_id=None, app_id="mozaiks-app"
+        ),
+        params={"message": "help", "subject_app_id": "customer-app"},
+    )
+
+    assert executor.requests[0].app_id == "mozaiks-app"
+    assert executor.requests[0].params["subject_app_id"] == "customer-app"
+    assert executor.requests[0].authority.permissions == ()

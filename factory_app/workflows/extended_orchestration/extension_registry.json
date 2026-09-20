@@ -153,6 +153,17 @@
       "handoff_style": "continuous_chat"
     },
     {
+      "id": "SecurityReadiness",
+      "description": "Advisory generated app security readiness review",
+      "startup_mode": "AgentDriven",
+      "interaction_mode": "agent_directed",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat",
+      "dependencies": [
+        "AppGenerator"
+      ]
+    },
+    {
       "id": "AppReview",
       "description": "In-chat build review and promote-or-revise HITL step",
       "startup_mode": "AgentDriven",
@@ -213,9 +224,6 @@
           "transition": "coding_journey_selector"
         },
         {
-          "transition": "database_setup_selector"
-        },
-        {
           "workflows": [
             "DesignDocs"
           ]
@@ -233,6 +241,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "SecurityReadiness"
           ]
         },
         {
@@ -338,6 +351,11 @@
           ]
         },
         {
+          "workflows": [
+            "SecurityReadiness"
+          ]
+        },
+        {
           "transition": "app_review"
         }
       ]
@@ -382,6 +400,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "SecurityReadiness"
           ]
         },
         {
@@ -432,6 +455,11 @@
           ]
         },
         {
+          "workflows": [
+            "SecurityReadiness"
+          ]
+        },
+        {
           "transition": "app_review"
         }
       ]
@@ -476,6 +504,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "SecurityReadiness"
           ]
         },
         {
@@ -740,7 +773,9 @@
           "route_to": "DesignDocs",
           "context_variables": {
             "coding_participation": "autonomous",
-            "design_docs_hitl": false
+            "design_docs_hitl": false,
+            "database_provider": "mongodb",
+            "database_setup_mode": "local"
           }
         },
         {
@@ -748,7 +783,9 @@
           "route_to": "DesignDocs",
           "context_variables": {
             "coding_participation": "guided",
-            "design_docs_hitl": true
+            "design_docs_hitl": true,
+            "database_provider": "mongodb",
+            "database_setup_mode": "local"
           }
         }
       ]

@@ -3,8 +3,8 @@ Manual live smoke: staged refinement coding worker -> scoped staging.
 
 Usage:
     python scripts/smoke_refinement_live_coding_worker.py
-    python scripts/smoke_refinement_live_coding_worker.py --run-live
-    python scripts/smoke_refinement_live_coding_worker.py --run-live --scenario all
+    python scripts/smoke_refinement_live_coding_worker.py --run-live --user-id <owner-id>
+    python scripts/smoke_refinement_live_coding_worker.py --run-live --user-id <owner-id> --scenario all
     python scripts/smoke_refinement_live_coding_worker.py --save-fixture
 
 What is live:
@@ -376,9 +376,10 @@ def _build_plan(*, spec: SmokeScenarioSpec, staging_root: Path) -> RefinementExe
     )
 
 
-def _build_worker_request(*, spec: SmokeScenarioSpec, plan: RefinementExecutionPlan) -> CodingWorkerRequest:
+def _build_worker_request(*, spec: SmokeScenarioSpec, plan: RefinementExecutionPlan, user_id: str) -> CodingWorkerRequest:
     return CodingWorkerRequest(
         app_id=spec.app_id,
+        user_id=user_id,
         artifact_kind=spec.artifact_kind,
         artifact_key=spec.artifact_key,
         artifact_version_id=spec.artifact_version_id,
@@ -676,6 +677,7 @@ def _sanitize_fixture_json(text: str) -> str:
 async def _run_scenario(
     *,
     spec: SmokeScenarioSpec,
+    user_id: str,
     worker_config: dict[str, Any],
     save_fixture: bool,
     fixture_path: Path | None,
@@ -694,7 +696,7 @@ async def _run_scenario(
             source_bundle_path=source_bundle,
             staging_root=tmp_path / ".refinement_staging",
         )
-        worker_request = _build_worker_request(spec=spec, plan=plan)
+        worker_request = _build_worker_request(spec=spec, plan=plan, user_id=user_id)
         artifact_store = _SmokeArtifactStore()
         worker = ScopedRefinementCodingWorker(
             tool_executor=_SmokeControlPlaneToolExecutor(
@@ -857,7 +859,7 @@ async def _run_scenario(
         return scenario_record
 
 
-async def _run_smoke(*, run_live: bool, scenario_name: str, save_fixture: bool, fixture_path: Path, strict: bool) -> int:
+async def _run_smoke(*, run_live: bool, scenario_name: str, save_fixture: bool, fixture_path: Path, strict: bool, user_id: str) -> int:
     if not run_live:
         print("Skipping live coding-worker smoke: pass --run-live to invoke the live worker.")
         return 0
@@ -879,6 +881,7 @@ async def _run_smoke(*, run_live: bool, scenario_name: str, save_fixture: bool, 
     for spec in scenarios:
         result = await _run_scenario(
             spec=spec,
+            user_id=user_id,
             worker_config=worker_config,
             save_fixture=save_fixture,
             fixture_path=fixture_path if scenario_name != "all" else None,
@@ -916,6 +919,7 @@ async def _run_smoke(*, run_live: bool, scenario_name: str, save_fixture: bool, 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the manual live staged coding-worker smoke.")
+    parser.add_argument("--user-id", help="Operator-supplied owner for auxiliary usage attribution")
     parser.add_argument(
         "--run-live",
         action="store_true",
@@ -949,10 +953,13 @@ def main() -> int:
     if not args.run_live:
         print("Skipping live coding-worker smoke: pass --run-live to invoke the live worker.")
         return 0
+    if not args.user_id or not args.user_id.strip():
+        parser.error("--user-id is required with --run-live")
     try:
         exit_code = asyncio.run(
             _run_smoke(
                 run_live=args.run_live,
+                user_id=args.user_id,
                 scenario_name=args.scenario,
                 save_fixture=args.save_fixture,
                 fixture_path=args.fixture_path,

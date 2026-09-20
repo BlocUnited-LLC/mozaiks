@@ -20,10 +20,33 @@ hardcoded app-specific branches.
 
 ### `app/config/`
 
+Authenticated apps declare `config/auth.yaml` using the shared typed
+`mozaiks.auth.v1` contract. AppLoader validates it and checks agreement with
+`app.json.authRequired`. `/api/shell-config` exposes its public browser settings
+and the backend's effective auth mode. The shared shell enables local development
+identity only when the backend explicitly allows it. Factory exercises these
+same declarations; see [Factory security](../../guides/factory-security.md).
+
 Runtime-facing app configuration, including AI provider settings, shell config,
 admin config, and theme config. When an app needs durable runtime secrets,
 `app/security/secrets.yaml` declares the secret provider/vault policy, env
 handles, and secret names only. It must never contain raw credential values.
+
+Generation, validation, and runtime share `mozaiksai.core.secrets.AppSecretContract`.
+The minimal contract works with environment variables and needs no cloud service:
+
+```yaml
+version: 1
+secrets:
+  - env: EMAIL_API_KEY
+```
+
+Optional `provider.type: azure_key_vault` declares vault policy and each entry's
+`azure_key_vault.secret_name` names a stored secret. Direct environment values
+have precedence. Unknown fields, string entries, duplicate env names, and malformed
+manifests fail validation without echoing submitted values. A selected app never
+inherits another workspace's secret manifest. Omit the file when no app-owned
+policy is needed; a configured file that is missing is an error.
 
 `app/config/integrations.yaml` is the canonical generated-app integration
 requirement contract. AppGenerator materializes it during assembly from
@@ -54,8 +77,10 @@ grants. When the app also declares `assignment_store`, the platform loads it at
 startup and wires the OSS `ConfiguredEntitlementAdapter` into
 `ModuleExecutor`; the adapter reads the configured app data alias for active
 subscription assignment state. Non-SaaS apps omit this file; all entitlement
-gates pass unconditionally via `NoOpEntitlementAdapter`. Schema:
-`mozaiks.subscriptions.v1`.
+gates pass unconditionally via `NoOpEntitlementAdapter`. A file that is
+present but invalid fails application loading — it is never downgraded to
+disabled enforcement, so a malformed contract can never silently grant gated
+actions. Schema: `mozaiks.subscriptions.v1`.
 Assignment stores may declare `tenant_id_field`, `workspace_id_field`, and
 `user_id_field`; the configured adapter checks exact scoped assignments before
 falling back to broader tenant, workspace, user, or app-level records.
@@ -64,7 +89,7 @@ Plans may also declare `usage_limits` for meters such as `ai_tokens`. These
 limits are deterministic app intent used by admin, billing, and selected
 managed-capability facade surfaces, including the MozaiksPay facade
 when that pack is selected. Token measurements themselves come from runtime
-AG2 1.0 beta usage middleware and `/api/me/usage` or `/api/admin/usage`; generated
+AG2 1.0 usage middleware and `/api/me/usage` or `/api/admin/usage`; generated
 modules must not create a second usage ledger.
 
 Plans may also declare provider-neutral `token_allowances`, and apps may declare

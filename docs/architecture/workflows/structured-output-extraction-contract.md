@@ -53,6 +53,7 @@ UI (receives tool_call/tool_response events)
 Defines Pydantic models and maps agents to their output models.
 
 ```yaml
+schema_version: mozaiks.structured_outputs.v1
 # Registry: agent name → model name
 registry:
   ExampleDecomposerAgent: ExampleDecomposition
@@ -149,6 +150,13 @@ tools:
 - If valid → finds tool with `auto_tool_call: true` for this agent
 - Invokes tool function with validated payload as kwargs
 - Tool receives structured output fields directly as parameters
+
+For a nonvisual `Agent_Tool`, explicitly accept the validated `agent_message`
+parameter when the user should see a question or confirmation. The existing
+tool-call event carries that message into the chat even without a UI component;
+internal tool arguments remain hidden and replayed tool-call IDs are deduplicated.
+The workflow's visual-agent policy still applies. Routing uses the tool's typed
+outcome binding, never the text of `agent_message` (ThemeCapture dogfoods this).
 
 ### 4. Tool Implementation
 

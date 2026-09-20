@@ -1,3 +1,4 @@
 visual_agents:
 - IntakeAgent
 - ReviewAgent
+- SynthesisAgent

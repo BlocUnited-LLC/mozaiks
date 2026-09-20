@@ -1,0 +1,113 @@
+definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+  artifact_version_id:
+    type: string
+    description: >
+      Optional launch selector; must match the bound registry's current build artifact.
+      The inspector populates the verified artifact id for the AppReview handoff.
+    source:
+      type: state
+      default: null
+  security_readiness_mode:
+    type: string
+    description: Advisory by default; hosted overlays may later opt into blocking gates.
+    source:
+      type: state
+      default: advisory
+  bundle_path:
+    type: string
+    writer_ids: [transition_router]
+    description: AppGenerator's registered staged app directory, carried unchanged for AppReview revision.
+    source:
+      type: state
+      default: null
+  lifecycle_state:
+    type: string
+    writer_ids: [transition_router]
+    description: Registered bundle lifecycle state carried from AppGenerator to AppReview.
+    source:
+      type: state
+      default: null
+  app_validation_status:
+    type: string
+    writer_ids: [transition_router]
+    description: Actual AppGenerator validation result, not inferred from the security assessment.
+    source:
+      type: state
+      default: null
+  app_validation_strategy_used:
+    type: string
+    writer_ids: [transition_router]
+    description: Validation strategy used by AppGenerator, carried unchanged to AppReview.
+    source:
+      type: state
+      default: null
+  app_validation_preview_url:
+    type: string
+    writer_ids: [transition_router]
+    description: Optional preview URL from AppGenerator validation.
+    source:
+      type: state
+      default: null
+  integration_tests_passed:
+    type: boolean
+    writer_ids: [transition_router]
+    description: Actual AppGenerator integration result; missing evidence remains null.
+    source:
+      type: state
+      default: null
+  app_bundle_acceptance_status:
+    type: string
+    writer_ids: [transition_router]
+    description: Actual deterministic acceptance result from AppGenerator.
+    source:
+      type: state
+      default: null
+  security_readiness_findings:
+    type: array
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Findings produced by inspect_generated_app_security.
+    source:
+      type: computed
+      default: []
+  security_readiness_summary:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Bound artifact assessment, source diagnostics, and persistence outcome surfaced by AppReview.
+    source:
+      type: computed
+      default: {}
+  security_readiness_recorded:
+    type: boolean
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: True only when a valid source was assessed and any findings were saved.
+    source:
+      type: computed
+      default: false
+  workflow_sequence:
+    type: string
+    description: Active workflow sequence id for build journey continuity.
+    source:
+      type: state
+      default: null
+
+agents:
+  SecurityReadinessAgent:
+    variables:
+      - artifact_version_id
+      - security_readiness_mode
+      - security_readiness_findings
+      - security_readiness_summary
+      - security_readiness_recorded
+      - workflow_sequence

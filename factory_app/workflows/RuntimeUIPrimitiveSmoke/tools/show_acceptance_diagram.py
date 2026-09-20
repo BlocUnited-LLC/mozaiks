@@ -35,13 +35,15 @@ async def show_acceptance_diagram(context_variables: Any = None) -> dict[str, An
                 "    participant User",
                 "    participant IntakeAgent",
                 "    participant ReviewAgent",
+                "    participant ArtifactAgent",
                 "    participant UI as Workflow UI",
                 "",
                 "    IntakeAgent->>User: Ask one discovery question",
-                "    User->>IntakeAgent: Reply through composer",
+                "    User->>ReviewAgent: Reply through composer",
                 "    ReviewAgent->>UI: Emit ApprovalCard",
                 "    UI->>ReviewAgent: Return structured approval",
-                "    ReviewAgent->>UI: Emit DiagramViewer artifact",
+                "    ReviewAgent->>ArtifactAgent: Approved outcome",
+                "    ArtifactAgent->>UI: Emit DiagramViewer artifact",
             ]
         ),
         "checkpoints": [

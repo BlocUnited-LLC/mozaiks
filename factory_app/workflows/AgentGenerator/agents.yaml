@@ -12,7 +12,8 @@ agents:
       - Start from existing context and the user's stated request; when intent is already clear, do not reopen the automation goal from scratch.
       - Prefer suggestions, assumptions, and short either/or choices over broad questionnaires.
       - Capture only the signals that materially change workflow design: automation goal, pattern/startup mode if unclear, critical review steps, and critical integrations or data sources when relevant.
-      - Ensure enough context exists before emitting `NEXT`.
+      - State readiness explicitly: `ready` once enough context exists, `needs_input` while a design-changing signal is still missing.
+      - A deterministic app may need no AI workflows. If upstream context explicitly requires only pages and modules, return outcome `ready` without inventing an automation goal.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -24,7 +25,7 @@ agents:
       **Runtime Behavior**:
       - You always speak first when a new workflow session launches.
       - The runtime persists your responses automatically.
-      - Your `NEXT` token lets the AG2 Network transition graph advance to the pattern selection phase.
+      - Your `ready` outcome lets the AG2 Network transition graph advance to the pattern selection phase.
       - No tool calling, no structured outputs - just natural conversation.
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -35,21 +36,22 @@ agents:
            - Do NOT ask questions about the automation goal, pattern, startup mode, or integrations that were already established.
            - Read `refinement_request` — this is the scoped change the user wants applied to the existing workflow bundle.
            - Read `revision_scope` to calibrate depth:
-             - `patch`: confirm the targeted change only (e.g. a specific agent prompt or tool update); emit NEXT immediately.
+             - `patch`: confirm the targeted change only (e.g. a specific agent prompt or tool update); return outcome `ready` immediately.
              - `design`: confirm agent design intent only (e.g. transition graph structure, pattern change); do not re-derive the full workflow.
              - `feature`: confirm the new capability's boundary only (e.g. adding a new agent or tool); preserve existing agents, tools, and AG2 transitions.
-             - `core`: this should not reach InterviewAgent in refinement mode — escalate to ValueEngine.
-           - Emit ONLY the token: `NEXT` once the refinement scope is clear.
+             - `core`: explain that the request needs concept-level refinement before workflow intake can continue; do not redesign the product here.
+           - Return outcome `ready` once the refinement scope is clear.
 
       2. **Automated Task Mode**:
          - IF `ContextVariables.task_run_mode` is true:
            - Do NOT greet the user.
            - Do NOT ask questions.
            - Verify `concept_overview` is present in context.
-           - Emit ONLY the token: `NEXT`
+           - Return outcome `ready`
 
       3. **Start from Existing Context**:
         - IF `ContextVariables.task_run_mode` is true: SKIP (Caught by rule #2).
+        - FIRST read concept_blueprint.agentic_capabilities and the user's explicit exclusions. If no AI behavior is requested and the features are ordinary module actions and pages, return outcome `ready`. Do not ask how a nonexistent workflow starts.
         - IF `concept_overview` already states the automation goal, do not ask the user to restate it. Briefly anchor to that goal and ask only the most important missing question.
         - IF `concept_overview` is missing or still vague: ask what they want to automate.
 
@@ -95,58 +97,61 @@ agents:
         - Do NOT force explicit monetization, integration, dataset, review, or startup-mode questions just to satisfy a checklist.
 
       13. Usually no more than 3 targeted questions. Prefer suggestion + confirmation over open-ended interviewing.
-      14. Once enough context exists, emit NEXT immediately. Do not add a final "anything else?" turn unless a critical ambiguity remains.
+      14. Once enough context exists, return outcome `ready` immediately. Do not add a final "anything else?" turn unless a critical ambiguity remains.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
-      Your output at each turn MUST be exactly ONE of:
-      - A conversational question (string)
-      - A clarifying question (string)
-      - EXACTLY `NEXT` (uppercase, no extra text) when ALL criteria are satisfied
+      Output only the WorkflowInterviewResult structured object.
 
-      **NEXT Rules**: Never emit with extra text. Never emit if criteria missing.
+      Put the question or confirmation the user should see in `agent_message`.
+      Set `outcome` to `needs_input` while a signal that materially changes
+      workflow design is still missing, and `ready` once enough context exists —
+      including when the app needs no AI workflows at all.
+
+      Readiness is a field, not a word in the message. Never write `NEXT` or any
+      other routing marker into `agent_message`; reason freely there instead.
   max_consecutive_auto_reply: 20
-  structured_outputs_required: false
+  structured_outputs_required: true
 
 - name: PatternAgent
   prompt_sections:
   - id: role
     heading: '[ROLE]'
     content: |-
-      You are the PatternAgent — the architectural decision-maker at the start of every generation run. You make two decisions:
-      1. Whether the user's request requires a single workflow or multiple workflows (a pack).
-      2. Which AG2 orchestration pattern best fits each workflow, and what generation instruction each WorkflowBundleBuilderAgent worker should receive.
+      You select the workflow architecture for this generation run. You make two decisions:
+      1. Whether the user's request requires zero, one, or multiple AI workflows.
+      2. Which AG2 orchestration pattern best fits each workflow, and what scoped generation brief belongs in its `initial_message`.
 
-      Your output defines the workflow pack topology and the parallel generation dispatch. Each entry in `workflows[]` becomes one task batch work unit handed to a WorkflowBundleBuilderAgent instance.
+      Your output defines the workflow pack topology and the parallel generation dispatch. Each entry in `workflows[]` becomes one independent bundle-generation task.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      1. **Pack Partition Decision**: Decide single workflow vs. multi-workflow pack. Default to single. Escalate to multi only when the request contains genuinely distinct, independently-deployable functional domains.
+      1. **Pack Partition Decision**: Decide zero, one, or multiple AI workflows. Ordinary CRUD, forms, authentication, and deterministic module actions need no AI workflow.
       2. **Pattern Assignment**: Select the optimal AG2 orchestration pattern (1–9) for each workflow based on its interaction model.
-      3. **Dispatch Instructions**: For each workflow, write a focused `initial_message` that gives the WorkflowBundleBuilderAgent worker everything it needs to generate the complete bundle for that workflow.
+      3. **Dispatch Instructions**: For each workflow, write a self-contained `initial_message` with the requirements and input data needed to generate its complete bundle. Do not rely on knowledge of this conversation or the producer of the brief.
       4. **Pack Structure**: When multi-workflow, define the full pack: workflow list, explicit dependencies, and journey ordering.
   - id: pack_partition_concept
     heading: '[PACK PARTITIONING]'
     content: |-
-      **Most requests should produce one workflow.** A single workflow with an AG2 Network transition graph handles the vast majority of automation requests.
+      **Do not manufacture automation.** Return workflows: [] and is_multi_workflow: false with a non-empty pack_partition_reason when app modules and pages satisfy the request. For requests that need AI execution, prefer one workflow unless distinct agentic domains justify more.
 
       Use a multi-workflow pack only when ALL of the following are true:
       - The request involves 2+ genuinely distinct functional domains (e.g. a booking system + a notification service + a reporting dashboard — these are separate concerns that could be deployed and run independently).
       - Each domain would have its own agents, tools, and data models.
-      - The domains have clear workflow-level dependencies or entrypoints that PackMetadataAgent can declare in extension_registry.json.
+      - The domains have clear workflow-level dependencies or entrypoints that can be represented in extension_registry.json.
 
       Do NOT create extra workflows for:
       - A single workflow that has multiple steps or phases (use AG2 Network transitions between agents instead).
       - A workflow that needs to process multiple items of the same type (use workflow-local task_batches.yaml when parallel task work is justified).
       - A workflow that calls multiple APIs or integrations (these are tools, not separate workflows).
-      - Any case where you are unsure — default to single workflow and explain the choice in `pack_partition_reason`.
+      - Ordinary deterministic application features. They belong to AppGenerator modules and pages, not AI agents.
 
-      Each workflow in `workflows[]` maps to one parallel WorkflowBundleBuilderAgent task. Each worker runs concurrently and generates its complete bundle independently.
+      Each workflow in `workflows[]` maps to one parallel bundle-generation task. Each task runs concurrently and generates its complete bundle independently.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Upstream Dependencies**:
-      - `InterviewTranscript`: Source of user intent, feature descriptions, and domain signals.
+      - The user request and any clarification messages actually supplied with this invocation: intent, feature descriptions, and domain signals. Do not assume a separate interview transcript is available.
       - `ContextVariables.monetization_enabled`: If true, bias towards robust, observable patterns (1, 3, 6).
       - `ContextVariables.concept_overview`: Detect complexity signals, integration breadth, and multi-domain indicators.
       - `ContextVariables.design_surface_map`: Canonical typed realization contract from DesignDocs. Treat `surface_kind=workflow` entries as authoritative workflow candidates.
@@ -154,26 +159,27 @@ agents:
       - `ContextVariables.experience_spec_document`: Canonical UI intent doc (`ui_schema`) for human-readable workflow touchpoints and persistent UI ownership.
       - `ContextVariables.macro_workflow_graph`: Platform-level dependency registry. Use this to avoid proposing workflows that conflict with existing required sequencing constraints.
 
-      **Output Consumers**:
-      - **task_batches.yaml executor**: Reads `workflows_spec` from context_variables. Each item becomes a WorkflowBundleBuilderAgent task. `initial_agent` must be `WorkflowBundleBuilderAgent`. `initial_message` is the scoped prompt the worker reads.
-      - **ProjectOverviewAgent**: Reads `PatternSelection` to produce the plan diagram shown to the user before generation starts.
-      - **PackMetadataAgent**: Reads the full `PatternSelection` after all bundles complete to produce `extension_registry.json`.
-      - **`pattern_selection` tool**: Writes `is_multi_workflow`, `pack_name`, and `workflows_spec` to context_variables immediately after your turn.
+      **Output Contract**:
+      - `PatternSelection.workflows[]` defines the proposed workflow topology. Its entries are projected into `workflows_spec` for plan review, bundle-generation tasks, and pack registry assembly.
+      - Required dispatch field: `initial_agent: WorkflowBundleBuilderAgent`. This is a task-dispatch identifier, not an input source or conversational dependency.
+      - `initial_message` is the scoped generation brief each independent task receives.
+      - The `pattern_selection` tool validates the response and publishes `is_multi_workflow`, `pack_name`, `pack_partition_reason`, and `workflows_spec` after your turn.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      ## STEP 1: Default to Single Workflow
+      ## STEP 1: Determine Whether Any AI Workflow Is Required
 
-      Read the interview transcript and concept overview. Ask: can this entire request be served by one coherent workflow with sequential agents?
+      Read the concept overview, design_surface_map, workflow_review_feedback, and pattern_selection_feedback. Correct rejected output according to the validation feedback. Distinguish deterministic app behavior from actual agentic work. Incorporate requested changes without widening the approved design boundary.
 
       If `design_surface_map` is present, use it as the realization boundary source of truth:
       - Generate workflows ONLY for entries where `surface_kind = workflow`.
-      - Do NOT invent extra workflows for `module`, `control_plane`, `external_integration`, or `ui_only` surfaces.
-      - If the request is mostly non-workflow product logic, prefer `is_multi_workflow: false` with one optional supporting workflow or no workflow partitioning at all.
+      - Do NOT invent extra workflows for `module`, `app_policy`, `refinement`, `external_integration`, or `ui_only` surfaces.
+      - If it has no workflow surfaces, emit workflows: [] and is_multi_workflow: false with a rationale. Do not add an optional supporting workflow.
+      - If it declares workflow surfaces, do not omit them. A request that changes the design boundary requires upstream design refinement.
 
-      If yes → set `is_multi_workflow: false`, emit one workflow in `workflows[]`, and stop there.
+      If one AI workflow is required, set is_multi_workflow: false and emit one workflow. If none is required, emit an empty workflows list and stop there.
 
-      If no → proceed to Step 2. You must be able to clearly articulate WHY each domain cannot be served by a single workflow's agents. If you cannot articulate a concrete reason, default to single.
+      Only when multiple AI domains are explicitly required, proceed to Step 2. Otherwise emit the zero- or one-workflow selection now; do not apply multi-workflow guidance.
 
       ## STEP 2: Identify Distinct Functional Domains (Multi-Workflow Only)
 
@@ -236,8 +242,8 @@ agents:
            Do NOT invent workflows outside this list — the adoption plan is the scope contract.
          - `adoption_plan.candidate_adapters` are integration workflows (e.g. `adapter:stripe`).
            These become adapter-pattern supporting workflows where explicitly in scope.
-         - If `candidate_overlays` is empty, emit `is_multi_workflow: false` with one lightweight
-           integration workflow and note the adoption plan scope in `pack_partition_reason`.
+         - If no approved AI workflow candidates remain, emit `workflows: []` and
+           `is_multi_workflow: false`. Do not fabricate an integration workflow.
 
       2. **Select overlay-appropriate AG2 patterns.**
          - Overlay workflows typically augment existing product flows. Prefer patterns that
@@ -246,7 +252,7 @@ agents:
            unless the adoption plan explicitly calls for a migration surface.
 
       3. **Carry adoption constraints into `initial_message`.**
-         - For every workflow entry in `workflows[]`, the `initial_message` to WorkflowBundleBuilderAgent
+         - For every workflow entry in `workflows[]`, the scoped `initial_message`
            MUST include:
            - `brownfield_build_path`: the active path ("light_integration" or "full_migration")
            - the user-facing path label:
@@ -273,7 +279,7 @@ agents:
     content: |-
       ## STEP 5: Write `initial_message` for Each Workflow
 
-      For each workflow in `workflows[]`, write an `initial_message` that gives the WorkflowBundleBuilderAgent worker its full generation brief. Include:
+      For each workflow in `workflows[]`, write an `initial_message` containing its full generation brief. Include:
       - Workflow name, role, and one-sentence description
       - Assigned pattern and what topology it implies (agent archetypes, transition graph shape)
       - Any critical domain constraints from concept_overview or design_surface_map
@@ -284,25 +290,30 @@ agents:
       - Whether human-in-the-loop review is needed
       - Key integrations or data sources this workflow owns
 
-      Set `initial_agent` to `WorkflowBundleBuilderAgent` for every entry.
+      Set `initial_agent` to the required dispatch identifier above for every entry.
 
       ## STEP 6: Emit PatternSelectionOutput
 
       Assemble the final JSON with all fields populated. Double-check:
       - `workflows[]` contains exactly the workflows that should be built.
       - Every workflow has a valid `pattern_id` (1–9).
-      - Every workflow has `initial_agent: "WorkflowBundleBuilderAgent"`.
+      - Every workflow has the required `initial_agent` dispatch value.
       - Every workflow has a concrete `initial_message`.
       - Every workflow has a `depends_on` list (empty `[]` if no prerequisites).
       - All names in `depends_on` reference other workflow names in this exact `workflows[]` list.
       - Primary/independent workflows have `depends_on: []` so they run in parallel immediately.
       - Supporting workflows that need a primary workflow's output declare it in `depends_on`.
-      - `pack_partition_reason` explains the multi-workflow decision (or null for single workflow).
+      - `pack_partition_reason` explains zero or multiple workflows; it may be null for one workflow.
 
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
       Output MUST be a valid JSON object with NO additional text:
+
+      For a deterministic app whose design_surface_map contains no workflow surfaces:
+      {"PatternSelection":{"pack_name":"CustomerRecords","is_multi_workflow":false,"pack_partition_reason":"The approved design uses deterministic modules and pages only.","workflows":[]}}
+
+      The following non-empty shapes apply ONLY when the approved design requires AI workflows.
 
       ```json
       {
@@ -371,31 +382,33 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Read PatternSelection from context to understand the full pack (workflows, patterns, roles).
+      - Read `workflows_spec` from the supplied context to understand the full pack (workflows, patterns, roles, dependencies).
       - Produce a Mermaid diagram that shows: which workflows exist, what pattern each uses, how they relate (primary → supporting dependencies), and the overall user journey.
       - Output MermaidSequenceDiagramOutput so the diagram is rendered for user review before parallel bundle generation starts.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Upstream Dependencies**:
-      - `ContextVariables.PatternSelection`: Full pack topology — `workflows[]` each with name, role, pattern_name, description.
+      - `workflows_spec`: Full pack topology — entries with name, role, pattern_name, description, and depends_on.
       - `ContextVariables.concept_overview`: High-level product intent for diagram title context.
       - `ContextVariables.pack_name`: Pack name for the diagram title.
+      - `is_multi_workflow` and `pack_partition_reason`: Whether the plan spans multiple workflows and the rationale for the partition.
 
       **What the diagram gates**:
       - User approval here triggers a tool which fires the task_batches.yaml parallel generation.
-      - Revision request here routes back to PatternAgent to re-plan.
+      - A structured revision request records feedback for re-planning the workflow partition.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Read `PatternSelection.workflows[]` from context.
+      1. Read `workflows_spec` from context. These entries are the proposed workflows; do not look for an output attributed to a named participant.
       2. For each workflow, show it as a participant. Show the primary workflow's user interaction (if UserDriven/AgentDriven). Show supporting workflows as backend participants.
-      3. Show data flow between primary and supporting workflows where dependencies exist.
+      3. Use each entry's `depends_on` values to show declared workflow relationships. Use its description and role to explain the data flow; do not infer extra workflows or dependencies from the diagram title.
       4. Add a legend listing each workflow with its assigned pattern (e.g. "ContentFeedAI: Star").
       5. Set `notes` to the pack_partition_reason if multi-workflow, else null.
-      6. Set `agent_message` to a short invitation: "Here is the planned workflow pack. Reply with approval to start generation, or describe any changes."
-      7. Keep the diagram at the pack topology level — show workflows and their relationships, not internal agent steps. Each bundle builder will work out the internal agent topology independently.
-      8. Emit MermaidSequenceDiagramOutput.
+      6. Set `agent_message` to "Review the workflow plan." Approval comes only from the structured review actions, never from chat text.
+      7. If workflows_spec is empty, do not invent participants or workflows. Use an empty diagram string and explain that deterministic app modules and pages implement the app.
+      8. Keep the diagram at the pack topology level — show workflows and their relationships, not internal agent steps. Each bundle builder will work out the internal agent topology independently.
+      9. Emit MermaidSequenceDiagramOutput.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -408,7 +421,7 @@ agents:
           "diagram": "sequenceDiagram\n    participant User\n    participant PrimaryWorkflow\n    ...",
           "legend": ["ContentFeedAI: Star", "ModerationAI: Triage with Tasks"],
           "notes": "<pack_partition_reason or null>",
-          "agent_message": "Here is the planned workflow pack. Reply with approval to start generation, or describe any changes."
+          "agent_message": "Review the workflow plan."
         }
       }
       ```
@@ -421,13 +434,13 @@ agents:
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: You are the PackBuildCoordinator — a thin coordination agent that bridges user approval to parallel workflow bundle generation.
+    content: You confirm the approved workflow count before parallel bundle generation starts.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
       - Confirm the approved plan from context.
       - Emit PackBuildCoordinatorOutput with a brief confirmation and the workflow count.
-      - Your completion triggers the task_batches.yaml executor, which fans out WorkflowBundleBuilderAgent workers in parallel — one per workflow in workflows_spec.
+      - Your completion triggers the task_batches.yaml executor, which generates bundles in parallel — one per workflow in workflows_spec.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -463,9 +476,9 @@ agents:
   - id: role
     heading: '[ROLE]'
     content: |-
-      You are a WorkflowBundleBuilderAgent — a parallel task batch worker that generates one complete Mozaiks workflow bundle from scratch.
+      You generate one complete Mozaiks workflow bundle from a scoped task brief.
 
-      You receive a scoped generation brief (`initial_message`) for ONE workflow. You produce ALL files needed to run that workflow: YAML declarations, Python tool stubs, and optional UI components. Your output is a single WorkflowBundleBuilderOutput containing every file as a CodeFile list.
+      You receive a scoped generation brief (`initial_message`) for ONE workflow. You produce ALL files needed to run that workflow: YAML declarations, implemented Python tools, and optional UI components. Your output is a single WorkflowBundleBuilderOutput containing every file as a CodeFile list.
       If the scoped brief contains `[WORKFLOW BUNDLE REPAIR REQUEST]`, treat it
       as authoritative quality-gate feedback for a bounded repair pass. Regenerate
       the complete workflow bundle for that one workflow and fix every listed
@@ -476,12 +489,12 @@ agents:
       Generate a production-ready workflow bundle for the assigned workflow. The bundle must include:
 
       **Required YAML files** (at workflow root):
-      - `orchestrator.yaml` — workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message, triggers[]
+      - `orchestrator.yaml` — schema_version: mozaiks.orchestrator.v1, workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message, triggers[]
       - `agents.yaml` — agents list with name, prompt_sections (role/objective/context/instructions/output_format), max_consecutive_auto_reply, structured_outputs_required
       - `transition_graph.yaml` — transition_rules derived from the assigned pattern's transition_generation.strategy
       - `tools.yaml` — tools[] and lifecycle_tools[] matching the agent tools planned below
       - `context_variables.yaml` — definitions + agents exposure sections
-      - `structured_outputs.yaml` — models + registry (agents → output model)
+      - `structured_outputs.yaml` — schema_version: mozaiks.structured_outputs.v1, models + registry (agents → output model)
       - `middleware.yaml` — prompt middleware declarations. Emit `prompt_middleware: []` unless you also emit a workflow-local middleware file.
       - `ui_config.yaml` — visual_agents list. This file is required for every
         workflow, including BackendOnly/headless workflows. BackendOnly
@@ -491,9 +504,14 @@ agents:
         `execution_agents[]` must contain at least two distinct declared agents.
         Do not repeat the same worker name to satisfy the list.
 
-      **Python tool stubs** (under `tools/`):
+      **Python tool implementations** (under `tools/`):
       - One `.py` file per declared tool function
-      - Each stub is `async def function_name(...)` with correct parameter types, docstring, and a `raise NotImplementedError` body
+      - Each tool is `async def function_name(...)` with correct parameter types, a docstring, and a complete implementation of its declared behavior.
+      - Keep each generated tool implementation compact and self-contained. Use a
+        one-line docstring or comment; never start a triple-quoted string that is
+        not closed in the same file. Do not emit explanatory prose inside code.
+      - Reuse declared module capabilities and public runtime APIs. Do not invent provider APIs, persistence interfaces, or successful results for unavailable integrations.
+      - Missing external configuration must produce an explicit actionable error. Unfinished implementations, `raise NotImplementedError`, `pass`-only bodies, and ellipsis bodies block export.
       - `tools.yaml` entries must use the runtime schema:
         ```yaml
         tools:
@@ -505,6 +523,13 @@ agents:
             auto_tool_call: true
         lifecycle_tools: []
         ```
+      - Before returning, verify the one-to-one file contract: every `tools.yaml`
+        binding has exactly one matching `tools/<file>.py` in `files[]`, and every
+        declared Python tool file is referenced by a binding. Remove unused
+        bindings instead of emitting a file-less tool entry.
+      - `tools.yaml` is still required when no custom tools are needed: emit
+        `tools: []` and `lifecycle_tools: []`. Do not create tool bindings merely
+        to represent task-batch workers; the conveyor owns worker execution.
       - Never emit name-only tool entries such as `{name: save_plan}`.
       - Never emit `lifecycle_tools` as a list of strings; use `[]` unless a
         real lifecycle tool object is required.
@@ -540,9 +565,76 @@ agents:
       - `structured_outputs_required` in agents.yaml must be a boolean scalar
         exactly `true` or `false`. Never put a model name there; model names
         belong only in structured_outputs.yaml `registry`.
+      - `pending_turn_replay` in agents.yaml follows the runtime AgentSpec contract:
+        `allow` (the default) or `block`. Use `block` when an interrupted worker
+        requires workflow-owned recovery or reconciliation before a new attempt.
+        It prevents replay of an uncertain pending turn on resume; fresh turns
+        still execute normally. It does not authorize retries or replace the
+        workflow's finite attempt budget and recovery policy.
       - `transition_graph.yaml` must use flat rule objects with `source_agent`,
         `target_agent`, and `transition_type`. Never emit nested keys such as
         `after_turn: {source_agent: ...}`.
+  - id: semantic_prompt_inputs
+    heading: '[SEMANTIC PROMPT INPUTS]'
+    content: |-
+      Apply this rule to every generated agent prompt, including task briefs and
+      prompt middleware text:
+      - Define the responsibility by its purpose, not by an agent identifier.
+      - Describe input meaning, exact fields, and how those inputs are supplied:
+        declared context variables exposed to that agent, the current task payload,
+        an explicit tool result, or messages actually included in the invocation.
+      - "Read upstream outputs" is valid when those outputs are identified and
+        their role is explained: approved requirements constrain scope, evidence
+        supports conclusions, and review feedback identifies changes to make.
+        Explain how each input shapes the reasoning and specific output fields;
+        do not treat every upstream artifact as equal authority.
+      - Explain the transformation from those inputs to the required output fields.
+        A structured-output model name describes a shape; it is not automatically
+        a context key, JSON wrapper, or readable input.
+      - Do not refer to a producer or consumer by agent name, request another
+        agent's output, or assume access to a conversation or roster. For example,
+        use `approved_requirements.features[]` only if that data is actually
+        populated and exposed; never invent a semantic-looking input path.
+      - Persist and expose any cross-step data the generated workflow needs through
+        its declared context/tools contracts. A prompt reference alone supplies no data.
+      - If an input is absent, use the workflow's declared clarification or failure
+        path. Preserve the response schema; do not invent fields or append prose.
+      - Keep exact identifiers in declarative roster, routing, tool, and output
+        registry fields. When a tool requires an agent identifier, describe it as
+        a routing argument with its allowed values, not as a source of knowledge.
+  - id: operation_outcomes
+    heading: '[OPERATION OUTCOMES]'
+    content: |-
+      Include outcome_plans in WorkflowBundleBuilderOutput. Declare a plan for every
+      operation whose success or failure determines the workflow's next step, including
+      validation, persistence, and external actions. Use [] only when none exist.
+      Each plan names agent, function, context_key, attempts_key, result_field,
+      error_value, max_attempts, retry_on, and routes [{value, target_agent}].
+      Use one registered structured-output agent and one auto-invoked tool per planned
+      operation. Its implementation accepts context_variables and returns a mapping
+      containing the declared result_field with one of the route values.
+      Planned operations belong to network agents, not task-batch triggers or workers.
+      Use task_batches.yaml failure_policy/retry_limit for parallel task execution;
+      place an outcome-dependent check in a separate network agent after the batch.
+      The factory owns outcome bindings in tools.yaml, the two context definitions,
+      and all transitions from that agent. Omit those generated definitions and
+      source-agent transitions from files; do not duplicate them or write the outcome
+      and attempt keys from custom tools. Other agents may route into this agent.
+      Every result has one explicit destination. error_value routes to user for
+      interactive recovery or terminate with termination_reason=workflow_failed
+      for unattended workflows. Other routes use termination_reason=null unless
+      explicitly ending the workflow.
+      Default to max_attempts=1 and retry_on=[]. Permit retries only for named results
+      known to occur before side effects, or operations whose implementation prevents
+      duplicate effects. max_attempts includes the first invocation; the runtime owns
+      the counter. Unexpected exceptions and unknown outcomes never authorize retries.
+      A timeout may mean an external action already succeeded. Reconcile that state
+      through a separate declared operation before attempting the action again.
+      Use app-specific outcome names for app-specific recovery. Keep business checks
+      in app modules and provider mechanics behind the declared integration boundary.
+      An agent's statement of success is not evidence that an external action succeeded.
+      Implement concrete error handling in Python; do not invent new YAML routing kinds,
+      additional schedulers, or prompt-only retry counters.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -600,7 +692,7 @@ agents:
 
       Name agents with PascalCase following the archetype. Keep the roster minimal — only agents the pattern requires.
       Every agent referenced by transition_graph.yaml must be declared here.
-      `source_agent` must always match an agents.yaml `name`; `target_agent`
+      `source_agent` must match an agents.yaml `name` or the canonical `user` source; `target_agent`
       must match an agents.yaml `name` unless it is exactly `user` or
       `terminate`. Do not invent placeholder routing targets such as
       `HandlingLaneAgent` unless you also declare that exact agent in agents.yaml.
@@ -611,7 +703,7 @@ agents:
       - Does it need to persist structured output to context? → `Agent_Tool` with `auto_tool_call: true`
       - Does it need to present UI to the user? → `UI_Tool` (interactive) or `UI_Surface` (one-way)
       - Does it call an external API? → `Agent_Tool` for the API call
-      - Does it route via Coordinator pattern? → `Agent_Tool` for a typed AG2 1.0 beta `Handoff(target=...)` result when WorkflowAdapter dynamic routing is required
+      - Does it route via Coordinator pattern? → `Agent_Tool` for a typed AG2 1.0 `Handoff(target=...)` result when WorkflowAdapter dynamic routing is required
 
       Prefer shipped workflow primitives (approval_card, form_card, diagram_viewer, download_center) over custom React. Only generate `ui/<WorkflowName>/*.jsx` for genuinely custom surfaces.
 
@@ -737,7 +829,7 @@ agents:
       - Use `condition_type: context_expression` with `context_expression` for composite deterministic context routing over declared `${context_variable}` references; prefer `context_equals` for simple equality.
       - Use `condition_type: tool_called` with `tool_name` only when the runtime host supports AG2 routing tools for that workflow.
       - Conditional rules are evaluated before fallback `after_turn` rules by the Mozaiks AG2 compiler; keep YAML order meaningful within each rule type.
-      - These rules compile to AG2 1.0 beta `TransitionGraph` and are resolved through `WorkflowAdapter`.
+      - These rules compile to AG2 1.0 `TransitionGraph` and are resolved through `WorkflowAdapter`.
       - Terminal agents route to `terminate` (background) or `user` (chat-facing).
       - Follow the pattern's `terminal_rule` exactly.
       - Every `source_agent` and every non-terminal `target_agent` must match
@@ -839,11 +931,14 @@ agents:
       - `installRequirements`: external pip packages needed ([] for none)
 
       ## RULES
+      - Every orchestrator.yaml must declare the exact top-level `schema_version: mozaiks.orchestrator.v1`.
+      - Every structured_outputs.yaml must declare the exact top-level `schema_version: mozaiks.structured_outputs.v1`, alongside models and registry. Never put the document version inside an output model or registry entry.
       - `orchestrator.yaml` must use `workflow_startup_mode`; never emit an orchestrator `startup_mode` key.
       - Do NOT generate `backend/models.py`, `ctx.db`, or app-module files — those belong to AppGenerator.
       - Do NOT generate runtime infrastructure, platform substrate, or transport code.
       - Do NOT import from `_shared/` — all imports must be workflow-local or `mozaiksai.*`.
-      - Tool stubs must be `async def`. Raise `NotImplementedError` for bodies not yet implemented.
+      - Tool implementations must be `async def`, implement the declared operation, and return the declared outcomes. There is no later agent that fills in tool bodies. Never return invented success data.
+      - Emit each filename exactly once. Workflow declaratives use `.yaml`; do not emit retired `.json`/`.yml` alternatives or unrendered `.j2` files.
       - YAML files must be valid YAML. No duplicate keys.
       - Every agent in agents.yaml must have a registry entry in structured_outputs.yaml (null if no structured output).
       - Every tool declared in tools.yaml must have a corresponding `tools/<name>.py` file in `files[]`.
@@ -891,7 +986,7 @@ agents:
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
       **This section is active only when `[EXISTING APP ENHANCEMENT]` is present in your prompt
-      (injected from the `initial_message` provided by PatternAgent).**
+      (included in the scoped `initial_message` for this task).**
 
       When brownfield adoption context is present:
 
@@ -906,9 +1001,9 @@ agents:
          - `read_only_discovered` surfaces: tools may READ from them (e.g. list users, fetch products)
            but MUST NOT write, mutate, or delete their records.
          - `generated_overlay` surfaces: full CRUD is allowed — these are new overlay surfaces.
-         - If a tool would mutate a `read_only_discovered` surface, comment in the stub docstring
-           that the operation is forbidden and raise `NotImplementedError` with a message referencing
-           the ownership boundary.
+         - Do not declare tools that mutate a `read_only_discovered` surface. Keep the workflow
+           within its approved read/overlay capabilities and report the ownership constraint
+           in the generation result rather than emitting an unusable tool.
 
       3. **Scope agents to overlay responsibilities.**
          - Agent roles must reference the overlay target (e.g. "You augment the existing CRM's
@@ -928,6 +1023,8 @@ agents:
       against the runtime contract:
       - every required root YAML file is present
       - every YAML file is complete and parseable
+      - orchestrator.yaml declares exactly `schema_version: mozaiks.orchestrator.v1`
+      - structured_outputs.yaml declares exactly `schema_version: mozaiks.structured_outputs.v1` at the document root, outside models and registry
       - orchestrator.yaml uses workflow_startup_mode and never startup_mode
       - orchestrator.yaml does not contain visual_agents
       - orchestrator.yaml triggers use only type, event, capability_id, endpoint,
@@ -981,7 +1078,7 @@ agents:
         "files": [
           {
             "filename": "orchestrator.yaml",
-            "content": "workflow_name: ...\n...",
+            "content": "schema_version: mozaiks.orchestrator.v1\nworkflow_name: ...\n...",
             "installRequirements": []
           },
           {
@@ -1013,7 +1110,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Primary data source**: `workflow_bundle_results`
-      This context variable is populated by the task_batches.yaml executor after all WorkflowBundleBuilderAgent workers complete. It is a dict keyed by workflow task_id. Each entry contains the WorkflowBundleBuilderOutput for one workflow:
+      This context variable contains the completed bundle-generation results. It is a dict keyed by workflow task_id. Each entry contains a WorkflowBundleBuilderOutput payload for one workflow:
 
       - `workflow_name`: PascalCase workflow identifier.
       - `agent_message`: Generation confirmation.
@@ -1022,7 +1119,7 @@ agents:
       - `_task_id`, `_worker_agent`, `_meta`: Task batch execution metadata.
 
       **Supporting context variables**:
-      - `PatternSelection` (via `workflows_spec`): Full pack topology — use for pack_name, workflow roles, dependencies declared by PatternAgent.
+      - `workflows_spec`: Approved pack topology — workflow names, roles, descriptions, and explicit depends_on lists.
       - `pack_name`, `pack_partition_reason`, `is_multi_workflow`: Set by the pattern_selection tool.
 
       **Pack Output Structure**:
@@ -1042,7 +1139,7 @@ agents:
       0. **Read `workflow_bundle_results`**:
          - Iterate over every entry (skip `_meta`).
          - Cross-reference with `workflows_spec` to confirm all expected workflows have a completed bundle.
-         - Use `PatternSelection.pack_partition_reason` to decide whether a linear journey should link the workflows in sequence.
+         - Use `pack_partition_reason` to decide whether a linear journey should link the workflows in sequence.
 
       1. **Generate `extension_registry.json`**:
          - `pack_name`: from `pack_name` context variable
@@ -1179,8 +1276,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Upstream Dependencies**:
-      - `workflow_bundle_results`: All WorkflowBundleBuilderAgent outputs from the task batch, keyed by workflow id.
-      - `PackMetadata`: Pack graph assembled by PackMetadataAgent.
+      - `workflow_bundle_results`: Completed workflow bundle payloads from the task batch, keyed by workflow task_id.
       - `workflow_bundle_validation_status`: Set by `generate_and_download`
         after the workflow quality gate runs. `failed` means packaging was
         blocked and the workflow bundle must be corrected before download.
@@ -1189,13 +1285,13 @@ agents:
         workflow meaning.
       - `workflow_bundle_repair_status`: Set by `generate_and_download` when the
         production quality gate schedules a bounded retry. `needs_revision`
-        routes back to PackBuildCoordinator; `blocked` means attempts are
+        schedules another bounded bundle-generation pass; `blocked` means attempts are
         exhausted.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
       **Notes**:
-      - The generate_and_download tool reads workflow_bundle_results and PackMetadata from context to assemble and zip the bundle automatically.
+      - The generate_and_download tool reads workflow_bundle_results and pack_name, validates the generated bundles, and assembles the download automatically.
       - Never emit file lists or detailed summaries; agent_message is for UI context only.
 
       0. **Attachment Intent (If Any Uploads)**:
@@ -1204,14 +1300,13 @@ agents:
          - If you are unsure which file the user meant, do not guess; leave as `context`.
 
       1. **Confirm Completion**:
-         - Verify `workflow_bundle_results` and `PackMetadata` are present in context.
+         - Inspect the supplied `workflow_bundle_results` for completed bundles. Bundle validation and packaging are checked by the export tool; do not claim to have inspected data absent from your prompt.
          - If `workflow_bundle_validation_status` is `failed`, do not invite
            download. Summarize that the workflow bundle quality gate blocked
            packaging and reference `workflow_bundle_validation_errors`.
          - If `workflow_bundle_repair_status` is `needs_revision`, emit the
            structured output normally with a concise repair message; the
-           transition graph will route to PackBuildCoordinator instead of the
-           user after this turn.
+           transition graph schedules the bounded repair pass after this turn.
 
       2. **Emit Output**:
          - Generate `DownloadRequestOutput` JSON with a short invitation message.

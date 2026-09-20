@@ -1,3 +1,4 @@
+schema_version: mozaiks.orchestrator.v1
 workflow_name: RuntimeContextExpressionTaskBatchSmoke
 max_turns: 8
 human_in_the_loop: false

@@ -60,7 +60,7 @@ Required shape:
 - `runtime`
   - `container_port`
   - `health_path`
-  - `start_command` (optional)
+  - `start_command`: `mozaiks serve . --host platform --listen 0.0.0.0 --port <container_port>`
 - `artifact_outputs`
   - `Dockerfile` (optional)
   - `docker-compose.yml` (optional)
@@ -187,6 +187,12 @@ provider-neutral runtime preflight before the container smoke:
 The workflow reports only safe metadata such as check ids, status, public host
 names, and exception type. It must not print connection strings, API keys,
 passwords, tokens, or provider secrets.
+
+The root `Dockerfile` invokes the same packaged OSS CLI command in exec form.
+The generated workspace is the application root, and the headless platform
+host loads its declarative pages, modules, services, and workflows. Generated
+apps do not depend on a repository-local launcher, the Studio host, or
+BlocUnited-operated infrastructure.
 
 ### Authenticated App Contract
 

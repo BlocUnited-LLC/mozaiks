@@ -169,7 +169,15 @@ class TestExplicitDiscoveryUrl:
 
         assert client.discovery_url == "https://auth.example.org/openid-configuration"
 
-    def test_env_url_takes_priority_over_constructor_url(self) -> None:
+    def test_constructor_url_takes_priority_over_env_url(self) -> None:
+        """Authority contract: explicit constructor input always wins.
+
+        A client built with a caller-owned discovery URL must keep it, so an
+        adapter's lazily created client can never be repointed by a later
+        environment change. (This inverts the previous env-precedence rule,
+        which allowed a live environment value to override the snapshot the
+        adapter was identified and constructed with.)
+        """
         import mozaiksai.core.auth.discovery as mod
         mod.reset_discovery_client()
 
@@ -180,7 +188,42 @@ class TestExplicitDiscoveryUrl:
                 discovery_url="https://constructor-arg.example.com/.well-known"
             )
 
-        assert client.discovery_url == "https://env-override.example.com/.well-known"
+        assert client.discovery_url == "https://constructor-arg.example.com/.well-known"
+
+    def test_env_url_used_only_when_no_constructor_url(self) -> None:
+        import mozaiksai.core.auth.discovery as mod
+        mod.reset_discovery_client()
+
+        env = {"MOZAIKS_OIDC_DISCOVERY_URL": "https://env-only.example.com/.well-known"}
+        with patch.dict(os.environ, env):
+            from mozaiksai.core.auth.discovery import OIDCDiscoveryClient
+            client = OIDCDiscoveryClient()
+
+        assert client.discovery_url == "https://env-only.example.com/.well-known"
+
+    def test_snapshot_bound_client_never_reads_environment(self) -> None:
+        """consult_environment=False fully binds the client to what it was given."""
+        import mozaiksai.core.auth.discovery as mod
+        mod.reset_discovery_client()
+
+        env = {
+            "MOZAIKS_OIDC_DISCOVERY_URL": "https://env.example.com/.well-known",
+            "MOZAIKS_OIDC_AUTHORITY": "https://env-authority.example.com",
+            "AUTH_DISCOVERY_CACHE_TTL": "99",
+        }
+        with patch.dict(os.environ, env):
+            from mozaiksai.core.auth.discovery import OIDCDiscoveryClient
+            bound = OIDCDiscoveryClient(
+                discovery_url="https://snapshot.example.com/.well-known",
+                cache_ttl=31,
+                consult_environment=False,
+            )
+            empty = OIDCDiscoveryClient(consult_environment=False)
+
+        assert bound.discovery_url == "https://snapshot.example.com/.well-known"
+        assert bound.cache_ttl_seconds == 31
+        # Nothing supplied and no environment allowed: discovery is unavailable.
+        assert empty.discovery_url is None
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +400,7 @@ class TestAdapterRegistryAutoDetection:
         clean.update(env_overrides)
         import mozaiksai.core.auth.adapters.registry as reg
         with patch.dict(os.environ, clean, clear=True):
-            return reg._auto_detect_provider()
+            return reg.resolve_auth_config().provider
 
     def test_explicit_auth_provider_wins(self) -> None:
         assert self._detect({"AUTH_PROVIDER": "keycloak"}) == "keycloak"

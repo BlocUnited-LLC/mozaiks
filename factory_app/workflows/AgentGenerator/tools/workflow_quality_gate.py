@@ -8,6 +8,9 @@ meaning the prompts asked for.
 
 from __future__ import annotations
 
+import ast
+import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -15,6 +18,8 @@ from typing import Any
 import yaml
 
 from factory_app.workflows._shared.workflow_integration import workflow_name_to_capability_id
+
+from .outcome_materialization import materialize_workflow_outcomes
 
 REQUIRED_WORKFLOW_FILES = {
     "orchestrator.yaml",
@@ -131,7 +136,7 @@ def _safe_relpath(raw_path: Any) -> str | None:
     return text
 
 
-def _files_by_name(entry: dict[str, Any]) -> dict[str, str]:
+def _files_by_name(entry: dict[str, Any], *, errors: list[str] | None = None) -> dict[str, str]:
     files = entry.get("files")
     if not isinstance(files, list):
         return {}
@@ -141,7 +146,13 @@ def _files_by_name(entry: dict[str, Any]) -> dict[str, str]:
             continue
         filename = _safe_relpath(file_entry.get("filename"))
         if not filename:
+            if errors is not None:
+                errors.append(f"invalid workflow file path: {file_entry.get('filename')!r}")
             continue
+        if filename in resolved and errors is not None:
+            errors.append(f"duplicate workflow file: {filename}")
+        if not isinstance(file_entry.get("content"), str) and errors is not None:
+            errors.append(f"{filename} content must be a string")
         resolved[filename] = str(file_entry.get("content") or "")
     return resolved
 
@@ -153,7 +164,7 @@ def _yaml_payloads_from_files(files: dict[str, str]) -> tuple[dict[str, Any], li
         if not relpath.endswith(".yaml"):
             continue
         try:
-            payloads[relpath] = yaml.safe_load(content) or {}
+            payloads[relpath] = yaml.safe_load(content)
         except Exception as exc:
             errors.append(f"{relpath} is not valid YAML: {exc}")
     return payloads, errors
@@ -170,6 +181,58 @@ def _read_agent_names(agents_payload: Any) -> list[str]:
             if isinstance(agent, dict) and str(agent.get("name") or "").strip()
         ]
     return []
+
+
+def _validate_bundle_implementations(files: dict[str, str], tools: dict[str, Any]) -> list[str]:
+    from mozaiksai.core.validation.functional_generated_app import scan_placeholder_implementations
+
+    errors: list[str] = []
+    modules: dict[str, ast.Module] = {}
+    for filename, content in files.items():
+        if not filename.endswith(".py"):
+            continue
+        try:
+            modules[filename] = ast.parse(content, filename=filename)
+            compile(modules[filename], filename, "exec")
+        except SyntaxError as exc:
+            errors.append(f"{filename} is not valid Python: {exc}")
+    errors.extend(
+        item.message for item in scan_placeholder_implementations({
+            f"workflows/generated/{path}": files[path] for path in modules
+        })
+    )
+    for binding in [*tools["tools"], *tools["lifecycle_tools"]]:
+        filename = str(binding["file"]).replace("\\", "/")
+        if not filename.startswith("tools/"):
+            filename = f"tools/{filename}"
+        if filename not in files:
+            errors.append(f"tools.yaml references missing implementation file {filename!r}")
+            continue
+        module = modules.get(filename)
+        if module is None:
+            if not filename.endswith(".py"):
+                errors.append(f"tools.yaml implementation must be a Python file: {filename!r}")
+            continue
+        function_name = binding["function"]
+        function = next((
+            node for node in module.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name
+        ), None)
+        if function is None:
+            errors.append(f"{filename} does not define declared tool function {function_name!r}")
+            continue
+        body = [node for node in function.body if not (
+            isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        )]
+        if not body or all(
+            isinstance(node, ast.Pass) or (
+                isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+                and node.value.value is Ellipsis
+            ) for node in body
+        ):
+            errors.append(f"{filename} declares unfinished tool function {function_name!r}")
+    return errors
 
 
 def _event_type_from_trigger(trigger: Any) -> str | None:
@@ -280,6 +343,21 @@ def validate_workflow_bundle_structure(
     bundle_entries: list[dict[str, Any]],
     expected_workflows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    from mozaiksai.core.workflow.contract_validation import (
+        validate_workflow_context_contract,
+        validate_workflow_tool_outcomes,
+    )
+    from mozaiksai.core.workflow.declarative.contracts import (
+        parse_a2a_config,
+        parse_agents_config,
+        parse_context_variables_config,
+        parse_middleware_config,
+        parse_orchestrator_config,
+        parse_structured_outputs_config,
+        parse_tools_config,
+        parse_transition_graph_config,
+        parse_ui_config,
+    )
     from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
     from mozaiksai.core.workflow.task_batches import parse_task_batches_config
 
@@ -297,18 +375,70 @@ def validate_workflow_bundle_structure(
         report: dict[str, Any] = {"workflow_name": workflow_name, "errors": []}
         workflow_reports.append(report)
 
-        files = _files_by_name(entry)
+        try:
+            entry = materialize_workflow_outcomes(entry)
+        except (ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
+            report["errors"].append(f"outcome plan materialization failed: {exc}")
+
+        files = _files_by_name(entry, errors=report["errors"])
         emitted_files = set(files)
         missing = sorted(REQUIRED_WORKFLOW_FILES.difference(emitted_files))
         if missing:
             report["errors"].append(f"missing required workflow files: {missing}")
 
-        stale_files = sorted({"handoffs.yaml", "hooks.yaml"}.intersection(emitted_files))
+        declarative_names = {Path(name).stem for name in REQUIRED_WORKFLOW_FILES} | {"a2a", "handoffs", "hooks"}
+        retired_files = {"handoffs.yaml", "hooks.yaml"} | {
+            f"{name}{suffix}" for name in declarative_names for suffix in (".json", ".yml")
+        }
+        stale_files = sorted(retired_files.intersection(emitted_files))
         if stale_files:
             report["errors"].append(f"stale workflow files emitted: {stale_files}")
+        templates = sorted(name for name in emitted_files if name.endswith(".j2"))
+        if templates:
+            report["errors"].append(f"unrendered workflow templates emitted: {templates}")
 
         payloads, yaml_errors = _yaml_payloads_from_files(files)
         report["errors"].extend(yaml_errors)
+
+        parsed_payloads: dict[str, Any] = {}
+        invalid_documents = False
+        for filename, parser in (
+            ("orchestrator.yaml", parse_orchestrator_config),
+            ("agents.yaml", parse_agents_config),
+            ("transition_graph.yaml", parse_transition_graph_config),
+            ("context_variables.yaml", parse_context_variables_config),
+            ("structured_outputs.yaml", parse_structured_outputs_config),
+            ("tools.yaml", parse_tools_config),
+            ("middleware.yaml", parse_middleware_config),
+            ("ui_config.yaml", parse_ui_config),
+            ("a2a.yaml", parse_a2a_config),
+        ):
+            if filename not in payloads:
+                continue
+            try:
+                parsed_payloads[filename] = parser(payloads[filename])
+            except ValueError as exc:
+                report["errors"].append(str(exc))
+                invalid_documents = True
+
+        if invalid_documents or yaml_errors or missing:
+            errors.extend(f"{workflow_name}: {message}" for message in report["errors"])
+            continue
+
+        try:
+            validate_workflow_context_contract(
+                workflow_name=workflow_name,
+                workflow_config={
+                    "context_variables": parsed_payloads["context_variables.yaml"],
+                    "transition_graph": parsed_payloads["transition_graph.yaml"],
+                    "structured_outputs": parsed_payloads["structured_outputs.yaml"],
+                    "tools": parsed_payloads["tools.yaml"]["tools"],
+                },
+            )
+        except ValueError as exc:
+            report["errors"].append(str(exc))
+
+        report["errors"].extend(_validate_bundle_implementations(files, parsed_payloads["tools.yaml"]))
 
         orchestrator = payloads.get("orchestrator.yaml")
         if isinstance(orchestrator, dict):
@@ -403,6 +533,13 @@ def validate_workflow_bundle_structure(
         if isinstance(task_batches, dict):
             try:
                 parsed = parse_task_batches_config(task_batches)
+                validate_workflow_tool_outcomes({
+                    "tools": (payloads.get("tools.yaml") or {}).get("tools", []),
+                    "context_variables": payloads.get("context_variables.yaml") or {},
+                    "transition_graph": payloads.get("transition_graph.yaml") or {},
+                    "structured_outputs": payloads.get("structured_outputs.yaml") or {},
+                    "initial_agent": (orchestrator or {}).get("initial_agent"),
+                }, task_batches=parsed)
                 if not parsed.conveyors:
                     report["errors"].append("task_batches.yaml must declare conveyors[]")
                 if not parsed.batches:
@@ -653,6 +790,8 @@ def run_workflow_bundle_quality_gate(
         bundle_entries=bundle_entries,
         expected_workflows=expected,
     )
+    if structure.get("valid"):
+        bundle_entries = [materialize_workflow_outcomes(entry) for entry in bundle_entries]
     semantic_drift = validate_agentgenerator_semantic_drift(
         bundle_entries=bundle_entries,
         expected_workflows=expected,
@@ -726,6 +865,24 @@ def _repair_task_id_for_spec(spec: dict[str, Any]) -> str:
     return re.sub(r"[^a-z0-9]+", "_", workflow_name.lower()).strip("_")
 
 
+
+def _repair_failure_fingerprint(*, repair_kind: str, evidence: Any) -> str:
+    """Return a stable digest for deterministic repair no-progress checks.
+
+    Mirrors AppGenerator's _repair_failure_fingerprint deliberately. Two repair
+    loops that answer "did this retry change anything" differently is how the
+    drift started; a second dialect would continue it.
+    """
+    normalized = json.dumps(
+        {"repair_kind": repair_kind, "evidence": evidence},
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def _build_repair_request(
     *,
     workflow_issues: dict[str, list[str]],
@@ -757,6 +914,9 @@ def prepare_workflow_bundle_repair(
     workflow_issues = _workflow_issue_map(quality_gate)
     failed_workflows = sorted(workflow_issues)
     prior_attempts = int(_context_get(context_variables, "workflow_bundle_repair_count", 0) or 0)
+    previous_fingerprint = str(
+        _context_get(context_variables, "workflow_bundle_repair_failure_fingerprint", "") or ""
+    ).strip()
 
     if not failed_workflows:
         result = {
@@ -772,7 +932,22 @@ def prepare_workflow_bundle_repair(
         _context_set(context_variables, "workflow_bundle_repair_result", result)
         return result
 
-    if prior_attempts >= max_attempts:
+    # A retry that reproduces the same issues will keep reproducing them, and
+    # each attempt here regenerates entire workflow bundles. AppGenerator has
+    # stopped on this since its loop was written; this one only counted.
+    failure_fingerprint = _repair_failure_fingerprint(
+        repair_kind="workflow_bundle",
+        evidence={name: sorted(workflow_issues[name]) for name in failed_workflows},
+    )
+    no_progress = bool(
+        prior_attempts > 0
+        and previous_fingerprint
+        and previous_fingerprint == failure_fingerprint
+    )
+    _context_set(context_variables, "workflow_bundle_repair_failure_fingerprint", failure_fingerprint)
+    _context_set(context_variables, "workflow_bundle_repair_no_progress", no_progress)
+
+    if no_progress or prior_attempts >= max_attempts:
         repair_request = _build_repair_request(
             workflow_issues=workflow_issues,
             attempt=prior_attempts,
@@ -781,11 +956,17 @@ def prepare_workflow_bundle_repair(
         result = {
             "status": "blocked",
             "repairable": False,
-            "reason": "workflow_bundle_repair_attempts_exhausted",
+            "reason": (
+                "workflow_bundle_repair_no_progress"
+                if no_progress
+                else "workflow_bundle_repair_attempts_exhausted"
+            ),
             "failed_workflows": failed_workflows,
             "attempt": prior_attempts,
             "max_attempts": max_attempts,
             "repair_request": repair_request,
+            "failure_fingerprint": failure_fingerprint,
+            "no_progress": no_progress,
         }
         _context_set(context_variables, "workflow_bundle_repair_status", result["status"])
         _context_set(context_variables, "workflow_bundle_repair_request", repair_request)
@@ -856,6 +1037,8 @@ def prepare_workflow_bundle_repair(
         "max_attempts": max_attempts,
         "repair_request": repair_request,
         "repair_workflow_count": len(repair_specs),
+        "failure_fingerprint": failure_fingerprint,
+        "no_progress": False,
     }
     _context_set(context_variables, "workflow_bundle_repair_status", result["status"])
     _context_set(context_variables, "workflow_bundle_repair_active", True)

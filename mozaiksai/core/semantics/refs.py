@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import ClassVar, Literal
+from typing import ClassVar, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -75,6 +75,7 @@ class RefDocumentType(StrEnum):
     BUILD_CONTEXT_BINDING = "build_context_binding"
     REFINEMENT_PATCH = "refinement_patch"
     ARTIFACT_REVISION = "artifact_revision"
+    COMPILATION_PLAN_AUTHORITY_INPUTS = "compilation_plan_authority_inputs"
     CHILD_CONTRACT = "child_contract"
     TAXONOMY_NAMESPACE = "taxonomy_namespace"
     SEMANTIC_PAYLOAD = "semantic_payload"
@@ -157,6 +158,30 @@ class CompilationPlanRef(_ScopedRef):
     )
 
 
+class PlanUnitRef(SemanticsModel):
+    """Subordinate reference to a cold-validated unit in one aggregate plan."""
+
+    ref_schema_version: Literal["mozaiks.plan_unit_ref.v1"] = "mozaiks.plan_unit_ref.v1"
+    compilation_plan_ref: CompilationPlanRef
+    unit_id: str
+    unit_digest: str
+
+    @field_validator("unit_id")
+    @classmethod
+    def _unit_id(cls, value: str) -> str:
+        text = str(value or "").strip()
+        if not text or any(part in {"", ".", ".."} for part in text.split("/")):
+            raise ValueError("unit_id must be a normalized plan-unit identifier")
+        if any(re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", part) is None for part in text.split("/")):
+            raise ValueError("unit_id must be a normalized plan-unit identifier")
+        return text
+
+    @field_validator("unit_digest")
+    @classmethod
+    def _unit_digest(cls, value: str) -> str:
+        return _validate_digest(value, field_name="unit_digest")
+
+
 class BuildContextBindingRef(_ScopedRef):
     """Reference contract only; binding content assembly is later-slice work."""
 
@@ -175,13 +200,53 @@ class RefinementPatchRef(_ScopedRef):
     )
 
 
-class ArtifactRevisionRef(_ScopedRef):
-    """Reference contract only; ``ArtifactRevision`` content is later-slice work."""
+class CompilationPlanAuthorityRef(SemanticsModel):
+    """Content-addressed reference to one immutable authority-inputs document.
+
+    The referenced document is a serialized ``CompilationPlanAuthorityInputs``
+    — the complete immutable inputs canonical plan derivation consumes. The
+    ref is scope-bound and digest-exact; it confers no trust by possession:
+    every consumer must resolve the document, cold-validate it, and
+    canonically rederive the plan.
+    """
+
+    ref_schema_version: Literal["mozaiks.compilation_plan_authority_ref.v1"] = (
+        "mozaiks.compilation_plan_authority_ref.v1"
+    )
+    scope: ExecutionAccessScopeRef
+    authority_digest: str
+
+    @field_validator("authority_digest")
+    @classmethod
+    def _authority_digest(cls, value: str) -> str:
+        text = str(value or "").strip().lower()
+        if _HEX_DIGEST.fullmatch(text) is None:
+            raise ValueError(
+                "authority_digest must be a lowercase SHA-256 hex digest"
+            )
+        return text
+
+
+class ArtifactRevisionRef(SemanticsModel):
+    """Content-addressed reference to one immutable application revision."""
 
     document_type: ClassVar[RefDocumentType] = RefDocumentType.ARTIFACT_REVISION
     ref_schema_version: Literal["mozaiks.artifact_revision_ref.v1"] = (
         "mozaiks.artifact_revision_ref.v1"
     )
+    scope: ExecutionAccessScopeRef
+    app_id: str
+    revision_digest: str
+
+    @field_validator("app_id")
+    @classmethod
+    def _app_id(cls, value: str) -> str:
+        return _validate_identifier(value, field_name="app_id")
+
+    @field_validator("revision_digest")
+    @classmethod
+    def _revision_digest(cls, value: str) -> str:
+        return _validate_digest(value, field_name="revision_digest")
 
 
 class ChildContractRef(_ScopedRef):
@@ -197,7 +262,10 @@ class ChildContractRef(_ScopedRef):
     @field_validator("artifact_family")
     @classmethod
     def _family(cls, value: str) -> str:
-        return validate_identifier_grammar(SemanticCategory.ARTIFACT_FAMILY, value)
+        return cast(
+            str,
+            validate_identifier_grammar(SemanticCategory.ARTIFACT_FAMILY, value),
+        )
 
     @field_validator("contract_schema_version")
     @classmethod
@@ -260,7 +328,7 @@ class SemanticPayloadRef(SemanticsModel):
         from mozaiksai.core.semantics.graph import SemanticNodeKind
 
         try:
-            return SemanticNodeKind(str(value or "").strip()).value
+            return cast(str, SemanticNodeKind(str(value or "").strip()).value)
         except ValueError as exc:
             raise ValueError(f"payload_kind must be a semantic node kind, got {value!r}") from exc
 
@@ -309,12 +377,14 @@ class TaxonomyNamespaceRef(SemanticsModel):
 __all__ = [
     "ApplicationManifestRef",
     "ArtifactRevisionRef",
+    "CompilationPlanAuthorityRef",
     "BuildContextBindingRef",
     "ChildContractRef",
     "CompilationPlanRef",
     "ExecutionAccessScopeRef",
     "ImplementationBindingRef",
     "MUTABLE_ALIASES",
+    "PlanUnitRef",
     "RefDocumentType",
     "RefinementPatchRef",
     "SemanticGraphRef",

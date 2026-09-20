@@ -19,6 +19,8 @@ from pathlib import Path
 
 import yaml
 
+from mozaiksai.hosts import shell_config
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -116,7 +118,6 @@ def test_app_custom_route_entry_still_has_requires_auth() -> None:
 
 def test_page_schema_roles_normalizes_to_requires_role(monkeypatch, tmp_path: Path) -> None:
     """Page YAML with roles: [admin] must produce meta.requiresRole: 'admin' in shell config."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -129,9 +130,9 @@ def test_page_schema_roles_normalizes_to_requires_role(monkeypatch, tmp_path: Pa
             }
         },
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [p for p in shell["pages"] if p["path"] == "/reports"]
     assert matching, "Reports page must appear in shell pages"
@@ -146,7 +147,6 @@ def test_page_schema_roles_normalizes_to_requires_role(monkeypatch, tmp_path: Pa
 
 def test_page_schema_multiple_roles_uses_first(monkeypatch, tmp_path: Path) -> None:
     """When roles has multiple values, the first entry becomes requiresRole."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -159,9 +159,9 @@ def test_page_schema_multiple_roles_uses_first(monkeypatch, tmp_path: Path) -> N
             }
         },
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [p for p in shell["pages"] if p["path"] == "/audit"]
     assert matching
@@ -172,7 +172,6 @@ def test_page_schema_multiple_roles_uses_first(monkeypatch, tmp_path: Path) -> N
 
 def test_page_schema_without_roles_has_no_requires_role(monkeypatch, tmp_path: Path) -> None:
     """A page with no roles field must not have requiresRole set."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -184,9 +183,9 @@ def test_page_schema_without_roles_has_no_requires_role(monkeypatch, tmp_path: P
             }
         },
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [p for p in shell["pages"] if p["path"] == "/projects"]
     assert matching
@@ -201,7 +200,6 @@ def test_page_schema_without_roles_has_no_requires_role(monkeypatch, tmp_path: P
 
 def test_route_manifest_requires_role_passes_through(monkeypatch, tmp_path: Path) -> None:
     """requiresRole declared in route_manifest.json must survive into shell config pages."""
-    from mozaiksai.hosts import platform as platform_app
 
     pages = [
         {
@@ -214,9 +212,9 @@ def test_route_manifest_requires_role_passes_through(monkeypatch, tmp_path: Path
         }
     ]
     app_root = _make_app_root(tmp_path, pages=pages)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [p for p in shell["pages"] if p["path"] == "/support"]
     assert matching, "Support page must appear in shell pages"
@@ -227,7 +225,6 @@ def test_route_manifest_requires_role_passes_through(monkeypatch, tmp_path: Path
 
 def test_route_manifest_requires_auth_still_enforced(monkeypatch, tmp_path: Path) -> None:
     """requiresAuth from route_manifest must default to True and be present in shell config."""
-    from mozaiksai.hosts import platform as platform_app
 
     pages = [
         {
@@ -238,9 +235,9 @@ def test_route_manifest_requires_auth_still_enforced(monkeypatch, tmp_path: Path
         }
     ]
     app_root = _make_app_root(tmp_path, pages=pages)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [p for p in shell["pages"] if p["path"] == "/dashboard"]
     assert matching
@@ -251,7 +248,6 @@ def test_route_manifest_requires_auth_still_enforced(monkeypatch, tmp_path: Path
 
 def test_route_manifest_meta_requires_auth_false_passes_through(monkeypatch, tmp_path: Path) -> None:
     """meta.requiresAuth: false must not be overwritten by the shell route normalizer."""
-    from mozaiksai.hosts import platform as platform_app
 
     pages = [
         {
@@ -263,9 +259,9 @@ def test_route_manifest_meta_requires_auth_false_passes_through(monkeypatch, tmp
         }
     ]
     app_root = _make_app_root(tmp_path, pages=pages)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [p for p in shell["pages"] if p["path"] == "/login"]
     assert matching
@@ -321,7 +317,6 @@ def test_route_auth_declared_in_structured_outputs() -> None:
 
 def test_route_manifest_route_auth_passes_through(monkeypatch, tmp_path: Path) -> None:
     """routeAuth declared in route_manifest.json must survive into shell pages."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -341,9 +336,9 @@ def test_route_manifest_route_auth_passes_through(monkeypatch, tmp_path: Path) -
             }
         ],
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
     matching = [p for p in shell["pages"] if p["path"] == "/apps/:appId/community"]
     assert matching
     assert matching[0]["meta"]["routeAuth"]["module"] == "community_membership"
@@ -351,7 +346,6 @@ def test_route_manifest_route_auth_passes_through(monkeypatch, tmp_path: Path) -
 
 def test_declarative_page_route_auth_passes_through(monkeypatch, tmp_path: Path) -> None:
     """routeAuth declared in ui/pages/*.yaml metadata must survive into shell pages."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -370,9 +364,9 @@ def test_declarative_page_route_auth_passes_through(monkeypatch, tmp_path: Path)
             }
         },
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
     matching = [p for p in shell["pages"] if p["path"] == "/projects/:projectId/settings"]
 
     assert matching

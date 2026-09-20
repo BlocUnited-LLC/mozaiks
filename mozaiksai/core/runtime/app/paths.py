@@ -12,6 +12,7 @@ APP_DATA_MIGRATIONS_GLOB = "data/migrations/*.json"
 APP_SECURITY_SECRETS_PATH = "security/secrets.yaml"
 APP_AUTH_CONFIG_PATH = "config/auth.yaml"
 APP_REFINEMENT_POLICY_CONFIG_PATH = "config/refinement_policy.yaml"
+APP_METRICS_CONFIG_PATH = "config/metrics.yaml"
 APP_PROVENANCE_PATH = "provenance.yaml"
 
 CANONICAL_APP_CONFIG_FILES = frozenset(
@@ -19,9 +20,15 @@ CANONICAL_APP_CONFIG_FILES = frozenset(
         "config/ai.json",
         APP_AUTH_CONFIG_PATH,
         "config/asset_manifest.json",
-        "config/integrations.json",
         "config/integrations.yaml",
-        "config/integrations.yml",
+        APP_METRICS_CONFIG_PATH,
+        # Read by the platform's profile-layout endpoint, which resolves
+        # app_root / "config" / "profile.yaml" and falls back to "top_nav".
+        # AppGenerator is told to write it ("this IS written to the generated
+        # app as app/config/profile.yaml"), the runtime consumes it, and the
+        # bundle scanner rejected it as noncanonical - failing every bundle
+        # that followed the instruction.
+        "config/profile.yaml",
         APP_REFINEMENT_POLICY_CONFIG_PATH,
         "config/shell.json",
         "config/subscriptions.yaml",
@@ -69,7 +76,7 @@ CANONICAL_APP_ROOT_DIRS = frozenset(
     }
 )
 
-_CANONICAL_APP_CONFIG_SUFFIXES = (".json", ".yaml", ".yml")
+_CANONICAL_INTEGRATION_CONFIG_SUFFIX = ".yaml"
 _SENSITIVE_CONFIG_TOKEN_RE = re.compile(
     r"(?:^|[._/-])(?:api[_-]?keys?|credentials?|passwords?|secrets?|tokens?)(?:[._/-]|$)",
     re.IGNORECASE,
@@ -149,7 +156,7 @@ def is_canonical_app_config_path(path: str) -> bool:
         return False
     if normalized in CANONICAL_APP_CONFIG_FILES:
         return True
-    if normalized.startswith("config/integrations/") and normalized.endswith(_CANONICAL_APP_CONFIG_SUFFIXES):
+    if normalized.startswith("config/integrations/") and normalized.endswith(_CANONICAL_INTEGRATION_CONFIG_SUFFIX):
         return True
     return False
 
@@ -184,7 +191,32 @@ def noncanonical_app_root_paths(paths: Iterable[str]) -> list[str]:
     return sorted(invalid)
 
 
+def app_bundle_workspace_path(path: str) -> str:
+    """Map an exported bundle member into the canonical standalone workspace."""
+    from mozaiksai.core.runtime.app.layout_registry import (
+        ArtifactKind,
+        PathScope,
+        validate_registered_path,
+    )
+
+    if path.startswith(("app/", "workflows/", "build_context/")):
+        return path
+    try:
+        validate_registered_path(path, None, PathScope.DEPLOYMENT_DERIVED)
+        return path
+    except ValueError:
+        pass
+    try:
+        match = validate_registered_path(path, None, PathScope.APP_BUNDLE_ROOT)
+        if match.family.kind == ArtifactKind.APP_ROOT_SUPPORT:
+            return path
+    except ValueError:
+        pass
+    return f"app/{path}"
+
+
 __all__ = [
+    "app_bundle_workspace_path",
     "APP_DATA_CONTRACT_PATH",
     "APP_DATA_MIGRATIONS_DIR",
     "APP_DATA_MIGRATIONS_GLOB",

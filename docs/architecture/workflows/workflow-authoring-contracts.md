@@ -129,15 +129,22 @@ Rules:
 
 ## Canonical File Shapes
 
+Every `orchestrator.yaml` must declare `schema_version: mozaiks.orchestrator.v1`;
+every `structured_outputs.yaml` must declare
+`schema_version: mozaiks.structured_outputs.v1`. These are required top-level
+fields. Missing, blank, or unsupported versions are rejected; the filename does
+not supply a default.
+
 ### `orchestrator.yaml`
 
 ```yaml
+schema_version: mozaiks.orchestrator.v1
 workflow_name: ExampleWorkflow
 max_turns: 20
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: Pipeline
-initial_message: "Start with ExampleHostAgent."
+initial_message: "Help the user define the requested workflow."
 initial_agent: ExampleHostAgent
 triggers:
   - type: chat
@@ -175,6 +182,67 @@ Rules:
   - `system_message`.
 - Auto-tool execution is derived from tools.yaml (agents with `auto_tool_call: true` tools); agents.yaml does not define a matching field.
 
+#### Semantic Prompt Inputs
+
+Apply the shared workflow prompt input rule described in
+[Semantic Prompt Inputs](#semantic-prompt-inputs).
+to first-party Factory workflows, generated workflows, prompt middleware, and
+task-batch `initial_message` content. A workflow may retain state or supply
+history; prompts must be correct for the inputs actually delivered to the
+current invocation.
+
+When authoring a prompt:
+
+1. Describe the role as a responsibility, such as "produce a diagram of the
+   proposed workflow pack." A roster identifier does not explain the task.
+2. Name each input's meaning and actual field or context key. Check the
+   recipient's `context_variables.yaml` `agents.<Agent>.variables`, prompt
+   middleware, and task-batch context delivery before claiming it is available.
+   A declared structured-output model or registry entry alone does not deliver
+   an earlier result to a later invocation.
+3. Explain each artifact's meaning and authority. Approved requirements constrain
+   scope; evidence supports conclusions; a proposed plan remains subject to its
+   review gate; validation feedback identifies contract failures to repair.
+   Use the authority assigned by the actual workflow, not an assumption that all
+   structured outputs are equally authoritative.
+4. Define how those inputs constrain or transform the reasoning and map into the
+   required structured-output fields. Describe downstream requirements in terms
+   of the artifact needed. "Read upstream outputs" is acceptable when these
+   semantic dependencies are explicit; replacing a producer name with a field
+   name alone does not explain them.
+5. Distinguish an allowed empty value from missing required evidence. Explain
+   how declared authority resolves conflicting inputs and when clarification,
+   repair, or failure is required. Do not invent prior dialogue or ask an
+   unavailable agent for its result. If the workflow cannot supply a required
+   input or handle its absence, repair the input contract before relying on it
+   in prose.
+
+For example, the Factory workflow-plan diagram consumes the projected
+`workflows_spec` as a proposed plan for user review. It preserves that plan's
+topology; `concept_overview` provides product context, not permission to add
+workflows. Its prompt can say:
+
+> Read the supplied upstream plan in `workflows_spec`. It defines the proposed
+> workflows and dependencies to present for review, not approved work to execute.
+> In `MermaidSequenceDiagramOutput`, set `MermaidSequenceDiagram.workflow_name`
+> from `pack_name`; derive `diagram` participants and links from `name` and
+> `depends_on`, and `legend` entries from `name` and `pattern_name`. Use the
+> partition rationale for `notes` when the plan spans multiple workflows.
+> An empty `workflows_spec` means no AI workflow is proposed; do not invent
+> participants. Missing or conflicting required plan evidence is an input-contract
+> failure; do not invent a plan or claim approval.
+
+The plan validation and review tools own invalid, blocked, and changes-requested
+outcomes; prompts do not acquire authority to approve a plan or write protected
+routing state by mentioning those outcomes.
+
+This identifies available data and its interpretation without requiring the
+model to locate a named participant's output. Model names and artifact field
+names remain valid vocabulary when their schemas or meanings are supplied.
+Likewise, generation instructions may require an exact `initial_agent`,
+`registry`, or transition destination value. Those are machine contract values,
+not directions to discover, remember, or contact a conversational participant.
+
 ### `transition_graph.yaml`
 
 ```yaml
@@ -200,14 +268,14 @@ Rules:
   compile to a source-scoped AG2 `ContextEquals` condition.
 - `context_expression` routes require `context_expression` using Mozaiks
   `${context_variable}` syntax over declared context references; they compile
-  to a registered AG2 1.0 beta `TransitionCondition`.
+  to a registered AG2 1.0 `TransitionCondition`.
 - `tool_called` routes require `tool_name`; they compile to a source-scoped AG2
   `ToolCalled` condition.
 - Same-source condition rules must appear before fallback `after_turn` rules
   because AG2 evaluates lower priority first.
 - LLM intent classification belongs in the Refinement Engine before a workflow run
   is started or resumed.
-- The runtime compiles these rules into an AG2 1.0 beta `TransitionGraph` and
+- The runtime compiles these rules into an AG2 1.0 `TransitionGraph` and
   resolves each turn through `WorkflowAdapter`.
 - AgentGenerator derives pattern-specific transition rules from
   `factory_app/build_context/AgentGenerator/ag2_network_patterns.yaml`.
@@ -249,6 +317,9 @@ Rules:
 - `agents` must be a mapping (`agent_name -> {variables: [...]}`), not a list.
 - `context_variables.yaml` is the declaration layer for workflow state. At
   runtime, AG2 `WorkflowState.context_vars` is the live state used for routing.
+- The runtime supplies `app_id`, `chat_id`, `user_id`, and `workflow_name` even
+  without workflow declarations. They remain runtime-only writable identity,
+  not caller/tool-controlled state or replayable workflow data.
 - Agent prompts and structured outputs own semantic reasoning. Context
   variables declare the typed state and artifact values that reasoning produces.
 - Every `agents.<Agent>.variables[]` entry must reference a declared
@@ -274,6 +345,7 @@ Rules:
 ### `structured_outputs.yaml`
 
 ```yaml
+schema_version: mozaiks.structured_outputs.v1
 registry:
   JokeWriterAgent: JokeCollection
 
@@ -289,6 +361,18 @@ models:
 Rules:
 - `models.<Name>.type` must be `model`.
 - `registry` values must reference existing `models` keys.
+- Declared models are exact at runtime: an agent output carrying a field the
+  model does not declare (top-level or nested) is rejected — never silently
+  stripped — and no auto tool runs for that turn. Declare every field the
+  agent may emit, or declare a deliberate open `dict`/`optional_dict` field
+  when arbitrary keys are genuinely part of the contract.
+- Auto tools read the exact validated output through
+  `context_variables.get("structured_output")` — a transient, read-only,
+  runtime-owned projection. `structured_output` is RESERVED runtime
+  vocabulary: declaring it in `context_variables.yaml` (as a definition or an
+  agent view variable) is rejected at workflow load, no declaration metadata
+  can claim it, and tools cannot write it; persist chosen data under your own
+  declared context keys instead.
 
 ### `tools.yaml`
 
@@ -334,6 +418,110 @@ Rules:
 - `UI_Surface` is one-way and requires `ui.component` and `ui.mode`.
 - `ui_contract` belongs only on `UI_Tool`.
 - Tool references use `file` and `function`.
+
+#### Operation Outcomes
+
+An outcome-dependent operation uses one structured-output agent and one
+auto-invoked tool. The optional `tools[].outcome` contract gives that operation
+a finite result vocabulary and an invocation budget:
+
+```yaml
+tools:
+  - agent: CheckAgent
+    file: tools/check_document.py
+    function: check_document
+    tool_type: Agent_Tool
+    auto_tool_call: true
+    bind_to_agent: false
+    outcome:
+      context_key: document_outcome
+      attempts_key: document_attempts
+      result_field: status
+      values: [ready, needs_revision, blocked]
+      error_value: blocked
+      max_attempts: 2
+      retry_on: [needs_revision]
+```
+
+The function accepts `context_variables` and returns a mapping or Pydantic model
+whose top-level `status` field is one of these values. Custom code implements
+the operation but must not write its outcome or attempt keys. The runtime:
+
+1. writes `error_value` before execution so a prior success cannot survive;
+2. checks and increments the operation's attempt count;
+3. invokes the tool once and validates its returned outcome;
+4. commits the result into context before AG2 evaluates the next transition.
+
+Exceptions, invalid results, invalid counter state, and exhausted attempts map
+to `error_value`. Cancellation propagates and leaves the operation blocked.
+Only a prior `retry_on` result permits another invocation. `max_attempts` counts
+all invocations, including the first, across this workflow execution and its
+continuations; it is a static integer from 1 to 100. The default is one attempt
+with no retry outcomes. Use a new workflow execution for a new operation.
+
+Both context keys must be declared with `source.type: state`, `persisted: true`,
+and `writer_ids: [deterministic_tool]`. The outcome key has `type: string`,
+`authority_class: closed_writer_routing_state`, and default `error_value`.
+The counter has `type: integer`, `authority_class: closed_writer_quality_state`,
+and default `0`. Model output and user input cannot set these protected values.
+
+Every declared value requires exactly one source-scoped `context_equals` rule
+on the outcome key. `error_value` routes to `user`, or to `terminate` with
+`termination_reason: workflow_failed` for an unattended workflow. The latter
+produces a failed run, not successful completion. An optional `after_turn`
+fallback uses one of these failure destinations; unrelated conditions from this source agent
+are rejected because they could bypass outcome handling. A missing current-turn
+result or a dynamic handoff/finish bypass fails execution before routing.
+
+Application-specific outcomes and recovery agents remain extensible. A known
+recoverable result can route to a repair agent, an alternative operation, or a
+partial-result review. Unexpected errors pause for attention or end as failed. Side-effecting
+actions need application-owned idempotency or reconciliation; an invocation
+budget does not provide distributed exactly-once execution or rollback of
+external actions. AG2 provider-call retries are separate from business retries.
+
+Validated structured outputs are dispatched at the packet boundary, before AG2
+folds state and chooses the next agent. Auto-tool delivery uses the channel,
+agent, and incoming envelope's causation identity; collected output history is
+not dispatched again after the run. The runtime retains the existing auto-tool
+execution checkpoints for duplicate delivery within a process.
+
+Workflows declaring interactive `UI_Tool` bindings do not use the adapter's
+whole-channel settlement deadline: user response waits remain unbounded, as
+required by the UI tool contract. Provider-call timeouts, graph turn limits,
+and operation attempt budgets remain in effect. Noninteractive channels retain
+the adapter's settlement deadline.
+
+These graph-bound operations belong to network agents, not task-batch triggers
+or workers. Task batches retain their existing `failure_policy` and
+`retry_limit`; put an outcome-dependent check in a separate network agent
+after the batch. Invalid combinations fail validation rather than bypassing
+the declared outcome routes.
+
+#### Live Outcome Verification
+
+With a local MongoDB instance and model credentials configured in the process,
+set `RUN_LIVE_TOOL_OUTCOME_SMOKE=1` and run:
+
+```bash
+python -m pytest tests/test_workflow_tool_outcomes.py::test_live_materialized_outcomes_through_mozaiks_runtime -q -s --no-cov --reruns 0
+```
+
+This opt-in test spends real model tokens. It materializes a temporary workflow,
+loads it through Mozaiks, and executes real AG2 agents for success, repair,
+exception, unknown-result, and exhausted-budget cases. Assertions check persisted
+state, tool invocation counts, agent routes, failed-versus-completed status, and
+usage events. Only the tool faults are injected; model calls and persistence are
+not mocked. Generated fixtures and unique smoke run IDs do not modify active
+app bundles. This does not test external provider idempotency or a full app build.
+
+`RuntimeUIPrimitiveSmoke` dogfoods outcome-controlled approval and artifact
+steps after a composer reply. With `RUN_LIVE_AG2_SMOKE=1`,
+`tests/test_workflow_live_smoke.py::test_live_ui_primitive_smoke_workflow` checks
+that each tool ran once and its persisted UI state matches the reported result.
+The live task-batch test in that file compares the synthesis output with actual
+executor metadata, rather than trusting the model's success claim. Continuations
+receive current values through the existing agent-declared context projection.
 
 ### `extended_orchestration/task_batches.yaml`
 
@@ -400,7 +588,7 @@ prompt_middleware:
 ```
 
 Rules:
-- Prompt middleware declarations are compiled to AG2 1.0 beta middleware.
+- Prompt middleware declarations are compiled to AG2 1.0 middleware.
 - Use lifecycle tools for side effects and structured outputs/runtime
   validators for output validation.
 

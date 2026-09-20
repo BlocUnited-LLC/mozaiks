@@ -28,7 +28,7 @@ class MessagesBaseHandler:
         subject_app_id: str | None = None,
         related_type: str | None = None,
         related_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: list[dict[str, Any]] | None = None,
         **_: object,
     ) -> dict[str, Any]:
         return await self._service.create_thread(

@@ -7,6 +7,7 @@ import {
   getBrandLogoSrc,
 } from "../../styles/brandAssets";
 import { logChatPersistence } from '../../session/chatSessionStorage';
+import { FiRotateCw } from 'react-icons/fi';
 
 const PENDING_HARNESS_DECISION_TITLES = {
   workflow_reentry: 'Workflow Re-Entry',
@@ -191,6 +192,7 @@ const ModernChatInterface = ({
   pendingHarnessDecisionBusy = false,
   pendingHarnessDecisionError = null,
   onPendingHarnessDecisionAction = null,
+  failedWorkflowRetry = null,
 }) => {
   const [message, setMessage] = useState('');
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
@@ -234,7 +236,7 @@ const ModernChatInterface = ({
   // Composer focus helpers
   // ---------------------------------------------------------------------------
 
-  const isComposerDisabled = buttonText === 'NEXT' || hasPendingHarnessDecision;
+  const isComposerDisabled = buttonText === 'NEXT' || hasPendingHarnessDecision || Boolean(failedWorkflowRetry);
 
   const focusComposer = useCallback(() => {
     if (!isComposerDisabled) {
@@ -489,7 +491,7 @@ const ModernChatInterface = ({
   // This covers the before-chat → first-agent gap where before_chat hooks emit
   // UI surfaces, run_complete clears loading=false, and then DiscoveryHostAgent
   // (or any first agent) starts its run with no stream chunks yet.
-  const showTypingIndicator = loading || (() => {
+  const showTypingIndicator = !failedWorkflowRetry && (loading || (() => {
     if (!Array.isArray(messages) || connectionStatus === 'error') return false;
     let hasWorkflowOutput = false;
     let hasAgentText = false;
@@ -515,7 +517,7 @@ const ModernChatInterface = ({
     }
     // Only fire in workflow mode — ask mode doesn't have this gap
     return conversationMode === 'workflow' && hasWorkflowOutput && !hasAgentText;
-  })();
+  })());
   const renderedMessages = (() => {
     // Determine the last chat index with a primary content message
     let lastContentIndex = -1;
@@ -787,7 +789,7 @@ const ModernChatInterface = ({
 
         {/* Jump to Present Button - Positioned over the messages area */}
         {isScrolledUp && (
-      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-10">
+      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20">
             <button
               onClick={scrollToBottom}
         className="jump-present"
@@ -824,6 +826,26 @@ const ModernChatInterface = ({
                 </button>
               )}
             </div>
+          </div>
+        )}
+        {failedWorkflowRetry && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3" role="region" aria-label="Failed workflow">
+            <span className="text-sm font-medium text-[var(--color-text-primary)]">Workflow failed</span>
+            <button
+              type="button"
+              aria-label="Retry failed workflow"
+              disabled={failedWorkflowRetry.starting}
+              onClick={failedWorkflowRetry.retry}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-[var(--color-primary-light)] px-3 py-2 text-sm font-semibold text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FiRotateCw aria-hidden="true" className="shrink-0" />
+              {failedWorkflowRetry.starting ? 'Starting workflow...' : 'Retry failed workflow'}
+            </button>
+            {failedWorkflowRetry.error && (
+              <p role="alert" className="w-full break-words text-sm text-[var(--color-error,#ef4444)]">
+                {failedWorkflowRetry.error}
+              </p>
+            )}
           </div>
         )}
         {hasPendingHarnessDecision && (

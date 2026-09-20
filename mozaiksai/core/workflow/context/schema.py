@@ -6,7 +6,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from mozaiksai.core.utils.sequences import dedupe_strings
+
 from ..declarative import parse_context_variables_config
+from ..reserved_context_keys import require_application_context_name_allowed
 from .authority import ContextAuthorityClass, ContextWriterId
 
 
@@ -24,16 +27,6 @@ def _optional_text(value: Any) -> str | None:
     return text or None
 
 
-def _normalize_string_list(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for raw in values:
-        text = str(raw or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        out.append(text)
-    return out
 
 
 class ContextModel(BaseModel):
@@ -93,7 +86,7 @@ class ContextTriggerSpec(ContextModel):
 class ContextVariableSource(ContextModel):
     """Source metadata for resolving a context variable."""
 
-    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context"]
+    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context", "runtime"]
 
     env_var: str | None = None
     default: Any | None = None
@@ -151,7 +144,7 @@ class ContextVariableSource(ContextModel):
     def _normalize_string_lists(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        normalized = _normalize_string_list(value)
+        normalized = dedupe_strings(value)
         return normalized or None
 
 
@@ -177,7 +170,7 @@ class ContextVariableDefinition(ContextModel):
     @field_validator("writer_ids")
     @classmethod
     def _normalize_writer_ids(cls, value: list[str]) -> list[str]:
-        return _normalize_string_list(value)
+        return dedupe_strings(value)
 
 
 class ContextAgentView(ContextModel):
@@ -188,7 +181,12 @@ class ContextAgentView(ContextModel):
     @field_validator("variables")
     @classmethod
     def _normalize_variables(cls, value: list[str]) -> list[str]:
-        return _normalize_string_list(value)
+        normalized = dedupe_strings(value)
+        for name in normalized:
+            require_application_context_name_allowed(
+                name, where="context plan agents.<name>.variables"
+            )
+        return normalized
 
 
 class ContextVariablesPlan(ContextModel):
@@ -204,6 +202,9 @@ class ContextVariablesPlan(ContextModel):
     ) -> dict[str, ContextVariableDefinition]:
         for key in value.keys():
             _required_text(key, field_name="context variable name")
+            require_application_context_name_allowed(
+                key, where="context plan definitions"
+            )
         return value
 
     @model_validator(mode="after")

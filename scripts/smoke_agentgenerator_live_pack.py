@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager, redirect_stdout
@@ -159,6 +160,8 @@ def _workflow_generation_prompt(
         f"Generate a minimal but runnable Mozaiks workflow bundle for {workflow_name}.\n"
         f"Role: {role}. Description: {description}\n"
         f"Use AG2 Network pattern {pattern_id}: {pattern_name}.\n"
+        "Emit top-level schema_version: mozaiks.orchestrator.v1 in orchestrator.yaml and "
+        "schema_version: mozaiks.structured_outputs.v1 in structured_outputs.yaml.\n"
         f"Set orchestrator.yaml workflow_startup_mode to {startup_mode}; never emit startup_mode.\n"
         f"Set human_in_the_loop to {str(human_in_the_loop).lower()}.\n"
         f"Required root YAML files: {root_files}.\n"
@@ -174,13 +177,23 @@ def _workflow_generation_prompt(
         f"{trigger_clause}\n"
         f"{task_batch_clause}\n"
         "Keep the smoke bundle concise: small agent roster, small structured models, "
-        "no external integrations, and no custom UI unless the assigned pattern truly requires it.\n"
-        "Keep tool stubs workflow-local under tools/. Raise NotImplementedError for unimplemented stubs.\n"
+        "no external integrations, and no custom UI unless the assigned pattern truly requires it. "
+        "Keep each Python tool implementation compact with a one-line docstring or comment; "
+        "close every string literal in the same file. Emit tools.yaml with empty tools and "
+        "lifecycle_tools lists when no custom tool is needed; do not create bindings merely "
+        "to represent task-batch workers. Before returning, ensure every tools.yaml binding "
+        "has exactly one matching tools/<file>.py entry in files[].\n"
+        "Keep complete tool implementations workflow-local under tools/. Unfinished stubs block export.\n"
         "Return only WorkflowBundleBuilderOutput JSON."
     )
 
 
-def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str, Any]:
+def build_seeded_pack_context(
+    *,
+    pack_name: str = DEFAULT_PACK_NAME,
+    target_app_id: str = "live-smoke-target",
+    build_id: str = "live-smoke-build",
+) -> dict[str, Any]:
     """Build the approved AgentGenerator context used by the live smoke.
 
     The context starts at AgentGenerator's approved-generation boundary. It avoids
@@ -253,10 +266,11 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
         }
         workflow_specs.append(spec)
 
+    from mozaiksai.core.session.build_binding import RunBuildBinding
+
     return {
         "build_mode": "initial",
         "task_run_mode": False,
-        "workflow_review_approved": True,
         "concept_overview": (
             "Support Operations Automation is an internal support backbone that "
             "classifies support tickets and triages heavy ticket queues through "
@@ -302,6 +316,12 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
             "workflows": workflow_specs,
         },
         "workflows_spec": workflow_specs,
+        "run_build_binding": RunBuildBinding(
+            build_registry_id="live-smoke-registry",
+            target_app_id=target_app_id,
+            build_id=build_id,
+            phase="genesis",
+        ).model_dump(),
     }
 
 
@@ -640,7 +660,6 @@ def _patched_download_tool():
         "_register_workflow_bundle_artifact_version": download_module._register_workflow_bundle_artifact_version,
         "resolve_agent_api_url": download_module.resolve_agent_api_url,
         "resolve_agent_websocket_url": download_module.resolve_agent_websocket_url,
-        "_promote_workflow_to_app_workspace": download_module._promote_workflow_to_app_workspace,
     }
 
     async def _fake_use_ui_tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -663,7 +682,6 @@ def _patched_download_tool():
     download_module._register_workflow_bundle_artifact_version = _fake_artifact_version
     download_module.resolve_agent_api_url = lambda app_id: f"https://api.local/{app_id}"
     download_module.resolve_agent_websocket_url = lambda app_id: f"wss://ws.local/{app_id}"
-    download_module._promote_workflow_to_app_workspace = lambda *args, **kwargs: None
     try:
         yield download_module
     finally:
@@ -682,11 +700,25 @@ async def _export_workflow_bundle(
         with _patched_download_tool() as download_module:
             stdout_buffer = io.StringIO()
             with redirect_stdout(stdout_buffer):
-                return await download_module.generate_and_download(
+                result = await download_module.generate_and_download(
                     DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
                     agent_message="Workflow bundle ready.",
                     context_variables=_Context(context),
                 )
+            if result.get("status") != "success":
+                print(
+                    json.dumps(
+                        {
+                            "workflow_bundle_quality_gate": result.get("workflow_bundle_quality_gate"),
+                            "workflow_bundle_repair": result.get("workflow_bundle_repair"),
+                            "validation_errors": result.get("validation_errors"),
+                        },
+                        default=str,
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+            return result
     finally:
         if old_generated_root is None:
             os.environ.pop("MOZAIKS_GENERATED_ARTIFACTS_PATH", None)
@@ -720,15 +752,18 @@ async def run_live_agentgenerator_pack_smoke(
     app_id = f"live-agentgenerator-pack-{uuid.uuid4().hex[:8]}"
     chat_id = f"chat_{workflow_name.lower()}_{uuid.uuid4().hex[:8]}"
     user_id = "live-smoke-user"
-    generated_root = (generated_root or (REPO_ROOT / ".tmp" / "agentgenerator_live_pack" / app_id / "generated")).resolve()
+    generated_root = (generated_root or (Path(tempfile.gettempdir()) / "mozaiks-ag2" / app_id / "generated")).resolve()
     active_workflows_root = (
         active_workflows_root
-        or (REPO_ROOT / ".tmp" / "agentgenerator_live_pack" / app_id / "active_workflows")
+        or (Path(tempfile.gettempdir()) / "mozaiks-ag2" / app_id / "active_workflows")
     ).resolve()
     generated_root.mkdir(parents=True, exist_ok=True)
     active_workflows_root.mkdir(parents=True, exist_ok=True)
 
-    context = build_seeded_pack_context()
+    context = build_seeded_pack_context(
+        target_app_id=app_id,
+        build_id=f"build-{uuid.uuid4().hex[:12]}",
+    )
     context.update(
         {
             "workflow_name": workflow_name,
@@ -885,7 +920,11 @@ async def run_live_agentgenerator_pack_smoke(
             )
             download_result = await _export_workflow_bundle(context=context, generated_root=generated_root)
 
-        bundle_root = generated_root / "workflows" / app_id
+        build_binding = context.get("run_build_binding") or {}
+        build_id = str(build_binding.get("build_id") or "").strip()
+        if not build_id:
+            raise RuntimeError("run_build_binding.build_id is required to resolve the generated workflow bundle")
+        bundle_root = generated_root / "workflows" / app_id / build_id
         validation = validate_generated_workflow_bundle(
             bundle_root=bundle_root,
             expected_workflows=context["workflows_spec"],

@@ -29,9 +29,11 @@ actions:
     handler_method: create_post
     input_schema:
       type: object
+      additionalProperties: false
       required: [body]
       properties:
-        body: { type: string, maxLength: 5000 }
+        # body — at most 5000 characters, enforced by the service.
+        body: { type: string }
         media_urls: { type: array, items: { type: string } }
         visibility: { type: string, enum: [public, friends, private] }
     output_schema:
@@ -50,6 +52,7 @@ actions:
     handler_method: get_post
     input_schema:
       type: object
+      additionalProperties: false
       required: [post_id]
       properties:
         post_id: { type: string }
@@ -66,6 +69,7 @@ actions:
     handler_method: delete_post
     input_schema:
       type: object
+      additionalProperties: false
       required: [post_id]
       properties:
         post_id: { type: string }
@@ -84,6 +88,7 @@ actions:
     handler_method: list_posts
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         author_id: { type: string }
         visibility: { type: string }
@@ -106,6 +111,7 @@ actions:
     handler_method: list_user_posts
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         user_id: { type: string }
         limit: { type: integer }
@@ -127,6 +133,7 @@ actions:
     handler_method: react_to_post
     input_schema:
       type: object
+      additionalProperties: false
       required: [post_id]
       properties:
         post_id: { type: string }
@@ -148,10 +155,12 @@ actions:
     handler_method: add_comment
     input_schema:
       type: object
+      additionalProperties: false
       required: [post_id, body]
       properties:
         post_id: { type: string }
-        body: { type: string, maxLength: 2000 }
+        # body — at most 2000 characters, enforced by the service.
+        body: { type: string }
     output_schema:
       type: object
       required: [success, comment]
@@ -168,6 +177,7 @@ actions:
     handler_method: delete_comment
     input_schema:
       type: object
+      additionalProperties: false
       required: [comment_id]
       properties:
         comment_id: { type: string }
@@ -186,6 +196,7 @@ actions:
     handler_method: list_comments
     input_schema:
       type: object
+      additionalProperties: false
       required: [post_id]
       properties:
         post_id: { type: string }
@@ -206,6 +217,7 @@ actions:
     handler_method: get_reaction_summary
     input_schema:
       type: object
+      additionalProperties: false
       required: [post_id]
       properties:
         post_id: { type: string }

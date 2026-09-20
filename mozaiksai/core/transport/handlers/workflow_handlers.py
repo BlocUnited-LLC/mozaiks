@@ -5,12 +5,12 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
+from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.transport.event_contract import send_event_envelope
 from mozaiksai.core.transport.session_registry import session_registry
 
@@ -54,6 +54,13 @@ async def handle_switch_workflow(
         raise ValueError("chat_id required for workflow switch")
 
     conn = transport._get_conn_meta(chat_id)
+    from mozaiksai.core.session import get_session_router_for_chat
+
+    app_id = conn.get("app_id")
+    user_id = conn.get("user_id")
+    if not app_id or not user_id:
+        raise ValueError("Missing connection identity")
+    await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=target_chat_id)
     ws_id = conn.get("ws_id")
     if not ws_id:
         # Recover gracefully when metadata was partially initialized.
@@ -78,7 +85,7 @@ async def handle_switch_workflow(
             pm = transport._get_or_create_persistence_manager()
             coll = await pm._coll()
             doc = await coll.find_one(
-                {"_id": target_chat_id},
+                {"_id": target_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
                 {"workflow_name": 1, "app_id": 1, "user_id": 1, "artifact_instance_id": 1},
             )
             if doc and doc.get("workflow_name") and doc.get("app_id") and doc.get("user_id"):
@@ -263,18 +270,13 @@ async def handle_start_workflow(
     if not ws_id or not ent_id or not usr_id:
         raise ValueError("Missing connection metadata")
 
-    from mozaiksai.core.session import TriggerInput, get_session_router
+    from mozaiksai.core.session import launch_prepared_workflow, prepare_routed_workflow_launch
 
-    pm = transport._get_or_create_persistence_manager()
-    session_router = get_session_router()
-    route_decision = await session_router.route_trigger(
-        TriggerInput(
-            app_id=str(ent_id),
-            user_id=str(usr_id),
-            trigger_source="chat",
-            workflow_id=str(target_workflow),
-        )
+    prepared = await prepare_routed_workflow_launch(
+        workflow_id=str(target_workflow), app_id=str(ent_id), user_id=str(usr_id),
+        trigger_source="chat", source_chat_id=chat_id,
     )
+    route_decision = prepared.routing_decision
     resolved_workflow = route_decision.workflow_id
     if route_decision.rerouted_by_dependency and route_decision.unmet_dependency is not None:
         await send_event_envelope(websocket, {
@@ -290,28 +292,8 @@ async def handle_start_workflow(
             "timestamp": utc_timestamp(),
         })
 
-    # Create new chat session
-    new_chat_id = f"chat_{resolved_workflow}_{uuid.uuid4().hex[:8]}"
-    await pm.create_chat_session(
-        chat_id=new_chat_id,
-        app_id=str(ent_id),
-        workflow_name=str(resolved_workflow),
-        user_id=str(usr_id),
-        extra_fields={
-            "trigger_meta": {
-                "trigger_source": "chat",
-                "requested_workflow_id": str(target_workflow),
-                "resolved_workflow_id": str(resolved_workflow),
-                "rerouted_by_dependency": bool(route_decision.rerouted_by_dependency),
-            }
-        },
-    )
-    await session_router.bind_workflow_session(
-        app_id=str(ent_id),
-        user_id=str(usr_id),
-        workflow_id=str(resolved_workflow),
-        chat_id=new_chat_id,
-    )
+    launched = await launch_prepared_workflow(prepared)
+    new_chat_id = launched.chat_id
 
     # Store frontend context
     if frontend_context and isinstance(frontend_context, dict):
@@ -386,9 +368,7 @@ async def handle_start_workflow_batch(
     if not isinstance(runs, list) or not runs:
         raise ValueError("runs must be a non-empty list")
 
-    pm = transport._get_or_create_persistence_manager()
-    from mozaiksai.core.session import TriggerInput, get_session_router
-    session_router = get_session_router()
+    from mozaiksai.core.session import launch_prepared_workflow, prepare_routed_workflow_launch
 
     started: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
@@ -404,14 +384,11 @@ async def handle_start_workflow_batch(
         initial_agent_name_override = run.get("initial_agent") or run.get("initial_agent_name")
         label = run.get("label")
 
-        route_decision = await session_router.route_trigger(
-            TriggerInput(
-                app_id=str(ent_id),
-                user_id=str(usr_id),
-                trigger_source="chat",
-                workflow_id=str(target_workflow),
-            )
+        prepared = await prepare_routed_workflow_launch(
+            workflow_id=str(target_workflow), app_id=str(ent_id), user_id=str(usr_id),
+            trigger_source="chat", source_chat_id=chat_id,
         )
+        route_decision = prepared.routing_decision
         resolved_workflow = route_decision.workflow_id
 
         if route_decision.rerouted_by_dependency and route_decision.unmet_dependency is not None:
@@ -421,27 +398,8 @@ async def handle_start_workflow_batch(
                 "rerouted_to": resolved_workflow,
             })
 
-        new_chat_id = f"chat_{resolved_workflow}_{uuid.uuid4().hex[:8]}"
-        await pm.create_chat_session(
-            chat_id=new_chat_id,
-            app_id=str(ent_id),
-            workflow_name=str(resolved_workflow),
-            user_id=str(usr_id),
-            extra_fields={
-                "trigger_meta": {
-                    "trigger_source": "chat",
-                    "requested_workflow_id": str(target_workflow),
-                    "resolved_workflow_id": str(resolved_workflow),
-                    "rerouted_by_dependency": bool(route_decision.rerouted_by_dependency),
-                }
-            },
-        )
-        await session_router.bind_workflow_session(
-            app_id=str(ent_id),
-            user_id=str(usr_id),
-            workflow_id=str(resolved_workflow),
-            chat_id=new_chat_id,
-        )
+        launched = await launch_prepared_workflow(prepared)
+        new_chat_id = launched.chat_id
 
         session_registry.add_workflow(
             ws_id=ws_id,

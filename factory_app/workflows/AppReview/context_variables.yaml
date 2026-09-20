@@ -1,30 +1,16 @@
 definitions:
-  build_registry_id:
-    type: string
-    description: >
-      ID of the hosted app_registry record for the build being reviewed.
-      Passed in from the preceding AppGenerator session via journey context.
-      Used by present_review_summary to display the build record and by
-      the artifact promotion endpoint to mark the app registry active after
-      the reviewed artifact is restored.
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
     source:
-      type: state
-      default: null
+      type: runtime
+      required: true
 
   app_id:
     type: string
     description: >
-      App identifier for the build under review. Passed through to Studio
-      refinement triggers by the chat session.
-    source:
-      type: state
-      default: null
-
-  build_id:
-    type: string
-    description: >
-      Build attempt identifier associated with the staged bundle. Included in
-      refinement metadata for traceability.
+      Executing host app identifier. The reviewed target is read only from
+      the server-verified run_build_binding.
     source:
       type: state
       default: null
@@ -78,6 +64,7 @@ definitions:
 
   app_validation_status:
     type: string
+    writer_ids: [transition_router]
     description: >
       Result of the build validation step run by AppGenerator.
       One of: passed, failed, skipped. Displayed in the review summary.
@@ -106,6 +93,7 @@ definitions:
 
   integration_tests_passed:
     type: boolean
+    writer_ids: [transition_router]
     description: >
       Whether integration checks passed during the build. Null when
       integration checks were not run.
@@ -115,12 +103,22 @@ definitions:
 
   app_bundle_acceptance_status:
     type: string
+    writer_ids: [transition_router]
     description: >
       Deterministic AppGenerator acceptance gate result for the staged app
       bundle. Expected AppReview entry value is passed.
     source:
       type: state
       default: null
+
+  security_readiness_summary:
+    type: object
+    description: >
+      Advisory SecurityReadiness result for the staged app bundle. The OSS
+      default is review evidence, not a promotion block.
+    source:
+      type: state
+      default: {}
 
   review_complete:
     type: boolean

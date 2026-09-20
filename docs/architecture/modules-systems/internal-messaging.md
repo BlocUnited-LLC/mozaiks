@@ -51,6 +51,18 @@ ticket owner as the recipient. The support module still emits
 `domain.workspace_support.message_added` for audit and support-specific
 automation, but user notification is owned by `domain.messages.message_sent`.
 
+Generated apps selecting the `support` pack also select `messaging`. Their
+`support.create_support_request` action creates the ticket's messages thread
+and first message on the server, then stores the thread id with ticket metadata.
+The Support page uses `support.get_support_conversation` and
+`support.reply_support_request`; the service checks requester ownership or
+support read/manage permission before delegating to `MessageService`. The
+generated public messages actions serve direct and group conversations only.
+They cannot create, list, read, or send support threads, even when the caller
+has generic messaging permission. This keeps the ticket as the authority for
+support conversation access. Support request records store the subject and
+page context, while message bodies stay only in the messages collection.
+
 Support status is explicit:
 
 - `open` means the ticket can still receive replies.
@@ -78,10 +90,36 @@ canonical path for "operator replied" notifications.
 are not plain message-recipient delivery: new support requests, ticket-owner
 replies, and negative feedback. These rules target principals with
 `workspace_support.read`, so a user who is also an admin can see operator alerts
-when their active principal has that scope. The profile support panel remains
-user-scoped by default and lists only the current user's tickets; admin/support
-queues must request `scope=app` or `scope=workspace` and carry support read or
-manage permission.
+when their active principal has that scope. The profile support page remains
+user-scoped by default and lists only the current user's tickets, including
+resolved tickets. Admin/support queues must request `scope=app` or
+`scope=workspace` and carry support read or manage permission. Support actions
+require an authenticated caller when auth is enabled; the service checks ticket
+ownership for user replies and mutations. Hosted products grant operator
+permissions through their own validated identity policy. The Studio queue routes
+also require the `admin` role for navigation, but that role alone does not grant
+the module's read or manage permission. An OIDC operator token needs those
+permissions from its identity policy or a host-owned permission resolver.
+
+The `subject_app_id` action input identifies the app a request or feedback item
+is about, or filters an operator queue. It does not change the authenticated
+runtime `app_id` or persistence scope. Support clients send their access token
+with module actions. A failed ticket insert or list read is surfaced as an
+error, so the UI does not claim that an unsaved ticket exists or show an
+unavailable queue as empty.
+Generic message lookups and mutations resolve `thread_id` inside the caller's
+current app or workspace scope before loading messages, updating the thread, or
+writing read state. A matching participant id alone is not enough to read or
+mutate a conversation from another app/workspace scope.
+The profile support panel groups tickets by `subject_app_id`, keeping the
+authenticated runtime `app_id` separate from the app the ticket concerns. If a
+listed ticket has no accessible linked message thread, its `error` field tells
+the profile and operator panels to show the failure and withhold the reply
+control. Clients do not submit `sender_role`; the authenticated module derives
+the role from server-side authority.
+Profile page hydration resolves module scope through the same host hook as
+HTTP module actions, so hosted membership can supply workspace scope and
+permissions when they are absent from the login token.
 
 Escalation UI should create a support request and navigate users to
 `/me?tab=support-tickets`, optionally with `request_id` and `app_id` query

@@ -51,7 +51,7 @@ _INTEGRATION_PATTERNS = (
     "modules/*/backend/service.py",
     "modules/*/backend/schemas.py",
     "modules/*/module.yaml",
-    "config/integrations*.json",
+    "config/integrations*.yaml",
     "docs/integrations*.md",
 )
 _SOURCE_OF_TRUTH_GENERATED_PATTERNS = (

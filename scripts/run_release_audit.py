@@ -85,10 +85,12 @@ def step_smoke_install(wheels: list[Path]) -> Path:
     pip = venv_dir / "Scripts" / "pip.exe" if sys.platform == "win32" else venv_dir / "bin" / "pip"
     python = venv_dir / "Scripts" / "python.exe" if sys.platform == "win32" else venv_dir / "bin" / "python"
 
-    _run([str(pip), "install", "--quiet", str(wheels[0])])
+    # Run from outside the repository so the smoke test cannot import the
+    # checkout ahead of the wheel under test via the current working directory.
+    _run([str(pip), "install", "--quiet", str(wheels[0])], cwd=venv_dir)
 
     # CLI sanity check.
-    _run([str(python), "-m", "mozaiks", "--version"])
+    _run([str(python), "-m", "mozaiks", "--version"], cwd=venv_dir)
 
     return python
 
@@ -120,7 +122,7 @@ for name, path in checks.items():
 
 print("All Factory resources resolve from site-packages.")
 """
-    _run([str(python), "-c", verify_script])
+    _run([str(python), "-c", verify_script], cwd=python.parent)
 
 
 def step_offline_acceptance() -> None:

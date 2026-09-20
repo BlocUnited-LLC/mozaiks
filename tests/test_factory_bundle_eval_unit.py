@@ -160,7 +160,12 @@ def test_missing_artifacts_score_zero_without_crashing(tmp_path):
     (root / "app.json").write_text("{}", encoding="utf-8")
     scores = _by_key(root)
     assert scores["has_app_manifest"].score == 0.0
-    assert scores["has_subscription_catalog"].score == 0.0
+    # An empty bundle cannot be judged on monetisation: it declares no modules,
+    # so there is nothing that could need a plan catalog. Emptiness is caught by
+    # has_app_manifest, ui_pages_present and has_dockerfile above. Scoring it
+    # FAIL asserted a defect that is not evidenced; scoring it PASS would hand a
+    # broken bundle a free point.
+    assert scores["has_subscription_catalog"].score is None
     assert scores["ui_pages_present"].score == 0.0
     assert scores["has_dockerfile"].score == 0.0
     assert scores["action_gate_coverage"].value is None  # no actions to divide by
@@ -293,3 +298,88 @@ def test_non_utf8_artifact_degrades_to_scorer_failure(tmp_path):
     assert scores["bundle_parses"].score == 0.0
     # The rest of the run still completes.
     assert scores["has_app_manifest"].score == 1.0
+
+
+def _free_app_bundle(root: Path) -> Path:
+    """A deliberately free app: no plan catalog, no entitlement_gate anywhere.
+
+    This is the shape the factory's first real generated bundle took. Its
+    SubscriptionContractDesigner returned "No Contract Needed" and instructed
+    downstream generation not to create billing surfaces.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "app.json").write_text(json.dumps({"name": "tool_library"}), encoding="utf-8")
+    (root / "Dockerfile").write_text("FROM python:3.13\n", encoding="utf-8")
+
+    mod = root / "modules" / "catalogue"
+    mod.mkdir(parents=True, exist_ok=True)
+    (mod / "module.yaml").write_text(
+        yaml.safe_dump({
+            "schema_version": "mozaiks.module.v1",
+            "module": {"id": "catalogue", "handler": "backend.handler:H"},
+            "actions": [{"id": "list_tools", "handler_method": "list_tools"}],
+        }),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _feedback(root: Path, key: str):
+    from factory_app.eval.bundle_scorers import score_bundle
+
+    return next(f for f in score_bundle(root) if f.key == key)
+
+
+def test_a_free_app_is_not_failed_for_having_no_plan_catalog(tmp_path):
+    """The pipeline decided this app has no subscription contract.
+
+    Scoring it FAIL penalises the generator for honouring its own design, and
+    teaches a corpus baseline that inventing an unwanted catalog scores better.
+    """
+    root = _free_app_bundle(tmp_path / "free")
+
+    result = _feedback(root, "has_subscription_catalog")
+
+    assert result.score == 1.0, "a free app needs no plan catalog"
+    assert "free app" in (result.comment or "")
+
+
+def test_a_gated_app_without_a_catalog_still_fails(tmp_path):
+    """The check must keep its teeth where monetisation is real.
+
+    An action declaring entitlement_gate has something a plan must resolve; a
+    missing catalog there is a genuine defect.
+    """
+    root = _free_app_bundle(tmp_path / "gated")
+    mod = root / "modules" / "catalogue" / "module.yaml"
+    mod.write_text(
+        yaml.safe_dump({
+            "schema_version": "mozaiks.module.v1",
+            "module": {"id": "catalogue", "handler": "backend.handler:H"},
+            "actions": [{
+                "id": "list_tools",
+                "handler_method": "list_tools",
+                "entitlement_gate": "catalogue.premium",
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    result = _feedback(root, "has_subscription_catalog")
+
+    assert result.score == 0.0, "a gated action with no catalog is a real failure"
+    assert "gated action" in (result.comment or "")
+
+
+def test_a_gated_app_with_a_catalog_passes(tmp_path):
+    root = _write_bundle(
+        tmp_path / "sold",
+        actions=[{
+            "id": "get_status",
+            "handler_method": "get_status",
+            "entitlement_gate": "billing.portal",
+        }],
+        plan_capabilities=["billing.portal"],
+    )
+
+    assert _feedback(root, "has_subscription_catalog").score == 1.0

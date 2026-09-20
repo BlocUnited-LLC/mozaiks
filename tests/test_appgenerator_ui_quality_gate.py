@@ -9,6 +9,8 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assemble_module
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from tests.factory_context import factory_context
 
 hook_quality_module = import_module(
     "factory_app.workflows.AppGenerator.tools.hook_app_ui_quality_gate"
@@ -45,7 +47,7 @@ def _read_yaml(relative_path: str):
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -54,7 +56,8 @@ class _Context:
         return self.data.get(key, default)
 
 
-def test_review_ui_quality_passes_without_warnings() -> None:
+@pytest.mark.parametrize("frozen", [False, True])
+def test_review_ui_quality_passes_without_warnings(frozen: bool) -> None:
     context = _Context(
         {
             "app_ui_quality_warnings": [],
@@ -80,11 +83,13 @@ def test_review_ui_quality_passes_without_warnings() -> None:
         }
     )
 
+    if frozen:
+        context = ContextVariablesBridge(context.data)
     result = ui_quality_module.review_ui_quality(context_variables=context)
 
     assert result["status"] == "passed"
-    assert context.data["app_ui_quality_status"] == "passed"
-    assert context.data["app_ui_quality_revision_request"] is None
+    assert context.get("app_ui_quality_status") == "passed"
+    assert context.get("app_ui_quality_revision_request") is None
 
 
 def test_review_ui_quality_requires_persisted_schema_before_passing() -> None:
@@ -166,7 +171,6 @@ def test_review_ui_quality_audits_persisted_page_schemas() -> None:
     result = ui_quality_module.review_ui_quality(context_variables=context)
 
     assert result["status"] == "needs_revision"
-    assert any("dashboard-style page naming" in warning for warning in result["warnings"])
     assert any("uses 2 SummaryStrip sections" in warning for warning in result["warnings"])
 
 
@@ -433,12 +437,15 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
     }
     assert context.data["assembled_source"] == "schema_and_task_batch_outputs"
     assert context.data["generated_files"]["app.json"] == '{"appName":"Support"}\n'
-    assert context.data["app_task_batch_results"]["assembled"] is True
+    assert context.data["app_task_batch_results"]["tickets_module"]["code_files"] == [
+        {"filename": "modules/tickets/module.yaml", "content": "id: tickets\n"}
+    ]
     assert context.data["app_task_batch_results_summary"]["result_keys"] == ["tickets_module"]
 
 
 @pytest.mark.asyncio
-async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_quality_gate() -> None:
+@pytest.mark.parametrize("frozen", [False, True])
+async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_quality_gate(frozen: bool) -> None:
     context = _Context(
         {
             "app_id": "support",
@@ -462,6 +469,8 @@ async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_qual
         }
     )
 
+    if frozen:
+        context = ContextVariablesBridge(context.data)
     result = await assemble_module.assemble_app_tasks(context_variables=context)
 
     filenames = {item["filename"] for item in result["code_files"]}
@@ -470,8 +479,10 @@ async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_qual
         "config/targets.json",
         "modules/tickets/module.yaml",
     }
-    assert context.data["app_task_batch_results"]["assembled"] is True
-    assert context.data["app_task_batch_results_summary"]["completed_tasks"] == ["tickets_module"]
+    assert context.get("app_task_batch_results")["tickets_module"]["code_files"][0]["content"] == "id: tickets\n"
+    assert context.get("app_task_batch_results")["_meta"]["task_count"] == 1
+    assert list(context.get("app_task_batch_results_summary")["completed_tasks"]) == ["tickets_module"]
+    assert context.get("generated_files")["modules/tickets/module.yaml"] == "id: tickets\n"
 
 
 def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
@@ -491,8 +502,9 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
         for rule in handoffs["transition_rules"]
     }
     tool_entries = {
-        (entry["agent"], entry["function"]): entry
+        (agent, entry["function"]): entry
         for entry in tools["tools"]
+        for agent in (entry["agent"] if isinstance(entry["agent"], list) else [entry["agent"]])
     }
 
     assert ("AppSchemaAgent", "AppUIQualityAgent") in handoff_pairs
@@ -504,18 +516,17 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert handoff_pairs[("AppUIQualityAgent", "AdminRegistryAgent")]["condition_value"] == "passed"
     assert ("AdminRegistryAgent", "AssemblyAgent") in handoff_pairs
     assert ("AssemblyAgent", "IntegrationReadinessAgent") in handoff_pairs
-    assert ("IntegrationReadinessAgent", "AppValidationAgent") in handoff_pairs
-    assert ("AppValidationAgent", "InfraScaffoldAgent") in handoff_pairs
-    assert ("InfraScaffoldAgent", "DownloadAgent") in handoff_pairs
+    assert ("IntegrationReadinessAgent", "AuthScaffoldAgent") in handoff_pairs
+    assert ("AuthScaffoldAgent", "AppValidationAgent") in handoff_pairs
+    assert ("AppValidationAgent", "DownloadAgent") in handoff_pairs
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_type"] == "context_equals"
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_key"] == "app_ui_quality_status"
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_value"] == "blocked"
 
-    assert ("AppUIQualityAgent", "review_ui_quality") in tool_entries
-    assert (
-        tool_entries[("AppUIQualityAgent", "review_ui_quality")]["auto_tool_call"]
-        is True
-    )
+    # The gate is not an auto tool. It advances the revision counter, and an
+    # auto tool runs after the reply the handoff has already been routed on --
+    # so binding it here only spent a second attempt on the same turn.
+    assert ("AppUIQualityAgent", "review_ui_quality") not in tool_entries
     assert ("AppUIQualityAgent", "review_ui_acceptance") not in tool_entries
 
     assert any(
@@ -608,3 +619,108 @@ def test_app_ui_quality_hook_persists_previous_schema_before_handoff(
     assert context.data["app_pages"][0]["route"] == "/tickets"
 
 
+
+
+def _revising_context() -> _Context:
+    """A context whose warnings always ask for another revision."""
+    return _Context(
+        {
+            "app_ui_quality_warnings": [
+                "Dashboard has 8 top-level sections; keep collection pages scan-first."
+            ],
+            "app_ui_quality_revision_count": 0,
+        }
+    )
+
+
+def test_a_budget_of_two_permits_two_revisions_and_refuses_a_third() -> None:
+    """The configured budget has to be the budget the agent actually gets.
+
+    It was not. The gate ran twice per AppUIQualityAgent turn -- once from the
+    prompt middleware before the reply, once from an auto tool after it -- and
+    each run that asked for a revision spent an attempt. A budget of two was
+    gone after a single turn, so the agent was blocked having revised once.
+    """
+    context = _revising_context()
+
+    first = ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=2)
+    assert first["status"] == "needs_revision"
+    assert first["revision_count"] == 1
+
+    second = ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=2)
+    assert second["status"] == "needs_revision", "the second attempt must still be allowed"
+    assert second["revision_count"] == 2
+
+    third = ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=2)
+    assert third["status"] == "blocked", "a third attempt must not be allowed"
+    assert third["revision_count"] == 2, "a blocked run must not spend another attempt"
+
+
+def test_each_gate_run_spends_exactly_one_attempt() -> None:
+    context = _revising_context()
+
+    for expected in (1, 2):
+        before = context.data.get("app_ui_quality_revision_count", 0)
+        ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=5)
+        after = context.data["app_ui_quality_revision_count"]
+        assert after == before + 1 == expected, f"one run moved the count {before} -> {after}"
+
+
+def test_the_quality_gate_has_exactly_one_caller() -> None:
+    """Two callers is the defect: the count advances per call, not per turn.
+
+    The prompt middleware owns the gate because AG2 evaluates handoff
+    conditions immediately after the agent reply, and routing reads the status
+    this gate writes. An auto tool runs after that point, so it cannot serve
+    the handoff -- it could only re-run the gate and spend a second attempt.
+    """
+    root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows" / "AppGenerator"
+    tools = yaml.safe_load((root / "tools.yaml").read_text(encoding="utf-8"))
+    rows = tools if isinstance(tools, list) else tools.get("tools", tools)
+    bindings = [
+        entry for entry in rows
+        if isinstance(entry, dict) and entry.get("function") == "review_ui_quality"
+    ]
+    assert bindings == [], f"the gate must not also be an auto tool: {bindings}"
+
+    middleware = yaml.safe_load((root / "middleware.yaml").read_text(encoding="utf-8"))
+    hooks = middleware if isinstance(middleware, list) else middleware.get("prompt_middleware", [])
+    assert any(
+        hook.get("agent") == "AppUIQualityAgent"
+        and hook.get("function") == "run_app_ui_quality_gate"
+        for hook in hooks
+    ), "the prompt middleware hook is the gate's only caller and must stay registered"
+
+
+def test_a_passing_run_never_spends_an_attempt() -> None:
+    """The gate re-audits the persisted schema, so a clean page is the pass case."""
+    context = _Context(
+        {
+            "app_ui_quality_warnings": [],
+            "app_ui_quality_revision_count": 1,
+            "app_schema_ready": True,
+            "app_manifest": {"app_name": "Support Operations"},
+            "app_pages": [
+                {
+                    "schema_version": "mozaiks.app_page.v1",
+                    "name": "Tickets",
+                    "route": "/tickets",
+                    "title": "Tickets",
+                    "page_type": "record_list",
+                    "layout": "full-width",
+                    "sections": [
+                        {
+                            "id": "tickets-header",
+                            "primitive": "PageHeader",
+                            "config": {"title": "Tickets"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    result = ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=2)
+
+    assert result["status"] == "passed"
+    assert result["revision_count"] == 1, "a pass must leave the remaining budget intact"

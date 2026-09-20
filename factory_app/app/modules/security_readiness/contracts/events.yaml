@@ -1,0 +1,36 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.security_readiness.assessment_recorded
+    version: 1
+    producer: security_readiness
+    description: Security-readiness findings were recorded for a Factory app build or artifact.
+    payload_schema:
+      type: object
+      required:
+        - app_id
+        - saved
+      properties:
+        app_id:
+          type: string
+        build_id:
+          type: string
+        artifact_version_id:
+          type: string
+        saved:
+          type: integer
+  - type: domain.security_readiness.finding_status_updated
+    version: 1
+    producer: security_readiness
+    description: A security-readiness finding review status was updated.
+    payload_schema:
+      type: object
+      required:
+        - finding_id
+        - status
+      properties:
+        finding_id:
+          type: string
+        app_id:
+          type: string
+        status:
+          type: string

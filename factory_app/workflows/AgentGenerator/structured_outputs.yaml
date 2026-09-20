@@ -1,4 +1,19 @@
+schema_version: mozaiks.structured_outputs.v1
 models:
+  WorkflowInterviewResult:
+    type: model
+    description: A user-facing turn with readiness stated as a field, so routing never depends on parsing chat text.
+    fields:
+      agent_message:
+        type: str
+        description: The question or confirmation shown to the user. Never include routing markers such as NEXT.
+      outcome:
+        type: literal
+        values: [needs_input, ready]
+        description: >-
+          needs_input while a signal that materially changes workflow design is
+          still missing; ready once enough context exists, including when the app
+          needs no AI workflows at all.
   AgentTool:
     type: model
     fields:
@@ -68,7 +83,7 @@ models:
         type: literal
         values:
         - prompt_middleware
-        description: Mozaiks prompt-injection trigger compiled to AG2 1.0 beta middleware. Runtime lifecycle work belongs in lifecycle_tools, not prompt middleware.
+        description: Mozaiks prompt-injection trigger compiled to AG2 1.0 middleware. Runtime lifecycle work belongs in lifecycle_tools, not prompt middleware.
       purpose:
         type: str
         description: Brief explanation of why this middleware is needed (<=140 chars).
@@ -126,8 +141,8 @@ models:
         description: Workflow name this diagram represents
       diagram:
         type: str
-        description: Complete Mermaid sequence diagram text, beginning with 'sequenceDiagram'.
-          Must include required blank line after participant declarations.
+        description: Mermaid sequence diagram beginning with sequenceDiagram, with a blank
+          line after participant declarations. Empty string when workflows_spec is empty.
       legend:
         type: list
         items: str
@@ -690,7 +705,11 @@ models:
           [BRACKETS])
       content:
         type: str
-        description: Section text content
+        description: >
+          Self-contained role, reasoning instructions, or output contract. Describe
+          inputs by meaning and exact supplied fields, never by a producer agent's
+          name or assumed conversation history. Context paths must be populated and
+          exposed to the consuming agent; model names do not imply input wrappers.
   AgentDefinition:
     type: model
     fields:
@@ -703,9 +722,10 @@ models:
       prompt_sections:
         type: list
         items: PromptSection
-        description: Agent-specific prompt sections (ordered list). Runtime hook_universal_prompts.py
-          injects universal sections (compliance, guidelines, runtime context) at
-          agent instantiation.
+        description: >
+          Ordered prompt sections describing the role, actual input delivery,
+          required reasoning, and response shape. Include all instructions needed
+          for this agent's task; do not assume an undeclared middleware injection.
       max_consecutive_auto_reply:
         type: int
         default: 10
@@ -719,6 +739,9 @@ models:
     - context_equals
     - context_expression
     - tool_called
+  WorkflowTerminationReason:
+    type: literal
+    values: [workflow_complete, workflow_failed]
   TransitionRule:
     type: model
     fields:
@@ -780,6 +803,10 @@ models:
         - RevertToUserTarget
         - TerminateTarget
         description: Type of transition target
+      termination_reason:
+        type: union
+        variants: [WorkflowTerminationReason, 'null']
+        description: Only for target_agent=terminate. workflow_failed records failure; null defaults to workflow_complete.
   StructuredModelField:
     type: model
     fields:
@@ -1133,8 +1160,13 @@ models:
           must satisfy a declared tool, hook, transition, or runtime-extension contract.
       content:
         type: str
-        description: Complete file contents with real newlines. Do not escape code
-          fences or truncate output.
+        description: Complete file contents with real newlines. For Python tool
+          files, keep the implementation compact, close every string literal in
+          the same file, and never truncate output. Do not escape code fences or
+          truncate output. Generated prompts must reason over actual
+          exposed context fields, task inputs, or tool results without depending on
+          named peers or unseen conversation history. Preserve machine identifiers
+          in roster, routing, tool, and structured-output registry declarations.
       installRequirements:
         type: list
         items: str
@@ -1324,15 +1356,13 @@ models:
     fields:
       is_multi_workflow:
         type: bool
-        description: Whether this request requires multiple workflows (pack) or
-          a single workflow
+        description: True exactly when workflows contains more than one item. False for zero or one.
       pack_partition_reason:
         type: union
         variants:
         - str
         - 'null'
-        description: If is_multi_workflow is true, explains why distinct workflows
-          are needed. Null for single workflows.
+        description: Required non-empty rationale for zero or multiple workflows; may be null for one.
       pack_name:
         type: str
         description: Name for the workflow pack (Title Case, 2-4 words). Used as
@@ -1340,8 +1370,8 @@ models:
       workflows:
         type: list
         items: WorkflowInPack
-        description: List of workflows in this pack. Single-workflow packs have
-          exactly one item with role='primary'.
+        description: Only required AI workflows. Use [] for deterministic apps with no workflow
+          surfaces. Single-workflow packs have one item with role='primary'.
   PatternSelectionOutput:
     type: model
     fields:
@@ -1458,11 +1488,11 @@ models:
       initial_agent:
         type: str
         description: Name of the first agent that receives control when the workflow
-          starts (maps to the AG2 1.0 beta Network initial speaker).
+          starts (maps to the AG2 1.0 Network initial speaker).
       visual_agents:
         type: optional_list
         items: str
-        description: Agents permitted to render UI/text to the user (mirrors ui_config.json
+        description: Agents permitted to render UI/text to the user (mirrors ui_config.yaml
           visual_agents list). Use null for backend-only/headless workflows.
       triggers:
         type: list
@@ -1690,7 +1720,7 @@ models:
         description: Query/access patterns the app expects (read/write emphasis).
   DataContractOutput:
     type: model
-    description: Output for DataContractAgent (data_contract_bundle.json).
+    description: Data contract bundle output (data_contract_bundle.json).
     fields:
       DataContract:
         type: DataContractDefinition
@@ -2202,11 +2232,124 @@ models:
         type: str
         description: Concise quality-gate message before review_workflow_ui_quality runs.
 
+  WorkflowParticipantImplementationOutput:
+    type: model
+    description: Exact agents.yaml implementation for one declared workflow.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - workflow_participant_implementation
+      workflow_id:
+        type: str
+        description: Canonical workflow identity supplied by the assignment.
+      agents_yaml:
+        type: str
+        description: UTF-8 agents.yaml content; topology remains compiler-owned.
+
+  WorkflowStructuredModelsOutput:
+    type: model
+    description: Exact structured_outputs.yaml implementation for one workflow.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - workflow_structured_models_implementation
+      workflow_id:
+        type: str
+        description: Canonical workflow identity supplied by the assignment.
+      structured_outputs_yaml:
+        type: str
+        description: UTF-8 structured_outputs.yaml content.
+
+  WorkflowToolImplementationOutput:
+    type: model
+    description: Exact Python source for one predeclared workflow tool.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - workflow_tool_implementation
+      workflow_id:
+        type: str
+        description: Canonical owning workflow identity supplied by the assignment.
+      tool_id:
+        type: str
+        description: Canonical tool identity supplied by the declaration.
+      tool_source:
+        type: str
+        description: UTF-8 source for the single compiler-owned tool path.
+
+  WorkflowUiImplementationOutput:
+    type: model
+    description: Exact JSX source for one predeclared workflow UI component.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - workflow_ui_implementation
+      workflow_id:
+        type: str
+        description: Canonical owning workflow identity supplied by the assignment.
+      component_id:
+        type: str
+        description: Canonical component identity supplied by the declaration.
+      component_source:
+        type: str
+        description: UTF-8 JSX source for the single compiler-owned UI path.
+
+  WorkflowOutcomeRoute:
+    type: model
+    fields:
+      value:
+        type: str
+        description: Exact result string returned by the operation.
+      target_agent:
+        type: str
+        description: Declared next agent, user, or terminate. error_value must route to user or terminate with workflow_failed.
+      termination_reason:
+        type: union
+        variants: [WorkflowTerminationReason, 'null']
+        description: Set workflow_failed for a failed terminal route; null for other destinations.
+
+  WorkflowOutcomePlan:
+    type: model
+    fields:
+      agent:
+        type: str
+        description: Agent with a registered structured output model and one auto-invoked operation.
+      function:
+        type: str
+        description: Exact function in the agent's tools.yaml binding.
+      context_key:
+        type: str
+        description: Operation-specific result state, materialized by the factory.
+      attempts_key:
+        type: str
+        description: Operation-specific invocation counter, materialized by the factory.
+      result_field:
+        type: str
+        description: Top-level field in the tool's returned mapping containing the outcome string.
+      error_value:
+        type: str
+        description: A route value targeting user or failed termination for exceptions, unknown results, and exhausted attempts.
+      max_attempts:
+        type: int
+        description: Total invocations per workflow execution, including the first; 1 to 100.
+      retry_on:
+        type: list
+        items: str
+        description: Known recoverable route values permitting another invocation. Empty with max_attempts=1. Never include error_value.
+      routes:
+        type: list
+        items: WorkflowOutcomeRoute
+        description: Unique exhaustive operation results and their next agents.
+
   WorkflowBundleBuilderOutput:
     type: model
     description: >
-      Complete workflow bundle produced by one WorkflowBundleBuilderAgent task batch worker.
-      Contains all files needed to run the workflow: YAML declarations, Python tool stubs,
+      Complete workflow bundle produced by one scoped generation task.
+      Contains all files needed to run the workflow: YAML declarations, implemented Python tools,
       and optional UI components. Each file's filename is relative to the workflow root.
     fields:
       workflow_name:
@@ -2221,6 +2364,13 @@ models:
       pattern_name:
         type: str
         description: Human-readable patternbook label for this workflow.
+      outcome_plans:
+        type: list
+        items: WorkflowOutcomePlan
+        description: >
+          Typed failure-handling plans for workflow operations. The factory materializes
+          their tool outcome bindings, protected context definitions, and graph routes.
+          Use [] only for workflows with no outcome-dependent operations.
       files:
         type: list
         items: CodeFile
@@ -2229,11 +2379,11 @@ models:
           orchestrator.yaml, agents.yaml, transition_graph.yaml, tools.yaml,
           context_variables.yaml, structured_outputs.yaml, middleware.yaml, ui_config.yaml.
           middleware.yaml is a prompt middleware declaration file.
-          Python tool stubs go under tools/<name>.py.
+          Complete Python tool implementations go under tools/<name>.py; unfinished stubs block export.
           UI components go under ui/<WorkflowName>/<Component>.jsx.
   PackBuildCoordinatorOutput:
     type: model
-    description: Thin acknowledgment emitted by PackBuildCoordinator before the task batch fires.
+    description: Thin acknowledgment confirming the workflow count before the task batch fires.
     fields:
       agent_message:
         type: str
@@ -2243,7 +2393,7 @@ models:
         description: Number of workflow bundles that will be generated in parallel.
 
 registry:
-  InterviewAgent: null
+  InterviewAgent: WorkflowInterviewResult
   PatternAgent: PatternSelectionOutput
   ProjectOverviewAgent: MermaidSequenceDiagramOutput
   PackBuildCoordinator: PackBuildCoordinatorOutput

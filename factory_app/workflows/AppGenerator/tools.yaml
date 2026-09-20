@@ -1,4 +1,11 @@
 tools:
+- agent: [DatabaseAgent, ConfigMiddlewareAgent, ModelAgent, ServiceAgent, FrontendStubAgent, ControllerAgent, RefinementHarnessAgent]
+  file: code_file_utils.py
+  function: save_generated_code
+  description: Persist validated generated file outputs and deletions before quality checks and repair routing.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+  bind_to_agent: false
 - agent: AppSchemaAgent
   file: save_app_schema.py
   function: save_app_schema
@@ -8,16 +15,6 @@ tools:
     artifacts to ui/route_manifest.json + ui/pages/custom/*.jsx + ui/index.js, and merges
     theme/shell/asset artifacts into their canonical config files when provided.
     Called automatically after AppSchemaAgent speaks.
-  tool_type: Agent_Tool
-  auto_tool_call: true
-  bind_to_agent: false
-- agent: AppUIQualityAgent
-  file: ui_quality.py
-  function: review_ui_quality
-  description: >
-    Review persisted AppSchemaAgent output for production UI quality issues and
-    set app_ui_quality_status to passed, needs_revision, or blocked for the
-    AppGenerator handoff gate.
   tool_type: Agent_Tool
   auto_tool_call: true
   bind_to_agent: false
@@ -45,11 +42,11 @@ tools:
   auto_tool_call: true
   bind_to_agent: false
 - agent: AppPlanAgent
-  file: app_build_plan.py
-  function: app_build_plan
-  description: Persist the canonical app build plan so downstream generation agents
-    can read the same scoped capability packs, pages, entities, roles, integrations,
-    theme preferences, and generation order.
+  file: app_plan_review.py
+  function: review_app_build_plan
+  description: Validate and cache a complete canonical app build plan before task
+    execution. Return actionable feedback for at most three planning attempts;
+    rejected plans never populate the worker queue.
   tool_type: Agent_Tool
   auto_tool_call: true
   bind_to_agent: false
@@ -173,11 +170,10 @@ tools:
   description: Record an integration need discovered while generating an API adapter or controller surface.
   tool_type: Agent_Tool
   auto_tool_call: false
-- agent: InfraScaffoldAgent
-  file: render_infra_scaffold.py
-  function: save_infra_scaffold
-  description: Render infra scaffold (Dockerfile, readiness.yml, deploy.yml, provision.sh) and auth
-    contract/adapter (config/auth.yaml, ui/auth/authAdapter.js) from build-context templates and emit as code_files.
+- agent: AuthScaffoldAgent
+  file: render_auth_scaffold.py
+  function: save_auth_scaffold
+  description: Materialize auth config, shared OIDC facade, and public auth routes from assembled app.json intent. Deployment packaging belongs to DownloadAgent.
   tool_type: Agent_Tool
   auto_tool_call: true
   bind_to_agent: false
@@ -189,6 +185,14 @@ tools:
   tool_type: UI_Tool
   auto_tool_call: true
   bind_to_agent: false
+  outcome:
+    context_key: app_bundle_export_outcome
+    attempts_key: app_bundle_export_attempts
+    result_field: outcome
+    values: [ready, repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness, cancelled, blocked]
+    error_value: blocked
+    max_attempts: 3
+    retry_on: [repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness]
   ui:
     component: AppWorkbench
     mode: artifact
@@ -271,6 +275,12 @@ tools:
 lifecycle_tools:
   - trigger: before_chat
     agent: null
+    file: hydrate_app_revision_context.py
+    function: hydrate_app_revision_context
+    description: Verify and load the selected app-bundle baseline for partial revisions; preserve unchanged files before reasoning and assembly.
+    tool_type: Agent_Tool
+  - trigger: before_chat
+    agent: null
     file: ../_shared/context_graph/load_context_graph_context.py
     function: load_context_graph_context
     description: Load the current compact Context Graph pack into context_variables before agent prompt hooks run.
@@ -299,47 +309,9 @@ lifecycle_tools:
     function: emit_build_completed
     description: Notify platform build tracking when workflow run completes.
     tool_type: Agent_Tool
-  - trigger: on_complete
-    agent: null
-    file: tools/platform/module_pattern_recorder.py
-    function: record_module_patterns
-    description: >
-      Extract generated module IDs from the assembled bundle and POST them to the
-      hosted build_intelligence module so pairwise cooccurrence patterns are scored.
-      No-op in OSS runs without app_backend_url or build_registry_id.
-    tool_type: Agent_Tool
-  - trigger: on_complete
-    agent: null
-    file: tools/platform/domain_tags_recorder.py
-    function: record_domain_tags
-    description: >
-      Derive domain tags from selected capability_packs and POST them to
-      build_intelligence so gate_failure and refinement_hotspot patterns are
-      domain-specific rather than always landing in "global".
-      No-op in OSS runs without app_backend_url or build_registry_id.
-    tool_type: Agent_Tool
-  - trigger: on_complete
-    agent: null
-    file: tools/platform/gate_corrections_recorder.py
-    function: record_gate_corrections
-    description: >
-      Post quality gate correction records to build_intelligence for any gate
-      that ended in "blocked" status. Increments quality_gate_blocks on the build
-      ledger so gate_failure patterns are scored on completion. No-op in OSS runs
-      without app_backend_url or build_registry_id.
-    tool_type: Agent_Tool
   - trigger: on_fail
     agent: null
     file: tools/platform/build_lifecycle.py
     function: emit_build_failed
     description: Notify platform build tracking when workflow run fails.
-    tool_type: Agent_Tool
-  - trigger: on_fail
-    agent: null
-    file: tools/platform/gate_corrections_recorder.py
-    function: record_gate_corrections
-    description: >
-      Post quality gate correction records to build_intelligence even when the
-      workflow fails. Ensures corrections are captured for failed builds where
-      a gate block may have contributed to the failure.
     tool_type: Agent_Tool

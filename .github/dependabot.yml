@@ -12,8 +12,20 @@ updates:
       - "dependencies"
       - "security"
     groups:
+      # AG2 upgrades require the watchpoint audit and compatibility gate. Keep
+      # the runtime pin and its ACP compatibility constraint together, but out
+      # of unrelated Python dependency batches.
+      ag2-runtime:
+        patterns:
+          - "ag2"
+          - "agent-client-protocol"
       # Batch minor/patch updates from the same ecosystem to reduce PR noise.
       python-minor-patch:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "ag2"
+          - "agent-client-protocol"
         update-types:
           - "minor"
           - "patch"

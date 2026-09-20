@@ -5,6 +5,7 @@ Supports configurable claim mappings to work with any JWT-based auth provider.
 """
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,13 @@ from jwt import PyJWKClient
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
+from mozaiksai.core.auth.cache_ttl import (
+    DEFAULT_DISCOVERY_CACHE_TTL_SECONDS,
+    DEFAULT_JWKS_CACHE_TTL_SECONDS,
+    DISCOVERY_CACHE_TTL_ENV,
+    JWKS_CACHE_TTL_ENV,
+    resolve_cache_ttl_setting,
+)
 from mozaiksai.core.auth.discovery import OIDCDiscoveryClient
 from mozaiksai.core.auth.jwks import JWKSClient
 
@@ -87,36 +95,77 @@ class JWTAdapterConfig:
     # Optional: required scope for user endpoints
     required_scope: str = ""
 
+    # Cache TTLs for this adapter's own discovery/JWKS clients. Held here so
+    # the lazily created clients derive from the same immutable snapshot that
+    # identifies the adapter, never from live environment.
+    jwks_cache_ttl_seconds: int = DEFAULT_JWKS_CACHE_TTL_SECONDS
+    discovery_cache_ttl_seconds: int = DEFAULT_DISCOVERY_CACHE_TTL_SECONDS
+
     def __post_init__(self):
         if self.algorithms is None:
             self.algorithms = ["RS256"]
 
     @classmethod
-    def from_env(cls) -> "JWTAdapterConfig":
-        """Load configuration from environment variables."""
-        algorithms_str = os.getenv("AUTH_ALGORITHMS", "RS256")
+    def from_env(cls, settings: Mapping[str, str] | None = None) -> "JWTAdapterConfig":
+        """Load configuration from an immutable snapshot, else the environment.
+
+        The auth registry passes the same snapshot it derived the adapter cache
+        identity from, so the constructed adapter always matches that identity.
+        """
+
+        def _raw(name: str) -> str | None:
+            """Return the configured value untouched (no default substitution)."""
+            return settings.get(name) if settings is not None else os.getenv(name)
+
+        def _get(name: str, default: str = "") -> str:
+            # Absent and empty are equivalent here: a blank AUTH_* variable in
+            # a .env must behave exactly like an unset one.
+            value = settings.get(name) if settings is not None else os.getenv(name)
+            return default if not value else value
+
+        algorithms_str = _get("AUTH_ALGORITHMS", "RS256")
         algorithms = [a.strip() for a in algorithms_str.split(",") if a.strip()]
 
+        raw_clock_skew = _get("AUTH_CLOCK_SKEW", "120").strip() or "120"
+        try:
+            clock_skew_seconds = int(raw_clock_skew)
+        except ValueError as exc:
+            raise ValueError(
+                f"AUTH_CLOCK_SKEW must be an integer number of seconds, got {raw_clock_skew!r}"
+            ) from exc
+
+        # Raw values go straight to the canonical resolver: absent, empty, and
+        # whitespace-only all normalize to the same default here as they do in
+        # canonical auth resolution.
+        jwks_cache_ttl_seconds = resolve_cache_ttl_setting(
+            JWKS_CACHE_TTL_ENV, _raw(JWKS_CACHE_TTL_ENV)
+        )
+        discovery_cache_ttl_seconds = resolve_cache_ttl_setting(
+            DISCOVERY_CACHE_TTL_ENV, _raw(DISCOVERY_CACHE_TTL_ENV)
+        )
+
         return cls(
-            jwks_url=os.getenv("AUTH_JWKS_URL", ""),
-            issuer=os.getenv("AUTH_ISSUER", ""),
-            audience=os.getenv("AUTH_AUDIENCE", ""),
-            oidc_authority=os.getenv("MOZAIKS_OIDC_AUTHORITY", ""),
-            oidc_tenant_id=os.getenv("MOZAIKS_OIDC_TENANT_ID", ""),
-            oidc_discovery_url=os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", ""),
-            user_id_claim=os.getenv("AUTH_USER_ID_CLAIM", "sub"),
-            email_claim=os.getenv("AUTH_EMAIL_CLAIM", "email"),
-            name_claim=os.getenv("AUTH_NAME_CLAIM", "name"),
-            roles_claim=os.getenv("AUTH_ROLES_CLAIM", "roles"),
-            scopes_claim=os.getenv("AUTH_SCOPES_CLAIM", "scp"),
-            app_id_claim=os.getenv("AUTH_APP_ID_CLAIM", "app_id"),
-            chat_id_claim=os.getenv("AUTH_CHAT_ID_CLAIM", "chat_id"),
-            tenant_id_claim=os.getenv("AUTH_TENANT_ID_CLAIM", "tid"),
-            workspace_id_claim=os.getenv("AUTH_WORKSPACE_ID_CLAIM", "workspace_id"),
-            scopes_format=os.getenv("AUTH_SCOPES_FORMAT", "space"),
+            jwks_url=_get("AUTH_JWKS_URL"),
+            issuer=_get("AUTH_ISSUER"),
+            audience=_get("AUTH_AUDIENCE"),
+            oidc_authority=_get("MOZAIKS_OIDC_AUTHORITY"),
+            oidc_tenant_id=_get("MOZAIKS_OIDC_TENANT_ID"),
+            oidc_discovery_url=_get("MOZAIKS_OIDC_DISCOVERY_URL"),
+            user_id_claim=_get("AUTH_USER_ID_CLAIM", "sub"),
+            email_claim=_get("AUTH_EMAIL_CLAIM", "email"),
+            name_claim=_get("AUTH_NAME_CLAIM", "name"),
+            roles_claim=_get("AUTH_ROLES_CLAIM", "roles"),
+            scopes_claim=_get("AUTH_SCOPES_CLAIM", "scp"),
+            app_id_claim=_get("AUTH_APP_ID_CLAIM", "app_id"),
+            chat_id_claim=_get("AUTH_CHAT_ID_CLAIM", "chat_id"),
+            tenant_id_claim=_get("AUTH_TENANT_ID_CLAIM", "tid"),
+            workspace_id_claim=_get("AUTH_WORKSPACE_ID_CLAIM", "workspace_id"),
+            scopes_format=_get("AUTH_SCOPES_FORMAT", "space"),
             algorithms=algorithms,
-            clock_skew_seconds=int(os.getenv("AUTH_CLOCK_SKEW", "120")),
-            required_scope=os.getenv("AUTH_REQUIRED_SCOPE", ""),
+            clock_skew_seconds=clock_skew_seconds,
+            required_scope=_get("AUTH_REQUIRED_SCOPE"),
+            jwks_cache_ttl_seconds=jwks_cache_ttl_seconds,
+            discovery_cache_ttl_seconds=discovery_cache_ttl_seconds,
         )
 
 
@@ -151,9 +200,13 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
     name = "jwt"
 
-    def __init__(self, config: JWTAdapterConfig | None = None):
-        super().__init__()
-        self._config = config or JWTAdapterConfig.from_env()
+    def __init__(
+        self,
+        config: JWTAdapterConfig | None = None,
+        settings: Mapping[str, str] | None = None,
+    ):
+        super().__init__(settings)
+        self._config = config or JWTAdapterConfig.from_env(settings)
         self._pyjwk_client: PyJWKClient | None = None
         self._discovery_client: OIDCDiscoveryClient | None = None
         self._jwks_client: JWKSClient | None = None
@@ -167,9 +220,13 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
     def _get_discovery_client(self) -> OIDCDiscoveryClient:
         if self._discovery_client is None:
+            # Snapshot-bound: the URL and TTL come from this adapter's own
+            # immutable config, and consult_environment=False forbids the
+            # client from reading live environment for anything.
             self._discovery_client = OIDCDiscoveryClient(
                 discovery_url=self._configured_discovery_url(),
-                cache_ttl=None,
+                cache_ttl=self._config.discovery_cache_ttl_seconds,
+                consult_environment=False,
             )
         return self._discovery_client
 
@@ -199,7 +256,13 @@ class GenericJWTAdapter(BaseAuthAdapter):
                         500,
                         self.name,
                     ) from exc
-            self._jwks_client = JWKSClient(jwks_url=jwks_url, use_discovery=False)
+            self._jwks_client = JWKSClient(
+                jwks_url=jwks_url,
+                cache_ttl=self._config.jwks_cache_ttl_seconds,
+                use_discovery=False,
+                consult_environment=False,
+                discovery_client=self._get_discovery_client(),
+            )
         return self._jwks_client
 
     async def _get_expected_issuer(self) -> str:

@@ -16,9 +16,19 @@ def _workspace() -> Path:
 _FACTORY_APP_PATH = str(_workspace() / "factory_app")
 
 
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n"])
+def test_validation_workspace_preserves_source_bytes(tmp_path, line_ending):
+    from factory_app.workflows.AppGenerator.tools.app_validation import _write_files_to_dir
+
+    text = line_ending.join(["first", "second", ""])
+    _write_files_to_dir(tmp_path, {"README.md": text})
+    assert (tmp_path / "README.md").read_bytes() == text.encode("utf-8")
+
+
 @pytest.fixture(autouse=True)
-def _clean_factory_app_syspath():
+def _clean_factory_app_syspath(monkeypatch):
     """Ensure factory_app/ is on sys.path during the test and clean up imported workflow modules after."""
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
     added = _FACTORY_APP_PATH not in sys.path
     if added:
         sys.path.insert(0, _FACTORY_APP_PATH)
@@ -85,6 +95,59 @@ class _Context:
         self._data[key] = value
 
 
+def _accept_tasks(context, files, ownership):
+    """Supply the approved producer inventory and its accepted batch evidence."""
+    task_types = {
+        "ConfigMiddlewareAgent": "module_contract", "ModelAgent": "data_models",
+        "ServiceAgent": "business_services", "AppSchemaAgent": "page_bundle",
+    }
+    tasks = [
+        {"task_id": task_id, "initial_agent": agent, "task_type": task_types[agent],
+         "owned_paths": paths, "depends_on": []}
+        for task_id, (agent, paths) in ownership.items()
+    ]
+    context.set("app_build_plan", {"build_tasks": tasks})
+    context.set("app_task_batch_results", {
+        task["task_id"]: {"code_files": [
+            {"filename": path, "content": files[path]}
+            for path in task["owned_paths"] if path in files
+        ]}
+        for task in tasks
+    })
+
+
+def _accept_support_tasks(context, files, *, missing_client=False):
+    prefix = "modules/support_tickets/"
+    ownership = {
+        "support_contract": ("ConfigMiddlewareAgent", [
+            prefix + "module.yaml", prefix + "contracts/events.yaml", prefix + "contracts/reactions.yaml",
+        ]),
+        "support_services": ("ServiceAgent", [
+            path for path in files if path.startswith(prefix + "backend/") and not path.endswith("/schemas.py")
+        ]),
+        "support_pages": ("AppSchemaAgent", [
+            path for path in files if path == "app.json" or path.startswith("ui/pages/")
+        ]),
+    }
+    schemas = prefix + "backend/schemas.py"
+    if schemas in files:
+        ownership["support_models"] = ("ModelAgent", [schemas])
+    if missing_client:
+        ownership["managed_client"] = (
+            "ConfigMiddlewareAgent", ["services/integrations/hosted_billing_client.py"],
+        )
+    _accept_tasks(context, files, ownership)
+    for task in context.get("app_build_plan")["build_tasks"]:
+        if task["task_id"].startswith("support_"):
+            task["capability_pack_id"] = "support_tickets"
+
+
+def _repair_responded(context):
+    from factory_app.workflows.AppGenerator.tools.task_integrity import mark_repair_responded
+
+    mark_repair_responded(context)
+
+
 @pytest.mark.parametrize(
     ("status", "acceptance_status", "integration_passed", "allow_export"),
     [
@@ -113,6 +176,13 @@ def test_resolve_export_gate_uses_acceptance_validation_and_integration(
             "integration_tests_passed": integration_passed,
         }
     )
+    from factory_app.workflows.AppGenerator.tools.task_integrity import artifact_snapshot_digest
+
+    context.set("generated_files", {"app.json": '{"app_id":"example"}'})
+    context.set("app_build_plan", {"build_tasks": []})
+    context.set("app_bundle_acceptance_result", {
+        "snapshot_digest": artifact_snapshot_digest(context, context.get("generated_files")),
+    })
 
     gate = module.resolve_export_gate(context)
 
@@ -143,6 +213,40 @@ def test_validation_strategy_defaults_to_skip_when_e2b_local_and_docker_are_unav
     assert "resolved" in reason
 
 
+def test_e2b_credentials_do_not_change_the_automatic_local_default() -> None:
+    from mozaiksai.core.workflow.generator_support import (
+        app_validation_strategy as app_validation_strategy_module,
+    )
+
+    strategy, reason = app_validation_strategy_module.resolve_app_validation_strategy(
+        env={"E2B_API_KEY": "configured"},
+        requested=None,
+        context_value=None,
+        local_available=False,
+        docker_available=True,
+    )
+
+    assert strategy == "docker"
+    assert "Docker" in reason
+
+
+def test_e2b_remains_available_when_explicitly_selected() -> None:
+    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+        resolve_app_validation_strategy,
+    )
+
+    strategy, reason = resolve_app_validation_strategy(
+        env={"E2B_API_KEY": "configured"},
+        requested="e2b",
+        context_value=None,
+        local_available=False,
+        docker_available=True,
+    )
+
+    assert strategy == "e2b"
+    assert "tool argument" in reason
+
+
 def test_validation_strategy_summary_exposes_allowed_values() -> None:
     from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
         build_app_validation_strategy_summary,
@@ -165,6 +269,25 @@ def test_validation_strategy_rejects_invalid_explicit_values() -> None:
 
     with pytest.raises(ValueError):
         resolve_app_validation_strategy(requested="invalid", context_value=None)
+
+
+@pytest.mark.parametrize("requested,context", [("skip", "local"), ("docker", "skip"), (None, "skip")])
+def test_operator_strategy_cannot_be_overridden_by_build_inputs(requested, context):
+    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+        resolve_app_validation_strategy,
+    )
+    strategy, reason = resolve_app_validation_strategy(
+        env={"MOZAIKS_APP_VALIDATION_STRATEGY": "e2b"}, requested=requested, context_value=context,
+    )
+    assert (strategy, reason) == ("e2b", "resolved from environment")
+
+
+def test_invalid_operator_strategy_fails_before_a_build_can_override_it():
+    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+        resolve_app_validation_strategy,
+    )
+    with pytest.raises(ValueError, match="Unsupported"):
+        resolve_app_validation_strategy(env={"MOZAIKS_APP_VALIDATION_STRATEGY": "invalid"}, requested="skip")
 
 
 def test_validate_app_build_skip_strategy_persists_context() -> None:
@@ -537,6 +660,7 @@ async def test_validate_app_bundle_from_request_blocks_workflow_integration_fail
         }
     )
 
+    _accept_support_tasks(context, files)
     result = await module.validate_app_bundle_from_request(
         {"validation_strategy": "skip", "start_dev_server": False},
         context_variables=context,
@@ -545,11 +669,12 @@ async def test_validate_app_bundle_from_request_blocks_workflow_integration_fail
     assert result["status"] == "failed"
     assert result["integration_tests_passed"] is False
     assert result["workflow_integration_validation_result"]["passed"] is False
-    assert result["workflow_integration_repair"]["status"] == "needs_revision"
+    assert result["bundle_repair"]["status"] == "needs_revision"
+    assert result["bundle_repair"]["target_agent"] == "ConfigMiddlewareAgent"
     assert context.get("workflow_integration_validation_passed") is False
-    assert context.get("workflow_integration_repair_status") == "needs_revision"
+    assert context.get("bundle_repair_status") == "needs_revision"
     assert context.get("integration_test_result")["workflow_integration"]["failed_tests"]
-    assert context.get("integration_test_result")["workflow_integration_repair"]["status"] == "needs_revision"
+    assert context.get("integration_test_result")["bundle_repair"]["status"] == "needs_revision"
 
 
 @pytest.mark.asyncio
@@ -576,6 +701,7 @@ async def test_app_bundle_acceptance_schedules_service_agent_bundle_repair() -> 
         }
     )
 
+    _accept_support_tasks(context, files)
     result = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
 
     assert result["passed"] is False
@@ -590,7 +716,129 @@ async def test_app_bundle_acceptance_schedules_service_agent_bundle_repair() -> 
 
 
 @pytest.mark.asyncio
-async def test_app_bundle_repair_deletion_closes_acceptance_and_export_gate() -> None:
+@pytest.mark.parametrize("repair", [False, True])
+async def test_module_implementation_failure_uses_bounded_bundle_repair(repair: bool) -> None:
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    handler = "modules/support_tickets/backend/handler.py"
+    files["modules/support_tickets/backend/base_handler.py"] = files[handler].replace(
+        "class SupportTicketsModule:", "class SupportTicketsBaseModule:",
+    )
+    files[handler] = "from .base_handler import SupportTicketsBaseModule as SupportTicketsModule\n"
+    context = _Context({
+        "generated_workflow_name": integration["workflow_name"],
+        "generated_workflow_capability_id": integration["capability_id"],
+        "generated_workflow_startup_mode": integration["startup_mode"],
+        "generated_workflow_trigger_events": integration["trigger_events"],
+    })
+    _accept_support_tasks(context, files)
+    first = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert first["passed"] is False
+    assert first["module_implementation"]["passed"] is False
+    assert first["bundle_repair"]["status"] == "needs_revision"
+    assert first["bundle_repair"]["target_agent"] == "ServiceAgent"
+    assert first["bundle_repair"]["attempt"] == 1
+    assert handler in context.get("bundle_repair_request")
+    assert "module_handler_class_exists" in context.get("bundle_repair_request")
+    if repair:
+        files[handler] = (
+            "from .base_handler import SupportTicketsBaseModule\n\n"
+            "class SupportTicketsModule(SupportTicketsBaseModule):\n"
+            '    """Workspace customization boundary."""\n'
+        )
+    _repair_responded(context)
+    second = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert second["passed"] is repair
+    assert second["bundle_repair"]["status"] == ("passed" if repair else "blocked")
+    assert second["bundle_repair"]["no_progress"] is (not repair)
+    assert second["bundle_repair"]["target_agent"] is None
+    assert context.get("bundle_repair_attempt_count") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repair", [False, True])
+async def test_runtime_import_failure_uses_stable_bounded_bundle_repair(repair) -> None:
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    handler = "modules/support_tickets/backend/handler.py"
+    original = files[handler]
+    files[handler] = "from .schemas import missing_detail_serializer\n" + original
+    context = _Context({
+        "generated_workflow_name": integration["workflow_name"],
+        "generated_workflow_capability_id": integration["capability_id"],
+        "generated_workflow_startup_mode": integration["startup_mode"],
+        "generated_workflow_trigger_events": integration["trigger_events"],
+    })
+    _accept_support_tasks(context, files)
+    first = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert first["passed"] is False
+    assert first["app_runtime_load"]["passed"] is False
+    assert first["bundle_repair"]["target_agent"] == "ServiceAgent"
+    assert first["bundle_repair"]["attempt"] == 1
+    assert handler in context.get("bundle_repair_request")
+    assert "mozaiks-app-runtime-load-" not in context.get("bundle_repair_request")
+    if repair:
+        files[handler] = original
+    _repair_responded(context)
+    second = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    assert second["passed"] is repair
+    assert second["bundle_repair"]["status"] == ("passed" if repair else "blocked")
+    assert second["bundle_repair"]["no_progress"] is (not repair)
+    assert context.get("bundle_repair_attempt_count") == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_validation_cleanup_preserves_concurrent_workflow_imports(monkeypatch) -> None:
+    from types import ModuleType, SimpleNamespace
+
+    from mozaiksai.core.runtime.app.loader import AppLoader
+
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    existing = ModuleType("mozaiks_runtime_module_fixture")
+    existing.__file__ = str(_workspace() / "factory_app/app/modules/fixture/backend/handler.py")
+    concurrent = ModuleType("concurrent_workflow_fixture")
+    concurrent.__file__ = str(_workspace() / "factory_app/workflows/Fixture/__init__.py")
+    marker = "concurrent-workflow-path"
+    monkeypatch.setitem(sys.modules, existing.__name__, existing)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    async def load(root):
+        transient = ModuleType(existing.__name__)
+        transient.__file__ = str(Path(root) / "modules/fixture/backend/handler.py")
+        sys.modules[existing.__name__] = transient
+        sys.modules[concurrent.__name__] = concurrent
+        sys.path.extend([root, str(Path(root).parent), marker])
+        return SimpleNamespace(
+            definition=SimpleNamespace(name="Fixture", pages=[], workflows=[]),
+            modules=[], failed_module_names=[], subscriptions_config=None,
+        )
+
+    monkeypatch.setattr(AppLoader, "load", load)
+    try:
+        result = await module._app_runtime_load_result({"app.json": "{}"})
+        assert result["passed"] is True
+        assert sys.modules[existing.__name__] is existing
+        assert sys.modules[concurrent.__name__] is concurrent
+        assert marker in sys.path
+        assert not any("mozaiks-app-runtime-load-" in entry for entry in sys.path)
+    finally:
+        sys.modules.pop(concurrent.__name__, None)
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_required_planned_file_cannot_close_acceptance_or_export() -> None:
     validation_module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
     export_module = importlib.import_module("factory_app.workflows.AppGenerator.tools.export_app_code")
     from scripts.smoke_appgenerator_live_acceptance import (
@@ -616,6 +864,7 @@ async def test_app_bundle_repair_deletion_closes_acceptance_and_export_gate() ->
         }
     )
 
+    _accept_support_tasks(context, files)
     failed = await validation_module.run_app_bundle_acceptance_gate(
         files=files,
         context_variables=context,
@@ -625,23 +874,25 @@ async def test_app_bundle_repair_deletion_closes_acceptance_and_export_gate() ->
     assert failed["bundle_repair"]["target_agent"] == "ServiceAgent"
 
     context.set("deleted_files", [forbidden_path])
+    _repair_responded(context)
     repaired = await validation_module.run_app_bundle_acceptance_gate(
         context_variables=context,
     )
 
-    assert repaired["passed"] is True
-    assert repaired["bundle_repair"]["status"] == "passed"
-    assert context.get("bundle_repair_status") == "passed"
-    assert context.get("bundle_repair_target") is None
+    assert repaired["passed"] is False
+    assert any(
+        item["path"] == forbidden_path and item["code"] == "PLANNED_ARTIFACT_MISSING"
+        for item in repaired["planned_completeness"]["diagnostics"]
+    )
     assert forbidden_path not in context.get("generated_files")
-    assert context.get("integration_tests_passed") is True
+    assert context.get("integration_tests_passed") is False
 
     context.set("app_validation_status", "skipped")
     context.set("app_validation_strategy_used", "skip")
     export_gate = export_module.resolve_export_gate(context)
 
-    assert export_gate["allow_export"] is True
-    assert export_gate["reasons"] == []
+    assert export_gate["allow_export"] is False
+    assert export_gate["reasons"]
 
 
 @pytest.mark.asyncio
@@ -669,6 +920,7 @@ async def test_app_bundle_acceptance_schedules_app_schema_repair_for_direct_mana
         }
     )
 
+    _accept_support_tasks(context, files)
     result = await module.run_app_bundle_acceptance_gate(
         files=files,
         context_variables=context,
@@ -707,6 +959,7 @@ async def test_app_bundle_acceptance_schedules_config_repair_for_missing_managed
         }
     )
 
+    _accept_support_tasks(context, files, missing_client=True)
     result = await module.run_app_bundle_acceptance_gate(
         files=files,
         context_variables=context,
@@ -747,6 +1000,7 @@ async def test_app_bundle_acceptance_blocks_bundle_repair_after_max_attempts() -
         }
     )
 
+    _accept_support_tasks(context, files)
     result = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
 
     assert result["passed"] is False
@@ -783,7 +1037,9 @@ async def test_app_bundle_acceptance_blocks_identical_no_progress_repair() -> No
         }
     )
 
+    _accept_support_tasks(context, files)
     first = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    _repair_responded(context)
     repeated = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
 
     assert first["bundle_repair"]["status"] == "needs_revision"
@@ -796,21 +1052,21 @@ async def test_app_bundle_acceptance_blocks_identical_no_progress_repair() -> No
 
 
 def test_bundle_repair_allows_changed_failure_within_budget() -> None:
-    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+
     first_error = "modules/support/backend/token_wallet_ledger.py: forbidden helper"
     changed_error = "modules/support/backend/provider_client.py: raw provider secret key literal"
-    first_fingerprint = module._repair_failure_fingerprint(
-        repair_kind="bundle:ServiceAgent",
-        evidence={"target_errors": [first_error], "deferred_errors": []},
+    context = _Context()
+    _accept_tasks(context, {}, {
+        "services": ("ServiceAgent", [
+            "modules/support/backend/token_wallet_ledger.py", "modules/support/backend/provider_client.py",
+        ]),
+    })
+    first = prepare_bundle_repair(
+        {"passed": False, "errors": [first_error]}, context,
     )
-    context = _Context(
-        {
-            "bundle_repair_attempt_count": 1,
-            "bundle_repair_failure_fingerprint": first_fingerprint,
-        }
-    )
-
-    result = module._prepare_bundle_repair(
+    _repair_responded(context)
+    result = prepare_bundle_repair(
         {"passed": False, "errors": [changed_error]},
         context,
     )
@@ -818,7 +1074,7 @@ def test_bundle_repair_allows_changed_failure_within_budget() -> None:
     assert result["status"] == "needs_revision"
     assert result["no_progress"] is False
     assert result["attempt"] == 2
-    assert result["failure_fingerprint"] != first_fingerprint
+    assert result["failure_fingerprint"] != first["failure_fingerprint"]
     assert context.get("bundle_repair_target") == "ServiceAgent"
 
 
@@ -843,34 +1099,41 @@ async def test_workflow_integration_repair_blocks_identical_no_progress_failure(
         }
     )
 
+    _accept_support_tasks(context, files)
     first = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    _repair_responded(context)
     repeated = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
 
-    assert first["workflow_integration_repair"]["status"] == "needs_revision"
-    assert repeated["workflow_integration_repair"]["status"] == "blocked"
-    assert repeated["workflow_integration_repair"]["no_progress"] is True
+    assert first["bundle_repair"]["status"] == "needs_revision"
+    assert repeated["bundle_repair"]["status"] == "blocked"
+    assert repeated["bundle_repair"]["no_progress"] is True
     assert (
-        repeated["workflow_integration_repair"]["failure_fingerprint"]
-        == first["workflow_integration_repair"]["failure_fingerprint"]
+        repeated["bundle_repair"]["failure_fingerprint"]
+        == first["bundle_repair"]["failure_fingerprint"]
     )
-    assert repeated["workflow_integration_repair"]["attempt"] == 1
-    assert context.get("workflow_integration_repair_no_progress") is True
+    assert repeated["bundle_repair"]["attempt"] == 1
+    assert context.get("bundle_repair_no_progress") is True
 
 
 def test_workflow_integration_fingerprint_ignores_failed_test_order() -> None:
-    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+
     failed_tests = [
         {"test": "event", "path": "modules/a/contracts/events.yaml", "error": "missing event"},
         {"test": "reaction", "path": "modules/a/contracts/reactions.yaml", "error": "missing reaction"},
     ]
     context = _Context({})
+    _accept_tasks(context, {}, {
+        "contracts": ("ConfigMiddlewareAgent", [item["path"] for item in failed_tests]),
+    })
 
-    first = module._prepare_workflow_integration_repair(
-        {"passed": False, "failed_tests": failed_tests},
+    first = prepare_bundle_repair(
+        {"passed": False, "diagnostics": failed_tests},
         context,
     )
-    repeated = module._prepare_workflow_integration_repair(
-        {"passed": False, "failed_tests": list(reversed(failed_tests))},
+    _repair_responded(context)
+    repeated = prepare_bundle_repair(
+        {"passed": False, "diagnostics": list(reversed(failed_tests))},
         context,
     )
 
@@ -878,6 +1141,95 @@ def test_workflow_integration_fingerprint_ignores_failed_test_order() -> None:
     assert repeated["status"] == "blocked"
     assert repeated["no_progress"] is True
     assert repeated["failure_fingerprint"] == first["failure_fingerprint"]
+
+
+@pytest.mark.parametrize("first_status", ["responded", "rejected", "selected"])
+def test_independent_owned_repair_can_use_budget_after_another_target_blocks(first_status):
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+
+    context = _Context()
+    models = "modules/support/backend/schemas.py"
+    service = "modules/support/backend/handler.py"
+    _accept_tasks(context, {}, {
+        "a_models": ("ModelAgent", [models]),
+        "b_services": ("ServiceAgent", [service]),
+    })
+    failures = {"passed": False, "diagnostics": [
+        {"path": models, "error": "Invalid model output"},
+        {"path": service, "error": "Missing handler class"},
+    ]}
+    first = prepare_bundle_repair(failures, context)
+    assert first["target_agent"] == "ModelAgent"
+    assert first["active"]["allowed_paths"] == [models]
+    assert first["attempt"] == 1
+    state = context.get("bundle_repair_result")
+    state["active"]["status"] = first_status
+    context.set("bundle_repair_result", state)
+
+    second = prepare_bundle_repair(failures, context)
+
+    assert second["status"] == "needs_revision"
+    assert second["target_agent"] == "ServiceAgent"
+    assert second["active"]["allowed_paths"] == [service]
+    assert second["attempt"] == 2
+    assert second["history"][0]["status"] == (
+        "interrupted" if first_status == "selected" else first_status
+    )
+    assert any(item.get("block_reason") for item in second["diagnostics"] if item["path"] == models)
+
+
+def test_missing_accepted_task_evidence_blocks_an_apparently_repairable_file():
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+
+    context = _Context()
+    path = "modules/support/backend/handler.py"
+    _accept_tasks(context, {}, {"services": ("ServiceAgent", [path])})
+    context.set("app_task_batch_results", {})
+
+    result = prepare_bundle_repair({"passed": False, "errors": [path + ": wrong class"]}, context)
+
+    assert result["status"] == "blocked"
+    assert result["attempt"] == 0
+    assert result["diagnostics"][0]["block_reason"] == "missing_accepted_task_evidence"
+
+
+@pytest.mark.parametrize("multiple_paths", [False, True])
+def test_wildcard_diagnostic_requires_a_unique_approved_task_owner(multiple_paths):
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+
+    context = _Context()
+    paths = ["modules/support/contracts/reactions.yaml"]
+    if multiple_paths:
+        paths.append("modules/reports/contracts/reactions.yaml")
+    _accept_tasks(context, {}, {"contracts": ("ConfigMiddlewareAgent", paths)})
+    wildcard = "modules/*/contracts/reactions.yaml"
+
+    result = prepare_bundle_repair({"passed": False, "diagnostics": [
+        {"path": wildcard, "error": "Missing workflow trigger reaction"},
+    ]}, context)
+
+    assert result["status"] == "needs_revision"
+    assert result["active"]["task_id"] == "contracts"
+    assert result["active"]["allowed_paths"] == paths
+    assert result["diagnostics"][0]["path"] == (wildcard if multiple_paths else paths[0])
+
+
+def test_wildcard_diagnostic_cannot_choose_between_tasks_with_the_same_agent():
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+
+    context = _Context()
+    _accept_tasks(context, {}, {
+        "support_contract": ("ConfigMiddlewareAgent", ["modules/support/contracts/reactions.yaml"]),
+        "reports_contract": ("ConfigMiddlewareAgent", ["modules/reports/contracts/reactions.yaml"]),
+    })
+
+    result = prepare_bundle_repair({"passed": False, "diagnostics": [
+        {"path": "modules/*/contracts/reactions.yaml", "error": "Missing workflow trigger reaction"},
+    ]}, context)
+
+    assert result["status"] == "blocked"
+    assert result["attempt"] == 0
+    assert result["diagnostics"][0]["block_reason"] == "missing_or_ambiguous_owner"
 
 
 def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:

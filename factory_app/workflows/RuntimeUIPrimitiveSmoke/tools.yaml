@@ -4,7 +4,14 @@ tools:
   function: request_acceptance_approval
   description: Collect structured approval for the runtime UI primitive smoke checkpoint.
   tool_type: UI_Tool
-  auto_tool_call: false
+  auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: approval_outcome
+    attempts_key: approval_attempts
+    result_field: action
+    values: [approve, request_changes, error]
+    error_value: error
   ui:
     component: ApprovalCard
     mode: inline
@@ -53,12 +60,19 @@ tools:
           rationale:
             type: string
         additionalProperties: true
-- agent: ReviewAgent
+- agent: ArtifactAgent
   file: show_acceptance_diagram.py
   function: show_acceptance_diagram
   description: Emit the artifact viewer surface for the runtime UI primitive smoke.
   tool_type: UI_Surface
-  auto_tool_call: false
+  auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: artifact_outcome
+    attempts_key: artifact_attempts
+    result_field: status
+    values: [emitted, error]
+    error_value: error
   ui:
     component: DiagramViewer
     mode: artifact

@@ -22,7 +22,7 @@ def _write_minimal_orchestrator_and_agents(wf_dir: Path, workflow_name: str) -> 
         wf_dir / "orchestrator.yaml",
         "\n".join(
             [
-                f"workflow_name: {workflow_name}",
+                f"schema_version: mozaiks.orchestrator.v1\nworkflow_name: {workflow_name}",
                 "workflow_startup_mode: AgentDriven",
                 "human_in_the_loop: true",
             ]
@@ -101,7 +101,7 @@ def test_workflow_manager_rejects_invalid_structured_outputs_contract(tmp_path: 
         wf_dir / "structured_outputs.yaml",
         "\n".join(
             [
-                "registry:",
+                "schema_version: mozaiks.structured_outputs.v1\nregistry:",
                 "  Planner: MissingModel",
                 "models:",
                 "  ActualModel:",
@@ -393,7 +393,7 @@ def test_workflow_manager_accepts_valid_declarative_bundle(tmp_path: Path) -> No
         wf_dir / "structured_outputs.yaml",
         "\n".join(
             [
-                "registry:",
+                "schema_version: mozaiks.structured_outputs.v1\nregistry:",
                 "  Planner: PlannerResponse",
                 "models:",
                 "  PlannerResponse:",

@@ -1815,7 +1815,7 @@ const ActionPlan = ({ payload = {}, onResponse, toolName, toolCallId, workflowNa
           </div>
           
           <div className="space-y-5">
-            <h1 className={`${fonts.heading} font-black text-xl sm:text-2xl md:text-3xl lg:text-4xl ${colors.text.primary} drop-shadow-lg break-words max-w-full leading-tight overflow-hidden`}>
+            <h1 className="font-black text-xl sm:text-2xl md:text-3xl lg:text-4xl text-foreground drop-shadow-lg break-words max-w-full leading-tight overflow-hidden">
           {String(safeWorkflow?.name || 'Generated Workflow')}
             </h1>
           </div>

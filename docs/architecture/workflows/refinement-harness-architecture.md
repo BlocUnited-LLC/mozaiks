@@ -282,7 +282,7 @@ It should not own the runtime engines.
 The harness is not:
 
 - a workflow
-- an AG2 1.0 beta workflow run
+- an AG2 1.0 workflow run
 - a module handler under `app/modules/*`
 - a global prompt wrapped around every message
 - a replacement for `extension_registry.json`

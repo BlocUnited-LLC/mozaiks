@@ -31,6 +31,75 @@ Mozaiks owns deterministic product and runtime contracts around AG2:
 
 ## Runtime Handoff
 
+Declared task batches execute after their trigger agent's validated output and
+auto tools, before AG2 folds that agent's outgoing packet. This applies at any
+point in the graph, including after an interview, human approval, or resume.
+The existing task-batch executor and AG2 Task adapter own worker execution;
+only declared result/status keys are committed with task-batch writer authority.
+AG2 then evaluates the original transition graph. Mozaiks must not replace the
+first turn with an artificial termination and a separately selected continuation.
+A failed required batch fails the run rather than advancing to assembly.
+The declared task retry budget covers response validation, deterministic file
+materialization, task identity, and file ownership. A rejected response supplies
+bounded validation feedback to the next attempt at the same task; it does not
+change the task's ownership or create an unlimited repair loop.
+For materialization/ownership failures, that retry also receives the rejected
+candidate as explicitly non-authoritative data: AG2 task attempts have independent
+streams, so error text alone cannot show the worker what needs correcting. The
+candidate is not committed as accepted output, and all original validation runs
+again. Retry limits and model-call admission still apply to the additional input.
+If an output hook fails after authorized tool or batch writes, the adapter
+commits those writes using AG2 `EV_CONTEXT_SET` without sending the failed
+reply packet. Failure evidence therefore survives WAL replay without advancing
+the graph. This uses AG2's existing
+[channel context primitive](https://docs.ag2.ai/docs/user-guide/network/context_variables/),
+not a second persistence or routing authority.
+
+Opted-in Factory recovery uses that same batch and checkpoint seam. The approved
+inventory and original DAG remain authoritative; accepted tasks are preserved,
+eligible rejected prerequisites receive one bounded correction, and descendants
+resume only after their prerequisites succeed. Pre-dispatch reservations and
+settled results use authorized `EV_CONTEXT_SET` writes. Missing evidence and
+uncertain interrupted attempts remain blocked. Factory selects repair policy;
+AG2 still executes workers and advances the declared graph. See
+[ADR 0011](../../adr/0011-factory-bounded-task-recovery.md) for contracts, budgets,
+acceptance, migration, and rollback.
+
+For an agent with a declared self-edge, the packet adapter supplies an explicit
+audience containing all workflow participants, including the sender. AG2 1.0.3
+excludes the sender from a default broadcast, otherwise leaving that self-edge
+without a delivery. Explicitly targeted packets are unchanged. AG2's default
+handler and `can_send` probe still select the authorized speaker; Mozaiks does
+not refold the graph or schedule an extra turn. Recheck this packet adaptation
+when upstream adds automatic self-edge notification.
+
+Initial prompts and user replies are shared within their workflow channel.
+They use AG2's broadcast visibility, not a private audience containing only
+the next interviewer. Otherwise later planners cannot see the user's corrections
+in AG2's projected conversation. AG2 still owns turn selection; visibility does
+not grant permission to speak. Tests inspect both history and current-turn input.
+
+Declarative workflow participants attach through AG2's public
+`attach_plugin=False` option. They keep AG2's default envelope handler,
+channel adapter, graph execution, and declared workflow tools, but do not
+automatically receive the optional `NetworkPlugin` tools (`delegate`, `peers`,
+`channels`, `tasks`, `context`). Those tools allow model-selected network work
+outside the declared workflow topology. Delegation inside a generated workflow
+must use its declared graph, task batches, or explicitly bound tools; prompts
+must not assume an implicit network-tool grant.
+
+This uses AG2's supported
+[network-tool opt-out](https://docs.ag2.ai/docs/user-guide/network/network_assigned_tools/),
+not a replacement scheduler or network implementation. The installed AG2
+1.0.3 source and real AG2 tests with provider HTTP replaced verify that the
+default handler still runs without the plugin. Recheck this boundary when
+upgrading AG2.
+
+A settlement timeout, including initial execution, is a failed run, not a human-input pause.
+The adapter returns a failed result and closes its live clients; transport
+then uses the existing failure event path. A timeout must not leave a reusable
+live-run handle or claim that the workflow is waiting for the user.
+
 AG2 network packets are the source trace for agent execution, not automatically
 user-visible chat copy. Mozaiks owns the projection from AG2 packet history into
 transport events and replayed chat history because that projection enforces
@@ -106,6 +175,15 @@ If AG2 does not provide a required capability:
 
 ## Task Decomposition
 
+Workflow operation outcomes remain Mozaiks contracts in `tools.yaml`. Their
+finite return values, context ownership, and per-execution invocation budgets
+are validated before loading. Mozaiks dispatches validated output and auto-tools
+before committing the AG2 packet; AG2 then folds the resulting context and
+executes the declared graph. The tool outcome wrapper performs no scheduling,
+backoff loop, or autonomous repair. This adapter boundary is needed because
+AG2 does not own Mozaiks tool-result schemas or generated artifact acceptance.
+It does not make external side effects atomic with AG2's packet commit.
+
 Mozaiks decomposition should stay contract-first:
 
 ```text
@@ -152,6 +230,15 @@ development and test runs. An operator or hosted deployment may supply any
 AG2-compatible implementation (Memory, Sqlite, Disk, Redis, Locked, or a
 custom duck-typed store) without modifying OSS code.
 
+The canonical `AG2OrchestrationAdapter` injects the existing tenant/chat-scoped
+`MongoAG2KnowledgeStore` before reaching this seam. Its resume path requires the
+original channel. Factory task recovery binds evidence to the actual packet's
+channel ID, and the adapter hydrates the context bridge from current Hub state
+before agent execution and auto tools. A new channel or stale bridge cannot
+reset an interrupted attempt or a repair budget. Direct in-memory callers must
+retain their store and channel for recovery; no separate persistence layer is
+introduced.
+
 **Lifecycle contract:**
 - One Hub is opened per workflow run (or per live session kept alive for
   paused runs).
@@ -176,6 +263,31 @@ run_workflow_orchestration(knowledge_store=...)
     → AG2NetworkRunnerRequest(knowledge_store=...)
       → Hub.open(request.knowledge_store or MemoryKnowledgeStore(), ...)
 ```
+
+## Reconnect Integration
+
+The network adapter snapshots AG2's pending participants before calling its
+`resume_pending_turns()` API. It must not discover and replay downstream turns
+that are already advancing through live delivery, or send a new user message
+before the recovered workflow settles. AG2's pending-turn state, causation
+deduplication, turn probe, and graph remain authoritative.
+
+Mozaiks serializes callbacks per attached client only while its mutable context
+bridge and temporary packet-send hook are installed. This prevents overlapping
+live/recovery notifications from nesting hooks or clearing another callback's
+context changes. It is not a workflow scheduler or a new replay ledger. Revisit
+this boundary if AG2 supplies an atomic per-client round hook or serialized
+concurrent redelivery in its default handler. See the upstream
+[client handler contract](https://docs.ag2.ai/docs/user-guide/network/agent_clients/)
+and [reconnect contract](https://docs.ag2.ai/docs/user-guide/network/distributed/).
+
+`AgentSpec.pending_turn_replay` declares `allow` (the default) or `block`.
+Before replaying pending turns, the adapter checks AG2's persisted pending
+records against this policy. A blocked participant stops resume with its agent
+and channel identified; a fresh delivery is unaffected. AppGenerator uses this
+for artifact workers whose interrupted execution must remain uncertain. AG2
+continues to own pending records and replay; the policy adds no attempt store
+or scheduler.
 
 ## Review Checklist
 

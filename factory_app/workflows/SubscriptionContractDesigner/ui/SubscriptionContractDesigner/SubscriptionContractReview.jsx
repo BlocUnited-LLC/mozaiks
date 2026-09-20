@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Panel, StatusPill } from '@mozaiks/chat-ui/ui';
+import { Button, Metric, Panel, StatusPill } from '@mozaiks/chat-ui/ui';
 
 function asList(value) {
   return Array.isArray(value) ? value : [];
@@ -92,15 +92,6 @@ function PlanCard({ plan }) {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function Metric({ label, value }) {
-  return (
-    <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
     </div>
   );
 }
@@ -339,29 +330,45 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
       )}
 
       <div className="mt-4 rounded-lg border border-border/60 bg-background/60 p-4">
-        <label className="flex items-start gap-3 text-sm text-foreground">
-          <input
-            type="checkbox"
-            checked={confirmed}
-            onChange={(event) => setConfirmed(event.target.checked)}
-            className="mt-1 accent-primary"
-            data-testid="confirm-subscription-contract-checkbox"
-          />
-          <span>
-            Yes, this subscription plan contract matches what the user wants.
-            I understand this only approves provider-neutral generated app settings;
-            it does not charge anyone, assign customers, or credit tokens.
-          </span>
-        </label>
+        {/* With no contract there is nothing to attest to. Asking someone to
+            tick "this subscription plan contract matches what the user wants"
+            when the screen above reads "No app-owned subscription contract is
+            required for this build" - zero plans, zero wallets, zero gated
+            actions - is a blocking gate over an empty decision. */}
+        {contractRequired ? (
+          <label className="flex items-start gap-3 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(event) => setConfirmed(event.target.checked)}
+              className="mt-1 accent-primary"
+              data-testid="confirm-subscription-contract-checkbox"
+            />
+            <span>
+              Yes, this subscription plan contract matches what the user wants.
+              I understand this only approves provider-neutral generated app settings;
+              it does not charge anyone, assign customers, or credit tokens.
+            </span>
+          </label>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Nothing to approve here - this build has no subscription contract.
+            You can still ask for one below.
+          </p>
+        )}
 
         <div className="mt-4 flex flex-col gap-3">
           <Button
             variant="primary"
-            disabled={!confirmed || submitted === 'confirmed'}
+            disabled={(contractRequired && !confirmed) || submitted === 'confirmed'}
             onClick={confirmContract}
             data-testid="confirm-subscription-contract-cta"
           >
-            {submitted === 'confirmed' ? 'Confirmed' : 'Confirm Subscription Plan Contract'}
+            {submitted === 'confirmed'
+              ? 'Confirmed'
+              : contractRequired
+                ? 'Confirm Subscription Plan Contract'
+                : 'Continue'}
           </Button>
 
           <textarea

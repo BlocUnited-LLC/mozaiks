@@ -1,3 +1,4 @@
+schema_version: mozaiks.structured_outputs.v1
 models:
   PrimitiveSectionHint:
     type: model
@@ -726,7 +727,7 @@ models:
     fields:
       capability_pack_id:
         type: str
-        description: Stable identifier for the capability pack.
+        description: Stable implementation identity. For generated_module use the approved module surface_id, matching modules/{surface_id}/ paths. Product categories such as crud_pack belong only in pack_type.
       surface_id:
         type: str
         description: Realization surface this capability pack maps to.
@@ -777,6 +778,10 @@ models:
         type: optional_list
         items: str
         description: Domain entities primarily owned by this pack.
+      user_data_scope:
+        type: bool
+        default: false
+        description: For generated_module packs, true when records belong to individual users (including private customer/contact records). This is the planned module.user_data_scope value. True requires backend/account_data_handler.py in the business_services task and its declared account_data_handler stub. False for app-wide/system records or packs that do not generate an app-owned module.
       primary_pages:
         type: optional_list
         items: str
@@ -798,15 +803,27 @@ models:
         items: str
         description: Optional AI-driven behaviors layered on top of the pack.
       capability_source:
-        type: optional_str
+        type: literal
+        values:
+        - config_file
+        - external_adapter
+        - framework_pack
+        - generated_module
+        - host_universal
+        - managed_capability
+        - operator_extension
+        - operator_pack
         description: >
           Implementation origin of this capability pack. Use one of:
           managed_capability (provided by a hosted platform capability — do not generate
           a module_contract for the managed capability id itself; generate app-owned
           facade module_contract tasks when UI/pages need local app actions),
           host_universal (provided universally by the platform host — no scaffold needed),
-          framework_pack (provided by an OSS or operator framework pack — generate only
-          the declared app-specific wiring),
+          framework_pack (must exist in the injected capability_packs registry —
+          generate only the declared app-specific wiring; product categories are not installed packs),
+          config_file (registered pack emitting declarative app configuration),
+          operator_extension (registered operator-provided extension),
+          operator_pack (registered operator build-context pack; preserve its declared origin and outputs),
           generated_module (app-owned generated module — generate full module contracts),
           external_adapter (third-party external service adapter — api_surface only).
   BuildTaskBase:
@@ -828,7 +845,7 @@ models:
       owned_paths:
         type: optional_list
         items: str
-        description: Canonical file paths this task exclusively owns.
+        description: Canonical case-sensitive file paths this task exclusively owns. Page filenames use the materializer's lowercase route-derived identity, not the display name; copy exact paths from FILE CONTRACTS CONTEXT.
       depends_on:
         type: optional_list
         items: str
@@ -875,7 +892,6 @@ models:
         - business_services
         - api_surface
         - page_bundle
-        - agent_backend_integration
         - refinement_harness
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
@@ -916,8 +932,7 @@ models:
           module_contract for refinement surfaces.
           surface_kind=external_integration may use `api_surface` for thin
           clients, `service_foundation` for direct app-owned provider adapters under
-          services/adapters/, explicit services/routes/, or security/secrets.yaml, or
-          `agent_backend_integration` for workflow touchpoints.
+          services/adapters/, explicit services/routes/, or security/secrets.yaml.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
       capability_pack_id:
         type: union
@@ -953,7 +968,7 @@ models:
       owned_paths:
         type: optional_list
         items: str
-        description: Canonical file paths this task exclusively owns.
+        description: Canonical case-sensitive file paths this task exclusively owns. Page filenames use the materializer's lowercase route-derived identity, not the display name; copy exact paths from FILE CONTRACTS CONTEXT.
       depends_on:
         type: optional_list
         items: str
@@ -1122,11 +1137,14 @@ models:
       pages:
         type: optional_list
         items: AppBuildPage
-        description: Ordered pages planned for the app. AppSchemaAgent materializes each page into a full AppPageSchema.
+        description: >
+          Complete ordered page inventory for the resulting app, including unchanged
+          pages in a revision. Never empty for an app with existing pages.
+          Only build_tasks determines which page files AppSchemaAgent regenerates.
       entities:
         type: optional_list
         items: AppBuildEntity
-        description: Canonical entities and required operations.
+        description: Canonical entities and required operations, including unchanged entities retained during a revision.
       roles:
         type: optional_list
         items: str
@@ -1298,7 +1316,10 @@ models:
       build_tasks:
         type: list
         items: AppBuildTask
-        description: Explicit execution-oriented build tasks derived from the plan.
+        description: >
+          Explicit execution-oriented tasks for this run. In a revision this is
+          only the changed-file delta; pages, entities, capability_packs, and
+          data_contract still describe the complete resulting app.
       data_contract:
         type: union
         variants:
@@ -1946,6 +1967,7 @@ models:
         type: literal
         values:
         - e2b
+        - docker
         - local
         - skip
         description: Validation strategy requested or resolved for this run.
@@ -1961,7 +1983,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Preview URL to the running app (if started).
+        description: Null for disposable build validation; interactive preview sessions are managed separately.
       errors:
         type: list
         items: ValidationErrorEntry
@@ -1990,12 +2012,13 @@ models:
         type: literal
         values:
         - e2b
+        - docker
         - local
         - skip
-        description: Requested validation strategy. Use context app_validation_strategy when provided; otherwise choose skip for smoke or local/e2b when explicitly configured.
+        description: Requested validation strategy. Copy context app_validation_strategy when provided. Operator environment policy takes precedence over this request.
       start_dev_server:
         type: bool
-        description: Whether validation may start a preview/dev server when the strategy supports it.
+        description: Set false for canonical apps; interactive preview sessions are managed separately.
       timeout_seconds:
         type: int
         description: Maximum validation runtime in seconds.
@@ -2225,7 +2248,7 @@ models:
       required:
         type: optional_list
         items: str
-        description: Required property names for object contracts.
+        description: Required property names for object contracts; must match the properties whose required flag is true.
       properties:
         type: optional_list
         items: JsonSchemaProperty
@@ -2236,6 +2259,14 @@ models:
         - str
         - 'null'
         description: Array item type when type=array.
+
+  ModuleApiSurface:
+    type: literal
+    values:
+    - public
+    - public_readonly
+    - internal
+    - admin_internal
 
   ModuleAction:
     type: model
@@ -2250,19 +2281,17 @@ models:
         type: str
         description: Method exposed by backend/handler.py for this action. The handler may delegate to service, policy, repo, and schema layers.
       api_surface:
-        type: literal
+        type: union
         default: null
-        values:
-        - public
-        - public_readonly
-        - internal
-        - admin_internal
+        variants:
+        - ModuleApiSurface
         - 'null'
         description: >
           External HTTP exposure posture for this action. Use public or
-          public_readonly only for anonymous-safe HTTP actions. Omit (null) or use
-          internal/admin_internal for actions that require an authenticated token
-          when AUTH_ENABLED=true. Does not bypass permissions or entitlement_gate checks.
+          public_readonly only for anonymous-safe HTTP actions. Use null for
+          authenticated UI/API actions. Internal/admin_internal disable HTTP dispatch
+          even with authentication and are only for trusted runtime/event calls.
+          Does not bypass permissions or entitlement_gate checks.
       input_schema:
         type: JsonSchemaContract
         description: Typed JSON-schema-like input contract.
@@ -2286,6 +2315,17 @@ models:
            with no generated-app entitlement requirement — the no-op adapter grants
            those unconditionally. Do NOT set this on admin_internal actions, and do
            not use it to model hosted product pack-access licensing.
+      ask_context_safe:
+        type: bool
+        default: false
+        description: >
+          Set true only on side-effect-free read actions that a page may name in
+          meta.ask_context to ground ask-mode answers. The runtime dispatches
+          these with an EMPTY permission grant, so the action must also declare
+          permissions: [] and must scope its own reads to the requesting user.
+          This is independent of api_surface and never widens HTTP exposure; do
+          not set it on any action that writes, emits events, or returns another
+          user's data.
 
   ModuleCapability:
     type: model
@@ -3066,20 +3106,35 @@ models:
         type: ModuleManifest
         description: module.yaml contract object.
       events_yaml:
-        type: ModuleEventsManifest
-        description: events.yaml contract object.
+        type: union
+        variants:
+          - ModuleEventsManifest
+          - 'null'
+        description: Optional contracts/events.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       reactions_yaml:
-        type: ModuleReactionsManifest
-        description: reactions.yaml contract object.
+        type: union
+        variants:
+          - ModuleReactionsManifest
+          - 'null'
+        description: Optional contracts/reactions.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       notifications_yaml:
-        type: ModuleNotificationsManifest
-        description: notifications.yaml contract object.
+        type: union
+        variants:
+          - ModuleNotificationsManifest
+          - 'null'
+        description: Optional contracts/notifications.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       settings_yaml:
-        type: ModuleSettingsManifest
-        description: settings.yaml contract object.
+        type: union
+        variants:
+          - ModuleSettingsManifest
+          - 'null'
+        description: Optional contracts/settings.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       admin_yaml:
-        type: ModuleAdminManifest
-        description: admin.yaml contract object for feature panels mounted inside semantic /admin sections.
+        type: union
+        variants:
+          - ModuleAdminManifest
+          - 'null'
+        description: Optional contracts/admin.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       profile_yaml:
         type: union
         variants:
@@ -3470,7 +3525,25 @@ models:
         type: AppPrimitiveValue
         description: Deterministic scalar value. Open-ended nested objects are not allowed in strict UI contracts.
 
+  # Keeps the name every reference site already uses, so the five variants
+  # reach all 14 fan-in positions without touching any of them.
   AppPageAction:
+    type: union
+    variants:
+    - AppNavigateAction
+    - AppSubmitAction
+    - AppDeleteAction
+    - AppEventAction
+    - AppWorkflowAction
+
+  # Page actions are five closed variants keyed by action_type. Each variant
+  # declares only the fields that behave on it, so a navigate action without a
+  # route or an event action without an event type is unrepresentable rather
+  # than rejected later: the provider's strict schema forbids the missing field
+  # and forbids the foreign ones. Do not reintroduce a flat action model with
+  # every field nullable -- that shape is what let three separate defects reach
+  # one page and spend a whole repair budget one at a time.
+  AppNavigateAction:
     type: model
     fields:
       id:
@@ -3488,41 +3561,6 @@ models:
         - str
         - 'null'
         description: Optional visual variant hint for Button-backed actions.
-      action_type:
-        type: literal
-        values:
-        - navigate
-        - event
-        - workflow
-        - submit
-        - delete
-        description: How this action behaves.
-      href:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Route or API/module endpoint. Required for navigate, submit, and delete actions; supports {field} interpolation.
-      event_type:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: "Event emitted on click (event actions only, e.g. ui.modal.open)."
-      workflow_id:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Runtime workflow registry id to launch when action_type=workflow. Never use workflow capability ids here.
-      context_variables:
-        type: optional_list
-        items: AppPrimitiveKeyValue
-        description: Optional deterministic context_variables entries for workflow actions. save_app_schema persists these as an object.
-      payload:
-        type: optional_list
-        items: AppPrimitiveKeyValue
-        description: Generic scalar payload entries used by event, submit, or delete actions. save_app_schema persists these as an object.
       requires_selection:
         type: bool
         description: Whether a row/item must be selected before this action is enabled.
@@ -3531,6 +3569,172 @@ models:
         type: bool
         description: Whether modal-backed action execution should close the modal automatically.
         default: true
+      action_type:
+        type: literal
+        values:
+        - navigate
+        description: Moves the user to another app route.
+      href:
+        type: str
+        description: Safe absolute app route starting with /. Navigation routes support {field} interpolation. Required.
+  AppSubmitAction:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable action id. Recommended when the action may be referenced by selection or empty-state handling.
+      label:
+        type: str
+        description: Display label for the action.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant hint for Button-backed actions.
+      requires_selection:
+        type: bool
+        description: Whether a row/item must be selected before this action is enabled.
+        default: false
+      closes_modal:
+        type: bool
+        description: Whether modal-backed action execution should close the modal automatically.
+        default: true
+      action_type:
+        type: literal
+        values:
+        - submit
+        description: Sends form or selection data to one module action endpoint.
+      href:
+        type: str
+        description: One fixed /api/modules/{module_id}/{action_id} endpoint. Never a conditional create/update URL -- keep separate create/edit forms, each with its own fixed href. Required.
+      payload:
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Deterministic scalar payload entries. Bind form values with {form.field} or a selected row with selected_row. Persisted as an object.
+  AppDeleteAction:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable action id. Recommended when the action may be referenced by selection or empty-state handling.
+      label:
+        type: str
+        description: Display label for the action.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant hint for Button-backed actions.
+      requires_selection:
+        type: bool
+        description: Whether a row/item must be selected before this action is enabled.
+        default: false
+      closes_modal:
+        type: bool
+        description: Whether modal-backed action execution should close the modal automatically.
+        default: true
+      action_type:
+        type: literal
+        values:
+        - delete
+        description: Removes the selected record through one module action endpoint.
+      href:
+        type: str
+        description: One fixed /api/modules/{module_id}/{action_id} endpoint for the delete command. Required.
+      payload:
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Deterministic scalar payload entries identifying the record. Persisted as an object.
+  AppEventAction:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable action id. Recommended when the action may be referenced by selection or empty-state handling.
+      label:
+        type: str
+        description: Display label for the action.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant hint for Button-backed actions.
+      requires_selection:
+        type: bool
+        description: Whether a row/item must be selected before this action is enabled.
+        default: false
+      closes_modal:
+        type: bool
+        description: Whether modal-backed action execution should close the modal automatically.
+        default: true
+      action_type:
+        type: literal
+        values:
+        - event
+        description: Emits a ui.* event on the page instead of navigating or calling an endpoint.
+      event_type:
+        type: str
+        description: Event emitted on click, from the ui.* family (for example ui.modal.open, ui.modal.close). Required.
+      modal_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: For ui.modal.open and ui.modal.close, the id of a Modal section declared on this same page. Materialized into the persisted payload as modal_id. Use null for events that do not target a modal.
+      payload:
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Deterministic scalar payload entries carried by the event. Persisted as an object.
+  AppWorkflowAction:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable action id. Recommended when the action may be referenced by selection or empty-state handling.
+      label:
+        type: str
+        description: Display label for the action.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant hint for Button-backed actions.
+      requires_selection:
+        type: bool
+        description: Whether a row/item must be selected before this action is enabled.
+        default: false
+      closes_modal:
+        type: bool
+        description: Whether modal-backed action execution should close the modal automatically.
+        default: true
+      action_type:
+        type: literal
+        values:
+        - workflow
+        description: Launches a runtime workflow.
+      workflow_id:
+        type: str
+        description: Runtime workflow registry id to launch. Never a workflow capability id. Required.
+      context_variables:
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Deterministic context_variables entries for the workflow launch. Persisted as an object.
 
   AppTableColumn:
     type: model
@@ -3595,6 +3799,10 @@ models:
         type: bool
         description: Whether the field is required.
         default: false
+      default_value:
+        type: AppPrimitiveValue
+        default: null
+        description: Literal per-field default (string, number, boolean, or null). Use for requested create-form defaults; no objects, arrays, expressions, or top-level defaults. A non-null selected_row field takes precedence in edit forms; null uses the primitive empty value.
       placeholder:
         type: union
         variants:
@@ -3715,6 +3923,12 @@ models:
         - 'null'
         description: Optional status such as ready, generating, or error.
 
+  AppPaginationMode:
+    type: literal
+    values:
+    - client
+    - server
+
   AppDataTableConfig:
     type: model
     fields:
@@ -3727,13 +3941,13 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional canonical module endpoint for row data. Use /api/modules/{module_id}/{action_id}; do not include query strings or fragments. Put limits in page_size and filters in payload/input config.
+        description: Canonical module endpoint for row data. Use /api/modules/{module_id}/{action_id} without query strings or fragments. Server mode sends page/page_size/search; declare those action inputs and implement bounded paging in the module. Client mode sends no query inputs.
       data_key:
         type: union
         variants:
         - str
         - 'null'
-        description: Optional response key containing row data.
+        description: Response path containing row data. Required in server mode; use an explicit key such as items, not an inferred response shape.
       selection:
         type: union
         variants:
@@ -3744,16 +3958,27 @@ models:
         type: bool
         description: Whether pagination is enabled.
         default: false
+      pagination_mode:
+        type: AppPaginationMode
+        default: client
+        description: Select server when the list endpoint returns a bounded page. Omitted input defaults to client; explicit null is invalid. Server requires pagination=true, page_size (1-100), api_endpoint, data_key, and total_key; requests canonical page/page_size/search inputs. Client operates only on loaded rows. Server owns search and stable ordering; column sorting is disabled.
+      total_key:
+        type: optional_str
+        description: Required response path to a nonnegative integer total in server mode; null in client mode. Count all rows matching the same owner scope and literal search, before paging.
       page_size:
         type: union
         variants:
         - int
         - 'null'
-        description: Optional page size.
+        description: Positive integer; server mode requires an explicit value from 1 through 100. Null in client mode uses the primitive default.
       search:
         type: bool
         description: Whether table-local search is enabled.
         default: false
+      search_keys:
+        type: optional_list
+        items: str
+        description: Client-mode row keys searched within loaded rows. Null uses all column keys; an empty list searches no fields. Server mode never applies or sends these keys; the declared module must implement the requested literal search fields across its full owned dataset.
       actions:
         type: optional_list
         items: AppPageAction
@@ -3765,9 +3990,20 @@ models:
         - 'null'
         description: Optional empty-state copy/action.
 
+  AppFormInitialValuesKey:
+    type: literal
+    values:
+    - selected_row
+
   AppFormConfig:
     type: model
     fields:
+      initial_values_key:
+        type: union
+        variants:
+        - AppFormInitialValuesKey
+        - 'null'
+        description: Use selected_row to prefill an edit form from the record passed to its modal. Null starts a create form using each field's default_value or the primitive empty value.
       fields:
         type: list
         items: AppFormField
@@ -3795,7 +4031,7 @@ models:
         variants:
         - AppPageAction
         - 'null'
-        description: Submit action. Prefer module/API routes or workflow actions.
+        description: Submit action. action_type submit requires its own fixed module endpoint in href; payload and the table endpoint cannot supply it. Use separate create/edit forms or modals when their module action IDs differ. Workflow submissions use action_type workflow with workflow_id instead.
       cancel_label:
         type: union
         variants:
@@ -3852,7 +4088,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional modal copy.
+        description: "Optional modal copy. Supports {selected_row.field} text for named confirmations."
       size:
         type: union
         variants:
@@ -3875,7 +4111,7 @@ models:
         description: Optional alert title.
       message:
         type: str
-        description: Alert message.
+        description: "Alert message. Supports {selected_row.field} text inside record modals."
       variant:
         type: union
         variants:
@@ -4145,6 +4381,10 @@ models:
         type: bool
         description: Whether pagination is enabled.
         default: false
+      pagination_mode:
+        type: AppPaginationMode
+        default: client
+        description: ResourceTable requires client, the default for omitted input; explicit null is invalid and server is rejected by page validation. Use DataTable for server pagination; resource filters and sorts are not a server query contract.
       page_size:
         type: union
         variants:
@@ -4164,7 +4404,7 @@ models:
       search_keys:
         type: optional_list
         items: str
-        description: Optional row fields used for search.
+        description: Explicit row keys searched within loaded rows. Set these when search must exclude other columns (for example title and author but not notes). Null uses all column keys; an empty list searches no fields. This does not query or fetch additional server rows.
       filters:
         type: optional_list
         items: AppTableFilter
@@ -4257,6 +4497,12 @@ models:
   AppSummaryStripConfig:
     type: model
     fields:
+      api_endpoint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Canonical module read endpoint providing live summary values. Use value_key to select response fields.
       items:
         type: list
         items: AppSummaryItem
@@ -4392,6 +4638,12 @@ models:
   AppMetricConfig:
     type: model
     fields:
+      api_endpoint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Canonical module read endpoint providing the metric value selected by value_key.
       label:
         type: str
         description: Metric label.
@@ -4475,6 +4727,7 @@ models:
     type: union
     variants:
     - AppPageHeaderConfig
+    - AppDataTableConfig
     - AppResourceTableConfig
     - AppSummaryStripConfig
     - AppInlineEmptyStateConfig
@@ -4485,7 +4738,6 @@ models:
     - AppStatusPillConfig
     - AppMetricConfig
     - AppSegmentedBarConfig
-    - AppDataTableConfig
     - AppFormConfig
     - AppButtonConfig
     - AppModalLeafConfig
@@ -4606,6 +4858,7 @@ models:
     type: union
     variants:
     - AppPageHeaderConfig
+    - AppDataTableConfig
     - AppResourceTableConfig
     - AppSummaryStripConfig
     - AppInlineEmptyStateConfig
@@ -4616,7 +4869,6 @@ models:
     - AppStatusPillConfig
     - AppMetricConfig
     - AppSegmentedBarConfig
-    - AppDataTableConfig
     - AppFormConfig
     - AppGridConfig
     - AppButtonConfig
@@ -4804,6 +5056,13 @@ models:
           when the page route carries tenant, workspace, ownership, membership,
           invitation, or other scoped resource identifiers that require an
           app-owned authorize_*_route module action before render.
+      ask_context:
+        type: optional_list
+        items: AppAskContextAction
+        description: >
+          Optional read-only module actions whose results ground ask-mode answers
+          on this page. References must resolve before acceptance to actions with
+          ask_context_safe: true and permissions: []; declare at most 3.
 
   AppPageSchema:
     type: model
@@ -5067,6 +5326,36 @@ models:
           the app-owned module action and renders the route only when the response
           returns allowed: true. Keep product-specific authorization decisions in
           the app module action; this metadata only names the generic hook.
+      ask_context:
+        type: optional_list
+        items: AppAskContextAction
+        description: >
+          Optional read-only module actions whose results ground ask-mode answers
+          for users on this page. Declare only what someone asking a question on
+          this page would need (at most 3), and only actions whose module declares
+          ask_context_safe: true with permissions: []. The runtime resolves these
+          server-side as the requesting user; the client never names actions.
+
+  AppAskContextAction:
+    type: model
+    fields:
+      module:
+        type: str
+        description: Module id that owns the read-only action.
+      action:
+        type: str
+        description: >
+          Action id to dispatch for page ask context. Must be declared with
+          ask_context_safe: true in that module's module.yaml.
+      params:
+        type: optional_list
+        items: AppRouteAuthParam
+        description: Optional strict key/value input mapping for the action.
+      label:
+        type: optional_str
+        description: >
+          Short human-readable label for the returned data as it appears in the
+          ask agent's context (e.g. "The user's recent support requests").
 
   AppRouteAuth:
     type: model
@@ -5922,9 +6211,17 @@ models:
         type: str
         description: Short summary of the schema produced.
       manifest:
-        type: AppManifest
+        type: union
+        variants:
+        - AppManifest
+        - 'null'
         description: >
           App metadata used to persist app.json startup and validate page routes.
+          In task-batch execution, emit AppManifest only when current_build_task.owned_paths
+          includes app.json; otherwise explicitly emit null. Null emits neither app.json
+          nor provenance.yaml. Standalone save_app_schema still requires AppManifest.
+          Final assembly must contain the complete app manifest from its owning task
+          or the verified revision baseline before app-bundle acceptance.
           Persistent routes are derived from the emitted ui/pages/*.yaml schemas.
       pages:
         type: list
@@ -5932,8 +6229,11 @@ models:
         description: >
           One AppPageSchema per page. Each is persisted as ui/pages/{name}.yaml and
           rendered by the platform shell's RouteRenderer using the primitive system.
-          Prefer this declarative lane by default; emit an empty list only when every
-          persistent page is owned by custom_route_bundle.
+          In task-batch execution, emit only pages whose ui/pages/*.yaml paths are owned
+          by current_build_task; other pages remain owned by other tasks or the baseline.
+          Prefer this declarative lane by default; emit an empty list only when the
+          current scope owns no declarative pages (for example, a manifest-only task
+          or pages owned by custom_route_bundle).
       custom_route_bundle:
         type: union
         variants:
@@ -6335,6 +6635,116 @@ models:
         - 'null'
         description: Optional summary message.
 
+  ModuleBackendImplementationOutput:
+    type: model
+    description: >
+      Exact reasoning-heavy backend implementation for one compiler-selected
+      module backend role. Paths are compiler-owned and cannot be added,
+      renamed, or deleted by this model.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - module_backend_implementation
+      module_id:
+        type: str
+        description: Canonical module identity supplied by the assignment.
+      backend_role:
+        type: literal
+        values:
+        - service
+        - repo
+        - policy
+        - schemas
+        description: Fixed backend role supplied by the registry family.
+      source:
+        type: str
+        description: UTF-8 source for the one compiler-owned backend path.
+
+  IntegrationAdapterImplementationOutput:
+    type: model
+    description: Exact source for one declared app-owned integration adapter.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - integration_adapter_implementation
+      integration_id:
+        type: str
+        description: Canonical integration identity supplied by the assignment.
+      adapter_area:
+        type: str
+        description: Closed adapter-area identity supplied by the semantic binding.
+      adapter_source:
+        type: str
+        description: UTF-8 source for the single compiler-owned adapter path.
+
+  AppRouteExtensionImplementationOutput:
+    type: model
+    description: Exact source for one predeclared app route extension.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - app_route_extension_implementation
+      route_id:
+        type: str
+        description: Canonical route-extension identity supplied by the assignment.
+      route_source:
+        type: str
+        description: UTF-8 source for the single compiler-owned route path.
+
+  CustomPageImplementationOutput:
+    type: model
+    description: Exact JSX source for one predeclared custom page.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - custom_page_implementation
+      page_id:
+        type: str
+        description: Canonical page identity supplied by the assignment.
+      component_source:
+        type: str
+        description: UTF-8 JSX source for the compiler-owned custom page path.
+
+  ModuleHelperImplementationOutput:
+    type: model
+    description: Exact source for one predeclared module-local helper.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - module_helper_implementation
+      module_id:
+        type: str
+        description: Canonical owning module identity supplied by the assignment.
+      helper_id:
+        type: str
+        description: Canonical helper identity supplied by the declaration.
+      helper_source:
+        type: str
+        description: UTF-8 source for the single compiler-owned helper path.
+
+  ModuleAdminPageImplementationOutput:
+    type: model
+    description: Exact JSX source for one predeclared module admin page.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - module_admin_page_implementation
+      module_id:
+        type: str
+        description: Canonical owning module identity supplied by the assignment.
+      page_id:
+        type: str
+        description: Canonical related page identity supplied by the declaration.
+      component_source:
+        type: str
+        description: UTF-8 JSX source for the compiler-owned module admin path.
+
   IntegrationReadinessSummary:
     type: model
     fields:
@@ -6389,7 +6799,7 @@ registry:
   ControllerAgent: ControllerOutput
   AssemblyAgent: CodeFilesOutput
   AppValidationAgent: AppValidationRequestCall
-  InfraScaffoldAgent: CodeFilesOutput
+  AuthScaffoldAgent: CodeFilesOutput
   DownloadAgent: DownloadRequestCall
 
 

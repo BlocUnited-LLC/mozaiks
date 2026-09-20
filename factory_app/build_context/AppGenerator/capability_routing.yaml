@@ -40,9 +40,7 @@ layers:
         1. Declare a workflow_touchpoint on the relevant page(s)
         2. Generate the deterministic module(s) that own the data the workflow
            reads and writes — actions, events, storage
-        3. Generate a module_interface.yaml alongside the workflow declaring
-           which module actions it will call
-        4. Do NOT generate a deterministic module that tries to implement AI logic
+        3. Do NOT generate a deterministic module that tries to implement AI logic
       AgentGenerator produces the workflow. The module layer owns the data contract.
     examples:
       - '"smart recommendations"  → workflow touchpoint + recommendations storage module'
@@ -128,8 +126,9 @@ layers:
       Capability packs are operator_pack entries available only when workspace
       build_context projects them into capability_packs. Do NOT invent pack
       internals or add pack-backed capabilities unless they appear in the
-      capability_packs context. If a capability is needed and no operator pack
-      is available, declare it as a custom_owned external_adapter instead.
+      capability_packs context. If no operator pack is available, generate the
+      app-owned domain module. Use an external_adapter only when an explicitly
+      requested external system supplies that capability.
 
   ai_native_packs:
     description: >
@@ -346,8 +345,8 @@ layers:
 
     rule: >
       For any app with monetization_enabled=true or builder_options.monetization.enabled=true:
-        1. Treat monetized as "revenue model unresolved" until AppPlanAgent sets
-           AppBuildPlan.revenue_model to free, subscriptions, usage_based,
+        1. Treat monetized as "revenue model unresolved" until
+           AppBuildPlan.revenue_model is set to free, subscriptions, usage_based,
            custom, or hybrid.
         2. Declare the corresponding capability_pack in AppBuildPlan.capability_packs.
         3. Include the required build_tasks in AppBuildPlan.build_tasks.
@@ -397,13 +396,28 @@ layers:
            artifacts, imports, API URLs, secret declarations, callback routes, or
            Mozaiks Cloud-branded events.
 
+  app_owned:
+    description: >
+      Ordinary app-specific domain behavior, including CRUD, validation, search,
+      calculations, and owner-scoped persistent records. The Factory implements
+      this behavior completely; it is not a bring-your-own external engine.
+    rule: >
+      Use capability_source=generated_module. Preserve the approved module
+      surface_id as capability_pack_id and in every modules/{surface_id}/ path.
+      Product categories such as crud_pack belong in pack_type, not module ids
+      or installed framework pack ids. Generate complete module contracts and
+      backend implementation tasks, including schemas, handler, service, repo,
+      and policy for persistent records. Never substitute empty stubs, in-memory
+      sample data, or an invented external service for requested app behavior.
+
   custom_owned:
     description: >
-      Advanced, custom, or bring-your-own capabilities the user owns entirely.
+      Explicit bring-your-own external systems whose existing implementation
+      the user controls. Not ordinary app-specific domain features.
       Includes custom agentic frameworks, bespoke integration engines, custom
       runtime extensions, or any system whose internals the user controls.
     rule: >
-      For custom or advanced capabilities:
+      Only when the user explicitly supplies or requests an external engine:
         1. Generate module.yaml with declared action interfaces — the API boundary
            the platform routes into the custom system
         2. Generate runtime_extensions.yaml startup_service or api_router entry
@@ -417,4 +431,3 @@ layers:
       - Custom ML inference engine → module.yaml actions + api_router webhook stub
       - Custom real-time data feed → startup_service stub + module action for reads
       - Proprietary business engine → module.yaml action declarations only
-

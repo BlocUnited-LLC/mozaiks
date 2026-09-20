@@ -1,0 +1,12 @@
+context_id: SecurityReadiness
+applies_to_workflows:
+  - SecurityReadiness
+assets:
+  - path: baseline_security_controls.yaml
+    kind: contract
+  - path: app_security_file_contracts.yaml
+    kind: contract
+  - path: finding_taxonomy.yaml
+    kind: catalog
+projections:
+  context_variables: {}

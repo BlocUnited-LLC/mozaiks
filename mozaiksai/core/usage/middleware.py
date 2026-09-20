@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""AG2 1.0 beta middleware that emits Mozaiks runtime usage events.
+"""AG2 1.0 middleware that emits Mozaiks runtime usage events.
 
 OpenTelemetry spans are handled by AG2's built-in TelemetryMiddleware. This
 middleware keeps a separate, queryable runtime ledger by emitting neutral
@@ -10,33 +10,21 @@ middleware keeps a separate, queryable runtime ledger by emitting neutral
 import os
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 from ag2 import Context
 from ag2.events import BaseEvent, ModelResponse
 from ag2.middleware import BaseMiddleware, LLMCall, Middleware
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.tokens.guard import TokenUsageGuard
 from mozaiksai.core.tokens.manager import TokenManager
+from mozaiksai.core.utils.context_vars import context_get
 
 logger = get_core_logger("ag2_usage_middleware")
 
 
-def _ctx_get(context_variables: Any, key: str, default: Any = None) -> Any:
-    if context_variables is None:
-        return default
-    if hasattr(context_variables, "get"):
-        try:
-            return context_variables.get(key, default)
-        except Exception:
-            return default
-    data = getattr(context_variables, "data", None)
-    if isinstance(data, dict):
-        return data.get(key, default)
-    if isinstance(context_variables, dict):
-        return context_variables.get(key, default)
-    return default
 
 
 def _int_usage(value: Any) -> int:
@@ -78,14 +66,14 @@ def _required_tokens_for_call(context_variables: Any) -> int:
         "token_watchdog_required_tokens",
         "token_budget_required_tokens",
     ):
-        value = _ctx_get(context_variables, key)
+        value = context_get(context_variables, key)
         if value is not None:
             return _positive_int(value)
     return _positive_int(os.getenv("MOZAIKS_TOKEN_PREFLIGHT_REQUIRED_TOKENS"), default=1)
 
 
 class MozaiksUsageMiddleware(BaseMiddleware):
-    """Emit factual usage deltas after AG2 1.0 beta LLM calls."""
+    """Emit factual usage deltas after AG2 1.0 LLM calls."""
 
     def __init__(
         self,
@@ -93,15 +81,17 @@ class MozaiksUsageMiddleware(BaseMiddleware):
         context: Context,
         *,
         agent_name: str,
-        workflow_name: str,
+        workflow_name: str | None,
         context_variables: Any,
         model_name: str | None = None,
+        execution_kind: Literal["workflow", "auxiliary"] = "workflow",
     ) -> None:
         super().__init__(event, context)
         self._agent_name = agent_name
         self._workflow_name = workflow_name
         self._context_variables = context_variables
         self._model_name = model_name
+        self._execution_kind = execution_kind
 
     async def on_llm_call(
         self,
@@ -109,11 +99,13 @@ class MozaiksUsageMiddleware(BaseMiddleware):
         events: Sequence[BaseEvent],
         context: Context,
     ) -> ModelResponse:
+        raw_binding = context_get(self._context_variables, "run_build_binding")
+        binding = RunBuildBinding.model_validate(raw_binding) if raw_binding is not None else None
         await TokenUsageGuard().check_or_raise(
-            app_id=_text(_ctx_get(self._context_variables, "app_id", "")),
-            user_id=_text(_ctx_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
-            tenant_id=_text(_ctx_get(self._context_variables, "tenant_id", "")) or None,
-            workspace_id=_text(_ctx_get(self._context_variables, "workspace_id", "")) or None,
+            app_id=_text(context_get(self._context_variables, "app_id", "")),
+            user_id=_text(context_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
+            tenant_id=_text(context_get(self._context_variables, "tenant_id", "")) or None,
+            workspace_id=_text(context_get(self._context_variables, "workspace_id", "")) or None,
             required_tokens=_required_tokens_for_call(self._context_variables),
         )
 
@@ -138,13 +130,13 @@ class MozaiksUsageMiddleware(BaseMiddleware):
 
         try:
             await TokenManager.emit_usage_delta(
-                chat_id=_text(_ctx_get(self._context_variables, "chat_id", "")),
-                app_id=_text(_ctx_get(self._context_variables, "app_id", "")),
-                user_id=_text(_ctx_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
-                tenant_id=_text(_ctx_get(self._context_variables, "tenant_id", "")) or None,
-                workspace_id=_text(_ctx_get(self._context_variables, "workspace_id", "")) or None,
-                workflow_name=_text(_ctx_get(self._context_variables, "workflow_name", self._workflow_name)),
-                build_id=_text(_ctx_get(self._context_variables, "build_id", "")) or None,
+                chat_id=_text(context_get(self._context_variables, "chat_id", "")),
+                app_id=_text(context_get(self._context_variables, "app_id", "")),
+                user_id=_text(context_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
+                tenant_id=_text(context_get(self._context_variables, "tenant_id", "")) or None,
+                workspace_id=_text(context_get(self._context_variables, "workspace_id", "")) or None,
+                workflow_name=_text(context_get(self._context_variables, "workflow_name", self._workflow_name)),
+                build_id=binding.build_id if binding else None,
                 agent_name=self._agent_name,
                 model_name=str(model_name) if model_name else self._model_name,
                 prompt_tokens=prompt_tokens,
@@ -154,6 +146,7 @@ class MozaiksUsageMiddleware(BaseMiddleware):
                 cached_tokens=cached_tokens,
                 duration_sec=duration,
                 invocation_id=getattr(response, "id", None),
+                execution_kind=self._execution_kind,
             )
         except Exception as exc:  # pragma: no cover - usage must not break runs
             logger.debug("usage middleware emit skipped: %s", exc)
@@ -163,11 +156,12 @@ class MozaiksUsageMiddleware(BaseMiddleware):
 def build_ag2_usage_middleware(
     *,
     agent_name: str,
-    workflow_name: str,
+    workflow_name: str | None,
     context_variables: Any,
     model_name: str | None = None,
+    execution_kind: Literal["workflow", "auxiliary"] = "workflow",
 ) -> Middleware:
-    """Build AG2 1.0 beta middleware for neutral runtime usage metering."""
+    """Build AG2 1.0 middleware for neutral runtime usage metering."""
 
     return Middleware(
         MozaiksUsageMiddleware,
@@ -175,6 +169,7 @@ def build_ag2_usage_middleware(
         workflow_name=workflow_name,
         context_variables=context_variables,
         model_name=model_name,
+        execution_kind=execution_kind,
     )
 
 

@@ -1,26 +1,46 @@
 transition_rules:
 - source_agent: user
-  target_agent: IntakeAgent
-  transition_type: condition
-  condition_type: context_equals
-  condition_key: intake_complete
-  condition_value: false
+  target_agent: ReviewAgent
+  transition_type: after_turn
   transition_target: AgentTarget
 - source_agent: IntakeAgent
   target_agent: user
-  transition_type: condition
-  condition_type: context_equals
-  condition_key: intake_complete
-  condition_value: false
+  transition_type: after_turn
   transition_target: RevertToUserTarget
-- source_agent: IntakeAgent
-  target_agent: ReviewAgent
+- source_agent: ReviewAgent
+  target_agent: ArtifactAgent
   transition_type: condition
   condition_type: context_equals
-  condition_key: intake_complete
-  condition_value: true
-  transition_target: AgentTarget
+  condition_key: approval_outcome
+  condition_value: approve
 - source_agent: ReviewAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: approval_outcome
+  condition_value: request_changes
+  termination_reason: workflow_failed
+- source_agent: ReviewAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: approval_outcome
+  condition_value: error
+  termination_reason: workflow_failed
+- source_agent: ArtifactAgent
+  target_agent: SynthesisAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: artifact_outcome
+  condition_value: emitted
+- source_agent: ArtifactAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: artifact_outcome
+  condition_value: error
+  termination_reason: workflow_failed
+- source_agent: SynthesisAgent
   target_agent: terminate
   transition_type: after_turn
   transition_target: TerminateTarget

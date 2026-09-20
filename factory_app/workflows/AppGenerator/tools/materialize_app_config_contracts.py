@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.connector_request import (
     collect_integration_needs,
 )
@@ -23,9 +24,9 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
     getter = getattr(context_variables, "get", None)
     if callable(getter):
         try:
-            return getter(key, default)
+            return detach(getter(key, default))
         except TypeError:
-            value = getter(key)
+            value = detach(getter(key))
             return default if value is None else value
     if isinstance(context_variables, dict):
         return context_variables.get(key, default)

@@ -10,9 +10,10 @@ pinned reference plus the caller's own scope.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from mozaiksai.core.semantics.binding import ImplementationBinding
+from mozaiksai.core.semantics.compilation_plan import CompilationPlan
 from mozaiksai.core.semantics.graph import SemanticGraph, SemanticGraphV2
 from mozaiksai.core.semantics.manifest import ApplicationManifest
 from mozaiksai.core.semantics.payloads import SemanticPayloadBase, parse_semantic_payload
@@ -21,8 +22,8 @@ from mozaiksai.core.semantics.refs import (
     ArtifactRevisionRef,
     BuildContextBindingRef,
     ChildContractRef,
-    CompilationPlanRef,
     ExecutionAccessScopeRef,
+    PlanUnitRef,
     RefDocumentType,
     RefinementPatchRef,
     SemanticPayloadRef,
@@ -30,6 +31,9 @@ from mozaiksai.core.semantics.refs import (
     _ScopedRef,
 )
 from mozaiksai.core.taxonomy import TaxonomyNamespace
+
+if TYPE_CHECKING:
+    from mozaiksai.core.semantics.artifact_revision import ArtifactRevision
 
 
 class ReferenceResolutionError(ValueError):
@@ -52,16 +56,20 @@ class SemanticReferenceResolver:
 
     Registration requires the full immutable identity; resolution re-verifies
     it.  Content-bearing documents (manifest, graph, binding, taxonomy
-    namespaces) are stored with content; the ref-only document kinds of this
-    slice (compilation plan, build-context binding, refinement patch, artifact
-    revision, child contracts) register as opaque digested subjects.
+    namespaces, CompilationPlans, and ArtifactRevisions) are stored with
+    content. Build-context bindings, refinement patches, and child contracts
+    remain opaque digested subjects until their owning slices land.
     """
 
     def __init__(self) -> None:
-        self._subjects: dict[tuple[str, int], _Subject] = {}
+        self._subjects: dict[tuple[RefDocumentType, str, int], _Subject] = {}
+        self._artifact_revisions: dict[
+            tuple[ExecutionAccessScopeRef, str, str], ArtifactRevision
+        ] = {}
+        self._plan_authority_inputs: dict[tuple[str, str], Any] = {}
 
     def _register(self, subject: _Subject) -> None:
-        key = (subject.subject_id, subject.version)
+        key = (subject.kind, subject.subject_id, subject.version)
         existing = self._subjects.get(key)
         if existing is not None:
             raise ReferenceResolutionError(
@@ -135,7 +143,9 @@ class SemanticReferenceResolver:
         self, ref: SemanticPayloadRef, *, requesting_scope: ExecutionAccessScopeRef
     ) -> SemanticPayloadBase:
         """Verify document type, node binding, kind, version, digest, and scope."""
-        subject = self._subjects.get((ref.node_id, ref.payload_version))
+        subject = self._subjects.get(
+            (RefDocumentType.SEMANTIC_PAYLOAD, ref.node_id, ref.payload_version)
+        )
         if subject is None:
             raise ReferenceResolutionError(
                 f"no semantic payload for node {ref.node_id!r} at immutable version "
@@ -167,8 +177,7 @@ class SemanticReferenceResolver:
         kind = getattr(payload, "payload_kind", None)
         if getattr(kind, "value", None) != ref.payload_kind:
             raise ReferenceResolutionError(
-                f"payload kind mismatch for node {ref.node_id!r}: ref expects "
-                f"{ref.payload_kind!r}"
+                f"payload kind mismatch for node {ref.node_id!r}: ref expects {ref.payload_kind!r}"
             )
         return payload
 
@@ -197,6 +206,156 @@ class SemanticReferenceResolver:
                 content=verified,
             )
         )
+
+    def register_compilation_plan(self, plan: CompilationPlan) -> None:
+        """Register the aggregate plan as an immutable content-bearing subject.
+
+        Only the aggregate registers: embedded family-instance plans have no
+        document type and no registration surface of their own.
+        """
+        try:
+            verified = CompilationPlan.model_validate(plan.model_dump(mode="json"))
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(
+                f"compilation plan failed cold validation: {exc}"
+            ) from exc
+        self._register(
+            _Subject(
+                kind=RefDocumentType.COMPILATION_PLAN,
+                subject_id=verified.graph_id,
+                version=verified.graph_version,
+                digest=verified.plan_digest,
+                scope=verified.scope,
+                content=verified,
+            )
+        )
+
+    def register_compilation_plan_authority_inputs(self, authority_inputs) -> None:
+        """Register one immutable authority-inputs document, digest-keyed.
+
+        The document is cold-revalidated on registration and again on
+        resolution; registration never confers derivation trust — consumers
+        must canonically rederive the plan from the resolved document.
+        """
+        from mozaiksai.core.semantics.plan_authority import (
+            CompilationPlanAuthorityInputs,
+            compilation_plan_authority_digest,
+        )
+
+        try:
+            verified = CompilationPlanAuthorityInputs.model_validate(
+                authority_inputs.model_dump(mode="json")
+            )
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(
+                f"authority inputs failed cold validation: {exc}"
+            ) from exc
+        digest = compilation_plan_authority_digest(verified)
+        key = (verified.graph.scope.model_dump_json(), digest)
+        existing = self._plan_authority_inputs.get(key)
+        if existing is not None:
+            if compilation_plan_authority_digest(existing) != digest:
+                raise ReferenceResolutionError(
+                    "authority-inputs registration is immutable"
+                )
+            return
+        self._plan_authority_inputs[key] = verified
+
+    def resolve_compilation_plan_authority_inputs(
+        self, ref, *, requesting_scope
+    ):
+        """Resolve one authority-inputs document by exact scope and digest."""
+        from mozaiksai.core.semantics.plan_authority import (
+            CompilationPlanAuthorityInputs,
+            compilation_plan_authority_digest,
+        )
+        from mozaiksai.core.semantics.refs import CompilationPlanAuthorityRef
+
+        verified_ref = CompilationPlanAuthorityRef.model_validate(
+            ref.model_dump(mode="json")
+        )
+        if requesting_scope != verified_ref.scope:
+            raise ReferenceResolutionError(
+                "authority-inputs resolution crosses execution scope"
+            )
+        key = (verified_ref.scope.model_dump_json(), verified_ref.authority_digest)
+        document = self._plan_authority_inputs.get(key)
+        if document is None:
+            raise ReferenceResolutionError(
+                "unknown compilation-plan authority inputs "
+                f"{verified_ref.authority_digest[:12]!r}"
+            )
+        revalidated = CompilationPlanAuthorityInputs.model_validate(
+            document.model_dump(mode="json")
+        )
+        if (
+            compilation_plan_authority_digest(revalidated)
+            != verified_ref.authority_digest
+        ):
+            raise ReferenceResolutionError(
+                "authority-inputs content digest mismatch"
+            )
+        return revalidated
+
+    def register_artifact_revision(self, revision: ArtifactRevision) -> None:
+        """Register one content-bearing revision by its full scoped digest identity."""
+
+        from mozaiksai.core.semantics.artifact_revision import ArtifactRevision
+
+        try:
+            verified = ArtifactRevision.model_validate(revision.model_dump(mode="json"))
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(
+                f"artifact revision failed cold validation: {exc}"
+            ) from exc
+        key = (verified.scope, verified.app_id, verified.revision_digest)
+        if key in self._artifact_revisions:
+            raise ReferenceResolutionError(
+                f"artifact revision {verified.revision_digest!r} is immutable and already registered"
+            )
+        self._artifact_revisions[key] = verified
+
+    def resolve_artifact_revision(
+        self,
+        ref: ArtifactRevisionRef,
+        *,
+        requesting_scope: ExecutionAccessScopeRef,
+    ) -> ArtifactRevision:
+        """Resolve a revision without any mutable alias or cross-scope fallback."""
+
+        from mozaiksai.core.semantics.artifact_revision import ArtifactRevision
+
+        verified_ref = ArtifactRevisionRef.model_validate(ref.model_dump(mode="json"))
+        if requesting_scope != verified_ref.scope:
+            raise ReferenceResolutionError("cross-scope artifact revision access fails closed")
+        revision = self._artifact_revisions.get(
+            (verified_ref.scope, verified_ref.app_id, verified_ref.revision_digest)
+        )
+        if revision is None:
+            raise ReferenceResolutionError("artifact revision ref did not resolve exactly")
+        verified = ArtifactRevision.model_validate(revision.model_dump(mode="json"))
+        if verified.ref != verified_ref:
+            raise ReferenceResolutionError("artifact revision ref identity mismatch")
+        return cast(ArtifactRevision, verified)
+
+    def resolve_plan_unit(
+        self, ref: PlanUnitRef, *, requesting_scope: ExecutionAccessScopeRef
+    ) -> Any:
+        """Resolve only through the registered aggregate and verify unit identity."""
+        from mozaiksai.core.semantics.canonical import canonical_digest
+
+        verified_ref = PlanUnitRef.model_validate(ref.model_dump(mode="json"))
+        content = self.resolve(verified_ref.compilation_plan_ref, requesting_scope=requesting_scope)
+        if not isinstance(content, CompilationPlan):
+            raise ReferenceResolutionError("compilation plan ref did not resolve to a plan")
+        try:
+            verified_plan = CompilationPlan.model_validate(content.model_dump(mode="json"))
+            unit = verified_plan.unit(verified_ref.unit_id)
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(f"plan unit failed cold resolution: {exc}") from exc
+        if canonical_digest(unit.identity_payload) != verified_ref.unit_digest:
+            raise ReferenceResolutionError("plan unit digest mismatch")
+        return unit
 
     def register_taxonomy_namespace(self, namespace: TaxonomyNamespace, digest: str) -> None:
         ref = TaxonomyNamespaceRef(
@@ -233,6 +392,8 @@ class SemanticReferenceResolver:
             RefDocumentType.IMPLEMENTATION_BINDING,
             RefDocumentType.TAXONOMY_NAMESPACE,
             RefDocumentType.SEMANTIC_PAYLOAD,
+            RefDocumentType.COMPILATION_PLAN,
+            RefDocumentType.ARTIFACT_REVISION,
         }:
             raise ReferenceResolutionError(
                 f"{kind.value} is content-bearing in this slice; register its document"
@@ -245,10 +406,8 @@ class SemanticReferenceResolver:
             "scope": scope,
         }
         ref_types = {
-            RefDocumentType.COMPILATION_PLAN: CompilationPlanRef,
             RefDocumentType.BUILD_CONTEXT_BINDING: BuildContextBindingRef,
             RefDocumentType.REFINEMENT_PATCH: RefinementPatchRef,
-            RefDocumentType.ARTIFACT_REVISION: ArtifactRevisionRef,
         }
         if kind is RefDocumentType.CHILD_CONTRACT:
             fields.update(
@@ -287,8 +446,23 @@ class SemanticReferenceResolver:
 
     def resolve(self, ref: _ScopedRef, *, requesting_scope: ExecutionAccessScopeRef) -> Any:
         """Verify type, exact version, digest, and scope; return stored content."""
-        subject = self._subjects.get((ref.subject_id, ref.subject_version))
+        subject = self._subjects.get((type(ref).document_type, ref.subject_id, ref.subject_version))
         if subject is None:
+            conflicting = next(
+                (
+                    candidate
+                    for (kind, subject_id, version), candidate in self._subjects.items()
+                    if subject_id == ref.subject_id
+                    and version == ref.subject_version
+                    and kind is not type(ref).document_type
+                ),
+                None,
+            )
+            if conflicting is not None:
+                raise ReferenceResolutionError(
+                    f"document type mismatch: ref expects {type(ref).document_type.value!r}, "
+                    f"stored subject is {conflicting.kind.value!r}"
+                )
             raise ReferenceResolutionError(
                 f"no subject {ref.subject_id!r} at immutable version "
                 f"{ref.subject_version}; refs never fall back to another version"
@@ -300,17 +474,14 @@ class SemanticReferenceResolver:
             )
         if subject.digest != ref.content_digest:
             raise ReferenceResolutionError(
-                f"content digest mismatch for {ref.subject_id!r} "
-                f"version {ref.subject_version}"
+                f"content digest mismatch for {ref.subject_id!r} version {ref.subject_version}"
             )
         if subject.scope != ref.scope:
             raise ReferenceResolutionError(
                 f"scope mismatch: ref scope does not own subject {ref.subject_id!r}"
             )
         if requesting_scope != subject.scope:
-            raise ReferenceResolutionError(
-                f"cross-scope access to {ref.subject_id!r} fails closed"
-            )
+            raise ReferenceResolutionError(f"cross-scope access to {ref.subject_id!r} fails closed")
         if (
             subject.reference_payload is not None
             and ref.model_dump(mode="json") != subject.reference_payload
@@ -331,7 +502,9 @@ class SemanticReferenceResolver:
         return content
 
     def resolve_taxonomy_namespace(self, ref: TaxonomyNamespaceRef) -> TaxonomyNamespace:
-        subject = self._subjects.get((ref.namespace_id, ref.namespace_version))
+        subject = self._subjects.get(
+            (RefDocumentType.TAXONOMY_NAMESPACE, ref.namespace_id, ref.namespace_version)
+        )
         if subject is None:
             raise ReferenceResolutionError(
                 f"no taxonomy namespace {ref.namespace_id!r} at version {ref.namespace_version}"

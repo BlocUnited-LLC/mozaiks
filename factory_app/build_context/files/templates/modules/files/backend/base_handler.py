@@ -25,7 +25,7 @@ class FilesBaseHandler:
         size_bytes: int,
         storage_url: str,
         is_public: bool = False,
-        metadata: dict[str, Any] | None = None,
+        metadata: list[dict[str, Any]] | None = None,
         **_: object,
     ) -> dict[str, Any]:
         return await self._service.upload_file(

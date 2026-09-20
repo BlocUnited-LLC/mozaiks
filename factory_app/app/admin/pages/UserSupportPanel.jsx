@@ -1,14 +1,14 @@
 /**
- * UserSupportPanel — profile panel component for workspace_support.
+ * UserSupportPanel — profile page component for workspace_support.
  *
  * Rendered by ProfilePage when the workspace_support module declares
- * contracts/profile.yaml with kind: component, component: UserSupportPanel.
+ * contracts/profile.yaml with renderer: custom_component and component: UserSupportPanel.
  *
- * Props (from panel contract runtime):
- *   panel  — the panel manifest (id, title, description, order)
+ * Props (from profile page runtime):
+ *   page   — the page manifest (id, label, description, order)
  *   data   — result of list_support_requests action, shape: { requests: [], total: int }
  *
- * Tickets are grouped by app_id so users with tickets across multiple apps
+ * Tickets are grouped by subject_app_id so users with tickets across multiple apps
  * see them organised clearly.
  *
  */
@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ChatThread } from '@mozaiks/chat-ui/ui'
+import { studioModuleAction } from './studioApi.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,48 +49,33 @@ function formatRelative(iso) {
 
 function normaliseRequest(r) {
   const fallbackMessage = String(r.message || '').trim()
+  const appId = r.subject_app_id || r.app_id || 'platform'
+  const error = typeof r.error === 'string' ? r.error.trim() : null
   return {
     id:        r.request_id || r.id,
     ticketId:  r.ticket_id || r.ticketId || r.request_id || r.id,
-    appId:     r.app_id || 'platform',
-    appLabel:  r.app_label || r.app_name || r.app_id || 'Platform',
+    appId,
+    appLabel:  r.subject_app_label || r.subject_app_name || r.subject_app_id || r.app_label || r.app_name || r.app_id || 'Platform',
     userId:    r.user_id || r.userId || r.submitted_by || null,
     subject:   r.subject || r.page_title || r.message?.slice(0, 60) || 'Support request',
     status:    r.status || 'open',
     updatedAt: r.updated_at || r.updatedAt || r.created_at,
-    messages:  Array.isArray(r.messages) ? r.messages : (fallbackMessage ? [{ role: 'user', content: fallbackMessage }] : []),
+    error,
+    messages:  Array.isArray(r.messages) && r.messages.length > 0 ? r.messages : (error || !fallbackMessage ? [] : [{ role: 'user', content: fallbackMessage }]),
   }
 }
 
-async function postMessage({ requestId, appId, userId, message }) {
+async function postMessage({ requestId, message }) {
   try {
     supportPanelTrace('message:add:start', {
       requestId,
-      appId,
-      userId,
       messageLength: String(message || '').length,
     })
-    const response = await fetch('/api/modules/workspace_support/add_support_message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        request_id: requestId,
-        message,
-        sender_role: 'user',
-        app_id: appId,
-        user_id: userId,
-      }),
+    const body = await studioModuleAction('workspace_support', 'add_support_message', {
+      request_id: requestId,
+      message,
     })
-    if (!response.ok) {
-      supportPanelWarn('message:add:failed_http', {
-        requestId,
-        appId,
-        userId,
-        status: response.status,
-      })
-      return null
-    }
-    const body = await response.json()
+    if (!body?.success) throw new Error(body?.error || 'Reply was not sent.')
     supportPanelTrace('message:add:success', {
       requestId,
       messageId: body?.message_id || null,
@@ -100,34 +86,24 @@ async function postMessage({ requestId, appId, userId, message }) {
   } catch (error) {
     supportPanelWarn('message:add:failed_exception', {
       requestId,
-      appId,
-      userId,
       error: error?.message || String(error || ''),
     })
-    return null
+    throw error
   }
 }
 
-async function updateRequestStatus({ requestId, appId, status }) {
-  const response = await fetch('/api/modules/workspace_support/update_support_request_status', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ request_id: requestId, app_id: appId, status }),
+async function updateRequestStatus({ requestId, status }) {
+  const body = await studioModuleAction('workspace_support', 'update_support_request_status', {
+    request_id: requestId, status,
   })
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-  const body = await response.json()
   if (!body?.success) throw new Error(body?.error || 'Status was not updated.')
   return body
 }
 
-async function deleteRequest({ requestId, appId }) {
-  const response = await fetch('/api/modules/workspace_support/delete_support_request', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ request_id: requestId, app_id: appId }),
+async function deleteRequest({ requestId }) {
+  const body = await studioModuleAction('workspace_support', 'delete_support_request', {
+    request_id: requestId,
   })
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-  const body = await response.json()
   if (!body?.success) throw new Error(body?.error || 'Request was not removed.')
   return body
 }
@@ -176,7 +152,7 @@ function TicketRow({ req, active, onClick }) {
 
 // ─── Root component ───────────────────────────────────────────────────────────
 
-export default function UserSupportPanel({ panel, data, onNewSupport }) {
+export default function UserSupportPanel({ page, data, onNewSupport }) {
   const location = useLocation()
   const queryRequestId = new URLSearchParams(location.search || '').get('request_id') || null
   const rawRequests = data?.requests?.length > 0 ? data.requests : []
@@ -222,8 +198,8 @@ export default function UserSupportPanel({ panel, data, onNewSupport }) {
       selectedId,
       selectedExists: Boolean(selected),
       selectedMessageCount: selected?.messages?.length || 0,
-      panelId: panel?.id || null,
-      panelError: panel?.error || null,
+      pageId: page?.id || null,
+      pageError: page?.error || null,
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryRequestId, rawRequests.length, ticketIdsKey, selectedId])
@@ -274,17 +250,14 @@ export default function UserSupportPanel({ panel, data, onNewSupport }) {
       existingMessageCount: threadMessages.length,
       messageLength: String(text || '').length,
     })
-    const body = await postMessage({
-      requestId: selected.id,
-      appId: selected.appId,
-      userId: selected.userId,
-      message: text,
-    })
-    if (body?.success) {
+    try {
+      await postMessage({ requestId: selected.id, message: text })
       setExtraMessages(prev => ({
         ...prev,
         [selected.id]: [...(prev[selected.id] || []), { role: 'user', content: text }],
       }))
+    } catch (error) {
+      setActionError(error?.message || 'Reply could not be sent.')
     }
   }
 
@@ -295,7 +268,6 @@ export default function UserSupportPanel({ panel, data, onNewSupport }) {
     try {
       await updateRequestStatus({
         requestId: selected.id,
-        appId: selected.appId,
         status: nextStatus,
       })
       setStatusOverrides(prev => ({ ...prev, [selected.id]: nextStatus }))
@@ -313,7 +285,7 @@ export default function UserSupportPanel({ panel, data, onNewSupport }) {
     setBusyRequestId(selected.id)
     setActionError(null)
     try {
-      await deleteRequest({ requestId: selected.id, appId: selected.appId })
+      await deleteRequest({ requestId: selected.id })
       setHiddenRequestIds(prev => ({ ...prev, [selected.id]: true }))
       setSelectedId(null)
     } catch (error) {
@@ -326,6 +298,14 @@ export default function UserSupportPanel({ panel, data, onNewSupport }) {
   const threadMessages = selected
     ? [...(selected.messages || []), ...(extraMessages[selected.id] || [])]
     : []
+
+  if (page?.error) {
+    return (
+      <div role="alert" className="rounded-2xl border border-destructive/30 bg-destructive/5 px-8 py-6 text-sm text-destructive">
+        Support requests could not be loaded. Please try again.
+      </div>
+    )
+  }
 
   if (requests.length === 0) {
     return (
@@ -424,13 +404,18 @@ export default function UserSupportPanel({ panel, data, onNewSupport }) {
             </div>
           </div>
 
+          {selected.error && (
+            <div role="alert" className="border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+              {selected.error}
+            </div>
+          )}
           <ChatThread
             messages={threadMessages}
             variant="support"
-            emptyText="No messages yet."
+            emptyText={selected.error ? 'Support conversation unavailable.' : 'No messages yet.'}
             className="flex-1 min-h-0"
             inputPlaceholder="Reply to this ticket…"
-            onSend={selected.status !== 'resolved' ? handleSend : undefined}
+            onSend={selected.status !== 'resolved' && !selected.error ? handleSend : undefined}
           />
           {actionError && (
             <div className="border-t border-destructive/20 px-4 py-2 text-xs text-destructive">

@@ -105,7 +105,7 @@ def test_appgenerator_structured_outputs_load_task_batch_build_task_contract() -
     assert task.context_variables[1].key == "current_build_task_id"
 
 
-def test_appgenerator_app_schema_output_schema_uses_strict_section_config_union() -> None:
+def test_appgenerator_provider_schema_uses_strict_section_config_union() -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
@@ -115,7 +115,7 @@ def test_appgenerator_app_schema_output_schema_uses_strict_section_config_union(
     _structured_mod._workflow_structured_agents.clear()
 
     _, registry = _structured_mod.load_workflow_structured_outputs("AppGenerator")
-    schema = registry["AppSchemaAgent"].model_json_schema()
+    schema = _structured_mod.get_provider_response_model(registry["AppSchemaAgent"]).model_json_schema()
     section_schema = schema["properties"]["pages"]["items"]["properties"]["sections"]["items"]
     config_schema = section_schema["properties"]["config"]
 
@@ -294,13 +294,22 @@ def test_designdocs_agent_output_supports_provider_strict_response_format() -> N
     _structured_mod._workflow_structured_agents.clear()
     _structured_mod._provider_response_model_cache.clear()
 
-    _, registry = _structured_mod.load_workflow_structured_outputs("DesignDocs")
+    models, registry = _structured_mod.load_workflow_structured_outputs("DesignDocs")
     supported, offending_path = _structured_mod.supports_provider_response_format(
         registry["DesignDocsAgent"]
     )
 
     assert supported is True, f"DesignDocsAgent output fails strict mode at: {offending_path}"
     assert offending_path is None
+
+    index = models["DataContractIndex"](keys=[{"field": "owner_id", "order": 1}])
+    assert index.model_dump(mode="json")["keys"] == [{"field": "owner_id", "order": 1}]
+    schema = _structured_mod.get_provider_response_model(models["DataContractIndex"]).model_json_schema()
+    item = schema["properties"]["keys"]["items"]
+    assert item["type"] == "object"
+    assert item["properties"]["field"]["type"] == "string"
+    assert item["properties"]["order"]["type"] == "integer"
+    assert item["additionalProperties"] is False
 
 
 def test_runtime_task_batch_models_mark_declared_fields_as_required() -> None:

@@ -32,24 +32,34 @@ actions:
     handler_method: activate_subscription
     input_schema:
       type: object
+      additionalProperties: false
       required:
         - user_id
         - plan_id
       properties:
+        # user_id — the user receiving the subscription.
         user_id:
           type: string
-          description: The user receiving the subscription.
+        # plan_id — as declared in config/subscriptions.yaml.
         plan_id:
           type: string
-          description: The plan_id as declared in config/subscriptions.yaml.
+        # activated_at — optional ISO 8601 activation timestamp; omit for "now".
         activated_at:
           type: string
-          nullable: true
-          description: ISO 8601 activation timestamp. Defaults to now.
+        # metadata — optional provider or billing context entries. Not read by
+        # the entitlement adapter; stored on the assignment record as a
+        # {key: value} map built from these typed entries.
         metadata:
-          type: object
-          nullable: true
-          description: Optional provider or billing metadata. Not read by the entitlement adapter.
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - key
+              - value
+            properties:
+              key: { type: string }
+              value: { type: string }
     output_schema:
       type: object
       required:
@@ -72,18 +82,17 @@ actions:
     handler_method: deactivate_subscription
     input_schema:
       type: object
+      additionalProperties: false
       required:
         - user_id
       properties:
+        # user_id — the user whose subscription is being cancelled.
         user_id:
           type: string
-          description: The user whose subscription is being cancelled.
+        # plan_id — optional; targets a specific plan record. When omitted,
+        # any active record for the user is deactivated.
         plan_id:
           type: string
-          nullable: true
-          description: >
-            Optional plan_id to target a specific plan record. When absent,
-            any active record for the user is deactivated.
     output_schema:
       type: object
       required:

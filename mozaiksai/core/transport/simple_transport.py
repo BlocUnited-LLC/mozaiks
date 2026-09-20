@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from datetime import UTC, datetime
@@ -20,6 +21,7 @@ from websockets.exceptions import ConnectionClosed
 
 # Enhanced logging setup
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.websocket_auth import accept_websocket
 from mozaiksai.core.events.runtime_events import RUNTIME_PROCESS_COMPLETED
 
 # Extracted mixins for separation of concerns
@@ -135,6 +137,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
         # AG2-aligned input request callback registry
         self._input_request_registries: dict[str, dict[str, Any]] = {}
+        self._ws_id_counter: int = 0
+        self._ws_id_lock = threading.Lock()
         self._recent_input_submit_chats: set[str] = set()
 
     # T-series: WebSocket protocol support structures
@@ -270,6 +274,26 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # CONNECTION HELPERS
     # ==================================================================================
 
+    @staticmethod
+    def _is_connection_alias(entry: dict[str, Any] | None) -> bool:
+        """Return whether a slot references a socket owned by another chat."""
+        return bool(isinstance(entry, dict) and entry.get("aliased_from_chat_id"))
+
+    def _next_ws_id(self) -> int:
+        """Allocate a connection identity that is never reused.
+
+        This was the websocket object's memory address, which is only unique
+        among *live* objects: CPython hands the same address to a new object
+        once the previous one is collected. The takeover guard in
+        ``_cleanup_connection`` compares these values to decide whether a late
+        cleanup still owns the slot, so a recycled address makes a departing
+        socket's cleanup look like the current owner's and tear down a live
+        connection.
+        """
+        with self._ws_id_lock:
+            self._ws_id_counter += 1
+            return self._ws_id_counter
+
     def _get_conn_meta(self, chat_id: str) -> dict[str, Any]:
         """Get connection metadata for a chat_id with safe defaults."""
         conn = self.connections.get(chat_id, {})
@@ -277,7 +301,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             ws = conn.get("websocket")
             if ws is not None:
                 try:
-                    conn["ws_id"] = id(ws)
+                    conn["ws_id"] = self._next_ws_id()
                 except Exception:
                     pass
         return conn
@@ -1397,7 +1421,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         })
 
     async def _handle_resume_request(self, chat_id: str, last_client_index: int, websocket) -> None:
-        """Resume protocol for persisted AG2 1.0 beta workflow runs.
+        """Resume protocol for persisted AG2 1.0 workflow runs.
 
         We DO NOT compute sequence diffs via a bespoke diff endpoint anymore.
         Instead we:
@@ -1499,6 +1523,12 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             "chat.switch_workflow",
             "chat.start_workflow",
             "chat.start_workflow_batch",
+            # Keepalive reply to server "ping" events. Accepting it (with no
+            # handler - dispatch ignores handler-less types) lets an idle
+            # client refresh last_received_at without tripping
+            # SCHEMA_VALIDATION_FAILED, so a builder waiting on a long agent
+            # turn is not disconnected by the idle timeout.
+            "client.pong",
         ):
             # Control commands - no additional validation needed
             return True
@@ -1591,11 +1621,11 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 await websocket.close(code=1008, reason="User connection limit reached")
                 return
 
-        await websocket.accept()
+        await accept_websocket(websocket)
 
         # Store ws_id for session registry lookups
         if ws_id is None:
-            ws_id = id(websocket)
+            ws_id = self._next_ws_id()
 
         # Evict any stale connection for the same chat_id before registering the new one.
         # Without this, the old receive loop's finally block would delete the new connection
@@ -1603,12 +1633,23 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if chat_id in self.connections:
             stale = self.connections[chat_id]
             stale_ws = stale.get("websocket")
-            logger.warning("Evicting stale WebSocket for chat_id=%s (ws_id=%s)", chat_id, stale.get("ws_id"))
-            try:
-                await stale_ws.close(code=1001)
-            except Exception:
-                pass
-            await self._cleanup_connection(chat_id)
+            if self._is_connection_alias(stale):
+                logger.info(
+                    "Releasing connection alias for chat_id=%s (socket owned by chat_id=%s)",
+                    chat_id,
+                    stale.get("aliased_from_chat_id"),
+                )
+            else:
+                logger.warning("Evicting stale WebSocket for chat_id=%s (ws_id=%s)", chat_id, stale.get("ws_id"))
+                try:
+                    await stale_ws.close(code=1001)
+                except Exception:
+                    pass
+            # This is a takeover, not a departure: a workflow may be mid-run on
+            # this chat and waiting on the user. Release the dead socket, but
+            # leave the execution's pending input callbacks armed for the
+            # replacement connection.
+            await self._cleanup_connection(chat_id, execution_continues=True)
 
         self.connections[chat_id] = {
             "websocket": websocket,
@@ -1622,21 +1663,26 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         }
         logger.info("WS_CONNECTED chat=%s ws_id=%s", chat_id, ws_id)
 
-        try:
-            session_registry.add_workflow(
-                ws_id=ws_id,
-                chat_id=chat_id,
-                workflow_name=str(workflow_name),
-                app_id=str(app_id) if app_id is not None else "",
-                user_id=str(user_id),
-                auto_activate=True,
-            )
-        except Exception as registry_err:
-            logger.warning(
-                "Failed to register workflow context on websocket connect for chat %s: %s",
-                chat_id,
-                registry_err,
-            )
+        # An empty workflow_name marks a general-only connection (ask-mode
+        # carrier): it must never register a workflow context, otherwise the
+        # session registry would route its free-form input into the workflow
+        # bridge instead of the general-mode exchange.
+        if str(workflow_name or "").strip():
+            try:
+                session_registry.add_workflow(
+                    ws_id=ws_id,
+                    chat_id=chat_id,
+                    workflow_name=str(workflow_name),
+                    app_id=str(app_id) if app_id is not None else "",
+                    user_id=str(user_id),
+                    auto_activate=True,
+                )
+            except Exception as registry_err:
+                logger.warning(
+                    "Failed to register workflow context on websocket connect for chat %s: %s",
+                    chat_id,
+                    registry_err,
+                )
         
         # H2: Start heartbeat for connection
         await self._start_heartbeat(chat_id, websocket)

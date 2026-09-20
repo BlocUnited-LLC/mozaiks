@@ -3,7 +3,7 @@
 // DESCRIPTION: Preview iframe with basic controls
 // ==============================================================================
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Play, RefreshCw } from 'lucide-react';
 
 const PreviewPane = ({
@@ -26,6 +26,11 @@ const PreviewPane = ({
     return trimmed.length ? trimmed : null;
   }, [previewUrl]);
 
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+  }, [url]);
+
   const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -36,20 +41,17 @@ const PreviewPane = ({
 
   if (!url) {
     return (
-      <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+      <div className="rounded-lg border border-white/10 bg-black/30 p-4" role="status">
         {isRestarting ? (
           <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
             <div className="h-4 w-4 border-2 border-[var(--color-primary-light)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            Restarting preview...
+            Starting preview...
           </div>
         ) : (
           <>
-            <div className="text-sm text-[var(--color-text-muted)]">Your app is not running yet.</div>
+            <div className="text-sm text-[var(--color-text-muted)]">Preview stopped</div>
             {onStartPreview && canStartPreview ? (
               <>
-                <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                  Start a live preview to see and use your app right here.
-                </div>
                 <button
                   type="button"
                   onClick={onStartPreview}
@@ -57,13 +59,10 @@ const PreviewPane = ({
                 >
                   <Play className="w-3.5 h-3.5" /> Start live preview
                 </button>
-                <div className="text-[10px] text-[var(--color-text-muted)] mt-2">
-                  Runs in a temporary sandbox (hosted, or local Docker) — nothing to install in your app.
-                </div>
               </>
             ) : (
               <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                A live preview needs a sandbox: a hosted sandbox key (<span className="font-mono">E2B_API_KEY</span>) or a running local Docker daemon.
+                No saved app bundle
               </div>
             )}
           </>
@@ -76,18 +75,31 @@ const PreviewPane = ({
   }
 
   return (
-    <div className="rounded-xl overflow-hidden border border-white/10 bg-black/30">
+    <div className="rounded-lg overflow-hidden border border-white/10 bg-black/30">
       <div className="flex items-center justify-between px-4 py-2 bg-black/40 border-b border-white/10">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-white">Preview</div>
           <div className="text-[10px] text-[var(--color-text-muted)] font-mono truncate">{url}</div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
+          {onStartPreview && canStartPreview && (
+            <button
+              type="button"
+              onClick={onStartPreview}
+              disabled={isRestarting}
+              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 text-[var(--color-text-secondary)] hover:text-white"
+              title="Restart preview runtime"
+              aria-label="Restart preview runtime"
+            >
+              <Play className="w-4 h-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={refresh}
             className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-[var(--color-text-secondary)] hover:text-white transition-colors"
             title="Refresh preview"
+            aria-label="Refresh preview"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -97,6 +109,7 @@ const PreviewPane = ({
             rel="noopener noreferrer"
             className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-[var(--color-text-secondary)] hover:text-white transition-colors"
             title="Open in new tab"
+            aria-label="Open preview in new tab"
           >
             <ExternalLink className="w-4 h-4" />
           </a>
@@ -107,7 +120,7 @@ const PreviewPane = ({
         {isRestarting && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-black/70">
             <div className="h-7 w-7 border-2 border-[var(--color-primary-light)] border-t-transparent rounded-full animate-spin" />
-            <div className="text-xs text-[var(--color-text-muted)]">Applying patch and restarting preview...</div>
+            <div className="text-xs text-[var(--color-text-muted)]">Restarting preview...</div>
           </div>
         )}
         {sandboxError && !isRestarting && (

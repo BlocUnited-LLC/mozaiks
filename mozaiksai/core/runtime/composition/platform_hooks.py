@@ -79,6 +79,16 @@ Bundle keys (all optional):
         Best-effort structured event-reaction audit callback. Exceptions are
         logged and do not affect event fan-out.
 
+    ask_context           async (*, app_id: str, user_id: str,
+                                  page_path: str | None,
+                                  page_context: str | None) -> Dict[str, Any]
+        Workspace context lines appended to the ask-mode system prompt, as
+        ``{label: value}`` (e.g. ``{"Workspace apps": "3 total — 2 draft"}``).
+        ``page_path`` is the route pattern of the page the user is asking
+        from and ``page_context`` its declared description, when the client
+        sends them. Best-effort UX context, never authority: exceptions are
+        logged and skipped, and earlier registrations win on key collisions.
+
     on_account_delete_complete
                           async (*, app_id: str, user_id: str,
                                   deletion_results: Dict[str, Any]) -> None
@@ -101,13 +111,20 @@ import importlib
 import inspect
 import os
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.runtime.composition.module_authority import ModuleExecutionPolicyDecision
 
 logger = get_workflow_logger("platform_hooks")
+
+
+class ModuleScopeResolutionError(RuntimeError):
+    """A scope/permission resolver hook failed while fail-closed resolution
+    was requested. Callers on privileged lanes deny the dispatch instead of
+    proceeding with the pre-hook (unnarrowed) permission set."""
 
 PLATFORM_EXTENSION_SCHEMA_VERSION = "mozaiks.platform_extensions.v1"
 
@@ -132,6 +149,7 @@ class PlatformExtensionBundle:
     before_module_execution: Callable | None = None
     module_dispatch_audit: Callable | None = None
     module_reaction_audit: Callable | None = None
+    ask_context: Callable | None = None
 
 
 def _clean_optional(value: Any) -> str | None:
@@ -151,6 +169,7 @@ _BUNDLE_KEYS = (
     "before_module_execution",
     "module_dispatch_audit",
     "module_reaction_audit",
+    "ask_context",
 )
 
 
@@ -178,6 +197,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
             before_module_execution=bundle.get("before_module_execution"),
             module_dispatch_audit=bundle.get("module_dispatch_audit"),
             module_reaction_audit=bundle.get("module_reaction_audit"),
+            ask_context=bundle.get("ask_context"),
         )
 
     if bundle is None or isinstance(bundle, (str, bytes, int, float, bool)):
@@ -201,6 +221,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
         before_module_execution=getattr(bundle, "before_module_execution", None),
         module_dispatch_audit=getattr(bundle, "module_dispatch_audit", None),
         module_reaction_audit=getattr(bundle, "module_reaction_audit", None),
+        ask_context=getattr(bundle, "ask_context", None),
     )
 
 
@@ -236,6 +257,7 @@ class PlatformHookRegistry:
         self._before_module_execution_hooks: list[Callable] = []
         self._module_dispatch_audit_hooks: list[Callable] = []
         self._module_reaction_audit_hooks: list[Callable] = []
+        self._ask_context_hooks: list[Callable] = []
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -283,7 +305,11 @@ class PlatformHookRegistry:
             except Exception as exc:
                 logger.warning("PLATFORM_HOOKS_LOAD_FAILED: %s — %s", entry, exc)
 
-    def _register_bundle(self, bundle: Any, source: str = "") -> None:
+    def register_bundle(self, bundle: Any, *, source: str, prepend: bool = False) -> None:
+        """Compose a host-owned bundle with configured operator extensions."""
+        self._register_bundle(bundle, source=source, prepend=prepend)
+
+    def _register_bundle(self, bundle: Any, source: str = "", *, prepend: bool = False) -> None:
         bundle = _normalize_bundle(bundle)
 
         def _get(key: str) -> Any:
@@ -300,11 +326,15 @@ class PlatformHookRegistry:
             "before_module_execution": self._before_module_execution_hooks,
             "module_dispatch_audit": self._module_dispatch_audit_hooks,
             "module_reaction_audit": self._module_reaction_audit_hooks,
+            "ask_context": self._ask_context_hooks,
         }
         for key, target in slot_map.items():
             val = _get(key)
             if callable(val):
-                target.append(val)
+                if prepend:
+                    target.insert(0, val)
+                else:
+                    target.append(val)
                 logger.debug("PLATFORM_HOOKS_REGISTERED: %s from %s", key, source)
 
     # ------------------------------------------------------------------
@@ -342,12 +372,15 @@ class PlatformHookRegistry:
                 )
                 if inspect.isawaitable(res):
                     res = await res
-                if isinstance(res, tuple) and len(res) == 2:
+                if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], bool):
                     ok, reason = res
                     if not ok:
                         return False, str(reason) if reason else "Prerequisite not met"
+                else:
+                    raise TypeError("chat_prereqs must return (bool, reason)")
             except Exception as exc:
                 logger.warning("PLATFORM_HOOKS_PREREQS_ERROR: %s", exc)
+                return False, "Chat prerequisite check failed"
         return True, None
 
     async def call_chat_session_fields(
@@ -356,9 +389,25 @@ class PlatformHookRegistry:
         user_id: str,
         workflow_name: str,
         chat_id: str,
+        *,
+        phase: Literal["prepare", "resume"] = "prepare",
+        trigger_source: str = "chat",
+        build_registry_id: str | None = None,
+        source_chat_id: str | None = None,
+        session_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Collect extra fields to inject into the chat session document."""
-        extra: dict[str, Any] = {}
+        """Resolve or revalidate trusted session fields, failing closed.
+
+        References are requests, not authority. Hooks see a detached snapshot;
+        a later extension may inspect but cannot replace an earlier binding.
+        Resume validates persisted facts and cannot install a different value.
+        """
+        from mozaiksai.core.session.build_binding import BuildTargetReference
+
+        reference = BuildTargetReference(
+            build_registry_id=build_registry_id, source_chat_id=source_chat_id,
+        )
+        extra: dict[str, Any] = deepcopy(session_fields or {})
         for hook in self._chat_session_fields_hooks:
             try:
                 res = hook(
@@ -366,13 +415,25 @@ class PlatformHookRegistry:
                     user_id=user_id,
                     workflow_name=workflow_name,
                     chat_id=chat_id,
+                    phase=phase,
+                    trigger_source=trigger_source,
+                    build_registry_id=reference.build_registry_id,
+                    source_chat_id=reference.source_chat_id,
+                    session_fields=deepcopy(extra),
                 )
                 if inspect.isawaitable(res):
                     res = await res
-                if isinstance(res, dict):
-                    extra.update(res)
+                if not isinstance(res, dict):
+                    raise TypeError("chat_session_fields must return a mapping")
+                for key, value in res.items():
+                    if key in extra and extra[key] != value:
+                        raise ValueError(f"Conflicting session field '{key}'")
+                    if phase == "resume" and key not in extra:
+                        raise ValueError(f"Resume cannot install session field '{key}'")
+                extra.update(deepcopy(res))
             except Exception as exc:
                 logger.warning("PLATFORM_HOOKS_SESSION_FIELDS_ERROR: %s", exc)
+                raise
         return extra
 
     async def call_module_permissions(
@@ -387,12 +448,16 @@ class PlatformHookRegistry:
         params: dict[str, Any],
         request: Any = None,
         default_permissions: list[str] | None = None,
+        fail_closed: bool = False,
     ) -> list[str] | None:
         """Resolve module permissions through optional host hooks.
 
         ``None`` retains the trusted/internal bypass semantics used by
         ModuleExecutor.  A hook may return an empty list to require enforcement
-        with no permissions granted.
+        with no permissions granted. With ``fail_closed`` a hook exception
+        raises ModuleScopeResolutionError instead of being swallowed — a
+        product hook that NARROWS permissions must not be bypassable by
+        crashing it with crafted params.
         """
 
         current = list(default_permissions) if default_permissions is not None else None
@@ -416,6 +481,11 @@ class PlatformHookRegistry:
                 if isinstance(res, (list, tuple, set)):
                     current = [str(item) for item in res if str(item).strip()]
             except Exception as exc:
+                if fail_closed:
+                    raise ModuleScopeResolutionError(
+                        f"module permission resolver hook failed for "
+                        f"{module_name}.{action_name}"
+                    ) from exc
                 logger.warning("PLATFORM_HOOKS_MODULE_PERMISSIONS_ERROR: %s", exc)
         return current
 
@@ -429,8 +499,13 @@ class PlatformHookRegistry:
         params: dict[str, Any],
         request: Any = None,
         default_permissions: list[str] | None = None,
+        fail_closed: bool = False,
     ) -> dict[str, Any]:
-        """Resolve canonical module dispatch scope through optional host hooks."""
+        """Resolve canonical module dispatch scope through optional host hooks.
+
+        With ``fail_closed`` a hook exception raises
+        ModuleScopeResolutionError instead of being swallowed.
+        """
 
         app_id = str(requested_scope.get("app_id") or "")
         user_id = _clean_optional(requested_scope.get("user_id"))
@@ -470,6 +545,11 @@ class PlatformHookRegistry:
                     if isinstance(raw_permissions, (list, tuple, set)):
                         permissions = [str(item) for item in raw_permissions if str(item).strip()]
             except Exception as exc:
+                if fail_closed:
+                    raise ModuleScopeResolutionError(
+                        f"module scope resolver hook failed for "
+                        f"{module_name}.{action_name}"
+                    ) from exc
                 logger.warning("PLATFORM_HOOKS_MODULE_SCOPE_ERROR: %s", exc)
 
         permissions = await self.call_module_permissions(
@@ -482,6 +562,7 @@ class PlatformHookRegistry:
             params=params,
             request=request,
             default_permissions=list(permissions),
+            fail_closed=fail_closed,
         ) or []
         return {
             "app_id": app_id,
@@ -568,6 +649,40 @@ class PlatformHookRegistry:
                 return str(name)
         return None
 
+    async def call_ask_context(
+        self,
+        app_id: str,
+        user_id: str,
+        *,
+        page_path: str | None = None,
+        page_context: str | None = None,
+    ) -> dict[str, Any]:
+        """Collect host-provided workspace context for ask-mode exchanges.
+
+        ``page_path`` is the route pattern of the page the user is asking
+        from (when the client sends one), so hooks can resolve page-declared
+        context. Best-effort UX context, never authority: a failing hook is
+        logged and skipped, and earlier registrations win on key collisions.
+        """
+        merged: dict[str, Any] = {}
+        for hook in self._ask_context_hooks:
+            try:
+                res = hook(
+                    app_id=app_id,
+                    user_id=user_id,
+                    page_path=page_path,
+                    page_context=page_context,
+                )
+                if inspect.isawaitable(res):
+                    res = await res
+            except Exception as exc:
+                logger.warning("PLATFORM_HOOKS_ASK_CONTEXT_ERROR: %s", exc)
+                continue
+            if isinstance(res, dict):
+                for key, value in res.items():
+                    merged.setdefault(str(key), value)
+        return merged
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
@@ -604,6 +719,10 @@ class PlatformHookRegistry:
     def has_module_reaction_audit(self) -> bool:
         return bool(self._module_reaction_audit_hooks)
 
+    @property
+    def has_ask_context(self) -> bool:
+        return bool(self._ask_context_hooks)
+
     def summary(self) -> dict[str, Any]:
         return {
             "startup_hooks": len(self._startup_hooks),
@@ -616,6 +735,7 @@ class PlatformHookRegistry:
             "before_module_execution_hooks": len(self._before_module_execution_hooks),
             "module_dispatch_audit_hooks": len(self._module_dispatch_audit_hooks),
             "module_reaction_audit_hooks": len(self._module_reaction_audit_hooks),
+            "ask_context_hooks": len(self._ask_context_hooks),
         }
 
 

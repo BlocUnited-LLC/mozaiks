@@ -1,10 +1,18 @@
 """Workflow-specific GitHub export wrapper for AppGenerator outputs."""
 
 
+import base64
+import zipfile
+from pathlib import Path
 from typing import Any
 
 from factory_app.workflows.AgentGenerator.tools.export_to_github import export_to_github_tool
+from factory_app.workflows.AppGenerator.tools.task_integrity import (
+    artifact_snapshot_digest,
+    planned_artifact_diagnostics,
+)
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_code_versions import (
     build_snapshot_document,
     build_snapshot_document_from_hashes,
@@ -14,6 +22,7 @@ from mozaiksai.core.workflow.generator_support.app_code_versions import (
     persist_patchset,
     persist_snapshot,
 )
+from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
 from mozaiksai.core.workflow.generator_support.workflow_exports import (
     get_latest_workflow_export,
     record_workflow_export,
@@ -26,7 +35,7 @@ def _read_ctx(context_variables: Any | None, key: str) -> Any:
     if context_variables is None or not hasattr(context_variables, "get"):
         return None
     try:
-        return context_variables.get(key)
+        return detach(context_variables.get(key))
     except Exception:
         return None
 
@@ -40,7 +49,7 @@ def _normalize_validation_status(raw: Any) -> str | None:
     return value
 
 
-def resolve_export_gate(context_variables: Any | None) -> dict[str, Any]:
+def resolve_export_gate(context_variables: Any | None, *, files: dict[str, str] | None = None) -> dict[str, Any]:
     reasons: list[str] = []
     validation_status = _normalize_validation_status(_read_ctx(context_variables, "app_validation_status"))
     acceptance_status = _normalize_validation_status(_read_ctx(context_variables, "app_bundle_acceptance_status"))
@@ -65,6 +74,21 @@ def resolve_export_gate(context_variables: Any | None) -> dict[str, Any]:
 
     if integration_passed is not True:
         reasons.append("Integration checks have not passed.")
+
+    plan = _read_ctx(context_variables, "app_build_plan")
+    if not isinstance(plan, dict) or not isinstance(plan.get("build_tasks"), list):
+        reasons.append("The final export has no approved task inventory.")
+
+    snapshot = files if files is not None else (_read_ctx(context_variables, "generated_files") or {})
+    reasons.extend(item["error"] for item in planned_artifact_diagnostics(context_variables, snapshot))
+    if acceptance_status == "passed":
+        accepted = _read_ctx(context_variables, "app_bundle_acceptance_result") or {}
+        try:
+            digest = artifact_snapshot_digest(context_variables, snapshot)
+        except (TypeError, ValueError):
+            digest = None
+        if not digest or accepted.get("snapshot_digest") != digest:
+            reasons.append("The final artifact snapshot does not have matching acceptance evidence.")
 
     return {
         "allow_export": len(reasons) == 0,
@@ -127,6 +151,25 @@ async def export_app_code_to_github(
     session_id, structured_outputs = _get_ctx_meta(context_variables)
 
     gate = resolve_export_gate(context_variables)
+    if gate["allow_export"]:
+        try:
+            snapshot: dict[str, str] = {}
+            prefix = Path(bundle_path).stem + "/"
+            with zipfile.ZipFile(bundle_path) as archive:
+                for info in archive.infolist():
+                    if info.is_dir():
+                        continue
+                    relative = info.filename.removeprefix(prefix)
+                    if not info.filename.startswith(prefix) or safe_relpath(relative) != relative:
+                        raise ValueError(f"noncanonical export path: {info.filename}")
+            for entry in extract_files_from_zip_bundle(bundle_path):
+                path = entry["path"].removeprefix(prefix)
+                if path in snapshot:
+                    raise ValueError(f"duplicate export path: {path}")
+                snapshot[path] = base64.b64decode(entry["contentBase64"], validate=True).decode("utf-8")
+            gate = resolve_export_gate(context_variables, files=snapshot)
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            gate = {**gate, "allow_export": False, "reasons": [f"Final export snapshot unavailable: {exc}"]}
     allow_export = bool(gate["allow_export"])
     reasons = list(gate["reasons"])
 

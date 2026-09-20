@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,6 +21,7 @@ from mozaiksai.core.app_context.store import (
     get_app_context_version,
     get_current_app_context_version,
 )
+from mozaiksai.core.artifacts.content_store import get_artifact_content_store
 from mozaiksai.core.artifacts.store import ArtifactStore
 
 APP_CONTEXT_MISSING_WARNING = (
@@ -366,6 +368,14 @@ async def _load_app_context_graph_ref(
                 f"{APP_CONTEXT_GRAPH_LOAD_WARNING} Artifact '{graph_ref.ref_id}' has no summary payload."
             ]
         )
+    if isinstance(payload, dict) and payload.get("content_ref"):
+        try:
+            raw = await get_artifact_content_store().get_bundle(str(payload["content_ref"]))
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            return AppContextGraphLookupResult(
+                warnings=[f"{APP_CONTEXT_GRAPH_LOAD_WARNING} External payload load failed: {exc}"]
+            )
     try:
         return AppContextGraphLookupResult(graph=AppContextGraph.model_validate(payload))
     except Exception as exc:
@@ -405,6 +415,14 @@ async def _load_source_context_bundle_ref(
                 f"{SOURCE_CONTEXT_LOAD_WARNING} Artifact '{bundle_ref.ref_id}' has no summary payload."
             ]
         )
+    if isinstance(payload, dict) and payload.get("content_ref"):
+        try:
+            raw = await get_artifact_content_store().get_bundle(str(payload["content_ref"]))
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            return SourceContextBundleLookupResult(
+                warnings=[f"{SOURCE_CONTEXT_LOAD_WARNING} External payload load failed: {exc}"]
+            )
     try:
         return SourceContextBundleLookupResult(bundle=SourceCorpusBundle.model_validate(payload))
     except Exception as exc:
@@ -444,6 +462,14 @@ async def _load_app_intelligence_snapshot_ref(
                 f"{APP_INTELLIGENCE_LOAD_WARNING} Artifact '{snapshot_ref.ref_id}' has no summary payload."
             ]
         )
+    if isinstance(payload, dict) and payload.get("content_ref"):
+        try:
+            raw = await get_artifact_content_store().get_bundle(str(payload["content_ref"]))
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            return AppIntelligenceSnapshotLookupResult(
+                warnings=[f"{APP_INTELLIGENCE_LOAD_WARNING} External payload load failed: {exc}"]
+            )
     try:
         return AppIntelligenceSnapshotLookupResult(snapshot=AppIntelligenceSnapshot.model_validate(payload))
     except Exception as exc:

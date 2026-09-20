@@ -17,6 +17,13 @@ APP_NAME_SOURCE_SET = set(APP_NAME_SOURCES)
 GENERIC_APP_NAMES = {"new app", "untitled app", "untitled", "app", "my app"}
 
 
+def owner_filter(owner_user_id: str) -> dict[str, str]:
+    owner = normalize_optional_text(owner_user_id)
+    if not owner:
+        raise ValueError("owner_user_id is required")
+    return {"owner_user_id": owner}
+
+
 def validate_lifecycle_state(value: str) -> str:
     normalized = str(value or "").strip().lower()
     if normalized not in APP_LIFECYCLE_STATE_SET:

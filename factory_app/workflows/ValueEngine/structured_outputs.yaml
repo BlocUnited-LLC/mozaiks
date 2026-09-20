@@ -1,3 +1,4 @@
+schema_version: mozaiks.structured_outputs.v1
 # ValueEngine Structured Outputs
 # Planning schemas for app concept, capability mapping, and build decomposition
 

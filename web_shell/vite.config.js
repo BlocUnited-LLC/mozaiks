@@ -4,6 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import fs from 'fs';
+import { createHash } from 'node:crypto';
+import { workflowUiPlugin } from './workflowUi.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require   = createRequire(import.meta.url);
@@ -51,20 +53,7 @@ function resolveFirstExistingPath(candidates) {
   return candidates[candidates.length - 1];
 }
 
-function hasWorkflowDefinitions(candidate) {
-  try {
-    if (!fs.existsSync(candidate) || !fs.statSync(candidate).isDirectory()) return false;
-    return fs.readdirSync(candidate, { withFileTypes: true }).some((entry) => {
-      if (!entry.isDirectory()) return false;
-      if (entry.name === 'extended_orchestration') return false;
-      return fs.existsSync(path.join(candidate, entry.name, 'orchestrator.yaml'));
-    });
-  } catch {
-    return false;
-  }
-}
-
-function resolveWorkflowRoot(platformAppDir, platformInputPath, workflowsEnvPath, factoryWorkflowsRoot, chatUiSrcRoot) {
+function resolveWorkflowRoot(platformAppDir, workflowsEnvPath, factoryWorkflowsRoot, chatUiSrcRoot) {
   const stubRoot = path.resolve(chatUiSrcRoot, 'workflows_stub');
   const resolveCandidate = (candidate) => {
     if (!candidate) return '';
@@ -77,23 +66,12 @@ function resolveWorkflowRoot(platformAppDir, platformInputPath, workflowsEnvPath
     return resolveCandidate(workflowsEnvPath);
   }
 
-  const appWorkflowRoot = path.resolve(platformAppDir, 'workflows');
-  if (hasWorkflowDefinitions(appWorkflowRoot)) {
-    return appWorkflowRoot;
-  }
-
-  const workspaceWorkflowRoot = path.resolve(platformInputPath, 'workflows');
-  if (workspaceWorkflowRoot !== appWorkflowRoot && hasWorkflowDefinitions(workspaceWorkflowRoot)) {
+  const workspaceRoot = path.basename(platformAppDir) === 'app' ? path.dirname(platformAppDir) : platformAppDir;
+  const workspaceWorkflowRoot = path.resolve(workspaceRoot, 'workflows');
+  if (fs.existsSync(workspaceWorkflowRoot) && fs.statSync(workspaceWorkflowRoot).isDirectory()) {
     return workspaceWorkflowRoot;
   }
-
-  if (hasWorkflowDefinitions(factoryWorkflowsRoot)) {
-    return factoryWorkflowsRoot;
-  }
-
   return resolveFirstExistingPath([
-    appWorkflowRoot,
-    workspaceWorkflowRoot,
     factoryWorkflowsRoot,
     stubRoot,
   ]);
@@ -195,13 +173,12 @@ export default defineConfig(({ mode }) => {
     '';
   const platformWorkflowRoot = resolveWorkflowRoot(
     platformAppDir,
-    platformInputPath,
     workflowsEnv,
     factoryWorkflowsRoot,
     chatUiSrcRoot,
   );
 
-  // Platform UI extensions come from the active app bundle: <app>/ui/index.js
+  // Schema-only apps do not need a custom registration barrel.
   const platformExtensionsFile = path.resolve(platformAppDir, 'ui/index.js');
   const platformAppDirForward = platformAppDir.replace(/\\/g, '/');
 
@@ -237,7 +214,7 @@ export default defineConfig(({ mode }) => {
   const appConfig = fs.existsSync(appConfigPath)
     ? require(appConfigPath)
     : {};
-  const apiUrl = process.env.VITE_API_URL || rootEnv.VITE_API_URL || appConfig.apiUrl || 'http://localhost:8000';
+  const apiUrl = process.env.MOZAIKS_BACKEND_URL || rootEnv.MOZAIKS_BACKEND_URL || process.env.VITE_API_URL || rootEnv.VITE_API_URL || appConfig.apiUrl || 'http://localhost:8000';
   const hostMode = process.env.VITE_MOZAIKS_HOST || rootEnv.VITE_MOZAIKS_HOST || process.env.MOZAIKS_HOST || rootEnv.MOZAIKS_HOST || 'studio';
   const resolveFavicon = () => {
     const themeConfigPath = path.join(platformBrandDir, 'theme_config.json');
@@ -256,7 +233,21 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
+  cacheDir: path.join(__dirname, 'node_modules', '.vite-apps', createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)),
   plugins: [
+    {
+      name: 'mozaiks-app-extensions',
+      resolveId(id) {
+        if (id === '@platform/extensions') return '\0mozaiks-app-extensions';
+      },
+      load(id) {
+        if (id !== '\0mozaiks-app-extensions') return undefined;
+        if (!fs.existsSync(platformExtensionsFile)) return 'export {};';
+        this.addWatchFile(platformExtensionsFile);
+        return `export * from ${JSON.stringify(platformExtensionsFile.replaceAll('\\', '/'))};`;
+      },
+    },
+    workflowUiPlugin({ primaryRoot: platformWorkflowRoot, factoryRoot: factoryWorkflowsRoot }),
     // Pre-process .js files that contain JSX anywhere in the build graph.
     // Covers chat-ui/src, shared factory workflow UIs, active app workflow/module
     // UIs, and product/workspace overlays that still ship JSX in .js files.
@@ -266,6 +257,7 @@ export default defineConfig(({ mode }) => {
       async transform(code, id) {
       const isChatUiJs = /(?:[\\/]chat-ui[\\/]src[\\/]|[\\/]mozaiks_chat_ui[\\/]src[\\/]).*\.js$/.test(id);
         const isWorkflowOrModuleUiJs =
+          [platformWorkflowRoot, factoryWorkflowsRoot].some((root) => id.replace(/\\/g, '/').startsWith(root.replace(/\\/g, '/') + '/') && id.endsWith('.js')) ||
           /[\\/]factory_app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
           /[\\/]factory_app[\\/]app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
           /[\\/]app[\\/](?:workflows|modules)[\\/].*[\\/]ui[\\/].*\.js$/.test(id);
@@ -333,7 +325,6 @@ export default defineConfig(({ mode }) => {
       // App.jsx imports: import { register } from '@platform/extensions'
       // Resolved to the active app root UI barrel, which owns any declared
       // custom routes and management surfaces for that app.
-      '@platform/extensions': platformExtensionsFile,
     },
   },
 

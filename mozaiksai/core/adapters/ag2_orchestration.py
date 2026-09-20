@@ -16,7 +16,7 @@ Responsibilities:
     - cancel() → delegates to SimpleTransport.pause_background_workflow()
     - capabilities() → reports engine version and supported features
 
-This adapter does not own workflow-specific task planning. AG2 1.0 beta provides the
+This adapter does not own workflow-specific task planning. AG2 1.0 provides the
 agent and network execution substrate; Mozaiks owns deterministic contracts
 around AG2, such as workflow YAML loading, structured-output validation, context
 persistence, artifact materialization, and task-batch dependency contracts.
@@ -57,6 +57,7 @@ from mozaiksai.core.ports.orchestration import (
     RunResult,
     RunStatus,
 )
+from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
 
 logger = get_core_logger("ag2_orchestration_adapter")
 
@@ -311,11 +312,16 @@ class AG2OrchestrationAdapter:
         """
         if not request.injected_context:
             return
+        # Guard before the try: a lease-loss refusal must abort the resume,
+        # never degrade into the warning path below.
+        assert_chat_mutable(app_id=request.app_id, chat_id=request.chat_id)
+        from mozaiksai.core.data.persistence import AG2PersistenceManager
+
+        pm = AG2PersistenceManager()
+        await pm.assert_chat_resumable(request.chat_id, request.app_id)
         try:
-            from mozaiksai.core.data.persistence import AG2PersistenceManager
             from mozaiksai.core.multitenant import build_app_scope_filter
 
-            pm = AG2PersistenceManager()
             coll = await pm._coll()
             await coll.update_one(
                 {"_id": request.chat_id, **build_app_scope_filter(request.app_id)},

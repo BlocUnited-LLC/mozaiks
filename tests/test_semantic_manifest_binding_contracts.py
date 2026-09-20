@@ -17,7 +17,6 @@ from mozaiksai.core.semantics import (
     DeploymentProfileSelection,
     ExecutionAccessScopeRef,
     ImplementationBindingRef,
-    RendererSelection,
     SemanticEdge,
     SemanticEdgeKind,
     SemanticGraphRef,
@@ -80,13 +79,7 @@ def _binding(graph, **overrides):
                 pack_digest=DIGEST,
             ),
         ),
-        "renderer_selections": (
-            RendererSelection(
-                requirement_node_id="mozaiks.pages.home",
-                renderer_id="page_schema_renderer",
-                renderer_version="1.0.0",
-            ),
-        ),
+        "renderer_selections": (),
         "deployment_profile_selections": (
             DeploymentProfileSelection(
                 requirement_node_id="mozaiks.targets.default",
@@ -175,9 +168,18 @@ def test_manifest_rejects_cross_scope_references() -> None:
     with pytest.raises(pydantic.ValidationError, match="cross-scope"):
         build_application_manifest(**fields)
 
+
+def test_manifest_rejects_foreign_app_artifact_revision_ref() -> None:
     fields = _manifest_fields()
     fields["artifact_revision_ref"] = ArtifactRevisionRef(
-        subject_id="rev-1", subject_version=1, content_digest=DIGEST, scope=OTHER_SCOPE
+        scope=fields["scope"], app_id="another-app", revision_digest=DIGEST
+    )
+    with pytest.raises(pydantic.ValidationError, match="foreign-app"):
+        build_application_manifest(**fields)
+
+    fields = _manifest_fields()
+    fields["artifact_revision_ref"] = ArtifactRevisionRef(
+        scope=OTHER_SCOPE, app_id="app-1", revision_digest=DIGEST
     )
     with pytest.raises(pydantic.ValidationError, match="cross-scope"):
         build_application_manifest(**fields)
@@ -261,11 +263,11 @@ def test_binding_cannot_select_against_wrong_node_kind() -> None:
     graph = _graph()
     binding = _binding(
         graph,
-        renderer_selections=(
-            RendererSelection(
+        capability_pack_selections=(
+            CapabilityPackSelection(
                 requirement_node_id="mozaiks.events.paid",
-                renderer_id="page_schema_renderer",
-                renderer_version="1.0.0",
+                pack_id="mozaikspay",
+                pack_digest=DIGEST,
             ),
         ),
     )

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+
 
 def _workspace() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -30,10 +32,24 @@ def test_data_table_uses_stable_empty_array_defaults() -> None:
     assert "actions = EMPTY_ARRAY" in source
 
 
-def test_summary_strip_compacts_on_mobile() -> None:
+def test_mobile_table_and_navigation_follow_app_theme() -> None:
+    table = _read("chat-ui/src/ui/primitives/DataTable.jsx")
+    css = _read("chat-ui/src/components/layout/header-styles.css")
+    bar = css.split(".shell-mobile-bottom-bar {", 1)[1].split("}", 1)[0]
+    assert "background: var(--color-surface)" in bar
+    assert "color: var(--color-text-primary)" in bar
+    assert "box-shadow" not in bar
+    assert "overflow-wrap:anywhere" in table
+    assert 'aria-label="Select record"' in table
+
+
+def test_summary_strip_fits_its_container_without_clipping_labels() -> None:
     source = _read("chat-ui/src/ui/primitives/SummaryStrip.jsx")
 
-    assert 'grid grid-cols-2 gap-px bg-border/35 md:grid-cols-4' in source
+    assert 'grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))]' in source
+    assert 'whitespace-normal' in source
+    assert 'overflow-wrap:anywhere' in source
+    assert 'truncate' not in source
     assert 'min-h-[5.75rem]' in source
     assert 'text-xl font-semibold' in source
 
@@ -52,12 +68,23 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert "<AdminTopbar" not in layout_source
     assert "Open Studio navigation" in layout_source
     assert "Studio navigation" in layout_source
-    assert "bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)]" in layout_source
+    # Mobile nav trigger is a sticky top-of-content control (admin-layout
+    # pattern), never a floating pill overlapping the shell bottom bar.
+    assert "sticky top-[calc(env(safe-area-inset-top,0px)+4.5rem)]" in layout_source
+    assert "fixed bottom-[calc(env(safe-area-inset-bottom,0px)" not in layout_source
     assert "max-h-[82dvh]" in layout_source
     assert "top-24 w-[min" not in layout_source
 
     assert 'fixed right-0 bottom-6 z-50 widget-safe-bottom' in widget_source
-    assert 'rounded-l-2xl border border-r-0 border-border/50' in widget_source
+    # The collapsed toggle is the only entry point to the assistant on a
+    # non-chat route, so it must stay high-contrast against the page: an opaque
+    # card surface with a solid primary edge, never a faint translucent tab.
+    assert 'rounded-l-2xl border-2 border-r-0 border-primary/70 bg-card' in widget_source
+    # The mark scales at the same 768px boundary the responsive smoke asserts
+    # against (<=52px wide under it, <=64px at or above), so the desktop toggle
+    # stays prominent without crowding a phone's screen edge.
+    assert 'h-7 w-7 transition-transform group-hover:scale-110 md:h-9 md:w-9' in widget_source
+    assert 'px-2 py-5' in widget_source and 'md:px-2.5' in widget_source
     assert 'w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px]' in widget_source
 
 
@@ -75,6 +102,22 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert "return `/me?${params.toString()}`;" in support_links_source
     assert "buildSupportRequestPayload" in widget_source
     assert "buildSupportRequestPayload" in chat_page_source
+    assert "payload.subject_app_id = cleanAppId" in support_links_source
+    assert "payload.app_id = cleanAppId" not in support_links_source
+    assert "payload.user_id = cleanUserId" not in support_links_source
+    assert "Authorization: `Bearer ${supportToken}`" in widget_source
+    assert "Authorization: `Bearer ${supportToken}`" in chat_page_source
+    assert "getSupportApiBaseUrl(api, config)" in widget_source
+    assert "getSupportApiBaseUrl(api, config)" in chat_page_source
+    assert "appId: resolvedAppId || supportScope.appId" in widget_source
+    assert "appId: currentAppId || supportScope.appId" in chat_page_source
+    assert "Your support request could not be sent. Please try again." in chat_page_source
+    assert "navigate(buildUserSupportPath({ appId: currentAppId }))" not in chat_page_source
+    assert "getAccessToken?.()" in profile_source
+    assert "window.location.origin" in profile_source
+    assert "getToken?.()" not in profile_source
+    assert "studioModuleAction('workspace_support'" in profile_panel_source
+    assert "if (page?.error)" in profile_panel_source
     assert "supportError" in widget_source
     assert "page_title:" not in widget_source
     assert "page_url:" not in widget_source
@@ -122,7 +165,9 @@ def test_dialog_and_overlay_primitives_use_mobile_sheet_layout() -> None:
     transition_source = _read("chat-ui/src/ui/screens/TransitionOverlayFrame.jsx")
     surface_source = _read("chat-ui/src/ui/primitives/Surface.jsx")
 
-    assert 'fixed inset-x-0 bottom-0 z-50 grid w-full' in dialog_source
+    assert 'fixed inset-x-0 bottom-0 z-50 grid' in dialog_source
+    assert 'max-h-[calc(100dvh-1rem)] w-full' in dialog_source
+    assert 'overflow-y-auto' in dialog_source
     assert 'rounded-t-[1.75rem] border-b-0' in dialog_source
     assert 'sm:left-[50%] sm:top-[50%]' in dialog_source
 
@@ -184,6 +229,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
 def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
     manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
     smoke_source = _read("web_shell/playwright/apps.responsive.smoke.spec.js")
+    auth_smoke_source = _read("web_shell/playwright/auth.spec.js")
     console_components = {
         path.stem
         for path in (_workspace() / "factory_app" / "app" / "admin" / "pages").glob("*.jsx")
@@ -191,12 +237,15 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
 
     smoke_titles_by_component = {
         "AppsPage": "apps route stays responsive across desktop and mobile widths",
+        "WorkspacePerformancePage": "workspace performance route stays responsive across desktop and mobile widths",
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
         "WorkspaceUsersPage": "workspace users route stays responsive across desktop and mobile widths",
         "WorkspaceIntegrationsPage": "workspace integrations route stays responsive across desktop and mobile widths",
         "UserSupportPage": "workspace support route stays responsive across desktop and mobile widths",
         "StudioPage": "app Studio root redirects to manifest default portal",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
+        "AppRevenuePage": "app revenue route stays responsive across desktop and mobile widths",
+        "AppUsersPage": "app users analytics route stays responsive across desktop and mobile widths",
         "DashboardPortalPage": "app building route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
         "AppAccessPage": "app access route stays responsive across desktop and mobile widths",
@@ -217,11 +266,15 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         and page["component"] not in _chat_ui_components
     }
 
-    assert route_components == set(smoke_titles_by_component)
+    assert route_components == set(smoke_titles_by_component) | APP_AUTH_COMPONENTS
     for title in smoke_titles_by_component.values():
         assert title in smoke_source
+    assert "Factory login follows discovery and PKCE callback, restores a protected route, and exposes the exchanged token" in auth_smoke_source
+    assert "a forged callback shows failure without authenticated identity" in auth_smoke_source
+    assert "page.goto('/auth/callback?code=unsolicited&state=unknown')" in auth_smoke_source
+    assert "testMatch: 'auth.spec.js'" in _read("web_shell/playwright.auth.config.js")
 
-    assert console_components == route_components | {
+    assert console_components == (route_components - APP_AUTH_COMPONENTS) | {
         "AppStudioChrome",
         "CreateAppRedirectPage",
         "RefinementControls",
@@ -230,6 +283,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "CarryForwardReportSummary",
         "CarryForwardReportPanel",
         "PricingHealthPanel",
+        "MetricDetailPanel",
     }
 
 
@@ -242,7 +296,7 @@ def test_factory_app_react_files_are_classified() -> None:
         if not relative.startswith("factory_app/build_context/")
     }
     # Components registered from chat-ui or custom pages/ (not factory_app/admin/pages/)
-    _non_admin_page_components = {"ProfilePage"}
+    _non_admin_page_components = {"ProfilePage"} | APP_AUTH_COMPONENTS
     route_backed_files = {
         f"factory_app/app/admin/pages/{page['component']}.jsx"
         for page in manifest["pages"]
@@ -252,6 +306,7 @@ def test_factory_app_react_files_are_classified() -> None:
         and page["component"] not in _non_admin_page_components
     }
     support_files = {
+        "factory_app/workflows/AgentGenerator/ui/WorkflowPlanReview.jsx",
         "factory_app/app/admin/pages/AppStudioChrome.jsx",
         "factory_app/app/admin/pages/CreateAppRedirectPage.jsx",
         "factory_app/app/admin/pages/RefinementControls.jsx",
@@ -260,6 +315,8 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/admin/pages/CarryForwardReportSummary.jsx",
         "factory_app/app/admin/pages/CarryForwardReportPanel.jsx",
         "factory_app/app/admin/pages/PricingHealthPanel.jsx",
+        # Universal metric drill-down drawer, opened from analytics surfaces
+        "factory_app/app/admin/pages/MetricDetailPanel.jsx",
         "factory_app/app/ui/components/StudioShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/app/ui/components/OnboardingTour.jsx",
@@ -275,4 +332,122 @@ def test_factory_app_react_files_are_classified() -> None:
     }
 
     assert react_files == route_backed_files | support_files
+    shared_auth_source = _read("chat-ui/src/auth/AuthPages.jsx")
+    for component in APP_AUTH_COMPONENTS:
+        assert f"export function {component}(" in shared_auth_source
 
+
+
+def test_widget_always_offers_workflow_access() -> None:
+    """The widget is ask-only, so its workspace button is the user's only route
+    back into a running build from a non-chat route. It must never be hidden
+    behind an active-session check, and it must reach *any* running session —
+    not only the one this browser last touched."""
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+
+    # Rendered unconditionally (support mode swaps the panel, not the button).
+    assert "{!inSupportMode && (" in widget_source
+    assert "hasActiveWorkflow && !inSupportMode" not in widget_source
+
+    # Server-side session list, not just this browser's stored pointers.
+    assert "/api/sessions/list/" in widget_source
+    assert "const [workflowSessions, setWorkflowSessions] = useState([]);" in widget_source
+
+    # One session resumes directly, several open a picker, none starts one.
+    assert "const handleWorkflowAccess = () => {" in widget_source
+    assert "if (workflowSessions.length > 1) {" in widget_source
+    assert "handleBackToWorkspace(workflowSessions[0]);" in widget_source
+    assert "navigate('/chat?mode=workflow');" in widget_source
+
+    # An explicit pick must win over the stored per-browser chat id.
+    assert "const handleBackToWorkspace = (target = null) => {" in widget_source
+    assert "target?.chat_id" in widget_source
+
+
+def test_page_surfaces_share_one_content_measure() -> None:
+    """Page routes align to the themeable content measure instead of each
+    picking a max-width, which is what left wide viewports with uneven gutters."""
+    tokens_source = _read("chat-ui/src/ui/theme/tokens.js")
+    shell_css_source = _read("web_shell/styles.css")
+    profile_source = _read("chat-ui/src/pages/ProfilePage.jsx")
+
+    assert "const contentWidthScale = {" in tokens_source
+    assert "'--mz-content-max'" in tokens_source
+    assert "content_width = 'wide'" in tokens_source
+    # The shell is Tailwind v4 and CSS-first: tailwind.config.js is vestigial
+    # here, and the --container-* namespace is what actually produces the
+    # max-w-* utility. Declaring the measure anywhere else compiles to nothing.
+    assert "--container-content: var(--mz-content-max, 96rem);" in shell_css_source
+    assert "max-w-content" in profile_source
+    assert "max-w-3xl" not in profile_source.split("const containerClass")[1].split("\n")[0]
+
+
+def test_widget_session_reads_carry_credentials() -> None:
+    """Both widget session reads must send the bearer token. A bare fetch works
+    only while auth is disabled and silently 401s the moment an app enables it,
+    which would quietly strip the widget's workflow access."""
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+
+    assert "import { authFetch } from '../../adapters/api';" in widget_source
+    assert "authFetch(`/api/session/state?" in widget_source
+    assert "authFetch(`/api/sessions/list/" in widget_source
+    assert "fetch(`/api/session/state?" not in widget_source.replace("authFetch(`/api/session/state?", "")
+    assert "fetch(`/api/sessions/list/" not in widget_source.replace("authFetch(`/api/sessions/list/", "")
+
+
+def test_widget_workflow_button_announces_its_state() -> None:
+    """The brand mark inside the button would otherwise supply a static
+    accessible name, so assistive tech announced "Go to workflows" even with
+    several builds running. Verified with Playwright against the built app:
+    the title updated while the accessible name did not."""
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+
+    # One derived label feeds both the tooltip and the accessible name, so the
+    # two cannot drift apart.
+    assert "const workflowAccessLabel = workflowSessions.length > 1" in widget_source
+    assert "title={workflowAccessLabel}" in widget_source
+    assert "aria-label={workflowAccessLabel}" in widget_source
+    # The decorative mark must not contribute a competing name.
+    assert 'alt=""\n                    aria-hidden="true"' in widget_source
+    assert 'alt="Go to workflows"' not in widget_source
+
+
+def test_widget_no_sessions_routes_to_declared_fresh_start_entrypoint() -> None:
+    """With no running workflow the widget must open the app's own declared
+    start-a-build surface, not bare workflow mode.
+
+    Routing to /chat?mode=workflow resolved a workflow from stored client
+    state, so a user with no sessions landed in whichever workflow this browser
+    last touched — observed live as ExistingAppDiscovery (the brownfield
+    adoption flow) instead of the create-app selector.
+    """
+    wrapper_source = _read("chat-ui/src/widget/GlobalChatWidgetWrapper.jsx")
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+
+    # Discovered from shell config, never hardcoded, so any app's own
+    # entrypoint declaration is honored.
+    assert "p?.meta?.freshStart" in wrapper_source
+    assert "freshStartPath={freshStartPath}" in wrapper_source
+    assert "freshStartPath = null," in widget_source
+    assert "navigate(freshStartPath);" in widget_source
+
+    # The guessed-workflow route stays only as a last resort for an app that
+    # declares no entrypoint at all.
+    access_block = widget_source.split("const handleWorkflowAccess")[1].split("};")[0]
+    assert access_block.index("navigate(freshStartPath);") < access_block.index(
+        "navigate('/chat?mode=workflow');"
+    )
+
+
+def test_factory_declares_a_fresh_start_entrypoint() -> None:
+    """The widget's fresh-start routing depends on this declaration existing."""
+    registry = json.loads(
+        _read("factory_app/workflows/extended_orchestration/extension_registry.json")
+    )
+    fresh = [
+        entry for entry in registry.get("entrypoints", [])
+        if (entry.get("meta") or {}).get("freshStart")
+    ]
+    assert fresh, "no entrypoint declares meta.freshStart"
+    assert fresh[0]["path"] == "/create"
+    assert fresh[0]["transition"] == "app_type_selector"

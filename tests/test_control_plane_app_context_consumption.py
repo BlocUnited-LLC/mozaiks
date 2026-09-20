@@ -144,7 +144,7 @@ def _greenfield_bundle() -> ArtifactVersionDoc:
             {"path": "app/ui/pages/home.yaml"},
             {"path": "app/modules/accounts/module.yaml"},
             {"path": "app/services/integrations/email_gateway_client.py"},
-            {"path": "app/config/integrations/email_gateway.json"},
+            {"path": "app/config/integrations/email_gateway.yaml"},
         ],
         commit_metadata={"metadata": {"artifact_path": "generated/apps/greenfield/app.zip"}},
     )

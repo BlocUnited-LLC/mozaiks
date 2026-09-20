@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+
 
 def _workspace() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -32,7 +34,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     manifest_source = _read("factory_app/app/ui/route_manifest.json")
     assert '@app.get("/api/studio/apps")' in studio_source
     assert '@app.post("/api/studio/apps")' in studio_source
-    assert '@app.put("/api/studio/apps/{build_registry_id}/status")' in studio_source
+    assert '@app.put("/api/studio/apps/{build_registry_id}/status")' not in studio_source
     assert '@app.get("/api/studio/build")' in studio_source
     assert '@app.put("/api/studio/build")' in studio_source
     assert 'build_shell_config(surface="studio")' in studio_source
@@ -166,7 +168,9 @@ def test_dashboard_portal_page_renders_manifest_build_panels() -> None:
     source = _read("factory_app/app/admin/pages/DashboardPortalPage.jsx")
     manifest_source = _read("factory_app/app/ui/route_manifest.json")
 
-    assert "fetchDashboardConfig({ scope, appId" in source
+    assert "fetchDashboardConfig({ scope, signal:" in source
+    routes = _read("factory_app/app/admin/pages/dashboardRoutes.js")
+    assert "params.set('app_id'" not in routes
     assert "routePatternMatches(item.route, pathname)" in source
     assert "case 'build_requests':" in source
     assert "case 'artifact_timeline':" in source
@@ -182,8 +186,7 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     studio_page_source = _read("factory_app/app/admin/pages/StudioPage.jsx")
     model_source = _read("factory_app/app/admin/pages/workspaceStudioModel.js")
     hook_source = _read("factory_app/app/admin/pages/useWorkspaceApps.js")
-    create_hook_source = _read("factory_app/workflows/ValueEngine/tools/create_app_record.py")
-    update_hook_source = _read("factory_app/workflows/AppGenerator/tools/update_app_record.py")
+    binding_source = _read("factory_app/workflows/_shared/platform/build_target.py")
     layout_source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     assert "/api/studio/apps" in hook_source
     assert "/api/studio/dashboard" in _read("factory_app/app/admin/pages/dashboardRoutes.js")
@@ -195,12 +198,10 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "manifest-declared default App Dashboard portal" in studio_page_source
     assert "getDefaultPortalRoute(payload, 'app')" in studio_page_source
     assert "location.pathname}/overview" not in studio_page_source
-    assert "/api/studio/apps" in create_hook_source
-    assert "_provisional_build_app_id" in create_hook_source
-    assert "No persisted user build intent" not in create_hook_source
-    assert "/api/modules/app_registry" not in create_hook_source
-    assert "/api/studio/apps/{record_id}/status" in update_hook_source
-    assert "/api/modules/app_registry" not in update_hook_source
+    assert "AppRegistryService().resolve_build_binding" in binding_source
+    assert "persisted_binding=session_fields.get" in binding_source
+    assert not (_workspace() / "factory_app/workflows/ValueEngine/tools/create_app_record.py").exists()
+    assert not (_workspace() / "factory_app/workflows/AppGenerator/tools/update_app_record.py").exists()
     assert "resolveShellLabel(appName, appId)" in layout_source
     assert "resolveShellSubtext(appId)" in layout_source
     assert "resolveShellMonogram(label)" in layout_source
@@ -305,23 +306,26 @@ def test_admin_studio_pages_use_workspace_layout_not_page_frame() -> None:
 
 
 def test_route_manifest_components_all_registered_in_admin_index() -> None:
-    """Every component named in factory_app/app/ui/route_manifest.json must have
-    a registerComponent() call in factory_app/app/admin/index.js, or the shell
-    will log 'Component Not Registered' and render nothing."""
+    """Factory routes bind app admin components or the two shared auth pages."""
     import json
     manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
     admin_index = _read("factory_app/app/admin/index.js")
+    shell_bootstrap = _read("web_shell/App.jsx")
+    shared_auth_pages = _read("chat-ui/src/auth/AuthPages.jsx")
 
     unregistered = []
     for page in manifest["pages"]:
         component = page.get("component")
         if not component or component == "AdminPortal":
             continue
-        if f"registerComponent('{component}'" not in admin_index:
+        if component in APP_AUTH_COMPONENTS:
+            assert f"export function {component}(" in shared_auth_pages
+            assert f"registerComponent('{component}', {component})" in shell_bootstrap
+        elif f"registerComponent('{component}'" not in admin_index:
             unregistered.append(component)
 
     assert not unregistered, (
-        f"Components in route_manifest.json not registered in admin/index.js: {unregistered}. "
+        f"Factory-owned components in route_manifest.json not registered in admin/index.js: {unregistered}. "
         "Add a registerComponent() call for each or the shell will fail to render the route."
     )
 

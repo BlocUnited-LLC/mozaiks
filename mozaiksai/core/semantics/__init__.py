@@ -41,6 +41,7 @@ from mozaiksai.core.semantics.manifest import (
     ApplicationManifest,
     build_application_manifest,
 )
+from mozaiksai.core.semantics.opaque_artifact import PreservedOpaqueArtifact
 from mozaiksai.core.semantics.refs import (
     ApplicationManifestRef,
     ArtifactRevisionRef,
@@ -49,6 +50,7 @@ from mozaiksai.core.semantics.refs import (
     CompilationPlanRef,
     ExecutionAccessScopeRef,
     ImplementationBindingRef,
+    PlanUnitRef,
     RefDocumentType,
     RefinementPatchRef,
     SemanticGraphRef,
@@ -74,6 +76,8 @@ __all__ = [
     "ExecutionAccessScopeRef",
     "ImplementationBinding",
     "ImplementationBindingRef",
+    "PlanUnitRef",
+    "PreservedOpaqueArtifact",
     "RefDocumentType",
     "ReferenceResolutionError",
     "RefinementPatchRef",

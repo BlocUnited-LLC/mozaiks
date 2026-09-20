@@ -1,0 +1,1978 @@
+{
+  "base_commit": "430d3ffaeab0b27843d7fbeba275c5be316ff586",
+  "derivation": "tests.slice_5b_composition_helpers.composition_fixture",
+  "config_fingerprint": "9aa3360290e37b5f5f930208d161eda511d08969efa1acd6faee5e949fe7ed21",
+  "selected_model_config": {
+    "type": "model",
+    "description": "Exact source for one predeclared module-local helper.",
+    "fields": {
+      "assignment_kind": {
+        "type": "literal",
+        "values": [
+          "module_helper_implementation"
+        ]
+      },
+      "module_id": {
+        "type": "str",
+        "description": "Canonical owning module identity supplied by the assignment."
+      },
+      "helper_id": {
+        "type": "str",
+        "description": "Canonical helper identity supplied by the declaration."
+      },
+      "helper_source": {
+        "type": "str",
+        "description": "UTF-8 source for the single compiler-owned helper path."
+      }
+    }
+  },
+  "input_document_fingerprint": "dfaa950cf84bd4df7be9086e88b71e9a82b9f3a52e9459303986bd2376b98af7",
+  "input_document_bytes_fingerprint": "c46ef25b950e50d4571e7a771e0a9cfc09211e5c46239185b5652a70c874737f",
+  "descriptor_snapshot": {
+    "registry_schema_version": "mozaiks.assignment_contract_registry.v1",
+    "descriptors": [
+      {
+        "assignment_kind": "app_route_extension_implementation",
+        "workflow_name": "AppGenerator",
+        "structured_output_model_id": "AppRouteExtensionImplementationOutput",
+        "owned_artifact_families": [
+          "app_service_route"
+        ],
+        "validator_ids": [
+          "generated_app_validator"
+        ],
+        "identity_bindings": [
+          [
+            "route_id",
+            "pack_id"
+          ]
+        ]
+      },
+      {
+        "assignment_kind": "custom_page_implementation",
+        "workflow_name": "AppGenerator",
+        "structured_output_model_id": "CustomPageImplementationOutput",
+        "owned_artifact_families": [
+          "app_ui_custom_route"
+        ],
+        "validator_ids": [
+          "generated_app_validator"
+        ],
+        "identity_bindings": [
+          [
+            "page_id",
+            "page_id"
+          ]
+        ]
+      },
+      {
+        "assignment_kind": "integration_adapter_implementation",
+        "workflow_name": "AppGenerator",
+        "structured_output_model_id": "IntegrationAdapterImplementationOutput",
+        "owned_artifact_families": [
+          "app_service_adapter"
+        ],
+        "validator_ids": [
+          "generated_app_validator"
+        ],
+        "identity_bindings": [
+          [
+            "integration_id",
+            "pack_id"
+          ],
+          [
+            "adapter_area",
+            "adapter_area"
+          ]
+        ]
+      },
+      {
+        "assignment_kind": "module_admin_page_implementation",
+        "workflow_name": "AppGenerator",
+        "structured_output_model_id": "ModuleAdminPageImplementationOutput",
+        "owned_artifact_families": [
+          "module_admin_ui"
+        ],
+        "validator_ids": [
+          "generated_app_validator"
+        ],
+        "identity_bindings": [
+          [
+            "module_id",
+            "module_id"
+          ],
+          [
+            "page_id",
+            "page_id"
+          ]
+        ]
+      },
+      {
+        "assignment_kind": "module_backend_implementation",
+        "workflow_name": "AppGenerator",
+        "structured_output_model_id": "ModuleBackendImplementationOutput",
+        "owned_artifact_families": [
+          "module_backend_policy",
+          "module_backend_repo",
+          "module_backend_schemas",
+          "module_backend_service"
+        ],
+        "validator_ids": [
+          "module_loader"
+        ],
+        "identity_bindings": [
+          [
+            "module_id",
+            "module_id"
+          ],
+          [
+            "backend_role",
+            "backend_role"
+          ]
+        ]
+      },
+      {
+        "assignment_kind": "module_helper_implementation",
+        "workflow_name": "AppGenerator",
+        "structured_output_model_id": "ModuleHelperImplementationOutput",
+        "owned_artifact_families": [
+          "module_backend_helper"
+        ],
+        "validator_ids": [
+          "module_loader"
+        ],
+        "identity_bindings": [
+          [
+            "module_id",
+            "module_id"
+          ],
+          [
+            "helper_id",
+            "helper_id"
+          ]
+        ]
+      },
+      {
+        "assignment_kind": "workflow_participant_implementation",
+        "workflow_name": "AgentGenerator",
+        "structured_output_model_id": "WorkflowParticipantImplementationOutput",
+        "owned_artifact_families": [
+          "workflow_config"
+        ],
+        "validator_ids": [
+          "workflow_manager"
+        ],
+        "identity_bindings": [
+          [
+            "workflow_id",
+            "workflow_id"
+          ]
+        ]
+      },
+      {
+        "assignment_kind": "workflow_structured_models_implementation",
+        "workflow_name": "AgentGenerator",
+        "structured_output_model_id": "WorkflowStructuredModelsOutput",
+        "owned_artifact_families": [
+          "workflow_config"
+        ],
+        "validator_ids": [
+          "workflow_manager"
+        ],
+        "identity_bindings": [
+          [
+            "workflow_id",
+            "workflow_id"
+          ]
+        ]
+      },
+      {
+        "assignment_kind": "workflow_tool_implementation",
+        "workflow_name": "AgentGenerator",
+        "structured_output_model_id": "WorkflowToolImplementationOutput",
+        "owned_artifact_families": [
+          "workflow_tool"
+        ],
+        "validator_ids": [
+          "workflow_manager"
+        ],
+        "identity_bindings": [
+          [
+            "workflow_id",
+            "workflow_id"
+          ],
+          [
+            "tool_id",
+            "tool_id"
+          ]
+        ]
+      },
+      {
+        "assignment_kind": "workflow_ui_implementation",
+        "workflow_name": "AgentGenerator",
+        "structured_output_model_id": "WorkflowUiImplementationOutput",
+        "owned_artifact_families": [
+          "workflow_ui"
+        ],
+        "validator_ids": [
+          "generated_app_validator"
+        ],
+        "identity_bindings": [
+          [
+            "workflow_id",
+            "workflow_id"
+          ],
+          [
+            "component_id",
+            "component_id"
+          ]
+        ]
+      }
+    ]
+  },
+  "reference": {
+    "ref_schema_version": "mozaiks.structured_output_contract_ref.v1",
+    "workflow_name": "AppGenerator",
+    "model_id": "ModuleHelperImplementationOutput",
+    "schema_digest": "aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7"
+  },
+  "provider_influenced_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "assignment_kind": {
+        "enum": [
+          "module_helper_implementation"
+        ],
+        "title": "LiteralEnum_0ce647e185bd",
+        "type": "string"
+      },
+      "module_id": {
+        "description": "Canonical owning module identity supplied by the assignment.",
+        "title": "Module Id",
+        "type": "string"
+      },
+      "helper_id": {
+        "description": "Canonical helper identity supplied by the declaration.",
+        "title": "Helper Id",
+        "type": "string"
+      },
+      "helper_source": {
+        "description": "UTF-8 source for the single compiler-owned helper path.",
+        "title": "Helper Source",
+        "type": "string"
+      }
+    },
+    "required": [
+      "assignment_kind",
+      "module_id",
+      "helper_id",
+      "helper_source"
+    ],
+    "title": "ModuleHelperImplementationOutput",
+    "type": "object"
+  },
+  "unmodified_basemodel_schema": {
+    "$defs": {
+      "LiteralEnum_0ce647e185bd": {
+        "enum": [
+          "module_helper_implementation"
+        ],
+        "title": "LiteralEnum_0ce647e185bd",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assignment_kind": {
+        "$ref": "#/$defs/LiteralEnum_0ce647e185bd"
+      },
+      "module_id": {
+        "description": "Canonical owning module identity supplied by the assignment.",
+        "title": "Module Id",
+        "type": "string"
+      },
+      "helper_id": {
+        "description": "Canonical helper identity supplied by the declaration.",
+        "title": "Helper Id",
+        "type": "string"
+      },
+      "helper_source": {
+        "description": "UTF-8 source for the single compiler-owned helper path.",
+        "title": "Helper Source",
+        "type": "string"
+      }
+    },
+    "required": [
+      "assignment_kind",
+      "module_id",
+      "helper_id",
+      "helper_source"
+    ],
+    "title": "ModuleHelperImplementationOutput",
+    "type": "object"
+  },
+  "base_plan": {
+    "document": {
+      "schema_version": "mozaiks.compilation_plan.v1",
+      "graph_id": "corpus-app",
+      "graph_version": 1,
+      "scope": {
+        "ref_schema_version": "mozaiks.execution_access_scope_ref.v1",
+        "tenant_id": "tenant1",
+        "workspace_id": "ws1",
+        "pre_app_scope_id": null
+      },
+      "graph_digest": "53684ec763a2ee80ddabab585340f82f0e1a77fb74960f08fc4426985860b274",
+      "scope_selection": {
+        "app_manifest_scope": "app_bundle_root",
+        "module_scope": "app_bundle_root",
+        "workflow_manifest_scope": "workflow_relative"
+      },
+      "registry_schema_version": "mozaiks.app_layout.v2",
+      "registry_digest": "7957e4fbcfde2f3431c7511e8b1bff5c5ba164643f31c1f9a1dccd0bb2d8aaae",
+      "assignment_contracts_digest": "e37d35bab40ada0b1a9ef772f20beb9c73a3dbe7c565a66967f66ba04279fb99",
+      "units": [
+        {
+          "unit_id": "app_integrations_config/220f7104547e",
+          "family_kind": "app_integrations_config",
+          "family_identity_digest": "220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "config/integrations.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_paths",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "app_manifest/4a3db375c920",
+          "family_kind": "app_manifest",
+          "family_identity_digest": "4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "app.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.auth.corpus",
+              "payload_digest": "576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_loader",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "app_secret_references/d3d82ba33c06",
+          "family_kind": "app_secret_references",
+          "family_identity_digest": "d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "security/secrets.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "app_ui_page_schema/home/484a8be83170",
+          "family_kind": "app_ui_page_schema",
+          "family_identity_digest": "484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "page_id",
+              "home"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/pages/home.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7"
+            },
+            {
+              "node_id": "mozaiks.section.hero",
+              "payload_digest": "f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167"
+            },
+            {
+              "node_id": "mozaiks.section.pricing",
+              "payload_digest": "de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.hero",
+              "discriminator": null,
+              "edge_identity": "5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45"
+            },
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.pricing",
+              "discriminator": null,
+              "edge_identity": "8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "page_schema_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "app_ui_route_manifest/c8c7777a62de",
+          "family_kind": "app_ui_route_manifest",
+          "family_identity_digest": "c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/route_manifest.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [
+            "app_ui_page_schema/home/484a8be83170"
+          ],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+          "family_kind": "module_backend_helper",
+          "family_identity_digest": "a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc",
+          "disposition": "agent_author",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "helper_id",
+              "report_hook"
+            ],
+            [
+              "module_id",
+              "reports"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "modules/reports/backend/report_hook.py"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.artifact.report_hook",
+              "payload_digest": "fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30"
+            },
+            {
+              "node_id": "mozaiks.module.reports",
+              "payload_digest": "46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "owns",
+              "source_node_id": "mozaiks.module.reports",
+              "target_node_id": "mozaiks.artifact.report_hook",
+              "discriminator": null,
+              "edge_identity": "dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "preserved_opaque",
+          "assignment_kind": "module_helper_implementation",
+          "validator": "module_loader",
+          "required_structured_output_ref": {
+            "ref_schema_version": "mozaiks.structured_output_contract_ref.v1",
+            "workflow_name": "AppGenerator",
+            "model_id": "ModuleHelperImplementationOutput",
+            "schema_digest": "aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7"
+          },
+          "base_plan_digest": null
+        }
+      ],
+      "gaps": [],
+      "plan_digest": "567df30ed2df0ebb0557915a22f048f09758b45cb3c793da4f89d51a2495c6ec"
+    },
+    "serialized_json": "{\"schema_version\":\"mozaiks.compilation_plan.v1\",\"graph_id\":\"corpus-app\",\"graph_version\":1,\"scope\":{\"ref_schema_version\":\"mozaiks.execution_access_scope_ref.v1\",\"tenant_id\":\"tenant1\",\"workspace_id\":\"ws1\",\"pre_app_scope_id\":null},\"graph_digest\":\"53684ec763a2ee80ddabab585340f82f0e1a77fb74960f08fc4426985860b274\",\"scope_selection\":{\"app_manifest_scope\":\"app_bundle_root\",\"module_scope\":\"app_bundle_root\",\"workflow_manifest_scope\":\"workflow_relative\"},\"registry_schema_version\":\"mozaiks.app_layout.v2\",\"registry_digest\":\"7957e4fbcfde2f3431c7511e8b1bff5c5ba164643f31c1f9a1dccd0bb2d8aaae\",\"assignment_contracts_digest\":\"e37d35bab40ada0b1a9ef772f20beb9c73a3dbe7c565a66967f66ba04279fb99\",\"units\":[{\"unit_id\":\"app_integrations_config/220f7104547e\",\"family_kind\":\"app_integrations_config\",\"family_identity_digest\":\"220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"config/integrations.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.integration.email\",\"payload_digest\":\"0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"app_paths\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"app_manifest/4a3db375c920\",\"family_kind\":\"app_manifest\",\"family_identity_digest\":\"4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"app.json\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.auth.corpus\",\"payload_digest\":\"576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"app_loader\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"app_secret_references/d3d82ba33c06\",\"family_kind\":\"app_secret_references\",\"family_identity_digest\":\"d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"security/secrets.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.integration.email\",\"payload_digest\":\"0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"app_ui_page_schema/home/484a8be83170\",\"family_kind\":\"app_ui_page_schema\",\"family_identity_digest\":\"484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[[\"page_id\",\"home\"]],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"ui/pages/home.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.page.home\",\"payload_digest\":\"ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7\"},{\"node_id\":\"mozaiks.section.hero\",\"payload_digest\":\"f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167\"},{\"node_id\":\"mozaiks.section.pricing\",\"payload_digest\":\"de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d\"}],\"edge_sources\":[{\"kind\":\"renders\",\"source_node_id\":\"mozaiks.page.home\",\"target_node_id\":\"mozaiks.section.hero\",\"discriminator\":null,\"edge_identity\":\"5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45\"},{\"kind\":\"renders\",\"source_node_id\":\"mozaiks.page.home\",\"target_node_id\":\"mozaiks.section.pricing\",\"discriminator\":null,\"edge_identity\":\"8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb\"}],\"depends_on_units\":[],\"materializer\":\"page_schema_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"app_ui_route_manifest/c8c7777a62de\",\"family_kind\":\"app_ui_route_manifest\",\"family_identity_digest\":\"c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"ui/route_manifest.json\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.page.home\",\"payload_digest\":\"ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7\"}],\"edge_sources\":[],\"depends_on_units\":[\"app_ui_page_schema/home/484a8be83170\"],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"module_backend_helper/report_hook-reports/a641fcf1cb52\",\"family_kind\":\"module_backend_helper\",\"family_identity_digest\":\"a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc\",\"disposition\":\"agent_author\",\"source_scope\":\"declared\",\"placeholder_values\":[[\"helper_id\",\"report_hook\"],[\"module_id\",\"reports\"]],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"modules/reports/backend/report_hook.py\"}],\"sources\":[{\"node_id\":\"mozaiks.artifact.report_hook\",\"payload_digest\":\"fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30\"},{\"node_id\":\"mozaiks.module.reports\",\"payload_digest\":\"46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93\"}],\"edge_sources\":[{\"kind\":\"owns\",\"source_node_id\":\"mozaiks.module.reports\",\"target_node_id\":\"mozaiks.artifact.report_hook\",\"discriminator\":null,\"edge_identity\":\"dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8\"}],\"depends_on_units\":[],\"materializer\":\"preserved_opaque\",\"assignment_kind\":\"module_helper_implementation\",\"validator\":\"module_loader\",\"required_structured_output_ref\":{\"ref_schema_version\":\"mozaiks.structured_output_contract_ref.v1\",\"workflow_name\":\"AppGenerator\",\"model_id\":\"ModuleHelperImplementationOutput\",\"schema_digest\":\"aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7\"},\"base_plan_digest\":null}],\"gaps\":[],\"plan_digest\":\"567df30ed2df0ebb0557915a22f048f09758b45cb3c793da4f89d51a2495c6ec\"}",
+    "units": [
+      {
+        "unit_id": "app_integrations_config/220f7104547e",
+        "document": {
+          "unit_id": "app_integrations_config/220f7104547e",
+          "family_kind": "app_integrations_config",
+          "family_identity_digest": "220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "config/integrations.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_paths",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_integrations_config/220f7104547e",
+          "family_kind": "app_integrations_config",
+          "family_identity_digest": "220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "config/integrations.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_paths",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_integrations_config/220f7104547e\",\"family_kind\":\"app_integrations_config\",\"family_identity_digest\":\"220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"config/integrations.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.integration.email\",\"payload_digest\":\"0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"app_paths\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "cc16ed69adc34ad323245c4ec84c3a60369c553b3e68a4afff0fa046bd162902"
+      },
+      {
+        "unit_id": "app_manifest/4a3db375c920",
+        "document": {
+          "unit_id": "app_manifest/4a3db375c920",
+          "family_kind": "app_manifest",
+          "family_identity_digest": "4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "app.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.auth.corpus",
+              "payload_digest": "576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_loader",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_manifest/4a3db375c920",
+          "family_kind": "app_manifest",
+          "family_identity_digest": "4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "app.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.auth.corpus",
+              "payload_digest": "576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_loader",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_manifest/4a3db375c920\",\"family_kind\":\"app_manifest\",\"family_identity_digest\":\"4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"app.json\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.auth.corpus\",\"payload_digest\":\"576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"app_loader\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "4036c49be656dca46bf72f37ec1399f53d63119d2bbfa81f09ee45d7f118410e"
+      },
+      {
+        "unit_id": "app_secret_references/d3d82ba33c06",
+        "document": {
+          "unit_id": "app_secret_references/d3d82ba33c06",
+          "family_kind": "app_secret_references",
+          "family_identity_digest": "d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "security/secrets.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_secret_references/d3d82ba33c06",
+          "family_kind": "app_secret_references",
+          "family_identity_digest": "d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "security/secrets.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_secret_references/d3d82ba33c06\",\"family_kind\":\"app_secret_references\",\"family_identity_digest\":\"d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"security/secrets.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.integration.email\",\"payload_digest\":\"0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "0c7cfa0b204eda26d793c6d33378f0b241cfe68f5a993e703432453b296a3245"
+      },
+      {
+        "unit_id": "app_ui_page_schema/home/484a8be83170",
+        "document": {
+          "unit_id": "app_ui_page_schema/home/484a8be83170",
+          "family_kind": "app_ui_page_schema",
+          "family_identity_digest": "484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "page_id",
+              "home"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/pages/home.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7"
+            },
+            {
+              "node_id": "mozaiks.section.hero",
+              "payload_digest": "f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167"
+            },
+            {
+              "node_id": "mozaiks.section.pricing",
+              "payload_digest": "de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.hero",
+              "discriminator": null,
+              "edge_identity": "5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45"
+            },
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.pricing",
+              "discriminator": null,
+              "edge_identity": "8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "page_schema_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_ui_page_schema/home/484a8be83170",
+          "family_kind": "app_ui_page_schema",
+          "family_identity_digest": "484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "page_id",
+              "home"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/pages/home.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7"
+            },
+            {
+              "node_id": "mozaiks.section.hero",
+              "payload_digest": "f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167"
+            },
+            {
+              "node_id": "mozaiks.section.pricing",
+              "payload_digest": "de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.hero",
+              "discriminator": null,
+              "edge_identity": "5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45"
+            },
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.pricing",
+              "discriminator": null,
+              "edge_identity": "8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "page_schema_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_ui_page_schema/home/484a8be83170\",\"family_kind\":\"app_ui_page_schema\",\"family_identity_digest\":\"484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[[\"page_id\",\"home\"]],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"ui/pages/home.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.page.home\",\"payload_digest\":\"ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7\"},{\"node_id\":\"mozaiks.section.hero\",\"payload_digest\":\"f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167\"},{\"node_id\":\"mozaiks.section.pricing\",\"payload_digest\":\"de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d\"}],\"edge_sources\":[{\"kind\":\"renders\",\"source_node_id\":\"mozaiks.page.home\",\"target_node_id\":\"mozaiks.section.hero\",\"discriminator\":null,\"edge_identity\":\"5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45\"},{\"kind\":\"renders\",\"source_node_id\":\"mozaiks.page.home\",\"target_node_id\":\"mozaiks.section.pricing\",\"discriminator\":null,\"edge_identity\":\"8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb\"}],\"depends_on_units\":[],\"materializer\":\"page_schema_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "805714f93333d96ff4abfc56087ae3a4103a630c3929c67e0f8174fc32980f9b"
+      },
+      {
+        "unit_id": "app_ui_route_manifest/c8c7777a62de",
+        "document": {
+          "unit_id": "app_ui_route_manifest/c8c7777a62de",
+          "family_kind": "app_ui_route_manifest",
+          "family_identity_digest": "c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/route_manifest.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [
+            "app_ui_page_schema/home/484a8be83170"
+          ],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_ui_route_manifest/c8c7777a62de",
+          "family_kind": "app_ui_route_manifest",
+          "family_identity_digest": "c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/route_manifest.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [
+            "app_ui_page_schema/home/484a8be83170"
+          ],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_ui_route_manifest/c8c7777a62de\",\"family_kind\":\"app_ui_route_manifest\",\"family_identity_digest\":\"c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"ui/route_manifest.json\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.page.home\",\"payload_digest\":\"ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7\"}],\"edge_sources\":[],\"depends_on_units\":[\"app_ui_page_schema/home/484a8be83170\"],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "df7e7f43484092266cb609fe94d206f3290bcdb2423b17e685d59058f79cb7f1"
+      },
+      {
+        "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+        "document": {
+          "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+          "family_kind": "module_backend_helper",
+          "family_identity_digest": "a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc",
+          "disposition": "agent_author",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "helper_id",
+              "report_hook"
+            ],
+            [
+              "module_id",
+              "reports"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "modules/reports/backend/report_hook.py"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.artifact.report_hook",
+              "payload_digest": "fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30"
+            },
+            {
+              "node_id": "mozaiks.module.reports",
+              "payload_digest": "46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "owns",
+              "source_node_id": "mozaiks.module.reports",
+              "target_node_id": "mozaiks.artifact.report_hook",
+              "discriminator": null,
+              "edge_identity": "dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "preserved_opaque",
+          "assignment_kind": "module_helper_implementation",
+          "validator": "module_loader",
+          "required_structured_output_ref": {
+            "ref_schema_version": "mozaiks.structured_output_contract_ref.v1",
+            "workflow_name": "AppGenerator",
+            "model_id": "ModuleHelperImplementationOutput",
+            "schema_digest": "aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7"
+          },
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+          "family_kind": "module_backend_helper",
+          "family_identity_digest": "a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc",
+          "disposition": "agent_author",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "helper_id",
+              "report_hook"
+            ],
+            [
+              "module_id",
+              "reports"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "modules/reports/backend/report_hook.py"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.artifact.report_hook",
+              "payload_digest": "fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30"
+            },
+            {
+              "node_id": "mozaiks.module.reports",
+              "payload_digest": "46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "owns",
+              "source_node_id": "mozaiks.module.reports",
+              "target_node_id": "mozaiks.artifact.report_hook",
+              "discriminator": null,
+              "edge_identity": "dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "preserved_opaque",
+          "assignment_kind": "module_helper_implementation",
+          "validator": "module_loader",
+          "required_structured_output_ref": {
+            "ref_schema_version": "mozaiks.structured_output_contract_ref.v1",
+            "workflow_name": "AppGenerator",
+            "model_id": "ModuleHelperImplementationOutput",
+            "schema_digest": "aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7"
+          },
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"module_backend_helper/report_hook-reports/a641fcf1cb52\",\"family_kind\":\"module_backend_helper\",\"family_identity_digest\":\"a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc\",\"disposition\":\"agent_author\",\"source_scope\":\"declared\",\"placeholder_values\":[[\"helper_id\",\"report_hook\"],[\"module_id\",\"reports\"]],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"modules/reports/backend/report_hook.py\"}],\"sources\":[{\"node_id\":\"mozaiks.artifact.report_hook\",\"payload_digest\":\"fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30\"},{\"node_id\":\"mozaiks.module.reports\",\"payload_digest\":\"46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93\"}],\"edge_sources\":[{\"kind\":\"owns\",\"source_node_id\":\"mozaiks.module.reports\",\"target_node_id\":\"mozaiks.artifact.report_hook\",\"discriminator\":null,\"edge_identity\":\"dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8\"}],\"depends_on_units\":[],\"materializer\":\"preserved_opaque\",\"assignment_kind\":\"module_helper_implementation\",\"validator\":\"module_loader\",\"required_structured_output_ref\":{\"ref_schema_version\":\"mozaiks.structured_output_contract_ref.v1\",\"workflow_name\":\"AppGenerator\",\"model_id\":\"ModuleHelperImplementationOutput\",\"schema_digest\":\"aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7\"},\"base_plan_digest\":null}",
+        "unit_digest": "13bc7f4f2dfa1d337904c7f3c86fef45ca83ac3169e6d7d4c7ec5e7a1b496543"
+      }
+    ]
+  },
+  "successor_plan": {
+    "document": {
+      "schema_version": "mozaiks.compilation_plan.v1",
+      "graph_id": "corpus-app",
+      "graph_version": 2,
+      "scope": {
+        "ref_schema_version": "mozaiks.execution_access_scope_ref.v1",
+        "tenant_id": "tenant1",
+        "workspace_id": "ws1",
+        "pre_app_scope_id": null
+      },
+      "graph_digest": "825e44afe9b5d03924c90839c37cd1d6029eaebac60d0d41499f1e4b0b7ddaa0",
+      "scope_selection": {
+        "app_manifest_scope": "app_bundle_root",
+        "module_scope": "app_bundle_root",
+        "workflow_manifest_scope": "workflow_relative"
+      },
+      "registry_schema_version": "mozaiks.app_layout.v2",
+      "registry_digest": "7957e4fbcfde2f3431c7511e8b1bff5c5ba164643f31c1f9a1dccd0bb2d8aaae",
+      "assignment_contracts_digest": "e37d35bab40ada0b1a9ef772f20beb9c73a3dbe7c565a66967f66ba04279fb99",
+      "units": [
+        {
+          "unit_id": "app_integrations_config/220f7104547e",
+          "family_kind": "app_integrations_config",
+          "family_identity_digest": "220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "config/integrations.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_paths",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "app_manifest/4a3db375c920",
+          "family_kind": "app_manifest",
+          "family_identity_digest": "4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "app.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.auth.corpus",
+              "payload_digest": "576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_loader",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "app_secret_references/d3d82ba33c06",
+          "family_kind": "app_secret_references",
+          "family_identity_digest": "d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "security/secrets.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "app_ui_page_schema/home/484a8be83170",
+          "family_kind": "app_ui_page_schema",
+          "family_identity_digest": "484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "page_id",
+              "home"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/pages/home.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899"
+            },
+            {
+              "node_id": "mozaiks.section.hero",
+              "payload_digest": "f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167"
+            },
+            {
+              "node_id": "mozaiks.section.pricing",
+              "payload_digest": "de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.hero",
+              "discriminator": null,
+              "edge_identity": "5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45"
+            },
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.pricing",
+              "discriminator": null,
+              "edge_identity": "8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "page_schema_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "app_ui_route_manifest/c8c7777a62de",
+          "family_kind": "app_ui_route_manifest",
+          "family_identity_digest": "c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/route_manifest.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [
+            "app_ui_page_schema/home/484a8be83170"
+          ],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        {
+          "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+          "family_kind": "module_backend_helper",
+          "family_identity_digest": "a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc",
+          "disposition": "agent_author",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "helper_id",
+              "report_hook"
+            ],
+            [
+              "module_id",
+              "reports"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "modules/reports/backend/report_hook.py"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.artifact.report_hook",
+              "payload_digest": "fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30"
+            },
+            {
+              "node_id": "mozaiks.module.reports",
+              "payload_digest": "46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "owns",
+              "source_node_id": "mozaiks.module.reports",
+              "target_node_id": "mozaiks.artifact.report_hook",
+              "discriminator": null,
+              "edge_identity": "dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "preserved_opaque",
+          "assignment_kind": "module_helper_implementation",
+          "validator": "module_loader",
+          "required_structured_output_ref": {
+            "ref_schema_version": "mozaiks.structured_output_contract_ref.v1",
+            "workflow_name": "AppGenerator",
+            "model_id": "ModuleHelperImplementationOutput",
+            "schema_digest": "aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7"
+          },
+          "base_plan_digest": null
+        }
+      ],
+      "gaps": [],
+      "plan_digest": "82cbb7eb6d45bc91887cdc426c073c120a7d0613fe9b0d4b974413d301cd3445"
+    },
+    "serialized_json": "{\"schema_version\":\"mozaiks.compilation_plan.v1\",\"graph_id\":\"corpus-app\",\"graph_version\":2,\"scope\":{\"ref_schema_version\":\"mozaiks.execution_access_scope_ref.v1\",\"tenant_id\":\"tenant1\",\"workspace_id\":\"ws1\",\"pre_app_scope_id\":null},\"graph_digest\":\"825e44afe9b5d03924c90839c37cd1d6029eaebac60d0d41499f1e4b0b7ddaa0\",\"scope_selection\":{\"app_manifest_scope\":\"app_bundle_root\",\"module_scope\":\"app_bundle_root\",\"workflow_manifest_scope\":\"workflow_relative\"},\"registry_schema_version\":\"mozaiks.app_layout.v2\",\"registry_digest\":\"7957e4fbcfde2f3431c7511e8b1bff5c5ba164643f31c1f9a1dccd0bb2d8aaae\",\"assignment_contracts_digest\":\"e37d35bab40ada0b1a9ef772f20beb9c73a3dbe7c565a66967f66ba04279fb99\",\"units\":[{\"unit_id\":\"app_integrations_config/220f7104547e\",\"family_kind\":\"app_integrations_config\",\"family_identity_digest\":\"220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"config/integrations.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.integration.email\",\"payload_digest\":\"0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"app_paths\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"app_manifest/4a3db375c920\",\"family_kind\":\"app_manifest\",\"family_identity_digest\":\"4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"app.json\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.auth.corpus\",\"payload_digest\":\"576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"app_loader\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"app_secret_references/d3d82ba33c06\",\"family_kind\":\"app_secret_references\",\"family_identity_digest\":\"d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"security/secrets.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.integration.email\",\"payload_digest\":\"0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"app_ui_page_schema/home/484a8be83170\",\"family_kind\":\"app_ui_page_schema\",\"family_identity_digest\":\"484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[[\"page_id\",\"home\"]],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"ui/pages/home.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.page.home\",\"payload_digest\":\"a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899\"},{\"node_id\":\"mozaiks.section.hero\",\"payload_digest\":\"f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167\"},{\"node_id\":\"mozaiks.section.pricing\",\"payload_digest\":\"de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d\"}],\"edge_sources\":[{\"kind\":\"renders\",\"source_node_id\":\"mozaiks.page.home\",\"target_node_id\":\"mozaiks.section.hero\",\"discriminator\":null,\"edge_identity\":\"5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45\"},{\"kind\":\"renders\",\"source_node_id\":\"mozaiks.page.home\",\"target_node_id\":\"mozaiks.section.pricing\",\"discriminator\":null,\"edge_identity\":\"8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb\"}],\"depends_on_units\":[],\"materializer\":\"page_schema_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"app_ui_route_manifest/c8c7777a62de\",\"family_kind\":\"app_ui_route_manifest\",\"family_identity_digest\":\"c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"ui/route_manifest.json\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.page.home\",\"payload_digest\":\"a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899\"}],\"edge_sources\":[],\"depends_on_units\":[\"app_ui_page_schema/home/484a8be83170\"],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null},{\"unit_id\":\"module_backend_helper/report_hook-reports/a641fcf1cb52\",\"family_kind\":\"module_backend_helper\",\"family_identity_digest\":\"a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc\",\"disposition\":\"agent_author\",\"source_scope\":\"declared\",\"placeholder_values\":[[\"helper_id\",\"report_hook\"],[\"module_id\",\"reports\"]],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"modules/reports/backend/report_hook.py\"}],\"sources\":[{\"node_id\":\"mozaiks.artifact.report_hook\",\"payload_digest\":\"fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30\"},{\"node_id\":\"mozaiks.module.reports\",\"payload_digest\":\"46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93\"}],\"edge_sources\":[{\"kind\":\"owns\",\"source_node_id\":\"mozaiks.module.reports\",\"target_node_id\":\"mozaiks.artifact.report_hook\",\"discriminator\":null,\"edge_identity\":\"dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8\"}],\"depends_on_units\":[],\"materializer\":\"preserved_opaque\",\"assignment_kind\":\"module_helper_implementation\",\"validator\":\"module_loader\",\"required_structured_output_ref\":{\"ref_schema_version\":\"mozaiks.structured_output_contract_ref.v1\",\"workflow_name\":\"AppGenerator\",\"model_id\":\"ModuleHelperImplementationOutput\",\"schema_digest\":\"aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7\"},\"base_plan_digest\":null}],\"gaps\":[],\"plan_digest\":\"82cbb7eb6d45bc91887cdc426c073c120a7d0613fe9b0d4b974413d301cd3445\"}",
+    "units": [
+      {
+        "unit_id": "app_integrations_config/220f7104547e",
+        "document": {
+          "unit_id": "app_integrations_config/220f7104547e",
+          "family_kind": "app_integrations_config",
+          "family_identity_digest": "220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "config/integrations.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_paths",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_integrations_config/220f7104547e",
+          "family_kind": "app_integrations_config",
+          "family_identity_digest": "220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "config/integrations.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_paths",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_integrations_config/220f7104547e\",\"family_kind\":\"app_integrations_config\",\"family_identity_digest\":\"220f7104547ee458dddc60b5322872839f36865772cd14a761384ae34332126e\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"config/integrations.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.integration.email\",\"payload_digest\":\"0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"app_paths\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "cc16ed69adc34ad323245c4ec84c3a60369c553b3e68a4afff0fa046bd162902"
+      },
+      {
+        "unit_id": "app_manifest/4a3db375c920",
+        "document": {
+          "unit_id": "app_manifest/4a3db375c920",
+          "family_kind": "app_manifest",
+          "family_identity_digest": "4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "app.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.auth.corpus",
+              "payload_digest": "576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_loader",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_manifest/4a3db375c920",
+          "family_kind": "app_manifest",
+          "family_identity_digest": "4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "app.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.auth.corpus",
+              "payload_digest": "576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "app_loader",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_manifest/4a3db375c920\",\"family_kind\":\"app_manifest\",\"family_identity_digest\":\"4a3db375c9206e22fb77fd8671ba126bd66c6c8536541352d907f64080c72c46\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"app.json\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.auth.corpus\",\"payload_digest\":\"576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"app_loader\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "4036c49be656dca46bf72f37ec1399f53d63119d2bbfa81f09ee45d7f118410e"
+      },
+      {
+        "unit_id": "app_secret_references/d3d82ba33c06",
+        "document": {
+          "unit_id": "app_secret_references/d3d82ba33c06",
+          "family_kind": "app_secret_references",
+          "family_identity_digest": "d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "security/secrets.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_secret_references/d3d82ba33c06",
+          "family_kind": "app_secret_references",
+          "family_identity_digest": "d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "security/secrets.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.integration.email",
+              "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_secret_references/d3d82ba33c06\",\"family_kind\":\"app_secret_references\",\"family_identity_digest\":\"d3d82ba33c063f13e4641414c59b17898c97203a7585bb18748d6f016a96da02\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"security/secrets.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.integration.email\",\"payload_digest\":\"0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de\"}],\"edge_sources\":[],\"depends_on_units\":[],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "0c7cfa0b204eda26d793c6d33378f0b241cfe68f5a993e703432453b296a3245"
+      },
+      {
+        "unit_id": "app_ui_page_schema/home/484a8be83170",
+        "document": {
+          "unit_id": "app_ui_page_schema/home/484a8be83170",
+          "family_kind": "app_ui_page_schema",
+          "family_identity_digest": "484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "page_id",
+              "home"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/pages/home.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899"
+            },
+            {
+              "node_id": "mozaiks.section.hero",
+              "payload_digest": "f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167"
+            },
+            {
+              "node_id": "mozaiks.section.pricing",
+              "payload_digest": "de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.hero",
+              "discriminator": null,
+              "edge_identity": "5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45"
+            },
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.pricing",
+              "discriminator": null,
+              "edge_identity": "8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "page_schema_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_ui_page_schema/home/484a8be83170",
+          "family_kind": "app_ui_page_schema",
+          "family_identity_digest": "484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "page_id",
+              "home"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/pages/home.yaml"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899"
+            },
+            {
+              "node_id": "mozaiks.section.hero",
+              "payload_digest": "f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167"
+            },
+            {
+              "node_id": "mozaiks.section.pricing",
+              "payload_digest": "de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.hero",
+              "discriminator": null,
+              "edge_identity": "5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45"
+            },
+            {
+              "kind": "renders",
+              "source_node_id": "mozaiks.page.home",
+              "target_node_id": "mozaiks.section.pricing",
+              "discriminator": null,
+              "edge_identity": "8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "page_schema_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_ui_page_schema/home/484a8be83170\",\"family_kind\":\"app_ui_page_schema\",\"family_identity_digest\":\"484a8be83170e2c6a2d809afb8eaa4cb24914be383243e44bacecd287d8b69e1\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[[\"page_id\",\"home\"]],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"ui/pages/home.yaml\"}],\"sources\":[{\"node_id\":\"mozaiks.page.home\",\"payload_digest\":\"a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899\"},{\"node_id\":\"mozaiks.section.hero\",\"payload_digest\":\"f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167\"},{\"node_id\":\"mozaiks.section.pricing\",\"payload_digest\":\"de927ad9a4432ba690783b63ab0ebca5a23a58f038aa04f9d3a486b93c348d7d\"}],\"edge_sources\":[{\"kind\":\"renders\",\"source_node_id\":\"mozaiks.page.home\",\"target_node_id\":\"mozaiks.section.hero\",\"discriminator\":null,\"edge_identity\":\"5efe8a075b89578a8a427863bc1d0ea6d7bed3d83f3546c6ac3e3a320f3a3c45\"},{\"kind\":\"renders\",\"source_node_id\":\"mozaiks.page.home\",\"target_node_id\":\"mozaiks.section.pricing\",\"discriminator\":null,\"edge_identity\":\"8717c73368f097d8c38c3b6e9928c1779801b9403d7b7453ccd6a4f96f102beb\"}],\"depends_on_units\":[],\"materializer\":\"page_schema_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "2fa371b2b6075637220bdea5c477e6c6d4fea0f516aaa1208e2d61d0ba6d8c0a"
+      },
+      {
+        "unit_id": "app_ui_route_manifest/c8c7777a62de",
+        "document": {
+          "unit_id": "app_ui_route_manifest/c8c7777a62de",
+          "family_kind": "app_ui_route_manifest",
+          "family_identity_digest": "c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/route_manifest.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [
+            "app_ui_page_schema/home/484a8be83170"
+          ],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "app_ui_route_manifest/c8c7777a62de",
+          "family_kind": "app_ui_route_manifest",
+          "family_identity_digest": "c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5",
+          "disposition": "render",
+          "source_scope": "declared",
+          "placeholder_values": [],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "ui/route_manifest.json"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.application.corpus",
+              "payload_digest": "c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584"
+            },
+            {
+              "node_id": "mozaiks.page.home",
+              "payload_digest": "a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899"
+            }
+          ],
+          "edge_sources": [],
+          "depends_on_units": [
+            "app_ui_page_schema/home/484a8be83170"
+          ],
+          "materializer": "app_config_executor",
+          "assignment_kind": null,
+          "validator": "generated_app_validator",
+          "required_structured_output_ref": null,
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"app_ui_route_manifest/c8c7777a62de\",\"family_kind\":\"app_ui_route_manifest\",\"family_identity_digest\":\"c8c7777a62de4001d403fd4b5d1133b6ab23ed1fd1c45fc9cddda3ac74dbbdc5\",\"disposition\":\"render\",\"source_scope\":\"declared\",\"placeholder_values\":[],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"ui/route_manifest.json\"}],\"sources\":[{\"node_id\":\"mozaiks.application.corpus\",\"payload_digest\":\"c99285be4fe6544021d5047440da63a6dde48c7373c399bd77de53152c602584\"},{\"node_id\":\"mozaiks.page.home\",\"payload_digest\":\"a90964c060b30a59091141467c40c956ad160848bda9173ddd153343a3dd8899\"}],\"edge_sources\":[],\"depends_on_units\":[\"app_ui_page_schema/home/484a8be83170\"],\"materializer\":\"app_config_executor\",\"assignment_kind\":null,\"validator\":\"generated_app_validator\",\"required_structured_output_ref\":null,\"base_plan_digest\":null}",
+        "unit_digest": "349fd7e3dd7a96f42c8892dc1ea3930acc51ba3a382f4b2e1a9f8344c2cb2f72"
+      },
+      {
+        "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+        "document": {
+          "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+          "family_kind": "module_backend_helper",
+          "family_identity_digest": "a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc",
+          "disposition": "agent_author",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "helper_id",
+              "report_hook"
+            ],
+            [
+              "module_id",
+              "reports"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "modules/reports/backend/report_hook.py"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.artifact.report_hook",
+              "payload_digest": "fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30"
+            },
+            {
+              "node_id": "mozaiks.module.reports",
+              "payload_digest": "46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "owns",
+              "source_node_id": "mozaiks.module.reports",
+              "target_node_id": "mozaiks.artifact.report_hook",
+              "discriminator": null,
+              "edge_identity": "dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "preserved_opaque",
+          "assignment_kind": "module_helper_implementation",
+          "validator": "module_loader",
+          "required_structured_output_ref": {
+            "ref_schema_version": "mozaiks.structured_output_contract_ref.v1",
+            "workflow_name": "AppGenerator",
+            "model_id": "ModuleHelperImplementationOutput",
+            "schema_digest": "aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7"
+          },
+          "base_plan_digest": null
+        },
+        "identity_payload": {
+          "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+          "family_kind": "module_backend_helper",
+          "family_identity_digest": "a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc",
+          "disposition": "agent_author",
+          "source_scope": "declared",
+          "placeholder_values": [
+            [
+              "helper_id",
+              "report_hook"
+            ],
+            [
+              "module_id",
+              "reports"
+            ]
+          ],
+          "outputs": [
+            {
+              "path_scope": "app_bundle_root",
+              "path": "modules/reports/backend/report_hook.py"
+            }
+          ],
+          "sources": [
+            {
+              "node_id": "mozaiks.artifact.report_hook",
+              "payload_digest": "fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30"
+            },
+            {
+              "node_id": "mozaiks.module.reports",
+              "payload_digest": "46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93"
+            }
+          ],
+          "edge_sources": [
+            {
+              "kind": "owns",
+              "source_node_id": "mozaiks.module.reports",
+              "target_node_id": "mozaiks.artifact.report_hook",
+              "discriminator": null,
+              "edge_identity": "dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8"
+            }
+          ],
+          "depends_on_units": [],
+          "materializer": "preserved_opaque",
+          "assignment_kind": "module_helper_implementation",
+          "validator": "module_loader",
+          "required_structured_output_ref": {
+            "ref_schema_version": "mozaiks.structured_output_contract_ref.v1",
+            "workflow_name": "AppGenerator",
+            "model_id": "ModuleHelperImplementationOutput",
+            "schema_digest": "aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7"
+          },
+          "base_plan_digest": null
+        },
+        "serialized_json": "{\"unit_id\":\"module_backend_helper/report_hook-reports/a641fcf1cb52\",\"family_kind\":\"module_backend_helper\",\"family_identity_digest\":\"a641fcf1cb526ee2fb9180404dd0f9fc00710fa147c72c6f82655b7ee13409bc\",\"disposition\":\"agent_author\",\"source_scope\":\"declared\",\"placeholder_values\":[[\"helper_id\",\"report_hook\"],[\"module_id\",\"reports\"]],\"outputs\":[{\"path_scope\":\"app_bundle_root\",\"path\":\"modules/reports/backend/report_hook.py\"}],\"sources\":[{\"node_id\":\"mozaiks.artifact.report_hook\",\"payload_digest\":\"fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30\"},{\"node_id\":\"mozaiks.module.reports\",\"payload_digest\":\"46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93\"}],\"edge_sources\":[{\"kind\":\"owns\",\"source_node_id\":\"mozaiks.module.reports\",\"target_node_id\":\"mozaiks.artifact.report_hook\",\"discriminator\":null,\"edge_identity\":\"dfbf1d8a836262f8b8dd70028a6bebbd16103491995b59ea67cd9e9ca9b8cbb8\"}],\"depends_on_units\":[],\"materializer\":\"preserved_opaque\",\"assignment_kind\":\"module_helper_implementation\",\"validator\":\"module_loader\",\"required_structured_output_ref\":{\"ref_schema_version\":\"mozaiks.structured_output_contract_ref.v1\",\"workflow_name\":\"AppGenerator\",\"model_id\":\"ModuleHelperImplementationOutput\",\"schema_digest\":\"aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7\"},\"base_plan_digest\":null}",
+        "unit_digest": "13bc7f4f2dfa1d337904c7f3c86fef45ca83ac3169e6d7d4c7ec5e7a1b496543"
+      }
+    ]
+  },
+  "compiled_assignments": {
+    "ordered_assignments": [
+      {
+        "assignment_id": "wa_e210a049dfd45785796d4ffa",
+        "plan_unit_ref": {
+          "ref_schema_version": "mozaiks.plan_unit_ref.v1",
+          "compilation_plan_ref": {
+            "subject_id": "corpus-app",
+            "subject_version": 2,
+            "content_digest": "82cbb7eb6d45bc91887cdc426c073c120a7d0613fe9b0d4b974413d301cd3445",
+            "scope": {
+              "ref_schema_version": "mozaiks.execution_access_scope_ref.v1",
+              "tenant_id": "tenant1",
+              "workspace_id": "ws1",
+              "pre_app_scope_id": null
+            },
+            "ref_schema_version": "mozaiks.compilation_plan_ref.v1"
+          },
+          "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+          "unit_digest": "13bc7f4f2dfa1d337904c7f3c86fef45ca83ac3169e6d7d4c7ec5e7a1b496543"
+        },
+        "assignment_kind": "module_helper_implementation",
+        "owned_paths": [
+          "modules/reports/backend/report_hook.py"
+        ],
+        "depends_on_unit_refs": [],
+        "dependency_context_refs": [
+          {
+            "ref_schema_version": "mozaiks.semantic_payload_ref.v1",
+            "node_id": "mozaiks.module.reports",
+            "payload_kind": "module",
+            "payload_version": 1,
+            "content_digest": "46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93",
+            "scope": {
+              "ref_schema_version": "mozaiks.execution_access_scope_ref.v1",
+              "tenant_id": "tenant1",
+              "workspace_id": "ws1",
+              "pre_app_scope_id": null
+            }
+          },
+          {
+            "ref_schema_version": "mozaiks.semantic_payload_ref.v1",
+            "node_id": "mozaiks.artifact.report_hook",
+            "payload_kind": "artifact_declaration",
+            "payload_version": 1,
+            "content_digest": "fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30",
+            "scope": {
+              "ref_schema_version": "mozaiks.execution_access_scope_ref.v1",
+              "tenant_id": "tenant1",
+              "workspace_id": "ws1",
+              "pre_app_scope_id": null
+            }
+          }
+        ],
+        "required_structured_output_ref": {
+          "ref_schema_version": "mozaiks.structured_output_contract_ref.v1",
+          "workflow_name": "AppGenerator",
+          "model_id": "ModuleHelperImplementationOutput",
+          "schema_digest": "aff63ab65fd9000582e74617bf39f4d9ad15b73d33a91e6b8d9769709609e5c7"
+        },
+        "required_validators": [
+          "module_loader"
+        ],
+        "semantic_identity_bindings": [
+          [
+            "module_id",
+            "reports"
+          ],
+          [
+            "helper_id",
+            "report_hook"
+          ]
+        ],
+        "assignment_retry_limit": 2,
+        "base_revision_digest": null,
+        "assignment_digest": "e210a049dfd45785796d4ffa2478986df59220265f707c30c3c174975a37a52d"
+      }
+    ],
+    "assignment_set_digest": "e3217a8acffde892cc98a0740103418473e4c4cb302dd16cf1c54d7b9edaadb3"
+  },
+  "artifact_result": {
+    "result_schema_version": "mozaiks.assignment_artifact_result.v1",
+    "assignment_id": "wa_e210a049dfd45785796d4ffa",
+    "assignment_digest": "e210a049dfd45785796d4ffa2478986df59220265f707c30c3c174975a37a52d",
+    "plan_unit_ref": {
+      "ref_schema_version": "mozaiks.plan_unit_ref.v1",
+      "compilation_plan_ref": {
+        "subject_id": "corpus-app",
+        "subject_version": 2,
+        "content_digest": "82cbb7eb6d45bc91887cdc426c073c120a7d0613fe9b0d4b974413d301cd3445",
+        "scope": {
+          "ref_schema_version": "mozaiks.execution_access_scope_ref.v1",
+          "tenant_id": "tenant1",
+          "workspace_id": "ws1",
+          "pre_app_scope_id": null
+        },
+        "ref_schema_version": "mozaiks.compilation_plan_ref.v1"
+      },
+      "unit_id": "module_backend_helper/report_hook-reports/a641fcf1cb52",
+      "unit_digest": "13bc7f4f2dfa1d337904c7f3c86fef45ca83ac3169e6d7d4c7ec5e7a1b496543"
+    },
+    "base_revision_digest": null,
+    "structured_output_digest": "95f6890f4e3a69d7802de7838e217b617198e3d959a14cf3c40c369a9ff0a40d",
+    "artifacts": [
+      {
+        "path": "modules/reports/backend/report_hook.py",
+        "content": "def report_hook():\n    return None\n",
+        "content_digest": "a62e9f31816d8ef24409c70d7beae70d85577b528120b18cf2b5a0be27dc51e2"
+      }
+    ],
+    "validation_receipts": [
+      {
+        "validator": "module_loader",
+        "subject_digest": "335937493098cc5b923023b2debb8a6ba53f3ac01477ab92a3afa93244d6da16",
+        "passed": true,
+        "evidence_digest": "5e9184572a2119973937151f1bf706093b58aaf241d8e18c69f4ee5f23aa8659"
+      }
+    ],
+    "result_digest": "defe3512e26e8027ea7a5570094aaf900ea2d2d95a408f4ac9c108fd2e64ab33"
+  },
+  "materialized_files": [
+    {
+      "path": "app.json",
+      "content_hex": "7b0a2020226170704964223a2022636f727075732d617070222c0a2020226170704e616d65223a2022436f7270757320417070222c0a20202276657273696f6e223a2022312e302e30222c0a2020226465736372697074696f6e223a20224120636c6f736564206170706c69636174696f6e207061796c6f6164222c0a202022617574685265717569726564223a20747275652c0a20202273746172747570223a207b0a20202020226c616e64696e675f73706f74223a20222f686f6d65220a20207d0a7d0a"
+    },
+    {
+      "path": "config/integrations.yaml",
+      "content_hex": "696e746567726174696f6e733a0a2d20736572766963653a20656d61696c0a20206b696e643a206170695f6b65790a2020707572706f73653a2053656e64206e6f74696669636174696f6e730a202072657175697265645f61743a2072756e74696d650a20206f7074696f6e616c3a2066616c73650a202072657175697265645f6669656c64733a0a20202d206e616d653a20454d41494c5f4150495f4b45590a20202020747970653a207365637265740a2020202072657175697265643a20747275650a"
+    },
+    {
+      "path": "security/secrets.yaml",
+      "content_hex": "76657273696f6e3a20310a736563726574733a0a2d20454d41494c5f4150495f4b45590a"
+    },
+    {
+      "path": "ui/pages/home.yaml",
+      "content_hex": "736368656d615f76657273696f6e3a206d6f7a61696b732e6170705f706167652e76310a6e616d653a20686f6d650a726f7574653a202f686f6d650a7469746c653a20436f6e736f6c650a706167655f747970653a206c616e64696e670a6c61796f75743a2066756c6c2d77696474680a73656374696f6e733a0a2d2069643a206865726f0a20207072696d69746976653a20506167654865616465720a2020636f6e6669673a0a202020207469746c653a2057656c636f6d650a2d2069643a2070726963696e670a20207072696d69746976653a2050616e656c0a2020636f6e6669673a0a202020207469746c653a20506c616e730a"
+    },
+    {
+      "path": "ui/route_manifest.json",
+      "content_hex": "7b0a2020227061676573223a205b0a202020207b0a2020202020202270617468223a20222f686f6d65222c0a20202020202022636f6d706f6e656e74223a2022536368656d6150616765222c0a202020202020226c6162656c223a2022436f6e736f6c65222c0a20202020202022736368656d61223a2022686f6d65220a202020207d0a20205d0a7d0a"
+    }
+  ]
+}

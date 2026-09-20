@@ -124,17 +124,20 @@ class SourceScopedContextExpression:
 
 
 @dataclass(slots=True)
-class SourceScopedToolCalled:
-    """Source-scoped adapter over AG2's `ToolCalled` condition."""
+class SourceScopedToolCalled(ToolCalled):
+    """Native tool-call condition with Mozaiks' declared source scope.
+
+    AG2 recognizes ToolCalled subclasses when deriving routing from tool events.
+    The source predicate is evaluated when its native graph selects the target.
+    """
 
     source_agent_id: str
-    tool_name: str
     name: ClassVar[str] = "mozaiks_source_tool_called"
 
     def evaluate(self, state: WorkflowState, envelope: Envelope) -> bool:
-        return FromSpeaker(self.source_agent_id).evaluate(state, envelope) and ToolCalled(
-            tool_name=self.tool_name,
-        ).evaluate(state, envelope)
+        return FromSpeaker(self.source_agent_id).evaluate(state, envelope) and ToolCalled.evaluate(
+            self, state, envelope
+        )
 
 
 @dataclass(slots=True)

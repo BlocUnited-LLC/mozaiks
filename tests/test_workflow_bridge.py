@@ -50,6 +50,29 @@ class _FakePersistenceManager:
         self.run_assistant_messages: list[dict[str, object]] = []
         self.persisted_context: list[dict[str, object]] = []
         self.completed: list[dict[str, str]] = []
+        self.failed: list[dict[str, str]] = []
+        self.status = 0
+        self.persisted_session = False
+
+    async def chat_session_exists(
+        self,
+        chat_id: str,
+        app_id: str,
+        workflow_name: str | None = None,
+    ) -> bool:
+        return self.persisted_session
+
+    async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+        from mozaiksai.core.data.models import WorkflowStatus
+        from mozaiksai.core.data.persistence.persistence_manager import ChatSessionTerminalError
+
+        if self.status:
+            raise ChatSessionTerminalError(WorkflowStatus(self.status))
+
+    async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+        self.failed.append({"chat_id": chat_id, "app_id": app_id})
+        self.status = 2
+        return True
 
     async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
         self.pending_lookups.append(kwargs)
@@ -201,6 +224,51 @@ async def test_handle_user_input_from_api_clears_persisted_pending_input_before_
         }
     ]
     assert transport.errors == []
+
+
+@pytest.mark.asyncio
+async def test_handle_user_input_from_api_resumes_persisted_session_after_restart(monkeypatch) -> None:
+    persistence_manager = _FakePersistenceManager()
+    persistence_manager.pending_input_request = None
+    persistence_manager.persisted_session = True
+    adapter = _FakeAdapter()
+    transport = _DummyTransport(persistence_manager)
+
+    async def _noop_apply_context_updates(**_kwargs):  # noqa: ANN003
+        return {}
+
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _workflow_name: {})
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: adapter)
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _noop_apply_context_updates)
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="chat-1",
+        user_id="user-1",
+        workflow_name="ExistingAppDiscovery",
+        message="Yes, the indexed readout matches the current app. NEXT",
+        app_id="app-1",
+    )
+
+    assert result["status"] == "success"
+    assert result["route"] == "workflow_resume"
+    assert adapter.run_requests == []
+    assert len(adapter.resume_requests) == 1
+    assert persistence_manager.run_user_messages == [
+        {
+            "chat_id": "chat-1",
+            "app_id": "app-1",
+            "content": "Yes, the indexed readout matches the current app. NEXT",
+            "metadata": {"source": "workflow_user", "user_id": "user-1"},
+        }
+    ]
+    assert transport.persisted_messages == [
+        {
+            "chat_id": "chat-1",
+            "user_id": "user-1",
+            "content": "Yes, the indexed readout matches the current app. NEXT",
+            "source": "http",
+        }
+    ]
 
 
 @pytest.mark.asyncio

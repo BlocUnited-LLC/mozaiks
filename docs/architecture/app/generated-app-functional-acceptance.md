@@ -76,7 +76,39 @@ internally declared app route/action/facade must not be missing.
 | Brownfield post-discovery handoff | Captured `ExistingAppDiscovery` artifact plus module decomposition through deterministic AppBuildPlan projection, real AppGenerator materialization, validation, `AppLoader`, and platform `TestClient` | Static / Runtime / HTTP | Added |
 | AgentGenerator-to-AppGenerator handoff | Captured `WorkflowBundleBuilderOutput` through AgentGenerator bundle materialization/promotion, workflow integration metadata, AppGenerator AppBuildPlan consumption, workflow registry loading, and platform `TestClient` | Static / Runtime / HTTP | Added |
 
+## Page Wiring Input Authority
+
+`run_app_bundle_acceptance_gate` passes its assembled `generated_files` snapshot
+directly to the existing `validate_wiring` check. The check detaches immutable
+workflow-context values before inspecting mappings or lists. Saved page YAMLs
+and module manifests in that snapshot take precedence over earlier `app_pages`,
+planned actions, or an older generated directory. This also applies when the
+gate is called with `files=` and no workflow context.
+
+Missing validation input and unresolved page endpoints are blocking, including
+when no module action registry is available. Static pages, navigation, custom
+React routes without declarative API references, and the supported platform
+read endpoints do not require app module actions. Page reads and nested action
+hrefs (including form submit/cancel, buttons, and empty states) are checked.
+An upstream experience specification's proposed URL is not a route declaration:
+generated business operations must bind to actual module actions. Runtime page
+schema parsing still permits safe host-owned/custom API paths; this check does
+not replace the host's routing contract or introduce a second runtime validator.
+
+`validation_strategy: skip` skips optional execution checks, not mandatory
+app-bundle acceptance or its wiring check. A zero-reference result only means
+that inspected input contains no page API references, not that an absent input
+was successfully validated.
+
 ## Diagnostics
+
+Page task validation reuses the runtime page schema and reports its diagnostic
+location. Builder retry feedback additionally preserves the known, input-free
+action requirements (for example, `submit actions require href`); it does not
+expose arbitrary validator messages or rejected values. A Form submit action
+must carry its own fixed module endpoint. When create and update target different
+actions, AppSchema generates separate forms/modals, not a null or conditional
+`href`. The runtime schema and bounded task retry budget remain unchanged.
 
 Functional failures are structured diagnostics. Examples:
 
@@ -247,6 +279,36 @@ AppGenerator-produced app harness load together without paid model calls. The
 test asserts that the declared workflow, agents, context variables, structured
 outputs, tool function, page route, and referenced generated module action all
 survive the handoff.
+
+## Factory Save Boundaries
+
+Live generation must prove saved artifacts, not only successful model responses
+or workflow-completion messages. Runtime `structured_output` is a read-only,
+turn-local projection. Factory tools use `detach()` before dictionary validation,
+serialization, or persistence; they do not mutate the runtime projection.
+
+ThemeCapture and DesignDocs declare one save attempt and `saved`/`blocked`
+outcomes. SubscriptionContractDesigner declares three review attempts, retries
+only after `changes_requested`, and distinguishes `confirmed`,
+`not_requested_headless`, and `blocked`. A connected review that becomes
+unavailable is not headless approval. Existing tool-outcome validation and AG2
+transition graphs enforce these contracts; failed saves terminate with
+`workflow_failed` rather than starting the next workflow.
+
+The AG2 adapter also treats `no_transition_matched` and `max_turns` as failures.
+Persisted channel closure takes precedence over a simultaneous user-pause
+observation. ThemeCapture explicitly routes user replies back to the active
+interview or analysis stage. AgentGenerator's `NEXT` trigger uses exact matching,
+which the context-authority policy distinguishes from freeform regex extraction.
+
+DesignDocs and AppGenerator represent index keys as ordered objects with `field`
+and `order`, not untyped nested arrays. Runtime strict-response preparation
+rejects untyped values before provider dispatch.
+
+The focused regression suites are `test_factory_auto_tool_acceptance.py`,
+`test_design_docs_bundle_persistence.py`, `test_subscription_contract_designer.py`,
+and `test_structured_output_runtime_contracts.py`. They complement, but do not
+replace, an authenticated live generated-app CRUD/refinement/export proof.
 
 ## Remaining Gaps
 

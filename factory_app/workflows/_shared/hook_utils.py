@@ -5,6 +5,7 @@ Shared utilities for factory workflow prompt middleware functions.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -45,13 +46,15 @@ def update_agent_section(agent: Any, header: str, body: str) -> None:
         )
         section = f"{header}\n{body}"
 
-        if header in current:
-            pre, _, rest = current.partition(header)
-            next_section_idx = rest.find("\n\n[")
-            after = rest[next_section_idx:] if next_section_idx > 0 else ""
-            new_message = f"{pre.rstrip()}\n\n{section}{after}"
-        else:
-            new_message = f"{current}\n\n{section}" if current else section
+        # Inline references to a catalog are prose, not section boundaries.
+        headings = list(re.finditer(r"(?m)^\[[^\]\r\n]+\][ \t]*(?:\r?\n|$)", current))
+        new_message = f"{current}\n\n{section}" if current else section
+        for index, match in enumerate(headings):
+            if match.group().strip() != header:
+                continue
+            after = current[headings[index + 1].start():] if index + 1 < len(headings) else ""
+            new_message = current[:match.start()] + section + ("\n\n" + after if after else "")
+            break
 
         if new_message == current:
             return

@@ -12,6 +12,7 @@ from scripts.run_live_workflow_smoke import (
     SmokeResult,
     _await_workflow_with_pending_input_fallback,
     _build_tool_call_response_payload,
+    _build_trigger_meta,
     _build_uvicorn_config,
     _build_workflow_user_reply_message,
     _collect_events,
@@ -22,9 +23,28 @@ from scripts.run_live_workflow_smoke import (
     _load_context_file,
     _load_prompt_file,
     _load_tool_response_file,
+    _pop_tool_response_payload,
     _resolve_assistant_message,
     _resolve_default_workflows_root,
 )
+
+
+def test_scripted_concept_approval_is_bound_to_the_emitted_draft():
+    response = _pop_tool_response_payload(
+        {"save_value_manifest": deque([{"action": "approve", "approved": True}])},
+        {"tool_name": "save_value_manifest", "payload": {"review_id": "current-draft"}},
+    )
+    assert response == {"action": "approve", "approved": True, "review_id": "current-draft", "status": "submitted"}
+
+
+def test_smoke_does_not_invent_an_approval_or_replace_a_supplied_review_id():
+    data = {"tool_name": "save_value_manifest", "payload": {"review_id": "current-draft"}}
+    assert _pop_tool_response_payload({}, data) is None
+    response = _pop_tool_response_payload(
+        {"save_value_manifest": deque([{"action": "approve", "approved": True, "review_id": "stale-draft"}])},
+        data,
+    )
+    assert response["review_id"] == "stale-draft"
 
 
 def test_smoke_result_as_dict_serializes_nested_datetimes() -> None:
@@ -62,23 +82,22 @@ def test_resolve_assistant_message_falls_back_to_structured_output() -> None:
     assert message == "The runtime smoke path was successfully summarized."
 
 
-def test_extract_latest_structured_output_falls_back_to_json_content() -> None:
-    doc = {
-        "messages": [
-            {
-                "role": "assistant",
-                "content": json.dumps(
-                    {
-                        "agent_message": "Parallel execution completed.",
-                        "parallel_execution_used": True,
-                        "work_unit_count": 4,
-                    }
-                ),
-            }
-        ]
-    }
+def test_extract_latest_structured_output_reads_hidden_canonical_run_event() -> None:
+    from ag2.events import ModelResponse
+    from ag2.events.input_events import TextInput
+    from ag2.events.types import ModelMessage
 
-    structured_output = _extract_latest_structured_output(doc)
+    output = {
+        "agent_message": "Parallel execution completed.",
+        "parallel_execution_used": True,
+        "work_unit_count": 4,
+    }
+    events = [
+        ModelResponse(ModelMessage(json.dumps(output), metadata={"ui_visibility": "hidden"})),
+        TextInput('{"must_not_read_user_output": true}'),
+        ModelResponse(ModelMessage("Done.")),
+    ]
+    structured_output = _extract_latest_structured_output(events)
 
     assert structured_output == {
         "agent_message": "Parallel execution completed.",
@@ -121,6 +140,18 @@ def test_build_workflow_user_reply_message_uses_workflow_transport_fields() -> N
             "source": "live_workflow_smoke",
             "conversation_mode": "workflow",
         },
+    }
+
+
+def test_build_trigger_meta_pins_only_an_explicit_journey() -> None:
+    assert _build_trigger_meta("ValueEngine", None) == {
+        "trigger_source": "chat",
+        "requested_workflow_id": "ValueEngine",
+    }
+    assert _build_trigger_meta("ValueEngine", " full_rebuild ") == {
+        "trigger_source": "chat",
+        "requested_workflow_id": "ValueEngine",
+        "journey_id": "full_rebuild",
     }
 
 
@@ -284,6 +315,46 @@ class _FakeTransport:
     async def submit_tool_call_response(self, request_id: str, response: dict) -> bool:
         self.responses.append((request_id, response))
         return True
+
+
+@pytest.mark.asyncio
+async def test_paired_pause_events_send_one_reply_and_wait_for_next_turn() -> None:
+    class DelayedWebSocket(_FakeWebSocket):
+        async def recv(self):
+            if len(self._events) == 1:
+                await asyncio.sleep(1.2)
+            return await super().recv()
+
+    websocket = DelayedWebSocket([
+        {"type": "chat.awaiting_reply", "data": {}},
+        {"type": "chat.run_complete", "data": {"status": "paused", "awaiting_user_input": True}},
+        {"type": "chat.run_complete", "data": {"status": "completed"}},
+    ])
+    events = await _collect_events(
+        websocket, chat_id="chat-pause", timeout_seconds=3,
+        user_replies=["First reply", "Keep for the next pause"],
+    )
+    assert events[-1]["data"]["status"] == "completed"
+    assert len(websocket.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_announcement_does_not_consume_scripted_ui_response() -> None:
+    websocket = _FakeWebSocket([
+        {"type": "chat.tool_call", "data": {
+            "tool_call_id": "announcement", "component_type": "ApprovalCard", "awaiting_response": False,
+        }},
+        {"type": "chat.tool_call", "data": {
+            "tool_call_id": "approval", "component_type": "ApprovalCard", "awaiting_response": True,
+        }},
+    ])
+    await _collect_events(
+        websocket, chat_id="chat-test", timeout_seconds=0.1,
+        tool_response_payloads={"ApprovalCard": {"action": "approve", "approved": True}},
+    )
+    assert len(websocket.sent) == 1
+    assert websocket.sent[0]["tool_call_id"] == "approval"
+    assert websocket.sent[0]["response"]["approved"] is True
 
 
 @pytest.mark.asyncio

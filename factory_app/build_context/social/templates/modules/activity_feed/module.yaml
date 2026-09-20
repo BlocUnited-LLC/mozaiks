@@ -25,6 +25,7 @@ actions:
     handler_method: get_feed
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         limit: { type: integer }
         before: { type: string }
@@ -45,6 +46,7 @@ actions:
     handler_method: get_profile_activity
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         user_id: { type: string }
         limit: { type: integer }
@@ -67,6 +69,7 @@ actions:
     handler_method: record_activity
     input_schema:
       type: object
+      additionalProperties: false
       required: [activity_type, actor_id]
       properties:
         activity_type: { type: string }
@@ -76,7 +79,15 @@ actions:
         subject_type: { type: string }
         subject_label: { type: string }
         feed_user_ids: { type: array, items: { type: string } }
-        metadata: { type: object }
+        # metadata — closed activity context written by this pack's reaction
+        # handlers; every key is declared here.
+        metadata:
+          type: object
+          additionalProperties: false
+          properties:
+            friendship_id: { type: string }
+            post_id: { type: string }
+            comment_id: { type: string }
     output_schema:
       type: object
       required: [success]

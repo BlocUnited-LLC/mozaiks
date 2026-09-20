@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
+from jsonschema import Draft7Validator
+from jsonschema.exceptions import SchemaError
 
 from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
+from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 
 _MODULE_CONTRACT_FILENAMES = {
     "admin.yaml",
@@ -21,6 +25,19 @@ _MODULE_CONTRACT_FILENAMES = {
     "relationships.yaml",
     "reactions.yaml",
     "settings.yaml",
+}
+
+_MODULE_CONTRACT_OUTPUT_PATHS = {
+    "module_yaml": "module.yaml",
+    "events_yaml": "contracts/events.yaml",
+    "reactions_yaml": "contracts/reactions.yaml",
+    "notifications_yaml": "contracts/notifications.yaml",
+    "policy_hooks_yaml": "contracts/policy_hooks.yaml",
+    "settings_yaml": "contracts/settings.yaml",
+    "admin_yaml": "contracts/admin.yaml",
+    "profile_yaml": "contracts/profile.yaml",
+    "relationships_yaml": "contracts/relationships.yaml",
+    "runtime_extensions_yaml": "runtime_extensions.yaml",
 }
 
 
@@ -76,28 +93,32 @@ def _materialize_app_schema_file_map(
 ) -> dict[str, str]:
     manifest = payload.get("manifest")
     pages = payload.get("pages")
-    if not isinstance(manifest, dict) or not isinstance(pages, list):
+    if "manifest" not in payload or not isinstance(pages, list):
         return {}
+    if manifest is not None and not isinstance(manifest, dict):
+        raise ValueError("AppSchemaOutput.manifest must be an object or null")
 
     file_map: dict[str, str] = {}
-    default_route = manifest.get("default_route") or "/"
-    auth_strategy = manifest.get("auth_strategy")
-    app_json = {  # type: ignore[var-annotated]
-        "appName": manifest.get("app_name") or manifest.get("name") or "Generated App",
-        "startup": {"landing_spot": default_route},
-        "targets": {"web": True, "mobile": False},
-        "authRequired": bool(auth_strategy and auth_strategy != "public"),
-        "admins": [],
-    }
-    file_map["app.json"] = json.dumps(app_json, indent=2, ensure_ascii=False)
-    file_map["provenance.yaml"] = dump_app_provenance_yaml(
-        build_default_app_provenance(
-            app_kind="generated",
-            created_mode="factory",
-            workflow="AppGenerator",
-            timestamp=build_timestamp,
+    # Scoped page workers leave app identity and provenance to their existing owner.
+    if manifest is not None:
+        default_route = manifest.get("default_route") or "/"
+        auth_strategy = manifest.get("auth_strategy")
+        app_json = {  # type: ignore[var-annotated]
+            "appName": manifest.get("app_name") or manifest.get("name") or "Generated App",
+            "startup": {"landing_spot": default_route},
+            "targets": {"web": True, "mobile": False},
+            "authRequired": bool(auth_strategy and auth_strategy != "public"),
+            "admins": [],
+        }
+        file_map["app.json"] = json.dumps(app_json, indent=2, ensure_ascii=False)
+        file_map["provenance.yaml"] = dump_app_provenance_yaml(
+            build_default_app_provenance(
+                app_kind="generated",
+                created_mode="factory",
+                workflow="AppGenerator",
+                timestamp=build_timestamp,
+            )
         )
-    )
 
     for page in pages:
         if not isinstance(page, dict):
@@ -145,6 +166,53 @@ def _materialize_app_schema_file_map(
     return file_map
 
 
+def _materialize_schema_contract(schema: dict[str, Any], *, closed_request: bool = False) -> dict[str, Any]:
+    """Compile the finite generator schema into the runtime's JSON Schema shape."""
+    if "items_type" not in schema and not isinstance(schema.get("properties"), list):
+        return schema
+    result: dict[str, Any] = {"type": schema["type"]}
+    if not closed_request and schema.get("description") is not None:
+        result["description"] = schema["description"]
+    if schema["type"] == "array" and schema.get("items_type") is not None:
+        result["items"] = {"type": schema["items_type"]}
+    properties = schema.get("properties") or []
+    required = schema.get("required")
+    if schema["type"] != "object" and (properties or required):
+        raise ValueError("Only object schema contracts may declare properties or required fields")
+    if schema["type"] == "object":
+        result["properties"] = {}
+        if closed_request:
+            result["additionalProperties"] = False
+        required_names: list[str] = []
+        for prop in properties:
+            name = prop["name"]
+            if not name or name in result["properties"]:
+                raise ValueError("Schema contract property names must be nonempty and unique")
+            rendered = {"type": prop["type"]}
+            if not closed_request and prop.get("description") is not None:
+                rendered["description"] = prop["description"]
+            if prop.get("enum_values"):
+                rendered["enum"] = prop["enum_values"]
+            if prop["type"] == "array" and prop.get("items_type") is not None:
+                rendered["items"] = {"type": prop["items_type"]}
+            result["properties"][name] = rendered
+            if prop.get("required") is True:
+                required_names.append(name)
+        if required is not None and (
+            len(required) != len(set(required)) or set(required) != set(required_names)
+        ):
+            raise ValueError("Schema contract required names must match property required flags")
+        if required_names:
+            result["required"] = required_names
+    try:
+        Draft7Validator.check_schema(result)
+    except SchemaError as exc:
+        raise ValueError(f"Invalid generated JSON Schema: {exc.message}") from exc
+    if closed_request:
+        import_closed_contract_schema(result)
+    return result
+
+
 def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, str]:
     bundle = payload.get("module_contract")
     if not isinstance(bundle, dict):
@@ -155,22 +223,29 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
 
     prefix = PurePosixPath("modules", module_id)
     file_map: dict[str, str] = {}
-    yaml_outputs = {
-        "module_yaml": prefix / "module.yaml",
-        "events_yaml": prefix / "contracts" / "events.yaml",
-        "reactions_yaml": prefix / "contracts" / "reactions.yaml",
-        "notifications_yaml": prefix / "contracts" / "notifications.yaml",
-        "policy_hooks_yaml": prefix / "contracts" / "policy_hooks.yaml",
-        "settings_yaml": prefix / "contracts" / "settings.yaml",
-        "admin_yaml": prefix / "contracts" / "admin.yaml",
-        "relationships_yaml": prefix / "contracts" / "relationships.yaml",
-        "runtime_extensions_yaml": prefix / "runtime_extensions.yaml",
-    }
-    for key, path in yaml_outputs.items():
+    for key, relative_path in _MODULE_CONTRACT_OUTPUT_PATHS.items():
+        path = prefix / relative_path
         value = bundle.get(key)
         if value is None:
             continue
         if isinstance(value, (dict, list)):
+            value = deepcopy(value)
+            if key == "module_yaml" and isinstance(value, dict):
+                for action in value.get("actions") or []:
+                    for schema_key in ("input_schema", "output_schema"):
+                        if isinstance(action.get(schema_key), dict):
+                            action[schema_key] = _materialize_schema_contract(
+                                action[schema_key], closed_request=schema_key == "input_schema",
+                            )
+                for capability in value.get("capabilities") or []:
+                    if isinstance(capability.get("input_schema"), dict):
+                        capability["input_schema"] = _materialize_schema_contract(
+                            capability["input_schema"], closed_request=True,
+                        )
+            elif key == "events_yaml" and isinstance(value, dict):
+                for event in value.get("events") or []:
+                    if isinstance(event.get("payload_schema"), dict):
+                        event["payload_schema"] = _materialize_schema_contract(event["payload_schema"])
             file_map[str(path)] = yaml.safe_dump(
                 value,
                 allow_unicode=True,
@@ -179,19 +254,6 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
             )
         else:
             file_map[str(path)] = str(value)
-
-    profile_yaml = bundle.get("profile_yaml")
-    if profile_yaml is not None:
-        path = prefix / "contracts" / "profile.yaml"
-        if isinstance(profile_yaml, (dict, list)):
-            file_map[str(path)] = yaml.safe_dump(
-                profile_yaml,
-                allow_unicode=True,
-                sort_keys=False,
-                default_flow_style=False,
-            )
-        else:
-            file_map[str(path)] = str(profile_yaml)
 
     return file_map
 
@@ -205,7 +267,9 @@ def _normalize_code_file_entries(raw_entries: Any) -> dict[str, str]:
         if not isinstance(item, dict):
             continue
         filename = item.get("filename") or item.get("path")
-        content = item.get("content") or item.get("filecontent")
+        content = item.get("content")
+        if content is None:
+            content = item.get("filecontent")
         if not filename or content is None:
             continue
         safe = safe_relpath(str(filename))
@@ -302,6 +366,24 @@ def extract_code_file_map_from_payload(
         safe = safe_relpath("ui/index.js")
         if safe:
             file_map[_canonical_generated_path(safe)] = str(registration_barrel)
+
+    bundle = payload.get("module_contract")
+    if isinstance(bundle, dict) and bundle.get("module_id"):
+        prefix = PurePosixPath("modules", str(bundle["module_id"]).strip())
+        for key, relative_path in _MODULE_CONTRACT_OUTPUT_PATHS.items():
+            path = str(prefix / relative_path)
+            if key in bundle and bundle[key] is None and path in file_map:
+                # Not a consistency nicety. Typed fields are materialized above -
+                # action schemas compiled, event entries normalized - and a raw
+                # file in code_files bypasses every bit of that. Accepting the
+                # raw file would ship a contract that never went through the
+                # typed pipeline, so the disagreement has to be an error and the
+                # typed field is the side that must win.
+                raise ValueError(
+                    f"module_contract.{key} is null but raw output emits {path}. "
+                    f"Set module_contract.{key} to the contract instead of emitting the file; "
+                    "a raw contract file skips schema materialization."
+                )
 
     return file_map
 

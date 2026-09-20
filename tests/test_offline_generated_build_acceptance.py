@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     run_app_bundle_acceptance_gate,
     validate_app_bundle_from_request,
@@ -13,6 +14,7 @@ from factory_app.workflows.AppGenerator.tools.app_validation import (
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 from mozaiksai.core.runtime.app.loader import AppLoader
+from scripts.appgenerator_fixture_replay import execute_file_replay
 
 
 class _Context:
@@ -115,8 +117,7 @@ sections:
         "security/secrets.yaml": """
 version: 1
 secrets:
-  - name: ORDERS_WEBHOOK_SECRET
-    env: ORDERS_WEBHOOK_SECRET
+  - env: ORDERS_WEBHOOK_SECRET
     required: false
 """,
         "modules/orders/module.yaml": """
@@ -419,14 +420,67 @@ def _write_files(root: Path, files: dict[str, str]) -> None:
         path.write_text(content, encoding="utf-8")
 
 
+async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions, page, saas=False):
+    tasks = []
+
+    def add(task_id, task_type, agent, owned_paths, depends_on, *, module_id=None, surface_kind="module"):
+        tasks.append({
+            "task_id": task_id, "task_type": task_type, "initial_agent": agent,
+            "capability_pack_id": module_id, "surface_id": module_id or task_id,
+            "surface_kind": surface_kind, "execution_target": "AppGenerator",
+            "description": f"Emit the approved {task_type} fixture.",
+            "initial_message": "Emit the assigned fixture files using the supplied prerequisite contracts.",
+            "owned_paths": owned_paths, "depends_on": depends_on,
+            "acceptance_criteria": ["Emit every owned file without modifying another task's output."],
+        })
+
+    prerequisites = []
+    if saas:
+        add("subscriptions", "subscription_config", "ConfigMiddlewareAgent", ["config/subscriptions.yaml"], [],
+            surface_kind="app_policy")
+        prerequisites.append("subscriptions")
+    else:
+        add("persistence", "persistence_contract", "DatabaseAgent", ["data/contract.json"], [])
+        add("secrets", "service_foundation", "ConfigMiddlewareAgent", ["security/secrets.yaml"], [],
+            surface_kind="external_integration")
+        prerequisites.append("persistence")
+    for module_id in module_actions:
+        add(f"{module_id}.contract", "module_contract", "ConfigMiddlewareAgent",
+            [f"modules/{module_id}/module.yaml"], list(prerequisites), module_id=module_id)
+        add(f"{module_id}.services", "business_services", "ServiceAgent",
+            [f"modules/{module_id}/backend/{name}.py" for name in ("__init__", "handler", "service")],
+            [f"{module_id}.contract", *prerequisites], module_id=module_id)
+    add("pages", "page_bundle", "AppSchemaAgent", [
+        "app.json", "config/ai.json", "config/shell.json", "ui/route_manifest.json", f"ui/pages/{page}.yaml",
+    ], [f"{module_id}.services" for module_id in module_actions], surface_kind="ui_only")
+    plan = {
+        "app_kind": "saas" if saas else "internal_app", "auth_strategy": "none", "roles": [], "entities": [],
+        "pages": [{"name": page.title(), "route": f"/{page}", "purpose": "Use the declared module actions."}],
+        "capability_packs": [{
+            "capability_pack_id": module_id, "surface_id": module_id, "surface_kind": "module",
+            "operations": actions,
+        } for module_id, actions in module_actions.items()],
+        "build_tasks": tasks, "generation_order": [task["task_id"] for task in tasks],
+        "agent_backend_required": False,
+    }
+    app_build_plan(AppBuildPlan=plan, context_variables=context)
+    accepted = await execute_file_replay(context.data, files)
+    admitted_files = {file["filename"]: file["content"] for key, output in accepted.items()
+                      if not key.startswith("_") for file in output["code_files"]}
+    assert set(admitted_files) == set(files)
+    context.set("generated_files", admitted_files)
+    return admitted_files, accepted
+
+
 @pytest.mark.asyncio
-async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_path: Path) -> None:
+async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_path: Path, monkeypatch) -> None:
     """Offline generated-build promotion gate.
 
     This exercises the deterministic acceptance path without OpenAI, AG2 model
     calls, npm, Docker, MongoDB, or HTTP.
     """
 
+    monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     files = _generated_build_files()
     context = _Context(
         {
@@ -434,15 +488,10 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
             "app_id": "support-operations",
             "chat_id": "offline-build-acceptance",
             "generated_files": files,
-            "app_build_plan": {
-                "capability_packs": [
-                    {
-                        "module_id": "orders",
-                        "actions": ["list_orders", "create_order"],
-                    }
-                ]
-            },
         }
+    )
+    files, accepted = await _admit_offline_fixture(
+        monkeypatch, context, files, module_actions={"orders": ["list_orders", "create_order"]}, page="orders",
     )
 
     scan_errors = scan_generated_bundle(files)
@@ -456,7 +505,8 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
         context_variables=context,
     )
 
-    assert validation["status"] == "success"
+    assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
+    assert context.get("app_task_batch_results") == accepted
     assert validation["app_bundle_acceptance_result"]["status"] == "passed"
     assert validation["integration_tests_passed"] is True
     assert context.get("app_bundle_acceptance_status") == "passed"
@@ -599,8 +649,9 @@ def test_scan_flags_unknown_entitlement_gate() -> None:
 
 
 @pytest.mark.asyncio
-async def test_offline_saas_build_acceptance_gate_passes() -> None:
+async def test_offline_saas_build_acceptance_gate_passes(monkeypatch) -> None:
     """Happy-path acceptance gate for a self-hosted SaaS app with entitlement gating."""
+    monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     files = _generated_saas_build_files()
     context = _Context(
         {
@@ -608,13 +659,13 @@ async def test_offline_saas_build_acceptance_gate_passes() -> None:
             "app_id": "analytics-saas",
             "chat_id": "offline-saas-acceptance",
             "generated_files": files,
-            "app_build_plan": {
-                "capability_packs": [
-                    {"module_id": "reports", "actions": ["list_reports", "export_report"]},
-                    {"module_id": "entitlement_dispatch", "actions": ["activate_subscription", "deactivate_subscription"]},
-                ]
-            },
         }
+    )
+    files, accepted = await _admit_offline_fixture(
+        monkeypatch, context, files, page="reports", saas=True, module_actions={
+            "reports": ["list_reports", "export_report"],
+            "entitlement_dispatch": ["activate_subscription", "deactivate_subscription"],
+        },
     )
 
     scan_errors = scan_generated_bundle(files)
@@ -628,7 +679,8 @@ async def test_offline_saas_build_acceptance_gate_passes() -> None:
         context_variables=context,
     )
 
-    assert validation["status"] == "success"
+    assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
+    assert context.get("app_task_batch_results") == accepted
     assert validation["app_bundle_acceptance_result"]["status"] == "passed"
     assert validation["integration_tests_passed"] is True
     assert context.get("app_bundle_acceptance_status") == "passed"

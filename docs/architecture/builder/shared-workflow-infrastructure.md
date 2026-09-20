@@ -65,6 +65,45 @@ need the same component, move the reusable implementation to `_shared/ui/` and
 keep only workflow-specific wrappers or registration barrels inside each
 workflow's `ui/` directory.
 
+## ValueEngine Concept Review
+
+`ValueEngine/tools/manifest.py` owns the concept-specific review operation. Its
+`save_value_manifest` tool is response-bearing (`UI_Tool`), auto-invoked after
+structured output, and not separately exposed as an agent-callable tool. One
+`ConceptBlueprint` component displays the draft and collects its review; it
+does not emit a second display-only surface.
+
+The operation persists a draft, then binds the structured response to a fresh
+`review_id`. `BuilderArtifactStore.finish_concept_review` applies the decision
+only to the current pending draft and its reviewer. A unique app index keeps one
+current concept record per app. Duplicate pre-1.0 concept records must be
+resolved before the index can be created; they are not silently chosen between.
+
+The existing `ToolOutcomeSpec` writes `concept_review_outcome`, and the existing
+AG2 transition graph consumes it:
+
+- `approved`: complete ValueEngine so the normal build journey can advance.
+- `changes_requested`: return to the user; the next message resumes
+  GapAnalysisAgent with `concept_review_feedback`.
+- `cancelled` or `blocked`: end unsuccessfully; do not advance downstream.
+
+`tools.yaml` declares three proposals per run and permits another invocation only
+after `changes_requested`. This workflow execution guard is independent of
+subscription entitlements and hosted revision charging. Freeform chat prose and
+model-generated text do not grant approval. An approved scope is populated only
+after the structured decision and required persistence succeed.
+
+This review contract does not resolve the separate factory registration/identity
+boundary: session `app_id` must not be overwritten with a generated target app ID
+to make registration work. A full hosted Genesis proof still requires aligned,
+server-owned build registration, artifact addressing, and usage scope. Component
+tests and isolated runtime smoke tests do not prove that hosted journey.
+
+Run the focused backend checks with `pytest tests/test_value_engine_concept_review.py
+tests/test_concept_review_real_mongo.py --no-cov`; the latter uses an isolated
+database on `MONGO_URI`. Run the browser checks from `web_shell` with
+`npm run test:concept-review` after installing Playwright Chromium.
+
 ## What Must Stay Workflow-Local
 
 Keep code inside `factory_app/workflows/{WorkflowName}/tools/` when any of the

@@ -21,6 +21,7 @@ async def emit_validated_agent_output(
     structured_registry: dict[str, Any],
     auto_tool_agents: set[str],
     wf_logger: Any,
+    turn_idempotency_key: str | None = None,
 ) -> dict[str, Any] | None:
     """Validate an agent reply and emit the canonical runtime output event."""
 
@@ -69,7 +70,7 @@ async def emit_validated_agent_output(
             auto_tool_call=current_agent_name in auto_tool_agents,
             context=context_payload,
             source="ag2_network_orchestration",
-            turn_idempotency_key=build_turn_idempotency_key(chat_id, turn_sequence),
+            turn_idempotency_key=turn_idempotency_key or build_turn_idempotency_key(chat_id, turn_sequence),
             pattern_context_ref=context_bridge,
             validation_passed=True,
         )

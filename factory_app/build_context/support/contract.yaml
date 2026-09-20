@@ -78,9 +78,10 @@ runtime_boundaries:
       assignee, and message_thread_id. It must not store message transcripts.
   - id: use_messages_for_conversations
     rule: >
-      Support conversations are persisted through the messages pack. The support
-      UI creates a support request, creates a messages thread, links
-      message_thread_id, and sends replies through messages/send_message.
+      The support service creates a messages support thread and first message
+      during create_support_request, then stores its thread id on the ticket.
+      The support UI reads and replies through ticket-authorized support actions.
+      It must not create or link threads or call generic messages actions.
   - id: app_scoped_support
     rule: >
       Support requests must include subject_app_id. In generated apps this is
@@ -105,7 +106,8 @@ cross_pack_integrations:
   - pack_id: messaging
     description: >
       Required. Support stores message_thread_id and delegates all conversation
-      reads/writes to messages module actions.
+      persistence to the messages service. Public support conversation access is
+      mediated by ticket-authorized support actions.
   - pack_id: social
     description: >
       Optional. Social apps can show support entry points on profiles or feeds,

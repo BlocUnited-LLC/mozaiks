@@ -27,7 +27,17 @@ from typing import Any
 from pydantic import ValidationError
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.runtime.app.auth_contract import (
+    AppAuthContract,
+    AppAuthContractError,
+    load_app_auth_contract,
+)
 from mozaiksai.core.runtime.app.definition import AppDefinition
+from mozaiksai.core.runtime.app.metrics_loader import (
+    MetricsConfig,
+    MetricsConfigLoadError,
+    load_metrics_config,
+)
 from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
 from mozaiksai.core.runtime.app.page_schema import (
     AppPageSchema,
@@ -71,6 +81,8 @@ class AppLoadResult:
         data_contract:        Parsed data contract, or None
         data_entities_by_key: Data entities indexed by (module_id, entity_name)
         subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
+        metrics_config:       Parsed analytics config, or None when not declared
+        auth_contract:        Validated app auth behavior, or None for public apps
         provenance:           Parsed app provenance, or None when not declared
         page_schemas:         Validated declarative page schemas indexed by page name
         failed_module_names:  Names of modules that failed to load — empty on full success
@@ -80,9 +92,12 @@ class AppLoadResult:
     data_contract: dict[str, Any] | None = None
     data_entities_by_key: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     subscriptions_config: SubscriptionsConfig | None = None
+    metrics_config: MetricsConfig | None = None
+    auth_contract: AppAuthContract | None = None
     provenance: AppProvenance | None = None
     page_schemas: dict[str, AppPageSchema] = field(default_factory=dict)
     failed_module_names: list[str] = field(default_factory=list)
+    module_load_errors: dict[str, str] = field(default_factory=dict)
 
 
 class AppLoader:
@@ -95,11 +110,14 @@ class AppLoader:
     APP_JSON_NAME = "app.json"
 
     @classmethod
-    async def load(cls, path: str = ".") -> AppLoadResult:
+    async def load(cls, path: str = ".", *, module_defaults_path: str | None = None) -> AppLoadResult:
         """Load app metadata and any discovered modules from a bundle directory.
 
         Args:
             path: Root directory of the platform bundle.
+            module_defaults_path: Optional host-owned app bundle supplying default modules.
+                Active app module folders override defaults by id. Other app families
+                (config, data, services, pages) remain owned by the active app root.
 
         Returns:
             AppLoadResult with parsed definition and loaded modules.
@@ -122,7 +140,7 @@ class AppLoader:
             raise AppLoadError("app.json must be a JSON object")
 
         raw = cls._resolve_env_vars(raw)
-        module_loader = ModuleLoader(base_path=str(base_path))
+        module_loader = ModuleLoader(base_path=str(base_path), module_defaults_path=module_defaults_path)
         module_names = module_loader.discover_module_names()
         workflow_names = cls._discover_workflow_names(base_path)
         page_names = cls._discover_page_names(base_path)
@@ -143,6 +161,11 @@ class AppLoader:
             raise AppLoadError(f"Invalid app.json/discovered bundle: {exc}") from exc
 
         try:
+            auth_contract = load_app_auth_contract(base_path, auth_required=raw.get("authRequired", False))
+        except AppAuthContractError as exc:
+            raise AppLoadError(str(exc)) from exc
+
+        try:
             data_contract = load_data_contract(base_path)
             data_entities_by_key = index_data_contract_by_entity(data_contract)
         except DataContractLoadError as exc:
@@ -153,16 +176,36 @@ class AppLoader:
         except AppProvenanceLoadError as exc:
             raise AppLoadError(f"Invalid provenance.yaml: {exc}") from exc
 
+        # Fail closed: an app that DECLARES a subscription contract must load
+        # it or not load at all. Downgrading an invalid present config to
+        # subscriptions_config=None would wire NoOpEntitlementAdapter and
+        # silently grant every entitlement gate. Only an absent file means a
+        # valid non-SaaS app. load_subscriptions_config remains the sole
+        # schema authority (v1 and v2 both accepted, unchanged).
         subscriptions_config: SubscriptionsConfig | None = None
         try:
             subscriptions_config = load_subscriptions_config(base_path)
-            if subscriptions_config is not None:
-                logger.info(
-                    "SUBSCRIPTIONS_LOADED: %s plans (%s)",
-                    len(subscriptions_config.plans), [p.plan_id for p in subscriptions_config.plans])
         except SubscriptionsLoadError as exc:
-            logger.warning(
-                "SUBSCRIPTIONS_CONFIG_INVALID: %s — entitlement enforcement disabled", exc)
+            raise AppLoadError(f"Invalid config/subscriptions.yaml: {exc}") from exc
+        if subscriptions_config is not None:
+            logger.info(
+                "SUBSCRIPTIONS_LOADED: schema=%s root_plans=%s products=%s",
+                subscriptions_config.schema_version,
+                [p.plan_id for p in subscriptions_config.plans],
+                [p.product_id for p in subscriptions_config.products])
+
+        # Same fail-closed posture as subscriptions: a declared-but-invalid
+        # analytics config is a load error, an absent file is a valid app.
+        metrics_config: MetricsConfig | None = None
+        try:
+            metrics_config = load_metrics_config(base_path)
+        except MetricsConfigLoadError as exc:
+            raise AppLoadError(f"Invalid config/metrics.yaml: {exc}") from exc
+        if metrics_config is not None:
+            logger.info(
+                "METRICS_CONFIG_LOADED: funnels=%s",
+                [f.funnel_id for f in metrics_config.funnels],
+            )
 
         logger.info(
             "APP_LOADED: name=%s version=%s mode=%s workflows=%s modules=%s",
@@ -191,9 +234,12 @@ class AppLoader:
         try:
             action_index = build_page_action_index_from_module_contracts(base_path)
             action_index.update(build_page_action_index(loaded_modules))
+            ask_context_index = build_page_action_index_from_module_contracts(base_path, ask_context_only=True)
+            ask_context_index.update(build_page_action_index(loaded_modules, ask_context_only=True))
             page_schemas = load_app_page_schemas(
                 base_path,
                 action_index=action_index,
+                ask_context_index=ask_context_index,
             )
         except PageSchemaValidationError as exc:
             formatted = "; ".join(
@@ -208,9 +254,12 @@ class AppLoader:
             data_contract=data_contract,
             data_entities_by_key=data_entities_by_key,
             subscriptions_config=subscriptions_config,
+            metrics_config=metrics_config,
+            auth_contract=auth_contract,
             provenance=provenance,
             page_schemas=page_schemas,
             failed_module_names=failed_module_names,
+            module_load_errors=dict(module_loader.load_errors),
         )
 
     @classmethod

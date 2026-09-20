@@ -156,10 +156,11 @@ class SessionStateStore:
         self._persistence = persistence or AG2PersistenceManager()
 
     @staticmethod
-    def session_id_for_scope(app_id: str, user_id: str) -> str:
+    def session_id_for_scope(app_id: str, user_id: str, target_app_id: str | None = None) -> str:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
-        return f"session_router::{app}::{user}"
+        suffix = f"::{target_app_id}" if target_app_id else ""
+        return f"session_router::{app}::{user}{suffix}"
 
     async def _coll(self):
         coll_getter = getattr(self._persistence, "_coll", None)
@@ -178,9 +179,9 @@ class SessionStateStore:
             raise RuntimeError("Mongo client not initialized")
         return persistence_root.client["mozaiksai"]["SessionRouterState"]
 
-    async def load(self, *, app_id: str, user_id: str) -> SessionState | None:
+    async def load(self, *, app_id: str, user_id: str, target_app_id: str | None = None) -> SessionState | None:
         coll = await self._coll()
-        session_id = self.session_id_for_scope(app_id, user_id)
+        session_id = self.session_id_for_scope(app_id, user_id, target_app_id)
         doc = await coll.find_one({"_id": session_id})
         if not isinstance(doc, dict):
             return None
@@ -205,6 +206,7 @@ class SessionStateStore:
             session_id=session_id,
             app_id=str(doc.get("app_id") or app_id),
             user_id=str(doc.get("user_id") or user_id),
+            target_app_id=target_app_id,
             sequence_status=sequence_status,
             sequence_completed_at=(
                 _coerce_datetime(doc.get("sequence_completed_at"), fallback=now)

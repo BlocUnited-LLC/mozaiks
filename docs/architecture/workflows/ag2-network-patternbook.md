@@ -26,7 +26,7 @@ modules: curated generation intelligence, not runtime authority.
 | --- | --- |
 | Patternbook YAML | Pattern taxonomy, intent signals, required context/tools, handoff-generation strategy |
 | AgentGenerator | Reads the patternbook to select patterns and generate workflow YAML |
-| Runtime compiler | Validates workflow YAML, compiles handoffs into AG2 1.0 beta `TransitionGraph` objects, and resolves turns through `WorkflowAdapter` |
+| Runtime compiler | Validates workflow YAML, compiles handoffs into AG2 1.0 `TransitionGraph` objects, and resolves turns through `WorkflowAdapter` |
 | Refinement Engine | Classifies user/refinement intent before workflow launch or resume |
 
 The runtime does not route from the patternbook directly. It routes from the
@@ -62,7 +62,7 @@ The patternbook tracks both AG2 cookbook shape and Mozaiks support level.
 | Star | `compiled_now` | Hub-spoke return graph |
 | Triage with Tasks | `compiled_now` | Triage plan followed by typed task sequence |
 
-`Coordinator` is the AG2 1.0 beta replacement for open-ended manager/specialist
+`Coordinator` is the AG2 1.0 replacement for open-ended manager/specialist
 selection. It should be generated only when the target host supports the full
 WorkflowAdapter typed handoff path. Otherwise AgentGenerator should prefer
 Context-Aware Routing or Star.
@@ -96,7 +96,7 @@ mozaiksai.core.workflow.context.projection.inject_build_context_projections
 
 Workflow-specific Python prompt stubs do not own patternbook projection. This
 keeps each parallel builder worker focused, keeps the patternbook as the single
-catalog to evolve as AG2 1.0 beta Network support expands, and lets other workflows
+catalog to evolve as AG2 1.0 Network support expands, and lets other workflows
 use the same context-declared projection contract.
 
 ## Boundary

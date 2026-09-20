@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +22,62 @@ from mozaiksai.control_plane import (
     LoadedControlPlanePack,
     ScopedRefinementCodingWorker,
 )
+from mozaiksai.core.session.build_binding import RunBuildBinding
+
+
+@pytest.mark.asyncio
+async def test_refinement_preserves_unselected_files_and_bound_target(tmp_path):
+    binding = RunBuildBinding(
+        target_app_id="app_1", build_registry_id="registry_1", build_id="revision_1", phase="refinement",
+    )
+    store = _FakeArtifactStore()
+    worker = ScopedRefinementCodingWorker(
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc), config_loader=_enabled_control_plane,
+        pack_loader=_pack, tool_executor=_FakeToolExecutor(),
+        source_validation_runner=_fake_source_validation_runner,
+        artifact_store=store, output_root=tmp_path,
+    )
+    original = "export default function Dashboard() {}"
+    unchanged = '{"appId":"app_1"}'
+    result = await worker.execute(CodingWorkerRequest(
+        app_id="factory", target_app_id="app_1", user_id="user_1", run_build_binding=binding,
+        build_family="app_bundle", build_record_id="av_parent", change_class="patch",
+        requested_workflow_id="AppGenerator", raw_user_request="Change the dashboard",
+        files={"app/ui/pages/Dashboard.jsx": original}, validation_strategy="local",
+        baseline_files={"app/ui/pages/Dashboard.jsx": original, "app/app.json": unchanged},
+    ))
+    assert result.status == "validated", result.error
+    assert store.calls[0]["app_id"] == "app_1"
+    metadata = store.calls[0]["commit_metadata"]["metadata"]
+    assert all(metadata[key] == value for key, value in binding.model_dump().items())
+    with zipfile.ZipFile(metadata["artifact_path"]) as archive:
+        assert archive.read("app/app.json").decode() == unchanged
+        assert b"patched" in archive.read("app/ui/pages/Dashboard.jsx")
 
 # ---------------------------------------------------------------------------
 # Fake AG2 agent infrastructure
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["skipped", "warning", "pending"])
+async def test_unvalidated_output_is_never_reported_validated(tmp_path, status):
+    async def validate(**kwargs):
+        return {"validation_status": status}
+
+    store = _FakeArtifactStore()
+    worker = ScopedRefinementCodingWorker(
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc), config_loader=_enabled_control_plane,
+        pack_loader=_pack, tool_executor=_FakeToolExecutor(), source_validation_runner=validate,
+        artifact_store=store, output_root=tmp_path,
+    )
+    result = await worker.execute(CodingWorkerRequest(
+        app_id="app_1", user_id="user_1", build_family="app_bundle", build_record_id="parent", change_class="patch",
+        files={"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"},
+    ))
+    assert result.status == "planned"
+    assert result.metadata["build_record_id"] == "av_child_1"
+    assert store.calls[0]["validation_status"].value != "passed"
 
 _GOOD_PLAN = CodingWorkerPlan(
     summary="Patch the dashboard file.",
@@ -89,6 +142,10 @@ class _FakeToolExecutor:
 async def _fake_source_validation_runner(**kwargs):  # noqa: ANN003
     assert kwargs["app_id"] == "app_1"
     assert "app/ui/pages/Dashboard.jsx" in kwargs["overlay_files"]
+    root = Path(kwargs["workspace_root"])
+    assert root.is_dir()
+    for name, content in kwargs["overlay_files"].items():
+        assert (root / name).read_text(encoding="utf-8") == content
     return {
         "success": True,
         "validation_status": "passed",
@@ -169,7 +226,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     tool_executor = _FakeToolExecutor()
     artifact_store = _FakeArtifactStore()
 
-    def capturing_factory(system_prompt: str, llm_config: dict) -> _FakeAgent:
+    def capturing_factory(system_prompt: str, llm_config: dict, *, middleware: list) -> _FakeAgent:
         a = _FakeAgent(system_prompt, llm_config)
         created.append(a)
         return a
@@ -186,7 +243,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
 
     result = await worker.execute(
         CodingWorkerRequest(
-            app_id="app_1",
+            app_id="app_1", user_id="user_1",
             artifact_kind="app_bundle",
             artifact_key="app_bundle",
             artifact_version_id="av_123",
@@ -234,7 +291,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
 @pytest.mark.asyncio
 async def test_coding_worker_rejects_non_patch_requests() -> None:
     worker = ScopedRefinementCodingWorker(
-        agent_factory=lambda sp, lc: _FakeAgent(sp, lc),
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc),
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -243,7 +300,7 @@ async def test_coding_worker_rejects_non_patch_requests() -> None:
 
     result = await worker.execute(
         CodingWorkerRequest(
-            app_id="app_1",
+            app_id="app_1", user_id="user_1",
             artifact_kind="app_bundle",
             artifact_key="app_bundle",
             artifact_version_id="av_123",
@@ -263,7 +320,7 @@ async def test_coding_worker_rejects_non_patch_requests() -> None:
 @pytest.mark.asyncio
 async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_path: Path) -> None:
     worker = ScopedRefinementCodingWorker(
-        agent_factory=lambda sp, lc: _FakeAgent(sp, lc, plan=_BAD_PLAN),
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc, plan=_BAD_PLAN),
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -274,7 +331,7 @@ async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_pat
 
     result = await worker.execute(
         CodingWorkerRequest(
-            app_id="app_1",
+            app_id="app_1", user_id="user_1",
             artifact_kind="app_bundle",
             artifact_key="app_bundle",
             artifact_version_id="av_123",
@@ -299,7 +356,7 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
             raise RuntimeError('artifact store unavailable')
 
     worker = ScopedRefinementCodingWorker(
-        agent_factory=lambda sp, lc: _FakeAgent(sp, lc),
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc),
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -310,7 +367,7 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
 
     result = await worker.execute(
         CodingWorkerRequest(
-            app_id="app_1",
+            app_id="app_1", user_id="user_1",
             artifact_kind="app_bundle",
             artifact_key="app_bundle",
             artifact_version_id="av_123",

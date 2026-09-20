@@ -150,9 +150,7 @@ function validateThemeConfig(config) {
   if (!config.assets) {
     issues.push({ level: 'error', file, message: 'Missing "assets" block. Add at least: { "assets": { "logo": "your-logo.svg" } }' });
   } else {
-    if (!config.assets.logo) {
-      issues.push({ level: 'warn', file, message: 'Missing "assets.logo". The header will have no logo image.' });
-    } else if (!ICON_FILE_RE.test(config.assets.logo) && !URL_RE.test(config.assets.logo)) {
+    if (config.assets.logo && !ICON_FILE_RE.test(config.assets.logo) && !URL_RE.test(config.assets.logo)) {
         issues.push({ level: 'error', file, message: `assets.logo="${config.assets.logo}" doesn't look like a file. Use a filename like "logo.svg" (placed in brand/assets/ within the active app root).` });
     }
     if (!config.assets.chatbackgroundImage) {

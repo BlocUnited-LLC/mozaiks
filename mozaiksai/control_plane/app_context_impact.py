@@ -17,6 +17,7 @@ from mozaiksai.core.app_context.models import (
     AppContextStaleStatus,
     GraphNodeType,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 APP_CONTEXT_GRAPH_MISSING_WARNING = (
     "No AppContextGraph was available; impact hints use existing route and artifact evidence only."
@@ -156,7 +157,7 @@ def derive_app_context_impact_hints(
         if edge_id in edge_by_id
     ]
     existing_paths = {_normalize_path(path).lower() for path in paths}
-    additional_path_hints = _dedupe(
+    additional_path_hints = dedupe_strings(
         [
             hint
             for node_id in related_node_ids
@@ -375,7 +376,7 @@ def _node_path_hints(node: AppContextGraphNode) -> list[str]:
         candidates.append(node.label)
     for key in _PATH_METADATA_KEYS:
         candidates.extend(_as_path_candidates(node.metadata.get(key)))
-    return _dedupe([path for path in (_safe_relative_path(path) for path in candidates) if path])
+    return dedupe_strings([path for path in (_safe_relative_path(path) for path in candidates) if path])
 
 
 def _as_path_candidates(value: Any) -> list[str]:
@@ -419,7 +420,7 @@ def _ownership_warnings(nodes: Any) -> list[str]:
         warnings.append(
             f"Graph node '{label}' is read_only_discovered; changes require ownership review."
         )
-    return _dedupe(warnings)
+    return dedupe_strings(warnings)
 
 
 def _ownership_value(node: AppContextGraphNode) -> str | None:
@@ -440,7 +441,7 @@ def _risk_warnings(nodes: Any) -> list[str]:
             value = node.metadata.get(key)
             if isinstance(value, str) and value.strip():
                 warnings.append(value.strip())
-    return _dedupe(warnings)
+    return dedupe_strings(warnings)
 
 
 def _normalize_path(path: str) -> str:
@@ -450,16 +451,6 @@ def _normalize_path(path: str) -> str:
     return str(path or "").replace("\\", "/").strip().lstrip("/")
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        result.append(normalized)
-    return result
 
 
 __all__ = [

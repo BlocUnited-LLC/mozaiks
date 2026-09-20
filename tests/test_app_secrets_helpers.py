@@ -29,7 +29,7 @@ Covers:
   _declared_secret_name:
     - no matching entry → ""
     - entry with top-level secret_name → that value
-    - entry with azure_key_vault.secret_name → that value (takes precedence)
+    - entry with azure_key_vault.secret_name → that value
     - entry with empty secret_name → ""
 
   _vault_name (env-dependent):
@@ -196,29 +196,11 @@ class TestDeclaredSecretName:
     def test_no_entry_returns_empty(self):
         assert _declared_secret_name("MY_SECRET", {}) == ""
 
-    def test_top_level_secret_name(self):
-        contract = _contract(secrets=[{"env": "MY_SECRET", "secret_name": "my-vault-secret"}])
+    def test_azure_secret_reference(self):
+        contract = _contract(secrets=[{
+            "env": "MY_SECRET", "azure_key_vault": {"secret_name": "my-vault-secret"},
+        }])
         assert _declared_secret_name("MY_SECRET", contract) == "my-vault-secret"
-
-    def test_azure_key_vault_name_takes_precedence(self):
-        contract = _contract(secrets=[
-            {
-                "env": "MY_SECRET",
-                "secret_name": "top-level",
-                "azure_key_vault": {"secret_name": "az-level"},
-            }
-        ])
-        assert _declared_secret_name("MY_SECRET", contract) == "az-level"
-
-    def test_azure_key_vault_empty_name_falls_back_to_top(self):
-        contract = _contract(secrets=[
-            {
-                "env": "MY_SECRET",
-                "secret_name": "top-level",
-                "azure_key_vault": {"secret_name": ""},
-            }
-        ])
-        assert _declared_secret_name("MY_SECRET", contract) == "top-level"
 
     def test_missing_secret_name_field_returns_empty(self):
         contract = _contract(secrets=[{"env": "MY_SECRET"}])

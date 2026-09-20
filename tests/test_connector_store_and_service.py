@@ -273,9 +273,14 @@ def test_connector_store_separates_workspace_and_app_scope() -> None:
     assert len(app_list) == 1
 
 
-def test_connector_service_records_metadata_only_status_without_vault() -> None:
+def test_connector_service_records_metadata_only_status_without_vault(monkeypatch) -> None:
     pm = _FakePersistenceManager()
     store = ConnectorStore(pm=pm)
+
+    import mozaiksai.core.workflow.generator_support.connector_service as connector_service
+    from mozaiksai.core.secrets import NoopConnectorVaultBackend
+
+    monkeypatch.setattr(connector_service, "get_connector_vault_backend", NoopConnectorVaultBackend)
 
     recorded = asyncio.run(
         save_connector_draft(

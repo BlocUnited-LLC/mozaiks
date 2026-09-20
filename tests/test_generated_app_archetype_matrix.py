@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
-from factory_app.workflows.AppGenerator.tools.render_infra_scaffold import save_infra_scaffold
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import save_auth_scaffold
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
 from mozaiksai.core.admin.registry import AdminRegistry, build_admin_shell_routes
 from mozaiksai.core.auth.adapters import registry as auth_registry
@@ -36,7 +36,6 @@ from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.core.validation import GeneratedAppValidationRequest, scan_functional_generated_app
 from mozaiksai.core.validation.generated_app import validate_generated_app_bundle
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    _page_from_plan,
     _page_stem_from_path,
 )
 from mozaiksai.core.workflow.task_batches import (
@@ -45,6 +44,8 @@ from mozaiksai.core.workflow.task_batches import (
 )
 from mozaiksai.hosts import platform
 from mozaiksai.hosts import runtime as runtime_host
+from tests.factory_context import factory_context
+from tests.page_plan_fixtures import _page_from_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
@@ -52,7 +53,7 @@ WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
 
 class _Context:
     def __init__(self, initial: Mapping[str, Any] | None = None) -> None:
-        self.data = dict(initial or {})
+        self.data = factory_context(initial)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
@@ -647,6 +648,12 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
         }
     if task_type == "page_bundle":
         return {
+            "manifest": {
+                "app_name": spec.app_name,
+                "default_route": spec.plan["pages"][0]["route"],
+                "auth_strategy": "oidc" if spec.auth_enabled else "public",
+            },
+            "pages": _validation_pages(spec.plan, {}),
             "code_files": [
                 {
                     "filename": "app.json",
@@ -675,6 +682,7 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
             "app_name": spec.app_name,
             "app_slug": spec.app_id,
             "chat_id": f"{spec.app_id}-chat",
+            "build_timestamp": "2026-09-12T00:00:00Z",
             "build_task_model": "AppBuildTask",
             "app_validation_strategy_used": "skip",
             "app_validation_status": "skipped",
@@ -685,8 +693,13 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
 
     task_batches = load_task_batches_config("AppGenerator", workflows_root=WORKFLOWS_ROOT)
     assert task_batches is not None
+    checkpoints: list[dict[str, Any]] = []
+
+    async def checkpoint(updates: dict[str, Any]) -> None:
+        checkpoints.append(deepcopy(updates))
 
     async def _fake_run(self: Any, request: Any) -> AG2TaskBatchRunnerResult:  # noqa: ARG001
+        assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"][request.task_id]
         task = dict(request.context_variables.get("current_build_task") or {})
         output = _app_task_output(
             spec,
@@ -721,20 +734,28 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
             app_id=ctx.get("app_id"),
             user_id="matrix-user",
             fresh_agents_per_task=False,
+            checkpoint=checkpoint,
+            parent_channel_id=f"{spec.app_id}-matrix-parent",
         )
     finally:
         ag2_task_batch_runner.AG2TaskBatchRunner.run = original_run
 
+    assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"] == {}
+
     assembled = await assemble_app_tasks(context_variables=ctx)
     files = _file_map(assembled)
     if spec.auth_enabled:
-        auth_scaffold = await save_infra_scaffold(
-            emit_infra=False,
-            emit_auth_adapter=True,
+        auth_scaffold = await save_auth_scaffold(
             context_variables=ctx.data,
         )
         files.update(_file_map(auth_scaffold))
     files.update(spec.extra_files)
+
+    # This fixture stops before export; apply the same final route composition
+    # that generate_and_download performs before its acceptance gate.
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import compose_bundle_auth_routes
+
+    compose_bundle_auth_routes(files)
 
     validation = validate_generated_app_bundle(
         GeneratedAppValidationRequest(
@@ -890,6 +911,7 @@ def _workflow_files() -> dict[str, str]:
     return {
         "workflows/ResearchWorkflow/orchestrator.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.orchestrator.v1
             workflow_name: ResearchWorkflow
             max_turns: 3
             human_in_the_loop: false
@@ -928,6 +950,7 @@ def _workflow_files() -> dict[str, str]:
         ).lstrip(),
         "workflows/ResearchWorkflow/structured_outputs.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.structured_outputs.v1
             registry:
               ResearchAgent: ResearchSummary
             models:

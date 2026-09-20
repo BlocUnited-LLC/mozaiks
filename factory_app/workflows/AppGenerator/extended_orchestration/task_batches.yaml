@@ -24,9 +24,17 @@ batches:
     execution:
       concurrency: 8
       dependency_field: depends_on
-      failure_policy: fail_batch
-      retry_limit: 1
+      failure_policy: continue_with_available
+      # Four total AG2 attempts per task, including its one bounded correction.
+      # An output rejection defers correction to Factory policy without losing evidence.
+      retry_limit: 3
       timeout_seconds: 600
+    recovery:
+      trigger_agent: AppValidationAgent
+      request_key: app_task_recovery_request
+      outcome_key: app_task_recovery_result
+      status_key: app_task_recovery_status
+      input_keys: [app_build_plan, build_timestamp]
     result:
       context_key: app_task_batch_results
       status_key: app_task_batch_status

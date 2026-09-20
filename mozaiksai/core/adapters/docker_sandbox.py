@@ -14,11 +14,12 @@ Resolution order (see app_validation_strategy.py):
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import re
 import shutil
-import tempfile
-from pathlib import Path, PurePosixPath
+import tarfile
+from pathlib import PurePosixPath
 
 _ENV_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$", re.IGNORECASE)
 from typing import Any
@@ -28,8 +29,7 @@ from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
 
 logger = get_core_logger("docker_sandbox")
 
-# Default image — Node 20 LTS on Alpine, mirrors the E2B template capabilities.
-_DEFAULT_IMAGE = os.getenv("DOCKER_SANDBOX_IMAGE", "node:20-alpine")
+_DEFAULT_IMAGE = os.getenv("DOCKER_SANDBOX_IMAGE", "mozaiks-sandbox:local")
 _DEFAULT_WORKDIR = "/workspace"
 _DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT", "300"))
 
@@ -37,14 +37,12 @@ _DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT", "300"))
 def _preview_ports() -> list[int]:
     """Container ports published at create time for preview URLs.
 
-    The configured preview port (SANDBOX_PREVIEW_PORT, default 3000 for node
-    dev servers) plus 8000 for python backends, deduplicated.
+    The canonical frontend/backend ports plus an optional custom preview port.
     """
     preview_port = int(os.getenv("SANDBOX_PREVIEW_PORT", "3000"))
-    ports = [preview_port]
-    if 8000 not in ports:
-        ports.append(8000)
-    return ports
+    if not 1 <= preview_port <= 65535:
+        raise ValueError("SANDBOX_PREVIEW_PORT must be a valid TCP port")
+    return list(dict.fromkeys([preview_port, 3000, 8000]))
 
 
 def docker_available() -> bool:
@@ -80,18 +78,19 @@ class DockerSandboxAdapter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _run(args: list[str], *, timeout: float = 30.0) -> tuple[int, str, str]:
+    async def _run(args: list[str], *, timeout: float = 30.0, input_data: bytes | None = None) -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.PIPE if input_data is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(input_data), timeout=timeout)
         except TimeoutError as exc:
             proc.kill()
             await proc.communicate()
-            raise RuntimeError(f"Docker command timed out after {timeout}s: {' '.join(args)}") from exc
+            raise RuntimeError(f"Docker command timed out after {timeout}s") from exc
         rc = int(proc.returncode or 0)
         return rc, stdout_b.decode("utf-8", errors="replace"), stderr_b.decode("utf-8", errors="replace")
 
@@ -110,7 +109,12 @@ class DockerSandboxAdapter:
         image = template or self._image
         env_args: list[str] = []
         for key, val in (envs or {}).items():
+            if not _ENV_KEY_RE.fullmatch(key):
+                raise ValueError("Invalid sandbox environment variable name")
             env_args += ["-e", f"{key}={val}"]
+        label_args: list[str] = ["--label", "mozaiks.sandbox=true"]
+        if metadata and metadata.get("manager_sandbox_id"):
+            label_args += ["--label", f"mozaiks.preview={metadata['manager_sandbox_id']}"]
 
         # Publish the preview ports with random host bindings so
         # get_preview_url's `docker port` lookup can resolve a URL. Without
@@ -123,14 +127,17 @@ class DockerSandboxAdapter:
         # Run a long-lived idle container so we can exec into it
         rc, stdout, stderr = await self._run([
             "docker", "run", "-d", "--rm",
+            "--init", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+            "--pids-limit=512", "--memory=2g", "--cpus=2",
             "-w", _DEFAULT_WORKDIR,
+            *label_args,
             *env_args,
             *port_args,
             image,
             "sh", "-c", f"sleep {timeout_seconds or self._timeout}",
         ])
         if rc != 0:
-            raise RuntimeError(f"docker run failed: {stderr.strip()}")
+            raise RuntimeError("Docker sandbox creation failed; check Docker and build the configured preview image")
         session_id = stdout.strip()
         logger.info("docker_sandbox.created container_id=%s image=%s", session_id[:12], image)
         return SandboxSessionInfo(
@@ -165,33 +172,33 @@ class DockerSandboxAdapter:
         base = cwd or _DEFAULT_WORKDIR
         written: list[str] = []
 
-        with tempfile.TemporaryDirectory(prefix="mozaiks-docker-staging-") as staging:
-            staging_root = Path(staging)
+        archive_bytes = io.BytesIO()
+        with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
             for rel_path, content in files.items():
                 safe = _safe_relpath(rel_path)
-                if not safe:
-                    continue
-                dest = staging_root / safe
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                if isinstance(content, bytes):
-                    dest.write_bytes(content)
-                else:
-                    dest.write_text(str(content), encoding="utf-8")
+                if not safe or safe in written:
+                    raise ValueError("Invalid or duplicate sandbox file path")
+                data = content if isinstance(content, bytes) else str(content).encode("utf-8")
+                member = tarfile.TarInfo(safe)
+                member.size = len(data)
+                member.mode = 0o644
+                archive.addfile(member, io.BytesIO(data))
                 written.append(safe)
 
-            if written:
-                # Ensure workdir exists inside container
-                await self._run(
-                    ["docker", "exec", session_id, "mkdir", "-p", base],
-                    timeout=10.0,
-                )
-                # Copy the staging dir tree into the container
-                rc, _, stderr = await self._run(
-                    ["docker", "cp", f"{staging}/.", f"{session_id}:{base}"],
-                    timeout=30.0,
-                )
-                if rc != 0:
-                    raise RuntimeError(f"docker cp failed: {stderr.strip()}")
+        if written:
+            rc, _, _ = await self._run(
+                ["docker", "exec", session_id, "mkdir", "-p", base],
+                timeout=10.0,
+            )
+            if rc != 0:
+                raise RuntimeError("Docker sandbox workspace is unavailable")
+            # Extract as the container user so subsequent edits and deletes retain access.
+            rc, _, _ = await self._run(
+                ["docker", "exec", "-i", session_id, "tar", "--no-same-owner", "--no-same-permissions", "-xf", "-", "-C", base],
+                input_data=archive_bytes.getvalue(), timeout=30.0,
+            )
+            if rc != 0:
+                raise RuntimeError("Docker sandbox file extraction failed")
 
         return {"written": written, "count": len(written)}
 
@@ -230,7 +237,7 @@ class DockerSandboxAdapter:
             env_args += ["-e", f"{key}={val}"]
 
         if background:
-            # Fire-and-forget — wrap in sh -c with nohup
+            # Docker detaches the process; its own launch result still matters.
             proc = await asyncio.create_subprocess_exec(
                 "docker", "exec", "-d",
                 *env_args,
@@ -240,8 +247,13 @@ class DockerSandboxAdapter:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            await proc.wait()
-            return SandboxRunResult(success=True)
+            try:
+                returncode = await asyncio.wait_for(proc.wait(), timeout=float(timeout_seconds or 60))
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return SandboxRunResult(success=False, error="sandbox_timeout")
+            return SandboxRunResult(success=returncode == 0, exit_code=returncode)
 
         try:
             rc, stdout, stderr = await self._run(
@@ -261,7 +273,7 @@ class DockerSandboxAdapter:
                 stderr=stderr,
             )
         except Exception as exc:
-            logger.error("Docker sandbox run_command failed session=%s: %s", session_id, exc, exc_info=True)
+            logger.error("Docker sandbox run_command failed session=%s exception=%s", session_id, type(exc).__name__)
             return SandboxRunResult(
                 success=False,
                 exit_code=1,
@@ -308,7 +320,13 @@ class DockerSandboxAdapter:
             ["docker", "stop", session_id],
             timeout=15.0,
         )
-        return rc == 0
+        if rc == 0:
+            return True
+        rc, stdout, _ = await self._run(
+            ["docker", "ps", "--all", "--quiet", "--no-trunc", "--filter", f"id={session_id}"],
+            timeout=15.0,
+        )
+        return rc == 0 and not stdout.strip()
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -321,11 +339,11 @@ class DockerSandboxAdapter:
 
 
 def _safe_relpath(raw: str) -> str | None:
-    path = raw.replace("\\", "/").strip()
-    if not path or path.startswith("/"):
+    path = raw.replace("\\", "/")
+    if not path or path != path.strip() or path.startswith("/") or ":" in path or "\x00" in path:
         return None
     p = PurePosixPath(path)
-    if any(part == ".." for part in p.parts):
+    if str(p) == "." or any(part == ".." for part in p.parts):
         return None
     return str(p)
 

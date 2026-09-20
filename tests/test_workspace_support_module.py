@@ -155,7 +155,7 @@ async def test_create_support_request_creates_canonical_message_thread():
         message="Still seeing the issue",
         page_title="Checkout",
         severity="medium",
-        app_id="checkout-app",
+        subject_app_id="checkout-app",
     )
 
     requests = persistence.collections[("workspace_support", "requests")]
@@ -180,6 +180,30 @@ async def test_create_support_request_creates_canonical_message_thread():
 
 
 @pytest.mark.asyncio
+async def test_create_support_request_does_not_claim_success_when_storage_fails():
+    persistence = _FakePersistence()
+    emitted = []
+
+    async def fail_insert(_doc):
+        raise RuntimeError("database unavailable")
+
+    persistence.collections[("workspace_support", "requests")].insert_one = fail_insert
+    ctx = SimpleNamespace(
+        app_id="app_1",
+        user_id="user_1",
+        permissions=[],
+        persistence=persistence,
+        emit=lambda event_type, payload: emitted.append((event_type, payload)),
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await WorkspaceSupportService().create_support_request(ctx, message="help")
+
+    assert emitted == []
+    assert persistence.collections[("messages", "threads")].rows == []
+
+
+@pytest.mark.asyncio
 async def test_create_support_request_seeds_message_thread_with_transcript():
     persistence = _FakePersistence()
     ctx = SimpleNamespace(
@@ -194,7 +218,7 @@ async def test_create_support_request_seeds_message_thread_with_transcript():
         ctx,
         message="human help",
         page_title="Widget",
-        app_id="customer-app",
+        subject_app_id="customer-app",
         conversation_transcript=[
             {"role": "user", "content": "hey"},
             {"role": "assistant", "content": "Hi there! How can I assist you today?"},
@@ -257,7 +281,7 @@ async def test_user_reply_requires_ticket_owner_or_support_manager():
     outsider_ctx = SimpleNamespace(
         app_id="app_1",
         user_id="other_user",
-        permissions=["access_as_user"],
+        permissions=[],
         persistence=persistence,
         emit=lambda *_args, **_kwargs: None,
     )
@@ -268,11 +292,12 @@ async def test_user_reply_requires_ticket_owner_or_support_manager():
             message="Trying to write to another user's ticket",
             sender_role="user",
         )
+    assert persistence.collections[("messages", "threads")].rows == []
 
     owner_ctx = SimpleNamespace(
         app_id="app_1",
         user_id="ticket_owner",
-        permissions=["access_as_user"],
+        permissions=[],
         persistence=persistence,
         emit=lambda *_args, **_kwargs: None,
     )
@@ -283,6 +308,27 @@ async def test_user_reply_requires_ticket_owner_or_support_manager():
         sender_role="user",
     )
     assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_user_reply_rejects_unowned_ticket_before_creating_thread():
+    persistence = _FakePersistence()
+    persistence.collections[("workspace_support", "requests")].rows.append(
+        {"request_id": "sr_legacy", "app_id": "app_1", "subject_app_id": "customer-app"}
+    )
+    ctx = SimpleNamespace(
+        app_id="app_1",
+        user_id="user_1",
+        permissions=[],
+        persistence=persistence,
+    )
+
+    with pytest.raises(PermissionError, match="own support requests"):
+        await WorkspaceSupportService().add_support_message(
+            ctx, request_id="sr_legacy", message="claiming ticket", sender_role="user"
+        )
+
+    assert persistence.collections[("messages", "threads")].rows == []
 
 
 @pytest.mark.asyncio
@@ -592,12 +638,50 @@ async def test_list_support_requests_defaults_to_current_user_scope():
             },
         ]
     )
-    ctx = SimpleNamespace(app_id="app_1", user_id="operator_1", persistence=persistence)
+    ctx = SimpleNamespace(app_id="app_1", user_id="operator_1", permissions=[], persistence=persistence)
     service = WorkspaceSupportService()
 
     result = await service.list_support_requests(ctx, status="all")
 
     assert [item["request_id"] for item in result["requests"]] == ["sr_user_1"]
+
+
+@pytest.mark.asyncio
+async def test_list_support_requests_surfaces_storage_failure():
+    persistence = _FakePersistence()
+
+    async def fail_find_many(_query, **_kwargs):
+        raise RuntimeError("database unavailable")
+
+    persistence.collections[("workspace_support", "requests")].find_many = fail_find_many
+    ctx = SimpleNamespace(app_id="app_1", user_id="user_1", permissions=[], persistence=persistence)
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await WorkspaceSupportService().list_support_requests(ctx)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("thread_id", [None, "thr_missing"])
+async def test_list_support_requests_marks_missing_conversations_unavailable(thread_id):
+    persistence = _FakePersistence()
+    persistence.collections[("workspace_support", "requests")].rows.append({
+        "request_id": "sr_missing_thread",
+        "app_id": "app_1",
+        "subject_app_id": "customer_app_1",
+        "user_id": "user_1",
+        "message": "I need help",
+        "status": "open",
+        "created_at": "2026-01-01T00:00:00Z",
+        "message_thread_id": thread_id,
+    })
+    ctx = SimpleNamespace(app_id="app_1", user_id="user_1", permissions=[], persistence=persistence)
+
+    result = await WorkspaceSupportService().list_support_requests(ctx, status="all")
+
+    request = result["requests"][0]
+    assert request["subject_app_id"] == "customer_app_1"
+    assert request["messages"] == []
+    assert request["error"] == "Support conversation unavailable."
 
 
 @pytest.mark.asyncio
@@ -626,7 +710,7 @@ async def test_list_support_requests_user_scope_can_filter_subject_app():
     ctx = SimpleNamespace(app_id="app_1", user_id="user_1", persistence=persistence)
     service = WorkspaceSupportService()
 
-    result = await service.list_support_requests(ctx, status="all", app_id="customer_app_1")
+    result = await service.list_support_requests(ctx, status="all", subject_app_id="customer_app_1")
 
     assert [item["request_id"] for item in result["requests"]] == ["sr_user_app_1"]
 
@@ -684,6 +768,13 @@ def test_workspace_support_action_schemas_accept_frontend_support_payloads():
     app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
     loaded = ModuleLoader(str(app_root)).load("workspace_support")
     schemas = loaded.action_schemas_map
+    assert all(not required for required in loaded.action_permissions_map.values())
+    assert schemas["list_support_requests"]["input"]["properties"]["status"]["default"] == "all"
+    for action in ("create_support_request", "list_support_requests", "submit_session_feedback"):
+        properties = schemas[action]["input"]["properties"]
+        assert "subject_app_id" in properties
+        assert "app_id" not in properties
+        assert "user_id" not in properties
 
     create_input = schemas["create_support_request"]["input"]
     assert _validate_schema(
@@ -691,7 +782,7 @@ def test_workspace_support_action_schemas_accept_frontend_support_payloads():
             "message": "Can I speak to a person?",
             "page_url": None,
             "page_title": None,
-            "app_id": None,
+            "subject_app_id": None,
             "severity": "low",
             "conversation_transcript": [
                 {"role": "user", "content": "hello"},
@@ -711,7 +802,7 @@ def test_workspace_support_action_schemas_accept_frontend_support_payloads():
         },
         schemas["create_support_request"]["output"],
     ) is None
-    assert _validate_schema({"status": "all", "app_id": None}, schemas["list_support_requests"]["input"]) is None
+    assert _validate_schema({"status": "all", "subject_app_id": None}, schemas["list_support_requests"]["input"]) is None
     assert _validate_schema(
         {"request_id": "sr_1", "status": "resolved"},
         schemas["update_support_request_status"]["input"],
@@ -727,7 +818,7 @@ def test_workspace_support_action_schemas_accept_frontend_support_payloads():
         schemas["update_support_request_status"]["output"],
     ) is None
     assert _validate_schema(
-        {"rating": 0, "session_id": None, "workflow_name": None, "app_id": None},
+        {"rating": 0, "session_id": None, "workflow_name": None, "subject_app_id": None},
         schemas["submit_session_feedback"]["input"],
     ) is None
 
@@ -764,6 +855,8 @@ async def test_list_support_requests_embeds_thread_messages_with_canonical_persi
         {
             "thread_id": thread_id,
             "app_id": "app_1",
+            "scope_type": "app",
+            "scope_id": "app_1",
             "participant_ids": ["user_1"],
             "status": "open",
             "updated_at": "2026-01-01T00:02:00Z",
@@ -831,6 +924,6 @@ async def test_app_id_filter_does_not_override_persistence_context_scope():
     ctx = SimpleNamespace(app_id="app_2", user_id="operator_1", persistence=persistence)
     service = WorkspaceSupportService()
 
-    result = await service.list_support_requests(ctx, status="all", scope="workspace", app_id="app_1")
+    result = await service.list_support_requests(ctx, status="all", scope="workspace", subject_app_id="app_1")
 
     assert [item["request_id"] for item in result["requests"]] == ["sr_app_1"]

@@ -1,3 +1,4 @@
+import { localDevelopmentAuth } from '../fixtures/localAuth.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -91,7 +92,7 @@ function browserFailures(page) {
 async function mockGeneratedApp(page, root, schemas) {
   const app = readJson(path.join(root, 'app.json'));
   const theme = readJson(path.join(root, 'brand', 'theme_config.json'), {});
-  const shell = shellConfigFor(app, schemas);
+  const shell = { ...shellConfigFor(app, schemas), auth: localDevelopmentAuth };
   const endpoints = Object.values(schemas).flatMap((schema) => collectApiEndpoints(schema));
 
   await page.route('**/api/shell-config', (route) =>

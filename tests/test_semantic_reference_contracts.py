@@ -37,7 +37,6 @@ SCOPED_REF_TYPES = [
     CompilationPlanRef,
     BuildContextBindingRef,
     RefinementPatchRef,
-    ArtifactRevisionRef,
 ]
 
 
@@ -62,9 +61,7 @@ def test_scoped_refs_pin_all_identity_fields(ref_type) -> None:
 
 
 @pytest.mark.parametrize("ref_type", SCOPED_REF_TYPES)
-@pytest.mark.parametrize(
-    "missing", ["subject_id", "subject_version", "content_digest", "scope"]
-)
+@pytest.mark.parametrize("missing", ["subject_id", "subject_version", "content_digest", "scope"])
 def test_missing_immutable_identity_fields_fail_closed(ref_type, missing) -> None:
     fields = {
         "subject_id": "subject-1",
@@ -88,6 +85,27 @@ def test_refs_are_immutable(ref_type) -> None:
     ref = _ref(ref_type)
     with pytest.raises(pydantic.ValidationError):
         ref.subject_version = 2
+
+
+def test_artifact_revision_ref_replaces_opaque_subject_shape() -> None:
+    ref = ArtifactRevisionRef(scope=SCOPE, app_id="app-1", revision_digest=DIGEST)
+    assert set(type(ref).model_fields) == {
+        "ref_schema_version",
+        "scope",
+        "app_id",
+        "revision_digest",
+    }
+    with pytest.raises(pydantic.ValidationError):
+        ArtifactRevisionRef(
+            scope=SCOPE,
+            app_id="app-1",
+            revision_digest=DIGEST,
+            subject_version=1,
+        )
+    with pytest.raises(pydantic.ValidationError):
+        ArtifactRevisionRef(scope=SCOPE, app_id="app-1")
+    with pytest.raises(pydantic.ValidationError):
+        ref.revision_digest = "1" * 64
 
 
 @pytest.mark.parametrize("alias", ["latest", "current", "head", "tip", "newest"])
@@ -279,15 +297,21 @@ def test_resolver_has_no_bare_id_lookup_surface() -> None:
     resolver = SemanticReferenceResolver()
     public = [name for name in dir(resolver) if not name.startswith("_")]
     assert set(public) == {
+        "register_compilation_plan",
         "register_semantic_graph",
         "register_semantic_graph_v2",
         "register_semantic_payload",
         "register_application_manifest",
+        "register_artifact_revision",
         "register_implementation_binding",
         "register_taxonomy_namespace",
         "register_opaque_subject",
         "resolve",
+        "register_compilation_plan_authority_inputs",
+        "resolve_compilation_plan_authority_inputs",
+        "resolve_artifact_revision",
         "resolve_manifest_ref",
+        "resolve_plan_unit",
         "resolve_semantic_payload",
         "resolve_taxonomy_namespace",
     }
@@ -296,14 +320,14 @@ def test_resolver_has_no_bare_id_lookup_surface() -> None:
 def test_opaque_subjects_resolve_for_ref_only_kinds() -> None:
     resolver = SemanticReferenceResolver()
     resolver.register_opaque_subject(
-        kind=RefDocumentType.COMPILATION_PLAN,
-        subject_id="plan-1",
+        kind=RefDocumentType.BUILD_CONTEXT_BINDING,
+        subject_id="binding-ctx-1",
         version=1,
         digest=DIGEST,
         scope=SCOPE,
     )
-    ref = CompilationPlanRef(
-        subject_id="plan-1", subject_version=1, content_digest=DIGEST, scope=SCOPE
+    ref = BuildContextBindingRef(
+        subject_id="binding-ctx-1", subject_version=1, content_digest=DIGEST, scope=SCOPE
     )
     assert resolver.resolve(ref, requesting_scope=SCOPE) is None
 
@@ -324,7 +348,7 @@ def test_opaque_registration_validates_immutable_identity() -> None:
     resolver = SemanticReferenceResolver()
     with pytest.raises(pydantic.ValidationError, match="mutable alias"):
         resolver.register_opaque_subject(
-            kind=RefDocumentType.COMPILATION_PLAN,
+            kind=RefDocumentType.BUILD_CONTEXT_BINDING,
             subject_id="latest",
             version=1,
             digest=DIGEST,
@@ -332,7 +356,7 @@ def test_opaque_registration_validates_immutable_identity() -> None:
         )
     with pytest.raises(pydantic.ValidationError, match="greater than or equal to 1"):
         resolver.register_opaque_subject(
-            kind=RefDocumentType.COMPILATION_PLAN,
+            kind=RefDocumentType.BUILD_CONTEXT_BINDING,
             subject_id="plan-1",
             version=0,
             digest=DIGEST,
@@ -340,7 +364,7 @@ def test_opaque_registration_validates_immutable_identity() -> None:
         )
     with pytest.raises(pydantic.ValidationError, match="lowercase hex"):
         resolver.register_opaque_subject(
-            kind=RefDocumentType.COMPILATION_PLAN,
+            kind=RefDocumentType.BUILD_CONTEXT_BINDING,
             subject_id="plan-1",
             version=1,
             digest="Z" * 64,
@@ -449,7 +473,7 @@ def test_child_contract_document_type_substitution_fails_closed() -> None:
         canonical_relative_path="modules/users/module.yaml",
         contract_schema_version="mozaiks.module.v1",
     )
-    substituted = CompilationPlanRef(
+    substituted = BuildContextBindingRef(
         subject_id="child-1", subject_version=1, content_digest=DIGEST, scope=SCOPE
     )
     with pytest.raises(ReferenceResolutionError, match="document type mismatch"):
@@ -507,8 +531,8 @@ def test_non_child_registration_rejects_child_identity_fields(field: str, value:
     resolver = SemanticReferenceResolver()
     with pytest.raises(ReferenceResolutionError, match="only for child contracts"):
         resolver.register_opaque_subject(
-            kind=RefDocumentType.COMPILATION_PLAN,
-            subject_id="plan-1",
+            kind=RefDocumentType.BUILD_CONTEXT_BINDING,
+            subject_id="binding-ctx-1",
             version=1,
             digest=DIGEST,
             scope=SCOPE,

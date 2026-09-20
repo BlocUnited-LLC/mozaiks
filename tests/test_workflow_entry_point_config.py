@@ -78,9 +78,27 @@ def test_create_launcher_workflow_is_removed() -> None:
 
 
 def test_mozaiks_app_generator_is_agent_driven() -> None:
+    """Agent-driven still holds; the entry agent is resolved, not named.
+
+    AppGenerator declares initial_agent: user so that
+    _resolve_executable_initial_agent consults the transition graph before the
+    first turn - that is the only place the participation bypass can be
+    evaluated, because a rule on source_agent "user" is too late once the
+    interview has already opened. The run still opens with an agent
+    (AppPlanAgent when the user delegated, InterviewAgent otherwise); it never
+    waits for the user to speak first, which is what agent-driven means here.
+    """
     config = _mozaiks_workflow_manager().get_config("AppGenerator")
     assert config.get("workflow_startup_mode") == "AgentDriven"
-    assert config.get("initial_agent") == "InterviewAgent"
+    assert config.get("initial_agent") == "user"
+
+    rules = config.get("transition_graph", {}).get("transition_rules", [])
+    from_user = [r for r in rules if r.get("source_agent") == "user"]
+    assert from_user, "entry resolution needs rules from the user seat"
+    # Every participation answer must resolve to a real agent, never back to
+    # the user seat - that would be a run waiting on someone to speak first.
+    targets = {r.get("target_agent") for r in from_user if r.get("transition_type") == "condition"}
+    assert targets and "user" not in targets
 
 
 def test_existing_app_discovery_is_agent_driven() -> None:

@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import tempfile
+import zipfile
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from factory_app.workflows._shared.workflow_integration import (
     hydrate_workflow_integration_context_from_latest_artifact,
     normalize_workflow_integration_metadata,
 )
+from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from mozaiksai.core.artifacts import (
@@ -32,10 +34,12 @@ from mozaiksai.core.artifacts import (
     persist_summary_artifact,
 )
 from mozaiksai.core.runtime.app.loader import AppLoader
+from scripts.appgenerator_fixture_replay import execute_file_replay
 from scripts.smoke_agentgenerator_live_pack import run_live_agentgenerator_pack_smoke
 from scripts.smoke_appgenerator_live_acceptance import (
     SmokeContext,
     build_appgenerator_acceptance_files,
+    build_appgenerator_acceptance_task_state,
     default_workflow_integration,
     workflow_integration_from_live_agentgenerator,
 )
@@ -374,42 +378,44 @@ async def _run_lineage_smoke_with_store(
 
     metadata = workflow_integration_metadata or _workflow_integration_metadata()
 
-    from factory_app.workflows.AgentGenerator.tools.platform import (
-        build_lifecycle as agent_lifecycle,
+    from factory_app.workflows.AgentGenerator.tools.generate_and_download import (
+        _register_workflow_bundle_artifact_version,
     )
-    from factory_app.workflows.AppGenerator.tools.platform.build_lifecycle import (
-        _persist_app_bundle_artifact,
+    from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+        _register_app_bundle_artifact_version,
     )
 
-    await agent_lifecycle._persist_workflow_bundle_artifact(
+    binding = {
+        "build_registry_id": f"registry_{app_id}", "target_app_id": app_id,
+        "build_id": "build_lineage_smoke", "phase": "genesis",
+    }
+    fixture_files = build_appgenerator_acceptance_files(_primary_workflow_integration(metadata))
+    app_dir = REPO_ROOT / ".local" / "smoke-artifacts" / app_id / "app"
+    app_dir.mkdir(parents=True, exist_ok=True)
+    archive = app_dir.parent / "bundle.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
+        for path, content in fixture_files.items():
+            output.writestr(f"bundle/{path}", content)
+            file_path = app_dir / path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8", newline="")
+    await _register_workflow_bundle_artifact_version(
         app_id=app_id,
         chat_id="chat_agentgenerator",
         user_id="user_1",
         workflow_name="AgentGenerator",
-        build_mode=None,
+        bundle_name="workflow_bundle", zip_path=archive,
+        context_variables={"run_build_binding": binding},
         artifact_store=store,
         workflow_integration_metadata=metadata,
     )
-    await _persist_app_bundle_artifact(
-        app_id=app_id,
-        chat_id="chat_appgenerator",
-        user_id="user_1",
-        workflow_name="AppGenerator",
-        build_mode=None,
-        artifact_store=store,
-    )
-
     current_refs = await store.get_current_build_record_refs(app_id=app_id)
     workflow_bundle = await store.get_build_record(
         app_id=app_id,
         build_record_id=current_refs["workflow_bundle"],
     )
-    app_bundle = await store.get_build_record(
-        app_id=app_id,
-        build_record_id=current_refs["app_bundle"],
-    )
-    if workflow_bundle is None or app_bundle is None:
-        return {"success": False, "validation_errors": ["Expected current workflow_bundle and app_bundle artifacts."]}
+    if workflow_bundle is None:
+        return {"success": False, "validation_errors": ["Expected current workflow_bundle artifact."]}
     create_calls = list(getattr(store, "create_calls", []))
     workflow_call = next(
         (
@@ -422,23 +428,12 @@ async def _run_lineage_smoke_with_store(
             "canonical_inputs_version": dict(workflow_bundle.canonical_inputs_version),
         },
     )
-    app_call = next(
-        (
-            call
-            for call in reversed(create_calls)
-            if call["build_family"] == "app_bundle"
-        ),
-        {
-            "source_workflow": app_bundle.source_workflow,
-            "canonical_inputs_version": dict(app_bundle.canonical_inputs_version),
-        },
-    )
-
     context = SmokeContext(
         {
             "workflow_name": "AppGenerator",
             "app_id": app_id,
             "chat_id": "chat_appgenerator",
+            "run_build_binding": binding,
             "artifact_version_refs": current_refs,
         }
     )
@@ -455,8 +450,51 @@ async def _run_lineage_smoke_with_store(
     context.set("generated_files", files)
     context.set("app_validation_status", "skipped")
     context.set("app_validation_strategy_used", "skip")
+    app_build_plan(
+        AppBuildPlan=build_appgenerator_acceptance_task_state(files)["app_build_plan"],
+        context_variables=context,
+    )
+    accepted = await execute_file_replay(context.data, files)
+    files = {
+        item["filename"]: item["content"]
+        for task_id, output in accepted.items() if not task_id.startswith("_")
+        for item in output["code_files"]
+    }
+    context.set("generated_files", files)
     acceptance = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
     export_gate = resolve_export_gate(context)
+    if not acceptance.get("passed") or not export_gate.get("allow_export"):
+        return _json_safe({
+            "success": False,
+            "validation_errors": ["The admitted AppGenerator fixture failed acceptance/export.",
+                                  *export_gate.get("reasons", [])],
+            "appgenerator_acceptance": acceptance,
+            "export_gate": export_gate,
+        })
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
+        for path, content in files.items():
+            output.writestr(f"bundle/{path}", content)
+            file_path = app_dir / path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8", newline="")
+    await _register_app_bundle_artifact_version(
+        app_id=app_id,
+        chat_id="chat_appgenerator",
+        user_id="user_1",
+        workflow_name="AppGenerator",
+        bundle_name="bundle", zip_path=archive, app_dir=app_dir, written_paths=list(files),
+        context_variables=context,
+        artifact_store=store,
+    )
+    current_refs = await store.get_current_build_record_refs(app_id=app_id)
+    app_bundle = await store.get_build_record(app_id=app_id, build_record_id=current_refs["app_bundle"])
+    if app_bundle is None:
+        return {"success": False, "validation_errors": ["Expected current app_bundle artifact."]}
+    app_call = next(
+        (call for call in reversed(list(getattr(store, "create_calls", []))) if call["build_family"] == "app_bundle"),
+        {"source_workflow": app_bundle.source_workflow,
+         "canonical_inputs_version": dict(app_bundle.canonical_inputs_version)},
+    )
     capability_id = str(
         fixture_workflow_integration.get("capability_id")
         or context.get("generated_workflow_capability_id")
@@ -472,11 +510,11 @@ async def _run_lineage_smoke_with_store(
         ["SubscriptionContractDesigner"],
         ["AgentGenerator"],
         ["AppGenerator"],
+        ["SecurityReadiness"],
     ]
     expected_transition_steps = [
         "app_type_selector",
         "coding_journey_selector",
-        "database_setup_selector",
         "app_review",
     ]
     if workflow_steps != expected_workflow_steps:
@@ -549,6 +587,9 @@ async def _run_lineage_smoke_with_store(
                 "validation_evidence": acceptance.get("validation_evidence"),
                 "workflow_integration": acceptance.get("workflow_integration"),
                 "fixture_workflow_integration": fixture_workflow_integration,
+                "task_batch_status": context.get("app_task_batch_status"),
+                "accepted_task_ids": sorted(task_id for task_id in accepted if not task_id.startswith("_")),
+                "failed_tasks": accepted.get("_failed", {}),
             },
             "export_gate": export_gate,
             "runtime_loader": loader_result,

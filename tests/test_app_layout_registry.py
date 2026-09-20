@@ -12,6 +12,7 @@ from mozaiksai.core.runtime.app import paths as app_paths
 from mozaiksai.core.runtime.app.layout_registry import (
     SCHEMA_VERSION,
     AppLayoutRegistry,
+    ArtifactDisposition,
     ArtifactFamily,
     ArtifactKind,
     ConditionIdentifier,
@@ -50,6 +51,7 @@ def _minimal_family(template: str) -> ArtifactFamily:
         path_scope=PathScope.APP_BUNDLE_ROOT,
         path_template=template,
         materializer=MaterializerIdentifier.APP_GENERATOR,
+        disposition=ArtifactDisposition.RENDER,
         validator=ValidatorIdentifier.APP_PATHS,
         runtime_consumer=RuntimeConsumerIdentifier.PLATFORM_HOST,
         security_class=SecurityClass.INTERNAL_CONTRACT,
@@ -74,6 +76,32 @@ class TestRegistryContract:
         assert ArtifactKind.APP_MANIFEST in kinds
         assert ArtifactKind.MODULE_MANIFEST in kinds
         assert ArtifactKind.WORKFLOW_MANIFEST in kinds
+
+    def test_application_input_kinds_are_declared_on_the_existing_registry(self) -> None:
+        rows = _registry().families
+        by_kind = {
+            kind: [family for family in rows if family.kind is kind]
+            for kind in (
+                ArtifactKind.APP_MANIFEST,
+                ArtifactKind.APP_AUTH_CONFIG,
+                ArtifactKind.APP_INTEGRATIONS_CONFIG,
+                ArtifactKind.WORKFLOW_MANIFEST,
+            )
+        }
+        assert {row.semantic_input_kinds for row in by_kind[ArtifactKind.APP_MANIFEST]} == {
+            ("application", "auth")
+        }
+        assert {row.semantic_input_kinds for row in by_kind[ArtifactKind.APP_AUTH_CONFIG]} == {
+            ("auth",)
+        }
+        assert {
+            row.semantic_input_kinds
+            for row in by_kind[ArtifactKind.APP_INTEGRATIONS_CONFIG]
+        } == {("application", "integration")}
+        assert all(
+            "workflow" in row.semantic_input_kinds
+            for row in by_kind[ArtifactKind.WORKFLOW_MANIFEST]
+        )
 
     def test_serialization_round_trip_revalidates_digest(self) -> None:
         registry = _registry()
@@ -299,7 +327,10 @@ class TestControlPlaneAndManagedCapabilityBoundaries:
         # capabilities; only the generated client is capability-conditioned.
         assert integrations.family.requirement is Requirement.CONDITIONAL
         assert client.family.requirement is Requirement.CONDITIONAL
-        assert integrations.family.condition is ConditionIdentifier.WHEN_APP_DECLARED
+        assert (
+            integrations.family.condition
+            is ConditionIdentifier.WHEN_INTEGRATIONS_SELECTED
+        )
         assert client.family.condition is ConditionIdentifier.WHEN_MANAGED_CAPABILITY_SELECTED
 
     def test_unselected_managed_capabilities_do_not_become_required_core(self) -> None:

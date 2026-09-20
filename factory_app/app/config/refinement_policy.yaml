@@ -5,43 +5,45 @@ llm_profiles:
     purpose: Classify refinement requests into the stable refinement change classes.
     expected_behavior: deterministic structured classification
     llm_config:
-      api_type: google
-      model: gemini-2.0-flash
+      api_type: openai
+      model: gpt-4.1-2025-04-14
   impact_analyzer:
     purpose: Support artifact impact analysis and refinement routing decisions.
     expected_behavior: deterministic structured impact analysis
     llm_config:
       api_type: google
       model: gemini-2.0-flash
+      api_type: openai
+      model: gpt-4.1-2025-04-14
   architecture:
     purpose: Concept-level planning for conceptual_replan and full_rebuild sequences
       - pivots, full rebuilds, and high-level design revisions.
     expected_behavior: deep structured reasoning for architecture-level tasks; planning-only,
       no code generation or shell tools
     llm_config:
-      api_type: google
-      model: gemini-2.5-flash
+      api_type: openai
+      model: gpt-4.1-2025-04-14
       temperature: 0.1
   planner_replanner:
     purpose: Plan or replan higher-scope refinement work after routing.
     expected_behavior: structured planning and replanning
     llm_config:
-      api_type: google
-      model: gemini-2.5-flash
+      api_type: openai
+      model: gpt-4.1-2025-04-14
       temperature: 0.1
   codegen:
     purpose: Generate scoped code or artifact patches.
     expected_behavior: deterministic code and artifact generation
     llm_config:
-      api_type: google
-      model: gemini-2.5-flash
+      api_type: openai
+      model: gpt-4.1-2025-04-14
       temperature: 0.1
   reviewer_validator:
     purpose: Review generated changes and validate contract conformance.
     expected_behavior: strict structured review and validation
     llm_config:
-      api_type: google
-      model: gemini-2.5-flash
+      api_type: openai
+      model: gpt-4.1-2025-04-14
       temperature: 0.1
 classifier:
   enabled: true

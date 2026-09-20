@@ -40,9 +40,18 @@ EXPECTED_MOZAIKS_CLOUD_CONTRACTS = {
     "provider_api_contract.yaml",
 }
 
+EXPECTED_SECURITY_READINESS_CONTRACTS = {
+    "app_security_file_contracts.yaml",
+    "baseline_security_controls.yaml",
+    "finding_taxonomy.yaml",
+}
+
 LEGACY_WORKFLOW_ROOT_CATALOGS = [
     *(f"factory_app/workflows/AppGenerator/{name}" for name in EXPECTED_APPGENERATOR_CATALOGS),
-    *(f"factory_app/workflows/AppGenerator/tools/{name}" for name in EXPECTED_APPGENERATOR_CATALOGS),
+    *(
+        f"factory_app/workflows/AppGenerator/tools/{name}"
+        for name in EXPECTED_APPGENERATOR_CATALOGS
+    ),
     "factory_app/workflows/_shared/ag2_network_patterns.yaml",
     "factory_app/workflows/_shared/factory_catalogs.py",
     "factory_app/workflows/_shared/pattern_catalog.py",
@@ -88,8 +97,12 @@ def test_factory_build_context_uses_named_context_roots() -> None:
             allowed |= EXPECTED_MOZAIKSPAY_CONTRACTS
         if context_root.name == "mozaiks_cloud":
             allowed |= EXPECTED_MOZAIKS_CLOUD_CONTRACTS
+        if context_root.name == "SecurityReadiness":
+            allowed |= EXPECTED_SECURITY_READINESS_CONTRACTS
         actual = {item.name for item in context_root.iterdir()}
-        assert actual <= allowed, f"{context_root} has non-canonical build-context entries: {sorted(actual - allowed)}"
+        assert actual <= allowed, (
+            f"{context_root} has non-canonical build-context entries: {sorted(actual - allowed)}"
+        )
 
 
 def test_context_yaml_is_structural_not_semantic_guidance() -> None:
@@ -124,7 +137,9 @@ def test_context_yaml_uses_explicit_assets_not_implicit_lanes() -> None:
         assert isinstance(assets, list) and assets, f"{context_path} must declare assets"
         for asset in assets:
             assert isinstance(asset, dict), f"{context_path} asset must be a mapping"
-            assert {"path", "kind"} <= set(asset), f"{context_path} asset must declare path and kind"
+            assert {"path", "kind"} <= set(asset), (
+                f"{context_path} asset must declare path and kind"
+            )
             assert asset["kind"] in allowed_asset_kinds, (
                 f"{context_path} asset kind is not canonical: {asset['kind']!r}"
             )
@@ -133,9 +148,9 @@ def test_context_yaml_uses_explicit_assets_not_implicit_lanes() -> None:
 
 
 def test_appgenerator_treats_in_app_notifications_as_runtime_contracts() -> None:
-    capability_routing = (FACTORY_BUILD_CONTEXT / "AppGenerator" / "capability_routing.yaml").read_text(
-        encoding="utf-8"
-    )
+    capability_routing = (
+        FACTORY_BUILD_CONTEXT / "AppGenerator" / "capability_routing.yaml"
+    ).read_text(encoding="utf-8")
     file_contracts = (FACTORY_BUILD_CONTEXT / "AppGenerator" / "file_contracts.yaml").read_text(
         encoding="utf-8"
     )
@@ -149,7 +164,12 @@ def test_appgenerator_treats_in_app_notifications_as_runtime_contracts() -> None
 
 
 def test_messaging_pack_keeps_contacts_and_hosted_features_out_of_substrate() -> None:
-    data = yaml.safe_load((FACTORY_BUILD_CONTEXT / "messaging" / "contract.yaml").read_text(encoding="utf-8")) or {}
+    data = (
+        yaml.safe_load(
+            (FACTORY_BUILD_CONTEXT / "messaging" / "contract.yaml").read_text(encoding="utf-8")
+        )
+        or {}
+    )
 
     forbidden_prefixes = {item.get("path_prefix") for item in data.get("forbidden_outputs") or []}
     boundary_ids = {item.get("id") for item in data.get("runtime_boundaries") or []}
@@ -200,7 +220,9 @@ def test_catalog_asset_projections_use_canonical_fields() -> None:
         data = yaml.safe_load(context_path.read_text(encoding="utf-8")) or {}
         projections = data.get("projections") or {}
         assert "prompts" not in projections, f"{context_path} must not use projections.prompts"
-        assert "prompt_inputs" not in projections, f"{context_path} prompt projections belong on assets"
+        assert "prompt_inputs" not in projections, (
+            f"{context_path} prompt projections belong on assets"
+        )
         for asset in data.get("assets") or []:
             if asset.get("kind") != "catalog":
                 continue
@@ -246,8 +268,12 @@ def test_appgenerator_hook_tools_use_factory_catalog_resolver() -> None:
     }
     for name in catalog_hooks:
         content = (tools_dir / name).read_text(encoding="utf-8")
-        assert "_shared.hook_utils" in content, f"{name} must load catalogs through shared hook utilities"
-        assert "workflow_context_path" in content, f"{name} must resolve factory build-context paths deterministically"
+        assert "_shared.hook_utils" in content, (
+            f"{name} must load catalogs through shared hook utilities"
+        )
+        assert "workflow_context_path" in content, (
+            f"{name} must resolve factory build-context paths deterministically"
+        )
         assert "_shared.catalogs" not in content, f"{name} must not use removed _shared.catalogs"
 
 
@@ -265,9 +291,7 @@ def test_pack_templates_with_handlers_use_base_handler_split() -> None:
             continue
         source = handler_path.read_text(encoding="utf-8")
         base_source = base_path.read_text(encoding="utf-8")
-        assert "BaseHandler" in base_source, (
-            f"{base_path} must define a *BaseHandler class"
-        )
+        assert "BaseHandler" in base_source, f"{base_path} must define a *BaseHandler class"
         assert "DO NOT EDIT" in base_source, (
             f"{base_path} must carry the DO NOT EDIT regeneration notice"
         )
@@ -291,14 +315,14 @@ def test_social_and_messaging_packs_have_adopted_base_handler_split() -> None:
         assert (backend_dir / "base_handler.py").exists(), (
             f"{backend_dir}/base_handler.py missing — social/messaging packs are reference implementations"
         )
-        assert (backend_dir / "handler.py").exists(), (
-            f"{backend_dir}/handler.py missing"
-        )
+        assert (backend_dir / "handler.py").exists(), f"{backend_dir}/handler.py missing"
 
 
 def test_workspace_extensions_contract_schema_exists() -> None:
     schema = FACTORY_BUILD_CONTEXT / "AppGenerator" / "workspace_extensions_contract.yaml"
-    assert schema.exists(), "workspace_extensions_contract.yaml must exist in AppGenerator build context"
+    assert schema.exists(), (
+        "workspace_extensions_contract.yaml must exist in AppGenerator build context"
+    )
     data = yaml.safe_load(schema.read_text(encoding="utf-8")) or {}
     assert data.get("schema_version") == 1
     assert data.get("file_location") == "build_context/{pack_id}/extensions.yaml"
@@ -322,10 +346,7 @@ def test_appgenerator_agents_document_handler_split_rule() -> None:
 
 def test_ai_pack_workflow_hook_uses_current_startup_contract() -> None:
     content = (
-        FACTORY_WORKFLOWS
-        / "AppGenerator"
-        / "tools"
-        / "hook_ai_pack_workflow_context.py"
+        FACTORY_WORKFLOWS / "AppGenerator" / "tools" / "hook_ai_pack_workflow_context.py"
     ).read_text(encoding="utf-8")
     assert "workflow_startup_mode=BackendOnly" in content
     assert re.search(r"(?<!workflow_)startup_mode=BackendOnly", content) is None

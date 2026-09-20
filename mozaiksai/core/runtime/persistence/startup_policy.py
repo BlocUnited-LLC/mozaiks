@@ -5,7 +5,6 @@ from typing import Literal
 
 DATABASE_STARTUP_POLICY_ENV = "MOZAIKS_DATABASE_STARTUP_POLICY"
 DatabaseStartupPolicy = Literal["best_effort", "required"]
-MONGO_CONNECTION_ENV_NAMES = ("MONGO_URI", "MONGODB_URI", "MONGO_URL")
 
 
 class DatabaseStartupPolicyError(ValueError):
@@ -22,18 +21,19 @@ def get_database_startup_policy() -> DatabaseStartupPolicy:
 
 
 def database_persistence_is_enabled(policy: DatabaseStartupPolicy) -> bool:
-    """Return whether startup must establish persistence readiness."""
+    """Return persistence readiness intent without retrieving credential values."""
+    from mozaiksai.core.secrets import inspect_secret_config
+
     if policy == "required":
         return True
     environment = os.getenv("ENV", os.getenv("ENVIRONMENT", "")).strip().lower()
     if environment == "production":
         return True
-    return any((os.getenv(name) or "").strip() for name in MONGO_CONNECTION_ENV_NAMES)
+    return inspect_secret_config("MONGO_URI").configured
 
 
 __all__ = [
     "DATABASE_STARTUP_POLICY_ENV",
-    "MONGO_CONNECTION_ENV_NAMES",
     "DatabaseStartupPolicy",
     "DatabaseStartupPolicyError",
     "database_persistence_is_enabled",

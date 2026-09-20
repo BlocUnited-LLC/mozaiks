@@ -129,6 +129,9 @@ _IMMUTABLE_EXACT = {
     "entitlement_state",
     "entitlements",
     "build_registry_id",
+    "run_build_binding",
+    "workflow_run_id",
+    "build_terminal_receipt",
 }
 _IMMUTABLE_SUFFIXES = ("_app_id", "_user_id", "_tenant_id", "_workspace_id")
 _IMMUTABLE_PARTS = ("credential", "secret", "token", "password", "api_key")
@@ -139,8 +142,16 @@ _ROUTING_EXACT = {
     "sequence_status",
     "routing_mode",
 }
+# Keys a transition seeds into a journey and later steps must be able to relay.
+# Referencing one of these in a transition_rule condition reclassifies it as
+# closed routing state, which strips TRANSITION_ROUTER_WRITER - and
+# _project_launch_context filters relayed keys on exactly that writer, in a dict
+# comprehension with no error and no log. So a key becomes un-relayable by the
+# act of routing on it, silently, one hop after the workflow that reads it.
+# coding_participation hit this: it relayed correctly until a rule referenced it.
 _TRANSITION_ROUTER_SEEDED_KEYS = {
     "build_mode",
+    "coding_participation",
     "revision_scope",
     "sequence_status",
 }
@@ -372,6 +383,44 @@ class ScopedContextWriter:
             raise ContextAuthorityError("context_authority.unsupported_target")
 
 
+def require_unchanged_runtime_authority(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    *,
+    policy: ContextAuthorityPolicy | None = None,
+) -> None:
+    """Reject lifecycle changes to runtime authority before agent execution."""
+    missing = object()
+    for key in sorted(before.keys() | after.keys()):
+        authority = policy.variables.get(key) if policy is not None else None
+        immutable = _is_immutable_key(key) or (
+            authority is not None
+            and authority.authority_class is ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY
+        )
+        if immutable and before.get(key, missing) != after.get(key, missing):
+            raise ContextAuthorityError(
+                f"context_authority.lifecycle_changed_runtime_authority key={key}"
+            )
+
+
+def resolve_declared_context_writer(
+    key: str,
+    *,
+    base_writer: ContextWriterId,
+    declared_writer: ContextWriterId,
+    policy: ContextAuthorityPolicy | None,
+) -> ContextWriterId:
+    """Resolve a trusted mechanism's declared attribution, without granting rights.
+
+    Callers establish the mutation mechanism before supplying its writer pair.
+    The returned writer still requires the ordinary policy authorization check.
+    """
+    authority = policy.variables.get(key) if policy is not None else None
+    if authority is not None and declared_writer in authority.writer_ids:
+        return declared_writer
+    return base_writer
+
+
 def build_context_authority_policy(
     *,
     workflow_name: str,
@@ -395,6 +444,11 @@ def build_context_authority_policy(
         )
         _validate_replay_contract(workflow_name=str(workflow_name or ""), authority=authority)
         variables[key] = authority
+    # Run identity exists even when a workflow declares no application state.
+    for key in ("app_id", "chat_id", "user_id", "workflow_name"):
+        variables.setdefault(key, infer_context_authority(
+            key, definition={"type": "string"}, routing_keys=frozenset(),
+        ))
     return ContextAuthorityPolicy(
         workflow_name=str(workflow_name or ""),
         variables=variables,
@@ -424,6 +478,8 @@ def infer_context_authority(
     )
 
     authority_class = metadata.authority_class
+    if source_type == "runtime" and authority_class not in {None, ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY}:
+        raise ValueError(f"runtime context '{clean_key}' must be immutable_runtime_authority")
     if authority_class is None:
         authority_class = _infer_authority_class(clean_key, source_type, trigger_types, routing_keys, task_keys)
 
@@ -527,7 +583,7 @@ def _infer_authority_class(
     routing_keys: frozenset[str],
     task_batch_context_keys: set[str],
 ) -> ContextAuthorityClass:
-    if _is_immutable_key(key):
+    if _is_immutable_key(key) or source_type == "runtime":
         return ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY
     if _is_quality_key(key):
         return ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE
@@ -701,6 +757,7 @@ __all__ = [
     "ContextVariableAuthority",
     "ContextWriterId",
     "ScopedContextWriter",
+    "require_unchanged_runtime_authority",
     "build_context_authority_policy",
     "validate_transition_context_authority",
 ]

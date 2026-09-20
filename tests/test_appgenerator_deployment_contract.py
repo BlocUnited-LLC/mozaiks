@@ -17,7 +17,7 @@ from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     validate_generated_deployment_bundle,
     validate_readiness_requirements,
 )
-from factory_app.workflows.AppGenerator.tools.render_infra_scaffold import save_infra_scaffold
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import save_auth_scaffold
 
 
 def _workspace() -> Path:
@@ -48,6 +48,9 @@ def test_deploy_target_spec_validates_generic_container() -> None:
     assert errors == []
     assert spec["target_kind"] == "container"
     assert spec["provider_profile"]["name"] == "generic"
+    assert spec["runtime"]["start_command"] == (
+        "mozaiks serve . --host platform --listen 0.0.0.0 --port 8000"
+    )
     assert spec["ci_secret_requirements"]["required"][0]["name"] == "REGISTRY_PUSH_TOKEN"
     assert spec["readiness_requirements"]["checks"][0]["id"] == "runtime_environment"
     for path in ENV_EXAMPLE_PATHS:
@@ -807,28 +810,23 @@ def test_generated_workflow_has_staging_environment_on_build_job() -> None:
     assert "environment: staging" in workflow
 
 
-def test_infra_scaffold_emits_readiness_workflow_from_documented_template() -> None:
+def test_auth_scaffold_never_emits_deployment_artifacts() -> None:
     result = asyncio.run(
-        save_infra_scaffold(
-            emit_infra=True,
-            emit_auth_adapter=False,
-            context_variables={"app_slug": "Demo App"},
+        save_auth_scaffold(
+            context_variables={"generated_files": {"app.json": '{"appName":"Demo App","authRequired":false}'}},
         )
     )
     files = {item["filename"]: item["content"] for item in result["code_files"]}
 
-    assert ".github/workflows/readiness.yml" in files
-    assert ".github/workflows/deploy.yml" in files
-    assert "environment staging" in files[".github/workflows/readiness.yml"].lower()
-    assert "artifact review staging" in files[".github/workflows/readiness.yml"].lower()
+    assert files == {}
 
 
-def test_infra_scaffold_emits_provider_neutral_auth_contract_and_hardened_adapter() -> None:
+def test_auth_scaffold_emits_provider_neutral_auth_contract_and_hardened_adapter() -> None:
     result = asyncio.run(
-        save_infra_scaffold(
-            emit_infra=False,
-            emit_auth_adapter=True,
-            context_variables={"app_slug": "Demo App", "default_route": "/dashboard"},
+        save_auth_scaffold(
+            context_variables={"generated_files": {"app.json": json.dumps({
+                "appName": "Demo App", "authRequired": True, "startup": {"landing_spot": "/dashboard"},
+            })}},
         )
     )
     files = {item["filename"]: item["content"] for item in result["code_files"]}
@@ -843,10 +841,9 @@ def test_infra_scaffold_emits_provider_neutral_auth_contract_and_hardened_adapte
     assert "post_login_default: /dashboard" in files["config/auth.yaml"]
     assert "VITE_OIDC_DISCOVERY_URL" in files["config/auth.yaml"]
     assert "https://" not in files["config/auth.yaml"]
-    assert "TRANSACTION_KEY" in files["ui/auth/authAdapter.js"]
-    assert "state," in files["ui/auth/authAdapter.js"]
-    assert "clearStoredUserSession" in files["ui/auth/authAdapter.js"]
-    assert "return { returnPath:" in files["ui/auth/authAdapter.js"]
+    assert "from '@mozaiks/chat-ui/auth'" in files["ui/auth/authAdapter.js"]
+    assert "return createSharedAuthAdapter(" in files["ui/auth/authAdapter.js"]
+    assert "VITE_MOCK_MODE" not in files["ui/auth/authAdapter.js"]
     assert "localStorage" not in files["ui/auth/authAdapter.js"]
 
 

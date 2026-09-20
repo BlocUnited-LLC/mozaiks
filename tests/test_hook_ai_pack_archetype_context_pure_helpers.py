@@ -35,7 +35,6 @@ Covers:
     - analysis surface does NOT include task_batches_required
 
   _build_callback_body:
-    - always includes module_interface.yaml instruction
     - always includes backend_request instruction
     - non-empty result for any non-empty ai_surfaces list
     - returns string
@@ -256,10 +255,6 @@ class TestBuildPatternBody:
 # ---------------------------------------------------------------------------
 
 class TestBuildCallbackBody:
-    def test_includes_module_interface_yaml_instruction(self):
-        result = _build_callback_body([_review_surface()])
-        assert "module_interface.yaml" in result
-
     def test_includes_backend_request_instruction(self):
         result = _build_callback_body([_review_surface()])
         assert "backend_request" in result

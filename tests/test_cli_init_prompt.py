@@ -1,11 +1,13 @@
 import json
 from argparse import Namespace
 
+import pytest
 import yaml
 
 from mozaiks_cli.commands import add as add_command
 from mozaiks_cli.commands import init_command
 from mozaiks_cli.main import create_parser
+from mozaiksai.core.runtime.app.loader import AppLoader
 
 
 def _load_json(path):
@@ -52,7 +54,6 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     assert (target_dir / "app" / "config" / "shell.json").exists()
     assert shell_json["header"]["actions"]
     assert shell_json["notifications"]["show"] is True
-    assert shell_json["shortcuts"]["footer"] == ["legal", "terms", "cookies"]
     assert (target_dir / "app" / "brand" / "theme_config.json").exists()
     assert (target_dir / "app" / "ui" / "route_manifest.json").exists()
     assert (target_dir / "requirements.txt").exists()
@@ -111,7 +112,11 @@ def test_init_command_starter_scaffold_seeds_entry_workflow(tmp_path) -> None:
     assert ai_json["chat"]["chat_startup_mode"] == "workflow"
     assert ai_json["workflows"]["entry_point"] == "HelloWorkflow"
     assert "control_plane" not in ai_json
-    assert (target_dir / "workflows" / "HelloWorkflow" / "orchestrator.yaml").exists()
+    workflow_dir = target_dir / "workflows" / "HelloWorkflow"
+    orchestrator = yaml.safe_load((workflow_dir / "orchestrator.yaml").read_text(encoding="utf-8"))
+    structured_outputs = yaml.safe_load((workflow_dir / "structured_outputs.yaml").read_text(encoding="utf-8"))
+    assert orchestrator["schema_version"] == "mozaiks.orchestrator.v1"
+    assert structured_outputs["schema_version"] == "mozaiks.structured_outputs.v1"
 
 
 def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
@@ -223,4 +228,32 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     studio_script = (target_dir / "scripts" / "run-studio.ps1").read_text(encoding="utf-8")
     assert '"studio"' in studio_script
     assert '"--dir"' in studio_script
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preset", ["engine", "chat", "integrated", "full"])
+async def test_every_cli_preset_loads_its_declared_auth_and_public_routes(tmp_path, preset):
+    target = tmp_path / preset
+    init_command.create_scaffold(
+        target_dir=target, preset=preset, app_name="Auth acceptance", admin_email="operator@example.invalid",
+    )
+    loaded = await AppLoader.load(str(target / "app"))
+    required = init_command.TIER_PRESETS[preset]["auth"]
+    assert _load_json(target / "app/app.json")["authRequired"] is required
+    assert (loaded.auth_contract is not None) is required
+    routes = _load_json(target / "app/ui/route_manifest.json")["pages"]
+    if required:
+        assert loaded.auth_contract.auth_required is True
+        assert loaded.auth_contract.routes.post_login_default == "/"
+        by_path = {route["path"]: route for route in routes}
+        for path, component in (
+            (loaded.auth_contract.routes.login, "LoginPage"),
+            (loaded.auth_contract.routes.callback, "AuthCallbackPage"),
+        ):
+            assert by_path[path]["component"] == component
+            assert by_path[path]["meta"]["requiresAuth"] is False
+            assert by_path[path]["meta"]["appShell"] is False
+    else:
+        assert not (target / "app/config/auth.yaml").exists()
+        assert routes == []
 

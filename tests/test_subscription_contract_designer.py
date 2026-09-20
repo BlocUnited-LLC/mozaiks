@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from tests.factory_context import factory_context
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
@@ -529,7 +530,8 @@ def test_agentgenerator_preserves_workflow_metering_contract_without_runtime_log
 
 
 @pytest.mark.asyncio
-async def test_save_subscription_contract_validates_and_persists_provider_neutral_config(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("read_only", [False, True])
+async def test_save_subscription_contract_validates_and_persists_provider_neutral_config(monkeypatch: pytest.MonkeyPatch, read_only: bool) -> None:
     from factory_app.workflows.SubscriptionContractDesigner.tools import (
         save_subscription_contract as module,
     )
@@ -547,12 +549,15 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
 
     monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
     context = {
-        "app_id": "app_test",
+        **factory_context({"app_id": "app_test"}),
         "chat_id": "chat_1",
         "user_id": "user_1",
         "structured_output": _sample_contract(),
     }
 
+    if read_only:
+        from mozaiksai.core.workflow.context.frozen import freeze
+        context["structured_output"] = freeze(context["structured_output"])
     result = await module.save_subscription_contract(context)
 
     assert result["success"] is True
@@ -608,7 +613,7 @@ async def test_save_subscription_contract_blocks_downstream_context_when_review_
     monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
 
     context = {
-        "app_id": "app_test",
+        **factory_context({"app_id": "app_test"}),
         "chat_id": "chat_1",
         "user_id": "user_1",
         "structured_output": _sample_contract(),
@@ -643,9 +648,9 @@ def test_transition_graph_routes_changes_requested_back_to_designer() -> None:
         "changes_requested instead of terminating without an approved contract"
     )
     assert loop_back["transition_type"] == "condition"
-    assert loop_back["condition_type"] == "context_expression"
-    assert "changes_requested" in loop_back["context_expression"]
-    assert "subscription_contract_review_status" in loop_back["context_expression"]
+    assert loop_back["condition_type"] == "context_equals"
+    assert loop_back["condition_value"] == "changes_requested"
+    assert loop_back["condition_key"] == "subscription_contract_review_status"
 
     terminate = [
         rule
@@ -665,6 +670,32 @@ def test_transition_graph_routes_changes_requested_back_to_designer() -> None:
         agent_id_by_name={"ContractDesignerAgent": "contract_designer"},
     )
     assert compiled is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["review", "persistence"])
+async def test_subscription_save_does_not_publish_success_after_dependency_failure(monkeypatch, failure):
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    async def review(*_args, **_kwargs):
+        if failure == "review":
+            raise module.UIToolError("review transport unavailable")
+        return {"action": "confirm", "approved": True}
+
+    async def persist(**_kwargs):
+        if failure == "review":
+            raise AssertionError("must not save before review")
+        raise RuntimeError("artifact store unavailable")
+
+    monkeypatch.setattr(module, "use_ui_tool", review)
+    monkeypatch.setattr(module, "persist_summary_artifact", persist)
+    context = {**factory_context({"app_id": "app_test"}), "chat_id": "chat", "structured_output": _sample_contract()}
+    with pytest.raises((module.UIToolError, RuntimeError), match="unavailable"):
+        await module.save_subscription_contract(context)
+    assert not context.get("subscription_contract")
+    assert context.get("subscription_contract_review_status") != "confirmed"
 
 
 def _generator_agent_stub(name: str, context: dict) -> SimpleNamespace:
@@ -779,3 +810,84 @@ def test_subscription_contract_rejects_token_wallets_without_usage_credit_or_quo
 
     with pytest.raises(ValueError, match="token_wallets are only valid"):
         normalize_subscription_contract(contract)
+
+
+def _normalize(config: dict) -> dict:
+    from factory_app.workflows.SubscriptionContractDesigner.tools.save_subscription_contract import (  # noqa: E501
+        _normalize_subscription_config,
+    )
+
+    return _normalize_subscription_config(config)
+
+
+def test_assignment_store_schema_declares_the_revision_field() -> None:
+    """The designer must be able to express the fence opt-out at all.
+
+    Structured outputs are exact: an agent emitting an undeclared nested field
+    is rejected before normalization, so an undeclared `revision_field` means
+    the opt-out has no way into the pipeline.
+    """
+    structured_outputs = _read_yaml(SUBSCRIPTION_WORKFLOW / "structured_outputs.yaml")
+    schema = structured_outputs["models"]["AssignmentStore"]["fields"]
+    assert "revision_field" in schema
+    # The finite literal the runtime accepts, not an open string — a `str`
+    # variant could generate a value the runtime would reject at load. The
+    # compiler resolves union variants by name, so the literal is declared as
+    # its own alias and referenced; an inline `values` list beside `variants`
+    # is not a shape it compiles.
+    assert schema["revision_field"]["variants"] == ["BillingRevisionField", "null"]
+    assert structured_outputs["models"]["BillingRevisionField"] == {
+        "type": "literal",
+        "values": ["billing_revision"],
+    }
+
+
+def test_explicit_null_revision_field_survives_normalization() -> None:
+    """`revision_field: null` is meaning-bearing: it opts a store out of
+    revision fencing. Dropping it as "just a null" would silently restore the
+    default on the next reload, turning an opt-out into an opt-in."""
+    contract = _sample_contract()
+    contract["subscription_config_file"]["assignment_store"]["revision_field"] = None
+
+    normalized = _normalize(contract["subscription_config_file"])
+
+    assert "revision_field" in normalized["assignment_store"]
+    assert normalized["assignment_store"]["revision_field"] is None
+
+
+def test_absent_revision_field_normalizes_to_the_explicit_default() -> None:
+    """Absence means "use the default", so the normalized contract states it
+    explicitly. That is the same semantics, just no longer implicit — and it
+    stays clearly distinguishable from the explicit null opt-out."""
+    contract = _sample_contract()
+    contract["subscription_config_file"]["assignment_store"].pop("revision_field", None)
+
+    normalized = _normalize(contract["subscription_config_file"])
+
+    assert normalized["assignment_store"]["revision_field"] == "billing_revision"
+
+
+def test_null_revision_field_survives_the_full_generator_roundtrip() -> None:
+    """design -> normalize -> materialize -> reload, with no default sneaking
+    back in at any hop."""
+    import yaml
+
+    from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
+        _materialize_subscriptions_yaml,
+    )
+    from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+
+    contract = _sample_contract()
+    contract["subscription_config_file"]["assignment_store"]["revision_field"] = None
+    normalized = _normalize(contract["subscription_config_file"])
+
+    rendered = _materialize_subscriptions_yaml(
+        context_variables={"subscription_contract": {"subscription_config_file": normalized}}
+    )
+    assert "revision_field: null" in rendered
+
+    reloaded = SubscriptionsConfig.model_validate(yaml.safe_load(rendered))
+    assert reloaded.assignment_store is not None
+    assert reloaded.assignment_store.revision_field is None, (
+        "the opt-out must survive the roundtrip"
+    )

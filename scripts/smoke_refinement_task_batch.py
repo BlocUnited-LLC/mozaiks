@@ -18,7 +18,6 @@ from mozaiksai.control_plane import (  # noqa: E402
     load_refinement_harness,
     load_refinement_policy_config,
 )
-from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService  # noqa: E402
 from mozaiksai.core.workflow.pack.config import (  # noqa: E402
     get_workflow_sequence,
     load_global_pack_graph,
@@ -104,7 +103,9 @@ async def _route_spec(spec: CombinedSmokeSpec) -> dict[str, Any]:
     refinement_policy_config = load_refinement_policy_config(APP_ROOT)
     llm_profile_used = str(refinement_policy_config.classifier.llm_profile or "raw_llm_config")
     classifier_llm_config = refinement_policy_config.resolve_capability_llm_config("classifier")
-    provider_ok, provider_message = await smoke_refinement_classifier._provider_available()
+    # Provider availability is a local environment check, not an LLM call.
+    # Keep this synchronous so the real classifier request is reached.
+    provider_ok, provider_message = smoke_refinement_classifier._provider_available()
     if not provider_ok:
         return {
             "success": False,
@@ -116,29 +117,26 @@ async def _route_spec(spec: CombinedSmokeSpec) -> dict[str, Any]:
     def pack_loader():
         return load_refinement_harness(app_root=APP_ROOT)
 
-    service = SimpleLLMCapabilityService(timeout=60.0)
-    try:
-        classifier = LLMChangeClassifier(
-            capability_service=service,
-            config_loader=lambda: refinement_policy_config,
-            pack_loader=pack_loader,
-        )
-        resolver = RefinementTriggerRouteResolver(classifier=classifier, pack_loader=pack_loader)
-        request = resolver.request_from_payload(
-            payload=_request_payload(spec),
-            requested_workflow_id="AppGenerator",
-        )
-        if request is None:
-            return {
-                "success": False,
-                "error": "request_from_payload returned None",
-                "llm_profile_used": llm_profile_used,
-                "classifier_llm_config": smoke_refinement_classifier._safe_llm_config(classifier_llm_config),
-            }
+    classifier = LLMChangeClassifier(
+        config_loader=lambda: refinement_policy_config,
+        pack_loader=pack_loader,
+    )
+    resolver = RefinementTriggerRouteResolver(classifier=classifier, pack_loader=pack_loader)
+    request = resolver.request_from_payload(
+        payload=_request_payload(spec),
+        app_id="refinement-task-batch-smoke",
+        user_id="smoke-user",
+        requested_workflow_id="AppGenerator",
+    )
+    if request is None:
+        return {
+            "success": False,
+            "error": "request_from_payload returned None",
+            "llm_profile_used": llm_profile_used,
+            "classifier_llm_config": smoke_refinement_classifier._safe_llm_config(classifier_llm_config),
+        }
 
-        decision = await resolver.route(request)
-    finally:
-        await service.aclose()
+    decision = await resolver.route(request)
 
     pack = load_global_pack_graph()
     sequence = get_workflow_sequence(pack, decision.workflow_sequence) if pack is not None else None

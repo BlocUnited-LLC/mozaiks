@@ -373,9 +373,10 @@ class ModuleEventRouter:
                 for event in events:
                     event_type = str(getattr(event, "type", "") or "").strip()
                     payload_schema = getattr(event, "payload_schema", None)
-                    if event_type and isinstance(payload_schema, dict) and payload_schema:
-                        self._event_schemas_by_producer[(module_id, event_type)] = dict(payload_schema)
-                        self._event_schemas_by_type[event_type].append((module_id, dict(payload_schema)))
+                    if event_type and payload_schema is not None:
+                        schema = dict(payload_schema) if isinstance(payload_schema, dict) else payload_schema
+                        self._event_schemas_by_producer[(module_id, event_type)] = schema
+                        self._event_schemas_by_type[event_type].append((module_id, schema))
             reactions_manifest = getattr(manifests, "reactions", None)
             if reactions_manifest is not None:
                 for reaction_model in reactions_manifest.reactions:
@@ -468,7 +469,7 @@ class ModuleEventRouter:
         event_provenance: ModuleEventProvenance,
     ) -> ModuleEventPayloadValidationError | None:
         schema = self._payload_schema_for_event(event_type, event_provenance)
-        if not schema:
+        if schema is None:
             return None
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else envelope
         diagnostic = validate_json_schema(payload, schema)
@@ -489,7 +490,7 @@ class ModuleEventRouter:
         producer_module = str(event_provenance.producer_module_id or "").strip()
         if producer_module:
             schema = self._event_schemas_by_producer.get((producer_module, event_type))
-            if schema:
+            if schema is not None:
                 return schema
         schemas = self._event_schemas_by_type.get(event_type) or []
         if len(schemas) == 1:

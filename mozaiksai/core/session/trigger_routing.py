@@ -14,6 +14,8 @@ class TriggerRoutingContribution:
     explanation: str = ""
     is_full_restart: bool = False
     lifecycle_state: SessionLifecycle = SessionLifecycle.ACTIVE
+    # Trusted launches can require rejection instead of a dependency redirect.
+    require_exact_route: bool = False
 
 
 class TriggerRouteResolver(Protocol):

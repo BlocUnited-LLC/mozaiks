@@ -46,9 +46,27 @@ class _MemoryCollection:
     def __init__(self) -> None:
         self._docs = {}
 
+    @staticmethod
+    def _matches(doc, query):
+        missing = object()
+        for key, expected in query.items():
+            value = doc
+            for part in key.split("."):
+                value = value.get(part, missing) if isinstance(value, dict) else missing
+            if isinstance(expected, dict) and "$exists" in expected:
+                if (value is not missing) != expected["$exists"]:
+                    return False
+            elif isinstance(expected, dict) and "$ne" in expected:
+                # Mongo $ne semantics: a missing field satisfies the predicate.
+                if value is not missing and value == expected["$ne"]:
+                    return False
+            elif value is missing or value != expected:
+                return False
+        return True
+
     async def find_one(self, query, projection=None, sort=None):  # noqa: ANN001
         for doc in self._docs.values():
-            if all(doc.get(k) == v for k, v in query.items()):
+            if self._matches(doc, query):
                 return dict(doc)
         return None
 
@@ -56,7 +74,7 @@ class _MemoryCollection:
         doc_id = filter_query.get("_id")
         if not doc_id:
             for existing_id, existing_doc in self._docs.items():
-                if all(existing_doc.get(k) == v for k, v in filter_query.items()):
+                if self._matches(existing_doc, filter_query):
                     doc_id = existing_id
                     break
         if not doc_id:
@@ -1234,6 +1252,43 @@ async def test_resolve_resume_substitutes_latest_workflow_when_requested_chat_mi
     assert resolution["chat_id"] == "chat_agent_1"
     assert resolution["requested_chat_id"] == "fresh_chat_id"
     assert resolution["session_state"]["current_chat_id"] == "chat_agent_1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_resume_never_redirects_onto_ask_carrier_chats(monkeypatch):
+    """Ask-mode carrier chats are transport artifacts and must never be
+    substituted as the resume target for a missing requested chat."""
+    persistence = _FakePersistence()
+    sessions = await persistence._coll()
+    sessions._docs["ask_carrier_1"] = {
+        "_id": "ask_carrier_1",
+        "app_id": "app_1",
+        "user_id": "user_1",
+        "workflow_name": "AgentGenerator",
+        "status": int(WorkflowStatus.IN_PROGRESS),
+        "transport_purpose": "ask_carrier",
+    }
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+    pack = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "AgentGenerator"}],
+            "transitions": [],
+            "workflow_sequences": [],
+        }
+    )
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
+
+    resolution = await router.resolve_resume(
+        app_id="app_1",
+        user_id="user_1",
+        requested_workflow_id="AgentGenerator",
+        requested_chat_id="fresh_chat_id",
+    )
+
+    assert resolution["resolved_from"] == "requested_chat_missing"
+    assert resolution["chat_id"] == "fresh_chat_id"
 
 
 @pytest.mark.asyncio

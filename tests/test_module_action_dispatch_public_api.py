@@ -76,6 +76,7 @@ def _app_with_executor() -> SimpleNamespace:
     executor.register(
         "orders",
         _OrdersModule(),
+        action_method_map={"restricted": "restricted"},
         action_permissions={"restricted": ["orders.read"]},
     )
     registry = ExecutorRegistry()

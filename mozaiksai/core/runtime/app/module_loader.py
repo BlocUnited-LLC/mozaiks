@@ -189,7 +189,7 @@ class ActionDef(ModuleContractModel):
     id: str
     description: str
     handler_method: str
-    api_surface: str | None = None
+    api_surface: Literal["public", "public_readonly", "internal", "admin_internal"] | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
     permissions: list[str] = Field(default_factory=list)
@@ -199,6 +199,12 @@ class ActionDef(ModuleContractModel):
     # and returns ENTITLEMENT_REQUIRED if the grant is not active.
     # When null/absent, no entitlement check is performed.
     entitlement_gate: str | None = None
+    # Opt-in eligibility for page-declared ask context. A page may name this
+    # action in meta.ask_context only when the module marks it here, and the
+    # action must be side-effect free: the resolver dispatches it with an empty
+    # permission grant to ground ask-mode answers. This is a separate decision
+    # from api_surface, which governs external HTTP exposure.
+    ask_context_safe: bool = False
 
     @field_validator("id", "description", "handler_method", mode="before")
     @classmethod
@@ -214,18 +220,6 @@ class ActionDef(ModuleContractModel):
     @classmethod
     def _entitlement_gate(cls, value: Any) -> str | None:
         return _optional_text(value)
-
-    @field_validator("api_surface", mode="before")
-    @classmethod
-    def _api_surface(cls, value: Any) -> str | None:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            raise ValueError("api_surface must be a string")
-        text = value.strip()
-        if not text:
-            raise ValueError("api_surface must be non-empty")
-        return text
 
 
 class ModuleCapability(ModuleContractModel):
@@ -293,6 +287,11 @@ class ModuleDefinition(ModuleContractModel):
     def action_emits_map(self) -> dict[str, list[str]]:
         """Maps each action id to event types declared in module.yaml actions[].emits."""
         return {action.id: list(action.emits) for action in self.actions}
+
+    @property
+    def action_ask_context_map(self) -> dict[str, bool]:
+        """Maps each action id to its page-declared ask-context eligibility."""
+        return {action.id: action.ask_context_safe and not action.permissions for action in self.actions}
 
     @model_validator(mode="after")
     def _validate_unique_ids(self) -> ModuleDefinition:
@@ -1120,6 +1119,10 @@ class LoadedModule:
         return self.definition.action_emits_map
 
     @property
+    def action_ask_context_map(self) -> dict[str, bool]:
+        return self.definition.action_ask_context_map
+
+    @property
     def event_payload_schemas_map(self) -> dict[str, dict[str, Any]]:
         if self.manifests.events is None:
             return {}
@@ -1153,26 +1156,44 @@ class ModuleLoader:
         "policy_hooks": ("policy_hooks.yaml", ModulePolicyHooksManifest),
     }
 
-    def __init__(self, base_path: str, *, taxonomy_advisory: bool = False) -> None:
+    def __init__(self, base_path: str, *, taxonomy_advisory: bool = False, module_defaults_path: str | None = None) -> None:
         self._base = Path(base_path)
+        self._module_roots = [self._base]
+        if module_defaults_path is not None:
+            defaults_root = Path(module_defaults_path)
+            if not defaults_root.is_dir():
+                raise ModuleLoadError(f"Module defaults app root not found: {defaults_root}")
+            if defaults_root.resolve() != self._base.resolve():
+                self._module_roots.append(defaults_root)
         self._taxonomy_advisory = taxonomy_advisory
+        self.load_errors: dict[str, str] = {}
         import_roots = [self._base.parent, self._base] if self._base.name == "app" else [self._base]
         for root in import_roots:
             root_text = str(root.resolve())
-            if root_text not in sys.path:
-                sys.path.insert(0, root_text)
+            if root_text in sys.path:
+                sys.path.remove(root_text)
+            sys.path.insert(0, root_text)
         self._clear_registered_package("services")
+        # Bind optional app support code to this workspace, even when another
+        # workspace has a regular services package elsewhere on sys.path.
+        self._register_module_package("services", self._base / "services")
+        self._clear_registered_package("modules")
+        # Pack modules may use another declared pack's backend service. Resolve
+        # those imports only from this app and its explicitly composed defaults.
+        self._register_module_package("modules", self._base / "modules")
+        sys.modules["modules"].__path__ = [
+            str(root / "modules") for root in self._module_roots
+        ]
 
     def discover_module_names(self) -> list[str]:
-        """Return module names for every modules/*/module.yaml in the bundle."""
-        modules_dir = self._base / "modules"
-        if not modules_dir.exists():
-            return []
-        names: list[str] = []
-        for child in sorted(modules_dir.iterdir(), key=lambda item: item.name.lower()):
-            if child.is_dir() and (child / self.YAML_FILENAME).exists():
-                names.append(child.name)
-        return names
+        """Discover active app modules and explicitly composed host defaults."""
+        names: set[str] = set()
+        for root in self._module_roots:
+            modules_dir = root / "modules"
+            if modules_dir.is_dir():
+                names.update(child.name for child in modules_dir.iterdir()
+                             if child.is_dir() and (child / self.YAML_FILENAME).exists())
+        return sorted(names, key=str.lower)
 
     async def load_all(
         self,
@@ -1187,19 +1208,24 @@ class ModuleLoader:
         """
         loaded: list[LoadedModule] = []
         failed: list[str] = []
+        self.load_errors.clear()
         names = module_names if module_names is not None else self.discover_module_names()
         for name in names:
             try:
                 mod = self.load(name)
                 loaded.append(mod)
             except ModuleLoadError as exc:
+                self.load_errors[name] = str(exc)
                 logger.error("MODULE_LOAD_FAILED: %s — %s", name, exc, exc_info=True)
                 failed.append(name)
         return loaded, failed
 
     def load(self, name: str) -> LoadedModule:
         """Load a single canonical module by folder name."""
-        module_dir = self._base / "modules" / name
+        module_dir = next(
+            (root / "modules" / name for root in self._module_roots if (root / "modules" / name).is_dir()),
+            self._base / "modules" / name,
+        )
         if not module_dir.exists():
             raise ModuleLoadError(f"Module directory not found: {module_dir}")
 
@@ -1268,78 +1294,50 @@ class ModuleLoader:
         )
 
     def _register_account_data_handler(self, module_id: str, module_dir: Path) -> None:
-        """Import and register backend/account_data_handler.py with account_data_registry.
-
-        Called automatically when module.yaml declares ``user_data_scope: true``.
-        The handler file must export a class named ``AccountDataHandler`` (or any
-        name — the loader looks for a class implementing the AccountDataHandler
-        Protocol).  It is registered under ``module_id`` with the process-global
-        ``account_data_registry``.
-
-        A missing backend/account_data_handler.py raises ModuleLoadError — the
-        module will not load. Generated modules must declare this file whenever
-        user_data_scope=true is set.
-        """
-        handler_file = module_dir / "backend" / "account_data_handler.py"
-        if not handler_file.exists():
+        """Load the declared account-data implementation in the module's package."""
+        relative_path = "backend/account_data_handler.py"
+        handler_file = module_dir / relative_path
+        if not handler_file.is_file():
             raise ModuleLoadError(
-                f"module {module_id!r} declares user_data_scope=true but "
-                "backend/account_data_handler.py was not found. "
-                "Generate backend/account_data_handler.py implementing the "
-                "AccountDataHandler protocol (delete_user_data + export_user_data), "
-                "or remove user_data_scope=true from module.yaml."
+                f"modules/{module_id}/{relative_path}: required by user_data_scope=true"
             )
-
         try:
-            import importlib.util as _ilu
-            spec = _ilu.spec_from_file_location(
-                f"app.modules.{module_id}.backend.account_data_handler",
-                handler_file,
-            )
-            if spec is None or spec.loader is None:
-                raise ImportError("spec_from_file_location returned None")
-            mod = _ilu.module_from_spec(spec)
-            spec.loader.exec_module(mod)  # type: ignore[attr-defined]
-
-            # Find the handler class — prefer one explicitly named AccountDataHandler,
-            # fall back to any class that satisfies the Protocol.
-            from mozaiksai.core.account import AccountDataHandler as _Protocol
-            handler_cls = getattr(mod, "AccountDataHandler", None)
-            if handler_cls is None:
-                # Search for any class that implements the protocol
-                import inspect as _inspect
-                candidates = [
-                    obj for _, obj in _inspect.getmembers(mod, _inspect.isclass)
-                    if obj.__module__ == mod.__name__ and isinstance(obj, type)
-                ]
-                for candidate in candidates:
-                    try:
-                        if isinstance(candidate(db=None), _Protocol):  # type: ignore[call-arg]
-                            handler_cls = candidate
-                            break
-                    except Exception:
-                        pass
-
-            if handler_cls is None:
-                logger.warning(
-                    "ACCOUNT_HANDLER_NO_CLASS: module %r backend/account_data_handler.py "
-                    "found but no AccountDataHandler class discovered. "
-                    "Export a class named AccountDataHandler.",
-                    module_id,
+            handler_file.resolve().relative_to(module_dir.resolve())
+            package_root = f"mozaiks_runtime_module_{module_id.replace('.', '_').replace('-', '_')}"
+            mod = importlib.import_module(f"{package_root}.backend.account_data_handler")
+            named = getattr(mod, "AccountDataHandler", None)
+            candidates = [named] if named is not None else [
+                candidate for _, candidate in inspect.getmembers(mod, inspect.isclass)
+                if candidate.__module__ == mod.__name__
+            ]
+            valid = []
+            for candidate in candidates:
+                if not inspect.isclass(candidate):
+                    continue
+                try:
+                    inspect.signature(candidate).bind(db=None)
+                    for method_name in ("delete_user_data", "export_user_data"):
+                        method = getattr(candidate, method_name, None)
+                        if not inspect.iscoroutinefunction(method):
+                            raise TypeError(f"{method_name} must be async")
+                        inspect.signature(method).bind(None, app_id="app", user_id="user")
+                except (TypeError, ValueError):
+                    continue
+                valid.append(candidate)
+            if len(valid) != 1:
+                raise ValueError(
+                    "export one AccountDataHandler class with __init__(db) and async "
+                    "delete_user_data(*, app_id, user_id) / export_user_data(*, app_id, user_id)"
                 )
-                return
-
             from mozaiksai.core.account import AccountDataHandler, account_data_registry
+
+            handler_cls = valid[0]
             account_data_registry.register(module_id, cast(type[AccountDataHandler], handler_cls))
             logger.info("ACCOUNT_HANDLER_REGISTERED: module=%s class=%s", module_id, handler_cls.__name__)
-
         except Exception as exc:
-            logger.warning(
-                "ACCOUNT_HANDLER_LOAD_ERROR: module %r backend/account_data_handler.py "
-                "could not be loaded: %s",
-                module_id,
-                exc,
-            )
+            raise ModuleLoadError(
+                f"modules/{module_id}/{relative_path}: invalid account-data implementation: {exc}"
+            ) from exc
 
     def _load_companion_manifests(
         self,

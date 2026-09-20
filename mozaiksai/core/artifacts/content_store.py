@@ -4,14 +4,33 @@ import hashlib
 import io
 import logging
 import os
+import re
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
 
 class ContentNotFoundError(Exception):
     """Raised when a content_ref does not resolve to stored content."""
+
+
+class ContentIntegrityError(ValueError):
+    """Raised when immutable content does not match its claimed digest."""
+
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _verified_blob_digest(data: bytes, expected_digest: str) -> str:
+    digest = str(expected_digest or "")
+    if _SHA256.fullmatch(digest) is None:
+        raise ContentIntegrityError("expected_digest must be a lowercase SHA-256 digest")
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != digest:
+        raise ContentIntegrityError("exact blob bytes do not match expected_digest")
+    return digest
 
 
 @runtime_checkable
@@ -51,6 +70,18 @@ class ArtifactContentStore(Protocol):
         Returns ``True`` if content was found and deleted, ``False`` if it
         did not exist.  Never raises on a missing ref.
         """
+        ...
+
+    async def put_blob(self, data: bytes, *, expected_digest: str) -> str:
+        """Idempotently persist exact immutable bytes under their SHA-256 identity."""
+        ...
+
+    async def get_verified_blob(self, content_digest: str) -> bytes:
+        """Return exact bytes only after recomputing their content digest."""
+        ...
+
+    async def has_verified_blob(self, content_digest: str) -> bool:
+        """Return whether an exact, digest-verified immutable blob exists."""
         ...
 
 
@@ -105,6 +136,47 @@ class LocalArtifactContentStore:
         if not path.exists():
             return False
         path.unlink()
+        return True
+
+    def _blob_path(self, content_digest: str) -> Path:
+        digest = str(content_digest or "")
+        if _SHA256.fullmatch(digest) is None:
+            raise ContentIntegrityError("content_digest must be a lowercase SHA-256 digest")
+        return self._root / "sha256" / digest[:2] / digest
+
+    async def put_blob(self, data: bytes, *, expected_digest: str) -> str:
+        digest = _verified_blob_digest(data, expected_digest)
+        destination = self._blob_path(digest)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.parent / f".{digest}.{uuid4().hex}.tmp"
+        temporary.write_bytes(data)
+        try:
+            try:
+                os.link(temporary, destination)
+            except FileExistsError:
+                existing = destination.read_bytes()
+                _verified_blob_digest(existing, digest)
+                if existing != data:
+                    raise ContentIntegrityError(
+                        "immutable blob identity resolved to different exact bytes"
+                    ) from None
+        finally:
+            temporary.unlink(missing_ok=True)
+        return digest
+
+    async def get_verified_blob(self, content_digest: str) -> bytes:
+        path = self._blob_path(content_digest)
+        if not path.is_file():
+            raise ContentNotFoundError(f"Immutable blob not found: {content_digest!r}")
+        data = path.read_bytes()
+        _verified_blob_digest(data, content_digest)
+        return cast(bytes, data)
+
+    async def has_verified_blob(self, content_digest: str) -> bool:
+        try:
+            await self.get_verified_blob(content_digest)
+        except ContentNotFoundError:
+            return False
         return True
 
 
@@ -217,6 +289,49 @@ class GridFSArtifactContentStore:
             )
             return False
 
+    async def put_blob(self, data: bytes, *, expected_digest: str) -> str:
+        from pymongo.errors import DuplicateKeyError
+
+        digest = _verified_blob_digest(data, expected_digest)
+        fs = await self._ensure_fs()
+        try:
+            await fs.upload_from_stream_with_id(
+                digest,
+                digest,
+                io.BytesIO(data),
+                metadata={"content_digest": digest, "immutable": True},
+            )
+        except DuplicateKeyError:
+            existing = await self.get_verified_blob(digest)
+            if existing != data:
+                raise ContentIntegrityError(
+                    "immutable GridFS blob identity resolved to different exact bytes"
+                ) from None
+        return digest
+
+    async def get_verified_blob(self, content_digest: str) -> bytes:
+        from gridfs.errors import NoFile  # type: ignore[import]
+
+        if _SHA256.fullmatch(str(content_digest or "")) is None:
+            raise ContentIntegrityError("content_digest must be a lowercase SHA-256 digest")
+        fs = await self._ensure_fs()
+        try:
+            grid_out = await fs.open_download_stream(content_digest)
+            data = await grid_out.read()
+        except NoFile as exc:
+            raise ContentNotFoundError(
+                f"Immutable GridFS blob not found: {content_digest!r}"
+            ) from exc
+        _verified_blob_digest(data, content_digest)
+        return cast(bytes, data)
+
+    async def has_verified_blob(self, content_digest: str) -> bool:
+        try:
+            await self.get_verified_blob(content_digest)
+        except ContentNotFoundError:
+            return False
+        return True
+
 
 _CONTENT_BACKEND_ENV_VAR = "MOZAIKS_ARTIFACT_CONTENT_BACKEND"
 _BUNDLE_CONTENT_BACKEND_ENV_VAR = "MOZAIKS_BUNDLE_CONTENT_BACKEND"
@@ -274,6 +389,7 @@ GridFSBundleContentStore = GridFSArtifactContentStore
 
 
 __all__ = [
+    "ContentIntegrityError",
     "ContentNotFoundError",
     "ArtifactContentStore",
     "LocalArtifactContentStore",

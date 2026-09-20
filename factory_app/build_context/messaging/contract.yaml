@@ -81,6 +81,12 @@ runtime_boundaries:
     rule: Generated repo.py must use ctx.persistence.collection("messages", entity_name). No direct Motor clients and no app_data_from_context aliases.
   - id: event_emission
     rule: Events must be emitted via ctx.emit(), not direct dispatcher calls from service/handler.
+  - id: support_ticket_authority
+    rule: >
+      Generated public messages actions only create, list, read, and send direct
+      or group conversations. The support module alone creates support threads
+      and mediates support conversation reads and replies after ticket authority
+      checks, while the messages service owns persistence and lifecycle events.
   - id: notification_delivery
     rule: Message recipient notifications are declared in messages/contracts/notifications.yaml from domain.messages.message_sent. Do not create a notification repo or delivery worker inside the app module.
   - id: no_announcement_leakage
@@ -93,19 +99,21 @@ runtime_boundaries:
     rule: Hosted products may add announcements, operator routing, realtime fan-out, or product-specific moderation, but they must keep core thread/message persistence on the messages module and preserve domain.messages.* lifecycle events for create_thread, send_message, and mark_thread_read.
   - id: profile_tab_composition
     rule: >
-      The default DM inbox entrypoint is a profile tab declared in
-      modules/messages/contracts/profile.yaml and registered through ui/index.js.
-      Keep /messages as a focused conversation route, but do not add it to global
-      shell navigation or profile shortcut pills by default.
+      The default DM entrypoint is one profile-owned messaging workspace declared
+      in modules/messages/contracts/profile.yaml and registered through ui/index.js.
+      The workspace keeps friends (when the social pack is selected), conversations,
+      search, and the selected thread in one surface. Selecting a thread or friend
+      renders the conversation inline; /messages remains a hidden deep-link and
+      support fallback, never a global shell item or profile shortcut by default.
 
 facades: []
 
 cross_pack_integrations:
   - pack_id: support
     description: >
-      Support modules use messages for persisted conversations. The support
-      module stores ticket metadata and references messages.thread_id through
-      message_thread_id.
+      Support modules call the messages service for persisted conversations.
+      Support stores ticket metadata and references messages.thread_id through
+      message_thread_id; public support reads and replies use support actions.
   - pack_id: social
     description: >
       Social apps may use messages for DMs after the social pack creates

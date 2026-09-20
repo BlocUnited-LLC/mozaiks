@@ -97,6 +97,12 @@ prompt_middleware:
 - agent: ServiceAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
+- agent: DatabaseAgent
+  filename: hook_file_contract_context.py
+  function: inject_cookie_cutter_contracts_context
+- agent: ModelAgent
+  filename: hook_file_contract_context.py
+  function: inject_cookie_cutter_contracts_context
 - agent: FrontendStubAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context

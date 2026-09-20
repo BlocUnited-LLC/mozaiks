@@ -1,0 +1,24 @@
+contract_id: app_security_file_contracts
+contract_type: generated_app_security_files
+version: 1
+files:
+  - path: app/security/secrets.yaml
+    required: when_app_declares_secret_requirements
+    owner: AppGenerator
+    rules:
+      - Names-only contract; never raw credential values.
+      - Use version 1 and secrets entries with id, env, purpose, required, and optional provider policy.
+      - Do not place Python resolver code under app/security/.
+  - path: app/security/production_operations.yaml
+    required: when_app_declares_production_or_hosted_operations
+    owner: AppGenerator_or_hosted_overlay
+    rules:
+      - Provider-neutral operational authority contract.
+      - No tenant ids, connection strings, tokens, or cloud resource secrets.
+      - Hosted products may extend with stricter operation classes through workspace build_context overlays.
+  - path: app/config/auth.yaml
+    required: when_auth_required_or_provider_configured
+    owner: AppGenerator
+    rules:
+      - Provider-neutral auth behavior lives here.
+      - Provider mechanics belong under app/services/adapters/auth/ only when the app itself owns the provider integration.

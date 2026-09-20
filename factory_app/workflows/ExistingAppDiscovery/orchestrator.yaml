@@ -1,3 +1,4 @@
+schema_version: mozaiks.orchestrator.v1
 # ExistingAppDiscovery Workflow Orchestrator
 # Entry point for brownfield-app adopters who already have an application
 # and want to integrate it with Mozaiks.

@@ -14,7 +14,7 @@ OSS `mozaiks` owns the generic primitives:
 - harvest middleware that intercepts AG2 reply files and persists them in one call
 - AG2 adapter helpers for typed inputs and image-generation configuration
 - workflow declarative flags that enable media behavior per agent
-- `promote_brand_asset` and `attach_campaign_asset` tools for the promote pattern
+- `promote_brand_asset` for the promote pattern
 
 Apps own product use cases. A marketing app can use these primitives to generate
 campaign images. A branding workflow can use the same primitives to produce logo,
@@ -212,7 +212,7 @@ Promotion targets are generic:
 - `brand_asset` — committed to `config/asset_manifest.json` via `promote_brand_asset`
 - `app_asset` — app-bundle media inventory
 - `page_asset` — page-specific imagery
-- `campaign_asset` — product modules such as marketing campaigns
+- `campaign_asset` — app-defined campaign or placement records
 - `artifact` — review-only workflow output
 
 `config/asset_manifest.json` is the deterministic source of truth for promoted
@@ -234,13 +234,16 @@ read from it rather than querying `MediaAssets` directly.
 
 ## Reference Workflows
 
-The OSS factory ships two reference workflows that demonstrate the full pipeline:
+The OSS factory ships one reference workflow that demonstrates the full pipeline:
 
 | Workflow | Purpose |
 |----------|---------|
 | `BrandAssetGeneratorWorkflow` | Logo and brand imagery. Promotes to `role=logo` in `asset_manifest.json`. |
-| `CampaignAssetGeneratorWorkflow` | Campaign hero images. Attaches to marketplace/campaign placement records via `attach_campaign_asset`. |
 
-Both workflows follow the same generate → harvest → promote pattern and can be
-customized via `build_context` overlays or used as archetypes for app-specific
-media workflows.
+It follows the generate → harvest → promote pattern and can be customized via
+`build_context` overlays or used as an archetype for app-specific media
+workflows.
+
+Apps build their own promote-side tools on these primitives. A workflow that
+attaches generated media to an app's own records supplies that tool itself;
+only the generic pieces above ship here.

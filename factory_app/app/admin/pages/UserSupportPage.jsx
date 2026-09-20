@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 
 import {
-  ChatThread,
   CollectionToolbar,
   InlineEmptyState,
   ResourceList,
@@ -10,13 +9,13 @@ import {
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
-  API_BASE,
   StatusPill,
   StudioErrorState,
   StudioLoadingState,
 } from '../../ui/components/StudioShared.jsx'
 import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
 import { getAppDisplayDescription, getAppDisplayName } from './appStudioModel.js'
+import { studioFetch } from './studioApi.js'
 import { useWorkspaceStudioData } from './useWorkspaceStudioData.js'
 
 const FILTER_OPTIONS = [
@@ -47,7 +46,7 @@ function normalizeSupportRequest(record) {
     id,
     ticketId: String(record.request_id || record.ticketId || id || 'SUP').toUpperCase(),
     appId,
-    appName: record.app_name || record.appName || record.app_label || appId,
+    appName: record.subject_app_label || record.subject_app_name || record.subject_app_id || record.app_name || record.appName || record.app_label || appId,
     subject,
     status: record.status || 'open',
     severity: record.severity || 'low',
@@ -59,8 +58,8 @@ function normalizeSupportRequest(record) {
 
 async function fetchSupportRequests({ scope = 'workspace', appId = null } = {}) {
   const payload = { status: 'all', limit: 200, scope }
-  if (appId) payload.app_id = appId
-  const res = await fetch(`${API_BASE}/api/modules/workspace_support/list_support_requests`, {
+  if (appId) payload.subject_app_id = appId
+  const res = await studioFetch('/api/modules/workspace_support/list_support_requests', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -71,53 +70,13 @@ async function fetchSupportRequests({ scope = 'workspace', appId = null } = {}) 
 
 async function fetchCurrentProfileAppId() {
   try {
-    const res = await fetch(`${API_BASE}/api/me`)
+    const res = await studioFetch('/api/me')
     if (!res.ok) return null
     const profile = await res.json()
     return profile?.app_id || profile?.appId || null
   } catch (_) {
     return null
   }
-}
-
-async function sendSupportMessage({ appId, requestId, message, senderRole = 'operator' }) {
-  const payload = { request_id: requestId, message, sender_role: senderRole }
-  if (appId) payload.app_id = appId
-  const res = await fetch(`${API_BASE}/api/modules/workspace_support/add_support_message`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
-}
-
-async function updateSupportStatus({ appId, requestId, status }) {
-  const payload = { request_id: requestId, status }
-  if (appId) payload.app_id = appId
-  const res = await fetch(`${API_BASE}/api/modules/workspace_support/update_support_request_status`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  const body = await res.json()
-  if (!body?.success) throw new Error(body?.error || 'Status was not updated.')
-  return body
-}
-
-async function deleteSupportRequest({ appId, requestId }) {
-  const payload = { request_id: requestId }
-  if (appId) payload.app_id = appId
-  const res = await fetch(`${API_BASE}/api/modules/workspace_support/delete_support_request`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  const body = await res.json()
-  if (!body?.success) throw new Error(body?.error || 'Request was not removed.')
-  return body
 }
 
 function statusForRow(row) {
@@ -319,165 +278,16 @@ function SupportMobileItem({ row, onDashboard }) {
   )
 }
 
-function normalizeThreadRequest(record) {
-  return {
-    id: record.request_id || record.id,
-    ticketId: record.request_id || record.ticket_id || record.id,
-    appId: record.app_id || record.subject_app_id || 'default',
-    appName: record.app_name || record.app_label || record.subject_app_id || record.app_id || 'App',
-    subject: record.subject || record.page_title || String(record.message || 'Support request').slice(0, 80),
-    status: record.status || 'open',
-    updatedAt: record.updated_at || record.created_at,
-    messages: Array.isArray(record.messages) && record.messages.length > 0
-      ? record.messages
-      : record.message
-        ? [{ role: 'user', content: record.message }]
-        : [],
-  }
-}
-
-function UserSupportThreadView({ requestId, appId }) {
-  const navigate = useNavigate()
-  const [requests, setRequests] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [actionError, setActionError] = useState(null)
-  const [actioning, setActioning] = useState(false)
-
-  const loadRequests = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const body = await fetchSupportRequests({ scope: 'user', appId })
-      setRequests((body?.requests || []).map(normalizeThreadRequest))
-    } catch (err) {
-      setError(err.message || 'Support could not be loaded.')
-      setRequests([])
-    } finally {
-      setLoading(false)
-    }
-  }, [appId])
-
-  useEffect(() => { loadRequests() }, [loadRequests])
-
-  const selected = requests.find((request) => request.id === requestId) || requests[0] || null
-
-  async function handleSend(message) {
-    if (!selected?.id) return
-    setActionError(null)
-    await sendSupportMessage({ appId: selected.appId || appId, requestId: selected.id, message })
-    await loadRequests()
-  }
-
-  async function handleStatusChange() {
-    if (!selected?.id || actioning) return
-    setActioning(true)
-    setActionError(null)
-    try {
-      await updateSupportStatus({
-        appId: selected.appId || appId,
-        requestId: selected.id,
-        status: selected.status === 'resolved' ? 'open' : 'resolved',
-      })
-      await loadRequests()
-    } catch (err) {
-      setActionError(err.message || 'Status could not be updated.')
-    } finally {
-      setActioning(false)
-    }
-  }
-
-  async function handleDelete() {
-    if (!selected?.id || actioning) return
-    const confirmed = window.confirm(`Remove support request "${selected.subject}"? This removes the linked conversation.`)
-    if (!confirmed) return
-    setActioning(true)
-    setActionError(null)
-    try {
-      await deleteSupportRequest({ appId: selected.appId || appId, requestId: selected.id })
-      navigate('/support')
-    } catch (err) {
-      setActionError(err.message || 'Support request could not be removed.')
-      setActioning(false)
-    }
-  }
-
-  if (loading) return <StudioLoadingState label="Loading support chat..." />
-  if (error) return <StudioErrorState title="Support Unavailable" message={error} />
-
-  return (
-    <WorkspaceLayout>
-      <div className="mx-auto flex min-h-[calc(100vh-180px)] w-full max-w-5xl flex-col gap-5">
-        <WorkspaceStudioHero
-          title="Support"
-          subtitle={selected ? selected.subject : 'No support chat selected.'}
-          actions={
-            <div className="flex flex-wrap gap-2">
-              <ActionButton variant="ghost" onClick={() => navigate('/support')}>
-                Support overview
-              </ActionButton>
-              {selected && (
-                <>
-                  <ActionButton variant="ghost" onClick={handleStatusChange} disabled={actioning}>
-                    {selected.status === 'resolved' ? 'Reopen' : 'Close'}
-                  </ActionButton>
-                  <ActionButton variant="ghost" onClick={handleDelete} disabled={actioning}>
-                    Remove
-                  </ActionButton>
-                </>
-              )}
-            </div>
-          }
-          onAction={null}
-          summaryItems={[
-            { id: 'ticket', label: 'Ticket', value: selected?.ticketId || 'None' },
-            { id: 'status', label: 'Status', value: selected?.status || 'None' },
-          ]}
-        />
-
-        {selected ? (
-          <section className="flex min-h-[520px] flex-col overflow-hidden rounded-[1.15rem] border border-border/45 bg-card/34">
-            <div className="border-b border-border/30 px-4 py-3">
-              <div className="text-xs font-mono text-muted-foreground">{selected.ticketId}</div>
-              <div className="mt-1 text-sm font-semibold text-foreground">{selected.appName}</div>
-            </div>
-            <ChatThread
-              messages={selected.messages}
-              variant="support"
-              emptyText="No messages yet."
-              inputPlaceholder="Reply to support..."
-              className="flex-1 min-h-0"
-              onSend={selected.status !== 'resolved' ? handleSend : undefined}
-            />
-            {actionError && (
-              <div className="border-t border-destructive/20 px-4 py-2 text-xs text-destructive">
-                {actionError}
-              </div>
-            )}
-          </section>
-        ) : (
-          <InlineEmptyState
-            title="No support chat found"
-            description="Create a support request from Ask mode and the conversation will open here."
-          />
-        )}
-      </div>
-    </WorkspaceLayout>
-  )
-}
-
 export default function UserSupportPage() {
   const navigate = useNavigate()
-  const location = useLocation()
-  const query = useMemo(() => new URLSearchParams(location.search || ''), [location.search])
-  const requestId = query.get('request_id')
-  const requestAppId = query.get('app_id')
   const { apps, loading, error, dataMode } = useWorkspaceStudioData('Support apps could not be loaded.')
   const [supportRequests, setSupportRequests] = useState([])
+  const [supportError, setSupportError] = useState(null)
   const [searchValue, setSearchValue] = useState('')
   const [activeFilter, setActiveFilter] = useState('all')
 
   const loadSupportRequests = useCallback(async () => {
+    setSupportError(null)
     try {
       const workspaceBody = await fetchSupportRequests()
       let requests = Array.isArray(workspaceBody?.requests) ? workspaceBody.requests : []
@@ -492,22 +302,19 @@ export default function UserSupportPage() {
         if (profileAppId) appIds.add(profileAppId)
 
         const appBodies = await Promise.all(
-          Array.from(appIds).map((appId) => fetchSupportRequests({ scope: 'app', appId }).catch(() => null)),
+          Array.from(appIds).map((appId) => fetchSupportRequests({ scope: 'app', appId })),
         )
         requests = appBodies.flatMap((body) => Array.isArray(body?.requests) ? body.requests : [])
       }
 
       setSupportRequests(requests.map(normalizeSupportRequest))
-    } catch (_) {
+    } catch (err) {
       setSupportRequests([])
+      setSupportError(err?.message || 'Support chats could not be loaded.')
     }
   }, [apps])
 
   useEffect(() => { loadSupportRequests() }, [loadSupportRequests])
-
-  if (requestId) {
-    return <UserSupportThreadView requestId={requestId} appId={requestAppId} />
-  }
 
   const supportSource = supportRequests
   const rows = useMemo(() => buildSupportRows(apps, supportSource), [apps, supportSource])
@@ -544,7 +351,7 @@ export default function UserSupportPage() {
   }
 
   if (loading) return <StudioLoadingState label="Loading support dashboards..." />
-  if (error) return <StudioErrorState title="Support Unavailable" message={error} />
+  if (error || supportError) return <StudioErrorState title="Support Unavailable" message={error || supportError} />
 
   return (
     <WorkspaceLayout>

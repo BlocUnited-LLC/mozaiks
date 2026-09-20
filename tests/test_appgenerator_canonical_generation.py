@@ -945,7 +945,7 @@ class TestTaxonomyAlignment:
         )
 
     def test_allowed_task_types_have_canonical_initial_agents(self) -> None:
-        """Every allowed task_type except agent_backend_integration must map to
+        """Every admitted AppGenerator task_type must map to
         a canonical initial agent for execution planning.
         """
         from factory_app.workflows.AppGenerator.tools.app_build_plan import (
@@ -953,10 +953,7 @@ class TestTaxonomyAlignment:
             _CANONICAL_INITIAL_AGENTS,
         )
 
-        # agent_backend_integration is exempt — it does not require a
-        # canonical initial agent mapping.
-        need_agents = _ALLOWED_TASK_TYPES - {"agent_backend_integration"}
-        missing = need_agents - set(_CANONICAL_INITIAL_AGENTS)
+        missing = _ALLOWED_TASK_TYPES - set(_CANONICAL_INITIAL_AGENTS)
         assert not missing, (
             f"task_types without _CANONICAL_INITIAL_AGENTS entry: {missing}"
         )

@@ -58,6 +58,11 @@ During existing-app discovery, the preload registers a current source-backed
 compact catalog and durable context refs; exact source remains behind retrieval
 tools.
 
+Large source bundles are externalized through the configured artifact content
+store (GridFS when `MOZAIKS_ARTIFACT_CONTENT_BACKEND=gridfs`). MongoDB artifact
+metadata keeps only the content reference, checksum, and byte count, while
+retrieval tools load the bundle lazily and return bounded file or chunk results.
+
 ## Why It Matters
 
 App Intelligence is what lets Mozaiks act like it understands the app before it

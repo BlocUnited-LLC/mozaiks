@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from mozaiksai.core.artifacts.content_store import get_artifact_content_store
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
@@ -46,6 +47,7 @@ APP_CONTEXT_GRAPH_ARTIFACT_KEY = "app_context_graph"
 APP_INTELLIGENCE_ARTIFACT_KIND = "app_intelligence_snapshot"
 APP_INTELLIGENCE_ARTIFACT_KEY = "app_intelligence_snapshot"
 APP_CONTEXT_INDEX_SCHEMA_VERSION = "mozaiks.app_context.index.v1"
+_INLINE_CONTEXT_PAYLOAD_LIMIT_BYTES = 4_000_000
 
 
 @dataclass(frozen=True)
@@ -317,6 +319,23 @@ async def persist_app_context_payload_artifact(
 ) -> ArtifactVersionDoc:
     """Persist a JSON AppContext payload artifact with canonical metadata."""
     raw = _json_bytes(payload)
+    summary_payload: Any = payload
+    content_metadata: dict[str, Any] = {}
+    if len(raw) > _INLINE_CONTEXT_PAYLOAD_LIMIT_BYTES:
+        content_store = get_artifact_content_store()
+        content_ref = await content_store.put_bundle(
+            raw,
+            app_id=app_id,
+            artifact_version_id=f"{build_family}-{build_key}",
+        )
+        summary_payload = {
+            "content_ref": content_ref,
+            "content_backend": content_store.backend_name,
+            "content_sha256": hashlib.sha256(raw).hexdigest(),
+            "content_size_bytes": len(raw),
+            "content_format": "json",
+        }
+        content_metadata = {"externalized": True, **summary_payload}
     return await store.create_build_record(
         app_id=app_id,
         build_family=build_family,
@@ -338,9 +357,10 @@ async def persist_app_context_payload_artifact(
             "source_workflow": source_workflow,
             "source_chat_id": source_chat_id,
             "metadata": {
-                "summary_payload": payload,
+                "summary_payload": summary_payload,
                 "summary_format": "json",
                 "artifact_contract": "mozaiksai/core/app_context",
+                **content_metadata,
                 **dict(metadata or {}),
             },
         },

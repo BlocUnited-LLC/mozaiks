@@ -1,3 +1,4 @@
+schema_version: mozaiks.orchestrator.v1
 workflow_name: AppGenerator
 max_turns: 25
 human_in_the_loop: true
@@ -5,4 +6,10 @@ workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
 initial_message: 'InterviewAgent: read the existing brief, guide the user through only the missing deterministic
   app-scope details, and avoid re-interviewing from scratch before code generation begins.'
-initial_agent: InterviewAgent
+# Entry resolves through the transition graph rather than naming an agent.
+# _resolve_executable_initial_agent compiles the rules and resolves from "user"
+# with this run's context, so the participation bypass is evaluated before the
+# first turn. Naming InterviewAgent here short-circuits that resolver on its
+# first line, which is why a routing rule alone could never skip the interview:
+# the interview had already opened.
+initial_agent: user

@@ -14,15 +14,15 @@ the bundle scanner, acceptance gates, and the bundle-quality scorers and
 regression eval under `factory_app/eval/`. Same inputs produce the same score
 on every run. No learned state, no cross-tenant data.
 
-This stays in the OSS repo, and specifically in `factory_app/` when the policy
+The capable reference suite stays in the OSS repo, and specifically in `factory_app/` when the policy
 being scored is builder-specific:
 
 - It is the quality gate on open contracts. Contributors and self-hosters must
   be able to run the same gates the factory runs, or the OSS framework is not
   trustworthy.
-- Transparency is a feature. Nothing about a deterministic checklist is a
-  competitive asset, and hiding evals from OSS users would undermine the
-  contract-first model.
+- Transparency is a feature. The public reference gates make open contracts
+  independently verifiable. Private optimized scoring and thresholds can still
+  be proprietary, as ADR 0005 explains.
 - Per the repo decision rules: generic scoring mechanics would belong in
   `mozaiksai/`; builder-specific scoring policy (which scorers, which
   thresholds, which fixture corpus) belongs in `factory_app/`. Today the
@@ -62,8 +62,27 @@ contract-declared customization rule:
   scores persisted as artifacts the user can see.
 
 Do not present this as current behavior. Until a loader and schema exist,
-`factory_app/eval/` remains a repo-internal regression suite invoked by tests
-and scripts, not an app-facing contract.
+`factory_app.eval` is a supported experimental Python facade invoked by tests
+and operator scripts, not a declarative app-facing contract. App Zero consumes
+that same facade. Privately tuned scorer policy, thresholds, corpora and results
+remain private by default under ADR 0005 even when their execution is deterministic.
+
+## Scoped generation evidence
+
+`factory_app.eval.GenerationEvidence` defines the bounded facts attached as
+`buildEvidence` to terminal events in the existing build lifecycle outbox. It
+contains module and selected pack identifiers, final gate statuses and counts, and known
+decision labels. It excludes source, prompts, diagnostic text and identity fields.
+The existing event envelope provides application, build and execution scope.
+Selected packs come from the normalized `app_build_plan.capability_packs`, never
+the launch context's registry of available pack descriptors. Completion hooks
+receive the live context explicitly through the lifecycle tool contract.
+
+Operators receive this evidence through the configured authenticated build-event
+callback and own persistence, retention and private aggregation. The Factory does
+not invoke proprietary module actions. This is operational evidence for that
+build, separate from optional anonymous community telemetry and from any future
+declarative evaluation contract.
 
 ## Review checklist
 

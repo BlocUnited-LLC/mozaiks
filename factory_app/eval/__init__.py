@@ -1,6 +1,9 @@
 """Factory generation-time evaluation: bundle scorers, runs, and diffs.
 
-This package is the OSS source of truth for scoring generated app bundles.
+This package is the supported, experimental Python facade for the reference
+Factory's deterministic bundle evaluation. Operators import this package rather
+than copying its implementation. Private corpora, tuned scoring policy and
+results remain operator-owned; this facade supplies the public reference suite.
 It originated in the hosted product's build_intelligence module (mozaiks-app
 PR #229) and moved here because the Factory's regression suite gates factory
 changes, which land in this repository.
@@ -22,13 +25,17 @@ from .bundle_eval import (
     run_corpus,
     save_run,
 )
-from .bundle_scorers import Bundle, all_scorers, score_bundle
+from .bundle_scorers import Bundle, Feedback, all_scorers, score_bundle
+from .evidence import GenerationEvidence, collect_generation_evidence
 
 __all__ = [
     "Bundle",
     "BundleRun",
+    "Feedback",
+    "GenerationEvidence",
     "RunDiff",
     "all_scorers",
+    "collect_generation_evidence",
     "diff_runs",
     "discover_bundles",
     "load_run",

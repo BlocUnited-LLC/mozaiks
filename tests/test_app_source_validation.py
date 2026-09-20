@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from mozaiksai.control_plane.app_validation import (
     plan_app_source_validation_commands,
@@ -18,6 +21,44 @@ def _framework_detection(commands: list[dict[str, Any]]) -> dict[str, Any]:
         "primary_framework_label": "Python",
         "validation_commands": commands,
     }
+
+
+@pytest.mark.parametrize("extra", [{}, {"sorts": []}, {"api_endpoint": "/api/modules/missing/list"}])
+def test_mozaiks_pages_use_runtime_contracts_before_source_validation_passes(tmp_path, extra):
+    (tmp_path / "app.json").write_text('{"appId":"app_1"}', encoding="utf-8")
+    pages = tmp_path / "ui" / "pages"
+    pages.mkdir(parents=True)
+    page = {
+        "schema_version": "mozaiks.app_page.v1", "name": "dashboard",
+        "route": "/dashboard", "title": "Dashboard", "page_type": "analytics_dashboard",
+        "layout": "grid", "shell_mode": "workspace",
+        "sections": [{"id": "recent", "primitive": "DataTable",
+                      "config": {"columns": [{"key": "name", "label": "Name"}], **extra}}],
+    }
+    (pages / "dashboard.yaml").write_text(json.dumps(page), encoding="utf-8")
+    result = run_app_source_validation(app_id="app_1", workspace_root=tmp_path)
+    check = next(c for c in result.fallback_checks if c.name == "mozaiks_page_contracts")
+    assert check.status == ("failed" if extra else "passed"), check.reason
+    assert result.validation_status == check.status
+
+
+@pytest.mark.asyncio
+async def test_staged_source_validation_does_not_require_an_indexed_workspace(tmp_path, monkeypatch):
+    from mozaiksai.control_plane import app_validation as module
+
+    async def no_job(**kwargs):
+        return None
+
+    async def no_detection(**kwargs):
+        return {}
+
+    monkeypatch.setattr(module, "get_latest_app_intelligence_index_job", no_job)
+    monkeypatch.setattr(module, "_current_framework_detection", no_detection)
+    (tmp_path / "service.py").write_text("def broken(:\n", encoding="utf-8")
+    result = await module.run_current_app_source_validation(app_id="app_1", workspace_root=tmp_path)
+    assert result.source == "explicit_workspace"
+    assert result.workspace_root_present
+    assert result.validation_status == "failed"
 
 
 def test_app_source_validation_runs_safe_detected_commands_in_copy(tmp_path: Path) -> None:

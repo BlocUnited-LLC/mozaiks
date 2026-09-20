@@ -12,7 +12,7 @@ Keycloak JWTs have the following structure:
 - azp: Authorized party (client_id)
 """
 
-import os
+from collections.abc import Mapping
 from typing import Any
 
 import jwt
@@ -63,14 +63,15 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
         keycloak_url: str | None = None,
         realm: str | None = None,
         client_id: str | None = None,
+        settings: Mapping[str, str] | None = None,
     ):
-        super().__init__()
-        self._keycloak_url = keycloak_url or os.getenv("KEYCLOAK_URL", "")
-        self._realm = realm or os.getenv("KEYCLOAK_REALM", "")
-        self._client_id = client_id or os.getenv("KEYCLOAK_CLIENT_ID", "")
-        self._app_id_claim = os.getenv("KEYCLOAK_APP_ID_CLAIM", "azp")
-        self._tenant_id_claim = os.getenv("KEYCLOAK_TENANT_ID_CLAIM", "azp")
-        self._workspace_id_claim = os.getenv("KEYCLOAK_WORKSPACE_ID_CLAIM", "workspace_id")
+        super().__init__(settings)
+        self._keycloak_url = keycloak_url or self._setting("KEYCLOAK_URL")
+        self._realm = realm or self._setting("KEYCLOAK_REALM")
+        self._client_id = client_id or self._setting("KEYCLOAK_CLIENT_ID")
+        self._app_id_claim = self._setting("KEYCLOAK_APP_ID_CLAIM", "azp")
+        self._tenant_id_claim = self._setting("KEYCLOAK_TENANT_ID_CLAIM", "azp")
+        self._workspace_id_claim = self._setting("KEYCLOAK_WORKSPACE_ID_CLAIM", "workspace_id")
         self._jwks_client: PyJWKClient | None = None
 
         # Clean URL (remove trailing slash)

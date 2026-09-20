@@ -1,6 +1,6 @@
 # Studio Product Model
 
-This note defines the current production-ready product model for the first-party
+This note defines the current pre-launch product model for the first-party
 Mozaiks management UX.
 
 ## Customer-Facing Terminology
@@ -55,6 +55,30 @@ product workflows for app creation, artifact review, promotion, run history, or
 build lifecycle management.
 
 ## Route Model
+
+### App Registry Ownership
+
+Studio directory records have one immutable `owner_user_id`. HTTP routes derive
+it from the authenticated principal, module actions from `ModuleContext`, and
+local build lifecycle updates from the resolved session owner. It is not an
+editable request field, and knowing an app or registry ID grants no access.
+
+The App Registry repo includes ownership in every record read, lifecycle write,
+and deletion filter. Reopening an app ID never transfers ownership. Concurrent
+creation claims one record through the existing unique app-ID index; an
+interrupted metadata write leaves an owned draft that the same owner can retry.
+Missing owners fail validation. Other-owner and missing records are both absent
+to reads and return `404` from Studio update/delete routes.
+
+Removing a directory record does not purge runtime usage facts. A user-chosen
+registry app ID is not authority to erase app-wide accounting. Account data
+management and runtime retention remain separate owners.
+
+Module creation without an explicit target app ID allocates a fresh app ID;
+it must not reuse the host app ID from `ModuleContext`. This is shared Studio
+behavior inherited by hosted products, not hosted commercial policy.
+
+### Navigation
 
 Workspace-level routes:
 

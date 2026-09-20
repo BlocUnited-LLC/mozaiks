@@ -12,28 +12,24 @@ export function SummaryStrip({ items = [], className }) {
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-lg border border-border/45 bg-card/[0.18] shadow-[0_1px_0_rgba(255,255,255,0.025)]',
+        'min-w-0 w-full overflow-hidden rounded-lg border border-border/45 bg-card/[0.18] shadow-[0_1px_0_rgba(255,255,255,0.025)]',
         className,
       )}
       aria-label="Summary metrics"
     >
-      <div className="grid grid-cols-2 gap-px bg-border/35 md:grid-cols-4">
-        {normalizedItems.map((item, index) => (
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-px bg-border/35">
+        {normalizedItems.map((item) => (
           <div
             key={item.id || item.label}
-            className={cn(
-              'min-h-[5.75rem] min-w-0 bg-card/34 px-4 py-3.5 sm:px-5',
-              index === 0 && 'md:rounded-l-[inherit]',
-              index === normalizedItems.length - 1 && 'md:rounded-r-[inherit]',
-            )}
+            className="min-h-[5.75rem] min-w-0 bg-card/34 px-4 py-3.5 sm:px-5"
           >
-            <div className="truncate text-[12px] font-medium text-muted-foreground/84">{item.label}</div>
+            <div className="whitespace-normal text-[12px] font-medium text-muted-foreground/84 [overflow-wrap:anywhere]">{item.label}</div>
             <div className="mt-1.5 flex min-w-0 flex-wrap items-end gap-x-2 gap-y-1">
-              <div className="min-w-0 break-words text-xl font-semibold leading-none text-foreground">
+              <div className="min-w-0 max-w-full whitespace-normal text-xl font-semibold leading-none text-foreground [overflow-wrap:anywhere]">
                 {item.value}
               </div>
               {item.detail ? (
-                <div className="hidden pb-0.5 text-[11px] text-muted-foreground/88 sm:block sm:pb-1">{item.detail}</div>
+                <div className="hidden min-w-0 max-w-full whitespace-normal pb-0.5 text-[11px] text-muted-foreground/88 [overflow-wrap:anywhere] sm:block sm:pb-1">{item.detail}</div>
               ) : null}
             </div>
           </div>

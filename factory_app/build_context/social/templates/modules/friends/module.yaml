@@ -25,6 +25,7 @@ actions:
     handler_method: send_friend_request
     input_schema:
       type: object
+      additionalProperties: false
       required: [recipient_id]
       properties:
         recipient_id: { type: string }
@@ -44,6 +45,7 @@ actions:
     handler_method: accept_friend_request
     input_schema:
       type: object
+      additionalProperties: false
       required: [request_id]
       properties:
         request_id: { type: string }
@@ -63,6 +65,7 @@ actions:
     handler_method: decline_friend_request
     input_schema:
       type: object
+      additionalProperties: false
       required: [request_id]
       properties:
         request_id: { type: string }
@@ -81,6 +84,7 @@ actions:
     handler_method: withdraw_friend_request
     input_schema:
       type: object
+      additionalProperties: false
       required: [request_id]
       properties:
         request_id: { type: string }
@@ -99,6 +103,7 @@ actions:
     handler_method: remove_friend
     input_schema:
       type: object
+      additionalProperties: false
       required: [friend_user_id]
       properties:
         friend_user_id: { type: string }
@@ -117,6 +122,7 @@ actions:
     handler_method: list_friends
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         before: { type: string }
         limit: { type: integer }
@@ -135,6 +141,7 @@ actions:
     handler_method: list_friends_of
     input_schema:
       type: object
+      additionalProperties: false
       required: [user_id]
       properties:
         user_id: { type: string }
@@ -155,6 +162,7 @@ actions:
     handler_method: list_friend_requests
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         direction: { type: string, enum: [incoming, outgoing, all] }
         status: { type: string, enum: [pending, accepted, declined, withdrawn, all] }
@@ -177,6 +185,7 @@ actions:
     handler_method: get_friendship_status
     input_schema:
       type: object
+      additionalProperties: false
       required: [other_user_id]
       properties:
         other_user_id: { type: string }
@@ -195,6 +204,7 @@ actions:
     handler_method: get_friends_count
     input_schema:
       type: object
+      additionalProperties: false
       properties: {}
     output_schema:
       type: object

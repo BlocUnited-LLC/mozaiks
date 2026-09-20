@@ -3,7 +3,7 @@ from __future__ import annotations
 """Shared JSON Schema helpers for runtime contract validation."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import jsonschema
 
@@ -20,6 +20,7 @@ class SchemaValidationDiagnostic:
     path: str
     schema_path: str
     validator: str | None = None
+    category: Literal["value_invalid", "schema_invalid"] = "value_invalid"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -27,6 +28,7 @@ class SchemaValidationDiagnostic:
             "path": self.path,
             "schema_path": self.schema_path,
             "validator": self.validator,
+            "category": self.category,
         }
 
 
@@ -53,38 +55,81 @@ def normalize_nullable_schema(schema: Any) -> Any:
     return normalized
 
 
-def validate_json_schema(value: Any, schema: dict[str, Any]) -> SchemaValidationDiagnostic | None:
-    """Validate *value* against a JSON Schema dict and return structured errors."""
+def _schema_failure(
+    message: str, *, validator: str, schema_path: str = "$",
+) -> SchemaValidationDiagnostic:
+    logger.warning("MODULE_SCHEMA_ERROR: %s schema_path=%s validator=%s", message, schema_path, validator)
+    return SchemaValidationDiagnostic(
+        message=message,
+        path="$",
+        schema_path=schema_path,
+        validator=validator,
+        category="schema_invalid",
+    )
 
-    if not schema or not isinstance(schema, dict):
-        return None
+
+def validate_json_schema(
+    value: Any, schema: dict[str, Any] | bool,
+) -> SchemaValidationDiagnostic | None:
+    """Check a normalized Draft 7 schema and then validate its value.
+
+    ``None`` is returned only after both checks succeed. The empty object is
+    a valid universal schema; absence is handled explicitly by callers, not
+    represented as an unchecked schema here. Exception diagnostics use stable
+    stage descriptions rather than exception reprs or runtime addresses.
+    """
     try:
-        validator = jsonschema.Draft7Validator(normalize_nullable_schema(schema))
+        normalized = normalize_nullable_schema(schema)
+    except Exception:
+        return _schema_failure("Schema normalization failed.", validator="normalization")
+    try:
+        jsonschema.Draft7Validator.check_schema(normalized)
+    except jsonschema.exceptions.SchemaError as exc:
+        return _schema_failure(
+            "Schema is invalid under Draft 7.",
+            validator=exc.validator if type(exc.validator) is str else "schema",
+            schema_path=_json_path(exc.path),
+        )
+    except Exception:
+        return _schema_failure("Schema checking failed.", validator="schema")
+    try:
+        validator = jsonschema.Draft7Validator(normalized)
+    except Exception:
+        return _schema_failure("Schema validator construction failed.", validator="construction")
+    try:
         errors = sorted(
             validator.iter_errors(value),
-            key=lambda err: (list(err.path), list(err.schema_path), err.message),
+            key=lambda err: (_json_path(err.path), _json_path(err.schema_path), str(err.validator)),
         )
         if not errors:
             return None
-        exc = errors[0]
+        value_error = errors[0]
+        constraint = str(value_error.validator) if value_error.validator else None
+        message = (f"Value does not satisfy the {constraint!r} constraint." if constraint
+                   else "Value does not satisfy the declared schema.")
+        if constraint == "required" and isinstance(value_error.instance, dict):
+            missing = sorted(name for name in value_error.validator_value if name not in value_error.instance)
+            message = "Missing required properties: " + ", ".join(repr(name) for name in missing) + "."
         return SchemaValidationDiagnostic(
-            message=exc.message,
-            path=_json_path(exc.path),
-            schema_path=_json_path(exc.schema_path),
-            validator=str(exc.validator) if exc.validator else None,
+            message=message,
+            path=_json_path(value_error.path),
+            schema_path=_json_path(value_error.schema_path),
+            validator=constraint,
         )
-    except Exception as exc:  # malformed schema - preserve existing non-crashing behavior
-        logger.warning("MODULE_SCHEMA_ERROR: could not validate schema: %s", exc)
-        return None
+    except Exception:
+        return _schema_failure("Schema evaluation failed.", validator="evaluation")
 
 
 def _json_path(parts: Any) -> str:
     path = "$"
-    for part in parts:
-        if isinstance(part, int):
-            path += f"[{part}]"
-        elif isinstance(part, str) and part.isidentifier():
-            path += f".{part}"
-        else:
-            path += f"[{part!r}]"
+    try:
+        for part in parts:
+            if type(part) is int:
+                path += f"[{part}]"
+            elif type(part) is str:
+                path += f".{part}" if part.isidentifier() else f"[{part!r}]"
+            else:
+                path += '["<non-json-key>"]'
+    except Exception:
+        return '$["<invalid-path>"]'
     return path

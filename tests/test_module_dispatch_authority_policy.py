@@ -68,6 +68,7 @@ def _executor(handler: _Handler, *, entitlement_checker: Any = None) -> ModuleEx
     executor.register(
         "orders",
         handler,
+        action_method_map={"run": "run"},
         action_permissions={"run": ["orders.run"]},
         action_entitlements={"run": "orders.premium"},
     )

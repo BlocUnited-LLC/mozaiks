@@ -205,6 +205,7 @@ def _captured_agentgenerator_bundle() -> dict[str, Any]:
                 "filename": "orchestrator.yaml",
                 "content": textwrap.dedent(
                     """
+                    schema_version: mozaiks.orchestrator.v1
                     workflow_name: ResearchReviewWorkflow
                     max_turns: 4
                     human_in_the_loop: false
@@ -259,6 +260,7 @@ def _captured_agentgenerator_bundle() -> dict[str, Any]:
                 "filename": "structured_outputs.yaml",
                 "content": textwrap.dedent(
                     """
+                    schema_version: mozaiks.structured_outputs.v1
                     registry:
                       ResearchPlannerAgent: ResearchPlan
                       ResearchSummaryAgent: ResearchSummary

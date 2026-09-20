@@ -7,6 +7,9 @@ from __future__ import annotations
 import inspect
 import logging
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
@@ -21,7 +24,14 @@ from mozaiksai.core.media.ag2 import (
 )
 from mozaiksai.core.media.middleware import build_ag2_media_harvest_middleware
 
-from ..context.authority import CONTEXT_BRIDGE_WRITER, ContextAuthorityPolicy
+from ..context.authority import (
+    CONTEXT_BRIDGE_WRITER,
+    DETERMINISTIC_TOOL_WRITER,
+    ContextAuthorityError,
+    ContextAuthorityPolicy,
+    ContextWriterId,
+    resolve_declared_context_writer,
+)
 from ..context.context_utils import (
     apply_context_exposures as _apply_context_exposures,
 )
@@ -29,6 +39,7 @@ from ..context.context_utils import (
     context_to_dict as _context_to_dict,
 )
 from ..context.frozen import detach, freeze
+from ..context.schema import load_context_variables_config
 from ..outputs.structured import (
     get_provider_response_model,
     get_structured_outputs_for_workflow,
@@ -143,6 +154,57 @@ def _log_existing_app_discovery_projection(
 # CONTEXT BRIDGE
 # ------------------------------------------------------------------
 
+@dataclass(slots=True)
+class _WorkflowToolInvocation:
+    bridge: ContextVariablesBridge
+    policy: ContextAuthorityPolicy | None
+    run_identity: tuple[str, str, str] | None
+    user_id: str | None
+    writer_id: ContextWriterId = DETERMINISTIC_TOOL_WRITER
+    active: bool = True
+
+
+_WORKFLOW_TOOL_INVOCATION: ContextVar[_WorkflowToolInvocation | None] = ContextVar(
+    "mozaiks_workflow_tool_invocation", default=None
+)
+
+
+def active_workflow_tool_run() -> tuple[str, str, str, str]:
+    """Return runtime-owned workflow/app/chat/actor identity for this invocation."""
+    invocation = _WORKFLOW_TOOL_INVOCATION.get()
+    if (
+        invocation is None
+        or not invocation.active
+        or invocation.run_identity is None
+        or invocation.policy is None
+        or invocation.user_id is None
+        or invocation.bridge._authority_policy is not invocation.policy
+        or invocation.bridge._run_identity != invocation.run_identity
+        or invocation.bridge.get("user_id") != invocation.user_id
+    ):
+        raise PermissionError("workflow_tool_invocation_unavailable")
+    return (*invocation.run_identity, invocation.user_id)
+
+
+@contextmanager
+def _workflow_tool_invocation(
+    bridge: ContextVariablesBridge, *, writer_id: ContextWriterId = DETERMINISTIC_TOOL_WRITER,
+):
+    actor = bridge.get("user_id")
+    invocation = _WorkflowToolInvocation(
+        bridge, bridge._authority_policy, bridge._run_identity,
+        actor if isinstance(actor, str) and actor.strip() else None,
+        writer_id=writer_id,
+    )
+    token = _WORKFLOW_TOOL_INVOCATION.set(invocation)
+    try:
+        yield
+    finally:
+        # Revocation also invalidates records inherited by unfinished child tasks.
+        invocation.active = False
+        _WORKFLOW_TOOL_INVOCATION.reset(token)
+
+
 class ContextVariablesBridge:
     """Shared workflow context exposed to tools and committed through AG2.
 
@@ -156,8 +218,9 @@ class ContextVariablesBridge:
         "__data",
         "_pending_set",
         "_pending_delete",
+        "_pending_writers",
         "_authority_policy",
-        "_writer_id",
+        "_run_identity",
         "_mozaiks_context_authority_policy",
     )
 
@@ -166,14 +229,41 @@ class ContextVariablesBridge:
         data: dict[str, Any],
         *,
         authority_policy: ContextAuthorityPolicy | None = None,
-        writer_id: str = CONTEXT_BRIDGE_WRITER,
     ) -> None:
         self.__data: dict[str, Any] = detach(data)  # type: ignore[assignment]
         self._pending_set: dict[str, Any] = {}
         self._pending_delete: set[str] = set()
+        self._pending_writers: dict[str, ContextWriterId] = {}
         self._authority_policy = authority_policy
-        self._writer_id = writer_id
+        self._run_identity: tuple[str, str, str] | None = None
         self._mozaiks_context_authority_policy = authority_policy
+
+    def _bind_run(
+        self, run_identity: tuple[str, str, str], policy: ContextAuthorityPolicy | None,
+    ) -> None:
+        if policy is not self._authority_policy:
+            raise ContextAuthorityError("context_authority.bridge_policy_mismatch")
+        if policy is not None and policy.workflow_name != run_identity[0]:
+            raise ContextAuthorityError("context_authority.bridge_workflow_mismatch")
+        if self._run_identity is not None and self._run_identity != run_identity:
+            raise ContextAuthorityError("context_authority.bridge_run_mismatch")
+        self._run_identity = run_identity
+
+    def _effective_writer(self, key: str) -> ContextWriterId:
+        invocation = _WORKFLOW_TOOL_INVOCATION.get()
+        if (
+            invocation is not None
+            and invocation.active
+            and invocation.bridge is self
+            and invocation.policy is self._authority_policy
+            and invocation.run_identity is not None
+            and invocation.run_identity == self._run_identity
+        ):
+            return resolve_declared_context_writer(
+                key, base_writer=CONTEXT_BRIDGE_WRITER,
+                declared_writer=invocation.writer_id, policy=self._authority_policy,
+            )
+        return CONTEXT_BRIDGE_WRITER
 
     # AG2-compatible read/write API
     def get(self, key: str, default: Any = None) -> Any:
@@ -189,23 +279,27 @@ class ContextVariablesBridge:
         clean_key = str(key or "").strip()
         if not clean_key:
             raise KeyError("context variable key must be non-empty")
+        writer = self._effective_writer(clean_key)
         if self._authority_policy is not None:
-            self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="set")  # type: ignore[arg-type]
+            self._authority_policy.require_can_write(clean_key, writer_id=writer, operation="set")
         self.__data[clean_key] = detach(value)
         self._pending_set[clean_key] = detach(value)
         self._pending_delete.discard(clean_key)
+        self._pending_writers[clean_key] = writer
 
     def pop(self, key: str, default: Any = None) -> Any:
         clean_key = str(key or "").strip()
         if not clean_key:
             raise KeyError("context variable key must be non-empty")
+        writer = self._effective_writer(clean_key)
         if self._authority_policy is not None:
-            self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="delete")  # type: ignore[arg-type]
+            self._authority_policy.require_can_write(clean_key, writer_id=writer, operation="delete")
         existed = clean_key in self.__data
         value = self.__data.pop(clean_key, default)
         if existed:
             self._pending_set.pop(clean_key, None)
             self._pending_delete.add(clean_key)
+            self._pending_writers[clean_key] = writer
         return detach(value)
 
     def delete(self, key: str) -> None:
@@ -242,6 +336,19 @@ class ContextVariablesBridge:
         """
         return detach(self.__data)
 
+    def _hydrate_channel_context(
+        self, data: Mapping[str, Any], *, policy: ContextAuthorityPolicy | None,
+        run_identity: tuple[str, str, str],
+    ) -> None:
+        """Restore the trusted AG2 channel snapshot before executing a turn.
+
+        Hydration is not a tool mutation: the Hub already authorized and stored
+        these facts. Replacement also removes stale seed keys absent from AG2.
+        """
+        self._bind_run(run_identity, policy)
+        self.__data = detach(dict(data))
+        self.clear_context_updates()
+
     @property
     def data(self) -> dict[str, Any]:
         raise AttributeError(
@@ -254,6 +361,20 @@ class ContextVariablesBridge:
     def clear_context_updates(self) -> None:
         self._pending_set.clear()
         self._pending_delete.clear()
+        self._pending_writers.clear()
+
+    def consume_authorized_context_updates(
+        self, *, policy: ContextAuthorityPolicy | None, run_identity: tuple[str, str, str],
+    ) -> dict[str, Any]:
+        self._bind_run(run_identity, policy)
+        for operation, keys in (("set", self._pending_set), ("delete", self._pending_delete)):
+            for key in keys:
+                writer = self._pending_writers.get(key)
+                if writer is None:
+                    raise ContextAuthorityError("context_authority.missing_mutation_provenance")
+                if policy is not None:
+                    policy.require_can_write(key, writer_id=writer, operation=operation)
+        return self.consume_context_updates()
 
     def consume_context_updates(self) -> dict[str, Any]:
         updates = {
@@ -324,16 +445,26 @@ def _wrap_tool_with_context(fn: Callable, context_bridge: ContextVariablesBridge
     if inspect.iscoroutinefunction(fn):
         @wraps(fn)
         async def async_wrapper(*args, **kwargs):
-            kwargs.setdefault("context_variables", context_bridge)
-            return await fn(*args, **kwargs)
+            if "context_variables" in kwargs:
+                raise ContextAuthorityError("context_authority.tool_context_override")
+            bound = new_sig.bind(*args, **kwargs)
+            bound.arguments["context_variables"] = context_bridge
+            call = inspect.BoundArguments(sig, bound.arguments)
+            with _workflow_tool_invocation(context_bridge):
+                return await fn(*call.args, **call.kwargs)
 
         async_wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
         return async_wrapper
     else:
         @wraps(fn)
         def sync_wrapper(*args, **kwargs):
-            kwargs.setdefault("context_variables", context_bridge)
-            return fn(*args, **kwargs)
+            if "context_variables" in kwargs:
+                raise ContextAuthorityError("context_authority.tool_context_override")
+            bound = new_sig.bind(*args, **kwargs)
+            bound.arguments["context_variables"] = context_bridge
+            call = inspect.BoundArguments(sig, bound.arguments)
+            with _workflow_tool_invocation(context_bridge):
+                return fn(*call.args, **call.kwargs)
 
         sync_wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
         return sync_wrapper
@@ -392,7 +523,7 @@ def _prepare_response_schema_for_agent(
                 raise ValueError(
                     f"[AGENTS] Agent '{agent_name}' in workflow '{workflow_name}' requires "
                     "structured outputs, but its model cannot be prepared for provider "
-                    f"strict response_schema: {offending_path} uses an open-ended object field"
+                    f"strict response_schema: {offending_path} uses an untyped value or open-ended object"
                 )
             return None
         return get_provider_response_model(structured_model_cls)
@@ -413,7 +544,7 @@ async def create_agents(
 ) -> dict[str, Agent]:
     """Create AG2 Agent instances for a workflow."""
 
-    logger.debug("[AGENTS] Creating beta agents for workflow: %s", workflow_name)
+    logger.debug("[AGENTS] Creating AG2 agents for workflow: %s", workflow_name)
 
     from time import perf_counter
 
@@ -476,6 +607,13 @@ async def create_agents(
         agent_tool_functions = {}
 
     auto_tool_agent_names = workflow_manager.get_auto_tool_agents(workflow_name)
+    from ..declarative.contracts import ToolOutcomeSpec
+
+    tool_outcomes = {
+        tool["agent"]: ToolOutcomeSpec.model_validate(tool["outcome"])
+        for tool in workflow_config.get("tools", [])
+        if tool.get("outcome") is not None and isinstance(tool.get("agent"), str)
+    }
 
     required_structured_agents = _required_structured_agent_names(
         agent_configs,
@@ -499,8 +637,11 @@ async def create_agents(
         except Exception:
             pass
 
-    exposures_map = getattr(context_variables, "_mozaiks_context_exposures", {}) or {}
-    agent_plan_map = getattr(context_variables, "_mozaiks_context_agents", {}) or {}
+    # Task workers receive detached snapshots, not context-container attributes.
+    # Resolve their prompt views from the same canonical YAML as network agents.
+    agent_plan_map = load_context_variables_config(
+        workflow_config.get("context_variables") or {},
+    ).agents
 
     agents: dict[str, Agent] = {}
 
@@ -511,6 +652,7 @@ async def create_agents(
             try:
                 remote = create_a2a_remote_agent(a2a_spec, context_variables=context_variables)
                 remote._mozaiks_agent_kind = "a2a_remote"
+                remote._mozaiks_pending_turn_replay = agent_config.get("pending_turn_replay", "allow")
                 agents[agent_name] = remote
                 continue
             except Exception as a2a_err:
@@ -544,13 +686,13 @@ async def create_agents(
             system_message = agent_config.get("system_message", "You are a helpful AI assistant.")
 
         # Apply context exposures to the base prompt
-        agent_exposures = (exposures_map or {}).get(agent_name, []) or []
+        unprojected_system_message = system_message
         agent_plan = (agent_plan_map or {}).get(agent_name)
         agent_variables = list(getattr(agent_plan, "variables", []) or [])
 
-        if agent_exposures or agent_variables:
+        if agent_variables:
             system_message = _apply_context_exposures(
-                system_message, agent_exposures, context_dict, agent_variables,
+                system_message, [], context_dict, agent_variables,
             )
 
         _log_existing_app_discovery_projection(
@@ -561,12 +703,11 @@ async def create_agents(
         )
         visible_context_keys = _safe_context_keys(context_dict)
         _conv_logger.info(
-            "[%s] AGENT_CONTEXT_READY agent=%s context_keys=%s exposed=%s declared=%s "
+            "[%s] AGENT_CONTEXT_READY agent=%s context_keys=%s declared=%s "
             "prompt_chars=%s",
             workflow_name,
             agent_name,
             visible_context_keys,
-            agent_exposures,
             agent_variables,
             len(system_message),
             extra={
@@ -700,7 +841,7 @@ async def create_agents(
             _wrap_tool_with_context(fn, context_bridge) for fn in raw_tool_fns
         ] + shell_tools + web_tools + image_generation_tools
 
-        # Load workflow-local AG2 1.0 beta prompt middleware declarations.
+        # Load workflow-local AG2 1.0 prompt middleware declarations.
         prompt_middleware_functions: list[Callable] = []
         try:
             from ..execution.middleware import _resolve_import, load_prompt_middleware_entries
@@ -803,15 +944,17 @@ async def create_agents(
         except Exception as watchdog_err:
             logger.debug("[AGENTS] AG2 token watchdog observers skipped for '%s': %s", agent_name, watchdog_err)
 
-        if prompt_middleware_functions:
+        if prompt_middleware_functions or agent_variables:
             from ..execution.middleware import build_prompt_middleware
 
             middleware.append(
                 build_prompt_middleware(
                     middleware_functions=prompt_middleware_functions,
                     agent_name=agent_name,
-                    base_system_message=system_message,
+                    base_system_message=unprojected_system_message,
                     context_bridge=context_bridge,
+                    context_exposures=[],
+                    context_variables=agent_variables,
                 )
             )
 
@@ -841,6 +984,8 @@ async def create_agents(
         agent._mozaiks_ag2_token_watchdog_enabled = bool(observers)
         agent._mozaiks_agent_kind = "local"
         agent._mozaiks_context_bridge = context_bridge
+        agent._mozaiks_tool_outcome = tool_outcomes.get(agent_name)
+        agent._mozaiks_pending_turn_replay = agent_config.get("pending_turn_replay", "allow")
 
         if structured_model_cls is not None:
             model_name = getattr(structured_model_cls, "__name__", None)
@@ -851,7 +996,7 @@ async def create_agents(
         agents[agent_name] = agent
 
     duration = perf_counter() - start_time
-    logger.debug("[AGENTS] Created %d beta agents for '%s' in %.2fs", len(agents), workflow_name, duration)
+    logger.debug("[AGENTS] Created %d AG2 agents for '%s' in %.2fs", len(agents), workflow_name, duration)
 
     return agents
 
@@ -861,7 +1006,7 @@ async def create_agents(
 # ------------------------------------------------------------------
 
 def list_agent_middleware(agent: Any) -> dict[str, list[str]]:
-    """Return Mozaiks prompt middleware registered as AG2 1.0 beta middleware."""
+    """Return Mozaiks prompt middleware registered as AG2 1.0 middleware."""
     out: dict[str, list[str]] = {}
     middleware_functions = getattr(agent, "_mozaiks_prompt_middleware", [])
     if middleware_functions:

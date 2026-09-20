@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 
 logger = logging.getLogger(__name__)
@@ -101,9 +102,7 @@ def _app_connector_inventory_summary(agent: Any) -> str:
     except Exception:
         return ""
 
-    app_id = _context_get(getattr(agent, "context_variables", None), "app_id")
-    if not app_id:
-        return ""
+    app_id = require_build_binding(getattr(agent, "context_variables", None)).target_app_id
 
     required_services = _context_get(getattr(agent, "context_variables", None), "required_connector_services", [])
     try:

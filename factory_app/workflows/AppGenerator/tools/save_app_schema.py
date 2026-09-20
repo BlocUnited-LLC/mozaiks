@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
@@ -18,8 +19,18 @@ from factory_app.workflows._shared.generated_ui_contract import (
     custom_route_bundle_page_files,
     dedupe,
 )
+from factory_app.workflows._shared.platform.build_target import require_build_binding
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    extract_code_file_map_from_payload,
+)
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
     load_default_ai_config,
+)
+from factory_app.workflows.AppGenerator.tools.task_integrity import (
+    RepairOwnershipError,
+    mark_repair_rejected,
+    mark_repair_responded,
+    validate_repair_candidate,
 )
 from mozaiksai.core.runtime.app.page_schema import (
     PageSchemaValidationError,
@@ -29,8 +40,15 @@ from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    materialize_modal_targets,
+    promote_table_primitive,
+    relayable_action_reasons,
+    resolve_modal_action_targets,
+    resource_table_only_fields,
+)
 from mozaiksai.core.workflow.ui_primitives import (
-    get_page_ui_primitive_names,
     validate_page_ui_primitives,
 )
 
@@ -111,24 +129,8 @@ def _resolve_artifact_ids(
     context_variables: Any | None,
     manifest_dict: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
-    manifest_dict = manifest_dict or {}
-    app_id = (
-        _context_get(context_variables, "app_id")
-        or os.getenv("MOZAIKS_APP_ID")
-        or manifest_dict.get("app_id")
-        or manifest_dict.get("app_name")
-        or "local-app"
-    )
-    build_id = (
-        _context_get(context_variables, "build_id")
-        or _context_get(context_variables, "chat_id")
-        or os.getenv("MOZAIKS_BUILD_ID")
-        or "local-build"
-    )
-    return (
-        _safe_path_segment(app_id, fallback="local-app"),
-        _safe_path_segment(build_id, fallback="local-build"),
-    )
+    binding = require_build_binding(context_variables)
+    return binding.target_app_id, binding.build_id
 
 
 def _normalize_list(value: Any) -> list[Any]:
@@ -138,17 +140,8 @@ def _normalize_list(value: Any) -> list[Any]:
 
 
 def _to_plain(value: Any) -> Any:
-    """Convert Pydantic-style structured output objects to plain containers."""
-    if hasattr(value, "model_dump"):
-        try:
-            return value.model_dump()
-        except Exception:
-            pass
-    if isinstance(value, dict):
-        return {key: _to_plain(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_to_plain(item) for item in value]
-    return value
+    """Detach structured output and immutable runtime views for serialization."""
+    return detach(value)
 
 
 def _strip_none(value: Any) -> Any:
@@ -252,6 +245,12 @@ def _normalize_page_section(section: Any) -> Any:
         if isinstance(children, list):
             config["children"] = [_normalize_page_section(child) for child in children]
         section["config"] = _strip_none(config)
+    if promote_table_primitive(section):
+        _logger.info(
+            "[AppGenerator] page section %r promoted DataTable -> ResourceTable for %s",
+            section.get("id"),
+            sorted(resource_table_only_fields() & set(section.get("config") or {})),
+        )
     return _strip_none(section)
 
 
@@ -413,6 +412,17 @@ def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
         else:
             merged[key] = value
     return merged
+
+
+def resolve_app_theme_config(captured_theme_config: Any, theme_config_patch: Any) -> dict[str, Any] | None:
+    """Apply explicit visual deltas without losing the approved ThemeCapture base."""
+    captured = detach(captured_theme_config)
+    patch = _strip_none(_to_plain(theme_config_patch))
+    if captured is not None and not isinstance(captured, dict):
+        raise ValueError("captured_theme_config must be an object or null")
+    if patch is not None and not isinstance(patch, dict):
+        raise ValueError("theme_config_patch must be an object or null")
+    return _deep_merge_dicts(captured or {}, patch or {}) or None
 
 
 def _resolve_output_dir(
@@ -819,16 +829,11 @@ def _validate_action(action: Any, *, path: str) -> None:
     if not _is_non_empty_string(action.get("label")):
         raise ValueError(f"{path}.label is required")
 
+    # action_type is the discriminator: every variant declares it, so an action
+    # that arrives without one did not come from the contract.
     action_type = action.get("action_type")
     if not _is_non_empty_string(action_type):
-        if _is_non_empty_string(action.get("event_type")):
-            action_type = "event"
-        elif _is_non_empty_string(action.get("workflow_id")):
-            action_type = "workflow"
-        elif _is_non_empty_string(action.get("href")):
-            action_type = "navigate"
-        else:
-            raise ValueError(f"{path}.action_type is required")
+        raise ValueError(f"{path}.action_type is required")
 
     if action_type not in VALID_ACTION_TYPES:
         raise ValueError(f"{path}.action_type must be one of {sorted(VALID_ACTION_TYPES)}")
@@ -855,14 +860,6 @@ def _validate_action(action: Any, *, path: str) -> None:
     if closes_modal is not None and not isinstance(closes_modal, bool):
         raise ValueError(f"{path}.closes_modal must be a boolean")
 
-    if action_type == "navigate" and not _is_non_empty_string(action.get("href")):
-        raise ValueError(f"{path}.href is required for navigate actions")
-    if action_type == "event" and not _is_non_empty_string(action.get("event_type")):
-        raise ValueError(f"{path}.event_type is required for event actions")
-    if action_type == "workflow" and not _is_non_empty_string(action.get("workflow_id")):
-        raise ValueError(f"{path}.workflow_id is required for workflow actions")
-    if action_type in {"submit", "delete"} and not _is_non_empty_string(action.get("href")):
-        raise ValueError(f"{path}.href is required for {action_type} actions")
 
 
 def _validate_action_list(actions: Any, *, path: str) -> None:
@@ -1454,6 +1451,7 @@ def _persist_to_filesystem(
     default_route = manifest_dict.get("default_route") or "/"
     auth_strategy = manifest_dict.get("auth_strategy")
     app_json = {
+        "appId": require_build_binding(context_variables).target_app_id,
         "appName": manifest_dict["app_name"],
         "startup": {"landing_spot": default_route},
         "targets": {"web": True, "mobile": False},
@@ -1474,7 +1472,7 @@ def _persist_to_filesystem(
     written.append("app.json")
 
     workflow_sequence = _context_text(context_variables, "workflow_sequence")
-    build_id = _context_text(context_variables, "build_id")
+    build_id = require_build_binding(context_variables).build_id
     generated_artifact_id = _context_text(context_variables, "generated_artifact_id")
     artifact_version_id = _context_text(context_variables, "artifact_version_id")
     app_context_version_id = _context_text(context_variables, "app_context_version_id")
@@ -1706,164 +1704,267 @@ def save_app_schema(
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
-        app_asset_manifest, app_data_contract, app_custom_route_bundle,
+        app_asset_manifest, data_contract, app_custom_route_bundle,
         app_schema_ready
 
     Tools are dumb — no reasoning, no transformation. AppSchemaAgent already
     produced correct typed output; this tool just persists it.
     """
-    if manifest is None:
-        raise ValueError("save_app_schema: manifest is required")
+    try:
+        if manifest is None:
+            raise ValueError("save_app_schema: manifest is required")
 
-    manifest_dict = _require_dict(_strip_none(_to_plain(manifest)), "manifest")
-    if not manifest_dict.get("app_name"):
-        raise ValueError("manifest.app_name is required")
+        manifest_dict = _require_dict(_strip_none(_to_plain(manifest)), "manifest")
+        if not manifest_dict.get("app_name"):
+            raise ValueError("manifest.app_name is required")
 
-    raw_page_list = _normalize_list(_to_plain(pages))
-    for page in raw_page_list:
-        if isinstance(page, dict) and "extensions" in page:
-            raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
-    page_list = [_normalize_page_schema(page) for page in raw_page_list]
-    if page_list and not isinstance(page_list, list):
-        raise ValueError("save_app_schema: pages must be a list")
-    _repair_missing_submit_hrefs(page_list, context_variables)
+        raw_page_list = _normalize_list(_to_plain(pages))
+        for page in raw_page_list:
+            if isinstance(page, dict) and "extensions" in page:
+                raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
+        page_list = [_normalize_page_schema(page) for page in raw_page_list]
+        baseline_files = detach(_context_get(context_variables, "generated_files")) or {}
+        code_files = extract_code_file_map_from_payload(
+            {"code_files": detach(_context_get(context_variables, "code_files")) or []}
+        )
+        baseline_files = {**baseline_files, **code_files}
+        if baseline_files:
+            # Repairs are partial typed outputs; unchanged pages still own their routes.
+            baseline_pages = {}
+            for path, content in baseline_files.items():
+                parts = Path(path).parts
+                if len(parts) == 3 and parts[:2] == ("ui", "pages") and path.endswith(".yaml"):
+                    page = yaml.safe_load(content)
+                    baseline_pages[page["name"]] = page
+            baseline_pages.update({page["name"]: page for page in page_list})
+            page_list = list(baseline_pages.values())
+            if custom_route_bundle is None:
+                custom_route_bundle = detach(_context_get(context_variables, "app_custom_route_bundle"))
+        if page_list and not isinstance(page_list, list):
+            raise ValueError("save_app_schema: pages must be a list")
+        # Still earns its place: the contract makes submit.href unskippable for
+        # generated actions, but baseline pages merged above never passed through
+        # it, and those are exactly the ones that can still arrive without a route.
+        _repair_missing_submit_hrefs(page_list, context_variables)
+        # The same deterministic repairs the task-batch lane runs. This lane used to
+        # validate without them, so a defect the repo already knew how to fix was
+        # reported to the agent instead of corrected -- and a repair budget went on
+        # four modal targets that were sitting inside the Modal that owned them.
+        # Applied to baseline pages too: they are merged in above without ever
+        # passing through _normalize_page_schema.
+        for page in page_list:
+            if not isinstance(page, dict):
+                continue
+            materialize_modal_targets(page)
+            resolve_modal_action_targets(page)
 
-    theme_config_patch = _strip_none(_to_plain(theme_config_patch))
-    shell_config = _normalize_shell_config(shell_config)
-    asset_manifest = _strip_none(_to_plain(asset_manifest))
-    data_contract = _strip_none(_to_plain(data_contract))
-    custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
+        theme_config_patch = _strip_none(_to_plain(theme_config_patch))
+        resolved_theme_config = resolve_app_theme_config(
+            _context_get(context_variables, "captured_theme_config"), theme_config_patch,
+        )
+        shell_config = _normalize_shell_config(shell_config)
+        asset_manifest = _strip_none(_to_plain(asset_manifest))
+        data_contract = _strip_none(_to_plain(data_contract))
+        custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
 
-    for page in page_list:
-        if not isinstance(page, dict):
-            raise ValueError("Each entry in pages must be a dict (AppPageSchema)")
-        if not page.get("name"):
-            raise ValueError("Each AppPageSchema must have a 'name' field")
-        if not _is_non_empty_string(page.get("route")):
-            raise ValueError(f"Page '{page.get('name')}' must have a valid route")
-        if not _is_non_empty_string(page.get("title")):
-            raise ValueError(f"Page '{page.get('name')}' must have a valid title")
-        _validate_shell_mode(page.get("shell_mode", page.get("shellMode")), field=f"Page '{page.get('name')}'.shell_mode")
-        page_meta = page.get("meta")
-        if page_meta is not None and not isinstance(page_meta, dict):
-            raise ValueError(f"Page '{page.get('name')}'.meta must be an object or null")
-        if isinstance(page_meta, dict):
-            _validate_shell_mode(
-                page_meta.get("shellMode", page_meta.get("shell_mode")),
-                field=f"Page '{page.get('name')}'.meta.shellMode",
-            )
-            _validate_route_auth(page_meta.get("routeAuth"), field=f"Page '{page.get('name')}'.meta.routeAuth")
-        if not page.get("sections"):
-            raise ValueError(f"Page '{page.get('name')}' must have at least one section")
-        if not isinstance(page.get("sections"), list):
-            raise ValueError(f"Page '{page.get('name')}' sections must be a list")
-
-        seen_section_ids = set()
-        for section_index, section in enumerate(page["sections"]):
-            if not isinstance(section, dict):
-                raise ValueError(
-                    f"Page '{page.get('name')}' sections[{section_index}] must be an object, "
-                    f"got {type(section).__name__}"
+        # One rejection carries every defect it can see. Reporting the first one and
+        # stopping meant a page with three independent faults needed three turns
+        # against a two-turn budget, and the run died one fix short.
+        page_defects: list[str] = []
+        for page in page_list:
+            if not isinstance(page, dict):
+                raise ValueError("Each entry in pages must be a dict (AppPageSchema)")
+            if not page.get("name"):
+                raise ValueError("Each AppPageSchema must have a 'name' field")
+            if not _is_non_empty_string(page.get("route")):
+                raise ValueError(f"Page '{page.get('name')}' must have a valid route")
+            if not _is_non_empty_string(page.get("title")):
+                raise ValueError(f"Page '{page.get('name')}' must have a valid title")
+            _validate_shell_mode(page.get("shell_mode", page.get("shellMode")), field=f"Page '{page.get('name')}'.shell_mode")
+            page_meta = page.get("meta")
+            if page_meta is not None and not isinstance(page_meta, dict):
+                raise ValueError(f"Page '{page.get('name')}'.meta must be an object or null")
+            if isinstance(page_meta, dict):
+                _validate_shell_mode(
+                    page_meta.get("shellMode", page_meta.get("shell_mode")),
+                    field=f"Page '{page.get('name')}'.meta.shellMode",
                 )
-            section_id = section.get("id")
-            if section_id in seen_section_ids:
-                raise ValueError(f"Page '{page.get('name')}' has duplicate section id '{section_id}'")
-            seen_section_ids.add(section_id)
-            _validate_page_section(
-                section,
-                path=f"pages[{page.get('name')}].sections[{section_index}]",
+                _validate_route_auth(page_meta.get("routeAuth"), field=f"Page '{page.get('name')}'.meta.routeAuth")
+            if not page.get("sections"):
+                raise ValueError(f"Page '{page.get('name')}' must have at least one section")
+            if not isinstance(page.get("sections"), list):
+                raise ValueError(f"Page '{page.get('name')}' sections must be a list")
+
+            seen_section_ids = set()
+            for section_index, section in enumerate(page["sections"]):
+                if not isinstance(section, dict):
+                    raise ValueError(
+                        f"Page '{page.get('name')}' sections[{section_index}] must be an object, "
+                        f"got {type(section).__name__}"
+                    )
+                section_id = section.get("id")
+                if section_id in seen_section_ids:
+                    raise ValueError(f"Page '{page.get('name')}' has duplicate section id '{section_id}'")
+                seen_section_ids.add(section_id)
+                _validate_page_section(
+                    section,
+                    path=f"pages[{page.get('name')}].sections[{section_index}]",
+                )
+            try:
+                validate_page_schema(page)
+            except PageSchemaValidationError as exc:
+                # Carry the reason, not just the code. These messages are built by
+                # the runtime's own sanitizer, so they name the rule without ever
+                # echoing the author's value back at them.
+                reasons = relayable_action_reasons(exc)
+                page_defects.extend(
+                    f"Page '{page.get('name')}' {diagnostic.location}: {diagnostic.code}"
+                    + (f" - {diagnostic.message}" if diagnostic.message else "")
+                    for diagnostic in exc.diagnostics
+                )
+                if reasons:
+                    page_defects.append(
+                        f"Page '{page.get('name')}' action requirements: " + "; ".join(reasons)
+                    )
+
+        if page_defects:
+            # Sorted so the same page always produces the same text: the repair loop
+            # fingerprints this to decide whether an attempt made progress.
+            raise ValueError(
+                "Pages violate mozaiks.app_page.v1: " + "; ".join(sorted(page_defects))
             )
-        try:
-            validate_page_schema(page)
-        except PageSchemaValidationError as exc:
-            formatted = "; ".join(
-                f"{diagnostic.location}: {diagnostic.code}"
-                for diagnostic in exc.diagnostics
+
+        if not page_list and custom_route_bundle is None:
+            raise ValueError("save_app_schema: at least one declarative page or custom route bundle is required")
+
+        _validate_custom_route_bundle(custom_route_bundle)
+        _canonicalize_manifest_routes(manifest_dict, page_list, custom_route_bundle)
+        _validate_manifest_against_pages(manifest_dict, page_list, custom_route_bundle)
+        _validate_shell_header_actions(shell_config)
+        _validate_shell_shortcuts(shell_config)
+        _validate_shell_navigation(shell_config)
+        _validate_shell_chrome(shell_config)
+        _validate_asset_manifest(asset_manifest)
+        resolved_data_contract = data_contract
+        if resolved_data_contract is None:
+            resolved_data_contract = detach(_context_get(context_variables, "data_contract"))
+        _validate_data_contract(resolved_data_contract)
+        app_ui_quality_warnings = dedupe(
+            audit_page_schemas(page_list)
+            + audit_custom_route_bundle_integrity(
+                custom_route_bundle,
+                app_manifest=manifest_dict,
             )
-            raise ValueError(f"Page '{page.get('name')}' violates mozaiks.app_page.v1: {formatted}") from exc
-
-    if not page_list and custom_route_bundle is None:
-        raise ValueError("save_app_schema: at least one declarative page or custom route bundle is required")
-
-    _validate_custom_route_bundle(custom_route_bundle)
-    _canonicalize_manifest_routes(manifest_dict, page_list, custom_route_bundle)
-    _validate_manifest_against_pages(manifest_dict, page_list, custom_route_bundle)
-    _validate_shell_header_actions(shell_config)
-    _validate_shell_shortcuts(shell_config)
-    _validate_shell_navigation(shell_config)
-    _validate_shell_chrome(shell_config)
-    _validate_asset_manifest(asset_manifest)
-    resolved_data_contract = data_contract
-    if resolved_data_contract is None:
-        resolved_data_contract = _context_get(context_variables, "data_contract")
-    _validate_data_contract(resolved_data_contract)
-    app_ui_quality_warnings = dedupe(
-        audit_page_schemas(page_list)
-        + audit_custom_route_bundle_integrity(
-            custom_route_bundle,
-            app_manifest=manifest_dict,
+            + audit_generated_react_files(
+                custom_route_bundle_page_files(custom_route_bundle),
+                source_label="custom route React",
+                require_jsx=False,
+                include_ui_index=False,
+            )
+            + audit_app_ui_bundle_integrity(
+                _custom_route_bundle_code_files(custom_route_bundle),
+                source_label="custom_route_bundle",
+            )
         )
-        + audit_generated_react_files(
-            custom_route_bundle_page_files(custom_route_bundle),
-            source_label="custom route React",
-            require_jsx=False,
-            include_ui_index=False,
-        )
-        + audit_app_ui_bundle_integrity(
-            _custom_route_bundle_code_files(custom_route_bundle),
-            source_label="custom_route_bundle",
-        )
-    )
-
-    # Persist to context_variables for downstream agents
-    if context_variables and hasattr(context_variables, "set"):
-        try:
-            context_variables.set("app_manifest", manifest_dict)
-            context_variables.set("app_pages", page_list)
-            context_variables.set("app_theme_config_patch", theme_config_patch)
-            context_variables.set("app_shell_config", shell_config)
-            context_variables.set("app_asset_manifest", asset_manifest)
-            context_variables.set("app_data_contract", resolved_data_contract)
-            context_variables.set("app_custom_route_bundle", custom_route_bundle)
-            context_variables.set("app_schema_ready", True)
-            context_variables.set("available_page_primitives", list(get_page_ui_primitive_names()))
-            context_variables.set("app_ui_quality_warnings", app_ui_quality_warnings)
-        except Exception as exc:
-            _logger.error("Failed to store app schema in context_variables: %s", exc)
-            return f"Error persisting app schema to context: {exc}"
-    else:
-        _logger.warning("context_variables not available or missing 'set' method")
+    except (TypeError, ValueError) as exc:
+        if mark_repair_rejected(context_variables, str(exc)):
+            return f"App schema repair rejected: {exc}"
+        raise
 
     # Read profile_layout from the app_build_plan stored by AppPlanAgent.
     _build_plan = _context_get(context_variables, "app_build_plan") or {}
     _profile_layout = str(_build_plan.get("profile_layout") or "").strip() or None
 
-    # Persist to generated artifacts; promotion is explicit and separate.
-    written: list[str] = []
+    output_dir = _resolve_output_dir(
+        context_variables=context_variables, manifest_dict=manifest_dict,
+    )
+    # Render with the canonical serializer before touching the accepted bundle.
+    # Seed only the existing merge inputs, preserving the same materialization.
+    with tempfile.TemporaryDirectory(prefix="mozaiks-schema-candidate-") as candidate_dir:
+        staging = Path(candidate_dir)
+        for path in ("brand/theme_config.json", "config/shell.json", "config/asset_manifest.json"):
+            content = baseline_files.get(path)
+            if content is None and (output_dir / path).is_file():
+                content = (output_dir / path).read_text(encoding="utf-8")
+            if content is not None:
+                target = staging / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+        try:
+            rendered_paths = _persist_to_filesystem(
+                staging, manifest_dict, page_list, resolved_theme_config,
+                shell_config, asset_manifest, resolved_data_contract, custom_route_bundle,
+                context_variables=context_variables, profile_layout=_profile_layout,
+            )
+        except OSError as exc:
+            raise RuntimeError("Could not write schema files to disk") from exc
+        except (TypeError, ValueError) as exc:
+            if mark_repair_rejected(context_variables, str(exc)):
+                return f"App schema repair rejected: {exc}"
+            raise
+        rendered_files = {
+            path: (staging / path).read_text(encoding="utf-8") for path in rendered_paths
+        }
+
+    active_repair = (detach(_context_get(context_variables, "bundle_repair_result")) or {}).get("active")
+    if isinstance(active_repair, dict):
+        # These values come from deterministic scaffolding, not the repair worker.
+        # A page repair cannot replace a previously accepted scaffold version.
+        for path in ("config/ai.json", "provenance.yaml", "config/profile.yaml"):
+            if path in baseline_files:
+                rendered_files[path] = baseline_files[path]
+            elif path not in (active_repair.get("allowed_paths") or []):
+                rendered_files.pop(path, None)
+        # Typed full-schema readback can serialize differently without changing a
+        # contract. Preserve the original bytes before checking task ownership.
+        for path, content in list(rendered_files.items()):
+            original = baseline_files.get(path)
+            if original is None or not path.endswith((".json", ".yaml")):
+                continue
+            try:
+                if yaml.safe_load(content) == yaml.safe_load(original):
+                    rendered_files[path] = original
+            except yaml.YAMLError:
+                pass
     try:
-        output_dir = _resolve_output_dir(
-            context_variables=context_variables,
-            manifest_dict=manifest_dict,
+        rendered_files = validate_repair_candidate(
+            context_variables, rendered_files, existing=baseline_files,
         )
-        written = _persist_to_filesystem(
-            output_dir,
-            manifest_dict,
-            page_list,
-            theme_config_patch,
-            shell_config,
-            asset_manifest,
-            resolved_data_contract,
-            custom_route_bundle,
-            context_variables=context_variables,
-            profile_layout=_profile_layout,
-        )
+    except RepairOwnershipError as exc:
+        return f"App schema repair rejected: {exc}"
+
+    written = sorted(rendered_files)
+    try:
+        for path, content in rendered_files.items():
+            target = output_dir / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
         _logger.info(
             "Wrote app schema to %s: %s",
             output_dir,
             ", ".join(written),
         )
-        if context_variables and hasattr(context_variables, "set"):
-            context_variables.set("generated_app_dir", str(output_dir))
+        if context_variables is not None:
+            code_files.update(rendered_files)
+            values = {
+                "app_manifest": manifest_dict, "app_pages": page_list,
+                "app_theme_config_patch": theme_config_patch, "app_shell_config": shell_config,
+                "app_asset_manifest": asset_manifest, "data_contract": resolved_data_contract,
+                "app_custom_route_bundle": custom_route_bundle, "app_schema_ready": True,
+                "app_ui_quality_warnings": app_ui_quality_warnings,
+                "generated_app_dir": str(output_dir),
+                "code_files": [
+                    {"filename": path, "content": content}
+                    for path, content in sorted(code_files.items())
+                ],
+                "generated_files": {**baseline_files, **rendered_files},
+            }
+            for key, value in values.items():
+                if isinstance(context_variables, dict):
+                    context_variables[key] = value
+                else:
+                    context_variables.set(key, value)
+            mark_repair_responded(context_variables)
     except Exception as exc:
         _logger.exception("Could not write schema files to disk")
         raise RuntimeError("Could not write schema files to disk") from exc

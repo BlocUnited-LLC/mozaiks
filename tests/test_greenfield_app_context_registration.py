@@ -117,7 +117,7 @@ def _file_manifest() -> list[dict[str, Any]]:
         "GeneratedApp/workflows/WorkOrderSummary/orchestrator.yaml",
         "GeneratedApp/workflows/WorkOrderSummary/agents.yaml",
         "GeneratedApp/app/services/integrations/email_gateway_client.py",
-        "GeneratedApp/app/config/integrations/email_gateway.json",
+        "GeneratedApp/app/config/integrations/email_gateway.yaml",
         "GeneratedApp/app/data/contract.json",
         "GeneratedApp/app/data/migrations/add_work_orders.json",
         "GeneratedApp/app/config/shell.json",

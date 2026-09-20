@@ -3,6 +3,7 @@ import workflowConfig from '../config/workflowConfig';
 import resolveWorkflow from '../utils/resolveWorkflow';
 import config from '../config';
 import platform from '../platform/index.js';
+import { openAuthenticatedWebSocket } from './websocketAuth.js';
 
 function _firstString(...values) {
   for (const value of values) {
@@ -57,7 +58,7 @@ function buildAuthHeaders(contentType = 'application/json', adapterConfig = null
 /**
  * Wrapper for fetch with automatic auth header injection.
  */
-async function authFetch(url, options = {}, adapterConfig = null) {
+export async function authFetch(url, options = {}, adapterConfig = null) {
   const token = getAccessToken(adapterConfig);
   
   const headers = {
@@ -410,9 +411,14 @@ export class WebSocketApiAdapter extends ApiAdapter {
   }
 
   createWebSocketConnection(appId, userId, callbacks = {}, workflowname = null, chatId = null, options = {}) {
-    const actualworkflowname = resolveWorkflow(workflowname);
-    
-    
+    // Ask-mode carriers never bind to a workflow. Keep the path segment literal
+    // so it can never resolve to the entry-point workflow; the backend keys the
+    // connection off transport_purpose=ask_carrier instead.
+    const actualworkflowname = options?.transportPurpose === 'ask_carrier'
+      ? 'ask'
+      : resolveWorkflow(workflowname);
+
+
     if (!chatId) {
       console.error('❌ Chat ID is required for WebSocket connection');
       return null;
@@ -440,17 +446,17 @@ export class WebSocketApiAdapter extends ApiAdapter {
       } catch (_) {}
     }
     
-    // Build WebSocket URL with access_token query param for authentication
+    // Build the WebSocket URL. The credential never goes in the URL — it travels in
+    // the handshake subprotocol header. See adapters/websocketAuth.js.
     const wsUrl = new URL(`/ws/${actualworkflowname}/${appId}/${chatId}/${userId}`, wsBase);
-    const token = getAccessToken(this.config);
-    if (token) {
-      wsUrl.searchParams.set('access_token', token);
-    }
     if (options?.suppressHistoryReplay) {
       wsUrl.searchParams.set('suppress_history_replay', '1');
     }
-    
-    const socket = new WebSocket(wsUrl.toString());
+    if (options?.transportPurpose === 'ask_carrier') {
+      wsUrl.searchParams.set('transport_purpose', 'ask_carrier');
+    }
+
+    const socket = openAuthenticatedWebSocket(wsUrl.toString(), getAccessToken(this.config));
     let closedByClient = false;
     let hasOpened = false;
     
@@ -484,7 +490,16 @@ export class WebSocketApiAdapter extends ApiAdapter {
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        
+
+        // Answer server heartbeat pings so the idle timeout never severs a
+        // session that is merely waiting on a long agent turn.
+        if (data.type === 'ping') {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'client.pong', chat_id: chatId }));
+          }
+          return;
+        }
+
         // F7/F8: Track sequence numbers for resume capability
         if (data.seq && typeof data.seq === 'number') {
           if (data.seq > lastSequence) {
@@ -519,9 +534,20 @@ export class WebSocketApiAdapter extends ApiAdapter {
       if (callbacks.onError) callbacks.onError(error);
     };
 
-    socket.onclose = () => {
-      this._chatConnections.delete(chatId);
-      if (callbacks.onClose) callbacks.onClose();
+    socket.onclose = (event) => {
+      const current = this._chatConnections.get(chatId);
+      if (current && current !== connection) return;
+      if (current === connection) this._chatConnections.delete(chatId);
+      // Forward the close reason. Without it a caller cannot tell a close it
+      // asked for from a network drop, and reconnecting after a deliberate
+      // close opens a second socket for a chat that already has one.
+      if (callbacks.onClose) {
+        callbacks.onClose({
+          code: event?.code,
+          reason: event?.reason || '',
+          wasClean: Boolean(event?.wasClean),
+        });
+      }
     };
 
     const connection = {
@@ -552,7 +578,9 @@ export class WebSocketApiAdapter extends ApiAdapter {
             socket.close();
           }
         } finally {
-          this._chatConnections.delete(chatId);
+          if (this._chatConnections.get(chatId) === connection) {
+            this._chatConnections.delete(chatId);
+          }
         }
       }
     };

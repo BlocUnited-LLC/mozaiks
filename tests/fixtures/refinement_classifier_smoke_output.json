@@ -112,7 +112,7 @@
           "modules/reports/module.yaml",
           "modules/reports/backend/service.py",
           "modules/reports/backend/schemas.py",
-          "config/integrations.json",
+          "config/integrations.yaml",
           "docs/integrations.md"
         ],
         "affected_declarative_families": [

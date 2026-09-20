@@ -1,0 +1,7 @@
+schema_version: mozaiks.orchestrator.v1
+workflow_name: SecurityReadiness
+max_turns: 8
+human_in_the_loop: false
+workflow_startup_mode: AgentDriven
+orchestration_pattern: ag2_network
+initial_agent: SecurityReadinessAgent

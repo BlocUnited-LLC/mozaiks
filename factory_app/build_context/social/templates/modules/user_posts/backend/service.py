@@ -7,6 +7,8 @@ from .policy import actor_id, app_scope, can_delete_comment, can_delete_post, pu
 from .repo import CommentRepo, PostRepo, ReactionRepo
 from .schemas import (
     DEFAULT_REACTION,
+    MAX_COMMENT_BODY_LENGTH,
+    MAX_POST_BODY_LENGTH,
     POST_STATUS_DELETED,
     POST_STATUS_PUBLISHED,
     REACTION_TYPES,
@@ -29,6 +31,11 @@ class UserPostsService:
         body = (body or "").strip()
         if not body:
             return {"success": False, "error": "Post body cannot be empty."}
+        if len(body) > MAX_POST_BODY_LENGTH:
+            return {
+                "success": False,
+                "error": f"Post body cannot exceed {MAX_POST_BODY_LENGTH} characters.",
+            }
 
         user_id = actor_id(ctx)
         now = timestamp_now()
@@ -168,6 +175,12 @@ class UserPostsService:
         body = (body or "").strip()
         if not body:
             return {"success": False, "error": "Comment body cannot be empty.", "comment": None}
+        if len(body) > MAX_COMMENT_BODY_LENGTH:
+            return {
+                "success": False,
+                "error": f"Comment body cannot exceed {MAX_COMMENT_BODY_LENGTH} characters.",
+                "comment": None,
+            }
 
         post = await self._posts.get(ctx, post_id=post_id)
         if not post or post.get("status") == POST_STATUS_DELETED:

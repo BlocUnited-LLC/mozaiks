@@ -20,8 +20,10 @@ from .generated_app import (
     GeneratedAppValidationResult,
     validate_generated_app_bundle,
 )
+from .workspace import validate_app_workspace
 
 __all__ = [
+    "validate_app_workspace",
     "AcceptanceController",
     "AcceptanceResult",
     "FunctionalGeneratedAppDiagnostic",

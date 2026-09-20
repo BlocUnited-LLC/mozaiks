@@ -14,14 +14,20 @@ description: >
   Runtime truth remains the structured outputs, build_tasks, owned_paths, and
   runtime loaders — not this catalog.
 
+  Authenticated app scaffolds are emitted through save_auth_scaffold outside
+  AppBuildPlan build_tasks. config/auth.yaml
+  validates against the shared mozaiks.auth.v1 model; ui/auth/authAdapter.js
+  delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
+  local demo identity implementations. Backend configuration selects auth mode.
+
 task_contracts:
   page_bundle:
     owner_agent: AppSchemaAgent
-    summary: Declarative persistent app UI bundle owned by AppSchemaAgent.
+    summary: Declarative persistent app UI bundle for the page_bundle task.
     required_outputs:
-      - app.json
       - ui/pages/*.yaml
     optional_outputs:
+      - app.json
       - provenance.yaml
       - ui/route_manifest.json
       - ui/pages/custom/*.jsx
@@ -33,6 +39,10 @@ task_contracts:
       - config/asset_manifest.json
     hard_constraints:
       - Persistent app pages stay declarative by default.
+      - Page filenames are case-sensitive lowercase identities derived by the canonical materializer from the final route segment (or the page name for /), with non-alphanumeric runs replaced by underscores. Copy exact planner-injected paths into owned_paths; display titles are not filenames. Never emit both uppercase and lowercase variants.
+      - Emit exactly the current task's owned_paths. Required page outputs apply only to pages in that scope; a manifest-only task may emit pages as an empty list.
+      - AppSchemaOutput.manifest is AppManifest or explicit null. A task owning app.json must emit AppManifest; otherwise emit null, which materializes neither app.json nor provenance.yaml. Do not emit a placeholder manifest or silently discard out-of-scope files.
+      - New-app page_bundle tasks collectively own app.json and every planned page, with one manifest owner. Page-only revisions preserve app.json and unchanged pages from the verified baseline; full-bundle acceptance still requires a complete valid app. Standalone save_app_schema requires a non-null manifest.
       - provenance.yaml is app-root metadata emitted by the scaffold/generator path. It records creation/refinement/validation lineage and declared contract refs; it must not contain secrets, absolute local paths, or provider execution state.
       - "Workflow launches from pages use action_type: workflow."
       - Prefer compact config/shell.json shortcuts for common shell chrome instead of repeating full header/profile/mobile/footer arrays.
@@ -43,9 +53,12 @@ task_contracts:
       - Dashboard manifests may reference workflow_sequence actions, but those sequences must already exist in workflows/extended_orchestration/extension_registry.json.
       - Use config/shell.json navigation.policy for placement rules such as desktop global=header, desktop local=sidebar, mobile global=bottomBar, mobile local=sheet, and mobile footer=hidden.
       - Put route chrome intent on AppPageSchema.shell_mode; use config/shell.json chrome only for app-wide mode-policy overrides.
+      - Use layout=full-width for a PageHeader followed by a primary record table. Grid places peer top-level sections in separate columns; it does not stack a heading above a full-width table.
       - Use shell_mode=conversation for DM/chat/thread routes, workspace for dense module/profile/admin-like work surfaces, focused for setup/review flows, immersive for full-viewport experiences, public for public/legal routes, and standard for ordinary pages.
       - Use explicit shell arrays only when labels, icons, role gates, or custom paths differ from the shortcut catalog.
       - Durable page mutations bind through declared api_endpoint values or canonical module actions.
+      - Design documents and ExperienceSpec describe approved product intent, not executable API authority. Replace illustrative endpoint hints with exact /api/modules/{module_id}/{action_id} bindings from planned and generated module contracts; never copy a placeholder URL into task initial_message or page output. Preserve the approved behavior, fields, and layout.
+      - Every data-backed summary needs a declared backend action returning its value_key fields. A ui_only page does not create that action. Plan the owning module contract and business_services implementation before the dependent page task; do not invent an endpoint or replace live counts with constants.
       - Do not emit raw frontend source outside the bounded custom route bundle.
       - Pages that require reading URL query params on mount, polling an endpoint until state changes, or rendering conditional sections based on API response value must use custom_route_bundle; they cannot be expressed as declarative AppPageSchema.
       - A post-redirect confirmation page must not display confirmed/success state from the redirect URL alone. Confirmation must come from querying an app-owned module action after the backend has processed the event.
@@ -81,7 +94,6 @@ task_contracts:
       - Token wallets and token_allowances are only for apps selling AI usage, credits, quotas, token packs, or usage-charge estimates; access-only SaaS plans must omit those fields.
       - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
 
-
   module_contract:
     owner_agent: ConfigMiddlewareAgent
     summary: Canonical module contract bundle that declares module behavior before Python or JS implementation.
@@ -113,10 +125,12 @@ task_contracts:
     hard_constraints:
       - module.yaml is always required.
       - module_contract owned_paths are YAML/declarative contract files only - module.yaml, contracts/*.yaml, and optional runtime_extensions.yaml. Do not include backend/*.py in module_contract tasks; use data_models for backend/schemas.py and business_services for handler.py/service.py/repo.py/policy.py.
+      - Optional request and event properties are not nullable unless their declared type admits null. Service code normalizes documented defaults before writes, preserves omitted fields on partial update, and omits absent optional event keys rather than emitting None. Verify required-only inputs against the event schema as well as fully populated forms.
+      - actions[].input_schema is a closed request contract. Every object level (root, nested objects, array item objects) must declare additionalProperties false, and every accepted request key must be an explicitly declared property. Never emit an open map property such as metadata {type object} in an action input schema - use a closed nested object with declared keys, or an array of closed {key, value} string entries for app-defined annotations. Keep input schemas to closed-profile keywords (type, enum, items, properties, required, additionalProperties); defaults and length limits live in service code. Expected business-rule input rejections raise mozaiksai.core.runtime.ModuleInputValidationError before writes/events, producing INVALID_PARAMS/400. Plain ValueError remains an unexpected execution error.
       - Emit only files declared by owned_paths or explicit file_manifest.
       - Omit YAML files that would serialize to empty arrays or null objects.
       - YAML declares the contract; downstream agents implement Python and JS stubs.
-      - actions[].api_surface is part of the module contract. Use public or public_readonly only for anonymous-safe HTTP actions. Omit it or use internal/admin_internal for actions that require an authenticated token when AUTH_ENABLED=true.
+      - actions[].api_surface is part of the module contract. Use public or public_readonly only for anonymous-safe HTTP actions. Omit it or use null for authenticated UI/API actions. Internal/admin_internal actions reject every HTTP request, including authenticated requests; use them only for event reactions or trusted runtime dispatch, never page bindings.
       - Public/public_readonly actions are only anonymous entrypoints; they still dispatch with an enforce-mode authority carrying a concrete (possibly empty) permission set and still run actions[].permissions and actions[].entitlement_gate checks.
       - External HTTP dispatch and internal runtime dispatch are separate paths. Internal event reactions may use api_surface=internal and permissions=[] because the event bus is the authorization boundary; do not mark internal reaction handlers public.
       - contracts/reactions.yaml target.kind may be handler, capability, notification, or service_adapter. service_adapter targets must declare target.adapter and target.adapter_method, point only to app-owned services/adapters/* support code, and must not be used to bypass facade modules, module state ownership, or managed-provider boundaries.
@@ -147,6 +161,11 @@ task_contracts:
       - backend/policy.py owns scope query helpers.
       - backend/policy.py should derive tenant/workspace/user resource filters from ctx.app_id, ctx.tenant_id, ctx.workspace_id, ctx.user_id, and ctx.permissions. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
       - backend/repo.py may use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
+      - For offset pagination, PersistenceCollection.find_many has no skip argument and returns a list, not a cursor. In repo.py use aggregate with an ownership-scoped $match, a stable $sort including a unique tie-breaker, then the requested $skip and a bounded $limit. Validate the declared page/offset inputs and limit before querying; never compute an offset and leave it unused or fetch an unbounded collection for client slicing.
+      - Pagination totals must count the same query as the page, including ownership, search, and all other active filters. Use count(query) with that matching query or a matching aggregate count; do not count unrelated or foreign records.
+      - When literal search is requested, search only the declared fields and use re.escape on user text before placing it in a Mongo $regex. Preserve the requested case behavior. Do not reinterpret literal metacharacters as regex operators or silently escape explicitly requested regex search; explicit regex intent requires its declared validation and bounds.
+      - repo.py must return the actual write result needed by service.py to distinguish an owned mutation from a missing/foreign record, concurrent deletion, or unchanged state. A pre-read or a write call without checking its outcome is not proof of mutation. Emit mutation-success events only after confirmed writes; when no owned mutation happened, do not emit such an event.
+      - A not-found, denied, or idempotent no-op response must follow the declared action contract. Do not invent a global HTTP status or success response for all modules. Keep caller-safe outcomes consistent with the module's authorization boundary and never disclose a foreign record.
       - backend/repo.py must use module_id/entity_name values aligned with data_contract and data/contract.json.
       - Generated repo code must not use ctx.db.
       - Generated repo code must not import or call get_mongo_client().
@@ -202,9 +221,11 @@ task_contracts:
     summary: App-level service support code for integrations, provider adapters, routes, and names-only secret policy. Paths are app-bundle-relative and assemble under physical app/services/ or app/security/.
     required_outputs: []
     optional_outputs:
+      - services/__init__.py
       - services/config.py
       - services/integrations/*.py
       - services/routes/*.py
+      - services/adapters/__init__.py
       - services/adapters/**/*.py
       - security/secrets.yaml
       - task-owned service support files
@@ -213,7 +234,8 @@ task_contracts:
       - Emit integration glue or provider adapter support only.
       - Do not generate a standalone platform or alternate host.
       - App-owned support code belongs under app-bundle-relative services/integrations/ for external or hosted API clients, services/adapters/ for provider-specific implementation boundaries, and services/routes/ for app-level routes only when needed; physical generated workspaces place these under app/services/.
-      - If app-owned runtime secrets are required, emit security/secrets.yaml as a names-only contract for provider/vault policy, env handles, and secret names. Never emit raw secret values.
+      - Optional __init__.py package markers may be empty and must be preserved in services/, services/integrations/, services/routes/, services/adapters/, and services/adapters/{adapter_area}/. They do not authorize other service directories or move module-owned behavior into services.
+      - "If app-owned runtime secrets are required, emit security/secrets.yaml as a names-only contract validated by mozaiksai.core.secrets.AppSecretContract: version: 1 and secrets entries with env (never string entries), optional azure_key_vault.secret_name, and optional provider policy. Unknown fields and raw values are forbidden. Never emit raw secret values."
       - Common services/adapters/ areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the generated app itself directly owns those provider mechanics rather than consuming a hosted platform capability.
       - Do not use service_foundation for Mozaiks-hosted deployment, DNS, domain, billing, payment processing, or platform operations. Hosted platform capabilities are consumed through hosted API clients/facade modules and host-owned records; provider adapters stay in the hosted product.
       - services/adapters/ and services/integrations/ must not own business actions, product lifecycle, user-facing actions, emitted domain events, or persistence authority. Modules own those behaviors.
@@ -268,18 +290,6 @@ task_contracts:
       - Managed capability adapter clients must target the stable API contract supplied by the operator/provider boundary (e.g. POST {APP_BACKEND_URL}/api/modules/{module_id}/{action_id}). Do not embed host-specific secrets or provider credentials in generated files.
       - Pages must not bind directly to /api/modules/{managed_capability_id}/{action}. When managed-capability data must appear on a persistent page, AppGenerator generates an app-owned façade module (generated_module) whose service calls the managed capability adapter client. Pages bind to /api/modules/{facade_module_id}/{action} using the standard page→module convention.
       - Provider implementation adapters that are not managed-capability API clients belong in services/adapters/ through service_foundation, not under modules/ and not in services/integrations/.
-
-  agent_backend_integration:
-    owner_agent: AppPlanAgent
-    summary: Planning lane for wiring an existing agent backend into the generated app.
-    required_outputs: []
-    optional_outputs:
-      - workflow touchpoints in page schemas
-      - build task initial_message context for downstream agents
-    hard_constraints:
-      - Treat upstream agent metadata as exact values, not inferred values.
-      - Persistent pages launch workflows declaratively; live workflow UI stays workflow-owned.
-      - Do not convert agent integrations into app-owned module collections by default.
 
 
 backend_helper_files:
@@ -336,13 +346,13 @@ backend_helper_files:
       - workflow or agent orchestration logic
       - arbitrary file splitting to break up long files
     rules:
-      - must be declared in current_build_task.owned_paths or python_stubs before ServiceAgent generates it
+      - must be declared in current_build_task.owned_paths or python_stubs before the business_services task generates it
       - must be imported by at least one canonical backend layer (handler.py, service.py) or referenced by runtime_extensions.yaml
       - must be module-local — no cross-module imports except to managed capability service interfaces
       - must not create new public module actions or bypass the handler dispatch contract
-      - AppPlanAgent must declare it with a short rationale in the build task initial_message
-      - ConfigMiddlewareAgent must add it to python_stubs before ServiceAgent runs
-      - ServiceAgent must not invent helper files that do not appear in python_stubs
+      - The build task initial_message must declare it with a short rationale
+      - The module contract output must include it in python_stubs before backend implementation
+      - Backend implementation must not invent helper files that do not appear in python_stubs
 
   runtime_extension_entrypoints:
     description: >
@@ -353,11 +363,11 @@ backend_helper_files:
     api_router:
       required_stub: backend/{router_file}.py
       factory_function: get_router
-      note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
+      note: Must be declared in python_stubs before backend implementation generates it.
     startup_service:
       required_stub: backend/{worker_file}.py
       service_class: "{ServiceClass}"
-      note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
+      note: Must be declared in python_stubs before backend implementation generates it.
 
   event_pipeline_conventions:
     description: >
@@ -412,12 +422,50 @@ backend_helper_files:
     required_methods:
       - "async delete_user_data(*, app_id: str, user_id: str) -> dict  # returns {deleted_count: int, ...}"
       - "async export_user_data(*, app_id: str, user_id: str) -> dict  # returns module-namespaced records"
-    constructor_signature: "__init__(self, db: Any) -> None  # receives motor db from loader"
+    constructor_signature: "__init__(self, db: Any) -> None  # receives raw Motor database from account registry"
+    database_contract: >
+      This handler receives a raw Motor database, NOT ModuleContext or
+      PersistenceCollection. Use db[physical_collection_name], find(...).to_list(...),
+      and delete_many(query) when the declared deletion policy permits deletion.
+      Do not call ctx.persistence methods such as find_many on this raw collection,
+      or db.get_collection(module_id, entity_name). Raw database access adds no scope.
+    collection_resolution: >
+      For entities stored by repo.py through ctx.persistence.collection(module_id,
+      entity_name), import collection_name_for from
+      mozaiksai.core.runtime.persistence.naming and resolve
+      db[collection_name_for(app_id=app_id, module_id=module_id, entity_name=entity_name)].
+      Use the exact module_id and entity_name from that repo, not a bare entity name,
+      hand-built physical name, or a scan of database collections. The standard
+      module executor omits app_slug, so omit it here too; do not substitute a
+      display name or app slug. This rule is not universal for literal collections,
+      alias bindings, externally bound storage, or a custom persistence context:
+      follow their existing declared database, physical collection, naming inputs,
+      and ownership contract instead. In every case, both export and deletion must
+      explicitly filter by app_id and the requested user's ownership using the
+      same owner fields as the repo. Physical collection isolation alone is insufficient.
+    export_example: |
+      # For a user_id-owned entity using standard generated-module persistence.
+      # module_id and entity_name must match the existing repo's collection call.
+      from bson import ObjectId
+      from fastapi.encoders import jsonable_encoder
+      from mozaiksai.core.runtime.persistence.naming import collection_name_for
+
+      collection = db[collection_name_for(
+          app_id=app_id, module_id=module_id, entity_name=entity_name,
+      )]
+      query = {"app_id": app_id, "user_id": user_id}
+      records = await collection.find(query, {"_id": 0}).to_list(length=None)
+      if not records:
+          return {}
+      return {f"{module_id}_{entity_name}": jsonable_encoder(
+          records, custom_encoder={ObjectId: str},
+      )}
     hard_constraints:
       - Must be named AccountDataHandler (the loader discovers it by this name first).
       - Both methods must scope ALL queries through app_id AND user_id. Never delete or export records across tenants.
       - delete_user_data must be idempotent — calling it twice must not raise an error.
       - export_user_data must return an empty dict (not None or raise) when the user has no records.
+      - Export payloads must already be JSON-safe because the account route uses JSONResponse directly. Exclude storage _id or convert ObjectId values to strings, and serialize datetimes as ISO 8601 strings, including nested values. Do not return raw Motor documents with BSON values.
       - For financial/ledger modules (transactional archetype), anonymise rather than delete user_id on ledger entries to preserve audit integrity. Document this in the method docstring.
       - "Return key names in export_user_data must be namespaced with the module_id to avoid collisions when the platform merges all module exports (e.g. {\"messages_threads\": [...], \"messages_dms\": [...]})."
       - Do not call service.py or handler.py from the handler — access the db directly for simplicity and to avoid ctx dependencies.
@@ -433,4 +481,3 @@ backend_helper_files:
     - backend/verification_poller.py # startup_service — background DNS/state poller (event_pipeline)
     - backend/ssl_status_poller.py   # startup_service — background certificate poller (event_pipeline)
     - backend/account_data_handler.py # AccountDataHandler — GDPR delete + export for user-scoped modules
-

@@ -33,6 +33,8 @@ Public-facing but subject to change without a deprecation window. These
 surfaces are working but the interface shape may still move.
 
 **What is in Tier 2:**
+- `factory_app.eval`: reference bundle scoring, corpus runs, persistence and diffs;
+  import the package facade rather than its implementation modules.
 - `mozaiks gen` CLI subcommand (prompt-to-app convenience; interface may simplify)
 - `mozaiks context index` (app intelligence indexing; pipeline still evolving)
 - `mozaiks sync-agent-guidance` (contributor tooling; format may change)
@@ -89,7 +91,8 @@ first.
 ## What Self-Hosters Can Count On Today
 
 - `pip install -e ".[dev]"` from a clean clone works without private config.
-- `mozaiks serve .` boots the Studio host without BlocUnited infrastructure.
+- `mozaiks serve .` boots the platform host; `--host studio` adds the shared
+  Studio management interface. Neither requires BlocUnited infrastructure.
 - The clean-room self-host acceptance suite (`tests/test_selfhost_clean_install.py`) passes on every main commit.
 - No runtime source imports from `mozaiks_app` (the private hosted-product repo).
 - No BlocUnited domains hardcoded in runtime or factory workflow source.
@@ -107,3 +110,22 @@ editable checkout. See [self-hosting guide](self-hosting.md) and
 
 Do not depend on a specific pre-1.0 `0.x.y` version as a stable API target.
 Pin to a specific git SHA for reproducible builds until 1.0.
+
+### Workspace acceptance
+
+`mozaiksai.core.validation.validate_app_workspace(app_root,
+inherited_ui_roots=())` checks shared app contracts and static route/action
+references. Pass the actual UI packages registered by the host when composing
+Studio surfaces. It does not apply generated-file layout or placeholder policy
+and is not provider/deployment readiness. Generated output continues to use
+`validate_generated_app_bundle`. Both paths consume the same secret contract
+and declaration checks.
+
+Factory now explicitly declares `config/auth.yaml` and `security/secrets.yaml`.
+Authenticated authored apps must supply a valid auth contract matching
+`app.json.authRequired`. The shell's implicit demo fallback and copied generated
+OIDC implementation are replaced by shared browser auth selected from backend
+configuration. Regenerate older auth scaffolds to consume that shared adapter.
+Runtime secret consumers use canonical environment handles instead of the retired
+`OpenAIApiKey` and `MongoURI` lookup names; an operator vault maps its existing
+secret names explicitly. See [Factory security](factory-security.md).

@@ -8,6 +8,13 @@ import pytest
 
 from tests.import_utils import import_module_directly
 
+
+@pytest.fixture(autouse=True)
+def generic_platform_hooks(monkeypatch):
+    from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+
+    monkeypatch.setattr(PlatformHookRegistry, "_instance", PlatformHookRegistry())
+
 _session_model = import_module_directly("mozaiksai.core.session.model")
 _session_router = import_module_directly("mozaiksai.core.session.router")
 _workflow_manager = import_module_directly("mozaiksai.core.workflow.workflow_manager")
@@ -103,10 +110,11 @@ class _FakeTransport:
 
 
 class _FakeSessionRouter:
-    def __init__(self, *, next_workflows=None) -> None:  # noqa: ANN001
+    def __init__(self, *, next_workflows=None, next_transition_id=None) -> None:  # noqa: ANN001
         self.annotated = []
         self.bound = []
         self.next_workflows = list(next_workflows or ["DesignDocs"])
+        self.next_transition_id = next_transition_id
 
     async def advance_journey_after_run_complete(self, **kwargs):  # noqa: ANN003
         return JourneyAdvanceDecision(
@@ -115,7 +123,8 @@ class _FakeSessionRouter:
             current_group_index=0,
             journey_total_steps=2,
             next_group_index=1,
-            next_workflows=self.next_workflows,
+            next_workflows=[] if self.next_transition_id else self.next_workflows,
+            next_transition_id=self.next_transition_id,
             completed=False,
         )
 
@@ -151,7 +160,10 @@ async def test_journey_orchestrator_uses_session_router_metadata(monkeypatch):
         return transport.connections.get(chat_id), transport
 
     monkeypatch.setattr(orchestrator, "_get_transport_conn", _fake_get_transport_conn)
-    monkeypatch.setattr(_journey_mod, "get_session_router", lambda: fake_router)
+    async def router_for_chat(**kwargs):
+        return fake_router
+
+    monkeypatch.setattr(_journey_mod, "get_session_router_for_chat", router_for_chat)
     monkeypatch.setattr(_journey_mod.session_registry, "complete_workflow", lambda ws_id, chat_id: None)
     monkeypatch.setattr(_journey_mod.session_registry, "add_workflow", lambda **kwargs: None)
 
@@ -175,6 +187,30 @@ async def test_journey_orchestrator_uses_session_router_metadata(monkeypatch):
     assert fake_router.annotated
     assert fake_router.bound
     assert transport.sent_events[-1][1]["data"]["journey_id"] == "journey_run_1"
+
+
+@pytest.mark.asyncio
+async def test_journey_handoff_failure_is_visible_without_exposing_exception(monkeypatch):
+    orchestrator = JourneyOrchestrator()
+    transport = _FakeTransport(_FakePersistenceManager())
+
+    async def fail_handoff(*_args):
+        raise ValueError("private launch details")
+
+    async def connected(_chat_id):
+        return {"websocket": object()}, transport
+
+    monkeypatch.setattr(orchestrator, "_handle_run_complete_inner", fail_handoff)
+    monkeypatch.setattr(orchestrator, "_get_transport_conn", connected)
+    await orchestrator.handle_run_complete({"chat_id": "source_chat", "status": "completed"})
+
+    assert len(transport.sent_events) == 1
+    chat_id, event = transport.sent_events[0]
+    assert chat_id == "source_chat"
+    assert event["type"] == "chat.error"
+    assert event["data"]["error_code"] == "JOURNEY_ADVANCE_FAILED"
+    assert "not complete" in event["data"]["message"]
+    assert "private launch details" not in str(event)
 
 
 @pytest.mark.asyncio
@@ -284,6 +320,8 @@ async def test_journey_orchestrator_inherits_context_and_applies_launch_provider
             ]
         },
         "unused_context": "drop me",
+        "interview_complete": True,
+        "app_id_was_not_a_launch_input": "other-app",
     }
     transport = _FakeTransport(persistence)
     transport.connections["chat_source"] = {
@@ -301,7 +339,10 @@ async def test_journey_orchestrator_inherits_context_and_applies_launch_provider
         return transport.connections.get(chat_id), transport
 
     monkeypatch.setattr(orchestrator, "_get_transport_conn", _fake_get_transport_conn)
-    monkeypatch.setattr(_journey_mod, "get_session_router", lambda: fake_router)
+    async def router_for_chat(**kwargs):
+        return fake_router
+
+    monkeypatch.setattr(_journey_mod, "get_session_router_for_chat", router_for_chat)
     monkeypatch.setattr(_journey_mod.session_registry, "complete_workflow", lambda ws_id, chat_id: None)
     monkeypatch.setattr(_journey_mod.session_registry, "add_workflow", lambda **kwargs: None)
 
@@ -326,4 +367,120 @@ async def test_journey_orchestrator_inherits_context_and_applies_launch_provider
     ]
     assert "unused_context" not in created
     assert "not_declared_for_appgenerator" not in created
+
+
+def test_theme_handoff_drops_source_progress_but_preserves_launch_inputs():
+    source = {
+        "_id": "source-chat", "app_id": "factory", "user_id": "alice",
+        "workflow_name": "ValueEngine", "interview_complete": True,
+        "concept_review_outcome": "approved", "app_name": "Client Ledger",
+        "builder_options": {"monetization_enabled": False},
+        "run_build_binding": {"target_app_id": "tracker"},
+    }
+    projected = _journey_mod._project_launch_context(source, "ThemeCapture")
+    assert projected == {
+        "app_name": "Client Ledger", "builder_options": {"monetization_enabled": False},
+    }
+    from mozaiksai.core.session.launcher import validate_context_for_workflow
+    from mozaiksai.core.workflow.context.authority import ContextAuthorityError
+
+    assert validate_context_for_workflow("ThemeCapture", projected) == projected
+    with pytest.raises(ContextAuthorityError):
+        validate_context_for_workflow("ThemeCapture", {"interview_outcome": "ready"})
+
+
+def test_handoff_cannot_silently_drop_context_for_an_unloaded_workflow():
+    with pytest.raises(ValueError, match="not loaded"):
+        _journey_mod._project_launch_context({"app_name": "Client Ledger"}, "UnregisteredWorkflow")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transition_type", ["chat_session", "silent", "user_choice"])
+async def test_journey_transition_projects_only_declared_chat_session_inputs(monkeypatch, transition_type):
+    from mozaiksai.core.workflow.pack.schema import WorkflowTransition
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    declaration = {"id": "review_step", "transition_type": transition_type}
+    if transition_type == "user_choice":
+        declaration.update(ui={"component": "ReviewChoice"}, options=[{"id": "review", "route_to": "ReviewScreen"}])
+    else:
+        declaration["route_to"] = "ReviewScreen"
+    pack = types.SimpleNamespace(transitions=[WorkflowTransition.model_validate(declaration)])
+    monkeypatch.setattr(_journey_mod, "load_global_pack_graph", lambda: pack)
+    config = {"context_variables": {"definitions": {
+        "allowed": {"type": "object", "source": {"type": "state"}},
+        "app_id": {"type": "string", "source": {"type": "state"}},
+        "calculated": {"type": "boolean", "source": {"type": "computed"}},
+        "protected": {
+            "type": "string", "source": {"type": "state"},
+            "authority_class": "closed_writer_quality_state", "writer_ids": ["deterministic_tool"],
+        },
+    }}}
+    monkeypatch.setattr(workflow_manager, "get_config", lambda name: config if name == "ReviewScreen" else None)
+    persistence = _FakePersistenceManager()
+    persistence._coll_ref._docs["chat_source"] = {
+        "_id": "chat_source", "app_id": "app_1", "user_id": "user_1", "workflow_name": "SourceWorkflow",
+        "allowed": {"evidence": "declared input"}, "calculated": True,
+        "protected": "not router writable", "undeclared": "never forward",
+    }
+    transport = _FakeTransport(persistence)
+    fake_router = _FakeSessionRouter(next_transition_id="review_step")
+
+    async def router_for_chat(**kwargs):
+        return fake_router
+
+    async def connected(chat_id):
+        return {"websocket": object(), "ws_id": 77}, transport
+
+    monkeypatch.setattr(_journey_mod, "get_session_router_for_chat", router_for_chat)
+    orchestrator = JourneyOrchestrator()
+    monkeypatch.setattr(orchestrator, "_get_transport_conn", connected)
+    await orchestrator.handle_run_complete({
+        "chat_id": "chat_source", "app_id": "app_1", "user_id": "user_1",
+        "workflow_name": "SourceWorkflow", "status": "completed",
+    })
+
+    assert len(transport.sent_events) == 1
+    chat_id, event = transport.sent_events[0]
+    assert chat_id == "chat_source"
+    assert event["type"] == "chat.transition_requested"
+    expected = {"allowed": {"evidence": "declared input"}} if transition_type == "chat_session" else {}
+    assert event["data"]["context_variables"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["missing_pack", "missing_transition", "unloaded_target"])
+async def test_unresolved_chat_session_transition_reports_handoff_failure(monkeypatch, fault):
+    from mozaiksai.core.workflow.pack.schema import WorkflowTransition
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    transition = WorkflowTransition(id="review_step", transition_type="chat_session", route_to="UnloadedReview")
+    pack = types.SimpleNamespace(transitions=[] if fault == "missing_transition" else [transition])
+    monkeypatch.setattr(_journey_mod, "load_global_pack_graph", lambda: None if fault == "missing_pack" else pack)
+    monkeypatch.setattr(workflow_manager, "get_config", lambda name: None)
+    persistence = _FakePersistenceManager()
+    persistence._coll_ref._docs["chat_source"] = {
+        "_id": "chat_source", "app_id": "app_1", "user_id": "user_1", "workflow_name": "SourceWorkflow",
+    }
+    transport = _FakeTransport(persistence)
+    fake_router = _FakeSessionRouter(next_transition_id="review_step")
+
+    async def router_for_chat(**kwargs):
+        return fake_router
+
+    async def connected(chat_id):
+        return {"websocket": object(), "ws_id": 77}, transport
+
+    monkeypatch.setattr(_journey_mod, "get_session_router_for_chat", router_for_chat)
+    orchestrator = JourneyOrchestrator()
+    monkeypatch.setattr(orchestrator, "_get_transport_conn", connected)
+    await orchestrator.handle_run_complete({
+        "chat_id": "chat_source", "app_id": "app_1", "user_id": "user_1",
+        "workflow_name": "SourceWorkflow", "status": "completed",
+    })
+
+    assert len(transport.sent_events) == 1
+    event = transport.sent_events[0][1]
+    assert event["type"] == "chat.error"
+    assert event["data"]["error_code"] == "JOURNEY_ADVANCE_FAILED"
 

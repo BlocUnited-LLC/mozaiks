@@ -1,15 +1,37 @@
 transition_rules:
-  # HITL revision loop: when the reviewer requests changes,
-  # save_subscription_contract clears the contract and records
-  # subscription_contract_review_status=changes_requested. Route back to the
-  # designer so it revises the structured output and re-submits for review
-  # instead of terminating with no approved contract. Conditional rules are
-  # evaluated before unconditional after_turn fallbacks.
-  - source_agent: ContractDesignerAgent
-    target_agent: ContractDesignerAgent
-    transition_type: condition
-    condition_type: context_expression
-    context_expression: "${subscription_contract_review_status} == 'changes_requested'"
-  - source_agent: ContractDesignerAgent
-    target_agent: terminate
-    transition_type: after_turn
+- source_agent: ContractDesignerAgent
+  target_agent: ContractDesignerAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: subscription_contract_review_status
+  condition_value: changes_requested
+  transition_target: AgentTarget
+- source_agent: ContractDesignerAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: subscription_contract_review_status
+  condition_value: confirmed
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+- source_agent: ContractDesignerAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: subscription_contract_review_status
+  condition_value: not_requested_headless
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+- source_agent: ContractDesignerAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: subscription_contract_review_status
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+- source_agent: ContractDesignerAgent
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed

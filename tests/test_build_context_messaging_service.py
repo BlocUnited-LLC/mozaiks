@@ -162,7 +162,12 @@ async def test_send_message_emits_recipient_notification_payload() -> None:
     service = MessageService()
     created = await service.create_thread(ctx, participant_ids=["user_2"], thread_type="support")
 
-    result = await service.send_message(ctx, thread_id=created["thread"]["thread_id"], body="Hello")
+    result = await service.send_message(
+        ctx,
+        thread_id=created["thread"]["thread_id"],
+        body="Hello",
+        allow_support_thread_sender=True,
+    )
 
     assert result["success"] is True
     event_type, payload = ctx.emitted[-1]
@@ -202,3 +207,71 @@ async def test_workspace_scope_threads_can_be_queried_separately() -> None:
 
     assert result["total"] == 1
     assert result["threads"][0]["scope_type"] == "workspace"
+
+
+@pytest.mark.asyncio
+async def test_thread_lookup_requires_authorized_scope() -> None:
+    ctx = _ctx(app_id="app_1")
+    ctx.persistence.collections[("messages", "threads")].rows.append(
+        {
+            "thread_id": "thr_cross_scope",
+            "app_id": "app_1",
+            "scope_type": "app",
+            "scope_id": "other_app",
+            "participant_ids": ["user_1"],
+            "status": "open",
+        }
+    )
+    ctx.persistence.collections[("messages", "messages")].rows.append(
+        {
+            "message_id": "msg_cross_scope",
+            "thread_id": "thr_cross_scope",
+            "app_id": "app_1",
+            "sender_role": "user",
+            "body": "secret from another app scope",
+            "is_deleted": False,
+        }
+    )
+    service = MessageService()
+
+    fetched = await service.get_thread(ctx, thread_id="thr_cross_scope")
+    sent = await service.send_message(ctx, thread_id="thr_cross_scope", body="hello")
+    read = await service.mark_thread_read(ctx, thread_id="thr_cross_scope")
+
+    assert fetched == {"thread": None, "messages": [], "error": "thread not found"}
+    assert sent == {"success": False, "error": "thread not found"}
+    assert read == {"success": False, "error": "thread not found"}
+
+
+@pytest.mark.asyncio
+async def test_workspace_thread_can_be_messaged_from_current_workspace() -> None:
+    ctx = _ctx(app_id="app_1", workspace_id="workspace_1")
+    service = MessageService()
+    created = await service.create_thread(
+        ctx,
+        participant_ids=["user_2"],
+        thread_type="direct",
+        scope_type="workspace",
+    )
+
+    sent = await service.send_message(ctx, thread_id=created["thread"]["thread_id"], body="Workspace hello")
+    fetched = await service.get_thread(ctx, thread_id=created["thread"]["thread_id"])
+    read = await service.mark_thread_read(ctx, thread_id=created["thread"]["thread_id"])
+
+    assert created["thread"]["scope_type"] == "workspace"
+    assert created["thread"]["scope_id"] == "workspace_1"
+    assert sent["success"] is True
+    assert fetched["messages"][0]["body"] == "Workspace hello"
+    assert read["success"] is True
+    assert ctx.persistence.collections[("messages", "thread_reads")].rows[0]["scope_id"] == "workspace_1"
+
+
+@pytest.mark.asyncio
+async def test_create_thread_rejects_scope_id_outside_current_context() -> None:
+    ctx = _ctx(app_id="app_1", workspace_id="workspace_1")
+
+    with pytest.raises(PermissionError, match="app message scope"):
+        await MessageService().create_thread(ctx, scope_type="app", scope_id="other_app")
+
+    with pytest.raises(PermissionError, match="workspace message scope"):
+        await MessageService().create_thread(ctx, scope_type="workspace", scope_id="other_workspace")

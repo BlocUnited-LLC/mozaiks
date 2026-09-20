@@ -21,7 +21,7 @@ def test_workflow_manager_loads_optional_a2a_yaml(tmp_path: Path) -> None:
         wf_dir / "orchestrator.yaml",
         "\n".join(
             [
-                "workflow_name: FlowA",
+                "schema_version: mozaiks.orchestrator.v1\nworkflow_name: FlowA",
                 "max_turns: 10",
                 "human_in_the_loop: true",
                 "workflow_startup_mode: AgentDriven",
@@ -80,7 +80,7 @@ def test_workflow_manager_load_summary_logs_degraded_on_partial_failure(
     ok_dir.mkdir()
     _write_yaml(
         ok_dir / "orchestrator.yaml",
-        "workflow_name: GoodFlow\nmax_turns: 5\nhuman_in_the_loop: false\nworkflow_startup_mode: AgentDriven",
+        "schema_version: mozaiks.orchestrator.v1\nworkflow_name: GoodFlow\nmax_turns: 5\nhuman_in_the_loop: false\nworkflow_startup_mode: AgentDriven",
     )
     _write_yaml(
         ok_dir / "agents.yaml",
@@ -90,7 +90,7 @@ def test_workflow_manager_load_summary_logs_degraded_on_partial_failure(
     # Bad workflow — missing workflow_startup_mode (will fail validation).
     bad_dir = tmp_path / "BadFlow"
     bad_dir.mkdir()
-    _write_yaml(bad_dir / "orchestrator.yaml", "workflow_name: BadFlow\nmax_turns: 5")
+    _write_yaml(bad_dir / "orchestrator.yaml", "schema_version: mozaiks.orchestrator.v1\nworkflow_name: BadFlow\nmax_turns: 5")
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
     with caplog.at_level(logging.WARNING):
@@ -111,7 +111,7 @@ def test_workflow_manager_load_summary_logs_ok_when_all_load(
     ok_dir.mkdir()
     _write_yaml(
         ok_dir / "orchestrator.yaml",
-        "workflow_name: FlowOk\nmax_turns: 5\nhuman_in_the_loop: false\nworkflow_startup_mode: AgentDriven",
+        "schema_version: mozaiks.orchestrator.v1\nworkflow_name: FlowOk\nmax_turns: 5\nhuman_in_the_loop: false\nworkflow_startup_mode: AgentDriven",
     )
     _write_yaml(
         ok_dir / "agents.yaml",
@@ -135,7 +135,7 @@ def test_workflow_manager_rejects_removed_startup_mode_only(tmp_path: Path) -> N
         wf_dir / "orchestrator.yaml",
         "\n".join(
             [
-                "workflow_name: FlowLegacy",
+                "schema_version: mozaiks.orchestrator.v1\nworkflow_name: FlowLegacy",
                 "startup_mode: UserDriven",
                 "human_in_the_loop: true",
             ]

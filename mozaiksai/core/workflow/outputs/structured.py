@@ -5,19 +5,20 @@
 
 import logging
 import types as _types
+from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Literal, Optional, Union, get_args, get_origin
 
 _UNION_ORIGINS = (Union, _types.UnionType) if hasattr(_types, "UnionType") else (Union,)
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from ..llm_config import get_llm_config
 from ..workflow_manager import workflow_manager
 
 # Workflow-specific model cache
-_workflow_models: dict[str, dict[str, type]] = {}
-_workflow_registries: dict[str, dict[str, type]] = {}
+_workflow_models: dict[str, dict[str, type[BaseModel]]] = {}
+_workflow_registries: dict[str, dict[str, type[BaseModel]]] = {}
 # Cache of workflow -> set(agent_names) that have structured output models
 _workflow_structured_agents: dict[str, set[str]] = {}
 _provider_response_model_cache: dict[type[BaseModel], type[BaseModel]] = {}
@@ -41,14 +42,42 @@ TYPE_MAP = {
 
 
 def _build_literal_enum(name: str, values: list[Any]) -> type[Enum]:
-    enum_name = f"{name}Enum_{abs(hash(tuple(values))) % 10000}"
+    # The enum class name enters the compiled model's JSON schema and
+    # therefore canonical structured-output identity. Python hash() is
+    # process-salted, so the name must be content-derived: a bounded prefix
+    # of the sha256 over deterministic value content. Distinct finite JSON
+    # scalar sets have no declaration-order meaning. Equality aliases retain
+    # their order: Python Enum uses the first equal member's exact value/type.
+    # Other runtime literal domains retain their existing compiler behavior.
+    import hashlib as _hashlib
+    import json as _json
+    import math as _math
+
+    scalar_set = all(
+        type(value) in (type(None), bool, int, float, str)
+        and (type(value) is not float or _math.isfinite(value))
+        for value in values
+    )
+    if scalar_set and len(set(values)) == len(values):
+        values = sorted(
+            values,
+            key=lambda value: _json.dumps(
+                value, ensure_ascii=True, separators=(",", ":"), allow_nan=False,
+            ),
+        )
+
+    content = _json.dumps(
+        values, ensure_ascii=False, separators=(",", ":"), default=repr
+    )
+    digest_prefix = _hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+    enum_name = f"{name}Enum_{digest_prefix}"
     enum_members = {f"VALUE_{i}": value for i, value in enumerate(values)}
     return Enum(enum_name, enum_members)  # type: ignore[return-value]
 
 
 def _resolve_named_type(
     type_name: str,
-    available_models: dict[str, type],
+    available_models: Mapping[str, type],
     alias_defs: dict[str, dict[str, Any]],
     alias_cache: dict[str, Any],
     stack: set[str] | None = None,
@@ -230,6 +259,12 @@ def _strictify_response_annotation(annotation: Any) -> Any:
 
 
 def get_provider_response_model(model_cls: type[BaseModel]) -> type[BaseModel]:
+    """Build/cache the OpenAI wire model without changing its acceptance model.
+
+    Required-field strengthening and schema ref/object formatting belong only
+    to this separately compiled provider projection. Workflow model caches
+    retain the unpatched acceptance classes regardless of invocation order.
+    """
     cached = _provider_response_model_cache.get(model_cls)
     if cached is not None:
         return cached
@@ -248,28 +283,38 @@ def get_provider_response_model(model_cls: type[BaseModel]) -> type[BaseModel]:
             field_kwargs["description"] = description
         fields[field_name] = (field_annotation, Field(..., **field_kwargs))
 
-    strict_model = create_model(model_cls.__name__, **fields)  # type: ignore[arg-type]
+    # The wire projection's advertised JSON schema already declares
+    # additionalProperties: false at every object level; its local parse must
+    # honor the same claim. Otherwise a permissive provider-side parse becomes
+    # the first lossy normalization: extras are stripped before the exact
+    # runtime acceptance model ever sees the original candidate.
+    strict_model = create_model(
+        model_cls.__name__, __config__=ConfigDict(extra="forbid"), **fields
+    )  # type: ignore[call-overload]
     _patch_model_schema(strict_model)
     _provider_response_model_cache[model_cls] = strict_model
     return strict_model
 
 
-def _find_open_ended_object_path(
+def _find_open_ended_type_path(
     annotation: Any,
     *,
     path: str,
     visited_models: set[type[BaseModel]] | None = None,
 ) -> str | None:
-    """Return the first path that contains a freeform object/dict annotation."""
+    """Return the first path with an untyped value or open-ended object."""
     visited_models = visited_models or set()
 
     origin = get_origin(annotation)
-    if origin in (dict, dict):
+    if annotation is Any or annotation in (dict, list, set, tuple) or origin is dict:
         return path
 
-    if origin in (list, list, set, tuple):
-        for arg in get_args(annotation):
-            found = _find_open_ended_object_path(
+    if origin in (list, set, tuple):
+        args = get_args(annotation)
+        if not args:
+            return path
+        for arg in args:
+            found = _find_open_ended_type_path(
                 arg,
                 path=f"{path}[]",
                 visited_models=visited_models,
@@ -282,7 +327,7 @@ def _find_open_ended_object_path(
         for arg in get_args(annotation):
             if arg is type(None):
                 continue
-            found = _find_open_ended_object_path(
+            found = _find_open_ended_type_path(
                 arg,
                 path=path,
                 visited_models=visited_models,
@@ -302,7 +347,7 @@ def _find_open_ended_object_path(
             model_fields = {}
         for field_name, field_info in model_fields.items():
             field_annotation = getattr(field_info, "annotation", None)
-            found = _find_open_ended_object_path(
+            found = _find_open_ended_type_path(
                 field_annotation,
                 path=f"{path}.{field_name}",
                 visited_models=visited_models,
@@ -317,11 +362,10 @@ def _find_open_ended_object_path(
 def supports_provider_response_format(model_cls: type[BaseModel]) -> tuple[bool, str | None]:
     """Return whether a model is safe for provider-enforced strict response_format.
 
-    OpenAI strict structured outputs do not support open-ended object blobs like
-    Dict[str, Any]. Those remain valid for Mozaiks runtime-side parsing and
-    validation, but they should not be sent as provider response_format schemas.
+    Open-ended objects, untyped arrays, and Any values must not be sent as
+    provider response_format schemas. Runtime-side parsing may still use them.
     """
-    offending_path = _find_open_ended_object_path(model_cls, path=model_cls.__name__)
+    offending_path = _find_open_ended_type_path(model_cls, path=model_cls.__name__)
     if offending_path:
         return False, offending_path
     return True, None
@@ -336,7 +380,7 @@ def _build_field(field_kwargs: dict[str, Any]) -> Any:
 
 def resolve_field_type(
     field_def: dict[str, Any],
-    available_models: dict[str, type],
+    available_models: Mapping[str, type],
     alias_defs: dict[str, dict[str, Any]] | None = None,
     alias_cache: dict[str, Any] | None = None,
 ) -> tuple[Any, Any]:
@@ -421,10 +465,20 @@ def resolve_field_type(
         return list[inner_type], _build_field(field_kwargs)  # type: ignore
     raise ValueError(f"Unknown field type: {field_type_str}")
 
-def build_models_from_config(models_config: dict[str, Any]) -> dict[str, type]:
+def build_models_from_config(
+    models_config: dict[str, Any], *, exact_model_ids: frozenset[str] = frozenset(),
+) -> dict[str, type[BaseModel]]:
+    """Compile provider-neutral acceptance models from workflow declarations.
+
+    Declared defaults and optional fields remain truthful in the model and
+    its ordinary Pydantic schema. Provider response-format preparation is
+    performed separately by ``get_provider_response_model``. Explicit exact
+    model identities configure acceptance closure at construction, before any
+    dependent model captures the child's validation/schema definition.
+    """
     if not models_config:
         return {}
-    models: dict[str, type] = {}
+    models: dict[str, type[BaseModel]] = {}
     alias_defs: dict[str, dict[str, Any]] = {
         name: mdef
         for name, mdef in models_config.items()
@@ -448,8 +502,11 @@ def build_models_from_config(models_config: dict[str, Any]) -> dict[str, type]:
         if unresolved:
             pending.append((name, mdef))
         else:
-            model_cls = create_model(name, **fields)  # type: ignore[arg-type]
-            _patch_model_schema(model_cls)
+            model_cls = create_model(
+                name,
+                __config__=ConfigDict(extra="forbid") if name in exact_model_ids else None,
+                **fields,
+            )  # type: ignore[call-overload]
             models[name] = model_cls
     # iterative resolution
     for _ in range(len(pending)):
@@ -467,8 +524,11 @@ def build_models_from_config(models_config: dict[str, Any]) -> dict[str, type]:
             if unresolved:
                 remaining.append((name, mdef))
             else:
-                model_cls = create_model(name, **fields)  # type: ignore[arg-type]
-                _patch_model_schema(model_cls)
+                model_cls = create_model(
+                    name,
+                    __config__=ConfigDict(extra="forbid") if name in exact_model_ids else None,
+                    **fields,
+                )  # type: ignore[call-overload]
                 models[name] = model_cls
         pending = remaining
         if not pending:
@@ -477,7 +537,7 @@ def build_models_from_config(models_config: dict[str, Any]) -> dict[str, type]:
         raise ValueError(f"Unresolved model dependencies: {[n for n,_ in pending]}")
     return models
 
-def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type], dict[str, type]]:
+def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type[BaseModel]], dict[str, type[BaseModel]]]:
     """Load structured outputs configuration for a workflow."""
     if workflow_name in _workflow_models:
         # Ensure structured agents cache is initialized before returning cached models.
@@ -502,8 +562,14 @@ def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type
         _workflow_structured_agents[workflow_name] = set()
         return {}, {}
     
-    # Build models from json config
-    models = build_models_from_config(models_config)
+    # Build models from json config. Runtime acceptance is EXACT: every
+    # declared model id compiles with closed-object acceptance so unknown
+    # candidate fields reject instead of being silently discarded. Nested
+    # named models become exact before any parent captures their definition
+    # (build_models_from_config applies closure at construction).
+    models = build_models_from_config(
+        models_config, exact_model_ids=frozenset(models_config)
+    )
     
     # Build registry mapping agent names to models
     registry = {}
@@ -520,6 +586,35 @@ def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type
     _workflow_structured_agents[workflow_name] = set(registry.keys())
     
     return models, registry
+
+def invalidate_workflow_structured_outputs(workflow_name: str) -> None:
+    """Drop all compiled structured-output state for one workflow.
+
+    The workflow manager calls this whenever it reloads or unloads a
+    workflow's configuration so compiled Pydantic models never outlive the
+    config they were built from. Cache keys preserve the raw casing callers
+    passed to load_workflow_structured_outputs, while the manager normalizes
+    names to lowercase, so matching here is case-insensitive.
+    """
+    normalized = str(workflow_name or "").strip().lower()
+    if not normalized:
+        return
+    stale_keys = {key for key in _workflow_models if key.lower() == normalized}
+    for key in stale_keys:
+        for model_cls in _workflow_models[key].values():
+            _provider_response_model_cache.pop(model_cls, None)
+    for cache in (_workflow_models, _workflow_registries, _workflow_structured_agents):
+        for key in [k for k in cache if k.lower() == normalized]:
+            del cache[key]
+
+
+def invalidate_all_workflow_structured_outputs() -> None:
+    """Drop all compiled structured-output state for every workflow."""
+    _workflow_models.clear()
+    _workflow_registries.clear()
+    _workflow_structured_agents.clear()
+    _provider_response_model_cache.clear()
+
 
 def get_structured_outputs_for_workflow(workflow_name: str) -> dict[str, type]:
     """Get structured outputs registry for a specific workflow."""
@@ -563,7 +658,7 @@ def get_structured_output_model_fields(workflow_name: str, agent_name: str) -> d
         except Exception:
             return {}
 
-def build_dynamic_models(spec_models: list[dict[str, Any]], existing_models: dict[str, type]) -> dict[str, type]:
+def build_dynamic_models(spec_models: list[dict[str, Any]], existing_models: dict[str, type]) -> dict[str, type[BaseModel]]:
     """Build dynamic models from runtime specifications."""
     if not spec_models:
         return {}
@@ -601,9 +696,12 @@ def build_dynamic_models(spec_models: list[dict[str, Any]], existing_models: dic
             'fields': fields
         }
     
-    # Build models using existing logic, combining with existing models
+    # Build models using existing logic, combining with existing models.
+    # Dynamic runtime models share the one exact acceptance contract.
     combined_models = existing_models.copy()
-    new_models = build_models_from_config(models_config)
+    new_models = build_models_from_config(
+        models_config, exact_model_ids=frozenset(models_config)
+    )
     combined_models.update(new_models)
     
     return new_models
@@ -675,7 +773,7 @@ async def get_llm_for_workflow(
                 )
 
             logger.warning(
-                "[STRUCTURED_OUTPUTS] Provider strict response_format disabled for %s/%s (%s uses open-ended object fields)",
+                "[STRUCTURED_OUTPUTS] Provider strict response_format disabled for %s/%s (%s uses an untyped value or open-ended object)",
                 workflow_name,
                 lookup_key,
                 offending_path,

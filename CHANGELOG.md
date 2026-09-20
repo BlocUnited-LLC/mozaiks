@@ -12,7 +12,1276 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- AppGenerator plan review no longer fails on its first attempt. The
+  `app_task_batch_status` context variable listed only the task batch runner as
+  an authorized writer, which locked out the declared workflow tools that set it
+  and ended every build with a `context_authority.rejected` error before any
+  plan was validated.
+- App download and validation now use admitted current artifacts and repairs.
+  Historical worker responses cannot restore rejected changes/deletions or
+  overwrite a newer authorized repair, and migration registration preserves
+  the accepted file bytes used by download and export.
+- Factory generation now preserves task failures and successful outputs, supplies
+  synthesized workers their actual prerequisites, and recovers eligible rejected
+  tasks through the existing AG2 batch within finite budgets. Repairs respect
+  approved task ownership; acceptance and export require the complete planned
+  snapshot. Runs with missing diagnostics or uncertain interrupted attempts stay
+  blocked instead of being reconstructed.
+- Task ownership now accepts the canonical `security/secrets.yaml` policy
+  artifact while retaining path safety checks and rejecting raw secret values.
+
+### Changed
+
+- Workflow agents can declare `pending_turn_replay: block` to stop automatic
+  replay of uncertain AG2 pending turns. Existing agents default to `allow`;
+  AppGenerator artifact workers now block replay. Deploy the runtime and Factory
+  contracts together; migration and rollback are documented in
+  [ADR 0011](docs/adr/0011-factory-bounded-task-recovery.md).
+- Generated page actions are now five closed shapes chosen by `action_type`
+  (`navigate`, `submit`, `delete`, `event`, `workflow`) instead of one shape
+  with every field nullable. Each declares only the fields that behave on it,
+  so `href` on a navigate action, `event_type` on an event action and
+  `workflow_id` on a workflow action are required by the contract rather than
+  checked after the fact, and a field belonging to another shape is refused.
+- `ui.modal.open` / `ui.modal.close` actions name their target in a typed
+  `modal_id` field. It is projected into the served `payload.modal_id` during
+  materialization, so the runtime, the event bus and the Modal component are
+  unchanged.
+- A page rejection from `save_app_schema` now reports every defect it can see
+  in one message, with the reason behind each, instead of stopping at the
+  first. Page validation also runs the same deterministic modal repairs the
+  task-batch lane already ran, including on baseline pages merged during a
+  repair.
+
+## 0.2.0 - 2026-09-18
+
+### Fixed
+
+- Factory build validation stages canonical workspaces and compiles their Python
+  and shared shell rather than expecting app-owned npm projects. Validation agent
+  schemas and prompts now include the runtime's Docker strategy.
+- Shared UI fallback logos ship with the library instead of referring to assets
+  in an individual app. Apps without a background image render a solid background.
+
+- Explicit server-side app validation strategy now takes precedence over tool
+  and workflow inputs. E2B preview polling no longer renews sandbox lifetime;
+  failed/expired previews and graceful shutdown attempt provider cleanup.
+  Configurable process/owner preview limits reject excess allocations with 429.
+  One-shot validation fails when sandbox teardown cannot be confirmed and no
+  longer returns a URL for a terminated sandbox.
+
+- Persisted in-progress workflow sessions now resume through AG2 after a
+  process restart instead of starting a second run when the in-memory input
+  callback is gone.
+
+
+
+### Fixed
+
+- Bundle eval no longer fails an app for having no subscription plans when the
+  app is deliberately free. Monetisation is now read from the bundle — an app
+  whose module actions declare no `entitlement_gate` has nothing for a plan to
+  resolve against — so a correctly generated free app is no longer scored as a
+  defect. A bundle with no modules reports the check as undeterminable rather
+  than passing or failing it.
+- A build task the plan gate invents to cover a module's files now carries a
+  prompt describing the work. Without one the task executor rejects it, so a
+  repair meant to close a coverage gap instead ended the build — six such tasks
+  stopped a live run with nothing generated.
+
+### Fixed
+
+- AppGenerator no longer abandons a build when the plan omits a capability for
+  an approved module. The design already states that module's identity, source
+  and entities, so the plan gate now fills the gap instead of rejecting the plan
+  — a rejected plan produced no build tasks and therefore no app bundle at all.
+
+### Changed
+
+- The optional E2B integration requires the tested 2.x code-interpreter SDK
+  (`>=2.10.0,<3`).
+
+- Outcome-contract tools now log why they rejected a result, which attempt it
+  was, and which budget ran out. A workflow that gave up previously recorded
+  only that a tool "completed successfully" several times before failing — the
+  reason existed in a context variable and never reached the log.
+
+### Fixed
+
+- Workflow transition aliases are released without closing the source chat's
+  live WebSocket, so a reconnect cannot interrupt an in-progress build.
+
+
+
+
+
+
+
+
+### Fixed
+
+- AgentGenerator can advance past its interview again. Readiness was inferred by
+  matching the literal token `NEXT` against the agent's message, which required
+  the model to emit a bare token with no preamble; when it explained itself
+  first, the match failed and the build waited on a user forever. The agent now
+  states readiness in a validated structured-output field, written to routing
+  state by a deterministic tool.
+
+### Fixed
+
+- A workflow transition no longer opens a second WebSocket for the same chat.
+  Every close scheduled a reconnect, including closes the client itself caused,
+  so moving between workflows raced a retry against the connection being built
+  for the new chat and the server evicted the live one. The client now
+  reconnects only from an unexpected close; a deliberate close, or an eviction
+  by a newer connection, is left alone.
+
+### Fixed
+
+- WebSocket connection identity is now allocated from a monotonic counter
+  instead of the socket object's memory address. Addresses are reused after
+  garbage collection, so on a reconnect a departing socket's late cleanup could
+  compare equal to the connection that replaced it and tear down the live one —
+  defeating the guard meant to prevent exactly that.
+
+### Fixed
+
+- A reconnect no longer kills the build running behind it. When a second
+  WebSocket arrived for a chat, evicting the stale one also dropped the pending
+  input-request callbacks a running workflow uses to receive the user's reply,
+  so the run could die mid-build. Eviction now releases the dead socket while
+  leaving the execution armed; a genuine disconnect still clears them.
+
 ### Added
+
+- Approval gates rendered by `ApprovalCard` now carry a stable
+  `data-testid="approval-action-<id>"` derived from the action id, so tests and
+  automation can drive them without matching model-authored button text.
+
+### Changed
+
+- Updated the AG2 runtime dependency to `1.0.5`.
+
+- `web_shell` UI validation now fails when a surface declares its own copy of a
+  shared design-system primitive (e.g. a local `Metric`). Import rules alone did
+  not catch this: a hand-rolled component imports nothing and passed every check
+  while rendering a drifted duplicate.
+
+### Fixed
+
+- Chat: the "..." typing bubble no longer sticks on screen after a run ends. It
+  is added when an agent hands off and was only removed when a *next* agent
+  spoke, so a run that finished or failed first left it there permanently.
+- Chat: the "Jump to Present" button no longer lets message text read through
+  it. It sat at 55% opacity over scrolled content, and shared a z-index with the
+  scroll layer so it only painted on top by DOM order.
+- `SubscriptionContractReview` now composes the shared `Metric` primitive
+  instead of its own copy.
+
+- Workflow UI: `ActionPlan` no longer crashes on render. It referenced two
+  undefined names (`fonts`, `colors`), so the branch containing them threw a
+  `ReferenceError` whenever it was reached.
+- Workflow UI: the app-type chooser (`AppTypeSelector`) no longer shows a large
+  empty box beside its choice cards. The monetization row now spans its own row
+  instead of sharing a line with the first card and stretching to card height.
+- Workflow UI: the workflow completion screen no longer shows a "Run Summary"
+  heading with nothing beneath it when a run reports no duration or token count.
+- Workflow UI: `AppIntelligenceOverviewCard` and `RepoAccessRecoveryCard` now
+  use the shared design-system primitives instead of local copies, so their
+  metrics, status pills, tabs, and buttons match the rest of the product.
+
+### Added
+
+- `web_shell`: `npm run render:workflow-ui` and `npm run shoot:workflow-ui`
+  render every workflow UI component with a representative payload and
+  screenshot it at desktop and mobile widths, for visual review.
+
+### Fixed
+
+- Generated Support pages now submit a ticket and its first message in one
+  support action. Requesters can read and reply through ticket-authorized
+  actions; generic messaging actions no longer expose support threads.
+
+- The assistant widget starts a build at the app's declared entrypoint. With no
+  workflow running, the workspace button routed to bare workflow mode, which
+  resolves a workflow from stored client state — so a user with nothing running
+  landed in whichever workflow that browser last touched (observed live as the
+  brownfield adoption flow instead of the create-app selector). It now opens the
+  entrypoint the app declares with `meta.freshStart`, discovered from shell
+  config rather than hardcoded, so each app's own start-a-build surface is used.
+
+- The widget's workflow button announces how many builds are running. The
+  brand mark inside it supplied a static accessible name, so assistive tech
+  read "Go to workflows" even with several sessions active while the tooltip
+  said otherwise. One derived label now feeds both the tooltip and the
+  accessible name, and the decorative mark is hidden from the a11y tree.
+
+- The floating assistant widget always offers a way into a workflow. Its
+  workspace button is no longer hidden when this browser has no stored
+  session: the widget reads the user's in-progress sessions from the server,
+  resumes directly when one is running, opens a picker when several are, and
+  otherwise sends the user to the workflow surface to start one. The widget
+  itself stays ask-only — this is the route back out of it.
+- The collapsed assistant toggle is legible against the page: an opaque card
+  surface with a solid primary edge and a full-size brand mark, instead of a
+  faint translucent tab that was easy to miss entirely.
+- Page routes share one themeable content measure (`--mz-content-max`, set by
+  `theme.content_width`, default `wide`) instead of each route choosing its own
+  max-width. The profile route no longer strands large empty gutters on wide
+  viewports while workspace routes fill them.
+
+### Added
+
+- Pages can declare the ask-mode context they need. A page's
+  `meta.ask_context` (in `ui/route_manifest.json`, or page-YAML `meta`) lists
+  read-only module actions whose results are injected into the ask agent's
+  prompt when the user asks from that page. Resolution is server-side and
+  fail-closed: an action resolves only when its `module.yaml` opts in with
+  `ask_context_safe: true` — a separate declaration from `api_surface`, so
+  opting into ask context never widens an action's HTTP exposure. Dispatch
+  runs in enforce mode with an empty permission grant and passes through the
+  host `module_scope` resolver, exactly as HTTP and workflow dispatch do. The
+  widget now sends the current route's `page_path` with each ask message, and
+  the platform `ask_context` hook receives the page identity. AppGenerator can
+  author both halves — `ask_context_safe` on module actions and page
+  `meta.ask_context` declarations — and Studio dogfoods the contract on the
+  workspace Support page (`workspace_support.list_support_requests`).
+
+### Changed
+
+- DataTable can opt into bounded server paging and search through declared
+  module action inputs and required row/count response fields. ResourceTable
+  keeps client paging; unsupported server bindings fail validation.
+- Revision workers receive the original requested behavior within their owned
+  tasks and operator contracts, including precise search, paging, default and
+  mutation-outcome requirements.
+
+- Ask-mode answers are grounded in server-side workspace truth. The general-mode
+  exchange now reads the user's current workflow session from the session router
+  (instead of the per-connection registry, which reported the ask carrier itself
+  and never the real build session) and collects a host-provided workspace
+  summary through the new platform `ask_context` hook — the Studio host
+  contributes app-registry counts, the most recently updated apps, and the build
+  currently in flight, which lives in a target-scoped session document the
+  runtime's own snapshot cannot see. Finished sessions are no longer described
+  as active workflows. The Studio `ask_mode_prompt` now describes exactly the
+  context the runtime appends, and support copy points at the widget's 🛟 help
+  button.
+
+### Fixed
+
+- Fix cold imports of auxiliary usage attribution and session binding contracts
+  without requiring consumers to preload AG2 adapters.
+- Factory account-data guidance uses the runtime's canonical collection naming,
+  explicit app/user query scope, and JSON-safe exports for generated persistence.
+- Generated form defaults and explicit table search fields survive the strict
+  page contracts and materialization into the existing shared UI primitives.
+- Summary metric columns adapt to their container width and wrap complete labels
+  instead of truncating short labels in narrow dashboard panels.
+- Factory planning receives exact materializer page paths and actionable
+  case-sensitive filename feedback, avoiding repeated display-name/path mismatches.
+- Factory form-action retries report known required-field errors and receive
+  fixed-endpoint create/edit guidance without weakening runtime page contracts.
+- Bundle acceptance validates the exact generated files and module actions,
+  including frozen workflow context, instead of passing empty or stale wiring.
+- Studio offers a fresh, owner-bound launch for failed workflows, with
+  acknowledgement checks and disabled terminal-session input.
+  Refinement retries recover the saved request and baseline without copying
+  failed execution state, and reject routing drift before persisting a launch.
+- Factory live previews boot saved, owner-bound app artifacts through the real
+  platform host, shared frontend, and disposable Mongo database. Failed startup,
+  expiry, and artifact changes clear stale preview URLs. A local Docker image
+  supplies the canonical runtime without inheriting Factory credentials.
+  Preview account export and deletion use the same private app database as
+  generated module actions, so they can reach the user's saved records.
+- Page-derived shell routes use the loader's exact file key, avoiding Linux
+  404s when generated display names differ in case from page filenames.
+- SecurityReadiness preserves its inspected artifact identity and review summary
+  through declared chat transitions. Explicit internal-only actions with empty
+  permissions no longer produce a false missing-permissions finding.
+  Build validation evidence and registered staged paths survive the full review
+  handoff; missing results stay missing, and zero findings are not mislabeled as
+  a failed persistence operation.
+- Workflow review components receive rejected response acknowledgements as errors,
+  rather than showing an unaccepted or stale decision as submitted.
+- UI review responses verify the saved session owner and app/chat scope before
+  completing or buffering an interaction, over both HTTP and WebSocket.
+- Live and restored artifact decisions use authenticated HTTP acknowledgement;
+  download controls display rejected submissions and prevent duplicate in-flight
+  decisions instead of treating a socket send as acceptance.
+- Ask-context contracts now round-trip through generated schema-native page
+  metadata. App loading and Factory acceptance reject unknown or ineligible
+  ask actions against actual module contracts, including custom-route metadata;
+  ask eligibility remains independent of HTTP exposure.
+
+- Studio's policy footer now links to the privacy, terms, and cookie pages
+  on mozaiks.ai so the website owns the policy content. CLI scaffolds and
+  onboarding's minimal-shell refresh inherit these factory shell defaults.
+
+- Auxiliary refinement agents now emit measured response usage through the
+  existing runtime collector and configured token-wallet ingest. Trusted host
+  app/user attribution is required; chat/build identity is attached only when
+  actually allocated. Native AG2 schema-correction turns retain usage and retry
+  middleware, and the auxiliary config adapter preserves provider controls.
+  This does not account for every attempt or establish unknown provider cost.
+- Profile and operator support tickets now group under the app they concern, show unavailable conversations instead of empty threads, send replies without a client-supplied sender role, and resolve hosted workspace scope during profile hydration.
+- Factory workflow prompts use the semantic inputs exposed to each task instead
+  of relying on named peers or unavailable output wrappers. Generated workflow
+  guidance follows the same input and structured-response discipline.
+- Preserve the original Factory build-event envelope across re-emission and
+  lost acknowledgements. Successful delivery cannot be revoked by a late failed
+  attempt, and already acknowledged events are not posted again by lifecycle hooks.
+- The floating ask widget is now fully isolated from workflow sessions. Its
+  WebSocket declares `transport_purpose=ask_carrier` at connect time, so the
+  runtime never resolves the widget's carrier chat onto an in-progress build
+  session, never auto-starts the entry-point workflow on it, and never replays
+  workflow history into it — workflow agents (e.g. the build interview) can no
+  longer appear inside the ask widget, and widget messages can no longer start
+  phantom builds. Widget carrier chats created before this fix are retro-tagged
+  on next connect so session listings stop offering them as resumable
+  workflows, and the session router never substitutes an ask carrier as a
+  resume target.
+- The ask agent now receives the current screen's `page_context` with each
+  widget message, so ask-mode answers are grounded in the page the user is on.
+- The collapsed assistant toggle uses a higher-contrast branded surface, sits
+  above the shell's mobile bottom bar instead of hiding behind it, and the
+  widget header's support control is a lifebuoy instead of a bare `?`. The
+  "Back to workspace" logo button also resolves the active workflow session
+  from the server session snapshot when local storage was cleared.
+- The Studio workspace mobile navigation trigger is a sticky top-of-content
+  control (matching the admin layout) instead of a floating pill overlapping
+  the shell bottom bar.
+- Restore the Studio support desk in user profiles and authenticated operator dashboards; support requests now use a subject app reference without changing runtime scope and report storage failures instead of appearing saved or empty.
+- Contextual workflow logging supports exception tracebacks so an error handler
+  can persist failed indexing/build state instead of raising a logging error.
+- Studio app/build summaries select owned generated targets through their build
+  registry without changing the authenticated host scope. Build review filters
+  app bundles instead of showing non-bundle App Intelligence projections as builds;
+  demo data no longer replaces unavailable real apps.
+- Mobile record cards wrap long values, and bottom navigation uses the app's
+  light/dark theme. Dashboard run labels distinguish failed runs from completed.
+- Structured-output compiler results retain their Pydantic model types. Artifact
+  registration requires runtime context, and refinement lookups guard missing
+  execution identity before reading app-scoped state.
+
+- Preserve source line endings during app validation and export so Windows
+  refinement does not repeatedly insert blank lines into unchanged files.
+- Honor ResourceTable search fields and placeholder, preserve selected record identity
+  after sorting, and guide generated primary tables toward full-width page layouts.
+- Return HTTP 400 for explicit module service input-validation errors without
+  masking unexpected application errors. Text-only branding no longer warns about
+  an intentionally absent logo image.
+- Preserve the requested chat when routing an in-page refinement and keep
+  backend repairs scoped to validation rather than unrelated generation steps.
+- Preserve canonical prompt-context views for detached task workers and retain
+  captured themes when assembling partial UI theme output.
+- Make AppWorkbench single-file refinement opt-in and use the canonical
+  `brand/theme_config.json` artifact for theme refinement.
+- Route module implementation validation failures through the existing bounded
+  bundle repair graph without relaxing handler contracts or retry limits.
+- Prevent Factory reconnects from replaying newly active downstream AG2 turns or
+  overlapping context-packet callbacks, and await recovery settlement before user input.
+- Include rejected task candidates in bounded validation retries so fresh AG2
+  worker attempts can repair their output without bypassing ownership or quality checks.
+- Display explicit user-facing messages from nonvisual automatic tools without
+  exposing internal tool payloads or duplicating replayed messages.
+- Preserve escaped Unicode and backslashes when replacing generated design
+  document surface maps instead of interpreting YAML as regex replacement syntax.
+- Keep workflow reviews visible on rejected or unconfirmed decisions and display
+  submission errors instead of closing the review before server acknowledgement.
+- Remove obsolete duplicate planner output examples and refer to the canonical
+  structured response schema; task prompts reuse inherited build context.
+- Attribute model usage to the validated run build binding without changing
+  execution-host charging or trusting caller-supplied build IDs.
+- Preserve registered operator-pack identity through typed app planning and
+  template expansion; reject unregistered pack references before generation.
+- Read workflow attachments from the execution session while keeping generated
+  artifacts scoped to the bound target app.
+- Route theme interviews using typed readiness and advance internal analysis
+  directly to validated theme assembly, without chat-text routing markers.
+- Security Readiness now saves findings through permissioned workflow module
+  dispatch using the live session principal. Findings retain project/build
+  association and cannot overwrite another project's matching scanner rule.
+  Workflow handoffs tolerate brief reconnects while rechecking the original
+  actor and fresh permissions before dispatch; started actions are never retried.
+  Unavailable persistence and uninspected bundles remain explicit in review.
+- Resolve Security Readiness input from the authenticated build binding and
+  verified target-owned artifact, rejecting stale, foreign, or tampered bundles.
+- Studio workspaces inherit packaged first-party modules through the standard
+  app loader. App-local modules override defaults by id, so hosted workspaces
+  can reuse Security Readiness without copying its implementation.
+- Validate scoped repairs against the complete staged app, including canonical
+  page schemas and action references, even without an indexed source workspace.
+  Failed repairs no longer report that a patch was applied; successful patches
+  are staged for review, not silently promoted.
+- Reject invented module API surface values and incomplete explicit form
+  payloads. Live metric/summary bindings share the canonical authenticated data API.
+- Generate module event calls through `await ctx.emit(...)`, not a nonexistent
+  context event bus, and reject that obsolete pattern during quality checks.
+- Keep required text fields nonblank, details forms read-only, and modal controls
+  accessible above mobile navigation, including on short viewports.
+- Isolate Vite dependency caches per app so concurrent Factory and generated-app
+  previews do not invalidate each other's prebundled dependencies.
+- Keep authenticated generated page actions on the authenticated module API;
+  reject nested page bindings to internal-only actions before export.
+- Preserve unchanged pages during partial schema repair and validate the newly
+  rendered files instead of a stale pre-repair bundle.
+- Authenticate artifact downloads through Studio's canonical artifact endpoint,
+  retain artifact identity for workflow exports, and only complete successful
+  downloads. Restored download surfaces can respond without echoing large file
+  payloads through the WebSocket.
+- Carry table selection into edit/confirmation dialogs, authenticate page data
+  and mutations, and preserve failed forms. Module deletions use the module
+  action protocol; data-load failures are visible and retryable.
+- Use canonical build-record identity when loading artifact context. Trusted
+  refinement-router state is validated separately from untrusted launch inputs.
+  Factory refinement profiles use the model exercised by local acceptance.
+- Project explicitly planned event names into worker manifest guidance and use
+  canonical companion paths under modules/{module_id}/contracts/.
+
+- Save validated Factory implementation outputs through auto tools before quality
+  routing, replacing extraction from a chat history that AG2 did not populate.
+  Data-contract failures have an explicit bounded DatabaseAgent repair route.
+- Reject invalid account-data implementations during module loading instead of
+  silently skipping registration; load helpers in the module's actual Python
+  namespace and send load diagnostics to the existing bounded Factory repair flow.
+- Expose complete file constraints and the runtime persistence API to Factory
+  workers. Reject unsupported Motor calls in generated repositories and changes
+  to approved data fields or optionality before export.
+- Detach protected export inputs so generated files reach the real download
+  and artifact persistence path instead of producing an empty workbench.
+- Let auto-invoked UI tools emit their own result surface; do not mount an empty
+  component or announce download readiness from arguments before export runs.
+- Preserve complete Factory prompts when catalog names appear inline in prose;
+  prompt hooks replace only standalone section headings and share one updater.
+  Planner category defaults cannot override approved scope exclusions.
+- Prefer the basic table configuration for ambiguous basic-table structured
+  output, avoiding resource-table-only fields rejected by the runtime.
+- Preserve validated AppSchemaOutput pages through task execution and assembly;
+  planner hints no longer overwrite forms, bindings, or interactions. Generate
+  auth contracts before the complete-bundle validation that requires them.
+  Validate page identity against its owned filename, keep display labels separate,
+  and provide actionable URL diagnostics without exposing rejected input values.
+  Forward build timestamps into task provenance materialization.
+- Separate AuthScaffoldAgent from DownloadAgent-owned deployment packaging;
+  do not emit partial deployment files or undeclared provision scripts before validation.
+- Persist schema data through the canonical data_contract state and fail explicitly
+  on rejected state writes. Valid dashboard page names are no longer rejected as
+  placeholder copy. User-owned module planning includes the account-data handler.
+- Keep initial prompts and interview replies visible to downstream workflow
+  agents through AG2 channel broadcasts; settlement timeouts fail explicitly.
+- Read protected task results, repair overlays, and app configuration as detached
+  data during assembly instead of overlooking read-only context containers.
+- Deliver declared workflow self-transitions through AG2's explicit audience
+  support so bounded same-agent repair loops receive their next turn.
+- Validate AppGenerator plan ownership and complete genesis file coverage before
+  worker calls, with bounded corrective feedback. Capability origins use a finite
+  vocabulary and registered managed packs; typed plan fields and frozen build
+  context catalogs are preserved through plan caching.
+- Clear stale AppGenerator plans before validation and terminate failed/empty
+  plans instead of falling through to page generation without backend tasks.
+- Make optional generated module manifests nullable and remove automatic admin
+  panel generation outside the approved task's file ownership.
+  Reject raw files that contradict an explicitly null typed manifest.
+- Include generated-file and task-identity validation in the existing task retry
+  budget, with corrective feedback on the next attempt. Exhausted failures stop
+  assembly and retain authorized diagnostics through AG2 context events.
+- Compile typed module action/capability and event schemas into runtime JSON
+  Schema instead of emitting generator-only property lists. Request schemas
+  obey the canonical closed profile; conflicting required fields fail early.
+
+- Execute declared task batches at their actual trigger inside the AG2 graph,
+  including interview-first builds, instead of checking only the first agent.
+- Detach protected runtime state before AppGenerator schema persistence and UI
+  quality checks so valid upstream data contracts are not rejected as non-objects.
+
+- Refresh each agent's declared context in the existing AG2 prompt middleware
+  before every model call, so later steps and revision attempts see current
+  tool results and user feedback instead of launch-time values.
+- Workflow tool loading registers Python module globals before execution so
+  typed models, dataclasses, and postponed annotations work in generated tools.
+  Reloads still refresh workflow-owned code; failed imports leave no partial module.
+- AgentGenerator supports approved apps with no AI workflows, records an explicit
+  empty workflow bundle, and clears stale workflow hints. Draft-correlated review
+  actions replace approval keywords; invalid plans receive bounded correction
+  attempts and cannot contradict the canonical design surface map.
+- Preserve workflow UI registrations across reloads and carry only declared,
+  writable launch inputs between journey steps. Handoff errors are visible in
+  chat; completing one workflow no longer claims the whole build is complete.
+- Factory theme, design, and subscription saves consume read-only structured
+  output through detached values and use declared failure outcomes. Failed
+  persistence or unavailable subscription review cannot advance the build.
+- DesignDocs index keys now use typed `field`/`order` entries, matching
+  AppGenerator. Untyped arrays and values are rejected before strict model calls.
+- Treat unmatched workflow transitions and exhausted AG2 turn limits as failures,
+  including when channel closure races a user handoff. ThemeCapture declares
+  user-return edges; AgentGenerator uses the authorized exact `NEXT` trigger.
+- Prevent stale browser storage from undoing live workflow handoffs and old
+  WebSocket close handlers from removing replacement connections. Failed message
+  submission is visible instead of leaving an indefinite typing indicator.
+
+- Bind app service imports to the selected workspace on reload and reset
+  platform health state for each startup attempt.
+- Keep Factory execution identity separate from generated-app targets through
+  handoffs, revision routing, artifact access, and downloads. Generated bundles
+  are promoted into version-specific workspaces, not the running Studio app.
+  Build identity and lifecycle pointers are server-owned; callers select an
+  owned registry record instead of supplying target IDs or artifact paths.
+
+- Build-record and version-counter uniqueness now follows `build_family` and
+  `build_key`. Known retired indexes are replaced without deleting records;
+  failed index initialization is retried instead of leaving a half-ready store.
+
+- Preserve explicitly empty generated files, including Python package markers,
+  so app service imports resolve from the generated bundle.
+
+- ValueEngine concept review now waits for a structured approve, request-changes,
+  or cancel action tied to the displayed draft. Stale reviews, failed saves, and
+  invalid responses cannot complete the workflow. The declared review budget is
+  three proposals per run, with retries only after an explicit request for changes;
+  this is an execution guard, not a subscription allowance.
+
+- Preserve explicit provider-native output token limits and SDK retry counts
+  when converting runtime LLM configuration to AG2. Invalid, conflicting, or
+  unsupported limits now fail before a provider request instead of disappearing.
+  This does not introduce a wallet reservation or a total-spend guarantee.
+
+### App workspace alignment
+
+- Add an advisory `SecurityReadiness` Factory workflow and build context so generated app bundles can surface baseline auth, secret, permission, tenant-scope, deployment, and eval-readiness findings during AppReview.
+
+- Add a first-party Factory `security_readiness` module for app/build security
+  findings, summaries, and review status without introducing hosted-only
+  compliance logic into OSS.
+- Expose the existing reference bundle evaluator through `factory_app.eval` so
+  hosted apps can consume it without copying the implementation. Factory build
+  events carry bounded generation evidence through the existing authenticated
+  outbox; removed proprietary Build Intelligence HTTP hooks from OSS workflows.
+- Resolve packaged Factory prompt catalogs outside source checkouts and combine
+  explicitly declared workspace projections. Configured launch-provider failures
+  propagate instead of silently discarding enrichment.
+- Resolve workflow UI using the backend's explicit default-registry inheritance
+  and workspace folder overrides. Added installed-workspace composition proof to
+  wheel CI.
+- Add `validate_app_workspace` for shared declarations and static action/route
+  closure with explicit inherited UI; generated bundles retain stricter output
+  and placeholder checks.
+
+### Security
+
+- Reject startup hooks that change immutable runtime identity or authorization
+  context before agent creation and model dispatch, including hooks that swallow
+  their own errors. This is a runtime invariant, not a generated-app target resolver.
+
+- Factory now declares its authentication and runtime secret contracts. The
+  shared shell uses backend-confirmed auth mode and shared OIDC sign-in;
+  failed configuration cannot silently create a demo identity. Generated auth
+  adapters delegate to the shared implementation. Runtime model and MongoDB
+  secret lookups consume the selected names-only policy.
+
+- Studio App Registry reads, updates, promotions, and deletes now carry the
+  caller's owner scope into Mongo filters. Reopening an app ID cannot transfer
+  ownership; concurrent same-owner creation is idempotent. Directory deletion
+  no longer erases app-wide usage facts. Module creation without a target ID
+  allocates a new app instead of reusing the Studio host's identity.
+
+- App secret declarations now use one typed names-only contract in generation,
+  validation, and runtime. Invalid or explicitly missing policies fail closed;
+  selecting an app never borrows another workspace's manifest. Environment-only
+  apps need no vault service. Generated secret entries now use the runtime's
+  canonical `env` object shape.
+- Account export and deletion now bind the authenticated principal and the
+  canonical app-data database before invoking module lifecycle handlers.
+  Signed-token Mongo tests cover ownership, app isolation, and repeated deletion.
+- **Production-safe browser WebSocket authentication**: the shared browser client
+  no longer puts the access token in the WebSocket URL
+  (`?access_token=<jwt>`), where it leaked into server access logs, browser
+  history, `Referer` headers, and shared links. The credential now travels in
+  the `Sec-WebSocket-Protocol` handshake header — the one request header the
+  browser WebSocket API lets a client set — as
+  `["mozaiks.bearer.v1", base64url(token)]`. The runtime decodes it, validates
+  it through the same configured auth adapter as HTTP routes, binds the same
+  `WebSocketUser`, and echoes back only the marker, never the credential.
+  Authenticated browser connections therefore work in production and staging
+  **without** setting `MOZAIKS_WS_ALLOW_QUERY_TOKEN=true`. Query-string tokens
+  remain rejected by default and stay available only as an explicit
+  local-development opt-in for non-browser clients. Auth-disabled local
+  development is unchanged. The credential component must be canonical unpadded
+  base64url: illegal characters, whitespace, padding, trailing garbage,
+  impossible lengths, invalid UTF-8, and non-canonical encodings are refused
+  before the auth adapter runs, with their own bounded close reason, and are
+  never sanitized into a usable credential.
+- **Fail-closed module action dispatch**: `ModuleExecutor` no longer falls
+  back from an undeclared action id to a same-named Python handler method.
+  Only action ids declared in the module's contract
+  (`module.yaml` `actions[].handler_method`, mirrored in the registered
+  `action_method_map`) are dispatchable; unknown or undeclared actions —
+  including event-reaction handlers, private helpers, and arbitrary handler
+  attributes — return `ACTION_NOT_FOUND` before any handler resolution, for
+  trusted and enforce-mode authorities alike. The rejection path never
+  touches the handler object (no `getattr`/`hasattr`, so hostile
+  properties/descriptors/`__getattr__` cannot execute), and denied audits
+  carry only a bounded, sanitized action string.
+- **Fail-closed authentication configuration**: auth-mode environment
+  variables are interpreted by one canonical resolver
+  (`resolve_auth_config`) consumed by every predicate, adapter resolution,
+  and startup validation. With `AUTH_ENABLED=true`, a missing, misspelled,
+  or incomplete auth provider configuration is fatal at startup (runtime and
+  platform/Studio hosts) and at provider resolution, in every environment.
+  Contradictory explicit declarations (`AUTH_ENABLED=true` +
+  `AUTH_PROVIDER=none`; `AUTH_ENABLED=false` + a real explicit
+  `AUTH_PROVIDER`) and unrecognized `AUTH_ENABLED` values are fatal instead
+  of silently resolving. **Unauthenticated operation is now allowlisted:** it
+  is permitted only in the recognized local environments `development`,
+  `local`, `test` (`dev` normalizes to `development`) or with no environment
+  configured. Every other explicit `ENV`/`ENVIRONMENT` value — `production`,
+  `staging`, and unknown or regional names such as `prod-us`,
+  `production-east`, `preview`, or `qa` — refuses no-auth operation
+  (explicit disable or implicit demo) independent of
+  `MOZAIKS_STARTUP_CHECKS` mode, while still booting normally with
+  authentication configured. `ENV` and `ENVIRONMENT` are resolved
+  canonically: blank values are absence (a blank `ENV` cannot mask a
+  deployed `ENVIRONMENT`), aliases normalize before comparison, and two
+  non-blank values that disagree are a fatal configuration error rather than
+  a silent pick. The cached auth adapter is keyed by the complete
+  provider-specific configuration snapshot it is built from — issuer, JWKS
+  and discovery URLs, audience, every claim mapping, scope format, clock
+  skew, algorithms, cache TTLs, Keycloak claim mappings, Supabase secret,
+  and anonymous-persona settings — so changing any of them rebuilds the
+  adapter and no stale adapter can serve requests under newer configuration.
+  Custom adapters declare a `config_identity` at registration to participate
+  in that cache identity, and are never cached without one; malformed
+  identities (non-string, empty, whitespace-only, or a raising callable) are
+  rejected rather than coerced into a cache key. The adapter constructor
+  contract is established *positively* at registration by binding the
+  runtime's exact invocation against the complete signature: `settings` as a
+  keyword (or `**kwargs`) receives the snapshot, a constructor whose other
+  parameters are all optional is built with no arguments, and anything the
+  runtime cannot actually invoke — `(settings, required)`,
+  `(required, **kwargs)`, a positional-only `settings`, any required parameter
+  it cannot supply, or a signature it cannot inspect — is rejected instead of
+  being assumed to take no configuration
+  (`register_adapter(..., constructor_mode=...)` declares the contract
+  explicitly for uninspectable constructors). An exception raised inside a
+  constructor body — including `TypeError` — fails closed instead of
+  triggering a retry that would discard the canonical configuration. An adapter's lazily created OIDC discovery and
+  JWKS clients now inherit its snapshot (URLs and cache TTLs) and never
+  consult live environment or global `AuthConfig`, so an adapter built under
+  one configuration cannot begin validating tokens against another; explicit
+  constructor input to those clients is authoritative. `AUTH_JWKS_CACHE_TTL`
+  (default 3600) and `AUTH_DISCOVERY_CACHE_TTL` (default 86400) are validated
+  (integer seconds, zero or greater; `0` means always refetch and is never
+  treated as unset) during configuration resolution, so malformed values fail
+  startup instead of surfacing during lazy client creation on a request path.
+  Absent, empty, and whitespace-only values normalize identically through one
+  canonical resolver shared by configuration resolution, the adapter config,
+  and `AuthConfig`, and cache expiry compares elapsed time against the TTL so
+  every accepted value — including very large ones — stays usable at request
+  time.
+  Implicit demo mode (no auth configuration at all, in an environment that
+  permits it) still boots for local getting-started use.
+- **Fail-closed billing fulfillment ingress**:
+  `POST /api/billing/fulfillment/apply` (and the fulfillment admin listing)
+  now requires the internal API key, an *authenticated* billing-admin
+  principal (`UserPrincipal.is_authenticated` — real bearer-token
+  provenance, not role/scope strings, which anonymous and dev-persona
+  principals can carry), or explicitly disabled authentication
+  (`AUTH_ENABLED=false` / `AUTH_PROVIDER=none`, which protected
+  environments reject outright). Auth being merely unconfigured no longer
+  makes the ingress callable without authentication.
+
+### Added
+
+- **Billing fulfillment revision fencing**: `BillingFulfillmentCommand` accepts
+  an optional `subject_revision` — a provider-neutral, monotonically increasing
+  ordinal that the upstream billing source allocates per entitlement subject
+  when it commits a canonical revision. Subscription effects now commit only
+  when the incoming revision is strictly newer than the one already stored for
+  that subject, compared atomically on the assignment document at write time.
+  An out-of-order command (an older HTTP request that completes after a newer
+  one has already been applied) is suppressed rather than regressing
+  entitlement state: its assignment and plan-allowance effects are `skipped`
+  with reason `stale_revision`, and the result carries the new terminal status
+  `superseded` so the sender can settle it without retrying. The last committed
+  revision is stored in the assignment document under the new
+  `assignment_store.revision_field` (`billing_revision`, or null to opt out —
+  the field is a fixed authority name, not a customization point). Plan token
+  allowances are fenced at their own commit too: the ledger accepts an opaque
+  `subject_key`/`subject_revision` pair and folds the ordering predicate into
+  the same single-document update that changes the balance, so a stale command
+  cannot mint tokens even if it was already mid-flight when a newer revision
+  committed, and the wallet-side ordering head advances for every accepted
+  revision — including cancellations, zero-allowance plans, and revisions that
+  reuse an existing period allocation — so "latest accepted revision" is what
+  fences a delayed older allowance, not "revision that last minted tokens".
+  That ordering authority is claimed on every applicable wallet *before* the
+  assignment commits: a revision only becomes the newly authoritative one once
+  no wallet its subject can reach still admits an older revision, and a wallet
+  that reports a newer revision means the command was overtaken, so nothing
+  applies. A head write that *fails* is not a decline: it propagates, nothing
+  applies, and — because that failure provably precedes every effect — the
+  durable command reservation is released so the identical command can be
+  retried instead of being refused as permanently pending. Wallet heads already
+  claimed are never reversed; the retry finds them equal and proceeds.
+  A wallet balance only ever moves under a reservation the invocation has
+  positively acquired: a pending reservation is taken by compare-and-swap on
+  exactly the reservation fields the stored document actually carries —
+  including their absence, so an entry written before reservations were
+  tracked is still adoptable and a movement that already committed stays
+  recoverable — and a lost swap means re-reading and reacquiring rather than
+  writing anyway. A newer, entitled revision may adopt
+  a reservation a stale attempt left behind, and rollback then only ever
+  deletes a reservation the rolling-back attempt still owns.
+  Fencing is one decision for the whole command: an app that sets
+  `revision_field: null` gets prior behavior from both the assignment and the
+  wallet. Enabling fencing requires one assignment row per entitlement subject,
+  enforced by a unique index over the configured subject paths — a store that
+  already carries an equivalent unique index provides that guarantee under
+  whatever name it uses and is accepted as is; pre-existing duplicate subjects
+  fail closed with an actionable error rather than being silently resolved. `billing_revision` is reserved — no other assignment
+  mapping may target it — and a command whose remaining effects are invalidated
+  by a newer revision reports `superseded` even when an earlier effect applied.
+  A replayed command reports `original_status`, preserving whether it
+  originally applied, was rejected, or was superseded. Commands that
+  omit `subject_revision` are applied unfenced exactly as before and keep their
+  pre-existing durable command identity, so upgrading cannot turn a previously
+  completed command into a content conflict.
+
+### Fixed
+
+- Declarative workflow agents no longer receive undeclared AG2 network
+  delegation/discovery tools automatically. Declared tools and AG2 graph
+  execution remain available. Continuation timeouts now return failed results
+  and close live-run clients instead of escaping as an exception or pretending
+  to await human input.
+- Workflow entrypoints, transition choices, and refinement launches now forward
+  the configured auth adapter's access token through the shared API helper.
+  Authenticated builds no longer fail at these steps with a missing-token error.
+- The shared app shell now binds chat and workflow defaults to the active
+  host's app identity, waits for shell configuration, and no longer launches
+  under an implicit `demo-app` scope.
+- Live workflow smoke checks now read canonical AG2 run events and wait for
+  resumed user turns. Reconnect replay emits versioned event envelopes, and
+  runtime-seeded chat/user identity remains available to usage accounting even
+  when workflows declare no application context variables.
+- Workflow composer continuations no longer block the WebSocket receiver while
+  awaiting UI tool responses. Task-batch continuations receive current declared
+  worker results; the UI smoke dogfoods single-attempt approval and artifact
+  outcomes instead of model-controlled tool repetition.
+- Generated workflow exports now validate all runtime YAML contracts and tool
+  implementations before packaging or repair. Capability-pack templates reject
+  missing inputs and invalid rendered YAML/JSON; readiness configuration preserves
+  string values containing YAML punctuation.
+- Workflow operations can declare validated outcomes and enforced attempt budgets.
+  AgentGenerator materializes their context and transition rules from typed plans;
+  factory export failures now route to bounded repair or user attention instead of
+  completing as successful downloads.
+
+- **Exact structured-output auto-tool contracts**: declared workflow
+  structured outputs are now exact at runtime — an agent output carrying an
+  undeclared field (top-level or nested) rejects before any normalization, so
+  no `agent_output_validated` event, auto tool, UI emission, or persistence
+  can run on silently stripped data. Deliberately declared open
+  `dict`/`optional_dict` fields keep accepting arbitrary keys inside. The
+  documented auto-tool contract
+  `context_variables.get("structured_output")` is now truthfully served as a
+  transient, runtime-owned, read-only projection of the exact validated
+  output: context-only auto tools work without declaring context variables,
+  explicit-param auto tools receive the same values, and the projection can
+  never be written, persisted, or replayed as workflow state.
+  `structured_output` is reserved runtime vocabulary: declaring it in
+  `context_variables.yaml` now fails workflow validation with no metadata
+  override, and overlay enumeration/snapshots never expose a colliding stale
+  base key. Auto-tool binding caches hold declarative metadata only,
+  self-validated against the live structured-output registry and tool
+  declarations (reload, unload, refresh_all, and failed reloads can never
+  execute a stale binding); the executable tool callable is resolved fresh
+  through the canonical loader on every dispatch, so workflow-owned tool and
+  imported helper changes (in both the `workflows.*` and derived real package
+  namespaces such as `factory_app.workflows.*`) are observed without restart,
+  while external installed packages remain a documented process-restart
+  boundary. Each binding receives its own detached copy of the validated
+  payload (explicit-argument mutation cannot contaminate another binding or
+  the audit record), turns are claimed in-flight atomically, and every
+  binding keeps a finite process-local execution checkpoint: once a tool
+  returns a truthful terminal result (success or failure) it is never
+  re-invoked for that turn — retries after cancellation resume unfinished
+  post-processing stages (write-back, persistence, result emission) instead
+  of re-running the tool. This is process-local runtime idempotency, not
+  distributed exactly-once delivery.
+
+### Changed
+
+- **YAML-first workflow and integration config contracts**: generated workflow
+  declaratives and app integration sub-configs now consistently use `.yaml`;
+  retired JSON prompt artifacts and stale JSON-path guidance were removed.
+
+- **Canonical capability-pack action requests are closed**: all 63 actions
+  across the 10 workspace_handler_split pack modules (commerce, entitlement
+  dispatch, files, messaging, MozaiksPay billing portal, notification settings,
+  activity feed, friends, user posts, support) now declare
+  `additionalProperties: false` at every object level and import under the
+  closed-contract profile. Unknown extra request keys are rejected at dispatch.
+  Open metadata maps became typed `{key, value}` entry lists (entitlement
+  dispatch, files, messaging) or closed objects with declared keys (activity
+  feed, commerce `raw_event`); handlers store the same record shapes as before.
+  Schema `default`/`maxLength`/`nullable` keywords moved to handler and service
+  code with identical behavior; post/comment body length limits are now
+  service-enforced. Generated modules and workspace action extensions must keep
+  request schemas closed by default.
+
+### Added
+
+- **Content-resolved implementation artifact authority**: implementation
+  selection for the future ImplementationBinding v2 now proves exact scope,
+  canonical artifact family/address, exact verified bytes, and exact document
+  schema versions for `orchestrator.yaml`, `structured_outputs.yaml`, and
+  `module.yaml` — resolved only through the immutable blob store, never a
+  filesystem path. Structured-output contract refs resolve only against the
+  selected workflow's exact configuration. Handler, base-handler, and
+  pack-contract sources are scope-bound selections (execution scope must
+  equal the requesting scope and the module selection's scope), and module
+  handler sources carry a bounded static export proof with exactly two
+  certification modes and no general source closure: `EXPLICIT_HANDLER` (a
+  true standalone class — zero bases — explicitly defining the action
+  `handler_method`) and `CANONICAL_BASE_HANDLER` (the two-source
+  workspace_handler_split closure, whose ownership authority is
+  content-resolved from the exact verified bytes of the module's owning
+  capability-pack `contract.yaml`, never caller-asserted; the canonical base
+  import must be an unconditional top-level statement before the class, and
+  a leaf override of the selected method stays a two-source certification
+  with a recorded `method_source`). Certified implementation identity covers
+  the leaf digest, base digest, and pack-contract digest; rebinding
+  analysis is closed over the full Python binding grammar including
+  exception-handler and match-pattern captures. The entire real canonical
+  split-pack corpus — 10 modules, 63 actions — certifies end to end with
+  proven pack-contract blob reads. The split-capable certifier is internal:
+  `resolve_module_action_implementation` is the only public
+  authority-producing API (no exported function accepts a preconstructed
+  split authority), direct dynamic-execution primitives are rejected in
+  construction scope even through `builtins` access, aliased builtins
+  imports, or simple rebinding, uninspected locally-defined callables cannot
+  be invoked or applied as decorators during module/class construction, and
+  construction-time anonymous lambdas are prohibited except a lambda stored
+  directly in a simple named binding (deferred runtime helpers remain
+  allowed; a bounded own-source proof — not a proof of arbitrary imported
+  dependency behavior), and pack-contract
+  `required_outputs` must be unambiguous: duplicate paths and omitted or
+  non-canonical authority-relevant owners reject. The commerce module
+  manifest's capability entries were repaired to the canonical
+  `ModuleCapability` contract (unique capability ids with `kind`/`title`),
+  which module loading requires.
+
+- **Closed semantic action requests**: `ActionPayload.request_contract` replaces
+  shallow request fields with one immutable, bounded contract algebra for null,
+  scalars, homogeneous arrays, and closed objects. Offline module-schema imports
+  reject unproven closure and unsupported assertions. Executable module dispatch
+  schemas retain their current authority; realization proofs remain deferred.
+- **Canonical workflow module interfaces**: the offline compiler renders
+  `mozaiks.module_interface.v2` from exact workflow capability, result,
+  binding, module, and event-taxonomy sources. Advisory results are retained;
+  event identity changes invalidate reuse through the real rematerialization
+  path. Both canonical layout representations enforce row-first output
+  identity. The retired factory writer stays absent. App workflow registry,
+  runtime routing, and persistent workflow launch remain separate/deferred.
+- **Node-level taxonomy identity in plan and reuse authority (ADR 0007)**:
+  `CompilationPlan` units gain a generic `taxonomy_sources` contract
+  (`PlanTaxonomySource`: exact `(node, category, identifier)` triples under
+  the closed taxonomy vocabulary and grammars) for canonical identities that
+  live on graph nodes rather than typed payloads. Identifiers are stored in
+  canonical spelling at model construction, including trimmed whitespace.
+  A pinned taxonomy identity
+  now participates in unit identity, serialization, canonical authority
+  rederivation, and — closing the defect found in the #479 review — the
+  regeneration/reuse signature: a unit whose node-level identity changed can
+  never be classified reusable, so stale bytes are never copied forward.
+  Empty taxonomy sources are omitted from identity and serialization alike,
+  keeping every pre-existing plan unit byte- and digest-identical. The
+  workflow module interface is the first family deriving these sources.
+- **Typed module↔workflow capability semantics**: the semantic graph now
+  models the relationship between deterministic application capabilities
+  (modules, actions, events) and agentic capabilities (workflows) as
+  canonical typed identity instead of stringly convention. Three new node
+  kinds — `workflow_capability` (the application-semantic identity of one
+  workflow capability: a stable `capability_id` owned by exactly one
+  workflow), `workflow_capability_binding` (one directional, typed
+  relationship per node: `consumes_action`, `commits_result_through_action`,
+  or `triggered_by_event`), and `workflow_result` (the typed,
+  capability-owned semantic identity of one workflow output — never a
+  provider schema, model class, or AG2 runtime id) — plus `ModuleActionRef`,
+  the exact module/action node identity that carries no HTTP path, handler
+  path, or AG2 tool identity. Typed payloads own application meaning; graph
+  edges are derived projections: every action used through `ModuleActionRef`
+  must have exactly one canonical module owner, event-production authority
+  comes from typed `ActionPayload.emits` joined to the EVENT node's canonical
+  taxonomy identity (a bare EMITS edge can never invent production), commit
+  bindings reference a declared `workflow_result` node owned by their own
+  capability (result fan-out is explicit: several commit bindings referencing
+  the same result node), and each capability/binding/result node must
+  participate in exactly its derived edge set — full edge identity,
+  discriminator included — so payload-unbacked edge mutations fail closed.
+  Every module-declared action forms the canonical ownership family: its
+  complete declarer set must close to exactly one module (contradictory
+  non-module DECLARES edges are never filtered away), every typed emit must
+  resolve to exactly one EVENT node carrying exactly one canonical identity
+  — independent of whether any workflow or trigger consumes the event — and
+  its EMITS edge set must equal the typed projection exactly.
+  AG2 Agent/Task/Network identities stay out of the graph — a Mozaiks
+  workflow capability is application semantics; AG2 runtime objects remain
+  execution implementation details. The offline projection now records
+  module-manifest action `emits` into the typed `ActionPayload` it already
+  drew EMITS edges from. The new semantics are offline contracts: no
+  module_interface.yaml rendering, no layout-registry families, and no
+  production AppGenerator/AgentGenerator wiring in this change.
+
+
+### Fixed
+
+- **AG2 Network tool routing**: declared tools retain authorized context writes
+  and hand off from actual tool-call events, including turns with no text.
+  Source-agent scoping and context-write policy remain enforced through graph
+  reload and packet publication.
+- **Provider-neutral structured-output identity**: canonical contracts now pin
+  a versioned acceptance profile and truthful optionality independently of
+  provider wire formatting. Build and cold resolution consume the same explicit
+  model authority. Module schema checking and evaluation failures now reject
+  validation instead of reporting success; explicit empty schemas remain valid.
+- **Canonical plan authority is now enforced across execution and durable
+  revision closure (ADR 0007 lane)**: assignment compilation
+  (`compile_approved_plan`), composition (`compose_plan_artifacts`, including
+  the base plan in refinement), revision persistence, cold
+  resolution/restoration, promotion, and CURRENT resolution all require the
+  exact immutable `CompilationPlanAuthorityInputs` and canonically rederive
+  the plan before any authority is exercised — self-digests, refs, and
+  ledger digest chains prove integrity and identity only, never truthful
+  derivation. `ArtifactRevision` now pins a content-addressed
+  `compilation_plan_authority_ref` as part of immutable revision identity,
+  and the authority document is persisted content-addressed
+  (`CompilationPlanAuthorityInputsV1`) so every fresh process repeats the
+  rederivation. Plans carrying brownfield content (`preserve_unowned` /
+  `reuse_from_base`) fail closed with the typed `base_authority_missing`
+  category until the immutable base-input authority contract exists; the
+  former synthetic 5B/5C fixtures that composed fabricated preserved bytes
+  are replaced by canonically derived fixtures. Plans also no longer emit
+  the former unconditional "registry" renderer-resolution pseudo-gap, which
+  made the composition zero-gap contract unsatisfiable by construction.
+  Canonical authority additionally governs every downstream dataflow: after
+  rederivation, all execution-authorizing plan-unit facts (dispositions,
+  kinds, owned paths, validators, structured-output refs, sources,
+  dependencies, identity bindings) come only from the canonical rederived
+  plan — never from a subsequent resolver lookup, so a hostile resolver can
+  no longer substitute unit content into compiled assignments or
+  composition. Validation-evidence construction and verification now also
+  require the canonical authority inputs (a re-digested plan whose
+  validators were rewritten can no longer produce or bless evidence, and
+  ledger unit entries must mirror the canonical units exactly), the
+  `ArtifactRevision` model itself scope-closes its plan-authority reference,
+  cold resolution validates authority before reading any dependent closure
+  document, parent revision, or content blob, and canonical-authority
+  failures crossing the revision-store boundary surface as its typed error
+  family.
+
+### Added
+
+- **Deterministic application-family rendering (ADR 0007 Slice 5D-0B2A)**: the
+  offline semantic compiler can now render canonical application-configuration
+  bytes for four application-level families — `app.json`,
+  `ui/route_manifest.json`, `config/integrations.yaml`, and names-only
+  `security/secrets.yaml` — from accepted semantic facts through a single
+  binding-resolved `deterministic_app_config_renderer@1` authority with
+  family-local render inputs, under two named byte contracts
+  (`mozaiks.json_decl_bytes.v1`, `mozaiks.yaml_decl_bytes.v1`).
+  `config/ai.json` is explicitly deferred: application-level AI-launch
+  semantics (chat startup mode, workflow entry point) have no typed semantic
+  home yet and are never inferred from per-workflow facts. Production
+  generation is unchanged: AppGenerator writers remain the authoritative
+  emitters of these paths until the atomic 5D cutover, and guards prove the
+  new renderer is not wired into any production path.
+
+### Fixed
+- **Server-owned session fields and the canonical bundle entry are closed
+  boundaries**: the chat-session lifecycle authority fields
+  (`workflow_run_id`, `run_build_binding`, `build_terminal_receipt`) are now
+  writable only through a privileged, lease-fenced persistence API — generic
+  session creation with `extra_fields` rejects them deterministically before
+  the idempotent existing-session return (a prohibited request never
+  silently succeeds, whether the session exists or not), generic context
+  persistence drops them with a logged security diagnostic, and the replay
+  merge preserves them past workflow-declared context policy without ever
+  accepting generic writes. A worker that lost its chat execution lease to a
+  successor can no longer replace the successor's lifecycle authority. The
+  app-bundle manifest now has an exact canonical bundle-entry identity: the
+  record must be the canonical `app_bundle`/`app_bundle` BuildRecord, its
+  persisted bundle name must satisfy the closed shared name grammar (ASCII
+  letters/digits/hyphen/underscore), and the single `application/zip` entry
+  must sit at exactly `{bundle_name}/{bundle_name}.zip` — one shared formula
+  used by both the manifest writer and the resolver. A digest may never be
+  validated against "any manifest entry with this digest"; wrong-family
+  records, wrong archive basenames, dot-segment names, duplicate archives,
+  digest-less entries, and mislocated archives all fail the build closed at
+  registration.
+
+### Fixed
+- **A present but invalid `config/subscriptions.yaml` now fails application
+  loading instead of silently disabling entitlement enforcement**: AppLoader
+  previously caught the subscription contract's load error, logged a warning,
+  and continued with no subscription config — which wired
+  `NoOpEntitlementAdapter` and granted every `entitlement_gate`
+  unconditionally. An invalid present contract (malformed YAML, unknown
+  fields, wrong schema version, broken plan/default/product/wallet
+  references) now raises `AppLoadError` and the platform host refuses to
+  start. An absent file is unchanged: a valid non-SaaS app with no
+  enforcement configured. Both `mozaiks.subscriptions.v1` and
+  `mozaiks.subscriptions.v2` remain accepted, unchanged —
+  `load_subscriptions_config` stays the sole schema authority.
+
+- **Generated Mongo documents no longer break HTTP responses**: module action
+  results are normalized at the ModuleExecutor boundary so BSON `ObjectId`
+  *values* become their stable 24-character hexadecimal strings wherever
+  they occur as values — `_id`, ordinary fields, nested documents, and
+  arrays — and `Decimal128` values become their lossless decimal strings.
+  JSON object keys must already be exact strings: an `ObjectId` key, like
+  every other non-string mapping key, is rejected with a typed
+  `MODULE_RESULT_NOT_JSON_SAFE` outcome — no key normalization or coercion
+  occurs, so no post-normalization key collision is possible; the key domain
+  is closed before iteration. Generated apps that list or read Mongo-backed
+  records — whose documents carry a driver-generated `ObjectId` `_id` —
+  previously produced a bare HTTP 500 at serialization on every read path
+  (module routes, profile panels/tabs, page hydration). Datetimes and other
+  JSON-encodable values keep their existing wire semantics through explicit
+  closed conversions, unknown value types fail closed with the same typed
+  outcome (no repr leaks), cyclic or absurdly nested results are rejected
+  instead of exhausting the stack, and the response-size gate now measures
+  the exact strictly-encoded UTF-8 bytes (no `default=str` masking). Input
+  documents are not mutated. The container domain is closed to exact
+  `dict`/`list`/`tuple`: sets and frozensets (no deterministic JSON form),
+  container subclasses, custom Mappings, and generators are rejected before
+  any iteration can run hostile code, and BSON `Int64` converts to the exact
+  builtin int. Non-finite `Decimal` values (NaN/Infinity), failing pydantic
+  serializers, malformed UTF-8 bytes, and unexpected conversion failures all
+  surface as the same typed error — never a raw exception — with hostile
+  payload contents kept out of error messages. The size gate's encoding is
+  byte-for-byte identical to what Starlette's `JSONResponse` emits (compact
+  separators, `ensure_ascii=False`, UTF-8), verified against real
+  `TestClient` response bodies, so a result at the limit passes and one byte
+  over fails.
+
+### Changed
+
+- **Self-versioned workflow documents**: `orchestrator.yaml` now requires
+  `schema_version: mozaiks.orchestrator.v1`; `structured_outputs.yaml` requires
+  `schema_version: mozaiks.structured_outputs.v1`. Public parsers retain the
+  exact version and reject missing, null, unsupported, or altered spellings.
+  OSS workflows, producers, examples, and authoring guidance migrate together.
+  App workspaces must migrate their documents when upgrading; there is no
+  unversioned fallback. Whole-document identity changes, while compiled output
+  models, workflow interfaces, and unrelated compiler units retain identity.
+- Upgraded the AG2 runtime to 1.0.3, including ACP 0.12.1 compatibility and corrected usage-event accounting coverage.
+
+### Fixed
+
+- **Structured-output caches now invalidate on workflow reload**: the compiled
+  Pydantic model, registry, and structured-agent caches in
+  `mozaiksai.core.workflow.outputs.structured` were never invalidated by
+  `reload_workflow`, `unload_workflow`, or `refresh_all`, so after a YAML
+  reload the workflow manager served the new configuration while
+  structured-output validation kept enforcing models compiled from the old
+  one. The structured-output subsystem now owns an explicit invalidation seam
+  (`invalidate_workflow_structured_outputs` /
+  `invalidate_all_workflow_structured_outputs`) that atomically drops all
+  compiled state for a workflow, and the manager invokes it from every
+  configuration-changing lifecycle operation — `reload_workflow`,
+  `unload_workflow`, `refresh_all`, and `initialize_workflows` (root
+  switches/reinitialization). A reload whose replacement configuration fails
+  validation now fails closed on every lifecycle surface: the prior config,
+  loaded-workflow record, and compiled models are evicted, and the manager
+  records one explicit error-state entry instead of continuing to report the
+  prior workflow as successfully loaded.
+
+### Added
+
+- **Executable application-family contracts (ADR 0007 Slice 5D-0B1)**:
+  the offline compiler now declares truthful per-family dispositions,
+  mutually exclusive application/module/workflow path scopes, typed artifact
+  and integration implementation relations, narrow family-specific assignment
+  kinds, schema-pinned closed outputs, semantic identity bindings, and exact
+  validator ownership. `CompilationPlan.gaps` remains the literal emitted gap
+  set; latent diagnostics are separate. The canonical integration path is now
+  `config/integrations.yaml`. No renderer, runnable bundle, AG2 execution,
+  production cutover, evaluation, or hosted-product authority was added;
+  `AppBuildPlan` remains the live planning authority.
+
+- **Typed application and workflow semantic input closure (ADR 0007 Slice
+  5D-0A)**: graph-v2 now has closed application, provider-neutral auth,
+  application-integration, and logical workflow-topology payloads plus finite
+  optional-family selection/absence evidence. The offline projector consumes
+  current application schema, persisted integration-declaration, and workflow
+  bundle contracts without consulting `AppBuildPlan`, Git, hosted state, or
+  AG2 runtime identity. The sole layout registry records the corresponding
+  future source footprints. Production planning, rendering, execution,
+  persistence/publication, and capability advertisement remain unchanged;
+  downstream assignment and renderer gaps remain explicit for Slice 5D-0B.
+
+- **Offline immutable artifact revisions (ADR 0007 Slice 5C)**: added a closed,
+  content-addressed `ArtifactRevision` contract binding graph, implementation
+  binding, CompilationPlan, CompositionLedger, validation evidence, exact
+  bytes, and parent lineage. An isolated `ApplicationPublication` store uses a
+  generation-guarded Mongo compare-and-swap so concurrent Genesis or sibling
+  candidates cannot both become CURRENT. Cold restore verifies every blob and
+  canonical digest; validator receipts now bind to the exact assignment result
+  they validated. The substrate remains deliberately production-unwired:
+  AppBuildPlan and BuildRecord still own live planning/publication until Slice
+  5D, and no AG2 behavior changes.
+
+- **Offline assignment artifact composition (ADR 0007 Slice 5B)**: added a
+  pure Factory-participant admission resolver, closed structured-output and
+  validator-backed `AssignmentArtifactResult`, and a content-free canonical
+  `CompositionLedger` paired with runtime bundle bytes. Composition now proves
+  exact plan-unit/path accounting, collision-free ownership, base-artifact
+  reuse, and explicit removal in offline tests. The obsolete parallel
+  `WorkAssignment` worker/executor/retry prototype was removed. Production
+  remains unwired: AppBuildPlan still owns live planning and AG2 still owns
+  participant identity and task lifecycle.
+
+- **Offline executable plan contracts (ADR 0007 Slice 5A)**: CompilationPlan
+  registry snapshots and family units now pin closed assignment-kind,
+  validator, and workflow structured-output identities for bounded
+  `agent_author` units. Aggregate-only `PlanUnitRef` resolution, exact semantic
+  source/dependency context references, and the replacement
+  `ApprovedAssignmentSpec` compiler derive paths and dependencies solely from
+  cold-validated plan authority. Regeneration reuse also pins the complete
+  authoring contract, including the resolved structured-output schema digest,
+  so a contract change cannot silently reuse stale agent-authored bytes. The
+  substrate remains deliberately unwired:
+  AppBuildPlan is still the sole production planning authority, AG2 executes no
+  new work, and deterministic Slice 4C materialization rejects `agent_author`.
+
+- **ADR 0008 (Proposed): Deterministic Engineering Context** — documents the
+  entitlement contract for software-engineering assignments (Mozaiks owns
+  WHAT an assignment may know; AG2 owns HOW it becomes runtime context), the
+  prompt/schema/Skills authoring policy, retrieval grants, symbolic context
+  budget classes, the determinism boundary, AppGenerator decomposition and
+  user-facing-state rules, the superseded-mechanism cleanup discipline, and
+  slice placement (no 4C impact; Slice 5 landing-zone grammars; post-Slice-5
+  implementation; Slice 6 closure-driven scoping). Companion evidence
+  inventory at docs/architecture/workflows/appgenerator-context-debt.md.
+  Documentation only — no runtime behavior changes.
+
+- **Deterministic offline page materialization (ADR 0007 Slice 4C)**: a pure
+  renderer materializes canonical `app_ui_page_schema` bytes from a validated
+  graph-v2 payload closure, its CompilationPlan unit's complete source
+  footprint, and the accepted graph-v2 ImplementationBinding — with one
+  canonical serialization (declaration-order YAML, omitted absent facts,
+  UTF-8/LF, no timestamps or provenance) proven byte-identical across
+  repeated runs, reordered inputs, and fresh processes. Implementation
+  resolution fails closed on any missing, wrong-family, wrong-materializer,
+  wrong-version, or wrong-graph binding with no fallback to historical
+  generators. `preserve_unowned` units place exact digest-verified bytes via
+  the existing `ChildContractRef` identity (empty files preserved, tampering
+  rejected); unsupported families stay typed gaps or explicit
+  handoff/deferred/unsupplied reports — nothing is silently omitted or
+  invented. Selective rematerialization drives the 4B regeneration closure: a
+  linked semantic section change rerenders only the affected page unit while
+  every unaffected output is reused byte-for-byte, and the proof suite
+  validates, loads, and boots both the base and successor bundles through the
+  real acceptance gate, `AppLoader`, and platform lifespan. Offline-only:
+  no AG2 imports, no AppBuildPlan consultation, no production wiring — the
+  agent-produced `AppBuildPlan` remains the sole operational authority until
+  the Slice 5 cutover.
+
+- **Renderer-input closure prerequisite (ADR 0007 Slice 4C, offline-only)**:
+  graph-v2 page payloads now retain the canonical page identifier, route,
+  page type, layout, shell mode, roles, navigation, metadata, and validated
+  runtime section declaratives required to reconstruct the bounded page-schema
+  corpus without invention. CompilationPlan units pin complete canonical
+  linked-node and edge footprints; renderer-incomplete families remain typed
+  gaps, while opaque executable/model-authored UTF-8 bytes are preserved
+  exactly under digest-matched `ChildContractRef` identities. The existing
+  layout registry now declares truthful materializer categories, and the
+  implementation binding pins graph-v2-compatible materializer/family
+  implementation versions. This adds no renderer, production cutover, or
+  capability advertisement; AppBuildPlan remains runtime authority.
+
+- **Aggregate CompilationPlan derivation (ADR 0007 Slice 4B, offline-only)**:
+  one deterministic authoritative plan per immutable graph identity, derived
+  solely from validated graph-v2 semantics, typed payloads, and the sole
+  layout registry. Embedded family-instance plans are non-authoritative
+  subdocuments (no reference type, registration, or execution surface of
+  their own); every registry family row is disposed (render /
+  reuse-from-base / preserve-unowned / input-only / external-handoff /
+  inapplicable) or carried as an explicit typed gap — binding-owned
+  conditions and renderer resolution defer to the next slice, never guessed.
+  Portable-path output ownership with case-fold and prefix collision
+  rejection, dependency ordering from the registry's total order, complete
+  digest closure (payload -> graph -> plan Merkle chain), and a pure
+  regeneration-closure function that partitions plan units into
+  affected/reusable/added/removed for Refinement Runs without touching
+  production refinement authority. The agent-produced AppBuildPlan remains
+  the sole active operational plan; no production code consumes the new
+  contract and no capability is advertised.
+
+### Fixed
+
+- **Generated application containers now boot through the packaged OSS platform host**:
+  AppGenerator's provider-neutral Dockerfile uses
+  `mozaiks serve . --host platform` with the declared listen address and
+  container port, so a standalone exported workspace starts without an
+  undeclared repository-local launcher. CI resolves the packaged CLI
+  entrypoint and smoke-tests a representative materialized app image against
+  MongoDB through health, page, and module-action requests.
+
+- **Distributed same-chat exclusion is now enforced (issue #426, sub-slice A)**:
+  the MongoDB chat lock at
+  `mozaiksai/core/runtime/persistence/distributed_lock.py` — previously dead
+  code with zero call sites — is rebuilt as a renewable chat execution lease
+  and wired into every production start/resume/restart path (the
+  `handle_user_input_from_api` funnel: HTTP input, WebSocket start/switch
+  handlers, host auto-start, journey spawns, and live paused-run
+  continuation). At most one runtime instance can execute a mutable run for a
+  given `(app_id, chat_id)` at a time; distinct chats and tenants proceed
+  independently, and read-only paths (history replay, reconnect) take no
+  lock. The lease is renewed for the length of the protected operation,
+  released at a durably persisted terminal or human-waiting boundary
+  (including on exceptions and cancellation), and a stale holder can never
+  delete a successor's lease. After confirmed lease loss (failed or
+  unprovable renewal), the protected execution is cancelled and further
+  durable session, workflow UI, AG2 stream, and AG2 Network knowledge/WAL
+  writes for that chat are refused in-process. A still-running local holder
+  cannot be hidden by a same-process successor. Operating modes are explicit: `required`
+  (fail-closed distributed exclusion whenever database persistence is
+  enabled; index or acquisition-authority failures remain distinct from
+  ordinary contention and fail closed instead of degrading to a cosmetic
+  lock) and `local` (explicit
+  single-process serialization only), overridable via
+  `MOZAIKS_CHAT_LOCK_MODE`. Contention, unavailable authority, renewal loss,
+  and release failure each emit distinct diagnostics (`CHAT_LOCK_BUSY`,
+  `CHAT_LOCK_AUTHORITY_UNAVAILABLE`, `CHAT_LOCK_RENEWAL_LOST`,
+  `CHAT_LOCK_RELEASE_FAILED`). Lock documents now live in the same system
+  database as the chat state they protect. One residual window remains
+  documented and out of this slice: storage-level fencing tokens for a
+  single in-flight write by a holder stalled past its TTL.
+
+### Added
+
+- **Projection emits graph v2 + typed payloads (ADR 0007 Slice 3E)**: the
+  offline source projection now produces `mozaiks.semantic_projection.v2` —
+  a Merkle-rooted `mozaiks.semantic_graph.v2` with one typed payload per node
+  and bijective payload closure validated at build. Former "not representable
+  by SemanticGraph v1" gap families become projected content: page/section
+  ordering as explicit dense positions, plan/limit/meter/product facts
+  (integer minor-unit prices, ISO-4217 currency), module/action/permission/
+  event descriptions, and endpoint trigger bindings. Content is never
+  invented — payload content fields are required-nullable (`None` when the
+  source carries no such fact, omission is invalid), and absent collections
+  remain distinct from explicitly empty collections while structural rules
+  stay strict. Facts
+  owned by edges or taxonomy are never duplicated into payloads. Navigation
+  ordering, plan catalog ordering, intra-section binding composition, and
+  renderer file lists remain explicit typed gaps. The source/graph fact
+  equivalence proof now covers payload content digests, so projection honesty
+  extends to content, not just identity.
 
 - **Typed semantic payloads + Merkle-rooted graph v2 (ADR 0007 Slice 2E)**:
   every semantic node kind now has exactly one strict payload variant
@@ -474,6 +1743,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
+- Retired write-only workflow `module_interface.yaml` v1 generation and the
+  non-materializing `agent_backend_integration` AppGenerator build-task type.
+  Existing workflow metadata and module callbacks are unchanged.
+
 - **Generated UI browser acceptance retired result vocabulary**: the
   `scripts/generated_ui_acceptance.py` output no longer exposes top-level
   `status`, `findings`, `revision_count`, or `revision_request` fields. Browser
@@ -696,9 +1969,9 @@ This project follows a practical pre-1.0 changelog format:
 ### Fixed
 
 - Ask-mode human-support escalation now short-circuits the LLM turn after rendering the support handoff UI, so users do not receive an extra assistant answer after requesting an operator.
-- **`infra/docker/Dockerfile` no longer references removed root files** (`run_server.py`, `shared_app.py`, `workflows/`, `config/`): it now installs the real `mozaiks` package from `pyproject.toml` (fixing missing runtime dependencies such as `jsonschema` and `limits` that the old `requirements.txt`-based build silently dropped) and serves the first-party `factory_app/` workspace via `mozaiks serve . --host studio`. Verified with a local `docker build` + container smoke test against MongoDB.
+- **`infra/docker/Dockerfile` no longer references removed root launcher and workspace files**: it now installs the real `mozaiks` package from `pyproject.toml` (fixing missing runtime dependencies such as `jsonschema` and `limits` that the old `requirements.txt`-based build silently dropped) and serves the first-party `factory_app/` workspace via `mozaiks serve . --host studio`. Verified with a local `docker build` + container smoke test against MongoDB.
 - **Helm chart liveness probe pointed at a 404** (`infra/helm/mozaiks/values.yaml`): `livenessProbe.httpGet.path` was `/api/health/liveness`, which does not exist; the real route is `/api/health/live` (`mozaiksai/hosts/runtime.py`). Verified by rendering the chart and confirming both probe paths resolve.
-- **`infra/compose/docker-compose.yml` dev `app` service used a broken `watchmedo`/`run_server.py` command** with no `watchdog` dependency installed: replaced with `mozaiks serve . --host studio --reload`, plus a `PYTHONPATH=/app` override so the bind-mounted repo shadows the image's installed first-party packages for live-reload dev. Verified end to end against a real container.
+- **`infra/compose/docker-compose.yml` dev `app` service used a broken removed-launcher command** with no `watchdog` dependency installed: replaced with `mozaiks serve . --host studio --reload`, plus a `PYTHONPATH=/app` override so the bind-mounted repo shadows the image's installed first-party packages for live-reload dev. Verified end to end against a real container.
 
 ### Added
 
@@ -2634,3 +3907,5 @@ This project follows a practical pre-1.0 changelog format:
 - Packaged CLI entrypoint with `mozaiks --version`.
 - Tag-driven GitHub Actions release flow for building, smoke-testing, creating a GitHub release, and publishing to PyPI.
 
+- Preserve untouched app files during partial AppGenerator revisions using the
+  selected artifact's verified archive as the baseline for agents and assembly.

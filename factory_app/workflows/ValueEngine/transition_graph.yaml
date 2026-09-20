@@ -14,9 +14,45 @@ transition_rules:
   transition_target: AgentTarget
 
 - source_agent: GapAnalysisAgent
-  target_agent: user
+  target_agent: terminate
   transition_type: after_turn
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: GapAnalysisAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: concept_review_outcome
+  condition_value: approved
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+
+- source_agent: GapAnalysisAgent
+  target_agent: user
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: concept_review_outcome
+  condition_value: changes_requested
   transition_target: RevertToUserTarget
+
+- source_agent: GapAnalysisAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: concept_review_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: GapAnalysisAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: concept_review_outcome
+  condition_value: cancelled
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 
 # Conditional rules win over same-source after_turn fallbacks when their context matches.
 - source_agent: ValueInterviewAgent

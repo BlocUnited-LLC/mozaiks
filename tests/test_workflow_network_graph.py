@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
+from ag2.events import BaseEvent, ToolCallEvent, ToolResultEvent
 from ag2.network import (
     EV_PACKET,
     Envelope,
+    ToolCalled,
     TransitionGraph,
     WorkflowAdapter,
     WorkflowState,
 )
 
+from mozaiksai.core.adapters.ag2_transition_conditions import SourceScopedToolCalled
 from mozaiksai.core.workflow.agents.transition_graph import wire_transition_graph_with_debugging
 from mozaiksai.core.workflow.execution.network_graph import (
     WorkflowGraphCompileError,
@@ -19,6 +23,22 @@ from mozaiksai.core.workflow.execution.network_graph import (
     resolve_next_agent,
 )
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+
+@pytest.mark.parametrize("repair_target", ["ServiceAgent", None])
+def test_appgenerator_backend_output_always_crosses_runtime_quality(repair_target):
+    root = Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator"
+    rules = yaml.safe_load((root / "transition_graph.yaml").read_text(encoding="utf-8"))["transition_rules"]
+    config = yaml.safe_load((root / "agents.yaml").read_text(encoding="utf-8"))
+    graph = compile_transition_rules_to_graph(
+        rules, initial_agent_name="ServiceAgent",
+        agent_id_by_name={agent["name"]: agent["name"] for agent in config["agents"]},
+        max_turns=10,
+    )
+    assert resolve_next_agent(
+        graph, current_agent_name="ServiceAgent",
+        context_variables={"bundle_repair_target": repair_target, "task_run_mode": False},
+    ) == "ModuleRuntimeQualityAgent"
 
 
 def test_transition_graph_uses_only_canonical_terminate_literal():
@@ -267,40 +287,166 @@ def test_context_expression_condition_uses_ag2_context_expression_and_is_source_
     )
 
 
-def test_tool_called_condition_uses_ag2_routing_tool_packet():
-    graph = compile_transition_rules_to_graph(
+@pytest.fixture
+def tool_called_graph() -> TransitionGraph:
+    return compile_transition_rules_to_graph(
         [
+            {
+                "source_agent": "PlannerAgent",
+                "target_agent": "user",
+                "transition_type": "after_turn",
+            },
             {
                 "source_agent": "PlannerAgent",
                 "target_agent": "ReviewAgent",
                 "transition_type": "condition",
                 "condition_type": "tool_called",
                 "tool_name": "route_to_review",
-            }
+            },
+            {
+                "source_agent": "PlannerAgent",
+                "target_agent": "WorkerAgent",
+                "transition_type": "condition",
+                "condition_type": "tool_called",
+                "tool_name": "route_to_review",
+            },
         ],
         initial_agent_name="PlannerAgent",
-        agent_id_by_name={"PlannerAgent": "PlannerAgent", "ReviewAgent": "ReviewAgent"},
+        agent_id_by_name={
+            "PlannerAgent": "agent-planner",
+            "ReviewAgent": "agent-review",
+            "WorkerAgent": "agent-worker",
+        },
     )
+
+
+def _build_tool_round_packet(
+    graph: TransitionGraph,
+    *,
+    sender_id: str,
+    body: str,
+    events: list[BaseEvent],
+) -> tuple[Envelope | None, WorkflowState]:
     state = WorkflowState(
-        participant_order=["PlannerAgent", "ReviewAgent"],
-        expected_next_speaker="PlannerAgent",
-        last_speaker_id="PlannerAgent",
+        participant_order=["agent-planner", "agent-review", "agent-worker", "user"],
+        expected_next_speaker=sender_id,
+        last_speaker_id=sender_id,
         turn_count=1,
         creator_id="user",
         graph_data=graph.to_dict(),
         context_vars={},
     )
-    envelope = Envelope(
-        channel_id="mozaiks-local-routing",
-        sender_id="PlannerAgent",
-        audience=None,
-        event_type=EV_PACKET,
-        event_data={"routing": {"tool": "route_to_review"}},
+    packet = WorkflowAdapter().build_round_envelope(
+        metadata=SimpleNamespace(channel_id="mozaiks-local-routing"),
+        sender_id=sender_id,
+        reply=SimpleNamespace(body=body),
+        events=events,
+        state=state,
+        hub=SimpleNamespace(name_to_id_map=lambda: {}),
+    )
+    return packet, state
+
+
+def test_tool_called_condition_round_trip_retains_native_subtype_and_source(
+    tool_called_graph: TransitionGraph,
+) -> None:
+    serialized = tool_called_graph.to_dict()
+    rehydrated = TransitionGraph.loads(serialized)
+
+    assert rehydrated.to_dict() == serialized
+    conditions = [
+        transition.when
+        for transition in rehydrated.transitions
+        if isinstance(transition.when, SourceScopedToolCalled)
+    ]
+    assert len(conditions) == 2
+    for condition in conditions:
+        assert isinstance(condition, ToolCalled)
+        assert condition.name == "mozaiks_source_tool_called"
+        assert condition.source_agent_id == "agent-planner"
+        assert condition.tool_name == "route_to_review"
+    assert [
+        transition["when"]["args"]
+        for transition in serialized["transitions"]
+        if transition["when"]["name"] == "mozaiks_source_tool_called"
+    ] == [{"source_agent_id": "agent-planner", "tool_name": "route_to_review"}] * 2
+
+
+@pytest.mark.parametrize("body", ["", "The review is ready."])
+def test_tool_called_condition_uses_native_events_before_fallback_and_later_matching_rule(
+    tool_called_graph: TransitionGraph,
+    body: str,
+) -> None:
+    call = ToolCallEvent("route_to_review")
+    packet, state = _build_tool_round_packet(
+        TransitionGraph.loads(tool_called_graph.to_dict()),
+        sender_id="agent-planner",
+        body=body,
+        events=[call, ToolResultEvent.from_call(call, "saved")],
     )
 
-    next_state = WorkflowAdapter().fold(envelope, state)
+    assert packet is not None
+    assert packet.event_type == EV_PACKET
+    assert packet.event_data["body"] == body
+    assert packet.event_data["routing"] == {
+        "kind": "handoff",
+        "tool": "route_to_review",
+        "reason": "",
+    }
+    next_state = WorkflowAdapter().fold(packet, state)
+    assert next_state.expected_next_speaker == "agent-review"
 
-    assert next_state.expected_next_speaker == "ReviewAgent"
+
+@pytest.mark.parametrize("body", ["", "The review is ready."])
+def test_tool_called_native_packet_keeps_source_scope_for_same_named_tool(
+    tool_called_graph: TransitionGraph,
+    body: str,
+) -> None:
+    call = ToolCallEvent("route_to_review")
+    packet, state = _build_tool_round_packet(
+        TransitionGraph.loads(tool_called_graph.to_dict()),
+        sender_id="agent-worker",
+        body=body,
+        events=[call, ToolResultEvent.from_call(call, "saved")],
+    )
+
+    assert packet is not None
+    assert packet.event_data["routing"]["tool"] == "route_to_review"
+    assert "target" not in packet.event_data["routing"]
+    next_state = WorkflowAdapter().fold(packet, state)
+    assert next_state.expected_next_speaker is None
+    assert next_state.pending_close_reason == "no_transition_matched"
+
+
+@pytest.mark.parametrize("body", ["", "route_to_review"])
+@pytest.mark.parametrize("event_case", ["text_only", "result_only", "wrong_tool", "unpaired_result"])
+def test_tool_called_requires_matching_native_call_event(
+    tool_called_graph: TransitionGraph,
+    body: str,
+    event_case: str,
+) -> None:
+    matching_call = ToolCallEvent("route_to_review")
+    matching_result = ToolResultEvent.from_call(matching_call, "saved")
+    other_call = ToolCallEvent("other_tool")
+    event_cases: dict[str, list[BaseEvent]] = {
+        "text_only": [],
+        "result_only": [matching_result],
+        "wrong_tool": [other_call, ToolResultEvent.from_call(other_call, "route_to_review")],
+        "unpaired_result": [other_call, matching_result],
+    }
+    packet, state = _build_tool_round_packet(
+        tool_called_graph,
+        sender_id="agent-planner",
+        body=body,
+        events=event_cases[event_case],
+    )
+
+    if not body:
+        assert packet is None
+    else:
+        assert packet is not None
+        assert packet.event_data["routing"] == {"kind": "text"}
+        assert WorkflowAdapter().fold(packet, state).expected_next_speaker == "user"
 
 
 def test_llm_transition_conditions_are_rejected():
@@ -433,6 +579,62 @@ def test_factory_workflow_transition_rules_compile_to_ag2_network_graphs():
         assert isinstance(graph, TransitionGraph), transition_path
 
 
+def test_theme_capture_user_reply_returns_to_interview():
+    path = Path("factory_app/workflows/ThemeCapture/transition_graph.yaml")
+    rules = yaml.safe_load(path.read_text(encoding="utf-8"))["transition_rules"]
+    names = ["ThemeInterviewAgent", "ThemeAnalysisAgent", "ThemeConfigAssemblerAgent"]
+    graph = compile_transition_rules_to_graph(
+        rules,
+        initial_agent_name=names[0],
+        agent_id_by_name={name: name for name in names},
+    )
+    assert resolve_next_agent(
+        graph,
+        current_agent_name="user",
+        context_variables={"interview_outcome": "needs_input"},
+        agent_name_by_id={name: name for name in names},
+        participant_order=[*names, "user"],
+    ) == "ThemeInterviewAgent"
+
+
+def test_theme_analysis_advances_without_model_routing_marker():
+    path = Path("factory_app/workflows/ThemeCapture/transition_graph.yaml")
+    rules = yaml.safe_load(path.read_text(encoding="utf-8"))["transition_rules"]
+    names = ["ThemeInterviewAgent", "ThemeAnalysisAgent", "ThemeConfigAssemblerAgent"]
+    graph = compile_transition_rules_to_graph(
+        rules,
+        initial_agent_name=names[0],
+        agent_id_by_name={name: name for name in names},
+    )
+    assert resolve_next_agent(
+        graph,
+        current_agent_name="ThemeAnalysisAgent",
+        context_variables={"interview_outcome": "ready"},
+        agent_name_by_id={name: name for name in names},
+        participant_order=[*names, "user"],
+    ) == "ThemeConfigAssemblerAgent"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [("needs_input", "user"), ("ready", "ThemeAnalysisAgent"), ("blocked", "terminate")],
+)
+def test_theme_interview_routes_validated_readiness(outcome, expected):
+    path = Path("factory_app/workflows/ThemeCapture/transition_graph.yaml")
+    rules = yaml.safe_load(path.read_text(encoding="utf-8"))["transition_rules"]
+    names = ["ThemeInterviewAgent", "ThemeAnalysisAgent", "ThemeConfigAssemblerAgent"]
+    graph = compile_transition_rules_to_graph(
+        rules, initial_agent_name=names[0], agent_id_by_name={name: name for name in names},
+    )
+    assert resolve_next_agent(
+        graph,
+        current_agent_name="ThemeInterviewAgent",
+        context_variables={"interview_outcome": outcome},
+        agent_name_by_id={name: name for name in names},
+        participant_order=[*names, "user"],
+    ) == expected
+
+
 def test_appgenerator_validation_routes_repair_context_before_user_fallback():
     workflow_dir = Path("factory_app/workflows/AppGenerator")
     transitions = yaml.safe_load((workflow_dir / "transition_graph.yaml").read_text(encoding="utf-8")) or {}
@@ -461,15 +663,13 @@ def test_appgenerator_validation_routes_repair_context_before_user_fallback():
             participant_order=participant_order,
         )
 
-    assert route({"workflow_integration_repair_status": "needs_revision"}) == "ConfigMiddlewareAgent"
     assert route({"bundle_repair_target": "AppSchemaAgent"}) == "AppSchemaAgent"
     assert route({"bundle_repair_target": "ConfigMiddlewareAgent"}) == "ConfigMiddlewareAgent"
     assert route({"bundle_repair_target": "ServiceAgent"}) == "ServiceAgent"
     assert route({"bundle_repair_target": "FrontendStubAgent"}) == "FrontendStubAgent"
     assert route({"bundle_repair_status": "blocked"}) == "user"
-    assert route({"workflow_integration_repair_status": "blocked"}) == "user"
     assert route({"app_validation_status": "failed"}) == "user"
-    assert route({"integration_tests_passed": True}) == "InfraScaffoldAgent"
+    assert route({"integration_tests_passed": True}) == "DownloadAgent"
     assert route({}) == "user"
 
 
@@ -503,3 +703,47 @@ def test_transition_graph_validator_accepts_user_as_special_source(monkeypatch: 
     assert summary["missing_target_agents"] == []
     assert summary["errors"] == []
 
+
+
+@pytest.mark.parametrize("declared,target_agent", [
+    ("RevertToUserTarget", "FinalAgent"),
+    ("NotARealTarget", "FinalAgent"),
+    ("NotARealTarget", "user"),
+])
+def test_declared_transition_target_must_match_its_destination(declared, target_agent):
+    with pytest.raises(WorkflowGraphCompileError):
+        compile_transition_rules_to_graph(
+            [
+                {
+                    "source_agent": "FinalAgent",
+                    "target_agent": target_agent,
+                    "transition_type": "after_turn",
+                    "transition_target": declared,
+                }
+            ],
+            initial_agent_name="FinalAgent",
+            agent_id_by_name={"FinalAgent": "FinalAgent", "user": "user"},
+            max_turns=4,
+        )
+
+
+@pytest.mark.parametrize("declared,target_agent", [
+    ("RevertToUserTarget", "user"),
+    ("AgentTarget", "FinalAgent"),
+    (None, "user"),
+])
+def test_consistent_declared_transition_targets_compile(declared, target_agent):
+    rule = {
+        "source_agent": "FinalAgent",
+        "target_agent": target_agent,
+        "transition_type": "after_turn",
+    }
+    if declared is not None:
+        rule["transition_target"] = declared
+    graph = compile_transition_rules_to_graph(
+        [rule],
+        initial_agent_name="FinalAgent",
+        agent_id_by_name={"FinalAgent": "FinalAgent", "user": "user"},
+        max_turns=4,
+    )
+    assert graph.transitions

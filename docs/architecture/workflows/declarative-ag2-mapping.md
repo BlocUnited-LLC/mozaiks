@@ -24,10 +24,10 @@ Those are Mozaiks layers that exist before a workflow starts.
 | --- | --- | --- |
 | `orchestrator.yaml` | pattern, turns, startup behavior | mostly AG2-native |
 | `agents.yaml` | agent roster and prompts | AG2-native with Mozaiks composition helpers |
-| `transition_graph.yaml` | routing rules inside the workflow | AG2 1.0 beta WorkflowAdapter / TransitionGraph |
+| `transition_graph.yaml` | routing rules inside the workflow | AG2 1.0 WorkflowAdapter / TransitionGraph |
 | `context_variables.yaml` | workflow state bindings | AG2-native container plus Mozaiks adapters |
 | `tools.yaml` | tool declarations | AG2 tool calling plus Mozaiks wrappers |
-| `middleware.yaml` | prompt injection declarations | Mozaiks declarations compiled to AG2 1.0 beta middleware |
+| `middleware.yaml` | prompt injection declarations | Mozaiks declarations compiled to AG2 1.0 middleware |
 | `structured_outputs.yaml` | typed runtime validation | Mozaiks layer |
 | `ui_config.yaml` | frontend exposure metadata | frontend-only |
 | `extended_orchestration/task_batches.yaml` | workflow-local deterministic task DAG contract | Mozaiks contract layer executed through AG2 where possible |
@@ -58,9 +58,9 @@ tool binding.
 
 ### `transition_graph.yaml`
 
-Maps to AG2 1.0 beta Network transition conditions and targets. Mozaiks compiles
+Maps to AG2 1.0 Network transition conditions and targets. Mozaiks compiles
 the rules into a `TransitionGraph`; turn-to-turn routing is resolved through
-AG2 1.0 beta `WorkflowAdapter`.
+AG2 1.0 `WorkflowAdapter`.
 
 Runtime compilation rules:
 
@@ -68,12 +68,21 @@ Runtime compilation rules:
 - `condition_type: context_equals` rules compile to a source-scoped adapter over
   AG2 `ContextEquals`
 - `condition_type: context_expression` rules compile to a source-scoped custom
-  AG2 1.0 beta `TransitionCondition` that evaluates Mozaiks
+  AG2 1.0 `TransitionCondition` that evaluates Mozaiks
   `${context_variable}` syntax against workflow context state
-- `condition_type: tool_called` rules compile to a source-scoped adapter over
-  AG2 `ToolCalled`
+- `condition_type: tool_called` rules compile to `SourceScopedToolCalled`, a
+  native AG2 `ToolCalled` subclass that also checks the declared source agent
 - `target_agent: user` pauses the run for user input
 - `target_agent: terminate` compiles to `TerminateTarget`
+
+AG2 derives tool routing from its native `ToolCallEvent` stream, including turns
+with an empty message body. The registered `mozaiks_source_tool_called` condition
+retains both `source_agent_id` and `tool_name` through graph serialization and
+rehydration. Static tool routing still evaluates the source predicate when AG2
+selects the target: another agent calling the same tool cannot satisfy that
+rule. Text mentioning the tool and a `ToolResultEvent` without its matching
+call do not establish a tool transition. AG2 owns event interpretation, packet
+construction, transition evaluation, and workflow state progression.
 
 LLM classification belongs before routing: a Refinement Engine route, agent tool, or
 structured output sets context state; the graph then routes deterministically.
@@ -90,7 +99,7 @@ Termination is declarative. A workflow bundle ends through
 
 The runtime does not inspect message text for completion and does not use a
 separate Python termination handler. During execution, Mozaiks resolves the next
-speaker through AG2 1.0 beta `WorkflowAdapter`; when that resolution returns AG2
+speaker through AG2 1.0 `WorkflowAdapter`; when that resolution returns AG2
 `TerminateTarget`, the turn loop reports `run_completed=true` and the runtime
 marks the app-scoped `ChatSessions` run as completed. `max_turns` remains a
 safety cap, not the primary happy-path completion mechanism.
@@ -113,6 +122,25 @@ agents:
     variables:
       - var_name
 ```
+
+`ContextAuthorityPolicy` owns write permission. The factory-injected
+`ContextVariablesBridge` checks each set or delete before accepting it. A
+declared `deterministic_tool` writer is selected only inside the trusted callable
+invocation installed by the agent factory, bound to that exact bridge, policy
+instance, and `(workflow_name, app_id, chat_id)` run. Tool arguments cannot
+replace the injected bridge or choose its writer identity. Ordinary bridge
+access remains `context_bridge`; a variable declaration alone does not establish
+tool provenance.
+
+The invocation's deterministic attribution expires when the callable exits,
+including on failure. Revocation also applies to invocation context inherited
+by unfinished child tasks. Each pending set or delete retains the writer that
+authorized that operation; later operations are checked independently. Before
+publication, the packet adapter verifies the same policy/run binding and checks
+every pending operation again under its retained writer. Updates already present
+in an outgoing packet receive only `context_bridge` attribution. Authorized
+updates then reach AG2's native fold before `ContextEquals` selects the next
+speaker.
 
 ### `tools.yaml`
 
@@ -139,7 +167,7 @@ lifecycle_tools: []
 
 ### `middleware.yaml`
 
-Maps to Mozaiks prompt-injection declarations. Runtime registration is AG2 1.0 beta
+Maps to Mozaiks prompt-injection declarations. Runtime registration is AG2 1.0
 agent middleware, not prior hook registration style. Lifecycle behavior belongs
 in `tools.yaml` `lifecycle_tools`.
 
@@ -165,6 +193,7 @@ Used for:
 Canonical shape:
 
 ```yaml
+schema_version: mozaiks.structured_outputs.v1
 registry:
   AgentName: ModelName
 models:

@@ -55,6 +55,13 @@ schema:
           Extra params added to existing actions from the base template.
           AppGenerator adds these to the handler.py override of that action method.
           The base_handler.py method signature stays unchanged.
+
+          Pack action request contracts are closed (every module.yaml
+          input_schema object declares additionalProperties: false), so every
+          extra param must also be added to that action's module.yaml
+          input_schema as an explicitly declared property — otherwise runtime
+          dispatch validation rejects requests carrying it. Extensions keep the
+          schema closed; they never reopen additionalProperties.
         items:
           action_id:
             type: string

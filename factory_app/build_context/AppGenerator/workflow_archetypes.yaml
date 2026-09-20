@@ -1,17 +1,17 @@
 version: 1
 
 description: >
-  Advisory workflow archetypes used as prompt-time guidance for AppPlanAgent
+  Advisory workflow archetypes used as prompt-time guidance for app planning
   when planning workflow-surface capability packs. These archetypes define the
   expected orchestrator shape, canonical agent sequence, tool constraints,
   structured output field defaults, and output invariants for common workflow
   patterns.
 
   Archetypes do not change the canonical structured output models.
-  They guide AppPlanAgent and downstream workflow authors in selecting the right
+  They guide app planning and workflow authoring in selecting the right
   orchestrator shape and agent conventions for each workflow capability pack.
 
-  Injected into AppPlanAgent via [WORKFLOW ARCHETYPE CONTEXT].
+  Injected into app planning via [WORKFLOW ARCHETYPE CONTEXT].
 
 archetypes:
 
@@ -29,6 +29,7 @@ archetypes:
     orchestration_pattern: Feedback Loop
     capability_id_suffix: "-review-workflow"
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: false
       workflow_startup_mode: BackendOnly
       max_turns: 20
@@ -49,7 +50,7 @@ archetypes:
           structured_outputs_required: true
       - ResultAgent:
           role: >
-            Calls record_review_result on the owning module with the ReviewerAgent
+            Calls record_review_result on the owning module with the supplied structured review
             decision and feedback. Confirms the write succeeded. Emits NEXT to close.
           max_consecutive_auto_reply: 4
           structured_outputs_required: false
@@ -72,6 +73,7 @@ archetypes:
     orchestration_pattern: Pipeline
     capability_id_suffix: "-analysis-workflow"
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: false
       workflow_startup_mode: BackendOnly
       max_turns: 15
@@ -91,7 +93,7 @@ archetypes:
           structured_outputs_required: true
       - ResultWriterAgent:
           role: >
-            Calls store_analysis_result on the owning module with the AnalysisAgent output.
+            Calls store_analysis_result on the owning module with the supplied typed analysis_result object.
             Confirms the write succeeded.
           max_consecutive_auto_reply: 3
           structured_outputs_required: false
@@ -114,6 +116,7 @@ archetypes:
     capability_id_suffix: "-extraction-workflow"
     task_batches_required: true
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: false
       workflow_startup_mode: BackendOnly
       max_turns: 30
@@ -157,6 +160,7 @@ archetypes:
       - "High-risk or irreversible actions must be deferred to a downstream execution workflow."
       - "Applicable to: compliance review, migration planning, deployment remediation plan, data cleanup plan, content moderation proposal, change proposal review, deployment impact assessment."
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: true
       max_turns: 30
       workflow_startup_mode: AgentDriven
@@ -180,7 +184,7 @@ archetypes:
       - OutputAgent:
           role: >
             Serializes the proposal into the top-level structured output model.
-            Must enforce all output invariants regardless of prior agent output.
+            Must enforce all output invariants regardless of supplied upstream proposal content.
             Output is JSON only — no prose.
           max_consecutive_auto_reply: 4
           structured_outputs_required: true
@@ -203,7 +207,7 @@ archetypes:
     structured_output_defaults:
       description: >
         Minimum required fields for the top-level output model of a proposal_only workflow.
-        OutputAgent must enforce the invariant fields regardless of prior agent output.
+        The final structured output must enforce the invariant fields regardless of supplied intermediate results.
       required_fields:
         proposal_id:
           type: str
@@ -216,9 +220,9 @@ archetypes:
         human_review_required:
           type: bool
           description: >
-            Always true. OutputAgent must enforce this as true regardless of what
-            prior agents produced. Schema-level invariant enforcement is a future enhancement;
-            OutputAgent prompt instructions are the current enforcement mechanism.
+            Always true regardless of supplied intermediate results. Schema-level invariant
+            enforcement is a future enhancement; the final output prompt instructions
+            are the current enforcement mechanism.
         status:
           type: str
           description: >
@@ -250,8 +254,8 @@ archetypes:
             approval state machine after review.
     output_invariants:
       description: >
-        OutputAgent must enforce these invariants in the final structured output.
-        They are enforced through explicit OutputAgent prompt instructions, not through
+        The final structured output must satisfy these invariants.
+        They are enforced through explicit final-output prompt instructions, not through
         schema-level constraints. A future enhancement may add schema-level invariant
         metadata to structured_outputs.yaml when schema-level invariants are
         introduced.
@@ -282,7 +286,7 @@ archetypes:
       - "All tool functions must start with list_, get_, read_, or save_."
       - "OutputAgent must have structured_outputs_required: true."
       - "OutputAgent [OUTPUT FORMAT] section must list all output invariants explicitly."
-      - "OutputAgent must enforce invariants regardless of what prior agents produced."
+      - "The final output must enforce invariants regardless of supplied intermediate results."
       - "Blocked/deferred phases must appear in the output — never silently omitted."
     blocked_phase_pattern:
       description: >
@@ -331,18 +335,18 @@ archetypes:
       - "The workflow is not exclusively a planning or review surface."
       - "Applicable to: chat assistant, onboarding wizard, content generation, form submission."
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: true
       workflow_startup_mode: AgentDriven
     tool_constraints:
       allowed:
         - "list_*, get_*, read_* — read-only tools always allowed"
-        - "Write-path module actions when declared in module_interface.yaml"
+        - "Write-path actions declared by the owning module contract"
         - "emit_event — publish domain events to the app event bus"
       forbidden:
         - "Do not implement business logic that belongs in a deterministic module."
         - "Do not call raw external APIs that bypass the app module action contract."
     hard_constraints:
-      - "Declare all module actions the workflow calls in module_interface.yaml."
       - "Emit domain events only through emit_event, not through direct module calls."
       - "Do not implement business logic that belongs in a deterministic module."
       - "Write-path actions must be declared in the plan before a downstream agent generates them."

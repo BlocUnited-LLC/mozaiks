@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import zipfile
 from importlib import import_module
 from pathlib import Path
 from unittest.mock import AsyncMock
+
+import pytest
+import yaml
 
 
 def _load_generate_and_download_module():
@@ -21,7 +25,13 @@ workflow_quality_gate_module = import_module(
 
 class _Context:
     def __init__(self, initial=None) -> None:
-        self.data = dict(initial or {})
+        self.data = {
+            "run_build_binding": {
+                "build_registry_id": "registry_fixture", "target_app_id": "target-app",
+                "build_id": "build-1", "phase": "genesis",
+            },
+            **dict(initial or {}),
+        }
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -72,6 +82,7 @@ def _minimal_workflow_files(
         }
     files = {
         "orchestrator.yaml": f"""
+schema_version: mozaiks.orchestrator.v1
 workflow_name: {workflow_name}
 max_turns: 4
 human_in_the_loop: false
@@ -85,7 +96,8 @@ triggers: {triggers or [{"type": "chat", "description": "Start the generated wor
             [
                 "agents:",
                 *[
-                    f"  - name: {agent}\n    system_message: {agent} executes workflow work."
+                    f"  - name: {agent}\n    system_message: {agent} executes workflow work.\n"
+                    "    structured_outputs_required: false"
                     for agent in agents
                 ],
             ]
@@ -109,6 +121,7 @@ transition_rules:
         ),
         "structured_outputs.yaml": """
 models: {}
+schema_version: mozaiks.structured_outputs.v1
 registry:
   PlannerAgent: null
   WorkerAgent: null
@@ -136,14 +149,23 @@ conveyors:
     ]
 
 
+@pytest.mark.parametrize("export_result", ["not_requested", {"success": True}, {"success": False}, None, "exception"])
 def test_generate_and_download_writes_bundle_files_and_creates_zip(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, export_result,
 ) -> None:
     """generate_and_download writes WorkflowBundleBuilderOutput files to disk and zips them."""
+    files = _minimal_workflow_files("ReviewWorkflow")
+    tools_file = next(item for item in files if item["filename"] == "tools.yaml")
+    tools_file["content"] = yaml.safe_dump({"tools": [{
+        "agent": "PlannerAgent", "file": "tools/total.py", "function": "total", "tool_type": "Agent_Tool",
+    }]})
+    files.append({"filename": "tools/total.py", "content": (
+        "async def total(values: list[int]) -> dict:\n    return {'total': sum(values)}\n"
+    )})
     bundle_results = _make_bundle_results([
         {
             "workflow_name": "ReviewWorkflow",
-            "files": _minimal_workflow_files("ReviewWorkflow"),
+            "files": files,
         }
     ])
 
@@ -151,19 +173,17 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
         {
             "chat_id": "chat-1",
             "app_id": "app-1",
-            "build_id": "build-1",
             "workflow_name": "AgentGenerator",
             "user_id": "user-1",
             "pack_name": "ReviewWorkflow",
+            "artifact_version_id": "av_1",
             "is_multi_workflow": False,
             "workflow_bundle_results": bundle_results,
         }
     )
 
     # Redirect output to tmp_path
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(generate_and_download_module, "_promote_workflow_to_app_workspace", lambda *a, **kw: None)
-    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "record_workflow_artifacts", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_api_url", lambda app_id: f"https://api.test/{app_id}")
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: f"wss://ws.test/{app_id}")
@@ -175,8 +195,15 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     monkeypatch.setattr(
         generate_and_download_module,
         "use_ui_tool",
-        AsyncMock(return_value={"status": "completed", "data": {}, "agentContext": {}}),
+        AsyncMock(return_value={
+            "status": "completed", "data": {}, "agentContext": {},
+            **({"action": "export_to_github"} if export_result != "not_requested" else {}),
+        }),
     )
+    monkeypatch.setattr(generate_and_download_module, "export_agent_workflow_to_github", AsyncMock(
+        return_value=export_result,
+        side_effect=TimeoutError("export timed out") if export_result == "exception" else None,
+    ))
 
     result = asyncio.run(
         generate_and_download_module.generate_and_download(
@@ -186,8 +213,14 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
         )
     )
 
-    assert result["status"] == "success"
+    succeeded = export_result in ("not_requested", {"success": True})
+    assert result["status"] == ("success" if succeeded else "error")
+    assert result["outcome"] == ("ready" if succeeded else "blocked")
     assert context.data["workflow_bundle_validation_status"] == "passed"
+    download_payload = generate_and_download_module.use_ui_tool.call_args.kwargs["payload"]
+    assert download_payload["artifact_version_id"] == "av_1"
+    assert download_payload["build_registry_id"] == context.get("run_build_binding")["build_registry_id"]
+    assert download_payload["app_id"] == "app-1"
     assert len(result["ui_files"]) == 1
     zip_entry = result["ui_files"][0]
     assert zip_entry["type"] == "zip"
@@ -195,12 +228,164 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
 
     zip_path = Path(zip_entry["path"])
     assert zip_path.exists()
-    assert zip_path.parent == tmp_path / "generated" / "workflows" / "app-1" / "build-1"
+    assert zip_path.parent == tmp_path / "generated" / "workflows" / "target-app" / "build-1"
     assert (zip_path.parent / "ReviewWorkflow" / "orchestrator.yaml").exists()
     with zipfile.ZipFile(zip_path) as zf:
         names = zf.namelist()
     assert any("orchestrator.yaml" in n for n in names)
     assert any("agents.yaml" in n for n in names)
+
+    from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
+
+    monkeypatch.setattr(UnifiedWorkflowManager, "_instance", None)
+    manager = UnifiedWorkflowManager(workflows_base_path=str(zip_path.parent))
+    info = manager.get_workflow_info("ReviewWorkflow")
+    assert info["status"] == "loaded", info["error"]
+
+    from mozaiksai.core.workflow.agents import tools as runtime_tools
+
+    monkeypatch.setattr(runtime_tools, "workflow_manager", manager)
+    loaded_tools = runtime_tools.load_agent_tool_functions("ReviewWorkflow")
+    assert len(loaded_tools["PlannerAgent"]) == 1
+    assert asyncio.run(loaded_tools["PlannerAgent"][0](values=[2, 3, 5])) == {"total": 10}
+
+
+@pytest.mark.parametrize("filename", ["orchestrator.yaml", "structured_outputs.yaml"])
+@pytest.mark.parametrize("mutation", ["missing", "null", "unknown", "whitespace"])
+def test_workflow_quality_gate_rejects_invalid_document_versions_without_mutating_input(
+    filename: str, mutation: str,
+) -> None:
+    entries = [{"workflow_name": "ReviewWorkflow", "files": _minimal_workflow_files("ReviewWorkflow")}]
+    assert workflow_quality_gate_module.validate_workflow_bundle_structure(bundle_entries=entries)["valid"]
+    selected = next(item for item in entries[0]["files"] if item["filename"] == filename)
+    document = yaml.safe_load(selected["content"])
+    if mutation == "missing":
+        del document["schema_version"]
+    elif mutation == "null":
+        document["schema_version"] = None
+    elif mutation == "unknown":
+        document["schema_version"] = "mozaiks.unsupported.v99"
+    else:
+        document["schema_version"] = f" {document['schema_version']} "
+    selected["content"] = yaml.safe_dump(document, sort_keys=False)
+    before = copy.deepcopy(entries)
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(bundle_entries=entries)
+
+    assert report["valid"] is False
+    assert len(report["errors"]) == 1
+    assert filename in report["errors"][0]
+    assert "schema_version" in report["errors"][0]
+    assert entries == before
+
+
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        ("agents.yaml", "agents: [{name: PlannerAgent, system_message: Plan work.}]"),
+        ("agents.yaml", "[]"),
+        ("tools.yaml", "tools: [{name: invented_tool}]"),
+        ("middleware.yaml", "prompt_middleware: [unknown_hook]"),
+        ("ui_config.yaml", "visual_agents: PlannerAgent"),
+        ("context_variables.yaml", "definitions: {ready: {type: invented}}"),
+        ("a2a.yaml", "agents: [unknown_agent]"),
+    ],
+)
+def test_workflow_quality_gate_rejects_runtime_invalid_documents(filename, content) -> None:
+    files = [item for item in _minimal_workflow_files("ReviewWorkflow") if item["filename"] != filename]
+    files.append({"filename": filename, "content": content})
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(
+        bundle_entries=[{"workflow_name": "ReviewWorkflow", "files": files}],
+    )
+
+    assert not report["valid"]
+    assert any(filename in error for error in report["errors"])
+
+
+def test_workflow_quality_gate_rejects_undeclared_context_references() -> None:
+    files = _minimal_workflow_files("ReviewWorkflow")
+    context_file = next(item for item in files if item["filename"] == "context_variables.yaml")
+    payload = yaml.safe_load(context_file["content"])
+    payload["agents"]["PlannerAgent"]["variables"].append("missing_state")
+    context_file["content"] = yaml.safe_dump(payload)
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(
+        bundle_entries=[{"workflow_name": "ReviewWorkflow", "files": files}],
+    )
+
+    assert not report["valid"]
+    assert any("missing_state" in error for error in report["errors"])
+
+
+@pytest.mark.parametrize("filename", ["agents.json", "tools.yml", "agents.yaml.j2", "agents.yaml"])
+def test_workflow_quality_gate_rejects_ambiguous_file_outputs(filename) -> None:
+    files = _minimal_workflow_files("ReviewWorkflow")
+    files.append({"filename": filename, "content": "{}"})
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(
+        bundle_entries=[{"workflow_name": "ReviewWorkflow", "files": files}],
+    )
+
+    assert not report["valid"]
+    assert any(filename in error for error in report["errors"])
+
+
+@pytest.mark.parametrize(
+    "implementation",
+    [None, "async def run(:", "return 1\n", "async def other():\n    return 1\n",
+     "async def run():\n    raise NotImplementedError\n", "async def run():\n    pass\n",
+     "async def run():\n    ...\n"],
+)
+def test_workflow_quality_gate_rejects_unfinished_tools(implementation) -> None:
+    files = _minimal_workflow_files("ReviewWorkflow")
+    tools = next(item for item in files if item["filename"] == "tools.yaml")
+    tools["content"] = yaml.safe_dump({"tools": [{
+        "agent": "PlannerAgent", "file": "tools/run.py", "function": "run", "tool_type": "Agent_Tool",
+    }]})
+    if implementation is not None:
+        files.append({"filename": "tools/run.py", "content": implementation})
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(
+        bundle_entries=[{"workflow_name": "ReviewWorkflow", "files": files}],
+    )
+
+    assert not report["valid"]
+    assert any("tools/run.py" in error for error in report["errors"])
+
+
+def test_generate_and_download_blocks_unversioned_document_before_packaging(monkeypatch, tmp_path: Path) -> None:
+    files = _minimal_workflow_files("ReviewWorkflow")
+    selected = next(item for item in files if item["filename"] == "structured_outputs.yaml")
+    document = yaml.safe_load(selected["content"])
+    del document["schema_version"]
+    selected["content"] = yaml.safe_dump(document, sort_keys=False)
+    bundle_results = _make_bundle_results([{"workflow_name": "ReviewWorkflow", "files": files}])
+    before = copy.deepcopy(bundle_results)
+    context = _Context({
+        "chat_id": "chat-version-blocked", "app_id": "app-version-blocked",
+        "user_id": "user-version-blocked", "pack_name": "ReviewWorkflow",
+        "workflow_bundle_results": bundle_results,
+    })
+    generated_root = tmp_path / "generated"
+    ui_mock = AsyncMock()
+    registration_mock = AsyncMock()
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui_mock)
+    monkeypatch.setattr(generate_and_download_module, "_register_workflow_bundle_artifact_version", registration_mock)
+
+    result = asyncio.run(generate_and_download_module.generate_and_download(
+        DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+        agent_message="Workflow bundle ready.", context_variables=context,
+    ))
+
+    assert result["status"] == "blocked"
+    assert context.data["workflow_bundle_validation_status"] == "failed"
+    assert any("structured_outputs.yaml" in error and "schema_version" in error for error in result["validation_errors"])
+    assert bundle_results == before
+    assert not generated_root.exists()
+    ui_mock.assert_not_awaited()
+    registration_mock.assert_not_awaited()
 
 
 def test_generate_and_download_multi_workflow_pack_zips_all_bundles(
@@ -229,9 +414,7 @@ def test_generate_and_download_multi_workflow_pack_zips_all_bundles(
         }
     )
 
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(generate_and_download_module, "_promote_workflow_to_app_workspace", lambda *a, **kw: None)
-    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "record_workflow_artifacts", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_api_url", lambda app_id: f"https://api.test/{app_id}")
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: f"wss://ws.test/{app_id}")
@@ -307,9 +490,7 @@ def test_generate_and_download_skips_meta_key(monkeypatch, tmp_path: Path) -> No
         }
     )
 
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(generate_and_download_module, "_promote_workflow_to_app_workspace", lambda *a, **kw: None)
-    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "record_workflow_artifacts", AsyncMock())
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_api_url", lambda app_id: "https://api.test")
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: "wss://ws.test")
@@ -612,4 +793,3 @@ def test_merge_workflow_bundle_repair_results_preserves_successful_outputs() -> 
         if not key.startswith("_") and value["workflow_name"] == "BrokenWorkflow"
     )
     assert len(repaired_entry["files"]) == len(_minimal_workflow_files("BrokenWorkflow"))
-

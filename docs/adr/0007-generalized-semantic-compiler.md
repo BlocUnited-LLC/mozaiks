@@ -24,8 +24,8 @@ test between representations:
   `loader.py`).
 
 Studio re-normalizes the same shapes again, and the control plane derives its
-own work-contract projections (`mozaiksai/core/workflow/work_contracts.py`,
-`mozaiksai/core/workflow/plan_assignment_compiler.py`).
+own assignment projections
+(`mozaiksai/core/workflow/plan_assignment_compiler.py`).
 
 Because that semantic authority is missing, safety became path-shaped:
 `mozaiksai/control_plane/implementations/refinement_router.py`,
@@ -184,6 +184,96 @@ resolver, serializer, taxonomy, or binding authority. Implementation binding
 continues to select a verified implementation only for a requirement already
 present in the pinned graph and cannot add payload facts.
 
+### Closed action request contracts
+
+`ActionPayload.request_contract` owns the application's semantic input
+requirement. It is a required, non-null `ObjectContract`; an action accepting
+no request data explicitly declares an empty closed object. The retired
+`request_fields` input is rejected, including when supplied alongside the new
+contract. Response fields, event payloads, data/entity fields, and workflow
+structured outputs retain their existing contracts.
+
+The canonical algebra lives in `mozaiksai.core.semantics.closed_contracts`:
+
+| Variant | Value meaning and fields |
+|---|---|
+| `NullContract` (`null`) | Exactly null; no nullable flag or other variant fields. |
+| `ScalarContract` (`boolean`, `integer`, `number`, `string`) | Required `nullable`; optional nonempty homogeneous scalar `enum`, excluding null. |
+| `ArrayContract` (`array`) | Required `nullable` and one recursive `items` contract. |
+| `ObjectContract` (`object`) | Required `nullable`, property tuple, and explicit `additional_properties: false`. |
+| `ContractProperty` | Exact nonempty `name`, explicit `required`, and a recursive `contract`. |
+
+Property absence, a present null value, a null-only contract, and a nullable
+non-null type are distinct. Optionality belongs to the property; nullability
+belongs to its value. Every object is closed. Duplicate property names or enum
+values reject. Properties sort by exact name and enums sort by scalar value.
+Boolean and integer values never coerce into each other. INTEGER enum members
+are exact signed 64-bit integers; NUMBER enum members are exact finite floats.
+Negative floating zero stores as positive zero. Integer/float enum forms are
+deliberately distinct canonical representations.
+
+The versioned profile `mozaiks.closed_contract_profile.v1` permits depth **32**
+(root depth one) and **1024** total contract occurrences. Property wrappers do
+not add nodes or depth; reused children count at every occurrence. Iterative
+preflight rejects cycles and excessive depth or width before recursive model
+validation. Exceeding a limit is `UNSUPPORTED`, never a compatibility success.
+Raw properties accept only lists or tuples so a lazy iterable cannot bypass
+the aggregate limits. Validated state contains only frozen models, tuples, and
+strict scalar values. Nested instances revalidate; update-copy paths reject.
+Identity and digest use the existing canonical serialization primitives.
+
+`closed_contract_schema.import_closed_contract_schema` is an explicit offline
+import boundary for existing module action `input_schema` documents. It
+supports only the finite profile's JSON-schema-like `type`, scalar `enum`,
+homogeneous `items`, and closed object `properties`/`required` declarations.
+Object `additionalProperties` must explicitly be false. Omission, open or
+schema-valued additional properties, unsupported assertions, unknown keys,
+refs, schema compositions/unions, conditional schemas, and custom validation
+hooks reject. Format, patterns, numeric/string/array bounds, multiples,
+uniqueness, contains, and tuple arrays are never silently erased. This phase
+has no reference expansion, general union semantics, or schema exporter.
+
+The offline projector imports an explicitly supplied module action schema
+into request authority. An identity-only surface mutation can join that same
+module action declaration; without request authority it reports a typed
+`MISSING` gap. Unsupported module schemas report `UNSUPPORTED`. It never
+invents an empty request for unknown input. Bounds apply before the projector
+copies an input schema recursively. The producer audit found only this offline
+projector and semantic test fixtures; no production prompt, generator, or
+runtime consumes the removed shallow request field.
+
+The executable boundary remains:
+
+```text
+ActionPayload.request_contract       semantic application requirement
+module.yaml actions[].input_schema   executable artifact projection
+```
+
+Production module dispatch continues consuming the executable projection.
+Future publication must prove that the selected executable schema realizes
+the semantic request contract. Its initial compatibility policy must require
+normalized equality before broader compatible realization is considered.
+This phase implements neither that proof nor assignability, result/action-input
+projection, compatibility receipts, implementation-binding extensions, runtime
+delivery, or ArtifactRevision evidence changes.
+
+The existing immutable `CanonicalJsonValue` family is shared from
+`mozaiksai.core.semantics.canonical_json`; plan authority imports the same
+classes. Extraction preserves the entire accepted value domain, declaration
+order, serialized bytes, and digest semantics. It does not sort exact pinned
+document entries or replace the canonical serializer.
+
+The action request migration legitimately changes the semantic corpus action
+payload, containing graph, aggregate plan header, and archive digests. These
+golden changes are `EXPECTED_SEMANTIC_MIGRATION`: a permanent proof restores
+only the retired request field and its containing digest pins to recover the
+exact base identities. All 61 corpus units and the historical 59-unit proof
+remain byte/digest identical. The workflow interface excludes action payload
+bodies from its source footprint: changing a referenced action request
+contract preserves actual interface reuse and identical bytes after
+authority serialization and rematerialization. Any other identity change is
+`UNRELATED_DRIFT` and fails the migration proof.
+
 ### Aggregate CompilationPlan authority
 
 Exactly one aggregate `CompilationPlan` is authoritative for a bounded build.
@@ -241,6 +331,200 @@ for graph v2. Production semantic authority, persistence, promotion behavior,
 and capability advertisement remain unchanged until Slice 5. None of these
 decisions authorizes live models or relaxes the ADR 0006 interlock.
 
+Slice 5B adds only the offline artifact-composition boundary. A cold-validated
+`CompiledAssignment` resolves ephemerally to exactly one logical Factory
+participant through the workflow's existing structured-output bindings. AG2
+continues to own runtime participant identity and task lifecycle. Successful
+candidate bytes become authoritative only after the pinned structured-output
+model and Mozaiks validators produce a closed `AssignmentArtifactResult`.
+`CompositionLedger` then accounts for every plan unit and every physical
+artifact identity, including exact base reuse and explicit removals; the
+ledger contains digests, not bytes, while `CanonicalComposedBundle` carries
+runtime bytes. This substrate is not imported by production workflows,
+execution adapters, materialization, persistence, promotion, or refinement.
+`AppBuildPlan` therefore remains production planning authority until the
+atomic Slice 5D cutover.
+
+Slice 5D-0A closes the application-input side of that future cutover without
+claiming executability. `ApplicationPayload`, `AuthPayload`, and
+`IntegrationPayload` are strict graph-v2 variants. Application identity and
+manifest intent project from the current `AppSchemaOutput.manifest`; active
+application integration intent projects from the existing persisted
+application integration declarations while connector/readiness state remains
+outside semantic identity. Authentication uses a finite provider-neutral
+strategy vocabulary and never carries credentials, provider account identity,
+or runtime session state.
+
+`WorkflowPayload` may now pin a closed logical topology: bounded turn intent,
+human-input requirement, declared logical participants, initial participant,
+and finite transition forms. Prompt bodies, models, channels, AG2 participant
+objects, envelopes, WAL cursors, runtime retries, and other execution state are
+not semantic topology. Cycles are permitted when every endpoint closes over a
+declared logical participant; unresolved participants and unsupported
+condition forms fail closed.
+
+Application payloads also record a complete finite selection statement for
+the optional auth, integration, custom-route, theme, shell, asset, data, and
+workflow families. `selected`, `absent_by_declaration`, and `not_applicable`
+are distinct; missing evidence is not normalized to any of them. The sole
+layout registry declares these new node kinds as future source footprints for
+application manifest, auth, integration, and workflow-manifest families.
+Renderers, assignment/output contracts, AG2 execution, publication,
+capability advertisement, and the production `AppBuildPlan` path remain
+unchanged until later Slice 5D gates.
+
+Slice 5D-0B1 closes the executable-family contract surface without making it
+operational. Every layout-registry row now declares one compiler disposition:
+`render`, `agent_author`, `preserve_unowned`, `external_handoff`, `input_only`,
+or `inapplicable`. Greenfield derivation never selects `preserve_unowned`;
+that disposition is valid only when a later brownfield input contract supplies
+pre-existing digest-bound bytes. Renderer callables and rendered bytes remain
+outside this slice.
+
+The compiler selects mutually exclusive application-manifest, module, and
+workflow-manifest path scopes through `CompilationScopeSelection`. The
+canonical integration declaration is `config/integrations.yaml`; unreleased
+JSON and `.yml` aliases are not compiler artifacts. Typed artifact declarations
+close migration, route-extension, custom-page, module-helper, workflow-tool,
+workflow-component, module-admin-page, and refinement prompt-pack identity over
+explicit owner/relationship edges. Integration implementation and adapter-area,
+root runtime/toolchain, and refinement-harness selections are likewise closed
+semantic facts. Missing facts emit prerequisite gaps; they are never inferred
+from files or normalized to false.
+
+Reasoning-heavy authorship uses finite family-specific assignment kinds and
+content-pinned structured-output schemas. Each compiler assignment resolves to
+one workflow/model locator, a closed artifact-family/path contract, semantic
+identity bindings, and one Mozaiks-owned validator. The broad production
+`AppBuildPlan` assignment vocabulary remains only as transitional path ownership
+metadata until the atomic 5D cutover; it is excluded from compiler descriptor
+resolution. In particular, validation is a deterministic gate and generic
+`integration`/`validation` authoring kinds do not exist.
+
+`CompilationPlan.gaps` is exactly the literal emitted first-blocker set.
+`CompilationGapReport.emitted_gaps` repeats that set, while hypothetical
+blockers may appear only in the separate `latent_gaps` field; the composite
+diagnostic view never changes the canonical plan gap count. 5D-0B1 registers
+no renderer, invokes no AG2 primitive, and is not imported by production
+AppGenerator, task execution, assembly, persistence, publication, Studio, or
+refinement paths. Those gates remain for 5D-0B2, 5D-0B3, and the atomic cutover.
+
+Slice 5D-0B2A makes the application-configuration subset of those `render`
+families deterministic. One renderer authority,
+`deterministic_app_config_renderer@1`, is resolved only through an
+`ImplementationBinding` renderer selection that must declare exactly its
+four-family capability set on the `app_config_executor` materializer, and
+renders `app_manifest` (`app.json`), `app_ui_route_manifest`
+(`ui/route_manifest.json`), `app_integrations_config`
+(`config/integrations.yaml`), and `app_secret_references`
+(`security/secrets.yaml`, secret names only) from accepted semantic payloads
+alone. Each family consumes its own closed, frozen, family-local render input
+projected lazily per plan unit by the offline materialization owner, so a
+typed gap in one family never blocks another whose own source closure is
+complete. Completion is selection-honest per consuming family: SELECTED
+requires the typed facts present and declared-absent facts must be absent —
+missing selected evidence stays a typed gap, never an empty rendering. Two
+named byte contracts, `mozaiks.json_decl_bytes.v1` and
+`mozaiks.yaml_decl_bytes.v1`, fix serialization (UTF-8, LF, trailing newline,
+declaration-order preservation, round-trip equality) so identical facts
+always produce identical bytes; the renderer reads no clock, environment,
+filesystem, `AppBuildPlan`, or Git state. `app_config` (`config/ai.json`) is
+explicitly deferred: per-workflow `workflow_startup_mode` is not
+application-level chat launch authority, and application-level AI-launch
+facts (chat startup mode, workflow entry point) have no typed semantic home
+yet — the family stays a typed gap and no startup mode is ever inferred.
+Families whose required facts likewise lack a typed home —
+`app_subscription_config` (default plan and assignment-store wiring),
+`app_data_contract` (collection-to-module ownership edges), and asset
+manifests (no typed asset facts) — remain typed gaps with recorded
+prerequisites for 5D-0B2B. Production AppGenerator writers remain the
+authoritative emitters of these paths until the atomic 5D cutover; hygiene
+guards prove they do not call the B2A renderer and that no production module
+imports it.
+
+Some canonical identities live on the graph node rather than on any typed
+payload — the canonical event identity, for example, is the EVENT node's
+single EVENT-category taxonomy reference. Plan units therefore carry a
+generic `taxonomy_sources` contract (`PlanTaxonomySource`: exact
+`(node, category, identifier)` triples) for node-level identities their
+bytes consume. The model stores the grammar-normalized identifier during
+construction, so surrounding whitespace cannot change serialization, unit
+identity, digest, or reuse authority. A pinned taxonomy identity participates consistently in unit
+identity, serialization, canonical authority rederivation, and the
+regeneration/reuse signature — a unit whose node-level identity changed is
+never classified reusable — while empty taxonomy sources are omitted from
+identity and serialization alike, so every payload-only unit's digest and
+serialized form are unchanged. Families that consume node-level identity
+(the workflow interface below) build on this primitive.
+
+### Canonical workflow module interface
+
+PR #479 is closed and superseded evidence, not an implementation dependency.
+PR #482 retired the independently authored v1 factory interface and its
+non-materializing AppGenerator task authority. PR #481 supplies canonical
+taxonomy-source identity and reuse authority. This slice restores only
+`module_interface.yaml` as `mozaiks.module_interface.v2`, derived through
+`SemanticGraphV2` → `CompilationPlan` → exact family sources → a closed render
+input → the deterministic interface renderer. There is one compiler byte
+writer and no factory or agent writer for this artifact.
+
+The `workflow_module_interface` family has two canonical layout rows:
+`workspace_root: workflows/{workflow_id}/module_interface.yaml` and
+`workflow_relative: module_interface.yaml`. Both are workflow-owned,
+conditional on `when_workflow_declared`, multiplicity `many`, disposition
+`render`, materializer `workflow_interface_executor`, validator
+`generated_app_validator`, security `internal_contract`, and dependent on
+`workflow_manifest`. Their runtime consumer is **NONE**. The existing workflow
+scope selection chooses one row; both retain exactly the `workflow_id`
+placeholder, including the scope-implied identity of the relative row.
+Bundle composition retains its existing global-root boundary: workspace
+interfaces materialize into bundles, while workflow-relative units remain
+explicitly deferred there and are proven through the direct renderer.
+
+For workflow W, C is every capability it owns, R is every result C owns
+(including advisory results with no commit binding), B is every typed binding
+C owns, M is every module referenced by an action binding, and E is every
+referenced trigger event. Payload sources are exactly `{W} ∪ C ∪ R ∪ B ∪ M`.
+Edge sources are exactly workflow/capability, capability/result and
+capability/binding ownership plus the existing typed binding-edge projection:
+consumes action, commit action with the result-node discriminator, commit
+result reference, and event consumption. Each E contributes only its exact
+EVENT-category `PlanTaxonomySource`. Action and event payload bodies,
+unrelated nodes, ambient registry entries, and unrelated graph edges are
+excluded.
+
+The YAML document contains `schema_version`, semantic `workflow_id`, and
+sorted `capabilities`. Each capability carries its `capability_id`, optional
+payload-owned description, all owned `results` (`result_id`, optional
+description), and sorted typed `bindings`. `consumes_action` carries
+`module_id` and `action_node_id`; `commits_result_through_action` also carries
+`workflow_result_id`; `triggered_by_event` carries `event_type`. No action
+body, request/response schema, result structured-output schema, approval
+policy, runtime workflow identity, provider/model identity, or AG2 identity
+enters the document. Serialization uses the existing canonical YAML byte
+contract, with no clock, filesystem, environment, or runtime registry input.
+
+Direct output validation resolves `family_identity_digest` to an exact live
+canonical row **before** interpreting scope/path. That row and the canonical
+instance derive the shared planner unit ID, exact placeholder set, output
+scope, and expanded path; the input workflow identity must match. A complete
+alternate twin is a valid direct-renderer shape, but substituting it into a
+plan still fails #475/#477 canonical rederivation. Renderer shape validation
+does not replace plan-membership authority.
+
+Selective rematerialization pins actual referenced event taxonomy and all
+owned results. The first end-to-end taxonomy-source family proof exercises
+canonical derivation, serialization/reload, actual historical-byte reuse,
+event-identity mutation, and comparison with clean successor materialization.
+Whole selected payloads remain conservative invalidation boundaries: unused
+fields of a selected WorkflowPayload or ModulePayload may invalidate its
+interface. Field-level PlanSource granularity is not introduced here.
+
+The app workflow registry, runtime capability routing, and production
+AppGenerator/AgentGenerator cutovers remain deferred. Persistent workflow
+launch is a separate contract; workflow touchpoints and page launch semantics
+do not enter this artifact.
+
 ## ApplicationManifest
 
 `ApplicationManifest` is the minimal root identity and reference document,
@@ -283,7 +567,7 @@ scope mismatch fails closed.
 
 In particular, `ApplicationManifestRef`, `SemanticGraphRef`,
 `ImplementationBindingRef`, `CompilationPlanRef`, `BuildContextBindingRef`,
-`RefinementPatchRef`, and `ArtifactRevisionRef` pin immutable versions and
+`RefinementPatchRef`, and `ArtifactRevisionRef` pin immutable identities and
 digests. `TaxonomyNamespaceRef` pins namespace identifier, version, and digest.
 Typed child-contract refs additionally pin artifact family, canonical relative
 path, contract schema version, and content digest. No ref may resolve by a bare
@@ -301,7 +585,7 @@ Required properties:
 - **Deterministic canonical serialization.** One canonical byte serialization
   (stable key order, normalized scalars, closed input set) defined once and
   reused for digesting, following the proven patterns of
-  `layout_registry`'s stable digest and `work_contracts.stable_digest`.
+  `layout_registry` and the narrow structured-output contract digest helper.
   Serializing the same graph twice is byte-identical. The serialization covers
   every semantically relevant schema field; no field may be omitted from the
   digest by convention. The exact scalar normalization, Unicode, number,
@@ -452,9 +736,9 @@ contracts are rendered views; they are not competing generation-time semantic
 authorities. The generator-side YAML mirrors of runtime contracts (the module
 and page families inside `factory_app/workflows/AppGenerator/structured_outputs.yaml`,
 and AgentGenerator's per-file output models) are retired once agents emit
-graph-node payloads validated directly against the runtime models — a
-mechanism already proven by the companion-model validation in
-`mozaiksai/core/workflow/module_contract_executor.py`.
+graph-node payloads validated directly against the runtime models — using the
+same cold-resolved canonical structured-output system that pins executable
+assignment output contracts.
 
 These authorities operate at different times. For compiler-managed surfaces,
 the `SemanticGraph` is authoritative when semantic intent disagrees with a
@@ -634,12 +918,10 @@ regions the graph declares.
 
 ## Structured-Output Strictness
 
-The audit found that `structured_outputs.yaml` declarations appear strict
-while the dynamically compiled runtime Pydantic models are permissive: the
-compiler in `mozaiksai/core/workflow/outputs/structured.py` builds models via
-`create_model` with no `model_config`, so unknown fields are ignored at
-runtime. `_patch_model_schema` makes the provider JSON-schema projection look
-strict, but provider/runtime validation therefore disagree. Open-ended dict
+The original audit found that `structured_outputs.yaml` declarations appeared
+strict while dynamically compiled runtime Pydantic models ignored unknown
+fields. `_patch_model_schema` made the provider JSON-schema projection look
+strict, so provider formatting obscured the acceptance contract. Open-ended dict
 fields have two current behaviors that stack on the same live agent-creation
 path: the `get_llm_for_workflow` helper (still called by the agent factory
 for every agent) logs a warning and falls back to a plain LLM configuration,
@@ -661,8 +943,9 @@ This ADR requires, for the compiler's structured-output surface:
   projection;
 - provider projection is deterministic — the same declaration always produces
   the same provider schema, and silent strictness downgrades are removed;
-- runtime validation is equivalent to provider-schema validation, so a payload
-  the provider would reject cannot pass the runtime;
+- runtime validation matches the canonical acceptance contract. A provider
+  protocol may strengthen its wire projection, such as requiring nullable
+  optional fields to be present, without changing application acceptance;
 - validation failure is observable — a typed, recorded failure, never
   warning-and-continue (the current silent no-op on structured-output
   validation failure in `mozaiksai/core/workflow/outputs/runtime_events.py`
@@ -673,6 +956,140 @@ This ADR requires, for the compiler's structured-output surface:
 
 This ADR does not implement the flip; it is rollout work (slice 5) gated on
 the compatibility report.
+
+### Provider-neutral acceptance identity prerequisite
+
+`build_models_from_config` now returns unpatched canonical Pydantic models.
+Explicit `exact_model_ids` applies `extra="forbid"` when models are created,
+before a parent can capture a child schema. The original #485 staging decision
+left generic runtime loading permissive; that decision is retired. **Declared
+structured outputs are exact at runtime**: `load_workflow_structured_outputs`
+compiles every declared model id with closed-object acceptance, so unknown
+candidate fields — top-level and nested — reject and are never silently
+discarded before an exact acceptance boundary sees the original candidate.
+There is no permissive mode, per-workflow acceptance override, or dual
+registry behavior, and reload/unload/refresh can never revive a permissive
+cached model. ``structured_output`` is reserved runtime vocabulary
+(`mozaiksai/core/workflow/reserved_context_keys.py`): every canonical context
+declaration surface rejects an application claim of it, with no metadata
+override. Auto-tool binding caches hold DECLARATIVE metadata only, self-validated
+against the live exact-model identity and tools.yaml declaration; Python
+callable authority is never cached across dispatches — the executable
+function is resolved fresh through the canonical workflow tool loader, whose
+namespace refresh derives the workflow root's real package chain (for example
+``factory_app.workflows``) as well as the synthetic ``workflows`` namespace,
+so workflow-owned source and imported helper changes are observed without a
+process restart. Changes to external installed third-party packages remain a
+process-restart boundary. Each auto-tool turn is claimed atomically before
+its first await, and each binding keeps a finite process-local execution
+checkpoint (PENDING → TOOL_TERMINAL → COMPLETE, with per-stage
+write-back/persistence/emission marks): once a tool returns a truthful
+terminal result — success or failure — that binding is never invoked again
+for the same turn; retries resume the first unfinished binding/stage. This is
+process-local runtime idempotency, not distributed exactly-once delivery: a
+crash after an external non-idempotent side effect but before durable
+recording is out of scope, and such tools must use their owning service's
+idempotency contract. Deliberately declared open `dict`/`optional_dict` fields keep their
+semantics: the field is closed at its containing object level while arbitrary
+keys inside the declared open dict remain valid runtime data.
+`get_provider_response_model` remains the sole provider adapter. It creates
+separate response models with the current OpenAI strict required fields,
+reference inlining, and object closure, and its local parse honors the same
+`additionalProperties: false` claim its advertised schema makes — a permissive
+provider-side parse cannot become the first lossy normalization. Production
+agent construction continues to use that adapter.
+
+`canonical_structured_output_schema` invokes the unmodified Pydantic validation
+schema compiler directly. Acceptance profile
+`mozaiks.structured_output_acceptance_profile.v1` retains refs, defaults,
+annotations, nullable unions, and canonical exact-object closure. It sorts
+object keys and schema `required` names, while preserving data-array order in
+defaults, examples, and enum members. The model compiler sorts distinct finite
+JSON scalar literal declarations before naming their enum; equality-alias
+declarations retain order because Python Enum gives the first value acceptance
+meaning. Union branch order remains compiler authority.
+
+`StructuredOutputContractRef` is now
+`mozaiks.structured_output_contract_ref.v2`, pinning `workflow_name`, `model_id`,
+`acceptance_profile`, and `schema_digest`. The digest covers the profile and
+canonical schema. The old ref version is rejected. This acceptance profile is
+separate from `mozaiks.closed_contract_profile.v1`: no compatibility algebra or
+assignability proof is inferred from a Pydantic schema.
+
+Both reference APIs require explicit configuration and exact model IDs:
+
+| Caller | Authority classification | Inputs |
+|---|---|---|
+| `derive_compilation_plan` | `CANONICAL_COMPILER` | Supplied configs and the selected assignment-descriptor authority |
+| `compile_approved_plan` | `COLD_AUTHORITY_BOUNDARY` | Configs, exact model IDs, and identity bindings from the same immutable `CompilationPlanAuthorityInputs` |
+| `resolve_assignment_admission` | `COLD_AUTHORITY_BOUNDARY` | Supplied configs and explicit exact model IDs; the pinned ref must match |
+| `build_assignment_artifact_result` | `COLD_AUTHORITY_BOUNDARY` | Supplied configs and explicit exact model IDs; the pinned ref must match |
+| Workflow model loading and provider adaptation | `PRODUCTION_RUNTIME_DEFAULT` | Runtime configuration and caches; never reference identity authority |
+
+Synthetic reference tests also supply explicit exact model sets. Canonical
+rederivation supplies the frozen descriptor snapshot, so later ambient registry
+changes cannot alter either schema exactness or semantic identity bindings.
+A separate persisted schema snapshot is unnecessary for these consumers:
+existing immutable authority inputs already contain the exact source documents.
+
+The exact-base migration fixture records provider-influenced schemas, references,
+plans, assignments, artifact results, and generated bytes from main
+`430d3ffaeab0b27843d7fbeba275c5be316ff586`. Ref-dependent identities are classified
+`EXPECTED_STRUCTURED_OUTPUT_IDENTITY_MIGRATION`; restoring only those references
+and their enclosing digests recovers the captured documents exactly. Authority
+inputs, unrelated units, artifact bytes, the existing 61-unit corpus, historical
+59-unit proof, action request contracts, and workflow interface bytes retain
+their identities. Other changes would be `UNRELATED_DRIFT` and fail the proof.
+
+Runtime module JSON Schema validation remains Draft 7. The shared validator
+normalizes nullable syntax, checks the schema, and evaluates the value. Any
+normalization, checking, construction, or evaluation exception returns a
+deterministic `schema_invalid` diagnostic; value violations return
+`value_invalid`. Explicit `{}` is a universal schema and is checked; `None`
+means absence only at callers that allow no schema. Module inputs, event
+emission, and event routing reject diagnostics. Output value violations retain
+their existing warning policy, while an invalid or unevaluable output schema
+returns `INVALID_OUTPUT_SCHEMA`. This does not change module dispatch topology,
+ArtifactRevision evidence, workflow results, or runtime result delivery.
+
+### Explicit workflow document versions
+
+The public `OrchestratorConfig` and `StructuredOutputsConfig` contracts require
+exact in-document literals: `mozaiks.orchestrator.v1` and
+`mozaiks.structured_outputs.v1`, respectively. Both public parsers retain
+`schema_version`. Missing, null, unknown, misspelled, or whitespace-altered
+versions reject; no parser injects a default. The spelling follows the existing
+`mozaiks.<contract>.vN` vocabulary, including underscore-separated contract names.
+
+The version identifies the enclosing YAML document. It is never inserted into
+`registry`, `models`, compiled output fields, or provider response schemas.
+Whole source-document and immutable authority-input identities consequently
+change (`EXPECTED_DOCUMENT_VERSION_MIGRATION`). The captured 61-unit compiler
+corpus, historical 59-unit proof, executable six-unit plans, structured-output
+acceptance references, assignment/artifact results, action contracts, and
+workflow interface bytes remain unchanged. Restoring only version metadata for
+comparison recovers the prior source/authority fingerprints; other changes are
+`UNRELATED_DRIFT`. Historical captures themselves remain immutable.
+
+Authority references and ArtifactRevision identities that pin the whole changed
+document also migrate. In the existing genesis/child revision fixtures, this
+propagates through parent references and enclosing ledger/evidence digests while
+artifact addresses, content digests, exact bodies, and bundle identity remain
+equal. These are expected document-authority changes, not an evidence redesign.
+
+Existing offline orchestrator projection validates this metadata through the
+public contract's literal annotation and does not project it into topology.
+Workflow names, startup, turns, patterns, messages, agents, and triggers retain
+their previous meaning. Parsed versions can later be compared with
+`ChildContractRef.contract_schema_version`; this prerequisite adds no content
+resolver, implementation selection, binding, or ArtifactRevision redesign.
+
+The workflow document migration census is maintained as an internal repository
+record; the public contract is documented in the
+[workflow authoring contracts](../architecture/workflows/workflow-authoring-contracts.md).
+The internal record covers governed OSS documents, producers, exclusions, and the
+required App Zero migration when its pinned OSS version advances. Unversioned
+downstream documents receive no compatibility exception.
 
 ## BuildContextBindingRef
 
@@ -747,6 +1164,96 @@ the graph, and a `BuildContextBindingRef` proves which inputs were available
 but cannot itself select output semantics. This keeps private strategy and
 provider resolution injectable without making either a second semantic author.
 
+### Content-resolved implementation artifact authority
+
+A future ImplementationBinding v2 must be able to truthfully claim "this exact
+implementation realizes this semantic workflow/action". A `ChildContractRef`
+or digest alone cannot carry that claim, so implementation selection is a
+proof boundary of its own
+(`mozaiksai/core/semantics/implementation_artifacts.py`):
+
+- a **selected contract artifact** couples one `ChildContractRef` to one
+  canonical `ArtifactAddress`; the reference path and address path must be
+  equal, and the canonical layout registry then independently proves artifact
+  family, path scope, placeholder identity (in the planner's closed instance
+  domain), and owner kind. Path equality alone is never authority.
+- bytes come only from `ArtifactContentStore.get_verified_blob()` — no
+  filesystem fallback, sibling checkout, glob/path discovery, mutable alias,
+  or caller assertion, and never from an opaque resolver registration with
+  `content=None`. The exact verified bytes then parse under the strict
+  document contract, and the parsed document's own `schema_version` must
+  equal the reference's `contract_schema_version`
+  (`mozaiks.orchestrator.v1`, `mozaiks.structured_outputs.v1`,
+  `mozaiks.module.v1`).
+- workflow implementation facts (`orchestrator.yaml`,
+  `structured_outputs.yaml`) expose the runtime workflow name and the exact
+  structured-output configuration; a `StructuredOutputContractRef` resolves
+  only against that selected configuration, so a same-schema contract from
+  another workflow is not interchangeable.
+- module implementation facts (`module.yaml`) expose module identity, the
+  declared action, `handler_method`, and the action request contract imported
+  through the closed-contract profile; a manifest declaring another module id
+  cannot be selected for a module instance.
+- handler, base-handler, and pack-contract sources are selected as
+  scope-bound `SelectedAccountedArtifact`s (execution scope plus
+  digest-mandatory `AccountedArtifact`); the selection scope must equal both
+  the requesting scope and the module selection's scope, so identical bytes
+  under another tenant or workspace scope are never the same selection. The
+  handler address must be canonical `module_backend_handler` and match the
+  manifest's declared entrypoint, and certification carries a **bounded
+  static export proof** (AST-level, never executed) with exactly two modes
+  and no general Python source closure. `EXPLICIT_HANDLER` — a true
+  standalone one-source class: the declared handler class has ZERO bases and
+  explicitly defines the selected `handler_method` (a class declaring any
+  base is not eligible, even with an explicit method).
+  `CANONICAL_BASE_HANDLER` — the two-source `workspace_handler_split`
+  closure: the split authority is content-resolved from the exact verified
+  bytes of the module's owning capability-pack contract (canonical
+  `build_context/{contract_id}/contract.yaml` path derived from the parsed
+  contract id; the contract must own this module's manifest, its
+  workspace-owned `handler.py` leaf, and its template-owned
+  `base_handler.py`) — never caller-asserted and never inferred from
+  filenames. The leaf class directly subclasses the single canonical base,
+  bound by exactly one `from .base_handler import <Base>` that is an
+  unconditional top-level statement appearing before the class definition;
+  the base class — itself with no bases — explicitly defines the selected
+  method, or the leaf explicitly overrides it (the proof records
+  `method_source`, and an override remains a two-source
+  `CANONICAL_BASE_HANDLER` certification). The certified implementation
+  identity covers the leaf digest, the base digest, AND the pack-contract
+  digest, so regenerating only the base, editing only the preserved leaf, or
+  changing only the certification authority changes identity; module/action
+  identity stays outside it for `ImplementationBinding v2` to pin
+  separately. Rebinding analysis is closed over the Python binding grammar —
+  including exception-handler captures, match-pattern captures, walrus
+  targets (also inside comprehensions and default arguments), and type-alias
+  statements. Direct dynamic-execution primitives (`exec`, `eval`,
+  `setattr`, `locals`, ...) are rejected in construction scope even when
+  reached through `builtins` access, aliased builtins imports, or simple
+  rebinding, and uninspected locally-defined callables (functions, classes,
+  bound lambdas) may exist but may not be referenced during module/class
+  construction — no direct or aliased invocation, no local class
+  construction, no decorator application. Construction-time anonymous
+  lambdas are prohibited except a lambda stored directly in a simple named
+  binding (`helper = lambda: ...`); a stored lambda becomes an ordinary
+  local callable name covered by the Load-reference rule, and every other
+  lambda position (walrus, call arguments, containers, subscripts,
+  conditionals, decorators, defaults, annotations, class bases) rejects
+  generically — locally supplied executable callbacks cannot cross the
+  construction boundary. Within this bounded own-source construction
+  grammar the certified visible class/method binding IS the effective
+  import-time export. Deferred function/method bodies may freely use local helpers
+  (runtime behavior, outside the import-time proof), and arbitrary imported
+  dependency behavior remains outside the proof. Pack-contract `required_outputs` must be
+  unambiguous at this boundary: duplicate paths reject, and
+  authority-relevant ownership must be explicit (never defaulted).
+  `resolve_module_action_implementation` is the only public
+  authority-producing API — no exported function accepts a preconstructed
+  split authority. Arbitrary imports, mixins, multiple or transitive
+  inheritance, star or dynamic or nested/conditional/late imports,
+  redefinitions, conditional or decorated definitions, monkeypatching,
+  `__getattr__` tricks, and every other dynamic export fail closed.
+
 ## OSS And Proprietary Intelligence
 
 Per the boundary ADR 0005 reserves (PR #394) and
@@ -778,20 +1285,40 @@ cannot require an OSS fork, a hidden service call, or a hidden Cloud dependency.
 ## ArtifactRevisionRef And Atomic Publication
 
 An `ArtifactRevision` is an immutable candidate byte set and provenance record.
-Its ref pins revision id, immutable version, digest, execution-access scope,
-`SemanticGraphRef`, `CompilationPlanRef`, `BuildContextBindingRef`,
-`ImplementationBindingRef`, renderer-registry version/digest, and a canonical
-files manifest. Promotion never mutates those fields or turns a mismatched
+Its identity binds application scope, exact parent (or explicit Genesis
+absence), `SemanticGraphRef`, `ImplementationBindingRef`,
+`CompilationPlanRef`, `CompositionLedger` digest, final bundle digest, and
+immutable validation-evidence digest. Exact artifact content digests remain
+transitively bound by the ledger rather than being copied into a second
+manifest authority. Promotion never mutates a revision or turns a mismatched
 candidate into a valid one.
 
-The single publication authority is an ownership-scoped compare-and-swap of
-the current `ApplicationManifestRef`. A successful commit publishes one new
-immutable manifest version containing the new graph/revision pair. It compares
-the expected prior manifest, graph, and revision refs immediately before the
-swap; a stale base or partial-store failure publishes neither ref and leaves
-the new revision unpromoted. Retry of the same commit is idempotent. Rollback
-uses the same operation to select a previously consistent manifest/graph/
-revision tuple, so there are never two independently current authorities.
+`ArtifactRevisionRef` is deliberately subordinate and minimal: schema version,
+`ExecutionAccessScopeRef`, application id, and revision digest only. Cold
+resolution loads the canonical revision by that full server-owned scope and
+digest, recomputes its identity, and verifies the complete referenced
+graph/binding/plan/ledger/evidence/content closure. It carries no copied body,
+mutable alias, sequence, filesystem path, or storage-backend identity.
+
+The single mutable publication authority is one `ApplicationPublication` row
+per execution scope and application. It contains a required-nullable current
+`ArtifactRevisionRef` and monotonically increasing generation. Promotion first
+persists and cold-verifies the immutable closure, then performs one backend-
+atomic compare-and-swap against the expected prior revision and generation. A
+stale base or partial-store failure leaves CURRENT unchanged; an unreferenced
+immutable candidate may remain safely. Retry of an already committed revision
+is an idempotent no-op. Rollback, when production wiring lands, uses the same
+CAS selection rather than mutating revision content or creating a second
+CURRENT authority.
+
+Revision and publication identity are deliberately source-control independent.
+Neither contract contains a repository, provider, branch, commit, pull request,
+or editor identity, and immutable bytes live in Mozaiks artifact/content
+storage. A workspace may be materialized locally or containerized without Git.
+Optional Git synchronization is a downstream export/projection of an accepted
+`ArtifactRevision`; externally changed source must re-enter as candidate content
+and pass validation plus revision creation before publication. A Git commit is
+never the canonical Mozaiks CURRENT authority.
 
 ## RefinementPatchRef
 
@@ -938,11 +1465,11 @@ compiler may reference or consume it but does not become its source of truth.
 | `layout_registry.py` | Artifact families, paths, validators, security classes | **extended** into the renderer registry | Gains renderer/stub/dependency declarations; becomes the single path→family authority repo-wide. |
 | Capability-pack/deployment/provider selection currently spread across `AppBuildPlan`, context variables, pack resolvers, and download renderers | Mix of semantic choice and concrete implementation resolution | **split by authority** | Semantic requirements move into graph nodes; deterministic concrete resolution becomes `ImplementationBindingRef`; no loose selection input survives. |
 | `AppBuildPlan` (structured output + `app_build_plan.py`) | Agent-authored build plan | **replaced** by derived `CompilationPlan` | Offline equivalence fixture during migration; retired at cutover. |
-| Generator YAML mirrors in `structured_outputs.yaml` (module/page families, AgentGenerator per-file models) | Generation-time re-declaration of runtime contracts | **replaced** | Agents emit graph-node payloads validated against runtime models (per `module_contract_executor.py` pattern). |
+| Generator YAML mirrors in `structured_outputs.yaml` (module/page families, AgentGenerator per-file models) | Generation-time re-declaration of runtime contracts | **replaced** | Agents emit graph-node payloads validated against canonical runtime models through the pinned structured-output contract boundary. |
 | `save_app_schema.py` hand validators | Parallel page/manifest validation | **replaced** | Collapse onto runtime models once the renderer path lands. |
 | Control-plane glob taxonomies (`refinement_router.py`, `dry_run.py`, `promotion_policy.py`, `validation_runner.py`) | Path→family inference | **replaced** | Graph-region queries over the renderer registry. |
 | `AppContextGraph` / `AppContextVersion` | Observed/indexed artifact view | separate authority, retained | Gains `semantic_graph_ref` sibling; stays downstream. |
-| `mozaiksai/core/artifacts/store.py` (`BuildRecordStore`) + `mozaiksai/control_plane/artifact_promotion.py` | Build records, lineage, promotion evidence | retained, extended | `ArtifactRevision` binds to existing lineage; revisions record graph/plan/binding digests; one current-manifest CAS publishes or rolls back a consistent graph/revision pair. |
+| `mozaiksai/core/artifacts/store.py` (`BuildRecordStore`) + `mozaiksai/control_plane/artifact_promotion.py` | Current production build records, lineage, and promotion evidence | retained through offline Slice 5C; app-bundle publication authority replaced at Slice 5D | Slice 5C adds immutable `ArtifactRevision` closure and isolated `ApplicationPublication` CAS without production importers. Slice 5D rewires app publication, makes AppContext a derived revision-keyed projection, and deletes the old app-bundle CURRENT/fallback paths atomically. |
 | `mozaiksai/core/data/persistence/artifact_store.py` (`BuilderArtifactStore`) | Typed builder artifact collections | direction decided at slice 5 | Becomes a projection of graph/artifact records or a typed view; no dual authority retained. |
 | Validation and acceptance gates (`app_validation.py`, `validation_runner.py`, bundle scanner) | Deterministic artifact validation | retained | Consume registry/graph instead of private path predicates. |
 | `factory_app/eval/` | Deterministic bundle scoring | separate authority, retained | Scores rendered output; gains archetype-corpus equivalence fixtures. |
@@ -978,7 +1505,8 @@ AppGenerator; production-dead AgentGenerator converter normalizers
 (`workflow_converter.py`); lossy, unpersisted `AppBuildPlan` planning path;
 the four control-plane glob taxonomies; `BuildRecordStore`/`ArtifactStore`
 alias duplication in `mozaiksai/core/artifacts/store.py`; multiple event and
-taxonomy registries; structured-output permissiveness; incomplete
+taxonomy registries; structured-output permissiveness (resolved: declared
+structured outputs are exact at runtime); incomplete
 provenance/ownership use in refinement (the `refinement` provenance mode and
 `last_refined_with` field in `mozaiksai/core/runtime/app/provenance.py` are
 declared but never read or written by any control-plane code); lack of refinement replay; dual builder persistence
@@ -1038,8 +1566,10 @@ journey capability.
 | **3E. Fresh-main graph-v2 projection evolution** — after the independently reviewed Slice 3 change lands, evolve its offline adapters to emit typed payload documents and graph-v2 refs | No authority change; current stage outputs and `AppBuildPlan` remain comparison inputs | Every prior typed gap is either represented by a strict payload variant or remains an explicit blocking gap; graph/payload closure and re-extraction equivalence across the corpus | Do not branch from the unmerged Slice 3 PR. Rollback: delete the graph-v2 adapter evolution. No live models or ADR 0006 interaction. |
 | **4B. Aggregate CompilationPlan derivation** — derive one aggregate plan containing non-authoritative artifact-family-instance subplans; project assignments and task-batch inputs from it | No production authority change: agent-produced `AppBuildPlan` remains current and the aggregate plan is offline-only | Complete family dispositions; derived-vs-produced plan equivalence; global DAG and path ownership; stable aggregate and family digests; partial regeneration/reuse closure; proof that family plans cannot resolve or execute independently and binding cannot widen graph semantics | Begin identifying plan mirrors and dead converter normalizers for cutover, but delete no active authority. Rollback: delete the candidate plan path. No live models, capability advertisement, or ADR 0006 dependency. |
 | **4C. Offline deterministic renderer equivalence** — bind graph-v2 payloads and aggregate-plan family instances to registry renderers; AgentGenerator regains a renderer layer | No production authority change; candidate renderers run only against offline corpus fixtures and never beside a live build | Stable renderer order; byte-identical child contracts; loader/validator and route/component/action closure; AppGenerator and AgentGenerator equivalence; changed semantic closure changes only affected families | Retain current generation and promotion. Rollback: delete candidate renderers and comparison flag. No live models, capability advertisement, or ADR 0006 dependency. |
-| **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph version + build record become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view; current-manifest CAS becomes publication authority | Agent-produced plan and four representations → one authored graph, derived binding/plan, rendered views, and one published graph/revision pair in a single cutover | Offline corpus regeneration equivalence; strictness report published **before** the flip; route/component/action closure; data-reference consumer tests through a test/development-only comparison window; fault injection at every graph/revision/manifest persistence boundary proves publish-all-or-neither and idempotent retry | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Truthfully advertise `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` together only after the cutover proof. Rollback blocks bounded starts; the per-workflow test/development flag exists only until cutover completes, then is removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
-| **6. Refinement on the graph** — typed, content-identified `RefinementPatch`; checkpoint output schemas re-typed; affected set = graph query; recompile → validate → CAS-promote | Whole-file patching + glob safety → typed patches + registry regions | Patch property tests (apply+recompile == direct compile); duplicate retry/idempotency and patch-id/content-conflict tests; two-writer stale-base race matrix; promotion parity; failure-injected paired publication; rollback rehearsal through the current-manifest CAS | Retire the four glob taxonomies and `_stale_route` staleness substitution after parity proof. Rollback selects a prior consistent manifest/graph/revision tuple. No live models beyond slice 5 policy. Uses ADR 0006 counters for repair/refinement starts when bounded. |
+| **5D-0A. Typed application/workflow semantic input closure** — add closed application, provider-neutral auth, application-integration, workflow-topology, and optional-family-selection payload facts; declare their future source footprints in the sole layout registry | No production authority change: `AppBuildPlan` remains operational authority and the new inputs are offline-only | Real Genesis corpus projects the five input categories without missing/ambiguous facts; recursive structural closure; contradiction, runtime-state smuggling, explicit-absence, topology-reference, digest-mutation, and shuffled-input proofs | No renderer, assignment, AG2, publication, or capability work. Remaining executable-output and renderer gaps stay explicit for 5D-0B. Rollback: remove the new offline payload variants/projection and registry input declarations. No live models. |
+| **5D-0B1. Executable family and assignment contracts** — declare per-family dispositions, typed scope/selection/placeholder relations, narrow compiler assignment kinds, exact content-pinned output models, validator bindings, and literal emitted-versus-latent gap reporting | No production authority change: broad `AppBuildPlan` kinds remain production-only metadata and compiler contracts remain offline | Disposition/alias/scope exhaustiveness; typed relation ownership and missing-edge rejection; exact-model unknown-field/path rejection; schema-digest and semantic-identity binding; no selected greenfield preservation; production-unwired hygiene | No renderer callable, runnable bundle, AG2 adapter, evaluation/hosted field, or cutover. 5D-0B2 may enter only by binding deterministic renderers to these declared `render` families. Rollback removes B1 fields/models and retains 5D-0A inputs. No live models. |
+| **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph + immutable artifact revision become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view; `ApplicationPublication` CAS becomes publication authority | Agent-produced plan and four representations → one authored graph, derived binding/plan, rendered views, and one published graph/revision pair in a single cutover | Offline corpus regeneration equivalence; strictness report published **before** the flip; route/component/action closure; data-reference consumer tests through a test/development-only comparison window; fault injection at every graph/revision/publication persistence boundary proves publish-all-or-neither and idempotent retry | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Truthfully advertise `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` together only after the cutover proof. Rollback blocks bounded starts; the per-workflow test/development flag exists only until cutover completes, then is removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
+| **6. Refinement on the graph** — typed, content-identified `RefinementPatch`; checkpoint output schemas re-typed; affected set = graph query; recompile → validate → CAS-promote | Whole-file patching + glob safety → typed patches + registry regions | Patch property tests (apply+recompile == direct compile); duplicate retry/idempotency and patch-id/content-conflict tests; two-writer stale-base race matrix; promotion parity; failure-injected publication; rollback rehearsal through `ApplicationPublication` CAS | Retire the four glob taxonomies and `_stale_route` staleness substitution after parity proof. Rollback selects a prior consistent graph/revision closure. No live models beyond slice 5 policy. Uses ADR 0006 counters for repair/refinement starts when bounded. |
 | **7. Retirement** — remove obsolete schemas, glob taxonomies, aliases, converter paths, transitional adapters, comparison fixtures, and development flags | One semantic authority; one registry per concern | Repository hygiene guard extended to ban retired names (pattern: `scripts/production_readiness_gate.py`); full suite; generated-app acceptance | Deletions complete. Rollback: deployment rollback before deletion only; no dual-read shim reintroduced. No live-model change. ADR 0006 slice interleaving agreed before this point. |
 
 ## Acceptance Criteria For Implementation

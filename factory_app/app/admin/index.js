@@ -16,12 +16,15 @@ import { lazy } from 'react'
 const AdminPage          = lazy(() => import('@mozaiks/chat-ui/pages/AdminPage.jsx'))
 const StudioPage        = lazy(() => import('./pages/StudioPage.jsx'))
 const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
+const WorkspacePerformancePage   = lazy(() => import('./pages/WorkspacePerformancePage.jsx'))
 const WorkspaceUsagePage         = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
 const WorkspaceUsersPage         = lazy(() => import('./pages/WorkspaceUsersPage.jsx'))
 const WorkspaceIntegrationsPage  = lazy(() => import('./pages/WorkspaceIntegrationsPage.jsx'))
 const CreateAppRedirectPage = lazy(() => import('./pages/CreateAppRedirectPage.jsx'))
 const DashboardPortalPage = lazy(() => import('./pages/DashboardPortalPage.jsx'))
 const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
+const AppRevenuePage     = lazy(() => import('./pages/AppRevenuePage.jsx'))
+const AppUsersPage       = lazy(() => import('./pages/AppUsersPage.jsx'))
 const AppHealthPage      = lazy(() => import('./pages/AppHealthPage.jsx'))
 const AppAccessPage      = lazy(() => import('./pages/AppAccessPage.jsx'))
 const AppUsagePage       = lazy(() => import('./pages/AppUsagePage.jsx'))
@@ -47,6 +50,10 @@ export function registerAdminComponents(registerComponent) {
     description: 'Apps directory — shows app records for the current user and routes into app Studio per app.',
   })
 
+  registerComponent('WorkspacePerformancePage', WorkspacePerformancePage, {
+    description: 'Portfolio performance surface — revenue and user analytics across all apps with attention insights and per-app drill-down.',
+  })
+
   registerComponent('WorkspaceUsagePage', WorkspaceUsagePage, {
     description: 'Workspace usage surface — portfolio-level usage, capacity, and value trends across all apps.',
   })
@@ -70,6 +77,14 @@ export function registerAdminComponents(registerComponent) {
   registerComponent('AppOverviewPage', AppOverviewPage, {
     description: 'App overview surface — shows app intent, readiness, and the next recommended build step.',
     override: true,
+  })
+
+  registerComponent('AppRevenuePage', AppRevenuePage, {
+    description: 'App revenue surface — recurring-revenue metrics, trend, and the MRR movement bridge explaining why revenue changed.',
+  })
+
+  registerComponent('AppUsersPage', AppUsersPage, {
+    description: 'App user analytics surface — acquisition, engagement, conversion, and the app-configurable lifecycle funnel.',
   })
 
   registerComponent('AppHealthPage', AppHealthPage, {

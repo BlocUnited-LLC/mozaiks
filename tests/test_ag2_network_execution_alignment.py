@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from time import perf_counter
@@ -38,14 +39,35 @@ from mozaiksai.core.adapters.ag2_network_runner import (
     AG2NetworkRunner,
     AG2NetworkRunnerRequest,
     _closed_reason_from_wal,
+    _json_safe_dict,
     _resume_pending_agent_turns,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
 from mozaiksai.core.workflow.task_batches import parse_task_batches_config
+
+
+def test_channel_context_projects_large_source_bundle_to_artifact_reference() -> None:
+    projected = _json_safe_dict(
+        {
+            "source_context_bundle": {"file_contents": {"repo.py": "x" * 300_000}},
+            "source_context_artifact_version_id": "artifact_source_1",
+        }
+    )
+
+    assert projected["source_context_bundle"] is None
+    assert projected["source_context_artifact_version_id"] == "artifact_source_1"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_runtime_platform_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These execution tests use synthetic sessions, not Studio build bindings.
+    registry = PlatformHookRegistry()
+    monkeypatch.setattr(orchestration_patterns_module, "get_platform_hooks", lambda: registry)
 
 
 class _Reply:
@@ -54,28 +76,38 @@ class _Reply:
 
 
 @pytest.mark.anyio
-async def test_resume_pending_agent_turns_replays_each_attached_identity() -> None:
+async def test_resume_pending_agent_turns_does_not_replay_new_live_turns() -> None:
+    expected = "PlannerAgent"
+
     class _Client:
-        def __init__(self, replayed: int) -> None:
+        def __init__(self, agent_id: str, replayed: int) -> None:
+            self.agent_id = agent_id
             self.replayed = replayed
             self.calls = 0
 
         async def resume_pending_turns(self) -> int:
+            nonlocal expected
             self.calls += 1
+            expected = "WorkerAgent"
             return self.replayed
 
-    planner = _Client(2)
-    worker = _Client(0)
+    class _Hub:
+        async def pending_turns_for(self, agent_id):
+            return [SimpleNamespace(channel_id="channel")] if agent_id == expected else []
+
+    planner = _Client("PlannerAgent", 1)
+    worker = _Client("WorkerAgent", 1)
 
     total = await _resume_pending_agent_turns(
+        hub=_Hub(), channel_id="channel",
         agent_clients={"PlannerAgent": planner, "WorkerAgent": worker},
         workflow_name="DurableResumeSmoke",
         chat_id="chat-durable-resume",
     )
 
-    assert total == 2
+    assert total == 1
     assert planner.calls == 1
-    assert worker.calls == 1
+    assert worker.calls == 0
 
 
 def test_pending_turn_recovery_detects_a_closed_channel() -> None:
@@ -88,6 +120,91 @@ def test_pending_turn_recovery_detects_a_closed_channel() -> None:
     ]
 
     assert _closed_reason_from_wal(wal) == (True, "workflow_complete")
+
+
+@pytest.mark.anyio
+async def test_recovered_turn_settles_before_a_new_user_message_is_sent() -> None:
+    store = MemoryKnowledgeStore()
+    rules = [
+        {"source_agent": "Planner", "target_agent": "Worker", "transition_type": "after_turn"},
+        {"source_agent": "Worker", "target_agent": "user", "transition_type": "after_turn"},
+        {"source_agent": "user", "target_agent": "terminate", "transition_type": "after_turn"},
+    ]
+
+    class PendingPlanner(_DeterministicAgent):
+        async def ask(self, *msg, **kwargs):
+            raise RuntimeError("process lost before the reply")
+
+    class SlowWorker(_DeterministicAgent):
+        async def ask(self, *msg, **kwargs):
+            await asyncio.sleep(0.03)
+            return await super().ask(*msg, **kwargs)
+
+    def request(agents, message):
+        return AG2NetworkRunnerRequest(
+            workflow_name="RecoverPendingSmoke", chat_id="chat-recovered", app_id="app-recovered",
+            agents=agents, transition_rules=rules, initial_agent_name="Planner",
+            initial_message=message, knowledge_store=store, close_timeout_seconds=3.0,
+        )
+
+    failed = await AG2NetworkRunner().run(request({
+        "Planner": PendingPlanner("Planner", "unused"),
+        "Worker": _DeterministicAgent("Worker", "unused"),
+    }, "Start"))
+    assert failed.status is RunStatus.FAILED
+    planner = _DeterministicAgent("Planner", "Recovered plan")
+    worker = SlowWorker("Worker", "Ready for approval")
+    recovered = await AG2NetworkRunner().run(request({"Planner": planner, "Worker": worker}, "Approve"))
+    try:
+        assert recovered.status is RunStatus.COMPLETED, recovered.error
+        assert recovered.channel_id == failed.channel_id
+        assert len(planner.ask_calls) == 1
+        assert len(worker.ask_calls) == 1
+    finally:
+        if recovered.live_run is not None:
+            await recovered.live_run.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("message", [None, "Continue"])
+async def test_rejected_reconnect_context_closes_the_new_hub(monkeypatch, message) -> None:
+    closed = []
+    original_close = Hub.close
+
+    async def observe_close(hub):
+        closed.append(hub)
+        await original_close(hub)
+
+    monkeypatch.setattr(Hub, "close", observe_close)
+    store = MemoryKnowledgeStore()
+
+    def request(initial_message, updates=None):
+        return AG2NetworkRunnerRequest(
+            workflow_name="RejectedResumeSmoke", chat_id="chat-rejected", app_id="app-rejected",
+            agents={"Worker": _DeterministicAgent("Worker", "Review")},
+            transition_rules=[
+                {"source_agent": "Worker", "target_agent": "user", "transition_type": "after_turn"},
+                {"source_agent": "user", "target_agent": "terminate", "transition_type": "after_turn"},
+            ],
+            initial_agent_name="Worker", initial_message=initial_message,
+            knowledge_store=store, resume_context_updates=updates, close_timeout_seconds=3.0,
+            context_authority_policy=build_context_authority_policy(
+                workflow_name="RejectedResumeSmoke", definitions={}, transition_rules=[],
+            ),
+        )
+
+    paused = await AG2NetworkRunner().run(request("Start"))
+    assert paused.status is RunStatus.PAUSED
+    await paused.live_run.close()
+    assert len(closed) == 1
+    rejected = await AG2NetworkRunner().run(request(message, {"app_id": "foreign-app"}))
+    try:
+        assert rejected.status is RunStatus.FAILED
+        assert rejected.live_run is None
+        assert len(closed) == 2
+    finally:
+        if rejected.live_run is not None:
+            await rejected.live_run.close()
 
 
 class _DeterministicAgent(Agent):
@@ -251,15 +368,9 @@ async def test_ag2_structured_outputs_emit_runtime_event_and_update_context(
     dispatcher = _StructuredOutputDispatcher()
     context_dict = {"workflow_name": "ValueEngine", "app_id": "app-1", "chat_id": "chat-1"}
     context_bridge = ContextVariablesBridge(dict(context_dict))
-    runner_result = SimpleNamespace(
-        structured_outputs=[
-            {
-                "agent": "GapAnalysisAgent",
-                "model_name": "_ConceptBlueprintLite",
-                "structured_data": {"app_name": "ContractorFlow CRM"},
-            }
-        ],
-    )
+    packet = SimpleNamespace(causation_id="input-4", channel_id="channel-1", event_data={
+        "body": {"app_name": "ContractorFlow CRM"},
+    })
 
     monkeypatch.setattr(
         "mozaiksai.core.events.unified_event_dispatcher.get_event_dispatcher",
@@ -271,23 +382,28 @@ async def test_ag2_structured_outputs_emit_runtime_event_and_update_context(
         lambda workflow_name: {"GapAnalysisAgent"},
     )
 
-    await orchestration_patterns_module._emit_validated_structured_outputs_from_runner_result(
-        runner_result=runner_result,
+    await orchestration_patterns_module._dispatch_agent_packet_output(
+        agent_name="GapAnalysisAgent",
+        packet=packet,
         workflow_name="ValueEngine",
         chat_id="chat-1",
         app_id="app-1",
         user_id="user-1",
-        turn_sequence_start=4,
-        context_vars_dict=context_dict,
         context_bridge=context_bridge,
         structured_registry={"GapAnalysisAgent": _ConceptBlueprintLite},
+        auto_tool_agents={"GapAnalysisAgent"},
         wf_logger=SimpleNamespace(debug=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
     )
 
-    assert context_dict["structured_output"] == {"app_name": "ContractorFlow CRM"}
-    assert context_dict["_ConceptBlueprintLite"] == {"app_name": "ContractorFlow CRM"}
-    assert context_bridge.get("structured_output") == {"app_name": "ContractorFlow CRM"}
-    assert context_bridge.get("_ConceptBlueprintLite") == {"app_name": "ContractorFlow CRM"}
+    # structured_output is a runtime-owned transient projection: it must NOT
+    # be written into application context state or the pattern bridge. Auto
+    # tools observe it through the read-only overlay instead.
+    assert "structured_output" not in context_dict
+    assert "_ConceptBlueprintLite" not in context_dict
+    assert "structured_output_agent" not in context_dict
+    assert "structured_output_model" not in context_dict
+    assert context_bridge.get("structured_output") is None
+    assert context_bridge.get("_ConceptBlueprintLite") is None
     assert len(dispatcher.calls) == 1
     kind, payload = dispatcher.calls[0]
     assert kind == "runtime.agent_output_validated"
@@ -444,6 +560,63 @@ async def test_ag2_network_runner_executes_mozaiks_transition_rules() -> None:
     ]
     assert [entry["event_type"] for entry in result.wal].count(EV_PACKET) == 2
     assert result.wal[-1]["event_type"] == EV_CHANNEL_CLOSED
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("reason", ["workflow_failed", "no_transition_matched", "max_turns"])
+async def test_ag2_network_runner_does_not_complete_failed_or_exhausted_graphs(reason: str) -> None:
+    agent = _DeterministicAgent("PlannerAgent", "Done with this turn.")
+    target = "user" if reason == "max_turns" else "terminate"
+    rule = {
+        "source_agent": "PlannerAgent",
+        "target_agent": target,
+        "transition_type": "after_turn",
+    }
+    if reason == "workflow_failed":
+        rule["termination_reason"] = reason
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="FailedGraphSmoke",
+            chat_id=f"chat-{reason}",
+            app_id="app-failed-graph",
+            agents={"PlannerAgent": agent},
+            transition_rules=[] if reason == "no_transition_matched" else [rule],
+            initial_agent_name="PlannerAgent",
+            initial_message="Run the graph.",
+            max_turns=1,
+            close_timeout_seconds=10.0,
+        )
+    )
+    assert result.status is RunStatus.FAILED
+    assert result.close_reason == reason
+    assert result.error == reason
+
+
+@pytest.mark.anyio
+async def test_ag2_network_runner_fails_missing_user_return_edge() -> None:
+    agent = _DeterministicAgent("InterviewAgent", "Which color?")
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="MissingReturnSmoke",
+            chat_id="chat-missing-return",
+            app_id="app-missing-return",
+            agents={"InterviewAgent": agent},
+            transition_rules=[{
+                "source_agent": "InterviewAgent",
+                "target_agent": "user",
+                "transition_type": "after_turn",
+            }],
+            initial_agent_name="InterviewAgent",
+            initial_message="Start.",
+            close_timeout_seconds=10.0,
+        )
+    )
+    assert result.status is RunStatus.PAUSED
+    assert result.live_run is not None
+    continued = await result.live_run.continue_with_user_message("Teal.")
+    assert continued.status is RunStatus.FAILED
+    assert continued.close_reason == "no_transition_matched"
+    assert continued.error == "no_transition_matched"
 
 
 @pytest.mark.anyio
@@ -700,6 +873,122 @@ async def test_ag2_network_runner_continues_paused_channel_with_user_message() -
 
 
 @pytest.mark.anyio
+async def test_initial_timeout_is_failure_and_cancels_waiting_agent() -> None:
+    cancelled = asyncio.Event()
+
+    class WaitingAgent(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="InitialTimeout", chat_id="initial-timeout", app_id="timeout-app",
+        agents={"Waiting": WaitingAgent("Waiting", "")},
+        transition_rules=[{"source_agent": "Waiting", "target_agent": "terminate", "transition_type": "after_turn"}],
+        initial_agent_name="Waiting", initial_message="Begin.",
+        context_variables={"retained": "evidence"}, close_timeout_seconds=0.05,
+    ))
+    assert result.status is RunStatus.FAILED
+    assert result.live_run is None
+    assert "did not close" in result.error
+    assert result.context_variables["retained"] == "evidence"
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+
+
+@pytest.mark.anyio
+async def test_interview_correction_is_visible_to_downstream_planner() -> None:
+    class Interviewer(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            self._body = "NEXT" if self.ask_calls else "Add an activity log?"
+            return await super().ask(*msg, **kwargs)
+
+    class Planner(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            self.visible_inputs = [await kwargs["stream"].history.get_events(), msg]
+            return await super().ask(*msg, **kwargs)
+
+    interviewer = Interviewer("Interviewer", "")
+    planner = Planner("Planner", "Plan complete")
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="SharedInterview", chat_id="shared-interview", app_id="test-app",
+        agents={"Interviewer": interviewer, "Planner": planner},
+        transition_rules=[
+            {"source_agent": "Interviewer", "target_agent": "Planner", "transition_type": "condition", "condition_type": "context_equals", "condition_key": "ready", "condition_value": True},
+            {"source_agent": "Interviewer", "target_agent": "user", "transition_type": "after_turn"},
+            {"source_agent": "user", "target_agent": "Interviewer", "transition_type": "after_turn"},
+            {"source_agent": "Planner", "target_agent": "terminate", "transition_type": "after_turn"},
+        ],
+        agent_text_context_deriver=lambda name, text: {"ready": text == "NEXT"} if name == "Interviewer" else {},
+        initial_agent_name="Interviewer", initial_message="Build a customer registry.",
+        close_timeout_seconds=3,
+    ))
+    assert result.status is RunStatus.PAUSED
+    try:
+        continued = await result.live_run.continue_with_user_message("No activity log. Email is optional.")
+        assert continued.status is RunStatus.COMPLETED, continued.error
+        assert len(interviewer.ask_calls) == 2
+        assert len(planner.ask_calls) == 1
+        assert "No activity log. Email is optional." in repr(planner.visible_inputs)
+        assert "Build a customer registry." in repr(planner.visible_inputs)
+    finally:
+        await result.live_run.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("timeout", [0.0, 0.05])
+async def test_continuation_timeout_fails_and_closes_live_run(timeout: float) -> None:
+    waiting = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class WaitingAgent(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            if self.ask_calls:
+                waiting.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+            return await super().ask(*msg, **kwargs)
+
+    agent = WaitingAgent("Interviewer", "What should I build?")
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="ContinuationTimeout",
+            chat_id="timeout-chat",
+            app_id="timeout-app",
+            agents={"Interviewer": agent},
+            transition_rules=[
+                {"source_agent": "Interviewer", "target_agent": "user", "transition_type": "after_turn"},
+                {"source_agent": "user", "target_agent": "Interviewer", "transition_type": "after_turn"},
+            ],
+            initial_agent_name="Interviewer",
+            initial_message="Begin.",
+            close_timeout_seconds=2.0,
+        )
+    )
+    assert result.status is RunStatus.PAUSED
+    live_run = result.live_run
+    assert live_run is not None
+    live_run._close_timeout_seconds = timeout
+    try:
+        continued = await asyncio.wait_for(live_run.continue_with_user_message("A tracker."), timeout=3.0)
+        assert continued.status is RunStatus.FAILED
+        assert "did not settle" in continued.error
+        assert continued.close_reason != "awaiting_user_input"
+        assert continued.live_run is None
+        assert live_run._closed
+        if timeout:
+            assert waiting.is_set()
+            await asyncio.wait_for(cancelled.wait(), timeout=1.0)
+        rejected = await live_run.continue_with_user_message("Try again.")
+        assert rejected.error == "live_ag2_channel_closed"
+    finally:
+        await live_run.close()
+
+
+@pytest.mark.anyio
 async def test_ag2_network_runner_hydrates_and_continues_same_channel_after_restart() -> None:
     store = MemoryKnowledgeStore()
     transition_rules = [
@@ -835,6 +1124,7 @@ async def test_ag2_network_runner_commits_multiple_context_updates_and_deletes()
             ],
             initial_agent_name="PlannerAgent",
             initial_message="Set route, phase, and delete obsolete.",
+            context_variables=context,
             close_timeout_seconds=10.0,
         )
     )
@@ -1026,6 +1316,7 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
             chat_id: str,
             app_id: str,
             workflow_name: str,
+            user_id: str,
         ) -> dict[str, Any]:
             self.fetched_scope = (chat_id, app_id, workflow_name)
             if persistence_failure == "fetch":
@@ -1047,6 +1338,13 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
             self.assistant_messages.append(dict(kwargs))
+
+        async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+            pass
+
+        async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+            self.failed = (chat_id, app_id)
+            return True
 
         async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
             self.completed.append((chat_id, app_id))
@@ -1137,6 +1435,8 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
         expected_error = "context fetch failed" if persistence_failure == "fetch" else "context update failed"
         with pytest.raises(RuntimeError, match=expected_error):
             await run_workflow_orchestration(**run_kwargs)
+        assert persistence.failed == ("chat-1", "app-1")
+        assert persistence.completed == []
         assert persistence.fetched_scope == ("chat-1", "app-1", "AlignmentSmoke")
         if persistence_failure == "fetch":
             assert persistence.persisted_scope is None
@@ -1195,6 +1495,7 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
             chat_id: str,
             app_id: str,
             workflow_name: str,
+            user_id: str,
         ) -> dict[str, Any]:
             assert workflow_name == "AgentGenerator"
             return {
@@ -1216,6 +1517,13 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
             return None
+
+        async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+            pass
+
+        async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+            self.failed = (chat_id, app_id)
+            return True
 
         async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
             self.completed.append((chat_id, app_id))
@@ -1338,8 +1646,12 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
 
 
 @pytest.mark.anyio
-async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phases(
+@pytest.mark.parametrize("interview_first", [False, True])
+@pytest.mark.parametrize("batch_fails", [False, True])
+async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigger(
     monkeypatch: pytest.MonkeyPatch,
+    interview_first: bool,
+    batch_fails: bool,
 ) -> None:
     class _Persistence:
         def __init__(self) -> None:
@@ -1364,6 +1676,7 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             chat_id: str,
             app_id: str,
             workflow_name: str,
+            user_id: str,
         ) -> dict[str, Any]:
             assert workflow_name == "TaskBatchAlignmentSmoke"
             return {}
@@ -1382,6 +1695,13 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
             self.assistant_messages.append(dict(kwargs))
 
+        async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+            pass
+
+        async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+            self.failed = (chat_id, app_id)
+            return True
+
         async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
             self.completed.append((chat_id, app_id))
             return True
@@ -1396,6 +1716,9 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
 
         def unregister_derived_context_manager(self, chat_id: str) -> None:
             return None
+
+        async def send_tool_call_event(self, **kwargs: Any) -> None:
+            self.events.append((kwargs["chat_id"], dict(kwargs["payload"])))
 
     class _ContextAwareAgent(Agent):
         def __init__(self, name: str, body_factory) -> None:
@@ -1427,14 +1750,19 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             }
         },
     )
-    worker_agent = _ContextAwareAgent(
-        "WorkerAgent",
-        lambda context: {
+    def _worker_reply(context):
+        if batch_fails:
+            raise ValueError("required worker failed")
+        return {
             "task_id": context["current_task_id"],
             "summary": "Worker used AG2 task lifecycle context.",
             "owned_paths": context["current_task"]["owned_paths"],
             "agent_message": "Worker done.",
-        },
+        }
+
+    worker_agent = _ContextAwareAgent(
+        "WorkerAgent",
+        _worker_reply,
     )
     synthesis_agent = _ContextAwareAgent(
         "SynthesisAgent",
@@ -1448,11 +1776,18 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
         return transport
 
     async def _agents_factory(workflow_name: str, context: Any, cache_seed: int) -> dict[str, Agent]:
-        return {
+        agents = {
             "PlannerAgent": planner_agent,
             "WorkerAgent": worker_agent,
             "SynthesisAgent": synthesis_agent,
         }
+        if interview_first:
+            agents["InterviewAgent"] = _DeterministicAgent("InterviewAgent", "Confirmed scope.")
+        bridge = ContextVariablesBridge({})
+        for agent in agents.values():
+            if not hasattr(agent, "_mozaiks_context_bridge"):
+                agent._mozaiks_context_bridge = bridge
+        return agents
 
     monkeypatch.setattr(orchestration_patterns_module, "AG2PersistenceManager", lambda: persistence)
     monkeypatch.setattr(simple_transport_module.SimpleTransport, "get_instance", staticmethod(_get_transport))
@@ -1463,9 +1798,14 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             "config": {
                 "max_turns": 4,
                 "workflow_startup_mode": "AgentDriven",
-                "initial_agent": "PlannerAgent",
+                "initial_agent": "InterviewAgent" if interview_first else "PlannerAgent",
                 "transition_graph": {
                     "transition_rules": [
+                        {
+                            "source_agent": "InterviewAgent",
+                            "target_agent": "PlannerAgent",
+                            "transition_type": "after_turn",
+                        },
                         {
                             "source_agent": "PlannerAgent",
                             "target_agent": "SynthesisAgent",
@@ -1481,7 +1821,7 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             },
             "max_turns": 4,
             "workflow_startup_mode": "AgentDriven",
-            "initial_agent_name": "PlannerAgent",
+            "initial_agent_name": "InterviewAgent" if interview_first else "PlannerAgent",
         },
     )
     monkeypatch.setattr(
@@ -1513,13 +1853,23 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
     )
 
     assert result is not None
+    if batch_fails:
+        assert result["run_completed"] is False
+        assert result["failed"] is True
+        assert not synthesis_agent.context_seen
+        assert not persistence.completed
+        assert persistence.persisted_context["runtime_tasks_status"] == "failed"
+        failure = persistence.persisted_context["runtime_tasks_results"]["_failed"]["module_contract"]
+        assert "AG2 task lifecycle failed for task 'module_contract'" in failure["error"]
+        assert any(event.get("phase") == "failed" for _, event in transport.events)
+        return
     assert result["run_completed"] is True
     assert worker_agent.context_seen[0]["current_task_id"] == "module_contract"
     assert synthesis_agent.context_seen[0]["runtime_tasks_status"] == "completed"
     assert synthesis_agent.context_seen[0]["runtime_tasks_results"]["module_contract"]["summary"] == (
         "Worker used AG2 task lifecycle context."
     )
-    assert [message["agent_name"] for message in persistence.assistant_messages] == [
+    assert [message["agent_name"] for message in persistence.assistant_messages] == (["InterviewAgent"] if interview_first else []) + [
         "PlannerAgent",
         "SynthesisAgent",
     ]
@@ -1527,7 +1877,7 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
 
 
 @pytest.mark.anyio
-async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phase(
+async def test_task_batch_interview_retains_the_declared_ag2_pause_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Persistence:
@@ -1552,6 +1902,7 @@ async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phas
             chat_id: str,
             app_id: str,
             workflow_name: str,
+            user_id: str,
         ) -> dict[str, Any]:
             assert workflow_name == "AgentGenerator"
             return {}
@@ -1569,6 +1920,13 @@ async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phas
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
             self.assistant_messages.append(dict(kwargs))
+
+        async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
+            pass
+
+        async def mark_chat_failed(self, chat_id: str, app_id: str) -> bool:
+            self.failed = (chat_id, app_id)
+            return True
 
         async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
             raise AssertionError("paused workflow must not be marked completed")
@@ -1600,14 +1958,14 @@ async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phas
     async def _network_phase(**kwargs: Any) -> SimpleNamespace:
         network_calls.append(dict(kwargs))
         return SimpleNamespace(
-            status=RunStatus.COMPLETED,
+            status=RunStatus.PAUSED,
             error=None,
             context_variables=kwargs["context_variables"],
             structured_outputs=[],
             wal=[],
             agent_name_by_id={},
             channel_id="channel-preface",
-            close_reason="workflow_complete",
+            close_reason="awaiting_user_input",
             live_run=None,
         )
 
@@ -1697,5 +2055,4 @@ async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phas
     assert result["run_completed"] is False
     assert len(network_calls) == 1
     assert network_calls[0]["initial_agent_name"] == "InterviewAgent"
-    assert transport.events[-2][1]["kind"] == "awaiting_reply"
-    assert transport.events[-2][1]["source_agent"] == "InterviewAgent"
+    assert network_calls[0]["transition_rules"][0]["target_agent"] == "user"

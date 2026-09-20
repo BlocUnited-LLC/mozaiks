@@ -121,7 +121,7 @@ def test_module_context_construction_without_persistence_remains_valid() -> None
 @pytest.mark.asyncio
 async def test_module_executor_injects_persistence_when_app_id_exists() -> None:
     executor = ModuleExecutor()
-    executor.register("inspect", CaptureContextHandler())
+    executor.register("inspect", CaptureContextHandler(), action_method_map={name: name for name in ("inspect_context", "read_project", "create", "run")})
 
     result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1", authority=trusted_framework_authority()))
 
@@ -141,7 +141,7 @@ async def test_module_executor_production_path_uses_real_mongo_persistence_conte
     assert module_executor_module.MongoPersistenceContext is MongoPersistenceContext
 
     executor = ModuleExecutor()
-    executor.register("inspect", CaptureContextHandler())
+    executor.register("inspect", CaptureContextHandler(), action_method_map={name: name for name in ("inspect_context", "read_project", "create", "run")})
 
     result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1", authority=trusted_framework_authority()))
 
@@ -152,7 +152,7 @@ async def test_module_executor_production_path_uses_real_mongo_persistence_conte
 @pytest.mark.asyncio
 async def test_injected_persistence_is_mongo_context_with_current_app_id() -> None:
     executor = ModuleExecutor()
-    executor.register("inspect", CaptureContextHandler())
+    executor.register("inspect", CaptureContextHandler(), action_method_map={name: name for name in ("inspect_context", "read_project", "create", "run")})
 
     result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_abc", authority=trusted_framework_authority()))
 
@@ -163,7 +163,7 @@ async def test_injected_persistence_is_mongo_context_with_current_app_id() -> No
 @pytest.mark.asyncio
 async def test_user_and_tenant_scope_are_passed_to_persistence() -> None:
     executor = ModuleExecutor()
-    executor.register("inspect", CaptureContextHandler())
+    executor.register("inspect", CaptureContextHandler(), action_method_map={name: name for name in ("inspect_context", "read_project", "create", "run")})
 
     result = await executor.execute(
         ModuleRequest(
@@ -186,7 +186,7 @@ async def test_user_and_tenant_scope_are_passed_to_persistence() -> None:
 @pytest.mark.asyncio
 async def test_ctx_db_attribute_does_not_exist() -> None:
     executor = ModuleExecutor()
-    executor.register("inspect", CaptureContextHandler())
+    executor.register("inspect", CaptureContextHandler(), action_method_map={name: name for name in ("inspect_context", "read_project", "create", "run")})
 
     result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1", authority=trusted_framework_authority()))
 
@@ -197,7 +197,7 @@ async def test_ctx_db_attribute_does_not_exist() -> None:
 @pytest.mark.asyncio
 async def test_handler_can_access_ctx_persistence() -> None:
     executor = ModuleExecutor()
-    executor.register("inspect", CaptureContextHandler())
+    executor.register("inspect", CaptureContextHandler(), action_method_map={name: name for name in ("inspect_context", "read_project", "create", "run")})
 
     result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1", authority=trusted_framework_authority()))
 
@@ -210,7 +210,7 @@ async def test_handler_can_call_persistence_collection(monkeypatch: pytest.Monke
     fake_client = FakeMongoClient()
     monkeypatch.setattr(mongo_module, "get_mongo_client", lambda: fake_client)
     executor = ModuleExecutor()
-    executor.register("projects", PersistenceUsingHandler())
+    executor.register("projects", PersistenceUsingHandler(), action_method_map={"read_project": "read_project"})
 
     result = await executor.execute(ModuleRequest(module="projects", action="read_project", app_id="app_1", authority=trusted_framework_authority()))
 
@@ -226,7 +226,7 @@ async def test_existing_event_emit_behavior_remains_unchanged() -> None:
         emitted.append((event_type, payload))
 
     executor = ModuleExecutor(event_emitter=capture)
-    executor.register("tasks", EmitHandler())
+    executor.register("tasks", EmitHandler(), action_method_map={"create": "create"})
 
     result = await executor.execute(
         ModuleRequest(module="tasks", action="create", app_id="app_1", user_id="user_1", tenant_id="tenant_1", authority=trusted_framework_authority())
@@ -246,7 +246,7 @@ async def test_event_emit_includes_workspace_when_present() -> None:
         emitted.append((event_type, payload))
 
     executor = ModuleExecutor(event_emitter=capture)
-    executor.register("tasks", EmitHandler())
+    executor.register("tasks", EmitHandler(), action_method_map={"create": "create"})
 
     result = await executor.execute(
         ModuleRequest(
@@ -271,7 +271,7 @@ async def test_event_emit_includes_workspace_when_present() -> None:
 async def test_existing_settings_and_auth_fields_remain_unchanged() -> None:
     settings = [SettingDef(id="max_items", type="integer", default=50)]
     executor = ModuleExecutor()
-    executor.register("tasks", EmitHandler(), settings=settings)
+    executor.register("tasks", EmitHandler(), action_method_map={"create": "create"}, settings=settings)
 
     result = await executor.execute(
         ModuleRequest(module="tasks", action="create", app_id="app_1", auth_token="token_123", authority=trusted_framework_authority())
@@ -285,7 +285,7 @@ async def test_existing_settings_and_auth_fields_remain_unchanged() -> None:
 @pytest.mark.asyncio
 async def test_module_execution_still_works_without_persistence_when_app_id_missing() -> None:
     executor = ModuleExecutor()
-    executor.register("optional", OptionalPersistenceHandler())
+    executor.register("optional", OptionalPersistenceHandler(), action_method_map={"run": "run"})
 
     result = await executor.execute(ModuleRequest(module="optional", action="run", authority=trusted_framework_authority()))
 

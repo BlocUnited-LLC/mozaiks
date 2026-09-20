@@ -34,11 +34,16 @@ def build_app_scope_filter(app_id: str) -> dict[str, Any]:
 
 
 def dual_write_app_scope(doc: dict[str, Any], app_id: str) -> dict[str, Any]:
-    """Write canonical scope key."""
+    """Write canonical scope key, refusing to produce an untagged document.
+
+    Reads fail closed by matching `__invalid__`; writes must too. Returning the
+    doc unscoped leaves a record no tenant filter can see and any unfiltered
+    query can, which is a leak waiting for one caller to forget its own guard.
+    """
 
     normalized = normalize_app_id(app_id)
     if not normalized:
-        return doc
+        raise ValueError("app_id is required to scope a tenant document")
     doc["app_id"] = normalized
     return doc
 

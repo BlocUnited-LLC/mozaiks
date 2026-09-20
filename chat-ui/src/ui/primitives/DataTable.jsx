@@ -27,6 +27,7 @@
  */
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '../base/components/table.jsx';
@@ -86,7 +87,7 @@ function MobileRowCard({
   return (
     <article
       className={cn(
-        'rounded-[1.2rem] border border-border/45 bg-card/34 shadow-sm shadow-black/5 space-y-3 p-4 md:hidden',
+        'min-w-0 rounded border border-border bg-card space-y-3 p-4 md:hidden',
         selection !== 'none' && 'cursor-pointer',
         isSelected && 'ring-2 ring-primary/25',
       )}
@@ -95,11 +96,11 @@ function MobileRowCard({
       {selection !== 'none' && (
         <div className="flex items-center justify-between gap-3 border-b border-border/32 pb-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Selection</div>
-            <div className="mt-1 text-sm font-medium text-foreground">{isSelected ? 'Included' : 'Tap to select'}</div>
+            <div className="text-sm font-medium text-foreground">{isSelected ? 'Selected' : 'Select record'}</div>
           </div>
           <input
             type={selection === 'multi' ? 'checkbox' : 'radio'}
+            aria-label="Select record"
             checked={isSelected}
             onChange={() => onToggle(rowKey)}
             onClick={(event) => event.stopPropagation()}
@@ -110,10 +111,10 @@ function MobileRowCard({
 
       {columns.map((col) => (
         <div key={col.key} className="space-y-1.5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+          <div className="text-xs font-semibold text-muted-foreground">
             {col.label}
           </div>
-          <div className="text-sm text-foreground">
+          <div className="break-words [overflow-wrap:anywhere] text-sm text-foreground">
             <CellContent column={col} value={row[col.key]} />
           </div>
         </div>
@@ -128,28 +129,42 @@ export function DataTable({
   data: initialData = EMPTY_ARRAY,
   selection = 'none',
   pagination = true,
+  pagination_mode = 'client',
   page_size = 20,
+  total,
+  query,
+  onQueryChange,
   search = true,
+  search_placeholder = 'Search...',
+  search_keys,
   actions = EMPTY_ARRAY,
   onAction,
   onRefresh,
   loading: initialLoading = false,
+  error = null,
   empty,
   className,
 }) {
-  const [data,         setData]         = useState(initialData);
-  const [loading,      setLoading]      = useState(initialLoading);
-  const [searchQuery,  setSearchQuery]  = useState('');
+  const server = pagination_mode === 'server';
+  const [clientData,   setData]         = useState(initialData);
+  const [clientLoading, setLoading]    = useState(initialLoading);
+  const [clientSearch, setSearchQuery] = useState('');
   const [sortKey,      setSortKey]      = useState(null);
   const [sortDir,      setSortDir]      = useState('asc');
-  const [page,         setPage]         = useState(1);
+  const [clientPage,   setPage]         = useState(1);
   const [selected,     setSelected]     = useState(new Set());
+  const data = server ? initialData : clientData;
+  const loading = server ? initialLoading : clientLoading;
+  const page = server ? (query?.page ?? 1) : clientPage;
+  const searchQuery = server ? (query?.search ?? '') : clientSearch;
 
   useEffect(() => {
-    setData(Array.isArray(initialData) ? initialData : []);
-    setPage(1);
+    if (!server) {
+      setData(Array.isArray(initialData) ? initialData : []);
+      setPage(1);
+    }
     setSelected(new Set());
-  }, [initialData]);
+  }, [initialData, server, query?.page, query?.search]);
 
   useEffect(() => {
     setLoading(initialLoading);
@@ -158,6 +173,10 @@ export function DataTable({
   // Agent-controlled refresh
   useAppEvent('ui.datatable.refresh', id, async () => {
     if (!onRefresh) return;
+    if (server) {
+      await onRefresh();
+      return;
+    }
     setLoading(true);
     try {
       const fresh = await onRefresh();
@@ -168,25 +187,35 @@ export function DataTable({
   });
 
   const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return data;
+    if (server || !searchQuery.trim()) return data;
     const q = searchQuery.toLowerCase();
+    const keys = search_keys ?? columns.map((column) => column.key);
     return data.filter((row) =>
-      columns.some((col) => String(row[col.key] ?? '').toLowerCase().includes(q))
+      keys.some((key) => String(row[key] ?? '').toLowerCase().includes(q))
     );
-  }, [data, searchQuery, columns]);
+  }, [data, searchQuery, columns, search_keys, server]);
+
+  // Row identity must survive sorting, filtering, and pagination.
+  const rowKeys = useMemo(() => new Map(data.map((row, index) => [row, getRowKey(row, index)])), [data]);
 
   const sorted = useMemo(() => {
-    if (!sortKey) return filtered;
+    if (server || !sortKey) return filtered;
     return [...filtered].sort((a, b) => {
       const av = a[sortKey] ?? '';
       const bv = b[sortKey] ?? '';
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [filtered, sortKey, sortDir]);
+  }, [filtered, sortKey, sortDir, server]);
 
-  const totalPages = Math.ceil(sorted.length / page_size);
-  const paged      = pagination ? sorted.slice((page - 1) * page_size, page * page_size) : sorted;
+  const resultCount = server ? total : sorted.length;
+  const totalPages = Math.max(1, Math.ceil((resultCount ?? 0) / page_size));
+  const paged = !server && pagination ? sorted.slice((page - 1) * page_size, page * page_size) : sorted;
+  const changePage = (nextPage) => {
+    setSelected(new Set());
+    if (server) onQueryChange?.({ page: nextPage });
+    else setPage(nextPage);
+  };
 
   const toggleSort = useCallback((key) => {
     if (sortKey === key) {
@@ -207,8 +236,8 @@ export function DataTable({
   }, [selection]);
 
   const selectedRows = useMemo(
-    () => sorted.filter((row, rowIndex) => selected.has(getRowKey(row, rowIndex))),
-    [selected, sorted],
+    () => sorted.filter((row) => selected.has(rowKeys.get(row))),
+    [selected, sorted, rowKeys],
   );
 
   return (
@@ -219,9 +248,14 @@ export function DataTable({
           {search && (
             <input
               type="search"
-              placeholder="Search…"
+              placeholder={search_placeholder}
+              aria-label={search_placeholder}
               value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+              onChange={(e) => {
+                setSelected(new Set());
+                if (server) onQueryChange?.({ search: e.target.value });
+                else { setSearchQuery(e.target.value); setPage(1); }
+              }}
               className="h-11 w-full max-w-md rounded-[var(--shell-control-radius,1rem)] border border-border/48 bg-card/34 px-4 text-sm text-foreground shadow-sm shadow-black/5 outline-none transition placeholder:text-muted-foreground/68 hover:border-border/70 focus:border-primary/42 focus:ring-2 focus:ring-primary/16"
             />
           )}
@@ -233,7 +267,7 @@ export function DataTable({
                   label={action.label}
                   variant={action.variant ?? 'secondary'}
                   size="sm"
-                  disabled={action.requires_selection && selected.size === 0}
+                  disabled={action.requires_selection && (selected.size === 0 || loading || !!error)}
                   onClick={() => onAction?.(action.id, selectedRows)}
                 />
               ))}
@@ -245,6 +279,14 @@ export function DataTable({
       {/* Table */}
       {loading ? (
         <Skeleton rows={5} height="h-10" />
+      ) : error ? (
+        <div role="alert">
+          <Empty
+            title={empty?.error_title || 'Unable to load records'}
+            message={empty?.error_message || String(error)}
+            action={onRefresh ? { label: empty?.retry_label || 'Retry', onClick: onRefresh } : undefined}
+          />
+        </div>
       ) : paged.length === 0 ? (
         <Empty
           title={empty?.title ?? 'No results'}
@@ -255,11 +297,8 @@ export function DataTable({
       ) : (
         <>
           <div className="space-y-3 md:hidden">
-            {paged.map((row, rowIdx) => {
-              const rowKey = getRowKey(
-                row,
-                pagination ? ((page - 1) * page_size) + rowIdx : rowIdx,
-              );
+            {paged.map((row) => {
+              const rowKey = rowKeys.get(row);
               return (
                 <MobileRowCard
                   key={rowKey}
@@ -282,11 +321,11 @@ export function DataTable({
                     <TableHead
                       key={col.key}
                       style={col.width ? { width: col.width } : undefined}
-                      className={cn(col.sortable && 'cursor-pointer select-none hover:text-foreground')}
-                      onClick={col.sortable ? () => toggleSort(col.key) : undefined}
+                      className={cn(!server && col.sortable && 'cursor-pointer select-none hover:text-foreground')}
+                      onClick={!server && col.sortable ? () => toggleSort(col.key) : undefined}
                     >
                       {col.label}
-                      {sortKey === col.key && (
+                      {!server && sortKey === col.key && (
                         <span className="ml-1 text-xs">{sortDir === 'asc' ? '↑' : '↓'}</span>
                       )}
                     </TableHead>
@@ -294,11 +333,8 @@ export function DataTable({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paged.map((row, rowIdx) => {
-                  const rowKey = getRowKey(
-                    row,
-                    pagination ? ((page - 1) * page_size) + rowIdx : rowIdx,
-                  );
+                {paged.map((row) => {
+                  const rowKey = rowKeys.get(row);
                   const isSelected = selected.has(rowKey);
                   return (
                     <TableRow
@@ -333,24 +369,28 @@ export function DataTable({
       )}
 
       {/* Pagination */}
-      {pagination && totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>{sorted.length} results</span>
+      {pagination && (server ? Number.isSafeInteger(total) && !loading && !error : totalPages > 1) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+          <span>{resultCount} results</span>
           <div className="flex items-center gap-1">
             <Button
-              label="‹"
+              icon={<ChevronLeft size={16} />}
+              aria-label="Previous page"
+              title="Previous page"
               variant="ghost"
               size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
+              disabled={loading || page <= 1}
+              onClick={() => changePage(page - 1)}
             />
-            <span className="px-2">Page {page} of {totalPages}</span>
+            <span className="px-2" aria-live="polite">Page {page} of {totalPages}</span>
             <Button
-              label="›"
+              icon={<ChevronRight size={16} />}
+              aria-label="Next page"
+              title="Next page"
               variant="ghost"
               size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
+              disabled={loading || page >= totalPages}
+              onClick={() => changePage(page + 1)}
             />
           </div>
         </div>

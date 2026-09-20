@@ -11,12 +11,13 @@
  *   - Render an Unknown fallback when the primitive type is not registered
  */
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { getPrimitive, getPrimitiveSchema } from './PrimitiveRegistry.js';
-import { getChildSections } from './schemaUtils.js';
-import { emitAppEvent } from '../hooks/useAppEventBus.js';
+import { getChildSections, resolvePath } from './schemaUtils.js';
+import { emitAppEvent, useAppEvent } from '../hooks/useAppEventBus.js';
 import { cn } from '../lib/cn.js';
 import { useWorkflowStart } from '../../hooks/useWorkflowStart.js';
+import { authFetch } from '../../adapters/api.js';
 
 function UnknownPrimitive({ type }) {
   return (
@@ -40,14 +41,6 @@ function titleize(value) {
   return String(value)
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase());
-}
-
-function resolvePath(source, path) {
-  if (!path) return undefined;
-  return String(path)
-    .split('.')
-    .filter(Boolean)
-    .reduce((current, segment) => (current == null ? undefined : current[segment]), source);
 }
 
 function interpolateString(template, context) {
@@ -142,9 +135,7 @@ function materializeActions(actions, executeAction, defaultPrefix) {
       const schemaAction = { ...action, id };
       return {
         ...schemaAction,
-        onClick: () => {
-          void executeAction(schemaAction);
-        },
+        onClick: () => executeAction(schemaAction),
       };
     });
 }
@@ -294,9 +285,17 @@ export function SectionRenderer({
   inheritedData = null,
   inheritedLoading = false,
   inheritedRefreshTargetId = null,
+  inheritedActionContext = null,
+  inheritedModalId = null,
 }) {
   const Primitive = getPrimitive(section.primitive);
   const { startWorkflow } = useWorkflowStart();
+  const [modalContext, setModalContext] = useState(null);
+  const [actionError, setActionError] = useState(null);
+  useAppEvent('ui.modal.open', section.id, (payload) => {
+    setModalContext({ selectedRows: payload.selected_rows ?? [] });
+    setActionError(null);
+  });
 
   if (!Primitive) {
     return <UnknownPrimitive type={section.primitive} />;
@@ -344,6 +343,8 @@ export function SectionRenderer({
   const effectiveLoading = hasOwnBinding ? (liveState.loading ?? false) : inheritedLoading;
   const refreshTargetId = hasOwnBinding ? section.id : inheritedRefreshTargetId;
   const componentId = section.id;
+  const actionContext = modalContext ?? inheritedActionContext ?? {};
+  const modalId = section.primitive === 'Modal' ? section.id : inheritedModalId;
 
   const refetchCurrentSection = useCallback(() => {
     if (!onRefetch || !refreshTargetId) return Promise.resolve(null);
@@ -354,11 +355,15 @@ export function SectionRenderer({
     if (!isRecord(action)) return null;
 
     const actionType = resolveActionType(action);
-    const context = buildActionContext(effectiveData, extraContext);
+    const context = buildActionContext(effectiveData, { ...actionContext, ...extraContext });
+    setActionError(null);
 
     try {
       if (actionType === 'event' && action.event_type) {
         const payload = interpolateValue(action.payload ?? {}, context);
+        if (action.event_type === 'ui.modal.open') {
+          payload.selected_rows = context.selected_rows;
+        }
         emitAppEvent(action.event_type, payload);
         return payload;
       }
@@ -391,10 +396,10 @@ export function SectionRenderer({
         const target = interpolateString(action.href, context);
         if (!target) return null;
 
-        const method = actionType === 'delete' ? 'DELETE' : 'POST';
-        const body = action.payload !== undefined
+        const method = actionType === 'delete' && !target.startsWith('/api/modules/') ? 'DELETE' : 'POST';
+        const body = action.payload != null
           ? interpolateValue(action.payload, context)
-          : extraContext.values ?? extraContext.selectedRows ?? {};
+          : extraContext.values ?? context.selected_row ?? {};
 
         const request = {
           method,
@@ -405,21 +410,25 @@ export function SectionRenderer({
           request.body = JSON.stringify(body);
         }
 
-        const response = await fetch(target, request);
+        const response = await authFetch(target, request);
         if (!response.ok) {
           throw new Error(`${response.status} ${response.statusText}`);
         }
 
         await onRefetch?.();
+        if (action.closes_modal && modalId) {
+          emitAppEvent('ui.modal.close', { modal_id: modalId });
+        }
         return response;
       }
 
       return null;
     } catch (error) {
       console.error(`❌ Failed to execute page action for section '${section.id}'`, error);
+      setActionError(error.message || 'The action could not be completed. Please try again.');
       return null;
     }
-  }, [effectiveData, onNavigate, onRefetch, section.id, startWorkflow]);
+  }, [effectiveData, actionContext, modalId, onNavigate, onRefetch, section.id, startWorkflow]);
 
   const nestedChildren = getChildSections(section).map((child) => (
     <SectionRenderer
@@ -431,6 +440,8 @@ export function SectionRenderer({
       inheritedData={effectiveData}
       inheritedLoading={effectiveLoading}
       inheritedRefreshTargetId={refreshTargetId}
+      inheritedActionContext={actionContext}
+      inheritedModalId={modalId}
     />
   ));
 
@@ -573,11 +584,21 @@ export function SectionRenderer({
       primitiveProps = {
         id: componentId,
         columns: normalizeColumns(config.columns),
-        data: resolveTableData(config, effectiveData),
+        data: config.pagination_mode === 'server' ? liveState?.rows : resolveTableData(config, effectiveData),
         selection: config.selection ?? 'none',
         pagination: config.pagination ?? true,
+        pagination_mode: config.pagination_mode ?? 'client',
         page_size: config.page_size ?? 20,
+        total: liveState?.total,
+        query: liveState?.query,
+        onQueryChange: (query) => onRefetch?.(section.id, query),
         search: config.search ?? true,
+        search_placeholder: config.search_placeholder,
+        search_keys: config.search_keys,
+        filters: config.filters,
+        default_filter: config.default_filter,
+        sorts: config.sorts,
+        default_sort: config.default_sort,
         actions,
         onAction: (actionId, selectedRows) => {
           const action = actionLookup.get(actionId);
@@ -591,6 +612,7 @@ export function SectionRenderer({
             ? { action: emptyAction }
             : undefined,
         loading: effectiveLoading,
+        error: liveState?.error,
         onRefresh: refreshTargetId ? refetchCurrentSection : undefined,
         variant: section.primitive === 'ResourceTable' ? 'resource' : undefined,
       };
@@ -607,6 +629,9 @@ export function SectionRenderer({
       primitiveProps = {
         id: componentId,
         fields: normalizeFormFields(config.fields),
+        initial_values: config.initial_values_key
+          ? resolvePath(buildActionContext(effectiveData, actionContext), config.initial_values_key)
+          : null,
         layout: config.layout ?? 'vertical',
         columns: config.columns ?? 2,
         submit_label: config.submit_label ?? 'Submit',
@@ -645,19 +670,20 @@ export function SectionRenderer({
     case 'Modal':
       primitiveProps = {
         id: componentId,
-        title: config.title,
-        description: config.description,
+        title: interpolateString(config.title, buildActionContext(effectiveData, actionContext)),
+        description: interpolateString(config.description, buildActionContext(effectiveData, actionContext)),
         size: config.size ?? 'medium',
         actions: materializeActions(config.actions, executeAction, section.id),
         children: nestedChildren,
         open: config.open,
+        error: actionError,
       };
       break;
     case 'Alert':
       primitiveProps = {
         id: componentId,
-        title: config.title,
-        message: config.message,
+        title: interpolateString(config.title, buildActionContext(effectiveData, actionContext)),
+        message: interpolateString(config.message, buildActionContext(effectiveData, actionContext)),
         variant: config.variant ?? 'default',
         dismissible: config.dismissible ?? false,
       };
@@ -745,6 +771,8 @@ export function SectionRenderer({
       break;
   }
 
+  if (section.primitive === 'Modal') return <Primitive {...primitiveProps} />;
+
   return (
     <div className={cn('w-full', className)}>
       {section.title && (
@@ -753,6 +781,9 @@ export function SectionRenderer({
         </h2>
       )}
       <Primitive {...primitiveProps} />
+      {actionError && section.primitive !== 'Modal' && (
+        <p role="alert" className="mt-2 text-sm text-destructive">{actionError}</p>
+      )}
     </div>
   );
 }

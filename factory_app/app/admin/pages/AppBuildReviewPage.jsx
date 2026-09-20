@@ -61,7 +61,7 @@ function actionVariant(actionId) {
   return 'outline'
 }
 
-async function postReviewAction({ appId, artifactVersionId, actionId }) {
+async function postReviewAction({ buildRegistryId, artifactVersionId, actionId }) {
   const endpointByAction = {
     accept: 'accept',
     reject: 'reject',
@@ -70,7 +70,7 @@ async function postReviewAction({ appId, artifactVersionId, actionId }) {
   const endpoint = endpointByAction[actionId]
   if (!endpoint) throw new Error(`${actionId} is not available yet.`)
   const response = await studioFetch(
-    `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${endpoint}?app_id=${encodeURIComponent(appId)}`,
+    `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${endpoint}?build_registry_id=${encodeURIComponent(buildRegistryId)}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -84,7 +84,7 @@ async function postReviewAction({ appId, artifactVersionId, actionId }) {
   return response.json()
 }
 
-function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
+function ReviewPackagePanel({ buildRegistryId, artifactVersionId, dataMode, onRefresh }) {
   const [payload, setPayload] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -94,7 +94,7 @@ function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
     let cancelled = false
 
     async function loadReviewPackage() {
-      if (!artifactVersionId || dataMode === 'demo') {
+      if (!artifactVersionId || !buildRegistryId || dataMode === 'demo') {
         setPayload(null)
         setLoading(false)
         setError(null)
@@ -104,7 +104,7 @@ function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
       setError(null)
       try {
         const response = await studioFetch(
-          `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review?app_id=${encodeURIComponent(appId)}`,
+          `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review?build_registry_id=${encodeURIComponent(buildRegistryId)}`,
         )
         if (!response.ok) {
           const body = await response.json().catch(() => null)
@@ -126,13 +126,13 @@ function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
     return () => {
       cancelled = true
     }
-  }, [appId, artifactVersionId, dataMode])
+  }, [buildRegistryId, artifactVersionId, dataMode])
 
   async function handleAction(action) {
     if (!action?.enabled || !artifactVersionId) return
     setActionState({ busy: action.id, error: null })
     try {
-      const nextPayload = await postReviewAction({ appId, artifactVersionId, actionId: action.id })
+      const nextPayload = await postReviewAction({ buildRegistryId, artifactVersionId, actionId: action.id })
       setPayload(nextPayload)
       if (typeof onRefresh === 'function') onRefresh()
       setActionState({ busy: null, error: null })
@@ -453,7 +453,7 @@ export default function AppBuildReviewPage() {
 
         {buildHistory.length > 0 && (
           <ReviewPackagePanel
-            appId={appId}
+            buildRegistryId={data.buildRegistryId}
             artifactVersionId={activeArtifactId}
             dataMode={dataMode}
             onRefresh={refresh}

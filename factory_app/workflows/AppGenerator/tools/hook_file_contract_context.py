@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from pathlib import Path
 from typing import Any
 
-from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
+from factory_app.workflows.AppGenerator.tools.app_build_plan import _ALLOWED_TASK_TYPES
+from mozaiksai.core.runtime.persistence.adapter import PersistenceCollection
+from mozaiksai.core.runtime.persistence.naming import collection_name_for
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +31,11 @@ _PLANNING_CONTRACT_ORDER = (
     "service_foundation",
     "refinement_harness",
     "api_surface",
-    "agent_backend_integration",
 )
 
 _AGENT_DEFAULT_CONTRACTS = {
+    "DatabaseAgent": ["persistence_contract"],
+    "ModelAgent": ["persistence_contract"],
     "AppSchemaAgent": ["page_bundle"],
     "RefinementHarnessAgent": ["refinement_harness"],
     "ServiceAgent": ["module_contract"],
@@ -55,44 +62,16 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
     getter = getattr(context_variables, "get", None)
     if callable(getter):
         try:
-            return getter(key, default)
+            return detach(getter(key, default))
         except TypeError:
             value = getter(key)
-            return default if value is None else value
+            return default if value is None else detach(value)
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
         return data.get(key, default)
     if isinstance(context_variables, dict):
         return context_variables.get(key, default)
     return default
-
-
-def _update_section(agent: Any, header: str, body: str) -> None:
-    current = (
-        getattr(agent, "system_message", None)
-        or getattr(agent, "_system_message", "")
-        or ""
-    )
-    section = f"{header}\n{body}"
-
-    if header in current:
-        pre, _, rest = current.partition(header)
-        next_section_idx = rest.find("\n\n[")
-        after = rest[next_section_idx:] if next_section_idx > 0 else ""
-        new_message = f"{pre.rstrip()}\n\n{section}{after}"
-    else:
-        new_message = f"{current}\n\n{section}" if current else section
-
-    if new_message == current:
-        return
-
-    updater = getattr(agent, "update_system_message", None)
-    if callable(updater):
-        updater(new_message)
-    elif hasattr(agent, "_system_message"):
-        agent._system_message = new_message
-    else:
-        agent._system_message = new_message
 
 
 def _format_list_block(title: str, items: list[str]) -> list[str]:
@@ -124,7 +103,7 @@ def _build_contract_block(contract_name: str, contract: dict[str, Any]) -> str:
     lines.extend(_format_list_block("  downstream_python_defaults:", downstream_python))
     lines.extend(_format_list_block("  optional_python_hooks:", optional_python_hooks))
     lines.extend(_format_list_block("  optional_js_stubs:", optional_js_stubs))
-    lines.extend(_format_list_block("  hard_constraints:", hard_constraints[:5]))
+    lines.extend(_format_list_block("  hard_constraints:", hard_constraints))
     return "\n".join(lines)
 
 
@@ -146,11 +125,25 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         "These task/file contracts are prompt-time guidance aligned to the current structured outputs.",
         "They keep modular YAML and Python/JS outputs cookie-cutter across domains.",
         "Runtime truth remains build_tasks, owned_paths, structured outputs, and runtime loaders.",
+        "The approved app_build_plan incorporates the latest interview decisions. Preserve its entity fields, optionality, ownership, actions, page routes, and exclusions. Older design documents and category defaults must not override it. Dependency outputs implement that plan, not a new product scope; report contradictions instead of silently copying them.",
     ]
 
     if agent_name == "AppPlanAgent":
+        context = getattr(agent, "context_variables", None)
+        experience = _context_get(context, "experience_spec", {}) or {}
+        pages = experience.get("pages") or []
+        if pages:
+            lines.append("Exact case-sensitive page paths from the approved ExperienceSpec; copy these into page_bundle owned_paths, preserving display names separately:")
+            lines.extend(
+                f"- `{page['name']}` (`{page['route']}`) -> `ui/pages/{_page_file_stem(page)}.yaml`"
+                for page in pages
+            )
         lines.append("")
-        lines.append("Plan only with the active AppGenerator task vocabulary:")
+        lines.append(
+            "Plan only with the active AppGenerator task vocabulary: "
+            + ", ".join(sorted(_ALLOWED_TASK_TYPES))
+            + "."
+        )
         for contract_name in _PLANNING_CONTRACT_ORDER:
             contract = task_contracts.get(contract_name)  # type: ignore[union-attr]
             if isinstance(contract, dict):
@@ -175,6 +168,41 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         if isinstance(contract, dict):
             lines.append("")
             lines.append(_build_contract_block(contract_name, contract))
+
+    if agent_name in {"ServiceAgent", "ConfigMiddlewareAgent"}:
+        context = getattr(agent, "context_variables", None)
+        task = _context_get(context, "current_build_task", {}) or {}
+        module = (_context_get(context, "module_contract", {}) or {}).get("module_yaml") or {}
+        owns_handler = any(str(path).endswith("/backend/account_data_handler.py") for path in task.get("owned_paths") or [])
+        if owns_handler or (module.get("module") or {}).get("user_data_scope"):
+            contract = (file_contracts.get("backend_helper_files") or {}).get("account_data_handler")
+            if contract:
+                import yaml
+
+                lines.append("Required account-data runtime contract:\n" + yaml.safe_dump(contract, sort_keys=False))
+                lines.append(
+                    "Account-data collection naming API:\n"
+                    "from mozaiksai.core.runtime.persistence.naming import collection_name_for\n"
+                    f"collection_name_for{inspect.signature(collection_name_for)}"
+                )
+
+    if agent_name == "ServiceAgent":
+        methods = [
+            f"async {name}{inspect.signature(method)}"
+            for name, method in vars(PersistenceCollection).items()
+            if not name.startswith("_") and inspect.iscoroutinefunction(method)
+        ]
+        lines.append(
+            "PersistenceCollection is NOT a Motor collection. repo.py may call only these methods:\n"
+            + "\n".join(methods)
+            + "\nfind_many returns a list, not a cursor; count returns an integer. "
+            "Do not use find, count_documents, find_one_and_update, sort/limit/to_list cursor chains. "
+            "Use update_one then find_one with the SAME ownership-scoped query. "
+            "Prefer allocating a string ID before insert_one and returning the submitted document; "
+            "write-result types are provider-specific, not dictionaries. "
+            "Persist every planned field, populate server-owned timestamps on create/update, "
+            "and preserve optional fields and notes in request, storage, and response shapes."
+        )
 
     return "\n".join(lines) if len(lines) > 3 else ""
 
@@ -346,6 +374,8 @@ def inject_cookie_cutter_contracts_context(agent: Any, messages: list[dict[str, 
     if agent_name not in {
         "AppPlanAgent",
         "AppSchemaAgent",
+        "DatabaseAgent",
+        "ModelAgent",
         "RefinementHarnessAgent",
         "ConfigMiddlewareAgent",
         "ServiceAgent",
@@ -359,19 +389,19 @@ def inject_cookie_cutter_contracts_context(agent: Any, messages: list[dict[str, 
         if file_contracts:
             file_contracts_body = _build_file_contracts_body(agent, file_contracts)
             if file_contracts_body:
-                _update_section(agent, _FILE_CONTRACTS_HEADER, file_contracts_body)
+                update_agent_section(agent, _FILE_CONTRACTS_HEADER, file_contracts_body)
 
         module_archetypes = _load_yaml(_MODULE_ARCHETYPES_PATH)
         if module_archetypes:
             module_archetypes_body = _build_module_archetypes_body(agent, module_archetypes)
             if module_archetypes_body:
-                _update_section(agent, _MODULE_ARCHETYPES_HEADER, module_archetypes_body)
+                update_agent_section(agent, _MODULE_ARCHETYPES_HEADER, module_archetypes_body)
 
         workflow_archetypes = _load_yaml(_WORKFLOW_ARCHETYPES_PATH)
         if workflow_archetypes:
             workflow_archetypes_body = _build_workflow_archetypes_body(agent, workflow_archetypes)
             if workflow_archetypes_body:
-                _update_section(agent, _WORKFLOW_ARCHETYPES_HEADER, workflow_archetypes_body)
+                update_agent_section(agent, _WORKFLOW_ARCHETYPES_HEADER, workflow_archetypes_body)
 
     except Exception as exc:
         logger.error("[%s] Failed to inject cookie-cutter contracts context: %s", agent_name, exc)

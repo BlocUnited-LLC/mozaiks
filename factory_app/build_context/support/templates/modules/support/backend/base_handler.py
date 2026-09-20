@@ -24,7 +24,6 @@ class SupportBaseHandler:
         page_title: str | None = None,
         severity: str = "low",
         app_id: str | None = None,
-        message_thread_id: str | None = None,
         **_: object,
     ) -> dict:
         return await self._service.create_support_request(
@@ -35,8 +34,26 @@ class SupportBaseHandler:
             page_title=page_title,
             severity=severity,
             app_id=app_id,
-            message_thread_id=message_thread_id,
         )
+
+    async def get_support_conversation(
+        self,
+        ctx: ModuleContext,
+        *,
+        request_id: str,
+        **_: object,
+    ) -> dict:
+        return await self._service.get_support_conversation(ctx, request_id=request_id)
+
+    async def reply_support_request(
+        self,
+        ctx: ModuleContext,
+        *,
+        request_id: str,
+        body: str,
+        **_: object,
+    ) -> dict:
+        return await self._service.reply_support_request(ctx, request_id=request_id, body=body)
 
     async def list_support_requests(
         self,
@@ -54,20 +71,6 @@ class SupportBaseHandler:
             scope=scope,
             app_id=app_id,
             limit=limit,
-        )
-
-    async def link_message_thread(
-        self,
-        ctx: ModuleContext,
-        *,
-        request_id: str,
-        message_thread_id: str,
-        **_: object,
-    ) -> dict:
-        return await self._service.link_message_thread(
-            ctx,
-            request_id=request_id,
-            message_thread_id=message_thread_id,
         )
 
     async def update_support_status(

@@ -17,6 +17,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { X } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogClose,
 } from '../base/components/dialog.jsx';
 import { Button } from './Button.jsx';
 import { useAppEvent } from '../hooks/useAppEventBus.js';
@@ -38,6 +40,7 @@ export function Modal({
   actions = [],
   open: controlledOpen,
   onClose,
+  error,
   className,
 }) {
   const [open, setOpen] = useState(controlledOpen ?? false);
@@ -61,13 +64,19 @@ export function Modal({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent size={size} className={cn('gap-0 p-0', className)}>
+        <DialogClose className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" aria-label="Close" title="Close">
+          <X size={18} aria-hidden="true" />
+        </DialogClose>
         {(title || description) && (
-          <DialogHeader className="px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-6">
+          <DialogHeader className="pl-4 pr-12 pb-3 pt-4 sm:pl-6 sm:pr-12 sm:pb-4 sm:pt-6">
             {title       && <DialogTitle>{title}</DialogTitle>}
             {description && <DialogDescription>{description}</DialogDescription>}
           </DialogHeader>
         )}
-        <div className="px-4 pb-4 sm:px-6 sm:pb-6">{children}</div>
+        <div className="px-4 pb-4 sm:px-6 sm:pb-6">
+          {children}
+          {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
+        </div>
         {actions.length > 0 && (
           <DialogFooter className="gap-2 border-t border-border/60 bg-background/80 px-4 py-4 backdrop-blur-sm sm:px-6">
             {actions.map((action) => (
@@ -76,9 +85,9 @@ export function Modal({
                 label={action.label}
                 variant={action.variant ?? 'secondary'}
                 className="w-full sm:w-auto"
-                onClick={() => {
-                  action.onClick?.();
-                  if (action.closes_modal !== false) handleOpenChange(false);
+                onClick={async () => {
+                  const result = await action.onClick?.();
+                  if (result != null && action.closes_modal !== false) handleOpenChange(false);
                 }}
               />
             ))}

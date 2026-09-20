@@ -1,9 +1,143 @@
 # AppGenerator Output Assembly Contract
 
+## Server Table Binding Acceptance
+
+Opt-in server-paged DataTable sections must close against the actual generated
+module action contract during the existing `validate_wiring` acceptance gate.
+Action names in a plan alone are insufficient. The action declares integer
+`page` and `page_size`, string `search`, and accepts the table's initial and
+next-page query, including empty search and a representative nonempty query when
+search is enabled. Extra required inputs cannot be supplied
+by this fixed query contract. Internal-only actions are not browser endpoints.
+
+`data_key` and `total_key` resolve through required inline object properties to
+an array of explicitly typed objects and an integer respectively. Schema references are not supported in this
+bounded binding contract and are never fetched. Missing or incompatible bindings
+fail the existing wiring check; they do not create another routing or retry
+system. Client-paged tables retain their current input contract. At runtime,
+the data-fetch owner separately validates actual rows and counts; declaration
+closure does not prove that generated backend behavior implements the query.
+
 **Status:** Canonical contract
 **Purpose:** Define exactly how AppGenerator turns persistent UI intent into bundle artifacts.
 
 ---
+
+## File Creation and Formats
+
+Agents return structured JSON responses. This transport format does not determine
+the format of generated files. App schemas, module contracts, and build plans
+feed the existing deterministic materializers; bounded implementation tasks
+provide Python/React source through `CodeFile` entries. Assembly combines those
+outputs with explicitly declared capability-pack templates.
+
+The existing task-batch attempt budget includes deterministic materialization and
+file-ownership validation. Invalid worker output is not merged. AppGenerator
+retains the first output rejection for one Factory-authorized correction through
+the same AG2 batch, within the original four-call ceiling. Dependencies continue
+to drain when a prerequisite fails. Successful outputs and original failure
+history remain authoritative; assembly writes a separate summary. Eligible
+prerequisites and blocked descendants resume without replaying successful tasks.
+Missing evidence, stale inputs, and uncertain interrupted attempts remain blocked.
+See [ADR 0011](../../adr/0011-factory-bounded-task-recovery.md).
+
+AppPlanAgent clears stale plan/task state before validating a replacement.
+Completed or partial batches advance to assembly; incomplete assembly goes directly
+to validation before auth scaffolding can require absent app files. A rejected or
+empty plan cannot fall through to standalone page generation.
+
+The workflow-owned `review_app_build_plan` tool validates the strict AppBuildPlan
+model, registered pack origins, approved app-owned module identities, page
+inventory, and complete genesis task ownership. Capability sources use the
+build-context registry vocabulary plus `host_universal` for built-in host
+surfaces. A product category is not a registered managed service.
+The planner receives exact case-sensitive page paths projected from the approved
+ExperienceSpec through the materializer's existing page-stem helper. Display
+names do not become filenames: `Books` at `/books` owns `ui/pages/books.yaml`.
+Review rejects differently cased paths and returns the required and received
+paths as repair feedback; it never silently renames planned files.
+The existing plan cache preserves all typed plan fields. Frozen context values
+are detached before catalog lookup and validation.
+
+Plan review follows the Factory quality-gate pattern: deterministic tool state
+routes an invalid plan back to AppPlanAgent, with at most three total attempts.
+Exhaustion leaves the plan unready and the worker queue empty, then terminates
+as a workflow failure. Graph outcome operations remain separate from task-batch
+triggers; this gate does not change that runtime contract. Scoped revision and
+brownfield plans do not have to regenerate the entire genesis inventory.
+Partial revisions preload the selected target-owned app-bundle archive into
+`generated_files`. The Factory reader verifies the committed archive digest;
+foreign ownership, retired records, missing content, and incomplete text-file
+loading fail rather than producing a partial baseline. Assembly rechecks the
+baseline, then applies schema/task outputs, accumulated repairs, and explicit
+deletions in that order. Unchanged files remain intact. A stale selected version
+is allowed as revision input because invalidation marks the old version stale;
+it is not thereby accepted or promoted. Explicit conceptual replans and full
+rebuilds retain their separate carry-forward policy and do not copy the old
+implementation wholesale. Binary-containing bundles currently require a
+binary-capable refinement path; this text-file path refuses to silently omit them.
+Auth scaffolding remains AuthScaffoldAgent's responsibility outside build tasks.
+It runs after integration readiness and before app validation, which requires the
+auth contract. Only a passed complete-bundle validation advances to DownloadAgent.
+Persistent entities are planned through the canonical data contract and
+`ctx.persistence`, not a generated replacement database service.
+
+Prompt-time catalog injection preserves the complete authored instructions and
+live repair feedback. Catalog names mentioned inline are not section boundaries;
+the shared section updater replaces only standalone bracketed headings. Planning
+describes the approved scope and task contracts without copying implementation
+source or entire catalogs into task messages. Category defaults do not expand
+explicitly approved surfaces or override interview exclusions.
+
+Revision planning preserves explicit behavioral qualifiers in each relevant
+owned task's `initial_message` and `acceptance_criteria`, including cross-layer
+requirements. Generic criteria such as "works as required" do not replace
+literal-versus-regex intent, later-page reachability, defaults/edit behavior,
+or mutation outcome requirements. The existing `refinement_request` is also
+projected to AppSchemaAgent, ServiceAgent, ConfigMiddlewareAgent, and ModelAgent
+so those workers can compare their scoped task with the original request.
+It conveys requested behavior, not permission to expand file ownership,
+override runtime/operator contracts, or change authorization boundaries.
+Workers report conflicting contracts or missing prerequisite ownership instead
+of silently weakening the request. This adds no context field, decision ledger,
+runtime routing policy, or alternate validator.
+
+The existing module-contract persistence guidance supplies ServiceAgent with
+the supported offset-pagination path: an ownership-filtered aggregate with
+stable ordering and a unique tie-breaker, offset, bounded limit, and a matching
+count query. Literal search escapes user text only when literal semantics are
+requested. Mutation-success events require an actual owned mutation; missing,
+denied, and idempotent no-op outcomes follow the declared action contract, not
+a universal HTTP response policy. These are implementation instructions, not
+new persistence or page schema APIs.
+
+`tests/test_appgenerator_refinement_behavior_guidance.py` exercises the actual
+prompt middleware and contract renderer, including request refresh, explicit
+regex intent, and unexposed-field isolation. It does not prove that generated
+code implements the instructions. Generated-app acceptance must still probe
+later-page records, literal matching, and foreign/no-op mutations with event
+observation.
+
+Module action/capability schemas and event payload schemas are compiled from
+`JsonSchemaContract` lists into runtime JSON Schema maps. Null annotations are
+omitted; enums and array item types are rendered under their JSON Schema keys.
+Required-name lists must agree with property flags. Action/capability requests
+use the existing closed-contract importer: unknown keys are rejected, and
+unrepresentable nested/open request objects fail instead of being weakened.
+
+Workflow/module/page contracts use `.yaml`. Browser manifests, app identity,
+data contracts, migrations, and tooling manifests retain their canonical `.json`
+paths. Jinja templates are build inputs: `name.yaml.j2` renders to `name.yaml`,
+and the `.j2` suffix is removed. Required missing template values or invalid
+rendered YAML/JSON stop materialization with the pack and template path in the
+error. Optional values must declare their defaults in the template. String
+substitutions in YAML must be serialized, for example with Jinja's `tojson`
+filter, so punctuation does not change the YAML structure or scalar type.
+
+`generate_and_download` runs `run_app_bundle_acceptance_gate` on the assembled
+files before packaging. That gate is the deterministic check of generated
+contracts and their connections; it does not substitute for exercising an app's
+business behavior and configured integrations.
 
 ## Owned Artifacts
 
@@ -82,6 +216,20 @@ It does **not** emit shell content such as header actions, profile menu items, n
 
 ### 2. AppSchemaAgent
 
+`app_build_plan.pages` owns the approved page name/route inventory, while
+`AppSchemaOutput` supplies complete runtime page contracts. Task acceptance and
+assembly validate those schemas without replacing their sections, forms, or
+bindings with planner hints. Invalid schemas receive bounded task feedback.
+Missing worker pages fail instead of being synthesized from incomplete hints.
+Generated-module capability plans declare `user_data_scope`, matching the
+runtime module field. True requires a planned `backend/account_data_handler.py`
+implementation and its module stub; bundle validation rejects scope drift or a
+missing handler. The account lifecycle protocol remains owned by the runtime.
+The plan's page name is a display label; the runtime page `name` must match its
+owned filename, with the display label in `title`. The approved route remains
+unchanged. Page URL validation supplies input-free corrective diagnostics, and
+task materialization forwards the build timestamp used for provenance replay.
+
 `AppSchemaAgent` compiles persistent UI into one `AppSchemaOutput` with six payloads:
 
 - `manifest`
@@ -90,6 +238,22 @@ It does **not** emit shell content such as header actions, profile menu items, n
 - `theme_config_patch`
 - `shell_config`
 - `asset_manifest`
+
+`manifest` is typed `AppManifest | null`. A detached `page_bundle` worker emits
+only its owned pages and supplies a manifest only when it owns `app.json`.
+Null materializes neither `app.json` nor `provenance.yaml`; it does not remove
+existing root metadata. Other unowned optional output fields remain null.
+The existing file-ownership gate still rejects an emitted manifest outside
+`owned_paths` and a missing manifest when the task owns `app.json`.
+
+New-app plan coverage requires a manifest owner and ownership of every planned
+page. Scoped revision assembly hydrates the verified archive and overlays task
+outputs, preserving the baseline manifest and unchanged pages. Nullable worker
+output does not make the final app manifest optional: full bundle validation,
+runtime loading, and export acceptance still require a complete valid app.
+Standalone `save_app_schema` continues to reject a null manifest before writes.
+Provider response schemas require an explicit object or null; local acceptance
+models retain the existing optional-field default semantics.
 
 ### Theme vs Shell Ownership
 
@@ -299,7 +463,8 @@ It must:
 - write `ui/pages/custom/*.jsx` when `custom_route_bundle` exists
 - synthesize `ui/index.js` from `custom_route_bundle.page_files` when custom routes exist
 - reject or warn on custom route registry drift before assembly: missing page files, duplicate registry keys, `.js` route files, non-default-exported React, or route components that no page file registers
-- deep-merge `theme_config_patch` into `brand/theme_config.json`
+- preserve `captured_theme_config` as the theme base and deep-merge non-null
+  `theme_config_patch` deltas into `brand/theme_config.json`
 - deep-merge `shell_config` into `config/shell.json`
 - deep-merge `asset_manifest` into `config/asset_manifest.json`
 - store `app_manifest`, `app_pages`, `app_custom_route_bundle`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
@@ -320,12 +485,19 @@ Required schema-driven outputs:
 - `ui/route_manifest.json` when `app_custom_route_bundle` exists
 - `ui/pages/custom/*.jsx` when `app_custom_route_bundle` exists
 - `ui/index.js` when `app_custom_route_bundle` exists
-- `brand/theme_config.json` when `app_theme_config_patch` exists
+- `brand/theme_config.json` when a captured theme or `app_theme_config_patch` exists
 - `config/shell.json` when `app_shell_config` exists
 - `config/asset_manifest.json` when `app_asset_manifest` exists
 
 When `app_schema_ready == false`, `AssemblyAgent` should use task batch outputs
 via `assemble_app_tasks` and must still preserve the page contract.
+Both assembly paths retain the captured theme's identity, assets, and visual
+tokens. A partial patch is not a replacement theme document. Explicit deltas
+override the corresponding base fields; null patch fields mean no change.
+
+Task worker prompt views come directly from the workflow's declared
+`context_variables.yaml` agent views, just like network agents. Detached task
+snapshots must not silently lose these declarations or expose undeclared values.
 
 ### 4b. Raw Frontend Path Removed
 
@@ -387,6 +559,15 @@ It does not reason about artifact ownership. It packages the materialized file s
 into the downloadable app bundle after the deterministic app-bundle acceptance
 gate passes.
 
+Validation and download use `admitted_app_file_map`: the current `generated_files`
+map, admitted `code_files` repairs, and admitted `deleted_files` tombstones.
+Historical raw worker responses and prior generated directories cannot overwrite,
+refill, or delete that snapshot. An older foreign readback filtered by a save tool
+cannot reappear during packaging. Empty current artifacts remain empty.
+Authorized deterministic scaffold additions run before acceptance; migration
+history registration records metadata without rewriting accepted file bytes.
+The archive and export gate consume that same final accepted snapshot.
+
 Download archives may include a single top-level folder named for the bundle
 such as `GeneratedApp/`. Studio artifact promotion treats that folder as a zip
 transport wrapper only when stripping it reveals an app-root bundle containing
@@ -412,82 +593,52 @@ modules must not invent workflow capabilities absent from that metadata, and a
 workflow trigger event must not also route to a different generated workflow
 capability unless that route is declared by the same metadata.
 
-When workflow integration fails, the acceptance gate writes a bounded repair
-contract before export can proceed:
+Workflow integration, generated-bundle, module, runtime, functional, and planned
+completeness diagnostics share one artifact-repair policy. The approved task
+inventory determines each exact path's owner. The gate persists:
 
-- `workflow_integration_repair_status`
-- `workflow_integration_repair_count`
-- `workflow_integration_repair_request`
-- `workflow_integration_repair_failed_tests`
-- `workflow_integration_repair_result`
+- `bundle_repair_status`, `bundle_repair_target`, and `bundle_repair_request`
+- `bundle_repair_attempt_count` and `bundle_repair_max_attempts`
+- `bundle_repair_errors`, failure fingerprint, and no-progress projection
+- `bundle_repair_result`, including the active task, allowed paths, request ID,
+  settled response state, history, and every deferred diagnostic
 
-`needs_revision` routes back to `ConfigMiddlewareAgent`, which runs in
-workflow-integration repair mode. That mode emits only corrected module contract
-YAML for the affected module, using AgentGenerator workflow metadata and the
-injected `[WORKFLOW INTEGRATION CONTRACT]` as authority. It must not regenerate
-backend Python, frontend code, pages, data contracts, service foundation files,
-or unrelated modules. After the configured attempt limit, the status becomes
-`blocked` and the workflow returns to the user.
+A failed or unstarted prerequisite uses `app_task_recovery_request` on the
+existing batch rather than artifact repair. `app_task_recovery_result` retains
+the outcome; `app_task_recovery_status` projects completed/partial progress back
+to assembly. Unknown root diagnostics are never reconstructed.
 
-When the generated-bundle scanner fails on a file-family violation, the same
-acceptance gate writes a bundle repair contract before export can proceed:
+Accepted tasks may receive a scoped artifact correction. The same two-proposal
+budget covers all artifact diagnostics. A repeated, rejected, or interrupted
+lane stays blocked while an independent eligible owner can use a remaining
+proposal. Each save validates the entire candidate before applying any change;
+foreign writes/deletions are rejected, and unrelated accepted output is preserved.
+Canonical optional-path rules cannot override another explicit task owner.
 
-- `bundle_repair_status`
-- `bundle_repair_target`
-- `bundle_repair_attempt_count`
-- `bundle_repair_max_attempts`
-- `bundle_repair_request`
-- `bundle_repair_errors`
-- `bundle_repair_result`
+The graph routes schema, module-contract, and service repairs through their
+quality gates and back to complete-bundle acceptance. It also supports ModelAgent,
+DatabaseAgent, ControllerAgent, RefinementHarnessAgent, and FrontendStubAgent as
+explicit owners. It never selects ServiceAgent merely because a diagnostic
+contains `backend/`; `schemas.py` belongs to its approved ModelAgent task.
 
-Both workflow-integration and generated-bundle repair contracts also persist a
-stable failure fingerprint and a `no_progress` flag. The acceptance gate
-normalizes the current failure evidence and hashes it before scheduling a repair.
-If validation after a repair produces the identical fingerprint, the gate marks
-the repair `blocked` immediately instead of spending another model turn on the
-same unchanged failure. A changed fingerprint may consume the next bounded
-attempt. Passing validation clears the fingerprint and no-progress state.
+Acceptance requires all planned required files and accepted task evidence in the
+final snapshot, including revision baseline preservation. A class rename cannot
+complete an absent action method. A successful import cannot waive the workspace
+subclass contract. Missing files, changed plan/evidence, and unresolved quality
+findings block export. Passing evidence binds the plan, inventory/results, build
+binding, and exact file contents; GitHub export checks the actual archive against
+that digest. Final snapshot validation cannot refill omissions from historical
+worker output.
 
-This makes the repair controller deterministic:
+Offline regressions live in `tests/test_appgenerator_bounded_recovery.py`,
+`tests/test_appgenerator_task_integrity.py`, and
+`tests/test_appgenerator_recovery_routing.py`. They prove original rejection
+retention, bounded AG2 correction, released descendants, complete acceptance,
+unauthorized-write rejection, and blocked exhausted/interrupted recovery.
 
-1. observe validation evidence
-2. classify the narrowest owning agent
-3. emit a bounded repair request
-4. apply only that agent's owned file delta
-5. re-run the authoritative acceptance gate
-6. stop on pass, repeated evidence, or attempt exhaustion
-
-Agent prompts may propose a patch, but they do not decide whether the loop
-continues. The acceptance gate, failure fingerprint, ownership table, and retry
-budget are the control authority.
-
-The automated repair controller currently covers workflow-integration failures
-and generated-bundle scanner failures. Other acceptance failures still fail
-closed to the user. Browser interaction evidence (console errors, failed network
-requests, screenshots, and replayable user-flow assertions) is not yet a
-first-class automatic repair input. Closing that gap requires a typed,
-environment-scoped verification-evidence contract that maps each failure to an
-owning agent and replays the same scenario after the patch. Browser evidence may
-inform repair, but it must not bypass deterministic acceptance, review, or
-promotion.
-
-The target must be the narrowest owning agent: `AppSchemaAgent` for page/schema
-endpoint drift, `ConfigMiddlewareAgent` for config or managed-capability client
-drift, `ServiceAgent` for backend Python/service drift, and `FrontendStubAgent`
-for generated frontend helper drift. A repair agent may remove stale or invalid
-artifacts by emitting `deleted_files`; `AssemblyAgent`, the acceptance gate, and
-`DownloadAgent` all apply those deletions before validation or packaging.
-
-Deterministic smoke coverage:
-
-```powershell
-python scripts\smoke_appgenerator_live_acceptance.py --repair-loop
-```
-
-This smoke injects an app-local token wallet ledger, verifies that scanner
-repair routes to `ServiceAgent`, applies `deleted_files`, re-runs acceptance,
-checks the export gate, and proves packaging no longer contains the removed
-artifact.
+Browser interaction evidence remains a separate validation-environment contract.
+E2B workspace failures do not authorize worker changes or an app-owned npm project.
+Live installed-package acceptance is coordinated separately after the OSS change.
 
 When a build/export context requests deployment output, or the generated files
 already contain `deployment.manifest.json`, `Dockerfile`, `docker-compose.yml`,
@@ -506,6 +657,22 @@ contracts, data/subscription config, or app-level `services.*` imports cannot
 load. The check persists `app_runtime_load_passed` and
 `app_runtime_load_result` into workflow context and includes `app_runtime_load`
 in `app_bundle_acceptance_result.validation_evidence`.
+
+Modules declaring `user_data_scope` must provide a loadable account-data class
+with a `db` constructor and asynchronous, keyword-callable `delete_user_data`
+and `export_user_data` methods accepting `app_id` and `user_id`. The loader
+imports it in the same module namespace as the action handler and fails the
+module when the contract cannot be registered. Account-data load failures and
+repository API quality failures join the existing bounded `ServiceAgent`
+repair path; they do not become successful loads with warnings.
+
+File-contract prompt hooks preserve all hard constraints. Service workers see
+the callable signatures from the runtime's `PersistenceCollection` protocol,
+not a Motor collection API. The repository quality gate rejects unsupported
+cursor and find-and-modify calls. Bundle acceptance also checks that generated
+data contracts preserve the approved plan's field types and required flags.
+These checks do not prove arbitrary business logic correct; live authenticated
+CRUD and ownership tests remain necessary for end-to-end acceptance.
 
 ### 7. AppValidation Strategy
 
@@ -540,11 +707,16 @@ Rules:
 
 Materialization rule:
 
+- `ModuleContractBundle` keeps `module_yaml` required. Companion manifests are
+  nullable: null means no file. Tasks must explicitly own any companion they
+  generate; ordinary CRUD does not automatically create admin/settings/events
+  manifests. Do not serialize null manifests as empty YAML or raw file mirrors.
+
 - typed agent outputs such as `app_backend_admin_config`, `python_files`, and
   `js_files` are the source of truth for their owned lanes
 - the same applies to `database_files`, `model_files`, and `service_foundation_bundle.files`
-- extraction may regenerate canonical file content from those typed fields before
-  packaging
+- extraction materializes canonical file content from those typed fields before
+  task/save admission; packaging consumes the admitted serialization
 - raw `code_files` are the serialized mirror, not the authority, when a typed
   lane exists
 
@@ -552,9 +724,56 @@ Materialization rule:
 
 ## Bundle Rules
 
+Partial AppSchema repairs overlay the existing page inventory by canonical page
+name, preserve unchanged routes, and publish the rendered file overlay back to
+the same validation bundle. A corrected page on disk is not sufficient if the
+export gate still sees stale context.
+
+Every task writer that edits an existing artifact receives `generated_files`
+through its declared agent context view, including ModelAgent. Schema patches
+preserve exports consumed by unchanged files. Runtime module-import failures
+enter the existing bounded ServiceAgent repair lane; that lane returns directly
+to AppValidationAgent instead of regenerating unrelated UI or adapter files.
+
+Page HTTP bindings, including nested form and modal actions, must resolve to
+HTTP-visible module actions. Omitted/null `api_surface` means authenticated API
+access; `internal` and `admin_internal` are not browser endpoints. Keep declared
+permissions and user ownership when correcting exposure; do not make the action
+public to bypass authentication.
+
+Optional event manifests remain explicit. When a task owns `contracts/events.yaml`,
+ConfigMiddlewareAgent receives the exact event/action bindings from the approved
+plan's `event_flows`, even if the task's prose does not repeat them.
+
+Service implementations emit declared events with `await ctx.emit(event_type,
+payload)` after persistence, not `ctx.events.publish(...)`. The module quality
+gate rejects access to that nonexistent event bus. Input constraints belong in
+the closed action request contract where supported. Additional business checks
+such as nonblank names run in service code before mutations and raise
+`mozaiksai.core.runtime.ModuleInputValidationError` for `INVALID_PARAMS`/HTTP 400.
+The executor does not expose the exception message or classify arbitrary
+`ValueError` bugs as client mistakes. Expected ownership denials use `PermissionError` so
+the module API returns a permission response instead of an internal error.
+
+`api_surface` is a finite runtime contract. Omitted/null is distinct from the
+invalid string `"null"`. Explicit form submit payloads must bind every declared
+field that the form submits. `SummaryStrip` and `MetricCard` may declare
+`api_endpoint` for live module-backed values through the same authenticated
+data loader as tables.
+
+Scoped coding repair validates the full staged baseline plus changed files,
+not just a patch or an unrelated indexed workspace. When using fallback checks,
+Mozaiks page validation also resolves module action references and rejects
+unsupported primitive configuration. A source validation failure blocks artifact
+creation. Explicit validation skips remain skips, not proof of functionality.
+The result message distinguishes a staged patch from a failed, ineligible, or
+planned repair; staging never implies promotion or successful live acceptance.
+
 Do:
 
 - keep persistent pages declarative
+- stack primary record tables below page headers with `layout: full-width`;
+  `grid` means peer top-level columns, not full-width rows
 - keep shell content separate from shell styling
 - reuse ThemeCapture output when available
 - deep-merge generated theme/shell patches into canonical runtime files

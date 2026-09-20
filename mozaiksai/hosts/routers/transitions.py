@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import resolve_scope_from_principal
+from mozaiksai.core.session.build_binding import BuildIdentity
 from mozaiksai.core.session.launcher import launch_transition
 
 router = APIRouter(tags=["transitions"])
@@ -46,6 +47,8 @@ class TransitionResolveRequest(BaseModel):
     context_variables: dict[str, Any] = Field(default_factory=dict)
     app_id: str | None = None
     user_id: str | None = None
+    build_registry_id: BuildIdentity | None = None
+    source_chat_id: BuildIdentity | None = None
 
 
 class PendingDecisionActionPayload(BaseModel):
@@ -83,6 +86,7 @@ class SessionPendingDecisionResolveRequest(BaseModel):
     decision_id: str
     action_id: str | None = None
     accepted: bool = True
+    source_chat_id: BuildIdentity | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +124,8 @@ async def resolve_transition_route(
             option_id=body.option_id,
             journey_id=body.journey_id,
             context_variables=body.context_variables or {},
+            build_registry_id=body.build_registry_id,
+            source_chat_id=body.source_chat_id,
         )
     except ValueError as route_err:
         raise HTTPException(status_code=400, detail=str(route_err)) from route_err
@@ -173,16 +179,25 @@ async def resolve_transition_route(
 async def get_session_state(
     app_id: str | None = Query(default=None),
     user_id: str | None = Query(default=None),
+    source_chat_id: BuildIdentity | None = Query(default=None),
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    from mozaiksai.core.session import get_session_router
+    from mozaiksai.core.session import get_session_router, get_session_router_for_chat
 
     scoped_app_id, scoped_user_id = resolve_scope_from_principal(
         principal,
         app_id=app_id,
         user_id=user_id,
     )
-    snapshot = await get_session_router().get_session_snapshot(
+    session_router = get_session_router()
+    if source_chat_id is not None:
+        try:
+            session_router = await get_session_router_for_chat(
+                app_id=scoped_app_id, user_id=scoped_user_id, chat_id=source_chat_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Workflow session is not available") from exc
+    snapshot = await session_router.get_session_snapshot(
         app_id=scoped_app_id,
         user_id=scoped_user_id,
     )
@@ -198,9 +213,18 @@ async def mark_session_pending_decision(
         PendingDecisionAction,
         PendingHarnessDecision,
         get_session_router,
+        get_session_router_for_chat,
     )
 
-    snapshot = await get_session_router().mark_pending_harness_decision(
+    session_router = get_session_router()
+    if body.chat_id is not None:
+        try:
+            session_router = await get_session_router_for_chat(
+                app_id=principal.app_id, user_id=principal.user_id, chat_id=body.chat_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Workflow session is not available") from exc
+    snapshot = await session_router.mark_pending_harness_decision(
         app_id=principal.app_id,
         user_id=principal.user_id,
         pending_decision=PendingHarnessDecision(
@@ -243,9 +267,17 @@ async def resolve_session_pending_decision(
     body: SessionPendingDecisionResolveRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    from mozaiksai.core.session import get_session_router
+    from mozaiksai.core.session import get_session_router, get_session_router_for_chat
 
-    snapshot = await get_session_router().resolve_pending_harness_decision(
+    session_router = get_session_router()
+    if body.source_chat_id is not None:
+        try:
+            session_router = await get_session_router_for_chat(
+                app_id=principal.app_id, user_id=principal.user_id, chat_id=body.source_chat_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Workflow session is not available") from exc
+    snapshot = await session_router.resolve_pending_harness_decision(
         app_id=principal.app_id,
         user_id=principal.user_id,
         decision_id=body.decision_id,

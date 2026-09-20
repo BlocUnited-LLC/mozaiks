@@ -22,8 +22,15 @@ include chat-ui/tailwind.config.js
 include chat-ui/tsconfig.json
 include chat-ui/vite.embed.config.js
 include chat-ui/README.md
+# The published wheel contains the importable ``mozaiks_chat_ui`` package.
+# Keep its source tree in the sdist so the wheel can be rebuilt from source,
+# while excluding repository-only tests and generated metadata below.
+prune tests
+prune mozaiks.egg-info
+global-exclude *.egg-info/*
 prune web_shell/node_modules
 prune web_shell/dist
+prune web_shell/.mozaiks-tailwind-sources
 prune web_shell/playwright
 prune web_shell/test-results
 prune web_shell/playwright-report

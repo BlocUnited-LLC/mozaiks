@@ -318,6 +318,7 @@ class WebSocketProtocolMixin:
                     await self._queue_message_with_backpressure(
                         chat_id,
                         {
+                            "schema_version": "mozaiks.ui.event.v1",
                             "type": "chat.text",
                             "data": {
                                 "index": event_dict.get("index", 0),
@@ -337,6 +338,7 @@ class WebSocketProtocolMixin:
                     await self._queue_message_with_backpressure(
                         chat_id,
                         {
+                            "schema_version": "mozaiks.ui.event.v1",
                             "type": "chat.resume_boundary",
                             "data": boundary,
                         },
@@ -346,6 +348,7 @@ class WebSocketProtocolMixin:
                     await self._queue_message_with_backpressure(
                         chat_id,
                         {
+                            "schema_version": "mozaiks.ui.event.v1",
                             "type": "chat.awaiting_reply",
                             "data": awaiting,
                         },
@@ -368,7 +371,13 @@ class WebSocketProtocolMixin:
     # CONNECTION CLEANUP
     # ==================================================================================
 
-    async def _cleanup_connection(self, chat_id: str, ws_id: int | None = None) -> None:
+    async def _cleanup_connection(
+        self,
+        chat_id: str,
+        ws_id: int | None = None,
+        *,
+        execution_continues: bool = False,
+    ) -> None:
         """Clean up connection resources.
 
         If ``ws_id`` is supplied the cleanup is guarded: if another WebSocket
@@ -376,6 +385,15 @@ class WebSocketProtocolMixin:
         reconnect or React StrictMode's double-invoke), this method returns
         without touching that new connection's resources.  The eviction path
         does *not* supply ``ws_id`` so it always cleans up unconditionally.
+
+        ``execution_continues`` separates socket-scoped state from
+        execution-scoped state. Pending input-request callbacks are keyed by
+        chat, not by socket: a workflow registers one so a user's reply can
+        reach it, and it stays valid across a reconnect because the replacement
+        socket serves the same run. Set this when a new socket is taking the
+        slot over, so evicting the dead one does not disarm the workflow still
+        running behind it. Leave it false on a genuine disconnect, or every
+        abandoned chat leaks its pending callbacks.
         """
         if ws_id is not None:
             current = self.connections.get(chat_id)
@@ -399,10 +417,13 @@ class WebSocketProtocolMixin:
             overflow_counts.pop(chat_id, None)
 
         # Clear any pending input request callbacks to prevent memory leaks when
-        # the client disconnects mid-workflow while awaiting user input.
-        input_registries = getattr(self, "_input_request_registries", None)
-        if isinstance(input_registries, dict):
-            input_registries.pop(chat_id, None)
+        # the client disconnects mid-workflow while awaiting user input. Keep
+        # them when a replacement socket is taking over: the execution behind
+        # them is still running and still needs a way to receive the answer.
+        if not execution_continues:
+            input_registries = getattr(self, "_input_request_registries", None)
+            if isinstance(input_registries, dict):
+                input_registries.pop(chat_id, None)
 
         await self._stop_heartbeat(chat_id)
         logger.debug("WS_CONN_CLEANUP chat=%s", chat_id)

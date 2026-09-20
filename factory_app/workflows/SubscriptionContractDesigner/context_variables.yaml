@@ -1,4 +1,22 @@
 definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+
+  coding_participation:
+    type: string
+    description: >
+      Build participation mode chosen at the checkpoint after theme capture.
+      Relayed, not consumed here: _project_launch_context carries a key from one
+      journey step to the next only if the receiving workflow declares it, so a
+      gap anywhere between coding_journey_selector and AppGenerator drops the
+      user's answer for every step after it.
+    source:
+      type: state
+      default: guided
   build_mode:
     type: string
     description: Build mode for subscription contract generation.
@@ -194,7 +212,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
         - ConceptOverview
       default: null
@@ -206,7 +224,7 @@ definitions:
       database_name: mozaiksai
       collection: BuilderConcepts
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
       fields:
         - Blueprint
       default: null
@@ -218,7 +236,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -232,7 +250,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: backend
         status: succeeded
       fields:
@@ -246,7 +264,7 @@ definitions:
       database_name: mozaiksai
       collection: DesignDocuments
       query_template:
-        app_id: '{{runtime.app_id}}'
+        app_id: '{{run_build_binding.target_app_id}}'
         kind: ui_schema
         status: succeeded
       fields:
@@ -267,9 +285,16 @@ definitions:
   subscription_contract_review_status:
     type: string
     description: Review UI result for the normalized subscription contract.
-    source:
-      type: computed
-      default: not_requested
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: blocked}
+  subscription_contract_review_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: 0}
   subscription_contract_review_response:
     type: object
     description: Last user response from the subscription contract review UI.

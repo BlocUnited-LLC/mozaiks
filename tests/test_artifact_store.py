@@ -31,6 +31,20 @@ BuildRecordStore = _artifact_store_mod.BuildRecordStore
 
 
 @pytest.mark.asyncio
+async def test_index_failure_leaves_store_uninitialized_and_retries(monkeypatch):
+    client = MagicMock()
+    monkeypatch.setattr(_artifact_store_mod, "get_mongo_client", lambda: client)
+    store = BuildRecordStore()
+    store._ensure_indexes = AsyncMock(side_effect=[RuntimeError("index failure"), None])
+    with pytest.raises(RuntimeError, match="index failure"):
+        await store._ensure_client()
+    assert store.client is None
+    await store._ensure_client()
+    assert store.client is client
+    assert store._ensure_indexes.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_create_build_record_persists_manifest_and_lineage() -> None:
     store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()

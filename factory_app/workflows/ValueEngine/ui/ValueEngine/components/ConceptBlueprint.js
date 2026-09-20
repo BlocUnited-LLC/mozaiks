@@ -1,20 +1,23 @@
 // ==============================================================================
-// FILE: ChatUI/src/workflows/ValueEngine/components/ConceptBlueprint.js
-// DESCRIPTION: ValueEngine "Concept Blueprint" artifact (display-only)
+// ValueEngine concept artifact and structured review.
 // ==============================================================================
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Bot,
+  Check,
   Layers3,
   ListChecks,
   MonitorSmartphone,
   Palette,
+  PencilLine,
   Route,
   Sparkles,
   Target,
+  X,
 } from 'lucide-react';
 import { workflowSurfaceStyles } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
+import { normalizePrimitiveActions } from '@mozaiks/chat-ui/core/ui/workflowPrimitiveUtils.js';
 
 const asText = (value) => (typeof value === 'string' ? value.trim() : '');
 
@@ -34,7 +37,31 @@ const renderList = (items) => {
   );
 };
 
-const ConceptBlueprint = ({ payload = {}, toolCallId, sourceWorkflowName, generatedWorkflowName }) => {
+const ConceptBlueprintContent = ({ payload = {}, onResponse, toolCallId, sourceWorkflowName, generatedWorkflowName }) => {
+  const [feedback, setFeedback] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const reviewActions = normalizePrimitiveActions(payload).filter((action) =>
+    ['approve', 'request_changes', 'cancel'].includes(action.id));
+  const submitReview = async (action) => {
+    if (!onResponse || submitting || submitted) return;
+    setSubmitting(true);
+    setReviewError('');
+    try {
+      await onResponse({
+        action: action.id,
+        approved: action.approved,
+        review_id: payload.review_id,
+        rationale: feedback.trim(),
+      });
+      setSubmitted(true);
+    } catch {
+      setReviewError('The review could not be submitted.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
   const blueprint = payload && typeof payload.blueprint === 'object' ? payload.blueprint : null;
   const endpoints = asArray(payload.api_endpoints).filter((x) => x && typeof x === 'object');
 
@@ -86,35 +113,35 @@ const ConceptBlueprint = ({ payload = {}, toolCallId, sourceWorkflowName, genera
 
   return (
     <div className={panelClass}>
-      <div className="px-5 py-4 border-b border-white/10 bg-black/35">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
+      <div className="px-5 py-4 border-b border-border bg-muted/40">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-primary/20 p-2.5 ring-2 ring-primary/50">
+              <div className="shrink-0 rounded-lg bg-primary/20 p-2.5 ring-2 ring-primary/50">
                 <Sparkles className="w-5 h-5 text-[var(--color-primary-light)]" />
               </div>
               <div className="min-w-0">
-                <div className="text-xl font-heading font-black text-foreground">{title}</div>
+                <h2 className="text-xl font-heading font-bold text-foreground break-words">{title}</h2>
                 {appName && (
                   <div className="text-sm text-muted-foreground truncate">{appName}</div>
                 )}
               </div>
             </div>
-            <div className="mt-2 text-[11px] text-muted-foreground">
+            <div className="mt-2 text-[11px] text-muted-foreground break-words">
               {generatedWorkflowName || sourceWorkflowName || 'ValueEngine'} • event {toolCallId || 'n/a'}
               {appId ? ` • app_id ${appId}` : null}
             </div>
           </div>
           {valueProp && (
-            <div className="inline-flex items-center gap-2 rounded-lg border-2 border-primary/45 bg-primary/12 text-primary px-4 py-2 text-xs font-sans font-bold uppercase tracking-wide max-w-[360px]">
-              <Target className="w-4 h-4" />
-              <span className="truncate">{valueProp}</span>
+            <div className="inline-flex min-w-0 items-start gap-2 text-primary text-sm max-w-full sm:max-w-[280px]">
+              <Target className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="break-words">{valueProp}</span>
             </div>
           )}
         </div>
       </div>
 
-      <div className="p-5 gap-5">
+      <div className="p-5 space-y-5">
         <div className="rounded-lg border border-border bg-muted/75 p-5">
           <div className="flex items-center gap-2 mb-2">
             <Layers3 className="w-4 h-4 text-[var(--color-primary-light)]" />
@@ -247,9 +274,37 @@ const ConceptBlueprint = ({ payload = {}, toolCallId, sourceWorkflowName, genera
           )}
         </div>
       </div>
+      {onResponse && payload.review_id && (
+        <section aria-label="Concept review" className="border-t border-border px-5 py-4 space-y-3 text-foreground">
+          {submitted ? <p role="status" className="text-sm text-muted-foreground">Review submitted</p> : (
+            <>
+              <label className="block space-y-2">
+                <span className="text-sm font-medium">Requested changes</span>
+                <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)}
+                  maxLength={4000} rows={3} disabled={submitting}
+                  className="block w-full rounded-md border border-border bg-background p-3 text-sm text-foreground" />
+              </label>
+              {reviewError && <p role="alert" className="text-sm text-destructive">{reviewError}</p>}
+              <div className="flex flex-wrap gap-2">
+                {reviewActions.map((action) => {
+                  const Icon = { approve: Check, request_changes: PencilLine, cancel: X }[action.id];
+                  return (
+                    <button key={action.id} type="button" disabled={submitting} onClick={() => submitReview(action)}
+                      className={`inline-flex items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium disabled:opacity-50 ${action.id === 'approve' ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-foreground'}`}>
+                      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />{action.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      )}
     </div>
   );
 };
+
+const ConceptBlueprint = (props) => <ConceptBlueprintContent key={props.payload?.review_id} {...props} />;
 
 export default ConceptBlueprint;
 

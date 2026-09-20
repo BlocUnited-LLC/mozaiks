@@ -33,6 +33,7 @@ from mozaiksai.control_plane.implementations.refinement_router import (
     RefinementTriggerRouteResolver,
 )
 from mozaiksai.control_plane.loader import load_refinement_harness
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 DRY_RUN_NOTICE = "No files were changed."
 VALID_CHANGE_CLASSES = {change_class.value for change_class in ChangeClass}
@@ -161,7 +162,7 @@ def neutral_manifest() -> list[dict[str, Any]]:
         {"path": "config/shell.json"},
         {"path": "data/contract.json"},
         {"path": "data/migrations/001_initial.json"},
-        {"path": "config/integrations.json"},
+        {"path": "config/integrations.yaml"},
         {"path": "docs/integrations.md"},
         {"path": "services/integrations/analytics_provider_client.py"},
         {"path": "services/integrations/managed_analytics_client.py"},
@@ -266,16 +267,6 @@ def infer_refinement_lane(
     return RefinementLane.UI_PATCH.value
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        deduped.append(normalized)
-    return deduped
 
 
 def _stable_request_id(
@@ -575,9 +566,9 @@ def build_refinement_execution_plan_from_route(
         raise ValueError("execution_mode must be 'dry_run' or 'staged'.")
 
     resolved_workflow_sequence = str(workflow_sequence or "").strip()
-    paths = _dedupe([str(path or "").replace("\\", "/") for path in affected_bundle_paths or []])
-    families = _dedupe(list(affected_declarative_families or []))
-    workflows = _dedupe(list(affected_workflows or []))
+    paths = dedupe_strings([str(path or "").replace("\\", "/") for path in affected_bundle_paths or []])
+    families = dedupe_strings(list(affected_declarative_families or []))
+    workflows = dedupe_strings(list(affected_workflows or []))
     refinement_lane = infer_refinement_lane(
         request=request,
         change_class=normalized_change_class,
@@ -615,7 +606,7 @@ def build_refinement_execution_plan_from_route(
         workflow_sequence=resolved_workflow_sequence,
         affected_bundle_paths=paths,
     )
-    plan_warnings = _dedupe(list(warnings or []))
+    plan_warnings = dedupe_strings(list(warnings or []))
     if execution_mode == "dry_run" and DRY_RUN_NOTICE not in plan_warnings:
         plan_warnings.insert(0, DRY_RUN_NOTICE)
     if any(path_has_secret_marker(path) for path in paths):
@@ -698,7 +689,7 @@ def build_refinement_execution_plan_from_route(
             workflow_sequence=resolved_workflow_sequence,
             scope_summary=scope_summary,
         ),
-        warnings=_dedupe(plan_warnings),
+        warnings=dedupe_strings(plan_warnings),
         app_context_summary=resolved_app_context_summary,
         context_policy_decision=context_policy_decision,
         app_context_impact_hints=resolved_app_context_impact_hints,

@@ -16,12 +16,14 @@ import { useNavigation } from '../providers/NavigationProvider';
 import { getComponent, hasComponent } from '../registry/componentRegistry';
 import { TransitionScreen } from '../ui/screens/TransitionScreen';
 import { useChatUI } from '../context/ChatUIContext';
+import { authFetch } from '../adapters/api';
 import Header from './layout/Header';
 import Footer from './layout/Footer';
 import MobileBottomBar from './layout/MobileBottomBar';
 import { useTheme } from '../styles/useTheme';
 import { getChatBackgroundSrc } from '../styles/brandAssets';
 import { getUserRoles, roleMatches } from '../navigation/shellActions';
+import { safeReturnPath } from '../auth/authAdapter.js';
 
 /**
  * Core routes that are ALWAYS mounted — not driven by owner manifests.
@@ -205,7 +207,7 @@ const ComponentNotFound = ({ componentName }) => (
  */
 function TransitionRoute({ route }) {
   const navigate = useNavigate();
-  const { user, config } = useChatUI();
+  const { user, config, auth } = useChatUI();
   const [currentTransitionId, setCurrentTransitionId] = useState(null);
   const [currentJourneyId, setCurrentJourneyId] = useState(route.sequence || null);
   const [accumulatedContext, setAccumulatedContext] = useState({});
@@ -224,7 +226,7 @@ function TransitionRoute({ route }) {
       const mergedContext = { ...accumulatedContext, ...contextVariables };
 
       try {
-        const res = await fetch('/api/transitions/resolve', {
+        const res = await authFetch('/api/transitions/resolve', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -235,7 +237,7 @@ function TransitionRoute({ route }) {
             app_id: resolvedAppId,
             user_id: resolvedUserId,
           }),
-        });
+        }, { auth });
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -260,11 +262,14 @@ function TransitionRoute({ route }) {
 
         throw new Error('Transition resolution returned an unsupported response');
       } catch (err) {
+        // Swallowing this stranded the user on a dead button: the balance gate
+        // rejects with a 400 whose detail explains exactly what to do, and it
+        // only ever reached the console. Let it reach the screen.
         console.error('❌ [TransitionRoute] transition resolution failed:', err);
-        return false;
+        throw err;
       }
     },
-    [accumulatedContext, currentJourneyId, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
+    [accumulatedContext, auth, currentJourneyId, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
   );
 
   if (!currentTransitionId) return null;
@@ -274,7 +279,7 @@ function TransitionRoute({ route }) {
 
 function WorkflowEntryRoute({ route }) {
   const navigate = useNavigate();
-  const { user, config } = useChatUI();
+  const { user, config, auth } = useChatUI();
   const [error, setError] = useState(null);
   const workflowId = route.workflow || null;
   const resolvedAppId = resolveRouteAppId(config, user);
@@ -286,7 +291,7 @@ function WorkflowEntryRoute({ route }) {
 
     async function startWorkflow() {
       try {
-        const res = await fetch('/api/workflows/trigger', {
+        const res = await authFetch('/api/workflows/trigger', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -297,7 +302,7 @@ function WorkflowEntryRoute({ route }) {
             app_id: resolvedAppId,
             user_id: resolvedUserId,
           }),
-        });
+        }, { auth });
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -317,7 +322,7 @@ function WorkflowEntryRoute({ route }) {
     return () => {
       cancelled = true;
     };
-  }, [workflowId, route, navigate, resolvedAppId, resolvedUserId]);
+  }, [auth, workflowId, route, navigate, resolvedAppId, resolvedUserId]);
 
   if (error) {
     return <ComponentNotFound componentName={`Workflow route ${workflowId}: ${error.message}`} />;
@@ -354,11 +359,9 @@ function ShellChromeLayout({ children, route }) {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[var(--color-background)] text-[var(--color-text-primary)]">
-      <img
-        src={chatBackgroundSrc}
-        alt=""
-        className="fixed inset-0 -z-10 h-full w-full object-cover"
-      />
+      {chatBackgroundSrc && (
+        <img src={chatBackgroundSrc} alt="" className="fixed inset-0 -z-10 h-full w-full object-cover" />
+      )}
       {(showHeaderDesktop || showHeaderMobile) && (
         <div className={headerClassName}>
           <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} route={route} shellMode={shellMode} />
@@ -394,7 +397,8 @@ const RouteWrapper = ({
   const { meta = {} } = route;
   const routeParams = useParams();
   const location = useLocation();
-  const { user } = useChatUI();
+  const { user, loading: authLoading } = useChatUI();
+  const { navigation } = useNavigation();
   const userRoles = useMemo(() => getUserRoles(user), [user]);
   const requiredRoles = meta.requiresRole || meta.requiredRole || meta.roles;
   const hasRequiredRole = roleMatches(requiredRoles, userRoles);
@@ -477,10 +481,14 @@ const RouteWrapper = ({
 
   // Check auth requirement
   if (meta.requiresAuth && !isAuthenticated) {
+    if (authLoading) return <DefaultLoadingFallback />;
     if (onAuthRequired) {
       onAuthRequired(route.path);
     }
-    return <Navigate to={meta.authRedirect || '/login'} replace />;
+    const loginPath = safeReturnPath(meta.authRedirect || navigation.auth?.contract?.routes?.login, '/login');
+    const target = new URL(loginPath, window.location.origin);
+    target.searchParams.set('returnTo', location.pathname + location.search + location.hash);
+    return <Navigate to={target.pathname + target.search} replace />;
   }
 
   if (!hasRequiredRole) {

@@ -7,11 +7,9 @@ AppSchemaAgent output and task-batch assembly are complete.
 
 Algorithm
 ---------
-1. Extract every api_endpoint string from page sections in context_variables.app_pages
-   (recursively, including nested children in compositional sections).
-2. Build a registry of valid "{module_id}/{action_id}" paths from two sources:
-     a. context_variables.app_build_plan.capability_packs  (planned actions)
-     b. modules/*/module.yaml files on disk in the generated app directory (actual actions)
+1. Build the action registry from module.yaml files in generated_files.
+   Before assembly, app_pages and planned/on-disk actions support standalone checks.
+2. Extract page API references from that snapshot, including nested actions.
 3. Cross-reference every referenced endpoint against the registry or the small
    allowlist of platform-owned read endpoints that the page renderer may fetch.
 4. Report:
@@ -20,11 +18,11 @@ Algorithm
      orphaned_pages   — endpoints with no matching module action or platform endpoint (BLOCKING)
      orphaned_actions — module actions with no page referencing them (advisory warning)
 
-The check is only blocking when a module registry is available. If neither
-capability_packs nor module.yaml files can be found, the check is advisory
-(cannot confirm or deny validity without a registry).
+Unresolved endpoints and missing input are blocking. A static/custom UI bundle
+may legitimately have no declarative page API references.
 """
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -32,6 +30,14 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
+from mozaiksai.core.runtime.app.page_schema import (
+    discover_page_schema_paths,
+    validate_ask_context_references,
+)
+from mozaiksai.core.workflow.context.frozen import detach
 
 _logger = logging.getLogger("tools.validate_wiring")
 
@@ -53,14 +59,14 @@ def _context_get(context_variables: dict[str, Any] | None, key: str) -> Any | No
         try:
             v = context_variables.get(key)
             if v is not None:
-                return v
+                return detach(v)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key)
+        return detach(data.get(key))
     if isinstance(context_variables, dict):
-        return context_variables.get(key)
+        return detach(context_variables.get(key))
     return None
 
 
@@ -132,9 +138,10 @@ def _collect_endpoints_from_config(
     href = config.get("href")
     if isinstance(href, str) and href.strip().startswith("/api/"):
         out.append((page_name, section_id, href.strip()))
-    submit_action = config.get("submit_action")
-    if isinstance(submit_action, dict):
-        _collect_endpoints_from_config(page_name, f"{section_id}/submit", submit_action, out)
+    for field in ("submit_action", "cancel_action", "action", "empty"):
+        action = config.get(field)
+        if isinstance(action, dict):
+            _collect_endpoints_from_config(page_name, f"{section_id}/{field}", action, out)
     for action in config.get("actions") or []:
         if isinstance(action, dict):
             action_id = str(action.get("id") or "action").strip()
@@ -273,8 +280,8 @@ def _actions_from_module_yamls(app_dir: Path) -> set[str]:
     return valid
 
 
-def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
-    valid: set[str] = set()
+def _generated_module_action_contracts(files: dict[str, str]) -> dict[str, dict[str, Any]]:
+    contracts: dict[str, dict[str, Any]] = {}
     for path, content in sorted(files.items()):
         if not path.startswith("modules/") or not path.endswith("/module.yaml"):
             continue
@@ -300,9 +307,131 @@ def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
             else:
                 continue
             if action_id:
-                valid.add(f"{module_id}/{action_id}")
-                valid.add(action_id)
-    return valid
+                contracts[f"{module_id}/{action_id}"] = action if isinstance(action, dict) else {}
+    return contracts
+
+
+def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
+    contracts = _generated_module_action_contracts(files)
+    return set(contracts) | {key.split("/", 1)[1] for key in contracts}
+
+
+def _has_schema_reference(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(key in value for key in ("$ref", "$dynamicRef", "$recursiveRef")) or any(
+            _has_schema_reference(item) for item in value.values()
+        )
+    return isinstance(value, list) and any(_has_schema_reference(item) for item in value)
+
+
+def _required_output_type(schema: Any, key_path: Any, expected: str) -> bool:
+    if not isinstance(key_path, str) or not key_path:
+        return False
+    for key in key_path.split("."):
+        if not isinstance(schema, dict) or schema.get("type") != "object":
+            return False
+        properties = schema.get("properties")
+        if not isinstance(properties, dict) or key not in (schema.get("required") or []):
+            return False
+        schema = properties.get(key)
+    if not isinstance(schema, dict) or schema.get("type") != expected:
+        return False
+    if expected == "array":
+        items = schema.get("items")
+        return isinstance(items, dict) and items.get("type") == "object"
+    return True
+
+
+def _server_table_contract_error(config: dict[str, Any], action: dict[str, Any]) -> str | None:
+    surface = action.get("api_surface")
+    if surface is not None and not isinstance(surface, str):
+        return "Server paging requires a valid module action surface."
+    if surface in {"internal", "admin_internal"}:
+        return "Server paging cannot bind an internal-only module action."
+    inputs, outputs = action.get("input_schema"), action.get("output_schema")
+    if not isinstance(inputs, dict) or not isinstance(outputs, dict):
+        return "Server paging requires the generated action's input and output schemas."
+    try:
+        if _has_schema_reference(inputs) or _has_schema_reference(outputs):
+            return "Server paging requires inline query and response schemas; schema references are unsupported."
+        Draft202012Validator.check_schema(inputs)
+        Draft202012Validator.check_schema(outputs)
+        properties = inputs.get("properties", {})
+        for field, expected in (("page", "integer"), ("page_size", "integer"), ("search", "string")):
+            declaration = properties.get(field, {})
+            if declaration.get("type") != expected:
+                return f"Server paging requires an explicit {expected} input named {field}."
+        validator = Draft202012Validator(inputs)
+        queries = [(1, ""), (2, "")]
+        if config.get("search"):
+            queries.append((1, "a"))
+        for page, search in queries:
+            if not validator.is_valid({"page": page, "page_size": config.get("page_size"), "search": search}):
+                return "The action schema rejects the table's initial, next-page or enabled text-search query."
+        for field, expected in (("data_key", "array"), ("total_key", "integer")):
+            if not _required_output_type(outputs, config.get(field), expected):
+                suffix = " with explicitly typed object items" if expected == "array" else ""
+                return f"Server paging {field} must resolve to a required {expected} response field{suffix}."
+    except (SchemaError, TypeError, ValueError, RecursionError, AttributeError):
+        return "Server paging requires valid, inline action schemas."
+    return None
+
+
+def _server_table_binding_errors(pages: list[Any], contracts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+
+    def visit(page_name: str, sections: Any) -> None:
+        for section in sections or []:
+            if not isinstance(section, dict) or not isinstance(section.get("config"), dict):
+                continue
+            config = section["config"]
+            if config.get("pagination_mode") == "server":
+                endpoint = config.get("api_endpoint")
+                key, _ = _endpoint_to_action_key(endpoint) if isinstance(endpoint, str) else (None, None)
+                error = _server_table_contract_error(config, contracts.get(key or "", {}))
+                if error:
+                    failures.append({
+                        "test": "wiring_server_table_contract", "page": page_name,
+                        "section": str(section.get("id") or "<no-id>"), "error": error,
+                        "fix_suggestion": "Align the table's page/page_size/search inputs and required data_key/total_key outputs with the generated module action contract.",
+                    })
+            visit(page_name, config.get("children"))
+
+    for page in pages:
+        if isinstance(page, dict):
+            visit(str(page.get("name") or "<unnamed>"), page.get("sections"))
+    return failures
+
+
+def _ask_context_binding_errors(pages: list[Any], contracts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    modules = {key.split("/", 1)[0] for key in contracts}
+    action_index = {
+        module: frozenset(key.split("/", 1)[1] for key in contracts if key.startswith(f"{module}/"))
+        for module in modules
+    }
+    eligible_index = {
+        module: frozenset(
+            key.split("/", 1)[1] for key, action in contracts.items()
+            if key.startswith(f"{module}/")
+            and action.get("ask_context_safe") is True and action.get("permissions", []) == []
+        ) for module in modules
+    }
+    failures: list[dict[str, Any]] = []
+    for page in pages:
+        meta = page.get("meta") if isinstance(page, dict) else None
+        raw = meta.get("ask_context") if isinstance(meta, dict) else None
+        if raw is None:
+            continue
+        errors = [(item.location, item.message) for item in validate_ask_context_references(
+            raw, action_index=action_index, ask_context_index=eligible_index,
+        )]
+        for location, message in errors:
+            failures.append({
+                "test": "wiring_ask_context", "page": page.get("name") or page.get("path") or "<unnamed>",
+                "section": location, "error": message,
+                "fix_suggestion": "Reference an existing read-only action with ask_context_safe: true and permissions: [].",
+            })
+    return failures
 
 
 # ---------------------------------------------------------------------------
@@ -329,13 +458,76 @@ async def validate_wiring(
     """
     # ── Read context ──────────────────────────────────────────────────────
     generated_files = _generated_files_from_context(context_variables)
-    app_pages: list[Any] = _context_get(context_variables, "app_pages") or []
-    if not app_pages:
-        app_pages = _pages_from_generated_files(generated_files)
+    has_file_snapshot = _context_get(context_variables, "generated_files") is not None
+    app_pages: list[Any] = (
+        _pages_from_generated_files(generated_files)
+        if has_file_snapshot
+        else _context_get(context_variables, "app_pages") or []
+    )
     app_build_plan: dict[str, Any] = _context_get(context_variables, "app_build_plan") or {}
     generated_app_dir_str: str | None = _context_get(context_variables, "generated_app_dir")
 
-    # ── 1. Collect endpoint references from pages ─────────────────────────
+    # Build the module action registry.
+    known_actions: set[str] = set()
+
+    # Source A: capability_packs
+    capability_packs = app_build_plan.get("capability_packs") or []
+    if not has_file_snapshot:
+        known_actions.update(_actions_from_capability_packs(capability_packs))
+
+    # Source B: modules/*/module.yaml on disk
+    app_dir: Path | None = None
+    if generated_app_dir_str:
+        app_dir = Path(generated_app_dir_str)
+    else:
+        app_id = _context_get(context_variables, "app_id")
+        build_id = (
+            _context_get(context_variables, "build_id")
+            or _context_get(context_variables, "chat_id")
+        )
+        if app_id and build_id:
+            app_dir = (
+                _resolve_generated_artifacts_root()
+                / "apps"
+                / str(app_id)
+                / str(build_id)
+                / "app"
+            )
+
+    if not has_file_snapshot and app_dir and app_dir.is_dir():
+        known_actions.update(_actions_from_module_yamls(app_dir))
+    if generated_files:
+        known_actions.update(_actions_from_generated_module_files(generated_files))
+
+    # Saved snapshots are authoritative; disk input is only for standalone checks.
+    contract_files = generated_files
+    if not has_file_snapshot and app_dir and app_dir.is_dir():
+        contract_files = {}
+        for path in sorted((app_dir / "modules").glob("*/module.yaml")):
+            try:
+                contract_files[path.relative_to(app_dir).as_posix()] = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                _logger.warning("validate_wiring: module contract could not be read: %s", path)
+        manifest_path = app_dir / "ui/route_manifest.json"
+        if manifest_path.is_file():
+            contract_files["ui/route_manifest.json"] = manifest_path.read_text(encoding="utf-8")
+        if not app_pages:
+            app_pages = [
+                yaml.safe_load(path.read_text(encoding="utf-8"))
+                for path in discover_page_schema_paths(app_dir).values()
+            ]
+    ask_pages = list(app_pages)
+    if "ui/route_manifest.json" in contract_files:
+        manifest = json.loads(contract_files["ui/route_manifest.json"])
+        if isinstance(manifest, dict) and isinstance(manifest.get("pages"), list):
+            ask_pages.extend(manifest["pages"])
+    action_contracts = _generated_module_action_contracts(contract_files)
+    server_table_failures = _server_table_binding_errors(app_pages, action_contracts)
+    ask_context_failures = _ask_context_binding_errors(
+        ask_pages, action_contracts,
+    )
+
+    # Collect endpoint references after standalone disk pages have been resolved.
     endpoint_refs = _extract_endpoint_refs(app_pages)
     referenced_set: set[str] = set()
     endpoint_keys: dict[tuple[str, str, str], str | None] = {}
@@ -359,37 +551,6 @@ async def validate_wiring(
                 "endpoint": endpoint,
                 "error": error,
             })
-
-    # ── 2. Build module action registry ──────────────────────────────────
-    known_actions: set[str] = set()
-
-    # Source A: capability_packs
-    capability_packs = app_build_plan.get("capability_packs") or []
-    known_actions.update(_actions_from_capability_packs(capability_packs))
-
-    # Source B: modules/*/module.yaml on disk
-    app_dir: Path | None = None
-    if generated_app_dir_str:
-        app_dir = Path(generated_app_dir_str)
-    else:
-        app_id = _context_get(context_variables, "app_id")
-        build_id = (
-            _context_get(context_variables, "build_id")
-            or _context_get(context_variables, "chat_id")
-        )
-        if app_id and build_id:
-            app_dir = (
-                _resolve_generated_artifacts_root()
-                / "apps"
-                / str(app_id)
-                / str(build_id)
-                / "app"
-            )
-
-    if app_dir and app_dir.is_dir():
-        known_actions.update(_actions_from_module_yamls(app_dir))
-    if generated_files:
-        known_actions.update(_actions_from_generated_module_files(generated_files))
 
     # ── 3. Cross-reference ────────────────────────────────────────────────
     wired: list[dict[str, str]] = []
@@ -421,13 +582,23 @@ async def validate_wiring(
     no_registry = not known_actions
     has_orphaned_pages = bool(orphaned_pages)
     has_invalid_endpoints = bool(invalid_endpoints)
+    missing_input = not generated_files and not app_pages and not ask_pages
 
-    # Block only when we have a registry to validate against.
-    blocking_pass: bool = not has_invalid_endpoints and (not has_orphaned_pages or no_registry)
+    blocking_pass: bool = not (
+        missing_input or has_invalid_endpoints or has_orphaned_pages
+        or server_table_failures or ask_context_failures
+    )
 
     # ── 5. Build human-readable output ───────────────────────────────────
     warnings: list[str] = []
-    failed_tests: list[dict[str, Any]] = []
+    failed_tests: list[dict[str, Any]] = [*server_table_failures, *ask_context_failures]
+
+    if missing_input:
+        failed_tests.append({
+            "test": "wiring_missing_input",
+            "error": "No generated files or page schemas were available for wiring validation.",
+            "fix_suggestion": "Pass the assembled generated_files snapshot to the acceptance gate.",
+        })
 
     for item in invalid_endpoints:
         failed_tests.append({
@@ -446,7 +617,7 @@ async def validate_wiring(
             ),
         })
 
-    if has_orphaned_pages and not no_registry:
+    if has_orphaned_pages:
         for item in orphaned_pages:
             failed_tests.append({
                 "test": "wiring_orphaned_endpoint",
@@ -472,9 +643,8 @@ async def validate_wiring(
 
     if no_registry:
         warnings.append(
-            "No module action registry available (capability_packs is empty and no "
-            "module.yaml files found on disk). Wiring check is advisory — cannot "
-            "confirm or deny endpoint validity."
+            "No module actions were found in the validation input. "
+            "Only supported platform read endpoints can resolve without app modules."
         )
 
     if orphaned_actions:
@@ -484,8 +654,14 @@ async def validate_wiring(
             "actions — review intent."
         )
 
-    if has_invalid_endpoints:
+    if missing_input:
+        message = "Wiring validation requires generated files or page schemas."
+    elif ask_context_failures:
+        message = f"{len(ask_context_failures)} page ask-context declaration(s) do not resolve to eligible actions."
+    elif has_invalid_endpoints:
         message = f"{len(invalid_endpoints)} page endpoint(s) have invalid api_endpoint syntax."
+    elif server_table_failures:
+        message = f"{len(server_table_failures)} server table binding(s) do not match their module action contracts."
     elif not blocking_pass:
         message = (
             f"{len(orphaned_pages)} page endpoint(s) reference unknown module actions."
@@ -502,14 +678,15 @@ async def validate_wiring(
             f"module actions{platform_suffix}."
         )
     else:
-        message = "Wiring check passed (advisory — registry or endpoints unavailable)."
+        message = "Wiring check passed; no unresolved page API references."
 
     check: dict[str, Any] = {
         "id": "module_action_wiring",
         "passed": blocking_pass,
         "message": message,
         "details": {
-            "blocking": not no_registry,
+            "blocking": True,
+            "ask_context_failures": ask_context_failures,
             "total_endpoints_referenced": len(endpoint_refs),
             "wired_count": len(wired),
             "platform_endpoint_count": len(platform_endpoints),

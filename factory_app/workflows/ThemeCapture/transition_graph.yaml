@@ -1,36 +1,70 @@
 # ThemeCapture Handoff Rules
 #
 # Canonical linear pipeline:
-# ThemeInterviewAgent -> ThemeAnalysisAgent -> ThemeConfigAssemblerAgent -> user
+# ThemeInterviewAgent -> ThemeAnalysisAgent -> ThemeConfigAssemblerAgent -> terminate
 
 transition_rules:
+- source_agent: user
+  target_agent: ThemeInterviewAgent
+  transition_type: after_turn
+  transition_target: AgentTarget
+
 - source_agent: ThemeInterviewAgent
   target_agent: user
-  transition_type: after_turn
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_outcome
+  condition_value: needs_input
   transition_target: RevertToUserTarget
 
 - source_agent: ThemeInterviewAgent
   target_agent: ThemeAnalysisAgent
   transition_type: condition
   condition_type: context_equals
-  condition_key: interview_complete
-  condition_value: true
+  condition_key: interview_outcome
+  condition_value: ready
   transition_target: AgentTarget
 
-- source_agent: ThemeAnalysisAgent
-  target_agent: user
+- source_agent: ThemeInterviewAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: ThemeInterviewAgent
+  target_agent: terminate
   transition_type: after_turn
-  transition_target: RevertToUserTarget
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 
 - source_agent: ThemeAnalysisAgent
   target_agent: ThemeConfigAssemblerAgent
-  transition_type: condition
-  condition_type: context_equals
-  condition_key: analysis_complete
-  condition_value: true
+  transition_type: after_turn
   transition_target: AgentTarget
 
 - source_agent: ThemeConfigAssemblerAgent
-  target_agent: user
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: theme_save_outcome
+  condition_value: saved
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+
+- source_agent: ThemeConfigAssemblerAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: theme_save_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: ThemeConfigAssemblerAgent
+  target_agent: terminate
   transition_type: after_turn
-  transition_target: RevertToUserTarget
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed

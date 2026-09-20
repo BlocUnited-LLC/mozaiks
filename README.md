@@ -283,4 +283,5 @@ This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The license covers the code, not the "Mozaiks"
+and "MozaiksPay" names and logo — see [TRADEMARK.md](TRADEMARK.md).

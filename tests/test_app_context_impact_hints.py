@@ -221,7 +221,7 @@ def test_integration_graph_returns_integration_hints_without_secrets() -> None:
                     "paths": [
                         "services/integrations/analytics_provider_client.py",
                         ".env",
-                        "config/integrations.credentials.json",
+                        "config/integrations.credentials.yaml",
                     ]
                 },
             ),

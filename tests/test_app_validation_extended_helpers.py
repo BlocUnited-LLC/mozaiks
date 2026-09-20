@@ -22,7 +22,7 @@ test_app_validation_ast_helpers.py:
     - handler from module.handler or top-level handler
     - non-list actions normalized to []
 
-  _generated_files_from_context:
+  admitted_app_file_map:
     - None context → {}
     - context without .get → {}
     - missing generated_files key → {}
@@ -53,10 +53,11 @@ import ast
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     _all_method_nodes,
     _append_command_output,
-    _generated_files_from_context,
     _input_schema_required_fields,
     _normalize_module_yaml,
 )
+from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 
 # ---------------------------------------------------------------------------
 # 1. _append_command_output
@@ -149,32 +150,40 @@ class TestNormalizeModuleYaml:
 
 
 # ---------------------------------------------------------------------------
-# 3. _generated_files_from_context
+# 3. admitted_app_file_map
 # ---------------------------------------------------------------------------
 
 class TestGeneratedFilesFromContext:
+    def test_frozen_context_preserves_files_repairs_and_deletions(self):
+        ctx = ContextVariablesBridge({
+            "generated_files": {"keep.py": "old", "delete.py": "unused"},
+            "code_files": [{"filename": "keep.py", "content": "repaired"}],
+            "deleted_files": ["delete.py"],
+        })
+        assert admitted_app_file_map(ctx) == {"keep.py": "repaired"}
+
     def test_none_context_returns_empty(self):
-        assert _generated_files_from_context(None) == {}
+        assert admitted_app_file_map(None) == {}
 
     def test_context_without_get_returns_empty(self):
-        assert _generated_files_from_context("not-a-dict") == {}
+        assert admitted_app_file_map("not-a-dict") == {}
 
     def test_missing_generated_files_returns_empty(self):
-        assert _generated_files_from_context({"other": "value"}) == {}
+        assert admitted_app_file_map({"other": "value"}) == {}
 
     def test_non_dict_generated_files_returns_empty(self):
-        assert _generated_files_from_context({"generated_files": "not-a-dict"}) == {}
+        assert admitted_app_file_map({"generated_files": "not-a-dict"}) == {}
 
     def test_valid_files_returned(self):
         ctx = {"generated_files": {"modules/orders/module.yaml": "id: orders"}}
-        result = _generated_files_from_context(ctx)
+        result = admitted_app_file_map(ctx)
         assert "modules/orders/module.yaml" in result
         assert result["modules/orders/module.yaml"] == "id: orders"
 
     def test_paths_sanitized(self):
         # _safe_relpath will normalize leading slashes/dangerous paths
         ctx = {"generated_files": {"modules/orders/module.yaml": "content"}}
-        result = _generated_files_from_context(ctx)
+        result = admitted_app_file_map(ctx)
         assert any("orders" in k for k in result)
 
     def test_multiple_files_returned(self):
@@ -184,7 +193,7 @@ class TestGeneratedFilesFromContext:
                 "modules/payments/module.yaml": "id: payments",
             }
         }
-        result = _generated_files_from_context(ctx)
+        result = admitted_app_file_map(ctx)
         assert len(result) == 2
 
 

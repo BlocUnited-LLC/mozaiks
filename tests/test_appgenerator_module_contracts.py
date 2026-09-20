@@ -28,6 +28,17 @@ def test_appgenerator_structured_outputs_parse_with_runtime_contract_validator()
     assert parsed["models"]["ModuleIdentity"]["fields"]["user_data_scope"]["type"] == "bool"
 
 
+def test_service_guidance_keeps_optional_events_and_expected_errors_explicit() -> None:
+    agents = _read_yaml("factory_app/workflows/AppGenerator/agents.yaml")["agents"]
+    service = next(agent for agent in agents if agent["name"] == "ServiceAgent")
+    guidance = "\n".join(section["content"] for section in service["prompt_sections"])
+    assert "ModuleInputValidationError" in guidance
+    assert "Optional is not nullable" in guidance
+    assert "required-only" in guidance
+    assert "context.events.publish" not in guidance
+    assert "await ctx.emit(event_type, payload)" in guidance
+
+
 def test_appgenerator_structured_outputs_include_canonical_module_contract_models() -> None:
     config = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
     models = config["models"]
@@ -127,8 +138,13 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert "output_contract" not in checkpoint_fields
 
     contract_fields = models["ModuleContractBundle"]["fields"]
-    assert contract_fields["reactions_yaml"]["type"] == "ModuleReactionsManifest"
-    assert contract_fields["admin_yaml"]["type"] == "ModuleAdminManifest"
+    for name, model in {
+        "events_yaml": "ModuleEventsManifest", "reactions_yaml": "ModuleReactionsManifest",
+        "notifications_yaml": "ModuleNotificationsManifest", "settings_yaml": "ModuleSettingsManifest",
+        "admin_yaml": "ModuleAdminManifest",
+    }.items():
+        assert contract_fields[name]["type"] == "union"
+        assert contract_fields[name]["variants"] == [model, "null"]
     assert contract_fields["python_stubs"]["items"] == "ModulePythonStub"
     assert contract_fields["js_stubs"]["items"] == "ModuleJsStub"
     assert "profile_yaml" in contract_fields
@@ -183,12 +199,12 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppBuildPlan"]["fields"]["shell_preset_hint"]["variants"] == ["str", "null"]
     module_action_fields = models["ModuleAction"]["fields"]
     assert "api_surface" in module_action_fields
-    assert module_action_fields["api_surface"]["type"] == "literal"
-    assert set(module_action_fields["api_surface"]["values"]) >= {
-        "public", "public_readonly", "internal", "admin_internal", "null"
+    assert module_action_fields["api_surface"]["variants"] == ["ModuleApiSurface", "null"]
+    assert set(models["ModuleApiSurface"]["values"]) == {
+        "public", "public_readonly", "internal", "admin_internal"
     }
     assert "public_readonly" in module_action_fields["api_surface"]["description"]
-    assert "AUTH_ENABLED=true" in module_action_fields["api_surface"]["description"]
+    assert "authenticated UI/API actions" in module_action_fields["api_surface"]["description"]
     assert models["AppShellMode"]["values"] == [
         "standard",
         "workspace",
@@ -241,7 +257,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["CiSecretRequirements"]["fields"]["optional"]["items"] == "CiSecretRequirement"
     assert models["CiSecretRequirements"]["fields"]["workflow_inputs"]["items"] == "CiWorkflowInputRequirement"
     assert models["DeploymentTemplateManifest"]["fields"]["validation_status"]["values"] == ["pending", "valid", "invalid"]
-    assert models["AppValidation"]["fields"]["validation_strategy"]["values"] == ["e2b", "local", "skip"]
+    assert models["AppValidation"]["fields"]["validation_strategy"]["values"] == ["e2b", "docker", "local", "skip"]
     assert models["AppValidation"]["fields"]["validation_status"]["values"] == ["passed", "failed", "skipped"]
     admin_panel_fields = models["ModuleAdminPanel"]["fields"]
     assert admin_panel_fields["page"]["type"] == "str"
@@ -259,12 +275,12 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "task_type: refinement_harness" in source
     assert "shell_preset_hint" in source
     assert "[SHELL PRESET CONTEXT]" in source
-    assert "initial_agent` must be `RefinementHarnessAgent`" in source
+    assert "`initial_agent: RefinementHarnessAgent`" in source
     assert "config/refinement_policy.yaml" in source
     assert "Output MUST be a valid JSON object matching `RefinementHarnessOutput`" in source
     assert "`current_build_task_type` must equal `refinement_harness`" in source
     assert "RefinementHarnessBundle" in source
-    assert "Routes use workflow_sequence only" in source
+    assert "route by `workflow_sequence` only" in source
     assert "service_foundation_bundle" in source
     assert "Do NOT include an `admin_config` build task." in source
     assert "Fail the task" in source
@@ -294,8 +310,8 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "self-contained FastAPI" in source
     assert "`app/app.json` `admins`" in source
     assert "`platform/config/admin.json`" not in source
-    assert "panels: []" in source  # emitted when module has no list actions
-    assert "Derive admin panels from the module" in source
+    assert "Otherwise set `admin_yaml: null`" in source
+    assert "derive panels from the module's declared actions" in source
     assert "structured-output-first contract" in source
     assert "app_validation_strategy" in source
     assert "validation_status" in source
@@ -306,7 +322,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "Do not generate provider adapters for those operations into a customer app bundle" in source
     assert "Generated app deployment packaging is not a `service_foundation` or `api_surface` task" in source
     assert "Do not declare `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `deployment.manifest.json`, or `.github/workflows/*.yml`" in source
-    assert "Do not include this page merely because DownloadAgent will emit provider-neutral deployment artifacts" in source
+    assert "Do not include this page merely because export will emit provider-neutral deployment artifacts" in source
     assert "Generated artifacts must never commit secrets" in source
     assert "ci_secret_requirements" in source
     assert "pre-deploy validation/preview only" in source
@@ -398,10 +414,8 @@ def test_appgenerator_guides_module_auth_surface_and_scope_contract() -> None:
     structured_outputs = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
 
     module_action = structured_outputs["models"]["ModuleAction"]["fields"]
-    assert module_action["api_surface"]["type"] == "literal"
-    assert set(module_action["api_surface"]["values"]) >= {
-        "public", "public_readonly", "internal", "admin_internal", "null"
-    }
+    assert module_action["api_surface"]["type"] == "union"
+    assert module_action["api_surface"]["variants"] == ["ModuleApiSurface", "null"]
     assert "public_readonly" in module_action["api_surface"]["description"]
     assert "entitlement_gate" in module_action["api_surface"]["description"]
 
@@ -410,15 +424,15 @@ def test_appgenerator_guides_module_auth_surface_and_scope_contract() -> None:
     standard_constraints = "\n".join(module_archetypes["archetypes"]["standard"]["hard_constraints"])
 
     assert "actions[].api_surface is part of the module contract" in module_constraints
-    assert "AUTH_ENABLED=true" in module_constraints
+    assert "Internal/admin_internal actions reject every HTTP request" in module_constraints
     assert "External HTTP dispatch and internal runtime dispatch are separate paths" in module_constraints
     assert "ctx.workspace_id" in module_constraints
     assert "Custom API adapters must not bypass module action auth" in api_constraints
     assert "Tenant, workspace, user, mutation, and admin actions require authenticated HTTP dispatch" in standard_constraints
 
     assert "`actions`: list of `{id, description, handler_method, api_surface" in source
-    assert "`actions[].api_surface` controls anonymous HTTP eligibility" in source
-    assert "Do not mark tenant, workspace, user, mutation, or admin actions public" in source
+    assert "`actions[].api_surface` controls HTTP exposure" in source
+    assert "Do not make private mutations public to fix an HTTP binding" in source
     assert "`context.workspace_id`" in source
     assert "never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization" in source
 
@@ -454,7 +468,9 @@ def test_appgenerator_download_tool_does_not_inject_removed_admin_surfaces() -> 
 
     assert "admin_surfaces" not in source
     assert "_inject_admin_surfaces(files_map)" not in source
-    assert "extract_code_file_map_from_payload" in source
+    assert "admitted_app_file_map" in source
+    assert "extract_code_file_map_from_payload" not in source
+    assert "gather_latest_agent_jsons" not in source
     assert "extract_code_file_entries_from_payload" in assembly
 
 
@@ -485,6 +501,17 @@ def test_module_identity_declares_user_data_scope_field() -> None:
     assert uds["type"] == "bool"
     assert "optional" not in uds
     assert "account_data" in uds["description"].lower() or "user_data_scope" in uds["description"].lower()
+
+
+def test_refinement_plan_retains_architecture_but_scopes_execution() -> None:
+    config = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+    fields = config["models"]["AppBuildPlan"]["fields"]
+    assert "including unchanged" in fields["pages"]["description"]
+    assert "Only build_tasks" in fields["pages"]["description"]
+    assert "complete resulting app" in fields["build_tasks"]["description"]
+    prompts = _read("factory_app/workflows/AppGenerator/agents.yaml")
+    assert "backend-only change must still include every existing page" in prompts
+    assert "do not schedule their original generation tasks" in prompts
 
 
 def test_module_python_stub_includes_account_data_handler_kind() -> None:

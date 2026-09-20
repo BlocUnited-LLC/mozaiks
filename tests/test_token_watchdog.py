@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from ag2.events import ModelResponse
+from ag2.events import ModelResponse, TaskFailed, UsageEvent
 from ag2.events.types import Usage
 
 from mozaiksai.core.usage import watchdog as watchdog_mod
@@ -48,7 +48,7 @@ async def test_ag2_token_watchdog_bridge_emits_mozaiks_budget_alert(monkeypatch:
     )
 
     alert = await token_monitor.process(
-        [ModelResponse(usage=Usage(prompt_tokens=12, completion_tokens=10, total_tokens=22))],
+        [UsageEvent(Usage(prompt_tokens=12, completion_tokens=10, total_tokens=22))],
         SimpleNamespace(),
     )
     assert alert is not None
@@ -75,3 +75,54 @@ async def test_ag2_token_watchdog_bridge_emits_mozaiks_budget_alert(monkeypatch:
             "alert_threshold": 20,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_ag2_token_watchdog_counts_usage_events_once_across_work_kinds() -> None:
+    token_monitor, _bridge = watchdog_mod.build_ag2_token_watchdog_observers(
+        agent_name="PlannerAgent",
+        workflow_name="AppGenerator",
+        context_variables=_ContextBridge(),
+    )
+
+    ordinary_usage = Usage(prompt_tokens=4, completion_tokens=2, total_tokens=6)
+    await token_monitor.process(
+        [
+            UsageEvent(ordinary_usage, kind="model_call"),
+            # AG2 also emits a ModelResponse for an ordinary call. TokenMonitor
+            # must consume the accounting event only or this turn counts twice.
+            ModelResponse(usage=ordinary_usage),
+        ],
+        SimpleNamespace(),
+    )
+    await token_monitor.process(
+        [
+            UsageEvent(
+                Usage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+                kind="subtask",
+                label="WorkerAgent",
+            ),
+            TaskFailed(
+                task_id="task-1",
+                agent_name="WorkerAgent",
+                objective="Fail after spending tokens",
+                error=RuntimeError("planned failure"),
+            ),
+        ],
+        SimpleNamespace(),
+    )
+    await token_monitor.process(
+        [
+            UsageEvent(
+                Usage(prompt_tokens=2, completion_tokens=1, total_tokens=3),
+                kind="compaction",
+            ),
+            UsageEvent(
+                Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                kind="aggregation",
+            ),
+        ],
+        SimpleNamespace(),
+    )
+
+    assert token_monitor.total_tokens == 16

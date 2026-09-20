@@ -119,7 +119,19 @@ class WorkflowTransition(BaseModel):
     """A router-driven transition point between workflows.
 
     transition_type values:
-      user_choice           — mounts a registered React component; user picks a path
+      user_choice           — mounts a registered React component; user picks a path.
+                               The chosen option supplies both the route
+                               (options[].route_to) and any context it seeds
+                               (options[].context_variables), which is how a gate
+                               configures the workflows that follow it.
+      user_choice_context   — user_choice whose point is the context it seeds.
+      user_choice_route     — user_choice whose point is the branch it selects.
+
+                               These two are authoring intent, not behaviour: the
+                               router treats all three identically, and only
+                               chat_session is branched on at runtime. Choose the
+                               name that says why the gate exists; do not expect a
+                               different code path from it.
       condition             — auto-routes based on a context variable (no UI)
       confirm               — mounts a registered React component for yes/cancel prompt
       silent                — router continues with no UI surface

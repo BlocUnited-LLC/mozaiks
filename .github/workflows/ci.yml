@@ -108,7 +108,7 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Download shard coverage data
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: coverage-shard-*
           merge-multiple: true
@@ -297,29 +297,53 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Workflow UI inheritance contract
+        run: npm run test:workflow-ui
+
+      - name: Support profile panel contract
+        run: npm run test:support-panel
+
+      - name: Test wiring guard
+        run: npm run test:wiring
+
+      - name: UI contract tests
+        run: npm run test:ui-contracts
+
+      - name: Browser auth contract
+        run: npm run test:auth
+
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
         env:
           PLAYWRIGHT_SKIP_BROWSER_GC: "1"
 
+      - name: Concept review interactions
+        run: npm run test:concept-review
+
+      - name: Factory review, retry, preview and generated page contracts
+        run: npm run test:factory-contracts
+
       - name: Responsive smoke
         run: npm run test:responsive-smoke
         env:
-          VITE_MOCK_MODE: "true"
+          MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
+          MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
+
+      - name: Factory sign-in acceptance
+        run: npm run test:auth-browser
+        env:
           MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
           MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
 
       - name: Onboarding demo smoke
         run: npm run test:onboarding-demo -- --project desktop-chromium
         env:
-          VITE_MOCK_MODE: "true"
           MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
           MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
 
       - name: Build
         run: npm run build
         env:
-          VITE_MOCK_MODE: "true"
           MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
           MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
 
@@ -365,7 +389,6 @@ jobs:
       - name: Visual regression
         run: npx playwright test --config playwright.visual.config.js
         env:
-          VITE_MOCK_MODE: "true"
           MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
           MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
 
@@ -393,6 +416,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           python -m build --wheel
+
+      - name: Check wheel publication boundaries
+        run: python scripts/package_content_guard.py dist/*.whl
 
       - name: Install wheel in clean venv
         run: |
@@ -440,6 +466,37 @@ jobs:
           print("Packaged resources resolved from site-packages")
           PY
 
+      - name: Verify standalone workspace composition
+        run: |
+          . .pkg-venv/bin/activate
+          python scripts/verify_installed_workspace.py \
+            --installed-root "$VIRTUAL_ENV" \
+            --workspace /tmp/mozaiks-workspace-composition
+
+      - name: Setup Node for installed browser contract
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Verify installed browser auth
+        run: |
+          . .pkg-venv/bin/activate
+          cd /tmp/mozaiks-package-smoke
+          python - <<'PY'
+          import os
+          import subprocess
+          from mozaiksai.resources import resolve_chat_ui_src_root, resolve_web_shell_root
+
+          shell = resolve_web_shell_root()
+          ui = resolve_chat_ui_src_root()
+          assert shell is not None and ui is not None
+          subprocess.run(
+              ["node", "--test", str(shell / "tests" / "authAdapter.test.js")],
+              env={**os.environ, "MOZAIKS_CHAT_UI_PATH": str(ui.parent)},
+              check=True,
+          )
+          PY
+
       - name: Smoke packaged scaffold init
         run: |
           . .pkg-venv/bin/activate
@@ -448,8 +505,8 @@ jobs:
           test -f /tmp/mozaiks-package-init/app/brand/theme_config.json
 
   infra-build:
-    # Proves the repo-local infra/ artifacts (Dockerfile + Helm chart) actually
-    # build and run, instead of only being reviewed by hand. See
+    # Proves the repo-local infra/ artifacts and a representative generated-app
+    # Dockerfile actually build and run, instead of only being reviewed by hand. See
     # docs/architecture/deployment/oss-infra-and-generated-app-deployment.md.
     runs-on: ubuntu-latest
     services:
@@ -465,6 +522,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install generated-app smoke dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install -e ".[dev]"
 
       - name: Build repo host image
         run: docker build -t mozaiks-repo-host:ci -f infra/docker/Dockerfile .
@@ -499,6 +567,11 @@ jobs:
       - name: Stop smoke container
         if: always()
         run: docker rm -f mozaiks-repo-host-smoke || true
+
+      - name: Build and smoke-run representative generated app
+        env:
+          MOZAIKS_RUN_GENERATED_APP_DOCKER_SMOKE: '1'
+        run: pytest -q --no-cov --reruns 0 tests/test_generated_app_container_smoke.py
 
       - name: Setup Helm
         uses: azure/setup-helm@v5

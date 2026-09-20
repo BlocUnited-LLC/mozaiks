@@ -1,21 +1,26 @@
 definitions:
-  intake_complete:
-    type: boolean
-    description: True once IntakeAgent has received the composer reply and emitted NEXT.
-    source:
-      type: state
-      default: false
-      triggers:
-      - type: agent_text
-        agent: IntakeAgent
-        ui_hidden: true
-        match:
-          contains: NEXT
-
-agents:
-  IntakeAgent:
-    variables:
-    - intake_complete
-  ReviewAgent:
-    variables:
-    - intake_complete
+  approval_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: error}
+  approval_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: 0}
+  artifact_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: error}
+  artifact_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: 0}
+agents: {}

@@ -4,9 +4,10 @@ import {
   setStoredActiveGeneralChatId,
 } from '../session/chatSessionStorage';
 
-// Fallback: generate a stable UUID-style widget chat_id when no workflow
-// session exists. Stored in localStorage so it survives refreshes and the
-// session_router doesn't redirect it to a different session.
+// Stable carrier chat_id for the widget's own ask connection, stored in
+// localStorage so it survives refreshes. Isolation from workflow sessions is
+// guaranteed by the connect-time transport_purpose=ask_carrier declaration,
+// not by the id shape.
 const WIDGET_CHAT_ID_KEY = 'mozaiks.widget_chat_id';
 
 function getOrCreateFallbackChatId() {
@@ -96,6 +97,8 @@ export function useWidgetAskWS({
   setActiveGeneralChatId,
   onAgentMessage,
   enabled = false,
+  pageContext = null,
+  pagePath = null,
 }) {
   const wsRef = useRef(null);
   const [status, setStatus] = useState('disconnected');
@@ -213,6 +216,13 @@ export function useWidgetAskWS({
       },
       workflowName || null,
       chatIdRef.current,
+      {
+        // Declare ask intent at connect time: the backend never binds this
+        // carrier to a workflow session, never auto-starts one, and never
+        // replays workflow history into it.
+        transportPurpose: 'ask_carrier',
+        suppressHistoryReplay: true,
+      },
     );
 
     wsRef.current = conn;
@@ -241,11 +251,13 @@ export function useWidgetAskWS({
         source: 'widget',
         conversation_mode: 'ask',
         ...(gid ? { general_chat_id: gid } : {}),
+        ...(pageContext ? { page_context: pageContext } : {}),
+        ...(pagePath ? { page_path: pagePath } : {}),
         app_id: appId,
         user_id: userId,
       },
     });
-  }, [activeGeneralChatId, appId, generalModeReady, userId]);
+  }, [activeGeneralChatId, appId, generalModeReady, pageContext, pagePath, userId]);
 
   return { send, status, isAgentTyping, generalModeReady };
 }

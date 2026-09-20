@@ -40,7 +40,7 @@ const VALID_LAYOUTS = new Set(['sidebar_left', 'top_nav', 'drawer', 'icon_rail']
 function getHostApiBaseUrl(config, api) {
   if (api && typeof api.getHttpBaseUrl === 'function') {
     const baseUrl = api.getHttpBaseUrl();
-    if (typeof baseUrl === 'string') return baseUrl.replace(/\/+$/, '');
+    if (typeof baseUrl === 'string' && baseUrl.trim()) return baseUrl.replace(/\/+$/, '');
   }
   const configured = (
     config?.apiUrl ||
@@ -51,11 +51,12 @@ function getHostApiBaseUrl(config, api) {
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_URL) ||
     ''
   );
-  return typeof configured === 'string' ? configured.replace(/\/+$/, '') : '';
+  if (typeof configured === 'string' && configured.trim()) return configured.replace(/\/+$/, '');
+  return typeof window !== 'undefined' ? window.location.origin : '';
 }
 
 async function fetchWithAuth(url, options = {}, auth = null) {
-  const token = await auth?.getToken?.();
+  const token = await auth?.getAccessToken?.();
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return fetch(url, { ...options, headers });
@@ -357,7 +358,7 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
 // Page content renderer
 // ---------------------------------------------------------------------------
 
-function PageContent({ page, padded = true }) {
+function PageContent({ page, padded = true, isOwner = false }) {
   if (!page) return null;
 
   const Component = page.component ? componentRegistry.getComponent(page.component) : null;
@@ -366,7 +367,7 @@ function PageContent({ page, padded = true }) {
   if (Component) {
     return (
       <div className={cls}>
-        <Component page={page} tab={page} data={page.data} />
+        <Component page={page} tab={page} data={page.data} isOwner={isOwner} />
       </div>
     );
   }
@@ -434,7 +435,7 @@ function TopNavLayout({ allPages, activePage, onSelect, isOwner }) {
           ))}
         </nav>
       </div>
-      <PageContent page={activePage} />
+      <PageContent page={activePage} isOwner={isOwner} />
     </>
   );
 }
@@ -486,7 +487,7 @@ function SidebarLeftLayout({ pagesBySection, activePage, onSelect, isOwner }) {
         })}
       </aside>
       <div className="flex-1 min-w-0 py-6 border-l border-border pl-6">
-        <PageContent page={activePage} padded={false} />
+        <PageContent page={activePage} padded={false} isOwner={isOwner} />
       </div>
     </div>
   );
@@ -581,7 +582,7 @@ function DrawerLayout({ allPages, pagesBySection, activePage, onSelect, isOwner 
 
       {/* Content */}
       <div className="px-5 sm:px-8">
-        <PageContent page={activePage} padded={false} />
+        <PageContent page={activePage} padded={false} isOwner={isOwner} />
       </div>
     </div>
   );
@@ -616,7 +617,7 @@ function IconRailLayout({ allPages, activePage, onSelect, isOwner }) {
         ))}
       </aside>
       <div className="flex-1 min-w-0 px-5 sm:px-8 py-6">
-        <PageContent page={activePage} padded={false} />
+        <PageContent page={activePage} padded={false} isOwner={isOwner} />
       </div>
     </div>
   );
@@ -752,8 +753,8 @@ export default function ProfilePage() {
     for (const [s, pages] of Object.entries(pagesBySection)) {
       if (!SECTION_ORDER.includes(s)) flat.push(...(pages || []));
     }
-    return flat;
-  }, [pagesBySection]);
+    return isOwner ? flat : flat.filter(page => page.visibility !== 'owner_only');
+  }, [pagesBySection, isOwner]);
 
   // Sync active page when pages load or URL param changes
   useEffect(() => {
@@ -783,8 +784,10 @@ export default function ProfilePage() {
   if (profileLoading) return <Spinner />;
   if (profileError && !profile) return <ErrorState message={`Could not load profile: ${profileError}`} />;
 
-  const hasSidebar = layout === 'sidebar_left' || layout === 'icon_rail';
-  const containerClass = `mx-auto pb-16 ${hasSidebar ? 'max-w-5xl' : 'max-w-3xl'}`;
+  // Align to the shared content measure (--mz-content-max, theme-configurable
+  // per app) so this route fills wide viewports like the workspace surfaces
+  // instead of stranding large empty gutters.
+  const containerClass = 'mx-auto w-full max-w-content px-4 pb-16 md:px-6 lg:px-8';
 
   const layoutProps = { allPages, pagesBySection, activePage: currentPage, onSelect: handleSelect, isOwner };
 

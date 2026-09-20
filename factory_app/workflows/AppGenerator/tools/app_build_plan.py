@@ -14,7 +14,7 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     normalize_app_path,
 )
-from mozaiksai.core.workflow.assignment_kinds import app_build_assignment_kind_values
+from mozaiksai.core.workflow.context.frozen import detach
 
 try:
     from .managed_monetization_contract import (
@@ -75,7 +75,6 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
     }
 )
 _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)
-_ALLOWED_TASK_TYPES = app_build_assignment_kind_values()
 _CANONICAL_INITIAL_AGENTS = {
     "subscription_config": "ConfigMiddlewareAgent",
     "service_foundation": "ConfigMiddlewareAgent",
@@ -88,9 +87,11 @@ _CANONICAL_INITIAL_AGENTS = {
     "api_surface": "ControllerAgent",
     "page_bundle": "AppSchemaAgent",
 }
+# AppGenerator materialization authority is narrower than generic assignment kinds.
+_ALLOWED_TASK_TYPES = frozenset(_CANONICAL_INITIAL_AGENTS)
 _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
     "app_policy": frozenset({"subscription_config"}),
-    "external_integration": frozenset({"api_surface", "service_foundation", "agent_backend_integration"}),
+    "external_integration": frozenset({"api_surface", "service_foundation"}),
     "refinement": frozenset({"refinement_harness"}),
     "ui_only": frozenset({"page_bundle"}),
 }
@@ -459,7 +460,7 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
     if context_variables is None or not hasattr(context_variables, "get"):
         return default
     try:
-        return context_variables.get(key, default)
+        return detach(context_variables.get(key, default))
     except Exception:
         return default
 
@@ -1364,6 +1365,29 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
     for task in build_tasks:
         task_id = str(task.get("task_id") or "<unknown>")
         task_type = str(task.get("task_type") or "<missing>")
+        if task_type == "agent_backend_integration":
+            raise ValueError(
+                f"Build task '{task_id}' uses retired task_type 'agent_backend_integration'. "
+                "This type is non-materializing after module-interface retirement "
+                "and is not valid AppGenerator build-task authority."
+            )
+
+        if task_type == "admin_config":
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' uses obsolete task_type 'admin_config'. "
+                "Admin bootstrap lives in app/app.json admins; use module_contract for feature panels "
+                "and api_surface for split service admin APIs."
+            )
+
+        if task_type not in _ALLOWED_TASK_TYPES:
+            allowed = ", ".join(sorted(_ALLOWED_TASK_TYPES))
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' uses unsupported task_type '{task_type}'. "
+                f"Use only the canonical AppGenerator task types: {allowed}."
+            )
+
         initial_agent = str(task.get("initial_agent") or "<missing>")
         capability_pack_id = task.get("capability_pack_id")
         owned_paths = _normalized_owned_paths(task)
@@ -1560,14 +1584,6 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 "shell/theme artifacts, not source files."
             )
 
-        if task_type == "admin_config":
-            raise ValueError(
-                "Build task "
-                f"'{task_id}' uses obsolete task_type 'admin_config'. "
-                "Admin bootstrap lives in app/app.json admins; use module_contract for feature panels "
-                "and api_surface for split service admin APIs."
-            )
-
         if _OBSOLETE_HOST_ADMIN_CONFIG_PATH in owned_paths:
             raise ValueError(
                 "Build task "
@@ -1716,14 +1732,6 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                     f"'{task_id}' is missing required refinement harness paths: {missing}."
                 )
 
-        if task_type not in _ALLOWED_TASK_TYPES:
-            allowed = ", ".join(sorted(_ALLOWED_TASK_TYPES))
-            raise ValueError(
-                "Build task "
-                f"'{task_id}' uses unsupported task_type '{task_type}'. "
-                f"Use only the canonical AppGenerator task types: {allowed}."
-            )
-
         expected_initial_agent = _CANONICAL_INITIAL_AGENTS.get(task_type)
         if expected_initial_agent and initial_agent != expected_initial_agent:
             raise ValueError(
@@ -1866,13 +1874,15 @@ def app_build_plan(
         Field(description="AG2-injected workflow context variables."),
     ] = None,
 ) -> str:
+    if context_variables is not None and hasattr(context_variables, "set"):
+        context_variables.set("app_plan_ready", False)
+        context_variables.set("app_build_plan", None)
+        context_variables.set("app_task_batch_items", [])
+        context_variables.set("app_task_batch_status", None)
+    AppBuildPlan = detach(AppBuildPlan)
     if not AppBuildPlan or not isinstance(AppBuildPlan, dict):
         raise ValueError("AppBuildPlan payload is required and must be a dictionary")
     AppBuildPlan = _unwrap_app_build_plan_payload(AppBuildPlan)
-    if "app_kind" not in AppBuildPlan and context_variables and hasattr(context_variables, "get"):
-        existing_plan = context_variables.get("app_build_plan")
-        if isinstance(existing_plan, dict):
-            AppBuildPlan = _unwrap_app_build_plan_payload(existing_plan)
 
     agent_message = str(AppBuildPlan.get("agent_message") or "").strip()
     app_kind = str(AppBuildPlan.get("app_kind") or "").strip()
@@ -2029,6 +2039,7 @@ def app_build_plan(
         normalized_build_tasks.append(normalized_task)
 
     normalized_plan = {
+        **AppBuildPlan,
         "agent_message": agent_message or "App build plan cached successfully.",
         "app_kind": app_kind,
         "pages": pages,
@@ -2053,7 +2064,7 @@ def app_build_plan(
         "demo_fixture_sets": demo_fixture_sets,
     }
 
-    if context_variables and hasattr(context_variables, "set"):
+    if context_variables is not None and hasattr(context_variables, "set"):
         try:
             context_variables.set("app_build_plan", normalized_plan)
             context_variables.set("app_plan_ready", True)

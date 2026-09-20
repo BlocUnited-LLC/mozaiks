@@ -4,14 +4,17 @@
 # ==============================================================================
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
+from mozaiksai.core.auth import WebSocketUser
 from mozaiksai.core.transport.event_contract import send_event_envelope
 from mozaiksai.core.transport.session_registry import session_registry
 
 from .base import logger, utc_timestamp
+from .workflow_handlers import _background_task_failure_callback
 
 if TYPE_CHECKING:
     from mozaiksai.core.transport.simple_transport import SimpleTransport
@@ -116,13 +119,32 @@ async def handle_user_input_submit(
                     "WORKFLOW_CONTEXT_MISSING",
                 )
                 return
-            await transport.handle_user_input_from_api(
-                chat_id=target_chat_id,
-                user_id=str(target_user_id or conn.get("user_id") or ""),
-                workflow_name=str(target_workflow_name),
-                message=text,
-                app_id=str(target_app_id),
-            )
+            existing = transport._background_tasks.get(target_chat_id)
+            if existing is not None and not existing.done():
+                await transport._send_ws_error(websocket, "Workflow is already running", "CHAT_BUSY")
+                return
+
+            async def continue_workflow() -> None:
+                try:
+                    await transport.handle_user_input_from_api(
+                        chat_id=target_chat_id,
+                        user_id=str(target_user_id or conn.get("user_id") or ""),
+                        workflow_name=str(target_workflow_name),
+                        message=text,
+                        app_id=str(target_app_id),
+                    )
+                except Exception:
+                    logger.exception("Workflow input failed for %s", target_chat_id)
+                    await transport._send_ws_error(websocket, "User message failed", "USER_MESSAGE_FAILED")
+                finally:
+                    if transport._background_tasks.get(target_chat_id) is asyncio.current_task():
+                        transport._background_tasks.pop(target_chat_id, None)
+
+            # A resumed turn can await another UI tool response on this socket.
+            # Keep receiving frames while the existing execution bridge owns the run.
+            task = asyncio.create_task(continue_workflow(), name=f"workflow-input:{target_chat_id}")
+            transport._background_tasks[target_chat_id] = task
+            task.add_done_callback(_background_task_failure_callback(str(target_workflow_name), target_chat_id))
         else:
             await transport.process_incoming_user_message(
                 chat_id=target_chat_id,
@@ -154,7 +176,21 @@ async def handle_tool_call_response(
     if not event_id:
         return
     try:
-        ok = await transport.submit_tool_call_response(event_id, response_data)
+        conn = transport._get_conn_meta(chat_id)
+        principal = getattr(websocket.state, "user", None)
+        ok = False
+        if (
+            isinstance(principal, WebSocketUser)
+            and conn.get("websocket") is websocket
+            and conn.get("user_id") == principal.user_id
+            and conn.get("app_id")
+        ):
+            active = session_registry.get_active_workflow(conn["ws_id"]) if conn.get("ws_id") else None
+            target_chat_id = active.chat_id if active else chat_id
+            ok = await transport.submit_tool_call_response_for_user(
+                event_id, response_data, principal=principal,
+                chat_id=target_chat_id, app_id=conn["app_id"],
+            )
         logger.debug("TOOL_CALL_RESPONSE_RECEIVED event=%s accepted=%s", event_id, ok)
         await send_event_envelope(websocket, {
             "schema_version": "mozaiks.ui.event.v1",

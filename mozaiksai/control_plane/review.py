@@ -9,6 +9,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.control_plane.staging import RefinementStagingResult
+from mozaiksai.core.utils.path_containment import resolve_inside
+
+
+def _resolve_inside(parent: Path, child: Path) -> Path:
+    return resolve_inside(parent, child, error=ValueError, message="Refusing to write outside staging area")
 
 REVIEW_FILENAME = "refinement_review.json"
 
@@ -62,22 +67,6 @@ class RefinementReviewRecord(BaseModel):
     write_back_mode: RefinementWriteBackMode = "generated_artifact"
     write_back_target: str | None = None
     mutation_allowed: Literal[False] = False
-
-
-def _is_relative_to(child: Path, parent: Path) -> bool:
-    try:
-        child.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def _resolve_inside(parent: Path, child: Path) -> Path:
-    parent_resolved = parent.resolve()
-    child_resolved = child.resolve()
-    if not _is_relative_to(child_resolved, parent_resolved):
-        raise ValueError(f"Refusing to write outside staging area: {child}")
-    return child_resolved
 
 
 def _review_path(staging_area: Path | str) -> Path:

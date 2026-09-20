@@ -16,3 +16,15 @@ from typing import Any
 #   deactivated_at — informational; not used for grant logic
 #   metadata      — not read by the adapter; available for app-owned billing context
 SubscriptionAssignmentDoc = dict[str, Any]
+
+
+def metadata_entries_to_map(entries: list[dict[str, Any]] | None) -> dict[str, str]:
+    """Fold closed {key, value} request entries into the stored metadata map.
+
+    The module request contract carries metadata as typed entries; assignment
+    records keep the {key: value} map shape. Later entries win on duplicate keys.
+    """
+    metadata: dict[str, str] = {}
+    for entry in entries or []:
+        metadata[str(entry["key"])] = str(entry["value"])
+    return metadata

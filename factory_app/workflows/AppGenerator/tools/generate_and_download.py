@@ -2,8 +2,8 @@
 generate_and_download - Bundle generated app code and present AppWorkbench + DownloadCenter UI.
 
 This tool:
-1) Collects latest agent JSON outputs for the chat/app
-2) Extracts `code_files` from any agent output
+1) Projects the current admitted app files and repair overlays
+2) Adds authorized deterministic deployment and runtime scaffolding
 3) Writes files under generated/apps/<app_id>/<build_id>/app/
 4) Creates a ZIP bundle
 5) Presents AppWorkbench export actions and (optionally) triggers export_to_github
@@ -21,11 +21,12 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
+from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
-    collect_generated_app_file_map,
-    extract_code_file_map_from_payload,
-    extract_deleted_file_paths_from_payload,
+    admitted_app_file_map,
+    compose_bundle_auth_routes,
 )
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     PRODUCTION_DEPLOYMENT_PROFILES,
@@ -38,9 +39,9 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import (
 from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
-from factory_app.workflows.AppGenerator.tools.update_app_record import update_build_status
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.app_context.store import register_greenfield_app_context_version
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
@@ -56,7 +57,6 @@ except Exception:  # pragma: no cover
     _log_tool_event = None  # type: ignore
 
 BuilderArtifactStore = None
-AG2PersistenceManager = None
 
 
 def _repo_root() -> Path:
@@ -102,17 +102,6 @@ def _builder_artifact_store():
     return BuilderArtifactStore()
 
 
-def _ag2_persistence_manager():
-    global AG2PersistenceManager
-    if AG2PersistenceManager is None:
-        from mozaiksai.core.data.persistence.persistence_manager import (
-            AG2PersistenceManager as _AG2PersistenceManager,
-        )
-
-        AG2PersistenceManager = _AG2PersistenceManager
-    return AG2PersistenceManager()
-
-
 def _safe_relpath(raw: str) -> str | None:
     if not isinstance(raw, str):
         return None
@@ -127,51 +116,19 @@ def _safe_relpath(raw: str) -> str | None:
     return str(p)
 
 
-def _discover_code_files(col: dict[str, Any]) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for _agent_name, data in (col or {}).items():
-        try:
-            if isinstance(data, dict):
-                out.update(extract_code_file_map_from_payload(data))
-            elif isinstance(data, str):
-                try:
-                    parsed = json.loads(data)
-                    if isinstance(parsed, dict):
-                        out.update(extract_code_file_map_from_payload(parsed))
-                except Exception:
-                    pass
-        except Exception:
-            continue
-    return out
-
-
-def _discover_deleted_files(col: dict[str, Any]) -> list[str]:
-    deleted: list[str] = []
-    seen: set[str] = set()
-    for _agent_name, data in (col or {}).items():
-        if not isinstance(data, dict):
-            continue
-        for path in extract_deleted_file_paths_from_payload(data):
-            if path in seen:
-                continue
-            seen.add(path)
-            deleted.append(path)
-    return deleted
-
-
 def _context_get(context_variables: Any | None, key: str) -> Any | None:
     if context_variables is None:
         return None
     if hasattr(context_variables, "get"):
         try:
-            return context_variables.get(key)
+            return detach(context_variables.get(key))
         except Exception:
             pass
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key)
+        return detach(data.get(key))
     if isinstance(context_variables, dict):
-        return context_variables.get(key)
+        return detach(context_variables.get(key))
     return None
 
 
@@ -280,10 +237,7 @@ def _deployment_env_for_capability_packs(capability_packs: list[dict[str, Any]])
 def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None or not hasattr(context_variables, "set"):
         return
-    try:
-        context_variables.set(key, value)
-    except Exception:
-        return
+    context_variables.set(key, value)
 
 
 def _is_truthy(value: Any) -> bool:
@@ -292,49 +246,6 @@ def _is_truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "passed", "ready"}
     return bool(value)
-
-
-def _discover_context_files(context_variables: Any | None) -> dict[str, str]:
-    raw = _context_get(context_variables, "generated_files")
-    out: dict[str, str] = {}
-    if isinstance(raw, dict):
-        for rel_path, content in raw.items():
-            safe = _safe_relpath(str(rel_path))
-            if safe:
-                out[safe] = str(content)
-    out.update(extract_code_file_map_from_payload({"code_files": _context_get(context_variables, "code_files")}))
-    return _apply_deleted_files(out, _context_deleted_files(context_variables))
-
-
-def _context_deleted_files(context_variables: Any | None) -> list[str]:
-    return extract_deleted_file_paths_from_payload({"deleted_files": _context_get(context_variables, "deleted_files")})
-
-
-def _apply_deleted_files(files_map: dict[str, str], deleted_files: list[str]) -> dict[str, str]:
-    if not deleted_files:
-        return files_map
-    merged = dict(files_map)
-    for path in deleted_files:
-        merged.pop(path, None)
-    return merged
-
-
-def _merge_bundle_sources(
-    *,
-    context_variables: Any | None,
-    collected: dict[str, Any],
-) -> dict[str, str]:
-    files_map = _discover_context_files(context_variables)
-    persisted_files = _discover_code_files(collected)
-    if persisted_files:
-        files_map.update(persisted_files)
-    return _apply_deleted_files(
-        files_map,
-        [
-            *_context_deleted_files(context_variables),
-            *_discover_deleted_files(collected),
-        ],
-    )
 
 
 def _generated_app_auth_required(files_map: dict[str, str]) -> bool:
@@ -491,6 +402,24 @@ async def _inject_agent_context_env(*, files_map: dict[str, str], app_id: str, c
     files_map[".env.example"] = "\n".join(lines).rstrip() + "\n"
 
 
+def _export_repair_outcome(acceptance: dict[str, Any]) -> str:
+    bundle = acceptance.get("bundle_repair") or {}
+    if acceptance.get("task_recovery_request"):
+        return "repair_tasks"
+    if bundle.get("status") == "needs_revision":
+        return {
+            "AppSchemaAgent": "repair_schema",
+            "DatabaseAgent": "repair_database",
+            "ConfigMiddlewareAgent": "repair_integration",
+            "ServiceAgent": "repair_service",
+            "ModelAgent": "repair_models",
+            "ControllerAgent": "repair_controller",
+            "RefinementHarnessAgent": "repair_harness",
+            "FrontendStubAgent": "repair_frontend",
+        }.get(str(bundle.get("target_agent") or ""), "blocked")
+    return "blocked"
+
+
 async def _emit_deployment_event(*, chat_id: str | None, status: str, data: dict) -> None:
     if not chat_id:
         return
@@ -526,18 +455,8 @@ async def _persist_pending_schema_migration(
     if not migration_id:
         return None
 
-    migration_path = (
-        Path(generated_app_dir)
-        / "data"
-        / "migrations"
-        / f"{migration_id}.json"
-    )
-    migration_path.parent.mkdir(parents=True, exist_ok=True)
-    migration_path.write_text(
-        json.dumps(pending_migration, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
+    # The accepted snapshot already owns the migration file's exact bytes.
+    # Registration records its history without materializing it a second time.
     artifact_version_id = None
     change_class = None
     if context_variables is not None and hasattr(context_variables, "get"):
@@ -629,6 +548,7 @@ async def _register_app_bundle_artifact_version(
     app_dir: Path | None = None,
     written_paths: list[str] | None = None,
     context_variables: Any | None,
+    artifact_store: Any | None = None,
 ):
     try:
         import hashlib
@@ -691,9 +611,22 @@ async def _register_app_bundle_artifact_version(
         if app_dir is not None and written_paths
         else []
     )
+    # The archive identity comes from the one shared canonical formula: the
+    # manifest records the bundle archive at exactly
+    # {bundle_name}/{bundle_name}.zip, and a zip whose on-disk name disagrees
+    # with the canonical archive name fails the build closed instead of
+    # persisting a manifest that cannot be resolved.
+    from mozaiksai.core.artifacts.models import canonical_bundle_archive_path
+
+    canonical_archive_path = canonical_bundle_archive_path(bundle_name)
+    if zip_path.name != f"{bundle_name}.zip":
+        raise RuntimeError(
+            f"bundle archive {zip_path.name!r} does not match the canonical "
+            f"archive name {bundle_name}.zip"
+        )
     files_manifest = [
         {
-            "path": f"{bundle_name}/{zip_path.name}",
+            "path": canonical_archive_path,
             "sha256": sha,
             "size_bytes": zip_path.stat().st_size,
             "content_type": "application/zip",
@@ -709,12 +642,8 @@ async def _register_app_bundle_artifact_version(
     }
     if app_dir is not None:
         bundle_content_metadata["workspace_dir"] = str(app_dir.resolve())
-    build_registry_id = _context_get(context_variables, "build_registry_id")
-    if build_registry_id:
-        bundle_content_metadata["build_registry_id"] = str(build_registry_id)
-    build_id = _context_get(context_variables, "build_id")
-    if build_id:
-        bundle_content_metadata["build_id"] = str(build_id)
+    binding = require_build_binding(context_variables)
+    bundle_content_metadata.update(binding.model_dump())
     # Include the carry-forward preservation report in artifact metadata when present.
     cf_report = None
     if context_variables is not None and hasattr(context_variables, "get"):
@@ -753,10 +682,10 @@ async def _register_app_bundle_artifact_version(
             wf_logger = get_workflow_logger(workflow_name=workflow_name, app_id=app_id)
             wf_logger.warning("Content store put_bundle failed; falling back to local path: %s", cs_exc)
 
-    artifact_store = get_artifact_store()
+    artifact_store = artifact_store or get_artifact_store()
     canonical_inputs_version = await resolve_latest_artifact_version_refs(
         app_id=str(app_id),
-        artifact_kinds=("concept", "design_docs", "workflow_bundle", "theme_capture"),
+        artifact_kinds=("design_docs", "subscription_contract", "workflow_bundle", "theme_capture"),
         artifact_store=artifact_store,
     )
     artifact_version = await artifact_store.create_build_record(
@@ -782,6 +711,20 @@ async def _register_app_bundle_artifact_version(
             "metadata": bundle_content_metadata,
         },
     )
+    # The persisted record must identify exactly one canonical bundle archive
+    # entry (unique application/zip entry under the persisted bundle_name
+    # path) — the only manifest digest that may ever serve as bundle-digest
+    # authority. A manifest that fails this resolves to no verifiable bundle,
+    # so the build fails closed here instead of persisting an ambiguous record.
+    from mozaiksai.core.artifacts.models import resolve_canonical_bundle_entry
+
+    canonical_bundle_entry = resolve_canonical_bundle_entry(artifact_version)
+    if canonical_bundle_entry.sha256 != sha:
+        raise RuntimeError(
+            "canonical bundle entry digest does not match the archive just "
+            f"written for record {artifact_version.id!r}"
+        )
+
     if context_variables is not None and hasattr(context_variables, "set"):
         try:
             context_variables.set("artifact_version_id", artifact_version.id)
@@ -823,16 +766,16 @@ async def generate_and_download(
     chat_id: str | None = None
     app_id: str | None = None
     user_id: str | None = None
-    build_registry_id: str | None = None
-    build_id: str | None = None
+    binding = require_build_binding(context_variables)
+    target_app_id = binding.target_app_id
+    build_registry_id = binding.build_registry_id
+    build_id = binding.build_id
     workflow_name = "AppGenerator"
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
             chat_id = context_variables.get("chat_id")
             app_id = context_variables.get("app_id")
             user_id = context_variables.get("user_id")
-            build_registry_id = context_variables.get("build_registry_id")
-            build_id = context_variables.get("build_id")
             workflow_name = context_variables.get("workflow_name") or workflow_name
         except Exception:
             pass
@@ -851,31 +794,9 @@ async def generate_and_download(
     if not chat_id or not app_id:
         return {"status": "error", "message": "chat_id and app_id are required"}
 
-    pm = _ag2_persistence_manager()
-    collected = await pm.gather_latest_agent_jsons(chat_id=chat_id, app_id=app_id)
-    files_map = _merge_bundle_sources(
-        context_variables=context_variables,
-        collected=collected,
-    )
-    if not files_map and _is_truthy(_context_get(context_variables, "app_schema_ready")):
-        files_map = collect_generated_app_file_map(
-            _context_get(context_variables, "generated_app_dir")
-        )
-        files_map.update(extract_code_file_map_from_payload({"code_files": _context_get(context_variables, "code_files")}))
-        files_map = _apply_deleted_files(
-            files_map,
-            [
-                *_context_deleted_files(context_variables),
-                *_discover_deleted_files(collected),
-            ],
-        )
-        if files_map and context_variables is not None and hasattr(context_variables, "set"):
-            try:
-                context_variables.set("generated_files", files_map)
-            except Exception:
-                pass
+    files_map = admitted_app_file_map(context_variables)
     if not files_map:
-        return {"status": "error", "message": "No code_files found to bundle."}
+        return {"status": "error", "message": "No admitted app files are available to bundle."}
 
     # Merge Phase 7A carry-forward preserved declarative files.
     # These were written to context["carry_forward_additions"] by the resolver.
@@ -887,7 +808,11 @@ async def generate_and_download(
             if safe_cf and safe_cf not in files_map:
                 files_map[safe_cf] = str(cf_content)
 
-    await _inject_agent_context_env(files_map=files_map, app_id=str(app_id), context_variables=context_variables)
+    if "app.json" in files_map:
+        app_manifest = json.loads(files_map["app.json"])
+        app_manifest["appId"] = target_app_id
+        files_map["app.json"] = json.dumps(app_manifest, indent=2) + "\n"
+    await _inject_agent_context_env(files_map=files_map, app_id=target_app_id, context_variables=context_variables)
 
     # Inject requirements.txt if the agents did not produce one.
     if "requirements.txt" not in files_map:
@@ -928,7 +853,7 @@ async def generate_and_download(
         include_dockerfiles = True
     if include_dockerfiles or include_workflow or include_compose or production_deployment_profile:
         deployment_contract = generate_deployment_artifacts(
-            app_id=str(app_id),
+            app_id=target_app_id,
             deployment_profile=deployment_profile,
             include_dockerfiles=include_dockerfiles,
             include_workflow=include_workflow,
@@ -949,7 +874,11 @@ async def generate_and_download(
                 context_variables.set("deployment_contract_validation_errors", deployment_contract.get("bundle_errors") or [])
             except Exception:
                 pass
-        await _inject_agent_context_env(files_map=files_map, app_id=str(app_id), context_variables=context_variables)
+        await _inject_agent_context_env(files_map=files_map, app_id=target_app_id, context_variables=context_variables)
+
+    # Auth scaffold and app-schema routes have independent owners; compose their
+    # normal declarations before final validation, without runtime route fallbacks.
+    compose_bundle_auth_routes(files_map)
 
     acceptance_result = await run_app_bundle_acceptance_gate(
         files=files_map,
@@ -961,6 +890,7 @@ async def generate_and_download(
             wf_logger.error("App bundle acceptance failure: %s", failed_test)
         return {
             "status": "error",
+            "outcome": _export_repair_outcome(acceptance_result),
             "message": (
                 "Generated app bundle failed deterministic acceptance. "
                 "Fix the reported contract errors and regenerate."
@@ -970,22 +900,22 @@ async def generate_and_download(
             "bundle_errors": acceptance_result.get("bundle_scan", {}).get("errors") or [],
         }
 
-    bundle_name = "GeneratedApp"
-    try:
-        # Best-effort: allow agent to provide a bundle name
-        for _agent, data in collected.items():
-            if isinstance(data, dict):
-                candidate = data.get("app_name") or data.get("bundle_name") or data.get("project_name")
-                if isinstance(candidate, str) and candidate.strip():
-                    bundle_name = candidate.strip()
-                    break
-    except Exception:
-        pass
+    bundle_name = str(_context_get(context_variables, "app_name") or "GeneratedApp")
 
     # Normalize bundle name to a safe folder name
-    bundle_name = "".join(ch for ch in bundle_name if ch.isalnum() or ch in {"-", "_"}).strip() or "GeneratedApp"
+    # Derivation from the display name, constrained to the closed shared
+    # bundle-name grammar (ASCII letters/digits/hyphen/underscore) that
+    # validate_canonical_bundle_name enforces at read time.
+    bundle_name = (
+        "".join(
+            ch
+            for ch in bundle_name
+            if ch.isascii() and (ch.isalnum() or ch in {"-", "_"})
+        ).strip()
+        or "GeneratedApp"
+    )
 
-    app_dir = _resolve_app_output_dir(app_id=app_id, build_id=build_id or chat_id)
+    app_dir = _resolve_app_output_dir(app_id=target_app_id, build_id=build_id)
     base_dir = app_dir.parent
     app_dir.mkdir(parents=True, exist_ok=True)
 
@@ -999,13 +929,13 @@ async def generate_and_download(
             continue
         out_path = app_dir / safe
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(str(content), encoding="utf-8")
+        out_path.write_text(str(content), encoding="utf-8", newline="")
         written_paths.append(safe)
 
     migration_record = await _persist_pending_schema_migration(
         pending_migration=pending_migration,
-        app_id=str(app_id),
-        build_id=str(build_id or chat_id),
+        app_id=target_app_id,
+        build_id=build_id,
         workflow_name=workflow_name,
         chat_id=chat_id,
         context_variables=context_variables,
@@ -1023,7 +953,7 @@ async def generate_and_download(
 
     zip_size = zip_path.stat().st_size
     artifact_version = await _register_app_bundle_artifact_version(
-        app_id=str(app_id),
+        app_id=target_app_id,
         user_id=user_id,
         workflow_name=workflow_name,
         chat_id=chat_id,
@@ -1037,7 +967,7 @@ async def generate_and_download(
     artifact_version_id = artifact_version.id if artifact_version else None
     workflow_sequence = str(_context_get(context_variables, "workflow_sequence") or "build")
     current_build_run = {
-        "build_id": str(build_id or chat_id or build_registry_id or ""),
+        "build_id": build_id,
         "workflow_sequence": workflow_sequence,
         "status": "review",
         "active_chat_id": chat_id,
@@ -1045,8 +975,9 @@ async def generate_and_download(
         "artifact_version_id": artifact_version_id,
         "bundle_path": resolved_bundle_path,
     }
-    await update_build_status(
-        build_registry_id=build_registry_id or "",
+    registry_update = await AppRegistryService().update_build_status(
+        owner_user_id=str(user_id),
+        build_registry_id=build_registry_id,
         status="review",
         bundle_path=resolved_bundle_path,
         artifact_version_id=artifact_version_id,
@@ -1054,16 +985,13 @@ async def generate_and_download(
         active_chat_id=chat_id,
         active_workflow_id=workflow_name,
         current_build_run=current_build_run,
+        expected_build_id=build_id,
     )
-    # Persist lifecycle_state and bundle_path into context_variables so the
-    # refinement router can read them when the user submits a revision request
-    # from the app_review transition without the bundle having been promoted yet.
-    if context_variables is not None and hasattr(context_variables, "set"):
-        try:
-            context_variables.set("lifecycle_state", "review")
-            context_variables.set("bundle_path", resolved_bundle_path)
-        except Exception:
-            pass
+    if not registry_update["success"]:
+        raise ValueError("Registered build target is no longer available")
+    # Publish the same staged location as the registry for the review handoff.
+    _context_set(context_variables, "lifecycle_state", "review")
+    _context_set(context_variables, "bundle_path", resolved_bundle_path)
 
     ui_files = [
         {
@@ -1088,7 +1016,10 @@ async def generate_and_download(
         "artifact_kind": "app_bundle",
         "artifact_key": "app_bundle",
         "artifact_version_id": artifact_version_id,
-        "app_id": str(app_id),
+        "app_id": app_id,
+        "target_app_id": target_app_id,
+        "build_registry_id": build_registry_id,
+        "source_chat_id": chat_id,
         # Workbench context (best-effort): allow ChatUI to render file tree + editor + preview.
         "generated_files": files_map,
     }
@@ -1097,9 +1028,9 @@ async def generate_and_download(
         ui_payload["deployment_artifacts_included"] = True
         if context_variables is not None and hasattr(context_variables, "get"):
             try:
-                ui_payload["deploy_target_spec"] = context_variables.get("deploy_target_spec")
-                ui_payload["deployment_template_manifest"] = context_variables.get("deployment_template_manifest")
-                ui_payload["deployment_contract_validation_errors"] = context_variables.get("deployment_contract_validation_errors")
+                ui_payload["deploy_target_spec"] = _context_get(context_variables, "deploy_target_spec")
+                ui_payload["deployment_template_manifest"] = _context_get(context_variables, "deployment_template_manifest")
+                ui_payload["deployment_contract_validation_errors"] = _context_get(context_variables, "deployment_contract_validation_errors")
             except Exception:
                 pass
     if migration_record:
@@ -1107,14 +1038,14 @@ async def generate_and_download(
     # Best-effort: include validation/integration context for the AppWorkbench.
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
-            ui_payload["app_validation_status"] = context_variables.get("app_validation_status")
-            ui_payload["app_validation_strategy_used"] = context_variables.get("app_validation_strategy_used")
-            ui_payload["app_validation_preview_url"] = context_variables.get("app_validation_preview_url")
-            ui_payload["app_validation_result"] = context_variables.get("app_validation_result")
-            ui_payload["integration_tests_passed"] = context_variables.get("integration_tests_passed")
-            ui_payload["integration_test_result"] = context_variables.get("integration_test_result")
-            ui_payload["app_bundle_acceptance_status"] = context_variables.get("app_bundle_acceptance_status")
-            ui_payload["app_bundle_acceptance_result"] = context_variables.get("app_bundle_acceptance_result")
+            ui_payload["app_validation_status"] = _context_get(context_variables, "app_validation_status")
+            ui_payload["app_validation_strategy_used"] = _context_get(context_variables, "app_validation_strategy_used")
+            ui_payload["app_validation_preview_url"] = _context_get(context_variables, "app_validation_preview_url")
+            ui_payload["app_validation_result"] = _context_get(context_variables, "app_validation_result")
+            ui_payload["integration_tests_passed"] = _context_get(context_variables, "integration_tests_passed")
+            ui_payload["integration_test_result"] = _context_get(context_variables, "integration_test_result")
+            ui_payload["app_bundle_acceptance_status"] = _context_get(context_variables, "app_bundle_acceptance_status")
+            ui_payload["app_bundle_acceptance_result"] = _context_get(context_variables, "app_bundle_acceptance_result")
         except Exception:
             pass
 
@@ -1136,6 +1067,7 @@ async def generate_and_download(
         _context_set(context_variables, "app_download_ready", False)
         return {
             "status": "cancelled",
+            "outcome": "cancelled",
             "ui_response": response,
             "agent_message_id": agent_message_id,
             "ui_files": [],
@@ -1183,7 +1115,8 @@ async def generate_and_download(
                 }
                 action = None
                 return {
-                    "status": "success",
+                    "status": "blocked",
+                    "outcome": "blocked",
                     "ui_response": response,
                     "agent_message_id": agent_message_id,
                     "ui_files": ui_files,
@@ -1209,7 +1142,7 @@ async def generate_and_download(
                     )
             deployment_result = await export_app_code_to_github(
                 bundle_path=str(zip_path.resolve()),
-                app_id=app_id,
+                app_id=target_app_id,
                 repo_name=repo_name,
                 commit_message=commit_message,
                 user_id=user_id,
@@ -1217,6 +1150,7 @@ async def generate_and_download(
             )
     except Exception as deploy_err:
         wf_logger.warning("GitHub export flow failed: %s", deploy_err)
+        deployment_result = {"success": False, "error": "GitHub export failed; inspect export status before retrying."}
 
     download_result = {
         "bundle_dir": str(app_dir.resolve()),
@@ -1231,8 +1165,12 @@ async def generate_and_download(
     _context_set(context_variables, "app_download_ready", True)
     _context_set(context_variables, "download_result", download_result)
 
+    export_failed = action == "export_to_github" and (
+        not isinstance(deployment_result, dict) or deployment_result.get("success") is not True
+    )
     return {
-        "status": "success",
+        "status": "error" if export_failed else "success",
+        "outcome": "blocked" if export_failed else "ready",
         "ui_response": response,
         "agent_message_id": agent_message_id,
         "ui_files": ui_files,
@@ -1243,6 +1181,5 @@ async def generate_and_download(
         "files_written": download_result["files_written"],
         "storage_backend": storage_backend,
     }
-
 
 

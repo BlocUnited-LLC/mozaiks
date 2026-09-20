@@ -17,13 +17,14 @@ const STATUS_TONE = {
   passed: 'success',
   failed: 'destructive',
   skipped: 'default',
+  attention_required: 'warning',
 };
 
 function ValidationRow({ label, status }) {
-  const tone = STATUS_TONE[status] || 'default';
+  const tone = status ? STATUS_TONE[status] || 'default' : 'warning';
   const label_text = status
     ? status.charAt(0).toUpperCase() + status.slice(1)
-    : 'Unknown';
+    : 'Missing';
   return (
     <div className="flex items-center justify-between border-b border-border/40 py-2 last:border-0">
       <span className="text-sm text-muted-foreground">{label}</span>
@@ -49,11 +50,11 @@ export default function AppReviewSummary({ payload = {} }) {
     setPromoting(true);
     setError(null);
     try {
-      const appIdQuery = payload?.app_id ? `?app_id=${encodeURIComponent(payload.app_id)}` : '';
+      const appIdQuery = `?build_registry_id=${encodeURIComponent(payload.build_registry_id)}`;
       const res = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(payload.artifact_version_id)}/promote${appIdQuery}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ build_registry_id: payload.build_registry_id || null }),
+        body: JSON.stringify({}),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -67,14 +68,17 @@ export default function AppReviewSummary({ payload = {} }) {
     }
   }, [payload]);
 
-  const validationStatus = payload.app_validation_status || 'skipped';
+  const securitySummary = payload.security_readiness_summary || {};
+  const securityStatus = securitySummary.status || (securitySummary.finding_count > 0 ? 'attention_required' : null);
+  const securityFindings = Array.isArray(securitySummary.findings) ? securitySummary.findings : [];
+  const validationStatus = payload.app_validation_status || null;
   const acceptanceStatus = payload.app_bundle_acceptance_status || null;
   const integrationStatus =
     payload.integration_tests_passed === true
       ? 'passed'
       : payload.integration_tests_passed === false
       ? 'failed'
-      : 'skipped';
+      : null;
   const canPromote = (
     payload.can_promote !== false
     && Boolean(payload?.artifact_version_id)
@@ -97,12 +101,20 @@ export default function AppReviewSummary({ payload = {} }) {
       )}
 
       <div className="mb-4 rounded-lg border border-border/40 bg-muted/30 px-4 py-1">
-        {acceptanceStatus && (
-          <ValidationRow label="Bundle acceptance" status={acceptanceStatus} />
-        )}
+        <ValidationRow label="Bundle acceptance" status={acceptanceStatus} />
         <ValidationRow label="Build validation" status={validationStatus} />
         <ValidationRow label="Integration checks" status={integrationStatus} />
+        <ValidationRow label="Security readiness" status={securityStatus} />
       </div>
+
+      {securityFindings.length > 0 && (
+        <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
+          <p className="text-sm font-medium text-warning">Security readiness needs attention</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {securityFindings.length} advisory finding{securityFindings.length === 1 ? '' : 's'} recorded for review.
+          </p>
+        </div>
+      )}
 
       {payload.app_validation_preview_url && (
         <div className="mb-4">

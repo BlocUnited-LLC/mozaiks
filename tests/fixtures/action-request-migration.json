@@ -1,0 +1,136 @@
+{
+  "base_commit": "e2713d64205079bad8c7b3dbc44186f26998e652",
+  "graph_digest": "19d4fa7f8db76e05a3710b58f5909ddb807ccb7ce37facb51e8278de2a19f86b",
+  "plan_digest": "f37b6ef7cd20344a0908eff052cfd83eeaccd8e113f345ea1f37a9c5a73d127d",
+  "archive_digest": "sha256:785d575f4e4ab73d16b2e28d54896ede3ea2e0d40a7013e05f2bf361fd6fc2f7",
+  "payload_digests": [
+    {
+      "node_id": "mozaiks.application.corpus",
+      "payload_digest": "efd1b393d586e3e1178eb8f91c32667f239af7c4683d25b09cfea7ddc0325a8d"
+    },
+    {
+      "node_id": "mozaiks.auth.corpus",
+      "payload_digest": "576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b"
+    },
+    {
+      "node_id": "mozaiks.integration.email",
+      "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+    },
+    {
+      "node_id": "mozaiks.surface.web",
+      "payload_digest": "8597949cc2890a65e3872e5855ada8bc7cd7e29a7de053083ff48cf9e6638473"
+    },
+    {
+      "node_id": "mozaiks.page.home",
+      "payload_digest": "ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7"
+    },
+    {
+      "node_id": "mozaiks.section.hero",
+      "payload_digest": "f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167"
+    },
+    {
+      "node_id": "mozaiks.module.reports",
+      "payload_digest": "46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93"
+    },
+    {
+      "node_id": "mozaiks.action.create_report",
+      "payload_digest": "cea6a938e1e480935dc59dd08c9a53f6d937671b82001e5095b8d2ef2a69e5a9"
+    },
+    {
+      "node_id": "mozaiks.capability.reporting",
+      "payload_digest": "2d00bb5fe4bf5ab70e9b682b7c0c0845e5e27c2f6f860c26114537fca3a5f9f9"
+    },
+    {
+      "node_id": "mozaiks.permission.report_admin",
+      "payload_digest": "b311da1fc157485c35a7ec5526dc433dfd728f9a8fecfd6b1c91b66ef716a7c8"
+    },
+    {
+      "node_id": "mozaiks.event.report_created",
+      "payload_digest": "ec1e184183fb430371876e16a2078719b67762a7236840942d63f1dd4298d1c2"
+    },
+    {
+      "node_id": "mozaiks.reaction.notify_owner",
+      "payload_digest": "0f70e1174fc1920e8132f8e07585ca2a7fc3cbe09fb8266c5844342eadc2caf1"
+    },
+    {
+      "node_id": "mozaiks.notification.report_ready",
+      "payload_digest": "487c871e0e9203afcf6b6f48de9e4cad90f21f78b3666feaae00453e482f4a29"
+    },
+    {
+      "node_id": "mozaiks.data.reports",
+      "payload_digest": "39faac4197b0135cea8543e43c6c94ba2731b043229d21e99354cdaefedf737e"
+    },
+    {
+      "node_id": "mozaiks.alias.reports",
+      "payload_digest": "4725020bea5632df606dbb0a069f80873dba2ee47baca5a4c633d2204ccf15e1"
+    },
+    {
+      "node_id": "mozaiks.workflow.digest",
+      "payload_digest": "d0ee72589a8a586e808c5272ad36378e8d40b7c38ec383f37981c3262c72b5f2"
+    },
+    {
+      "node_id": "mozaiks.trigger.on_report",
+      "payload_digest": "55cfae61f2a73262eeffcbc97d84d6c21662c8608ccefb5b641feb8561ffa197"
+    },
+    {
+      "node_id": "mozaiks.plan.pro",
+      "payload_digest": "2368a16fbdc29a6578a6f187b599097d0ce655bcf78362f766a92c657ab3725a"
+    },
+    {
+      "node_id": "mozaiks.product.addon",
+      "payload_digest": "48a2faaaab9c2bfc8cd050d1fa36df12f4acd1da391d26a43baef66ebf819cdd"
+    },
+    {
+      "node_id": "mozaiks.meter.report_runs",
+      "payload_digest": "c47cbe03db966df098e9750932af5a3ebf8707f7477f7f715153777002b1cfc0"
+    },
+    {
+      "node_id": "mozaiks.limit.report_runs",
+      "payload_digest": "b9d5f4fd593203ae6508eca92c7a491d42ecfd5ea6600a599b8b75121ab22b4c"
+    },
+    {
+      "node_id": "mozaiks.deploy.container",
+      "payload_digest": "b37a72024b1714742b3ec5fdb7410a6083649e70dbd9e5d636a0ea59d0cd1b28"
+    },
+    {
+      "node_id": "mozaiks.artifact.report_hook",
+      "payload_digest": "fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30"
+    },
+    {
+      "node_id": "mozaiks.section.pricing",
+      "payload_digest": "391e13936b7f6f2ccae1450eab7f97303310e8cd12a00ab38042e8f35c438e94"
+    }
+  ],
+  "action_payload": {
+    "payload_schema_version": "mozaiks.semantic_payload.v1",
+    "node_id": "mozaiks.action.create_report",
+    "payload_version": 1,
+    "scope": {
+      "ref_schema_version": "mozaiks.execution_access_scope_ref.v1",
+      "tenant_id": "tenant1",
+      "workspace_id": "ws1",
+      "pre_app_scope_id": null
+    },
+    "payload_digest": "cea6a938e1e480935dc59dd08c9a53f6d937671b82001e5095b8d2ef2a69e5a9",
+    "payload_kind": "action",
+    "description": "Create one report",
+    "request_fields": [
+      {
+        "name": "name",
+        "field_type": "string",
+        "required": true
+      }
+    ],
+    "response_fields": [
+      {
+        "name": "report_id",
+        "field_type": "reference",
+        "required": true
+      }
+    ],
+    "emits": [
+      "reports.report_created"
+    ],
+    "entitlement_gate": "reports.premium"
+  }
+}

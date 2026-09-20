@@ -29,9 +29,9 @@ def test_preview_ports_default_and_env(monkeypatch):
     monkeypatch.delenv("SANDBOX_PREVIEW_PORT", raising=False)
     assert _preview_ports() == [3000, 8000]
     monkeypatch.setenv("SANDBOX_PREVIEW_PORT", "5173")
-    assert _preview_ports() == [5173, 8000]
+    assert _preview_ports() == [5173, 3000, 8000]
     monkeypatch.setenv("SANDBOX_PREVIEW_PORT", "8000")
-    assert _preview_ports() == [8000]
+    assert _preview_ports() == [8000, 3000]
 
 
 @pytest.mark.asyncio
@@ -77,8 +77,38 @@ class _FakeAdapter:
     async def get_preview_url(self, **kwargs) -> str | None:
         return "https://sess-1.example.dev"
 
-    async def terminate_session(self, *, session_id: str) -> None:
+    async def terminate_session(self, *, session_id: str) -> bool:
         self.terminated.append(session_id)
+        return True
+
+
+@pytest.mark.asyncio
+async def test_server_timeout_caps_e2b_validation_allocation(monkeypatch):
+    monkeypatch.setenv("E2B_TIMEOUT", "120")
+    fake = _FakeAdapter()
+    with patch("mozaiksai.core.adapters.get_sandbox_adapter", return_value=fake):
+        result = await _run_sandbox_validation(
+            strategy="e2b", resolved_files={"app.json": "{}"}, commands=["true"],
+            start_dev_server=False, timeout_seconds=9999,
+        )
+    assert fake.create_kwargs["timeout_seconds"] == 120
+    assert result["sandbox_terminated"] is True
+
+
+@pytest.mark.asyncio
+async def test_validation_cleanup_failure_blocks_success_and_never_returns_dead_preview():
+    fake = _FakeAdapter()
+    fake.terminate_session = AsyncMock(side_effect=RuntimeError("provider credential must stay private"))
+    with patch("mozaiksai.core.adapters.get_sandbox_adapter", return_value=fake):
+        result = await _run_sandbox_validation(
+            strategy="e2b", resolved_files={"app.json": "{}"}, commands=["npm install"],
+            start_dev_server=False, timeout_seconds=60,
+        )
+    assert result["success"] is False
+    assert result["sandbox_terminated"] is False
+    assert result["preview_url"] is None
+    assert result["sandbox_session_id"] == "sess-1"
+    assert "credential" not in str(result["errors"])
 
 
 @pytest.mark.asyncio
@@ -213,7 +243,9 @@ async def test_artifact_preview_manager_tags_and_bounds_sessions(monkeypatch):
     )
     manager._broadcast = AsyncMock()
 
-    state = await manager.create_or_reuse("artifact-123")
+    state = await manager.create_or_reuse(
+        "artifact-123", app_id="factory", user_id="user-a", target_app_id="generated-app", build_registry_id="appreg-a",
+    )
 
     assert state.session_id == "fake-session"
     assert created["timeout_seconds"] == 15 * 60

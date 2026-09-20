@@ -104,6 +104,27 @@ def test_agent_generator_runtime_helpers_are_yaml_first() -> None:
     assert '"/tools.json"' not in export_helper
 
 
+def test_factory_workflows_do_not_ship_legacy_json_declaratives() -> None:
+    workflows_root = _workspace() / "factory_app" / "workflows"
+    legacy_config_names = {
+        "agents.json",
+        "context_variables.json",
+        "middleware.json",
+        "orchestrator.json",
+        "structured_outputs.json",
+        "tools.json",
+        "transition_graph.json",
+        "ui_config.json",
+    }
+    offenders = [
+        path.relative_to(workflows_root).as_posix()
+        for path in workflows_root.rglob("*.json")
+        if path.name in legacy_config_names or path.name.endswith("Prompt.json")
+    ]
+
+    assert offenders == []
+
+
 def test_repo_workflow_tools_do_not_import_global_shared_workflow_bucket() -> None:
     from tests.conftest import _resolve_active_app_root
     app_root = _resolve_active_app_root()
@@ -180,7 +201,7 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "ModuleRuntimeQualityAgent",
         "ModelAgent",
         "AppValidationAgent",
-        "InfraScaffoldAgent",
+        "AuthScaffoldAgent",
         "DownloadAgent",
         "ServiceAgent",
         "FrontendStubAgent",
@@ -197,7 +218,8 @@ def test_app_generator_page_contract_stays_declarative() -> None:
     assert "Only emit custom full-page React when a true primitive gap remains" in content
     assert "`AppBuildPlan.pages[]` is the authoritative persistent page inventory" in content
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
-    assert "Persistent page materialization is exclusively AppBuildPlan-driven" in content
+    assert "Persistent page materialization is driven by AppBuildPlan.pages[]" in content
+    assert "enriched through AppSchemaOutput." in content
     assert "persistent app pages still belong in `app.json` + `provenance.yaml` + `ui/pages/*.yaml`" in content
     assert "ui/index.js" in content
     assert "theme_config_patch" in content
@@ -264,7 +286,7 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
     assert 'rel_path.startswith("ui/")' in converter
     assert '"path": "ui/index.js"' in converter
 
-    assert "@chat-workflows-root/*/ui/index.{js,jsx}" in registry
+    assert "import workflowModules from 'virtual:mozaiks-workflow-ui'" in registry
     assert "@chat-workflows-root-secondary" not in registry
     assert "mozaiks-platform/app/workflows" not in registry
     assert "const namespacedComponentName = `${workflowName}:${componentName}`;" in registry
@@ -272,7 +294,7 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
     assert "'@mozaiks/factory-app-ui': path.resolve(factoryAppRoot, 'app/ui/index.js')" in app_vite
     assert "'@mozaiks/factory-admin': path.resolve(factoryAppRoot, 'app/admin/index.js')" in app_vite
     assert "@chat-workflows-root-secondary" not in app_vite
-    assert "'@chat-workflows-root': fileURLToPath(new URL('./src/workflows_stub', import.meta.url))" in embed_vite
+    assert "'virtual:mozaiks-workflow-ui': fileURLToPath(new URL('./src/embed/workflowUiModulesStub.js', import.meta.url))" in embed_vite
     assert "../mozaiks-platform/" not in tailwind
     assert "`@chat-workflows/${workflow}/components/index.js`" not in router
     assert "workflow && component ? `${workflow}:${component}` : null" in router
@@ -356,8 +378,6 @@ def test_shared_workflow_ui_contract_is_documented() -> None:
 
 def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
     files = [
-        "factory_app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
-        "factory_app/workflows/ValueEngine/tools/manifest.py",
         "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools/show_acceptance_diagram.py",
     ]
 
@@ -365,6 +385,18 @@ def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
         content = _read(relative_path)
         assert "from mozaiksai.core.workflow.ui_tools import emit_ui_surface" in content
         assert "send_ui_tool_event(" not in content
+
+
+def test_value_engine_review_uses_response_bearing_ui_tool() -> None:
+    content = _read("factory_app/workflows/ValueEngine/tools/manifest.py")
+    assert "from mozaiksai.core.workflow.ui_tools import use_ui_tool" in content
+    assert "emit_ui_surface" not in content
+    tools = _read_yaml("factory_app/workflows/ValueEngine/tools.yaml")["tools"]
+    review = next(tool for tool in tools if tool["function"] == "save_value_manifest")
+    assert review["tool_type"] == "UI_Tool"
+    assert review["auto_tool_call"] is True
+    assert review["bind_to_agent"] is False
+    assert review["outcome"]["values"] == ["approved", "changes_requested", "cancelled", "blocked"]
 
 
 def test_ui_system_spec_documents_interactive_vs_one_way_producer_contracts() -> None:
@@ -461,53 +493,69 @@ def test_agent_generator_smoke_fixture_covers_real_ag2_workflow_ui_contract() ->
     assert response_fixture["tool_responses"]["DownloadCenter"]["action"] == "download_complete"
     assert "ActionPlan" not in response_fixture["tool_responses"]
     assert any(rule["contains"] == "final tweaks" for rule in assistant_reply_rules)
-    assert any("Proceed with implementation." in rule["reply"] for rule in assistant_reply_rules)
+    assert response_fixture["tool_responses"]["WorkflowPlanReview"]["action"] == "approve"
     assert "internal helpdesk lead" in smoke_prompt
     assert "classify urgency" in smoke_prompt
     assert "ask for human approval before closing" in smoke_prompt
     assert "Do not use external APIs or third-party integrations." in smoke_prompt
-    assert {"DownloadCenter", "DiagramViewer"} <= manifest_components
+    assert {"DownloadCenter", "WorkflowPlanReview"} <= manifest_components
     assert manifest_realizations["DownloadCenter"] == "shipped_component"
-    assert manifest_realizations["DiagramViewer"] == "shipped_component"
+    assert manifest_realizations["WorkflowPlanReview"] == "workflow_wrapper"
     assert (scripted_components - manifest_components) <= exported_names
 
 
-def test_agent_generator_review_handoff_uses_user_text_state_triggers() -> None:
+def test_agent_generator_review_handoff_uses_structured_outcomes() -> None:
     handoffs = _read_yaml("factory_app/workflows/AgentGenerator/transition_graph.yaml")
     context_vars = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
 
     review_handoffs = {
         (rule["source_agent"], rule["target_agent"]): rule
         for rule in handoffs["transition_rules"]
-        if rule["source_agent"] == "user" and rule["target_agent"] in {"PackBuildCoordinator", "PatternAgent"}
+        if rule["source_agent"] == "ProjectOverviewAgent" and rule["target_agent"] in {"PackBuildCoordinator", "PatternAgent"}
     }
     review_defs = context_vars["definitions"]
 
-    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_type"] == "context_equals"
-    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_key"] == "workflow_review_approved"
-    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_value"] is True
-    assert review_handoffs[("user", "PatternAgent")]["condition_type"] == "context_equals"
-    assert review_handoffs[("user", "PatternAgent")]["condition_key"] == "workflow_review_revision_requested"
-    assert review_handoffs[("user", "PatternAgent")]["condition_value"] is True
-
-    approved_trigger = review_defs["workflow_review_approved"]["source"]["triggers"][0]
-    revision_trigger = review_defs["workflow_review_revision_requested"]["source"]["triggers"][0]
-
-    assert approved_trigger["type"] == "user_text"
-    assert "regex" in approved_trigger["match"]
-    assert revision_trigger["type"] == "user_text"
-    assert "regex" in revision_trigger["match"]
+    assert review_handoffs[("ProjectOverviewAgent", "PackBuildCoordinator")]["condition_key"] == "workflow_review_outcome"
+    assert review_handoffs[("ProjectOverviewAgent", "PackBuildCoordinator")]["condition_value"] == "approved"
+    assert review_handoffs[("ProjectOverviewAgent", "PatternAgent")]["condition_value"] == "changes_requested"
+    assert "workflow_review_approved" not in review_defs
+    assert "workflow_review_revision_requested" not in review_defs
+    assert "triggers" not in review_defs["workflow_review_outcome"]["source"]
 
 
-def test_agent_generator_interview_next_trigger_accepts_standalone_next_line() -> None:
+def test_agent_generator_interview_states_readiness_as_a_field() -> None:
+    """Routing must not depend on the model emitting a bare token.
+
+    The exact-match `NEXT` sentinel required a message equal to the token. A
+    live run produced correct reasoning followed by `NEXT`, the match failed,
+    and the build waited on a user forever (#591).
+    """
     context_config = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
-    interview = context_config["definitions"]["interview_complete"]
-    trigger = interview["source"]["triggers"][0]
+    assert "interview_complete" not in context_config["definitions"], (
+        "the text-sentinel readiness key must not come back"
+    )
 
-    assert trigger["type"] == "agent_text"
-    assert trigger["agent"] == "InterviewAgent"
-    assert trigger["match"]["regex"] == r"(?m)^\s*NEXT\s*$"
-    assert "equals" not in trigger["match"]
+    outputs = _read_yaml("factory_app/workflows/AgentGenerator/structured_outputs.yaml")
+    assert outputs["registry"]["InterviewAgent"] == "WorkflowInterviewResult"
+    fields = outputs["models"]["WorkflowInterviewResult"]["fields"]
+    assert set(fields["outcome"]["values"]) == {"needs_input", "ready"}
+
+    tools = _read_yaml("factory_app/workflows/AgentGenerator/tools.yaml")["tools"]
+    recorder = next(t for t in tools if t["function"] == "record_workflow_interview")
+    assert recorder["agent"] == "InterviewAgent"
+    assert recorder["auto_tool_call"] is True
+    # InterviewAgent is this workflow's initial_agent, and the workflow has task
+    # batches — contract_validation refuses outcome operations on task agents.
+    assert "outcome" not in recorder
+
+    rules = _read_yaml("factory_app/workflows/AgentGenerator/transition_graph.yaml")["transition_rules"]
+    advance = [
+        r for r in rules
+        if r.get("source_agent") == "InterviewAgent"
+        and r.get("condition_key") == "interview_outcome"
+        and r.get("condition_value") == "ready"
+    ]
+    assert len(advance) == 1 and advance[0]["target_agent"] == "PatternAgent"
 
 
 def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() -> None:

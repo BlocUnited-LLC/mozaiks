@@ -1,3 +1,4 @@
+schema_version: mozaiks.orchestrator.v1
 # ThemeCapture Workflow Orchestrator
 # Captures the visual identity of an existing application and produces
 # a valid theme_config.json that Mozaiks can use for embedded widgets

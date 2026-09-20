@@ -1,22 +1,67 @@
 tools:
+- agent: InterviewAgent
+  file: record_workflow_interview.py
+  function: record_workflow_interview
+  description: Write validated interview readiness from the agent's structured output.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+  bind_to_agent: false
 - agent: PatternAgent
   file: pattern_selection.py
   function: pattern_selection
   description: Cache AG2 Network patternbook selection (workflows_spec, pack_name, is_multi_workflow) in context variables for the task batch executor and downstream agents.
   tool_type: Agent_Tool
   auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: pattern_selection_outcome
+    attempts_key: pattern_selection_attempts
+    result_field: outcome
+    values: [selected, invalid, blocked]
+    error_value: blocked
+    max_attempts: 3
+    retry_on: [selected, invalid]
 
 - agent: ProjectOverviewAgent
   file: mermaid_sequence_diagram.py
   function: mermaid_sequence_diagram
-  description: Render the pack plan sequence diagram artifact for user review before parallel bundle generation starts.
-  tool_type: UI_Surface
+  description: Review the exact workflow partition before dispatch. An approved empty partition records that no AI workflows are required.
+  tool_type: UI_Tool
   auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: workflow_review_outcome
+    attempts_key: workflow_review_attempts
+    result_field: outcome
+    values: [approved, no_workflows, changes_requested, cancelled, blocked]
+    error_value: blocked
+    max_attempts: 3
+    retry_on: [changes_requested]
   ui:
-    component: DiagramViewer
+    component: WorkflowPlanReview
     mode: artifact
-    workflow_primitive: diagram_viewer
-    realization: shipped_component
+    workflow_primitive: approval_card
+    realization: workflow_wrapper
+  ui_contract:
+    surface_kind: agent_tool
+    payload_schema:
+      type: object
+      required: [review_id, workflow_count, checkpoints]
+      properties:
+        review_id: {type: string}
+        workflow_count: {type: integer}
+        checkpoints: {type: array, items: {type: string}}
+        diagram: {type: string}
+      additionalProperties: true
+    actions_schema:
+    - id: approve
+      label: Approve
+      approved: true
+      variant: primary
+    - id: request_changes
+      label: Request Changes
+      approved: false
+      variant: secondary
 
 - agent: DownloadAgent
   file: generate_and_download.py
@@ -24,6 +69,15 @@ tools:
   description: Assemble all workflow bundle files from workflow_bundle_results, zip them, and present the inline download UI.
   tool_type: UI_Tool
   auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: workflow_bundle_export_outcome
+    attempts_key: workflow_bundle_export_attempts
+    result_field: outcome
+    values: [ready, needs_revision, cancelled, blocked]
+    error_value: blocked
+    max_attempts: 3
+    retry_on: [needs_revision]
   ui:
     component: DownloadCenter
     mode: inline

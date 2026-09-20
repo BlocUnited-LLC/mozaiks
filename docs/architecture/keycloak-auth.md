@@ -147,7 +147,12 @@ Own deployment-time backend configuration, such as:
 - `AUTH_REQUIRED_SCOPE` — required scope for user-authenticated endpoints
 - `AUTH_ROLES_CLAIM` — JWT claim name for roles (default: `roles`)
 - `VITE_OIDC_AUTHORITY` — frontend: OIDC authority for the browser auth flow
-- `VITE_MOCK_MODE` — frontend: skip auth for local development
+- `VITE_OIDC_CLIENT_ID` — public browser client registered with the provider
+- `AUTH_ENABLED=false` with `ENV=development` — explicit backend local mode;
+  the shell uses the backend's configured anonymous identity and roles
+
+Frontend mock flags never select an authentication mode. See
+[Factory security](../guides/factory-security.md) for local and authenticated setup.
 
 ### Login Theme Assets
 

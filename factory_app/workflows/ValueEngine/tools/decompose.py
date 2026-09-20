@@ -1,5 +1,7 @@
 from typing import Annotated, Any
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
+
 
 async def get_feature_context(
     feature_name: Annotated[str, "Feature to get context for"],
@@ -15,7 +17,7 @@ async def get_feature_context(
     if context_variables and hasattr(context_variables, "get"):
         manifest = context_variables.get("value_manifest")
 
-    if not manifest:
+    if not manifest or manifest.get("app_id") != require_build_binding(context_variables).target_app_id:
         return {"success": False, "error": "No manifest in context"}
 
     # Find relevant endpoints for this feature

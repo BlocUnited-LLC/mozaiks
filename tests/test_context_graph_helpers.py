@@ -133,7 +133,6 @@ from mozaiksai.core.app_context.context_graph import (
     _annotation_node_id,
     _clean_metadata,
     _contract_path,
-    _dedupe,
     _dedupe_symbols,
     _file_map_checksum,
     _first_text,
@@ -149,6 +148,7 @@ from mozaiksai.core.app_context.context_graph import (
     _string_list,
 )
 from mozaiksai.core.app_context.models import AppContextGraphNode, GraphNodeType
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 # ---------------------------------------------------------------------------
 # 1. _stable_token
@@ -423,23 +423,23 @@ class TestFirstText:
 
 class TestDedupe:
     def test_preserves_order(self):
-        assert _dedupe(["c", "a", "b"]) == ["c", "a", "b"]
+        assert dedupe_strings(["c", "a", "b"]) == ["c", "a", "b"]
 
     def test_removes_duplicates(self):
-        assert _dedupe(["a", "b", "a"]) == ["a", "b"]
+        assert dedupe_strings(["a", "b", "a"]) == ["a", "b"]
 
     def test_skips_empty_strings(self):
-        assert _dedupe(["a", "", "b"]) == ["a", "b"]
+        assert dedupe_strings(["a", "", "b"]) == ["a", "b"]
 
     def test_strips_whitespace(self):
-        result = _dedupe(["  a  ", "b"])
+        result = dedupe_strings(["  a  ", "b"])
         assert result == ["a", "b"]
 
     def test_empty_input_returns_empty(self):
-        assert _dedupe([]) == []
+        assert dedupe_strings([]) == []
 
     def test_whitespace_only_items_skipped(self):
-        assert _dedupe(["   ", "a"]) == ["a"]
+        assert dedupe_strings(["   ", "a"]) == ["a"]
 
 
 # ---------------------------------------------------------------------------

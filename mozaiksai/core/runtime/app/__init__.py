@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from .auth_contract import (
+    AppAuthContract,
+    AppAuthContractError,
+    load_app_auth_contract,
+    validate_app_auth_contract,
+)
 from .definition import (
     AppDefinition,
     AppFeatureFlags,
@@ -38,6 +44,10 @@ _STUDIO_SUMMARY_EXPORTS = {
 }
 
 __all__ = [
+    "AppAuthContract",
+    "AppAuthContractError",
+    "load_app_auth_contract",
+    "validate_app_auth_contract",
     "AppDefinition",
     "AppFeatureFlags",
     "AppLoadError",

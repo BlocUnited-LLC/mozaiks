@@ -223,7 +223,7 @@ def _integration_surface_entries(files: dict[str, str]) -> list[dict[str, str]]:
             (
                 "services/integrations/*_client.py",
                 "services/adapters/**/*.py",
-                "config/integrations*.json",
+                "config/integrations*.yaml",
                 "docs/integrations*.md",
             ),
         ):

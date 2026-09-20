@@ -126,7 +126,7 @@ async def test_change_classifier_uses_refinement_policy_llm_config() -> None:
     tool_executor = _FakeToolExecutor()
     created: list[_FakeAgent] = []
 
-    def capturing_factory(system_prompt: str, llm_config: dict) -> _FakeAgent:
+    def capturing_factory(system_prompt: str, llm_config: dict, *, middleware: list) -> _FakeAgent:
         a = _FakeAgent(system_prompt, llm_config)
         created.append(a)
         return a
@@ -142,7 +142,7 @@ async def test_change_classifier_uses_refinement_policy_llm_config() -> None:
         build_family="app_bundle",
         build_key="app_bundle",
         raw_user_request="Add exports for reporting",
-        app_id="app_1",
+        app_id="app_1", user_id="user_1",
     )
 
     assert isinstance(result, ChangeClassifierResult)
@@ -167,7 +167,7 @@ async def test_change_classifier_uses_refinement_policy_llm_config() -> None:
 @pytest.mark.asyncio
 async def test_change_classifier_requires_enabled_refinement_engine() -> None:
     classifier = LLMChangeClassifier(
-        agent_factory=lambda sp, lc: _FakeAgent(sp, lc),
+        agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc),
         config_loader=lambda: ControlPlaneConfig(enabled=False),
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -177,5 +177,5 @@ async def test_change_classifier_requires_enabled_refinement_engine() -> None:
         await classifier.classify(
             build_family="app_bundle",
             raw_user_request="Add exports for reporting",
-            app_id="app_1",
+            app_id="app_1", user_id="user_1",
         )

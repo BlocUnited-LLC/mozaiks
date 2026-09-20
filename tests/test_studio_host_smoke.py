@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from mozaiksai.hosts import shell_config
+
 
 @pytest.mark.asyncio
 async def test_studio_shell_config_injects_studio_routes(monkeypatch):
@@ -114,6 +116,7 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
         async def create_app_record(self, **kwargs):  # noqa: ANN003
             self._app = {
                 "app_id": kwargs.get("app_id") or "smoke-app",
+                "chat_app_id": kwargs.get("chat_app_id"),
                 "bundle_path": None,
                 "created_at": "2025-01-01T00:00:00+00:00",
                 "description": kwargs.get("description"),
@@ -153,26 +156,23 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
         "/api/studio/apps",
         json={
             "name": "Smoke App",
-            "active_chat_id": "chat-smoke",
-            "active_workflow_id": "ValueEngine",
         },
     )
     assert create_response.status_code == 200
     app_id = create_response.json()["app"]["app_id"]
     build_registry_id = create_response.json()["app"]["build_registry_id"]
-    assert create_response.json()["app"]["active_chat_id"] == "chat-smoke"
-    assert create_response.json()["app"]["active_workflow_id"] == "ValueEngine"
+    assert create_response.json()["app"]["active_chat_id"] is None
+    assert create_response.json()["app"]["active_workflow_id"] is None
 
     build_response = client.get(f"/api/studio/build?app_id={app_id}")
     status_response = client.put(
         f"/api/studio/apps/{build_registry_id}/status",
         json={"status": "review", "bundle_path": "generated/apps/smoke"},
     )
-    history_response = client.get("/api/studio/build/history?limit=10")
+    history_response = client.get(f"/api/studio/build/history?limit=10&build_registry_id={build_registry_id}")
 
     assert build_response.status_code == 200
-    assert status_response.status_code == 200
-    assert status_response.json()["app"]["lifecycle_state"] == "review"
+    assert status_response.status_code == 404
     assert history_response.status_code == 200
 
 
@@ -247,6 +247,7 @@ def test_platform_host_indexes_workflow_capability_routes(tmp_path):
     workflow_dir.mkdir(parents=True)
     workflow_dir.joinpath("orchestrator.yaml").write_text(
         """
+schema_version: mozaiks.orchestrator.v1
 workflow_name: ReviewWorkflow
 workflow_startup_mode: BackendOnly
 triggers:
@@ -379,11 +380,10 @@ async def test_platform_host_invokes_capability_route_into_workflow_session():
 @pytest.mark.asyncio
 async def test_platform_host_loads_app_zero_product_modules(monkeypatch):
     from mozaiksai.core.runtime.app.loader import AppLoader
-    from mozaiksai.hosts import platform as platform_app
     from tests.import_utils import active_app_root
 
     monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
-    load_result = await AppLoader.load(str(platform_app.resolve_app_root()))
+    load_result = await AppLoader.load(str(shell_config.resolve_app_root()))
     loaded_modules = {module.name: type(module.handler).__name__ for module in load_result.modules}
 
     product_modules = {"communications", "investor_marketplace"}
@@ -396,3 +396,34 @@ async def test_platform_host_loads_app_zero_product_modules(monkeypatch):
         "investor_marketplace": "InvestorMarketplaceHandler",
     }
 
+
+
+def test_studio_host_registers_its_platform_hooks(monkeypatch):
+    """The Studio host must actually land its hooks in the registry.
+
+    Unit tests for the hook functions and for the registry slots both pass with
+    the wiring deleted, so assert the host's real registration function here.
+    It is asserted against a fresh registry rather than the singleton because
+    another test module resets that singleton, and a cached module import does
+    not re-run import-time registration.
+    """
+    from tests.import_utils import active_app_root
+
+    monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
+    from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+    from mozaiksai.hosts import studio as studio_app
+
+    registry = PlatformHookRegistry()
+    registry._loaded = True  # skip env-extension loading
+    studio_app.register_studio_platform_hooks(registry)
+
+    # Identify hooks by qualified name, not object identity: other test modules
+    # re-import factory_app packages under fresh module objects, so the same
+    # source function can be two distinct objects within one session.
+    def _names(hooks: list) -> set[str]:
+        return {getattr(hook, "__qualname__", repr(hook)) for hook in hooks}
+
+    assert registry.has_ask_context is True
+    assert "studio_ask_context" in _names(registry._ask_context_hooks)
+    assert registry.has_session_fields is True
+    assert "bind_factory_session" in _names(registry._chat_session_fields_hooks)

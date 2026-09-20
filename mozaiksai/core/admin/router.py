@@ -369,7 +369,9 @@ async def get_admin_usage(
                         "_id": "$wallet_id",
                         "total_balance": {"$sum": "$balance"},
                         "total_credited": {"$sum": "$total_credited"},
-                        "total_debited": {"$sum": "$total_debited"},
+                        # Balance documents store spend as total_spent; the
+                        # response keeps the total_debited key for consumers.
+                        "total_debited": {"$sum": "$total_spent"},
                         "scope_count": {"$sum": 1},
                     }
                 },

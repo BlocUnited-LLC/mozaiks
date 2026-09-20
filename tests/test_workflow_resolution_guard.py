@@ -7,12 +7,13 @@ from mozaiksai.core.workflow.startup_messages import (
     should_autostart_empty_workflow,
 )
 from mozaiksai.hosts import platform as platform_app
+from mozaiksai.hosts.workflow_runnability import is_runnable_workflow_name
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_non_runnable_workflow_id_is_rejected() -> None:
-    assert platform_app._is_runnable_workflow_name(
+    assert is_runnable_workflow_name(
         "extended_orchestration",
         ["ValueEngine", "AppGenerator"],
     ) is False
@@ -21,7 +22,7 @@ def test_non_runnable_workflow_id_is_rejected() -> None:
 def test_resolve_requested_workflow_prefers_entry_point_for_non_runnable(monkeypatch) -> None:
     monkeypatch.setattr(
         platform_app,
-        "_get_ordered_workflow_names",
+        "get_ordered_workflow_names",
         lambda: ["ValueEngine", "AppGenerator"],
     )
     monkeypatch.setattr(platform_app, "_get_configured_entry_point", lambda: "AppGenerator")
@@ -32,7 +33,7 @@ def test_resolve_requested_workflow_prefers_entry_point_for_non_runnable(monkeyp
 def test_resolve_requested_workflow_uses_loaded_name_when_known(monkeypatch) -> None:
     monkeypatch.setattr(
         platform_app,
-        "_get_ordered_workflow_names",
+        "get_ordered_workflow_names",
         lambda: ["ValueEngine", "AppGenerator"],
     )
     monkeypatch.setattr(platform_app, "_get_configured_entry_point", lambda: "AppGenerator")

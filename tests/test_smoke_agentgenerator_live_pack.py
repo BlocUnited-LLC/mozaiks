@@ -52,6 +52,7 @@ def _write_valid_workflow(
     _write_yaml(
         workflow_dir / "orchestrator.yaml",
         {
+            "schema_version": "mozaiks.orchestrator.v1",
             "workflow_name": workflow_name,
             "max_turns": 4,
             "human_in_the_loop": startup_mode != "BackendOnly",
@@ -106,6 +107,7 @@ def _write_valid_workflow(
     _write_yaml(
         workflow_dir / "structured_outputs.yaml",
         {
+            "schema_version": "mozaiks.structured_outputs.v1",
             "models": {},
             "registry": {"PlannerAgent": None, "WorkerAgent": None, "AnalysisAgent": None},
         },

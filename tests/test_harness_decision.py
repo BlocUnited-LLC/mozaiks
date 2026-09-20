@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mozaiksai.control_plane import (
     ArtifactKind,
     ChangeClass,
@@ -10,6 +12,7 @@ from mozaiksai.control_plane import (
     RefinementRoutingDecision,
     ScopeProposal,
 )
+from mozaiksai.control_plane.contracts import CodingWorkerResult
 
 
 def _routing_decision(change_class: ChangeClass) -> RefinementRoutingDecision:
@@ -61,6 +64,24 @@ def test_decision_policy_requires_confirmation_for_core_restart() -> None:
     assert decision.requires_confirmation is True
     assert decision.recommended_workflow_id == "ValueEngine"
     assert decision.actions[0].action_id == "confirm_recommended_workflow"
+
+
+@pytest.mark.parametrize("status", ["validated", "planned", "ineligible", "failed"])
+def test_coding_result_decision_reports_actual_staging_status(status: str) -> None:
+    decision = FirstPartyHarnessDecisionPolicy().for_coding_result(
+        routing_decision=_routing_decision(ChangeClass.PATCH),
+        selected_paths=["app/ui/pages/Dashboard.jsx"],
+        result=CodingWorkerResult(eligible=status != "ineligible", status=status),
+    )
+    assert "applied" not in decision.message.lower()
+    assert decision.metadata["coding_status"] == status
+    assert bool(decision.actions) == (status == "validated")
+    if status == "validated":
+        assert decision.message == "Scoped patch staged for review."
+        assert decision.metadata["scope_origin"] == "staged"
+    else:
+        assert "no changes staged" in decision.message
+        assert decision.metadata["scope_origin"] == "none"
 
 
 def test_decision_policy_clarifies_low_confidence_scope() -> None:

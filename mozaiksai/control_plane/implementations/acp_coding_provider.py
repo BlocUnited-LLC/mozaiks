@@ -114,8 +114,8 @@ def build_acp_agent_config(
     the workspace is both ``cwd`` and ``fs_root``; the subprocess env is an
     explicit allowlist over ``env_source``; ``expose_tools=False`` (the AG2
     default is True) so no MCP gateway is started; ``allow_terminal=False``
-    because agent-requested terminal commands inherit the full host
-    environment in ag2 1.0.2 (``ag2/acp/bridge.py:123``); and
+    because agent-requested terminal commands would expand the provider beyond
+    the mediated disposable-workspace file bridge; and
     ``elicitation_policy="decline"`` so the question capability is never
     advertised in headless execution. ``permission_policy="auto"`` is safe
     only because the blast radius is the disposable workspace plus the

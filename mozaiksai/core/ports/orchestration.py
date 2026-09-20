@@ -6,7 +6,7 @@
 # This is the single boundary between the runtime layer and the execution engine.
 # Everything above this contract (transport, API routes, websocket handlers) is
 # engine-agnostic. Everything below it (AG2 Agent loop, MemoryStream,
-# AG2 1.0 beta Network transition graph execution) is engine-specific and isolated
+# AG2 1.0 Network transition graph execution) is engine-specific and isolated
 # in adapters/.
 #
 # When the engine changes, ONLY the adapter changes.
@@ -137,7 +137,7 @@ class OrchestrationPort(Protocol):
         The adapter is responsible for:
         - loading workflow config
         - creating beta Agent instances with tools and context
-        - running the AG2 1.0 beta Network TransitionGraph-driven agent loop
+        - running the AG2 1.0 Network TransitionGraph-driven agent loop
         - streaming events to the transport via DomainEvent
         - returning a RunResult when the loop finishes or pauses for user input
         """

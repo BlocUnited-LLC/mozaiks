@@ -18,6 +18,7 @@ from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.artifacts.store import get_artifact_store
+from mozaiksai.core.usage.context import resolve_auxiliary_usage_context
 
 from .refinement_router import RefinementRequest, RefinementRoutingDecision
 
@@ -65,6 +66,11 @@ class ArtifactScopeProposer:
             payload=payload or {},
         )
         proposal = await self._agent_runner.run(
+            usage_context=resolve_auxiliary_usage_context(
+                app_id=refinement_request.app_id, user_id=refinement_request.user_id,
+                context=refinement_request.usage_context,
+                target_app_id=refinement_request.artifact_app_id,
+            ),
             agent_name="ScopeProposer",
             system_prompt=self._load_system_prompt(),
             user_prompt=self._build_user_prompt(
@@ -90,7 +96,7 @@ class ArtifactScopeProposer:
         refinement_request: RefinementRequest,
         selected_paths: list[str],
     ) -> dict[str, str]:
-        app_id = str(refinement_request.app_id or "").strip()
+        app_id = str(refinement_request.artifact_app_id or "").strip()
         build_record_id = str(refinement_request.build_record_id or "").strip()
         if not app_id or not build_record_id:
             return {}
@@ -147,6 +153,7 @@ class ArtifactScopeProposer:
         context = ControlPlaneToolContext(
             checkpoint=_CHECKPOINT_EVENT,
             app_id=refinement_request.app_id,
+            target_app_id=refinement_request.target_app_id,
             user_id=refinement_request.user_id,
             build_family=refinement_request.build_family,
             build_key=refinement_request.normalized_build_key(),
@@ -272,7 +279,7 @@ class ArtifactScopeProposer:
         )
 
     async def _available_workspace_paths(self, refinement_request: RefinementRequest) -> set[str]:
-        app_id = str(refinement_request.app_id or "").strip()
+        app_id = str(refinement_request.artifact_app_id or "").strip()
         build_record_id = str(refinement_request.build_record_id or "").strip()
         if not app_id or not build_record_id:
             return set()

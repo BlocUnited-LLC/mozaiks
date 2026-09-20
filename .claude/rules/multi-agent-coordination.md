@@ -35,6 +35,23 @@ git worktree add .local/worktrees/<task-name> origin/main -b cc/<short-descripti
 Do all work there, and remove it when done (`git worktree remove
 .local/worktrees/<task-name> --force`).
 
+After confirming a PR has merged, use the repository cleanup report before
+removing old agent worktrees:
+
+```bash
+python scripts/prune_agent_worktrees.py
+```
+
+This is a dry run. Review the complete report before using `--apply`. Never
+delete dirty, unpushed, or detached worktrees based only on their age or on a
+remote branch being deleted. The script is intentionally conservative and
+keeps work when GitHub state cannot be verified.
+
+When creating or editing a PR, send real Markdown to GitHub. Do not use a
+quoted shell argument containing `\\n`; those characters render literally.
+Use `gh pr create --body-file` with a temporary Markdown file, or a
+shell-native literal here-string, and verify with `gh pr view <number>`.
+
 ## Before Opening a PR — Local Verification Is Mandatory
 
 Do not push and open a PR on faith that CI will catch problems. Run locally
@@ -94,18 +111,79 @@ same `--auto` request still applies once you push again.
 
 This identifies ownership instantly when multiple PRs are open.
 
-## Repo Ownership Split
+## Who Owns What
 
-Primary boundary — avoids overlap entirely:
+**No repo belongs to one agent.** Claude Code and Codex both work in both repos,
+often at the same time, and work regularly spans the two. Do not defer a task
+because you think another agent owns the repo it lives in, and do not assume a
+repo is quiet because it is "theirs".
 
-| Repo | Primary agent |
-|------|--------------|
-| `mozaiks` (OSS framework) | Claude Code |
-| `mozaiks-app` (hosted product) | Codex |
+Where a change belongs is decided by the layering rule -- generic mechanism in
+`mozaiks`, hosted product specifics in `mozaiks-app`. That is a question about
+the code, not about which agent may write it.
 
-Both agents may touch either repo when needed, but this split should be the
-default assignment. When both are working in the same repo simultaneously, the
-branch workflow and the open PR check are the coordination mechanism.
+Ownership is per **task**, and it is claimed, not assigned.
+
+## Claiming Work
+
+Several agents run concurrently, and more than one may be the same tool -- two
+Claude Code sessions both push `cc/` branches, so the prefix identifies the tool,
+not the worker. Naming alone cannot prevent a collision. Claiming can.
+
+Before writing code:
+
+```bash
+git fetch origin
+gh pr list --state open                       # what is in flight
+gh pr list --search "<file or subsystem>"     # has someone claimed this?
+git log origin/main --oneline -10             # what just landed
+```
+
+Search for the **files** you intend to change, not just the topic. A duplicate
+pin-bump PR was nearly opened this way: the work was already in flight under a
+name that did not mention the file it touched.
+
+Then claim it before you build it:
+
+- push the branch and open a **draft PR immediately**, with a title naming the
+  files or subsystem. An empty draft PR is a cheap lock other agents can see.
+- if an open PR already covers your task, **do not open a second one**. Add your
+  findings as a comment on theirs -- evidence on an existing PR is worth more
+  than a competing one.
+
+## Isolation
+
+**Always work in a worktree.** Agents share checkouts; a `git checkout` in a
+shared tree silently switches another agent's branch and sweeps their
+uncommitted edits into your commit.
+
+```bash
+git worktree add .local/worktrees/<task> origin/main -b cc/<task>
+```
+
+Do not run `npm install` inside a worktree on Windows. Deleting a worktree
+follows `node_modules` junctions and destroys the **main** checkout's packages;
+`find -type l` does not detect them. Verify with PowerShell before removing:
+
+```powershell
+Get-ChildItem -Path $wt -Recurse -Force | Where-Object { $_.LinkType }
+```
+
+## The Shared Runtime Is Not Protected By Any Of This
+
+Branch rules cover the repo. They do not cover the one dev stack every agent
+shares: a single venv, a single Mongo, ports 3000/8000.
+
+- `pip install -r requirements.txt` in `mozaiks-app` replaces the OSS package
+  for **every** agent. It silently reverted another agent's editable install
+  mid-session and cost most of a day debugging fixes that were never loaded.
+- restarting the stack restarts it for everyone.
+- seeded data (wallets, chat sessions) is shared, and a concurrent build raises
+  global counts -- attribute results to your own `chat_id`, never to a total.
+
+If you change the shared environment, say so in your PR or a comment. If you are
+verifying something, first prove the running stack contains your change rather
+than assuming a restart was enough.
 
 ## If PRs Conflict at Merge Time
 

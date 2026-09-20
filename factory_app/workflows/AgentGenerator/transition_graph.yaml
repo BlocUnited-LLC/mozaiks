@@ -8,46 +8,100 @@ transition_rules:
 
 - source_agent: PatternAgent
   target_agent: ProjectOverviewAgent
-  transition_type: after_turn
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: pattern_selection_outcome
+  condition_value: selected
   transition_target: AgentTarget
 
-- source_agent: ProjectOverviewAgent
-  target_agent: user
+- source_agent: PatternAgent
+  target_agent: PatternAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: pattern_selection_outcome
+  condition_value: invalid
+  transition_target: AgentTarget
+
+- source_agent: PatternAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: pattern_selection_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: PatternAgent
+  target_agent: terminate
   transition_type: after_turn
-  transition_target: RevertToUserTarget
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 
 # Conditional rules win over same-source after_turn fallbacks when their context matches.
 - source_agent: InterviewAgent
   target_agent: PatternAgent
   transition_type: condition
   condition_type: context_equals
-  condition_key: interview_complete
-  condition_value: true
+  condition_key: interview_outcome
+  condition_value: ready
   transition_target: AgentTarget
 
 - source_agent: user
   target_agent: InterviewAgent
   transition_type: condition
   condition_type: context_equals
-  condition_key: interview_complete
-  condition_value: false
+  condition_key: interview_outcome
+  condition_value: needs_input
   transition_target: AgentTarget
 
-- source_agent: user
+- source_agent: ProjectOverviewAgent
   target_agent: PackBuildCoordinator
   transition_type: condition
   condition_type: context_equals
-  condition_key: workflow_review_approved
-  condition_value: true
+  condition_key: workflow_review_outcome
+  condition_value: approved
   transition_target: AgentTarget
 
-- source_agent: user
+- source_agent: ProjectOverviewAgent
   target_agent: PatternAgent
   transition_type: condition
   condition_type: context_equals
-  condition_key: workflow_review_revision_requested
-  condition_value: true
+  condition_key: workflow_review_outcome
+  condition_value: changes_requested
   transition_target: AgentTarget
+
+- source_agent: ProjectOverviewAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_review_outcome
+  condition_value: no_workflows
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+
+- source_agent: ProjectOverviewAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_review_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: ProjectOverviewAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_review_outcome
+  condition_value: cancelled
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: ProjectOverviewAgent
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 
 - source_agent: PackBuildCoordinator
   target_agent: PackMetadataAgent
@@ -60,15 +114,43 @@ transition_rules:
   transition_target: AgentTarget
 
 - source_agent: DownloadAgent
-  target_agent: user
+  target_agent: terminate
   transition_type: after_turn
-  transition_target: RevertToUserTarget
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 
 - source_agent: DownloadAgent
   target_agent: PackBuildCoordinator
   transition_type: condition
   condition_type: context_equals
-  condition_key: workflow_bundle_repair_status
+  condition_key: workflow_bundle_export_outcome
   condition_value: needs_revision
   transition_target: AgentTarget
+
+- source_agent: DownloadAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_bundle_export_outcome
+  condition_value: ready
+  transition_target: TerminateTarget
+  termination_reason: workflow_complete
+
+- source_agent: DownloadAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_bundle_export_outcome
+  condition_value: cancelled
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: DownloadAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_bundle_export_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 

@@ -1,0 +1,18 @@
+catalog_id: security_readiness_finding_taxonomy
+version: 1
+statuses: [open, accepted, resolved]
+severities: [low, medium, high, critical]
+sources: [manual, validation, eval, import]
+control_areas:
+  - auth
+  - secrets
+  - permissions
+  - tenant_isolation
+  - managed_capability_boundary
+  - deployment
+  - data_persistence
+  - evals
+  - compliance_readiness
+blocking_policy:
+  default_mode: advisory
+  advisory_blocking_definition: Open high or critical findings are highlighted as blocking candidates but do not block promotion in OSS.

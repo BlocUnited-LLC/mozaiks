@@ -12,6 +12,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from mozaiksai.core.media.types import MediaPromotionTargetValue
+from mozaiksai.core.utils.sequences import dedupe_strings
+from mozaiksai.core.workflow.reserved_context_keys import (
+    require_application_context_name_allowed,
+)
 from mozaiksai.core.workflow.workflow_ui_catalog import (
     infer_workflow_ui_realization,
     validate_workflow_renderable_primitive_ids,
@@ -33,16 +37,6 @@ def _optional_text(value: Any) -> str | None:
     return text or None
 
 
-def _normalize_string_list(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for raw in values:
-        text = str(raw or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        out.append(text)
-    return out
 
 
 class DeclarativeModel(BaseModel):
@@ -70,6 +64,7 @@ class OrchestratorTriggerSpec(DeclarativeModel):
 
 
 class OrchestratorConfig(DeclarativeModel):
+    schema_version: Literal["mozaiks.orchestrator.v1"]
     workflow_name: str
     max_turns: int = 50
     human_in_the_loop: bool = False
@@ -138,6 +133,7 @@ class AgentSpec(DeclarativeModel):
     description: str | None = None
     human_input_mode: str | None = None
     max_consecutive_auto_reply: int = 2
+    pending_turn_replay: Literal["allow", "block"] = "allow"
     structured_outputs_required: bool
     multimodal_inputs_enabled: bool = False
     image_generation_enabled: bool = False
@@ -198,6 +194,7 @@ class TransitionRuleSpec(DeclarativeModel):
     context_expression: str | None = None
     tool_name: str | None = None
     transition_target: str | None = None
+    termination_reason: Literal["workflow_complete", "workflow_failed"] | None = None
 
     @field_validator("source_agent", "target_agent")
     @classmethod
@@ -217,6 +214,8 @@ class TransitionRuleSpec(DeclarativeModel):
 
     @model_validator(mode="after")
     def _validate_condition_shape(self) -> TransitionRuleSpec:
+        if self.termination_reason is not None and self.target_agent != "terminate":
+            raise ValueError("termination_reason requires target_agent='terminate'")
         if self.transition_type == "after_turn":
             if (
                 self.condition_type
@@ -313,7 +312,7 @@ class ContextTriggerSpec(DeclarativeModel):
 
 
 class ContextVariableSourceSpec(DeclarativeModel):
-    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context"]
+    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context", "runtime"]
     env_var: str | None = None
     default: Any | None = None
     required: bool | None = None
@@ -364,7 +363,7 @@ class ContextVariableSourceSpec(DeclarativeModel):
     def _normalize_string_lists(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        normalized = _normalize_string_list(value)
+        normalized = dedupe_strings(value)
         return normalized or None
 
 
@@ -413,7 +412,7 @@ class ContextVariableDefinitionSpec(DeclarativeModel):
     @field_validator("writer_ids")
     @classmethod
     def _normalize_writer_ids(cls, value: list[str]) -> list[str]:
-        return _normalize_string_list(value)
+        return dedupe_strings(value)
 
 
 class ContextAgentViewSpec(DeclarativeModel):
@@ -422,7 +421,12 @@ class ContextAgentViewSpec(DeclarativeModel):
     @field_validator("variables")
     @classmethod
     def _normalize_variables(cls, value: list[str]) -> list[str]:
-        return _normalize_string_list(value)
+        normalized = dedupe_strings(value)
+        for name in normalized:
+            require_application_context_name_allowed(
+                name, where="context_variables.yaml agents.<name>.variables"
+            )
+        return normalized
 
 
 class ContextVariablesConfig(DeclarativeModel):
@@ -436,6 +440,9 @@ class ContextVariablesConfig(DeclarativeModel):
     ) -> dict[str, ContextVariableDefinitionSpec]:
         for key in value.keys():
             _required_text(key, field_name="context variable name")
+            require_application_context_name_allowed(
+                key, where="context_variables.yaml definitions"
+            )
         return value
 
 
@@ -536,6 +543,46 @@ class UIToolContractSpec(DeclarativeModel):
         return value
 
 
+class ToolOutcomeSpec(DeclarativeModel):
+    """Finite results and invocation budget for one auto-invoked operation."""
+
+    context_key: str
+    attempts_key: str
+    result_field: str = "status"
+    values: list[str] = Field(min_length=1)
+    error_value: str
+    max_attempts: int = Field(default=1, strict=True, ge=1, le=100)
+    retry_on: list[str] = Field(default_factory=list)
+
+    @field_validator("context_key", "attempts_key", "result_field", "error_value")
+    @classmethod
+    def _validate_names(cls, value: str) -> str:
+        if not value or value != value.strip():
+            raise ValueError("outcome names must be non-empty and have no surrounding whitespace")
+        return value
+
+    @field_validator("values", "retry_on")
+    @classmethod
+    def _validate_values(cls, values: list[str]) -> list[str]:
+        if len(set(values)) != len(values) or any(not v or v != v.strip() for v in values):
+            raise ValueError("outcome values must be unique non-empty strings")
+        return values
+
+    @model_validator(mode="after")
+    def _validate_contract(self) -> ToolOutcomeSpec:
+        for key in (self.context_key, self.attempts_key):
+            require_application_context_name_allowed(key, where="tools.yaml outcome")
+        if self.context_key == self.attempts_key:
+            raise ValueError("outcome context_key and attempts_key must differ")
+        if self.error_value not in self.values:
+            raise ValueError("outcome error_value must be declared in values")
+        if not set(self.retry_on).issubset(self.values) or self.error_value in self.retry_on:
+            raise ValueError("retry_on must contain declared outcomes excluding error_value")
+        if bool(self.retry_on) != (self.max_attempts > 1):
+            raise ValueError("retry_on requires max_attempts > 1, and vice versa")
+        return self
+
+
 class ToolSpec(DeclarativeModel):
     agent: str | list[str]
     file: str
@@ -544,6 +591,7 @@ class ToolSpec(DeclarativeModel):
     tool_type: Literal["Agent_Tool", "UI_Tool", "UI_Surface"]
     auto_tool_call: bool = False
     bind_to_agent: bool = True
+    outcome: ToolOutcomeSpec | None = None
     ui: ToolUIConfig | None = None
     ui_contract: UIToolContractSpec | None = None
 
@@ -553,7 +601,7 @@ class ToolSpec(DeclarativeModel):
         if isinstance(value, str):
             return _required_text(value, field_name="agent")
         if isinstance(value, list):
-            normalized = _normalize_string_list([str(v) for v in value if isinstance(v, str)])
+            normalized = dedupe_strings([str(v) for v in value if isinstance(v, str)])
             if not normalized:
                 raise ValueError("agent list must include at least one non-empty string")
             return normalized
@@ -584,6 +632,10 @@ class ToolSpec(DeclarativeModel):
 
     @model_validator(mode="after")
     def _validate_ui_requirements(self) -> ToolSpec:
+        if self.outcome is not None and (not self.auto_tool_call or self.bind_to_agent):
+            raise ValueError("tool outcome requires auto_tool_call=true and bind_to_agent=false")
+        if self.outcome is not None and not isinstance(self.agent, str):
+            raise ValueError("tool outcome requires one agent name, not an agent list")
         if self.tool_type in {"UI_Tool", "UI_Surface"}:
             if not self.ui:
                 raise ValueError(
@@ -726,7 +778,7 @@ class UIConfig(DeclarativeModel):
     def _normalize_lists(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        return _normalize_string_list(value)
+        return dedupe_strings(value)
 
 
 class A2AClientConfig(DeclarativeModel):
@@ -741,7 +793,7 @@ class A2AClientConfig(DeclarativeModel):
     @field_validator("accepted_output_modes", "extensions", "supported_transports")
     @classmethod
     def _normalize_string_lists(cls, value: list[str]) -> list[str]:
-        return _normalize_string_list(value)
+        return dedupe_strings(value)
 
 
 class A2AAgentSpec(DeclarativeModel):
@@ -807,7 +859,7 @@ class StructuredOutputFieldSpec(DeclarativeModel):
     def _normalize_variants(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        normalized = _normalize_string_list(value)
+        normalized = dedupe_strings(value)
         return normalized or None
 
     @model_validator(mode="after")
@@ -873,13 +925,14 @@ class StructuredOutputUnionSpec(DeclarativeModel):
     @field_validator("variants")
     @classmethod
     def _validate_variants(cls, value: list[str]) -> list[str]:
-        normalized = _normalize_string_list(value)
+        normalized = dedupe_strings(value)
         if not normalized:
             raise ValueError("union.variants must not be empty")
         return normalized
 
 
 class StructuredOutputsConfig(DeclarativeModel):
+    schema_version: Literal["mozaiks.structured_outputs.v1"]
     registry: dict[str, str | None] = Field(default_factory=dict)
     models: dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec] = (
         Field(default_factory=dict)

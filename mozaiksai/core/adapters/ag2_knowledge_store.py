@@ -18,6 +18,7 @@ from pymongo import ReturnDocument
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
+from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
 
 
 def _normalize_path(path: str) -> str:
@@ -53,6 +54,7 @@ class MongoAG2KnowledgeStore:
         return None if doc is None else str(doc.get("content") or "")
 
     async def write(self, path: str, content: str) -> None:
+        assert_chat_mutable(app_id=self._app_id, chat_id=self._chat_id)
         normalized = _normalize_path(path)
         now = datetime.now(UTC)
         await (await self._coll()).update_one(
@@ -89,6 +91,7 @@ class MongoAG2KnowledgeStore:
         return sorted(children)
 
     async def delete(self, path: str) -> None:
+        assert_chat_mutable(app_id=self._app_id, chat_id=self._chat_id)
         normalized = _normalize_path(path)
         query = self._scope_filter()
         query["$or"] = [
@@ -108,6 +111,7 @@ class MongoAG2KnowledgeStore:
 
     async def append(self, path: str, content: str) -> int:
         """Atomically append UTF-8 content and return its prior byte offset."""
+        assert_chat_mutable(app_id=self._app_id, chat_id=self._chat_id)
         normalized = _normalize_path(path)
         now = datetime.now(UTC)
         prior = await (await self._coll()).find_one_and_update(

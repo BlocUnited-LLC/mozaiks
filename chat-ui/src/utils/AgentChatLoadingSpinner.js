@@ -12,7 +12,7 @@ const LoadingSpinner = () => {
   const logoSrc = getBrandLoadingIconSrc(theme);
 
   if (!loading && !theme?.branding?.loadingIcon && !theme?.branding?.logo) {
-    console.warn('⚠️ [THEME] branding.loadingIcon/branding.logo not set — using fallback: /assets/mozaik_logo.svg');
+    console.warn('⚠️ [THEME] branding.loadingIcon/branding.logo not set — using bundled fallback logo');
   }
 
   return (

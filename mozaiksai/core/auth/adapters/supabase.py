@@ -12,7 +12,7 @@ Supabase JWTs have the following structure:
 - user_metadata: User profile data
 """
 
-import os
+from collections.abc import Mapping
 from typing import Any
 
 import jwt
@@ -49,10 +49,11 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
         self,
         supabase_url: str | None = None,
         jwt_secret: str | None = None,
+        settings: Mapping[str, str] | None = None,
     ):
-        super().__init__()
-        self._supabase_url = supabase_url or os.getenv("SUPABASE_URL", "")
-        self._jwt_secret = jwt_secret or os.getenv("SUPABASE_JWT_SECRET", "")
+        super().__init__(settings)
+        self._supabase_url = supabase_url or self._setting("SUPABASE_URL")
+        self._jwt_secret = jwt_secret or self._setting("SUPABASE_JWT_SECRET")
         self._jwks_client: PyJWKClient | None = None
 
         # Clean URL (remove trailing slash)

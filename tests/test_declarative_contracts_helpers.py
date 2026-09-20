@@ -63,13 +63,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from mozaiksai.core.utils.sequences import dedupe_strings
 from mozaiksai.core.workflow.declarative.contracts import (
     AgentsConfig,
     AgentSpec,
     OrchestratorConfig,
     OrchestratorTriggerSpec,
     PromptSectionSpec,
-    _normalize_string_list,
     _optional_text,
     _required_text,
 )
@@ -149,32 +149,32 @@ class TestOptionalText:
 
 class TestNormalizeStringList:
     def test_empty_list_returns_empty(self):
-        assert _normalize_string_list([]) == []
+        assert dedupe_strings([]) == []
 
     def test_strings_stripped(self):
-        result = _normalize_string_list(["  a  ", "  b  "])
+        result = dedupe_strings(["  a  ", "  b  "])
         assert result == ["a", "b"]
 
     def test_empty_strings_excluded(self):
-        result = _normalize_string_list(["a", "", "b"])
+        result = dedupe_strings(["a", "", "b"])
         assert "" not in result
         assert result == ["a", "b"]
 
     def test_duplicates_removed(self):
-        result = _normalize_string_list(["a", "b", "a"])
+        result = dedupe_strings(["a", "b", "a"])
         assert result == ["a", "b"]
 
     def test_order_preserved(self):
-        result = _normalize_string_list(["c", "a", "b"])
+        result = dedupe_strings(["c", "a", "b"])
         assert result == ["c", "a", "b"]
 
     def test_whitespace_only_excluded(self):
-        result = _normalize_string_list(["  ", "valid"])
+        result = dedupe_strings(["  ", "valid"])
         assert result == ["valid"]
 
     def test_none_items_excluded(self):
         # str(None or "").strip() = "" → excluded
-        result = _normalize_string_list([None, "valid"])
+        result = dedupe_strings([None, "valid"])
         assert result == ["valid"]
 
 
@@ -211,6 +211,7 @@ class TestOrchestratorTriggerSpecValidate:
 class TestOrchestratorConfigMaxTurns:
     def _valid_config(self, **kwargs):
         defaults = {
+            "schema_version": "mozaiks.orchestrator.v1",
             "workflow_name": "TestWorkflow",
             "workflow_startup_mode": "UserDriven",
         }
@@ -245,15 +246,20 @@ class TestOrchestratorConfigMaxTurns:
 class TestOrchestratorConfigRequiredText:
     def test_empty_workflow_name_raises(self):
         with pytest.raises(ValidationError):
-            OrchestratorConfig(workflow_name="", workflow_startup_mode="UserDriven")
+            OrchestratorConfig(
+                schema_version="mozaiks.orchestrator.v1", workflow_name="", workflow_startup_mode="UserDriven",
+            )
 
     def test_whitespace_workflow_name_raises(self):
         with pytest.raises(ValidationError):
-            OrchestratorConfig(workflow_name="   ", workflow_startup_mode="UserDriven")
+            OrchestratorConfig(
+                schema_version="mozaiks.orchestrator.v1", workflow_name="   ", workflow_startup_mode="UserDriven",
+            )
 
     def test_empty_orchestration_pattern_raises(self):
         with pytest.raises(ValidationError):
             OrchestratorConfig(
+                schema_version="mozaiks.orchestrator.v1",
                 workflow_name="TestWorkflow",
                 workflow_startup_mode="UserDriven",
                 orchestration_pattern="",
@@ -265,6 +271,16 @@ class TestOrchestratorConfigRequiredText:
 # ---------------------------------------------------------------------------
 
 class TestAgentSpecPromptShape:
+    @pytest.mark.parametrize("policy", ["allow", "block"])
+    def test_pending_turn_replay_is_explicit(self, policy):
+        agent = AgentSpec(name="Worker", structured_outputs_required=False, system_message="Hi", pending_turn_replay=policy)
+        assert agent.pending_turn_replay == policy
+
+    @pytest.mark.parametrize("policy", [None, False, "retry"])
+    def test_pending_turn_replay_rejects_unknown_values(self, policy):
+        with pytest.raises(ValidationError, match="pending_turn_replay"):
+            AgentSpec(name="Worker", structured_outputs_required=False, system_message="Hi", pending_turn_replay=policy)
+
     def test_no_prompt_sections_and_no_system_message_raises(self):
         with pytest.raises(ValidationError, match="must provide"):
             AgentSpec(name="MyAgent", structured_outputs_required=False)

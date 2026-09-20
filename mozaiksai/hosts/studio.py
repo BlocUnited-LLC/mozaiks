@@ -7,6 +7,7 @@ CLI and by the hosted Mozaiks product. It adds Studio shell routes and
 workflow triggering on top of the headless platform host.
 """
 
+import os
 import stat
 import zipfile
 from asyncio import to_thread
@@ -17,12 +18,15 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, ValidationError
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import (
     AcceptedStagedAppBundleBuildRecordError,
+    RefinementRequest,
     SourceImportRequest,
     accept_staged_refinement_build_record,
     build_refinement_review_package,
@@ -80,6 +84,18 @@ from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.dashboard import load_dashboard_manifest
 from mozaiksai.core.data.persistence import ConnectorStore
+from mozaiksai.core.metrics import (
+    OwnerAnalyticsService,
+    PeriodError,
+    PeriodWindow,
+    resolve_period,
+)
+from mozaiksai.core.metrics.funnels import FunnelDef
+from mozaiksai.core.runtime.app.metrics_loader import (
+    MetricsConfigLoadError,
+    load_metrics_config,
+)
+from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
     build_apps_summary,
@@ -88,6 +104,13 @@ from mozaiksai.core.runtime.app.studio_summary import (
     get_missing_studio_surfaces,
     load_build_state_from_db,
     save_build_state_to_db,
+)
+from mozaiksai.core.sandbox.preview_sessions import preview_sessions_lifespan
+from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
+from mozaiksai.core.session.build_binding import (
+    BuildIdentity,
+    BuildTargetReference,
+    RunBuildBinding,
 )
 from mozaiksai.core.session.launcher import launch_prepared_workflow, prepare_routed_workflow_launch
 from mozaiksai.core.session.model import (
@@ -98,6 +121,7 @@ from mozaiksai.core.session.model import (
     TriggerInput,
 )
 from mozaiksai.core.session.router import configure_session_router, get_session_router
+from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
 from mozaiksai.core.studio.scope import resolve_studio_scope
 from mozaiksai.core.workflow.generator_support.connector_health import run_connector_health_check
 from mozaiksai.core.workflow.generator_support.connector_service import (
@@ -107,18 +131,18 @@ from mozaiksai.core.workflow.generator_support.connector_service import (
     patch_connector,
     save_connector,
 )
-from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import platform as platform_app
 from mozaiksai.hosts.bootstrap import register_repo_host_bootstrap
 from mozaiksai.hosts.platform import (
     build_shell_config,
     resolve_app_root,
 )
-from mozaiksai.hosts.routers.sandbox import router as _sandbox_router
+from mozaiksai.hosts.routers.sandbox import create_sandbox_router
+from mozaiksai.hosts.runtime import register_app_lifespan
 
 app = platform_app.app
 register_repo_host_bootstrap(app, "studio")
-app.include_router(_sandbox_router)
+register_app_lifespan(app, preview_sessions_lifespan)
 logger = get_workflow_logger("studio_app")
 
 _BUNDLE_MAX_TEXT_FILES = 200
@@ -182,7 +206,7 @@ def _restore_entry_name(name: str) -> tuple[str | None, str | None]:
 
     relative_path = "/".join(parts)
     lowered = relative_path.lower()
-    if any(term in lowered for term in _RESTORE_SECRET_PATH_TERMS):
+    if not is_secret_contract_path(relative_path) and any(term in lowered for term in _RESTORE_SECRET_PATH_TERMS):
         return relative_path, "Secret-sensitive paths are not restored."
     basename = PurePosixPath(relative_path).name.lower()
     if (
@@ -200,15 +224,6 @@ def _zipinfo_is_symlink(info: zipfile.ZipInfo) -> bool:
     return mode == stat.S_IFLNK
 
 
-def _contains_symlink_component(root: Path, relative_path: str) -> bool:
-    if root.is_symlink():
-        return True
-    current = root
-    for part in PurePosixPath(relative_path).parts:
-        current = current / part
-        if current.exists() and current.is_symlink():
-            return True
-    return False
 
 
 def _strip_shared_root_prefix(entries: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
@@ -249,8 +264,15 @@ def _decode_text_bundle_entries(zip_path: Path) -> tuple[dict[str, str], list[st
         for info in archive.infolist():
             safe_name = _normalize_bundle_entry_name(info.filename)
             if safe_name is None:
+                skipped.append(f"{info.filename}: unsafe_path")
                 continue
             if info.is_dir():
+                continue
+            if _zipinfo_is_symlink(info):
+                skipped.append(f"{safe_name}: symlink")
+                continue
+            if any(name == safe_name for name, _ in entries):
+                skipped.append(f"{safe_name}: duplicate_path")
                 continue
             if len(entries) >= _BUNDLE_MAX_TEXT_FILES:
                 skipped.append(f"{safe_name}: file_limit")
@@ -388,14 +410,23 @@ def _enforce_artifact_validation_gate(
 
 
 def _resolve_bundle_restore_target(version) -> Path:  # noqa: ANN001
-    app_root = resolve_app_root()
     if version.build_family != "app_bundle":
         raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.build_family}")
-    app_root.mkdir(parents=True, exist_ok=True)
-    return app_root
+    target_id = TypeAdapter(BuildIdentity).validate_python(version.app_id)
+    version_id = TypeAdapter(BuildIdentity).validate_python(version.id)
+    workspace_root = Path(os.getenv("MOZAIKS_WORKSPACES_PATH", ".local/workspaces")).resolve()
+    target = (workspace_root / target_id / version_id).resolve()
+    active_root = resolve_app_root().resolve()
+    if (
+        not target.is_relative_to(workspace_root)
+        or target.is_relative_to(active_root)
+        or active_root.is_relative_to(target)
+    ):
+        raise HTTPException(status_code=409, detail="Build promotion cannot modify the active host workspace")
+    return target
 
 
-def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path) -> dict[str, list[str]]:
+def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path, workspace_layout: bool = False) -> dict[str, list[str]]:
     restored: list[str] = []
     skipped: list[str] = []
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -415,7 +446,12 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path) -> dict[str, 
             if reason is not None:
                 skipped.append(safe_name)
                 continue
-            if _contains_symlink_component(target_root, safe_name):
+            if is_secret_contract_path(safe_name):
+                try:
+                    validate_secret_contract_text(archive.read(info.filename))
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail="Artifact contains an invalid names-only secret contract") from exc
+            if contains_symlink_component(target_root, safe_name):
                 raise HTTPException(
                     status_code=400,
                     detail=f"Restore target contains a symlinked component for archive entry: {safe_name}",
@@ -428,6 +464,10 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path) -> dict[str, 
         restore_names = _strip_app_bundle_root_prefix([safe_name for _, safe_name in planned])
         for info, safe_name in planned:
             safe_name = restore_names.get(safe_name, safe_name)
+            if workspace_layout:
+                safe_name = app_bundle_workspace_path(safe_name)
+            if contains_symlink_component(target_root, safe_name):
+                raise HTTPException(status_code=400, detail="Restore target contains a symlinked component")
             destination = (target_root / safe_name).resolve()
             if not destination.is_relative_to(target_root):
                 raise HTTPException(
@@ -616,6 +656,29 @@ configure_session_router(
     trigger_route_resolver=get_orchestration_control_harness(),
 )
 
+from factory_app.workflows._shared.platform.ask_context import studio_ask_context
+from factory_app.workflows._shared.platform.build_target import bind_factory_session
+from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.utils.path_containment import contains_symlink_component
+from mozaiksai.core.utils.sequences import dedupe_strings
+
+
+def register_studio_platform_hooks(registry: Any | None = None) -> None:
+    """Install Studio's platform extension hooks.
+
+    Called once at import time. Exposed as a named function so the wiring is
+    assertable without depending on import side effects surviving a registry
+    reset.
+    """
+    (registry or get_platform_hooks()).register_bundle(
+        {"chat_session_fields": bind_factory_session, "ask_context": studio_ask_context},
+        source="mozaiks.studio",
+        prepend=True,
+    )
+
+
+register_studio_platform_hooks()
+
 def _resolve_studio_scope(
     principal: UserPrincipal,
     *,
@@ -628,6 +691,7 @@ def _resolve_studio_scope(
         app_id=app_id,
         user_id=user_id,
         default_user_id=platform_app._DEFAULT_PROFILE_USER_ID,
+        default_app_id=platform_app._resolve_default_app_id(),
     )
     return scope.app_id, scope.user_id
 
@@ -658,9 +722,15 @@ async def get_studio_dashboard_config(
 @app.get("/api/studio/overview")
 async def get_app_overview(
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    if build_registry_id is not None:
+        resolved_app_id, user_id = await _resolve_studio_artifact_scope(
+            principal, build_registry_id=build_registry_id, app_id=app_id,
+        )
+    else:
+        resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
     missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
@@ -670,7 +740,7 @@ async def get_app_overview(
         )
 
     try:
-        record = (await _get_app_registry_service().get_app_record(app_id=resolved_app_id)).get("app")
+        record = (await _get_app_registry_service().get_app_record(app_id=resolved_app_id, owner_user_id=user_id)).get("app")
         if not isinstance(record, dict):
             raise HTTPException(status_code=404, detail=f"App record not found: {resolved_app_id}")
         return build_app_overview_summary(
@@ -713,26 +783,10 @@ async def get_workspace_apps(
 
 
 class CreateWorkspaceAppRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     name: str | None = Field(default=None, max_length=120)
     description: str | None = Field(default=None, max_length=1000)
-    app_id: str | None = Field(default=None, max_length=160)
-    chat_app_id: str | None = Field(default=None, max_length=160)
-    status: str = Field(default="draft", max_length=40)
-    active_chat_id: str | None = Field(default=None, max_length=160)
-    active_workflow_id: str | None = Field(default=None, max_length=160)
-    name_source: str | None = Field(default=None, max_length=80)
-    build_context_profile: dict[str, Any] | None = None
-    current_build_run: dict[str, Any] | None = None
-
-
-class UpdateWorkspaceAppStatusRequest(BaseModel):
-    status: str = Field(min_length=1, max_length=40)
-    bundle_path: str | None = Field(default=None, max_length=1000)
-    artifact_version_id: str | None = Field(default=None, max_length=160)
-    workflow_sequence: str | None = Field(default=None, max_length=160)
-    active_chat_id: str | None = Field(default=None, max_length=160)
-    active_workflow_id: str | None = Field(default=None, max_length=160)
-    current_build_run: dict[str, Any] | None = None
 
 
 @app.post("/api/studio/apps")
@@ -740,53 +794,11 @@ async def create_workspace_app(
     body: CreateWorkspaceAppRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    _, user_id = _resolve_studio_scope(principal)
-    try:
-        return await _get_app_registry_service().create_app_record(
-            owner_user_id=user_id,
-            name=body.name,
-            description=body.description,
-            status=body.status,
-            app_id=body.app_id,
-            chat_app_id=body.chat_app_id,
-            active_chat_id=body.active_chat_id,
-            active_workflow_id=body.active_workflow_id,
-            name_source=body.name_source,
-            build_context_profile=body.build_context_profile,
-            current_build_run=body.current_build_run,
-        )
-    except ValueError as exc:
-        logger.warning("create_app_record validation error: %s", exc)
-        raise HTTPException(status_code=400, detail="Invalid app parameters.") from exc
-    except Exception as exc:
-        logger.exception("Failed to create app record")
-        raise HTTPException(status_code=500, detail="Failed to create app record") from exc
-
-
-@app.put("/api/studio/apps/{build_registry_id}/status")
-async def update_workspace_app_status(
-    build_registry_id: str,
-    body: UpdateWorkspaceAppStatusRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    _, _user_id = _resolve_studio_scope(principal)
-    try:
-        return await _get_app_registry_service().update_build_status(
-            build_registry_id=build_registry_id,
-            status=body.status,
-            bundle_path=body.bundle_path,
-            artifact_version_id=body.artifact_version_id,
-            workflow_sequence=body.workflow_sequence,
-            active_chat_id=body.active_chat_id,
-            active_workflow_id=body.active_workflow_id,
-            current_build_run=body.current_build_run,
-        )
-    except ValueError as exc:
-        logger.warning("update_app_status validation error: %s", exc)
-        raise HTTPException(status_code=400, detail="Invalid app status parameters.") from exc
-    except Exception as exc:
-        logger.exception("Failed to update app status")
-        raise HTTPException(status_code=500, detail="Failed to update app status") from exc
+    host_app_id, user_id = _resolve_studio_scope(principal)
+    return await _get_app_registry_service().create_app_record(
+        owner_user_id=user_id, name=body.name, description=body.description,
+        chat_app_id=host_app_id,
+    )
 
 
 @app.delete("/api/studio/apps/{build_registry_id}")
@@ -794,15 +806,182 @@ async def delete_workspace_app(
     build_registry_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    _, _user_id = _resolve_studio_scope(principal)
+    _, user_id = _resolve_studio_scope(principal)
     try:
-        return await _get_app_registry_service().delete_app(build_registry_id=build_registry_id)
+        result = await _get_app_registry_service().delete_app(build_registry_id=build_registry_id, owner_user_id=user_id)
+        if not result.get("success"):
+            raise HTTPException(status_code=404, detail="App registry record not found")
+        return result
+    except HTTPException:
+        raise
     except ValueError as exc:
         logger.warning("delete_app validation error: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to delete app record")
         raise HTTPException(status_code=500, detail="Failed to delete app record") from exc
+
+
+_owner_analytics_service: OwnerAnalyticsService | None = None
+
+
+def _get_owner_analytics_service() -> OwnerAnalyticsService:
+    global _owner_analytics_service
+    if _owner_analytics_service is None:
+        _owner_analytics_service = OwnerAnalyticsService()
+    return _owner_analytics_service
+
+
+def _analytics_period(period: str) -> PeriodWindow:
+    try:
+        return resolve_period(period)
+    except PeriodError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _analytics_app_row(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "app_id": record.get("app_id"),
+        "name": record.get("name") or record.get("app_id"),
+        "lifecycle_state": record.get("lifecycle_state"),
+    }
+
+
+async def _analytics_owned_app(app_id: str, user_id: str) -> dict[str, Any]:
+    """Resolve one app record through the ownership boundary or 404."""
+
+    try:
+        result = await _get_app_registry_service().get_app_record(
+            app_id=app_id, owner_user_id=user_id
+        )
+        record = result.get("app")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Analytics app record lookup failed")
+        raise HTTPException(status_code=500, detail="Failed to resolve app record") from exc
+    if not isinstance(record, dict):
+        raise HTTPException(status_code=404, detail=f"App record not found: {app_id}")
+    return record
+
+
+def _analytics_funnel_for_record(record: dict[str, Any]) -> FunnelDef | None:
+    """Load the app-declared funnel from the app's bundle, when present.
+
+    Registered apps carry their bundle path; the Studio host's own app falls
+    back to the resolved app root. A declared-but-invalid config is treated
+    as no funnel here (the bundle's own load path is where it fails closed).
+    """
+
+    roots: list[Path] = []
+    bundle_path = record.get("bundle_path")
+    if bundle_path:
+        roots.append(Path(str(bundle_path)))
+    elif record.get("app_id") == platform_app._resolve_default_app_id():
+        roots.append(resolve_app_root())
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            config = load_metrics_config(root)
+        except MetricsConfigLoadError:
+            logger.warning(
+                "ANALYTICS_METRICS_CONFIG_INVALID app_id=%s root=%s",
+                record.get("app_id"),
+                root,
+                exc_info=True,
+            )
+            return None
+        if config is not None:
+            return config.default_funnel
+    return None
+
+
+@app.get("/api/studio/analytics/portfolio")
+async def get_studio_analytics_portfolio(
+    period: str = "30d",
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """World View analytics across every app the caller owns."""
+
+    _, user_id = _resolve_studio_scope(principal)
+    window = _analytics_period(period)
+    try:
+        records = (await _get_app_registry_service().list_apps(owner_user_id=user_id)).get(
+            "apps"
+        ) or []
+    except Exception as exc:
+        logger.exception("Analytics portfolio app listing failed")
+        raise HTTPException(status_code=500, detail="Failed to list apps for analytics") from exc
+
+    rows = [
+        _analytics_app_row(record)
+        for record in records
+        if isinstance(record, dict) and record.get("app_id")
+    ]
+    try:
+        return await _get_owner_analytics_service().portfolio(rows, window)
+    except Exception as exc:
+        logger.exception("Analytics portfolio assembly failed")
+        raise HTTPException(status_code=500, detail="Failed to build portfolio analytics") from exc
+
+
+@app.get("/api/studio/analytics/apps/{app_id}")
+async def get_studio_analytics_app(
+    app_id: str,
+    period: str = "30d",
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """App View analytics for one owned app, including movement and funnel."""
+
+    _, user_id = _resolve_studio_scope(principal)
+    window = _analytics_period(period)
+    record = await _analytics_owned_app(app_id, user_id)
+    funnel = _analytics_funnel_for_record(record)
+    try:
+        return await _get_owner_analytics_service().app_analytics(
+            _analytics_app_row(record), window, funnel=funnel
+        )
+    except Exception as exc:
+        logger.exception("Analytics app assembly failed")
+        raise HTTPException(status_code=500, detail="Failed to build app analytics") from exc
+
+
+@app.get("/api/studio/analytics/apps/{app_id}/metrics/{metric_id}")
+async def get_studio_analytics_metric_detail(
+    app_id: str,
+    metric_id: str,
+    period: str = "30d",
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Drill-down detail for one metric on one owned app."""
+
+    _, user_id = _resolve_studio_scope(principal)
+    window = _analytics_period(period)
+    record = await _analytics_owned_app(app_id, user_id)
+    try:
+        peers = (await _get_app_registry_service().list_apps(owner_user_id=user_id)).get(
+            "apps"
+        ) or []
+    except Exception:
+        peers = []
+    peer_rows = [
+        _analytics_app_row(peer)
+        for peer in peers
+        if isinstance(peer, dict) and peer.get("app_id")
+    ]
+    try:
+        return await _get_owner_analytics_service().metric_detail(
+            metric_id,
+            window,
+            app=_analytics_app_row(record),
+            peer_apps=peer_rows,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown metric: {metric_id}") from exc
+    except Exception as exc:
+        logger.exception("Analytics metric detail assembly failed")
+        raise HTTPException(status_code=500, detail="Failed to build metric detail") from exc
 
 
 @app.get("/api/studio/integrations")
@@ -1175,7 +1354,7 @@ async def _run_studio_app_intelligence_index_job(app_id: str, job_id: str) -> No
             update={
                 "workspace_root": import_result.selected_root,
                 "import_result": import_result.model_dump(mode="python"),
-                "warnings": _dedupe_strings([*job.warnings, *import_result.warnings]),
+                "warnings": dedupe_strings([*job.warnings, *import_result.warnings]),
             }
         )
         job = await save_app_intelligence_index_job(job)
@@ -1254,7 +1433,7 @@ def _index_result_readiness(result: Any) -> dict[str, Any]:
         "primary_framework_label": frameworks.get("primary_framework_label"),
         "framework_count": len(frameworks.get("frameworks") or []),
         "validation_command_count": len(frameworks.get("validation_commands") or []),
-        "warnings": _dedupe_strings([*list(result.warnings or []), *list(graph_health.get("warnings") or [])]),
+        "warnings": dedupe_strings([*list(result.warnings or []), *list(graph_health.get("warnings") or [])]),
     }
 
 
@@ -1282,20 +1461,11 @@ def _studio_context_readiness(*, summary: Any, graph_status: dict[str, Any], lat
             "indexed_at": graph_status.get("indexed_at"),
             "node_count": graph_status.get("node_count"),
             "edge_count": graph_status.get("edge_count"),
-            "warnings": _dedupe_strings([*list(summary.warnings), *list(graph_status.get("warnings") or [])]),
+            "warnings": dedupe_strings([*list(summary.warnings), *list(graph_status.get("warnings") or [])]),
         }
     return job_readiness or {"status": "missing", "warnings": list(summary.warnings)}
 
 
-def _dedupe_strings(values: list[Any]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for value in values:
-        text = str(value or "").strip()
-        if text and text not in seen:
-            seen.add(text)
-            out.append(text)
-    return out
 
 
 @app.post("/api/studio/apps/{app_id}/context/refresh-plan")
@@ -1602,17 +1772,67 @@ async def remove_integration_connector(
     }
 
 
+async def _resolve_studio_artifact_scope(
+    principal: UserPrincipal, *, build_registry_id: str | None, app_id: str | None = None,
+) -> tuple[str, str]:
+    host_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    try:
+        reference = BuildTargetReference(build_registry_id=build_registry_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid build target") from exc
+    if reference.build_registry_id is None:
+        raise HTTPException(status_code=400, detail="Select a registered build target")
+    result = await _get_app_registry_service().get_app_record(
+        build_registry_id=reference.build_registry_id, owner_user_id=user_id,
+    )
+    record = result.get("app")
+    if not record or record.get("chat_app_id") != host_app_id:
+        raise HTTPException(status_code=404, detail="Build target not found")
+    return record["app_id"], user_id
+
+
+@app.get("/api/studio/build/artifacts/{artifact_version_id}/download")
+async def download_build_artifact(
+    artifact_version_id: str,
+    build_registry_id: str,
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    validate_path_id(artifact_version_id, "artifact_version_id")
+    target_app_id, _ = await _resolve_studio_artifact_scope(
+        principal, build_registry_id=build_registry_id, app_id=app_id,
+    )
+    version = await get_artifact_store().get_build_record(
+        app_id=target_app_id, build_record_id=artifact_version_id,
+    )
+    if version is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    try:
+        binding = RunBuildBinding.model_validate({
+            key: _version_metadata(version).get(key) for key in RunBuildBinding.model_fields
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Artifact has no verified build identity") from exc
+    if binding.build_registry_id != build_registry_id or binding.target_app_id != target_app_id:
+        raise HTTPException(status_code=409, detail="Artifact identity does not match its build target")
+    zip_path = _artifact_bundle_path_from_version(version)
+    if zip_path is None or not zip_path.is_file():
+        raise HTTPException(status_code=404, detail="Artifact archive is unavailable")
+    return FileResponse(zip_path, media_type="application/zip", filename=f"{target_app_id}-{artifact_version_id}.zip")
+
+
 @app.get("/api/studio/build/history")
 async def get_build_history(
     principal: UserPrincipal = Depends(require_user_scope),
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     build_family: str | None = None,
     build_key: str | None = None,
     build_record_id: str | None = None,
     limit: int = 25,
 ):
     """Return recent artifact versions and change requests for the current workspace."""
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     versions = await artifact_store.list_build_records(
         app_id=app_id,
@@ -1636,10 +1856,12 @@ async def get_build_history(
 async def get_build_artifact_bundle(
     artifact_version_id: str,
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    host_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=host_app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(
         app_id=app_id,
@@ -1678,6 +1900,9 @@ async def get_build_artifact_bundle(
         "generated_files": generated_files,
         "skipped_files": skipped_files,
         "workbench": {
+            "app_id": host_app_id,
+            "target_app_id": app_id,
+            "build_registry_id": build_registry_id,
             "title": f"Artifact Workbench · {version.build_key} v{version.version_number}",
             "description": "Inspect a persisted artifact bundle and launch scoped coding refinement from explicit file scope.",
             "artifact_version_id": version.id,
@@ -1695,10 +1920,11 @@ async def get_build_artifact_bundle(
 async def get_build_artifact_review(
     artifact_version_id: str,
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(
         app_id=app_id,
@@ -1727,10 +1953,11 @@ async def accept_build_artifact_version(
     artifact_version_id: str,
     body: BuildArtifactAcceptanceRequest | None = None,
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
@@ -1798,10 +2025,11 @@ async def accept_build_artifact_version(
 async def reject_build_artifact_version(
     artifact_version_id: str,
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
@@ -1839,10 +2067,6 @@ async def reject_build_artifact_version(
 
 
 class BuildArtifactPromotionRequest(BaseModel):
-    build_registry_id: str | None = Field(
-        default=None,
-        description="Optional app_registry record id to mark active after the artifact is restored.",
-    )
     allow_validation_override: bool = Field(
         default=False,
         description="Allow promoting skipped or pending validation with an explicit operator override.",
@@ -1855,10 +2079,11 @@ async def promote_build_artifact_version(
     background_tasks: BackgroundTasks,
     body: BuildArtifactPromotionRequest | None = None,
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
-    app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, user_id = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
@@ -1886,16 +2111,15 @@ async def promote_build_artifact_version(
             detail="Artifact versions must include a file manifest before promotion.",
         )
     metadata = _version_metadata(version)
-    promotion_build_registry_id = (
-        str((body.build_registry_id if body is not None else None) or metadata.get("build_registry_id") or "").strip()
-        or None
-    )
+    promotion_build_registry_id = build_registry_id
+    if metadata.get("build_registry_id") != promotion_build_registry_id:
+        raise HTTPException(status_code=409, detail="Artifact does not belong to the selected build")
     app_registry_result = None
     app_registry_service = None
     if promotion_build_registry_id:
         app_registry_service = _get_app_registry_service()
         registry_record = (
-            await app_registry_service.get_app_record(build_registry_id=promotion_build_registry_id)
+            await app_registry_service.get_app_record(build_registry_id=promotion_build_registry_id, owner_user_id=user_id)
         ).get("app")
         if not registry_record:
             raise HTTPException(
@@ -1912,15 +2136,36 @@ async def promote_build_artifact_version(
                 status_code=409,
                 detail="Only app registry records in review can be promoted.",
             )
+        current_run = registry_record.get("current_build_run") or {}
+        if (
+            current_run.get("artifact_version_id") != artifact_version_id
+            or current_run.get("build_id") != metadata.get("build_id")
+        ):
+            raise HTTPException(status_code=409, detail="Selected artifact is not the current build under review")
     refinement_metadata = _refinement_metadata_from_version(version)
 
     target_dir = _resolve_bundle_restore_target(version)
     try:
-        restore_summary = _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir)
+        restore_summary = _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir, workspace_layout=True)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to promote artifact") from exc
+
+    if promotion_build_registry_id and app_registry_service is not None:
+        try:
+            app_registry_result = await app_registry_service.promote_build(
+                build_registry_id=promotion_build_registry_id,
+                promoted_by=user_id,
+                bundle_path=str(target_dir / "app"),
+                expected_build_id=metadata["build_id"],
+                expected_artifact_version_id=artifact_version_id,
+            )
+        except ValueError as exc:
+            logger.warning("promote_build conflict app=%s build=%s: %s", app_id, promotion_build_registry_id, exc)
+            raise HTTPException(status_code=409, detail="Conflict promoting build.") from exc
+        if not app_registry_result["success"]:
+            raise HTTPException(status_code=409, detail="Build changed during promotion. Refresh before retrying.")
 
     for session in await artifact_store.list_refinement_sessions(
         app_id=app_id,
@@ -1933,26 +2178,14 @@ async def promote_build_artifact_version(
             status=RefinementSessionStatus.PROMOTED,
             ended_at=datetime.now(UTC),
         )
-    if promotion_build_registry_id and app_registry_service is not None:
-        try:
-            app_registry_result = await app_registry_service.promote_build(
-                build_registry_id=promotion_build_registry_id,
-                promoted_by=user_id,
-            )
-        except ValueError as exc:
-            logger.warning("promote_build conflict app=%s build=%s: %s", app_id, promotion_build_registry_id, exc)
-            raise HTTPException(status_code=409, detail="Conflict promoting build.") from exc
 
-    # A promoted bundle changes the live app root, so the App Intelligence
-    # context must be rebuilt or the next refinement cycle classifies, scopes,
-    # and validates against a stale snapshot. Enqueued best-effort: a refresh
-    # failure is logged and reported but never rolls back the promotion.
+    # Index the selected workspace, never the host that performed the promotion.
     app_intelligence_refresh: dict[str, Any] | None = None
     try:
         app_intelligence_refresh = await _start_studio_app_intelligence_index_job(
             app_id=app_id,
             user_id=user_id,
-            body=AppIntelligenceIndexRequest(),
+            body=AppIntelligenceIndexRequest(workspace_root=str(target_dir)),
             background_tasks=background_tasks,
         )
     except Exception as exc:
@@ -1990,25 +2223,21 @@ async def promote_build_artifact_version(
     }
 
 
-class BuildRevertRequest(BaseModel):
-    artifact_version_id: str = Field(..., description="Artifact version to restore as the active app state")
+class BuildRestoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    artifact_version_id: str = Field(..., description="Accepted artifact version to materialize in a separate workspace")
 
 
-@app.post("/api/studio/build/revert")
-async def revert_to_artifact_version(
-    body: BuildRevertRequest,
+@app.post("/api/studio/build/restore")
+async def restore_artifact_version(
+    body: BuildRestoreRequest,
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    """Restore a previously generated artifact version as the active app state.
-
-    Extracts the stored bundle zip to the appropriate directory under the active
-    app root. Returns restart_required=True because the platform host reads from
-    disk at startup.
-    """
-    from pathlib import Path as _Path
-
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    """Materialize a selected app version outside the running host workspace."""
+    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=app_id, build_registry_id=build_registry_id)
+    validate_path_id(body.artifact_version_id, "artifact_version_id")
     artifact_store = get_artifact_store()
 
     version = await artifact_store.get_build_record(
@@ -2018,39 +2247,37 @@ async def revert_to_artifact_version(
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {body.artifact_version_id}")
 
+    if _version_metadata(version).get("build_registry_id") != build_registry_id:
+        raise HTTPException(status_code=409, detail="Artifact does not belong to the selected build")
+    if version.lifecycle_status not in {ArtifactLifecycleStatus.CURRENT, ArtifactLifecycleStatus.SUPERSEDED}:
+        raise HTTPException(status_code=409, detail="Only previously accepted artifacts can be restored")
+    _enforce_artifact_validation_gate(version, action="restored", allow_validation_override=False)
+
     artifact_path = (version.commit_metadata.metadata or {}).get("artifact_path")
     if not artifact_path:
         raise HTTPException(
             status_code=400,
-            detail="This artifact version has no restorable file path. Only versions generated after revert support was added can be restored.",
+            detail="This artifact version has no restorable file path.",
         )
 
-    zip_path = _Path(artifact_path)
+    zip_path = Path(artifact_path)
     if not zip_path.exists():
         raise HTTPException(
             status_code=400,
             detail=f"Artifact file no longer exists on disk: {artifact_path}",
         )
 
-    app_root = resolve_app_root()
-
-    if version.build_family == "workflow_bundle":
-        target_dir = candidate_app_workflows_roots(app_root)[0]
-        target_dir.mkdir(parents=True, exist_ok=True)
-    elif version.build_family == "app_bundle":
-        target_dir = app_root
-    else:
-        raise HTTPException(status_code=400, detail=f"Cannot revert artifact kind: {version.build_family}")
+    target_dir = _resolve_bundle_restore_target(version)
 
     try:
-        _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir)
+        _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir, workspace_layout=True)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to extract artifact") from exc
 
     logger.info(
-        "Reverted app_id=%s to artifact_version_id=%s (%s/%s)",
+        "Restored app_id=%s artifact_version_id=%s to a separate workspace (%s/%s)",
         app_id,
         body.artifact_version_id,
         version.build_family,
@@ -2058,21 +2285,27 @@ async def revert_to_artifact_version(
     )
 
     return {
-        "reverted": True,
+        "restored": True,
         "artifact_version_id": body.artifact_version_id,
         "build_family": version.build_family,
         "build_key": version.build_key,
         "target_path": str(target_dir),
-        "restart_required": True,
+        "active_version_changed": False,
     }
 
 
 @app.get("/api/studio/build")
 async def get_build_surface(
     app_id: str | None = None,
+    build_registry_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    if build_registry_id is not None:
+        app_id, user_id = await _resolve_studio_artifact_scope(
+            principal, build_registry_id=build_registry_id, app_id=app_id,
+        )
+    else:
+        app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
     missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
@@ -2082,7 +2315,7 @@ async def get_build_surface(
         )
 
     try:
-        record = (await _get_app_registry_service().get_app_record(app_id=app_id)).get("app")
+        record = (await _get_app_registry_service().get_app_record(app_id=app_id, owner_user_id=user_id)).get("app")
         if not isinstance(record, dict):
             raise HTTPException(status_code=404, detail=f"App record not found: {app_id}")
         build_state = await load_build_state_from_db(app_id)
@@ -2178,6 +2411,139 @@ class WorkflowTriggerRequest(BaseModel):
     artifact_key: str | None = None
     app_id: str | None = None
     user_id: str | None = None
+    build_registry_id: BuildIdentity | None = None
+    source_chat_id: BuildIdentity | None = None
+    retry_failed: StrictBool = False
+
+
+async def _failed_workflow_retry_contribution(
+    body: WorkflowTriggerRequest, *, app_id: str, user_id: str,
+) -> TriggerRoutingContribution:
+    from mozaiksai.core.multitenant import build_app_scope_filter
+    from mozaiksai.core.session.launcher import _PERSISTENCE_MANAGER, validate_context_for_workflow
+
+    if body.trigger_source != "manual" or not body.source_chat_id or not body.workflow_id:
+        raise ValueError("Failed-workflow retry requires a manual trigger and source workflow session")
+    if (body.context_variables or body.trigger_payload or body.journey_id is not None
+            or body.action_id is not None or body.artifact_key is not None):
+        raise ValueError("Failed-workflow retry cannot override saved launch intent")
+    source = await (await _PERSISTENCE_MANAGER._coll()).find_one(
+        {"_id": body.source_chat_id, "user_id": user_id, "workflow_name": body.workflow_id,
+         **build_app_scope_filter(app_id)},
+        {"status": 1, "run_build_binding": 1, "trigger_meta": 1, "change_request_id": 1, "revision_id": 1},
+    )
+    if not source or source.get("status") != 2:
+        raise ValueError("Source workflow session is not an owned failed run")
+    binding = await _get_app_registry_service().resolve_build_binding(
+        owner_user_id=user_id, app_id=app_id, chat_id=body.source_chat_id, workflow_name=body.workflow_id,
+        build_registry_id=body.build_registry_id, source_chat_id=body.source_chat_id,
+        persisted_binding=source.get("run_build_binding"),
+    )
+    trigger_meta = source.get("trigger_meta") or {}
+    if binding.phase == "genesis":
+        return TriggerRoutingContribution(
+            workflow_id=body.workflow_id, journey_id=trigger_meta.get("journey_id"),
+            explanation="Retry failed workflow", require_exact_route=True,
+        )
+
+    change_id = TypeAdapter(BuildIdentity).validate_python(source.get("change_request_id"))
+    revision_id = TypeAdapter(BuildIdentity).validate_python(source.get("revision_id"))
+    store = get_artifact_store()
+    change = await store.get_change_request(app_id=binding.target_app_id, change_request_id=change_id)
+    if (change is None or change.id != change_id or change.app_id != binding.target_app_id
+            or change.created_by_user_id != user_id):
+        raise ValueError("Saved refinement request is not available to this owner")
+    request = RefinementRequest.model_validate(change.refinement_request.model_dump(mode="python"))
+    journey_id = trigger_meta.get("workflow_sequence") or trigger_meta.get("journey_id")
+    if not journey_id or journey_id != change.impact_set.workflow_sequence:
+        raise ValueError("Saved refinement journey does not match the failed run")
+    if (change.router_decision.get("is_full_restart")
+            or journey_id in {"full_rebuild", "conceptual_replan"} or request.request_kind != "refinement"):
+        raise ValueError("Failed-workflow retry does not support saved rebuild or restart intent")
+    baseline_id = TypeAdapter(BuildIdentity).validate_python(request.build_record_id)
+    if (
+        not request.raw_user_request.strip() or request.raw_user_request != change.raw_user_request
+        or request.app_id not in {None, app_id} or request.user_id not in {None, user_id}
+        or request.target_app_id not in {None, binding.target_app_id}
+        or request.build_record_id != change.build_record_id
+        or request.build_record_id != trigger_meta.get("build_record_id")
+        or request.build_family != change.build_family or request.normalized_build_key() != change.build_key
+        or change.classification != change.change_intent.change_class
+        or change.classification != trigger_meta.get("change_class")
+    ):
+        raise ValueError("Saved refinement request does not match the failed run")
+    baseline = await store.get_build_record(app_id=binding.target_app_id, build_record_id=baseline_id)
+    if (
+        baseline is None or baseline.id != request.build_record_id or baseline.app_id != binding.target_app_id
+        or baseline.build_family != request.build_family or baseline.build_key != request.normalized_build_key()
+        or baseline.lifecycle_status in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}
+        or baseline.commit_metadata.author_user_id != user_id
+    ):
+        raise ValueError("Selected retry baseline is unavailable or retired")
+    metadata = _version_metadata(baseline)
+    if metadata.get("build_registry_id") != binding.build_registry_id or metadata.get("target_app_id") != binding.target_app_id:
+        raise ValueError("Selected retry baseline does not belong to the registered target")
+
+    # Reuse the accepted request and routing facts, never the failed run's
+    # generated output, validation, counters, or mutable workspace copy.
+    extra = {"change_request_id": change_id, "revision_id": revision_id,
+             "files_manifest": [entry.model_dump(mode="python") for entry in baseline.files_manifest]}
+    if metadata.get("workspace_dir"):
+        extra.update(lifecycle_state="review", bundle_path=metadata["workspace_dir"])
+    request = request.model_copy(update={"app_id": app_id, "user_id": user_id, "target_app_id": binding.target_app_id, "extra": extra})
+    seed = {
+        "build_mode": "revision", "revision_scope": change.classification.value,
+        "artifact_kind": request.build_family, "artifact_version_id": baseline.id,
+        "refinement_request": request.raw_user_request, "refinement_request_meta": request.model_dump(mode="python"),
+        "change_intent": change.change_intent.model_dump(mode="python"), "impact_set": change.impact_set.model_dump(mode="python"),
+        "change_request_id": change_id, "revision_id": revision_id,
+        "revision_origin_workflow": request.requested_workflow_id or body.workflow_id,
+        "workflow_sequence": journey_id, "screen": request.source_surface,
+    }
+    if extra.get("lifecycle_state"):
+        seed["lifecycle_state"] = extra["lifecycle_state"]
+    return TriggerRoutingContribution(
+        workflow_id=body.workflow_id, journey_id=journey_id,
+        context_seed=validate_context_for_workflow(body.workflow_id, seed),
+        explanation="Retry failed workflow with its saved refinement request and selected baseline",
+        require_exact_route=True,
+    )
+
+
+async def _complete_inline_refinement(*, binding: RunBuildBinding, user_id: str, result: Any) -> None:
+    artifact_id = (result.metadata or {}).get("build_record_id")
+    if result.status == "validated" and not artifact_id:
+        raise ValueError("Inline refinement has no saved output to review")
+    version = None
+    if artifact_id:
+        version = await get_artifact_store().get_build_record(
+            app_id=binding.target_app_id, build_record_id=artifact_id,
+        )
+        if version is None or any(
+            _version_metadata(version).get(key) != value for key, value in binding.model_dump().items()
+        ):
+            raise ValueError("Inline refinement output does not belong to its registered run")
+        if result.status == "validated" and version.validation_status != ArtifactValidationStatus.PASSED:
+            raise ValueError("Inline refinement output has not passed validation")
+    result_status = "review" if version is not None and result.status == "validated" else "needs_revision"
+    saved = await _get_app_registry_service().update_build_status(
+        owner_user_id=user_id, build_registry_id=binding.build_registry_id,
+        expected_build_id=binding.build_id, status=result_status,
+        artifact_version_id=version.id if version else None,
+        bundle_path=_version_metadata(version).get("workspace_dir") if version else None,
+    )
+    if not saved["success"]:
+        raise ValueError("Inline refinement was superseded before its output could be registered")
+
+
+async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> None:
+    try:
+        await _get_app_registry_service().update_build_status(
+            owner_user_id=user_id, build_registry_id=binding.build_registry_id,
+            expected_build_id=binding.build_id, status="needs_revision",
+        )
+    except Exception:
+        logger.exception("Could not record inline refinement failure for build=%s", binding.build_id)
 
 
 @app.post("/api/workflows/trigger")
@@ -2186,6 +2552,15 @@ async def trigger_workflow(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=body.app_id, user_id=body.user_id)
+    retry_contribution = None
+    if body.retry_failed:
+        try:
+            retry_contribution = await _failed_workflow_retry_contribution(body, app_id=app_id, user_id=user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    build_registry_id = body.build_registry_id
+    artifact_app_id = app_id
+    session_router = get_session_router()
     trigger_payload = dict(body.trigger_payload or {})
     orchestration_control = get_orchestration_control_harness()
     refinement_request = None
@@ -2203,13 +2578,43 @@ async def trigger_workflow(
     persisted_revision_id = str(trigger_payload.get("revision_id") or "").strip() or None
 
     if body.trigger_source == "refinement":
+        from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+        from mozaiksai.core.session.launcher import _PERSISTENCE_MANAGER
+        from mozaiksai.core.usage.context import AuxiliaryUsageContext
+
+        protected_context = {
+            "run_build_binding", "build_registry_id", "build_id", "target_app_id",
+            "artifact_root", "bundle_path", "lifecycle_state", "artifact_version_id",
+            "app_id", "user_id", "chat_id",
+        }
+        if protected_context.intersection(body.context_variables):
+            raise HTTPException(status_code=400, detail="Refinement context cannot override saved build identity or paths")
+        if body.source_chat_id:
+            source = await _get_app_registry_service().repo.get_owned_chat_binding(
+                app_id=app_id, owner_user_id=user_id, chat_id=body.source_chat_id,
+            )
+            if not source:
+                raise HTTPException(status_code=404, detail="Source build session not found")
+            binding = RunBuildBinding.model_validate(source)
+            if build_registry_id and build_registry_id != binding.build_registry_id:
+                raise HTTPException(status_code=400, detail="Source session does not match selected build")
+            build_registry_id = binding.build_registry_id
+        artifact_app_id, _ = await _resolve_studio_artifact_scope(
+            principal, app_id=app_id, build_registry_id=build_registry_id,
+        )
+        session_router = session_router.for_target(artifact_app_id)
+        allowed, reason = await get_platform_hooks().call_chat_prereqs(
+            app_id, user_id, body.workflow_id or "", _PERSISTENCE_MANAGER,
+        )
+        if not allowed:
+            raise HTTPException(status_code=403, detail=reason or "Workflow prerequisites not met")
         maybe_action = trigger_payload.get("harness_action")
         if isinstance(maybe_action, dict) and (
             not str(trigger_payload.get("change_request_id") or "").strip()
             or not str(trigger_payload.get("revision_id") or "").strip()
         ):
             try:
-                session_snapshot = await get_session_router().get_session_snapshot(
+                session_snapshot = await session_router.get_session_snapshot(
                     app_id=app_id,
                     user_id=user_id,
                 )
@@ -2229,10 +2634,16 @@ async def trigger_workflow(
                     ).strip()
                     if active_revision_id:
                         trigger_payload["revision_id"] = active_revision_id
+        usage_context = AuxiliaryUsageContext(
+            app_id=app_id, user_id=user_id,
+            tenant_id=principal.tenant_id, workspace_id=principal.workspace_id,
+        )
         try:
             refinement_request = orchestration_control.request_from_payload(
+                usage_context=usage_context,
                 payload=trigger_payload,
                 app_id=app_id,
+                target_app_id=artifact_app_id,
                 user_id=user_id,
                 requested_workflow_id=body.workflow_id,
                 default_source_surface=(
@@ -2247,6 +2658,22 @@ async def trigger_workflow(
                 status_code=400,
                 detail="refinement triggers require trigger_payload.refinement_request.",
             )
+        source_version = await get_artifact_store().get_build_record(
+            app_id=artifact_app_id, build_record_id=refinement_request.build_record_id,
+        ) if refinement_request.build_record_id else None
+        if source_version is None or source_version.build_family != refinement_request.build_family:
+            raise HTTPException(status_code=404, detail="Selected refinement artifact not found")
+        metadata = _version_metadata(source_version)
+        # Filesystem roots and baseline contracts come from the saved version,
+        # not from caller context or copied workbench metadata.
+        safe_extra = {
+            key: value for key, value in refinement_request.extra.items()
+            if key in {"harness_action", "change_request_id", "revision_id"}
+        }
+        safe_extra["files_manifest"] = [entry.model_dump(mode="python") for entry in source_version.files_manifest]
+        if metadata.get("workspace_dir"):
+            safe_extra.update(lifecycle_state="review", bundle_path=metadata["workspace_dir"])
+        refinement_request = refinement_request.model_copy(update={"extra": safe_extra})
         persisted_revision_id = (
             str(refinement_request.extra.get("revision_id") or "").strip() or persisted_revision_id
         )
@@ -2254,6 +2681,16 @@ async def trigger_workflow(
             str(refinement_request.extra.get("change_request_id") or "").strip()
             or persisted_change_request_id
         )
+        if persisted_change_request_id:
+            change = await get_artifact_store().get_change_request(
+                app_id=artifact_app_id, change_request_id=persisted_change_request_id,
+            )
+            if change is None or change.created_by_user_id != user_id:
+                raise HTTPException(status_code=404, detail="Refinement change request not found")
+        if persisted_revision_id:
+            snapshot = await session_router.get_session_snapshot(app_id=app_id, user_id=user_id)
+            if not snapshot or snapshot.get("active_revision_id") != persisted_revision_id:
+                raise HTTPException(status_code=409, detail="Refinement revision is no longer active")
 
         try:
             refinement_decision = await orchestration_control.route_refinement_request(refinement_request)
@@ -2264,8 +2701,9 @@ async def trigger_workflow(
         if (
             orchestration_control.contract_surface_enabled()
             and refinement_decision.change_intent.change_class.value in {"feature", "design"}
-            and refinement_request.build_family in {"app_bundle", "workflow_bundle"}
+            and refinement_request.build_family == "app_bundle"
         ):
+            inline_binding = None
             try:
                 contract_surface_plan, harness_decision = (
                     await orchestration_control.prepare_contract_surface_request(
@@ -2273,13 +2711,48 @@ async def trigger_workflow(
                         routing_decision=refinement_decision,
                     )
                 )
+                if contract_surface_plan is not None and contract_surface_plan.requires_schema_migration:
+                    contract_surface_plan = None
+                    harness_decision = orchestration_control.build_harness_decision(refinement_decision)
                 if contract_surface_plan is not None:
+                    zip_path = _artifact_bundle_path_from_version(source_version)
+                    if zip_path is None:
+                        raise HTTPException(status_code=409, detail="Refinement baseline archive is unavailable")
+                    baseline_files, skipped = _decode_text_bundle_entries(zip_path)
+                    if skipped:
+                        raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+                    inline_binding = await _get_app_registry_service().begin_refinement_run(
+                        owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
+                        workflow_name=refinement_decision.workflow_id,
+                    )
+                    refinement_request = refinement_request.model_copy(update={
+                        "usage_context": usage_context.model_copy(update={"run_build_binding": inline_binding}),
+                    })
                     surface_result = await orchestration_control.execute_surface_plan(
                         plan=contract_surface_plan,
                         refinement_request=refinement_request,
                         routing_decision=refinement_decision,
+                        workspace_files=baseline_files,
                     )
+                    finalized = await orchestration_control.finalize_surface_output(
+                        plan=contract_surface_plan, result=surface_result, refinement_request=refinement_request,
+                        routing_decision=refinement_decision, workspace_files=baseline_files,
+                        run_build_binding=inline_binding,
+                    )
+                    await _complete_inline_refinement(binding=inline_binding, user_id=user_id, result=finalized)
+                    surface_result = surface_result.model_copy(update={
+                        "status": "success" if finalized.status == "validated" else "failed",
+                        "metadata": {**surface_result.metadata, **finalized.metadata, "validation_result": finalized.validation_result},
+                    })
+            except HTTPException:
+                if inline_binding is not None:
+                    await _fail_inline_refinement(binding=inline_binding, user_id=user_id)
+                raise
             except Exception as exc:
+                if inline_binding is not None:
+                    await _fail_inline_refinement(binding=inline_binding, user_id=user_id)
+                    logger.exception("surface_regeneration_failed build=%s", inline_binding.build_id)
+                    raise HTTPException(status_code=503, detail="Surface refinement unavailable") from exc
                 logger.warning("contract_surface_planner_failed, falling back to workflow: %s", exc)
                 contract_surface_plan = None
                 surface_result = None
@@ -2288,19 +2761,53 @@ async def trigger_workflow(
         resolved_artifact_kind = refinement_request.build_family
         resolved_artifact_version_id = refinement_request.build_record_id
         if orchestration_control.coding_enabled() and isinstance(trigger_payload.get("coding_request"), dict):
+            coding_payload = dict(trigger_payload["coding_request"])
+            if coding_payload.get("files"):
+                zip_path = _artifact_bundle_path_from_version(source_version)
+                if zip_path is None:
+                    raise HTTPException(status_code=409, detail="Refinement baseline archive is unavailable")
+                baseline_files, _ = _decode_text_bundle_entries(zip_path)
+                requested_paths = coding_payload["files"]
+                if not isinstance(requested_paths, dict) or any(path not in baseline_files for path in requested_paths):
+                    raise HTTPException(status_code=400, detail="Refinement file scope is not in the selected artifact")
+                coding_payload["files"] = {path: baseline_files[path] for path in requested_paths}
             coding_request = orchestration_control.build_coding_request(
                 refinement_request=refinement_request,
                 routing_decision=refinement_decision,
-                payload=trigger_payload.get("coding_request"),
+                payload=coding_payload,
             )
             if coding_request is not None:
+                inline_binding = None
                 try:
                     coding_request, coding_decision = await orchestration_control.prepare_coding_request(coding_request)
                     harness_decision = coding_decision
                     if coding_request is not None:
+                        zip_path = _artifact_bundle_path_from_version(source_version)
+                        if zip_path is None:
+                            raise HTTPException(status_code=409, detail="Refinement baseline archive is unavailable")
+                        baseline_files, skipped = _decode_text_bundle_entries(zip_path)
+                        if skipped:
+                            raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+                        inline_binding = await _get_app_registry_service().begin_refinement_run(
+                            owner_user_id=user_id, app_id=app_id,
+                            build_registry_id=build_registry_id,
+                            workflow_name=refinement_decision.workflow_id,
+                        )
+                        coding_request = coding_request.model_copy(update={
+                            "run_build_binding": inline_binding, "baseline_files": baseline_files,
+                        })
                         coding_result = await orchestration_control.execute_coding_request(coding_request)
-                        harness_decision = orchestration_control.build_coding_result_decision(coding_request)
+                        await _complete_inline_refinement(
+                            binding=inline_binding, user_id=user_id, result=coding_result,
+                        )
+                        harness_decision = orchestration_control.build_coding_result_decision(coding_request, coding_result)
+                except HTTPException:
+                    if inline_binding is not None:
+                        await _fail_inline_refinement(binding=inline_binding, user_id=user_id)
+                    raise
                 except Exception as exc:
+                    if inline_binding is not None:
+                        await _fail_inline_refinement(binding=inline_binding, user_id=user_id)
                     logger.error("coding_worker_failed: %s", exc, exc_info=True)
                     raise HTTPException(status_code=503, detail="Coding worker unavailable") from exc
         trigger_payload = {
@@ -2321,7 +2828,7 @@ async def trigger_workflow(
     ):
         try:
             persisted_change_request = await artifact_store.create_change_request(
-                app_id=app_id,
+                app_id=artifact_app_id,
                 build_family=refinement_request.build_family,
                 build_key=body.artifact_key or refinement_request.normalized_build_key(),
                 build_record_id=refinement_request.build_record_id,
@@ -2461,7 +2968,7 @@ async def trigger_workflow(
                 ],
                 metadata=dict(harness_decision.metadata or {}),
             )
-            pending_snapshot = await get_session_router().persist_revision_intent(
+            pending_snapshot = await session_router.persist_revision_intent(
                 trigger=TriggerInput(
                     app_id=app_id,
                     user_id=user_id,
@@ -2500,7 +3007,7 @@ async def trigger_workflow(
                     "failed": RefinementSessionStatus.FAILED,
                 }.get(coding_result.status, RefinementSessionStatus.PENDING)
                 coding_session = await artifact_store.create_refinement_session(
-                    app_id=app_id,
+                    app_id=artifact_app_id,
                     build_record_id=refinement_request.build_record_id,
                     change_request_id=persisted_change_request_id,
                     result_build_record_id=((coding_result.metadata or {}).get("build_record_id") or (coding_result.metadata or {}).get("artifact_version_id")),
@@ -2543,11 +3050,12 @@ async def trigger_workflow(
                     "failed": RefinementSessionStatus.FAILED,
                 }.get(surface_result.status, RefinementSessionStatus.PENDING)
                 surface_session = await artifact_store.create_refinement_session(
-                    app_id=app_id,
+                    app_id=artifact_app_id,
                     build_record_id=refinement_request.build_record_id,
                     change_request_id=persisted_change_request_id,
                     provider="contract_surface_regeneration",
                     status=surface_session_status,
+                    result_build_record_id=surface_result.metadata.get("build_record_id"),
                     metadata={
                         "surface_result": surface_result.model_dump(mode="python"),
                         "workflow_id": refinement_decision.workflow_id,
@@ -2578,12 +3086,25 @@ async def trigger_workflow(
             journey_id=(refinement_decision.workflow_sequence if refinement_decision is not None else body.journey_id),
             context_variables=body.context_variables or {},
             trigger_payload=trigger_payload,
+            build_registry_id=build_registry_id,
+            source_chat_id=body.source_chat_id,
+            session_router=session_router,
+            routing_contribution=(
+                TriggerRoutingContribution(
+                    workflow_id=refinement_decision.workflow_id,
+                    journey_id=refinement_decision.workflow_sequence,
+                    context_seed=refinement_decision.context_seed,
+                    explanation=refinement_decision.explanation,
+                    is_full_restart=refinement_decision.is_full_restart,
+                    lifecycle_state=SessionLifecycle.STALE if refinement_decision.is_full_restart else SessionLifecycle.ACTIVE,
+                ) if refinement_decision is not None else retry_contribution
+            ),
             extra_trigger_meta={
                 "action_id": body.action_id,
-                "change_class": resolved_change_class,
-                "build_record_id": resolved_artifact_version_id,
-                "build_family": resolved_artifact_kind,
-                "workflow_sequence": refinement_decision.workflow_sequence if refinement_decision is not None else None,
+                "change_class": resolved_change_class or (retry_contribution.context_seed.get("revision_scope") if retry_contribution else None),
+                "build_record_id": resolved_artifact_version_id or (retry_contribution.context_seed.get("artifact_version_id") if retry_contribution else None),
+                "build_family": resolved_artifact_kind or (retry_contribution.context_seed.get("artifact_kind") if retry_contribution else None),
+                "workflow_sequence": refinement_decision.workflow_sequence if refinement_decision is not None else (retry_contribution.journey_id if retry_contribution else None),
             },
         )
     except ValueError as route_err:
@@ -2598,7 +3119,7 @@ async def trigger_workflow(
     if persisted_change_request_id is not None and artifact_store is not None:
         try:
             await artifact_store.update_change_request_router_decision(
-                app_id=app_id,
+                app_id=artifact_app_id,
                 change_request_id=persisted_change_request_id,
                 router_decision={
                     "workflow_id": resolved_workflow_id,
@@ -2630,6 +3151,35 @@ async def trigger_workflow(
         "rerouted_by_dependency": workflow_launch.rerouted_by_dependency,
         "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
     }
+
+
+async def _resolve_preview_artifact(
+    principal: UserPrincipal, artifact_version_id: str, build_registry_id: str,
+) -> tuple[str, dict[str, str | bytes]]:
+    target_app_id, _ = await _resolve_studio_artifact_scope(principal, build_registry_id=build_registry_id)
+    version = await get_artifact_store().get_build_record(app_id=target_app_id, build_record_id=artifact_version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if version.build_family != "app_bundle":
+        raise HTTPException(status_code=422, detail="Preview requires an app bundle")
+    try:
+        binding = RunBuildBinding.model_validate({
+            key: _version_metadata(version).get(key) for key in RunBuildBinding.model_fields
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Artifact has no verified build identity") from exc
+    if binding.build_registry_id != build_registry_id or binding.target_app_id != target_app_id:
+        raise HTTPException(status_code=409, detail="Artifact identity does not match its build target")
+    try:
+        files, diagnostics = await read_artifact_bundle(version, include_binary=True)
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=422, detail="Artifact archive is unavailable or failed integrity validation") from exc
+    if any(item.get("blocking") for item in diagnostics):
+        raise HTTPException(status_code=422, detail="Artifact contains unsafe or oversized preview files")
+    return target_app_id, files
+
+
+app.include_router(create_sandbox_router(resolve_scope=_resolve_studio_scope, resolve_artifact=_resolve_preview_artifact))
 
 
 app.router.routes[:] = sorted(

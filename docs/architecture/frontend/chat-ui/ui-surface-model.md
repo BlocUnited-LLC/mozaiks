@@ -102,19 +102,37 @@ The widget is the session entry point outside the full chat surface.
 
 ### What it shows
 
-The widget follows the active context:
+The widget is ask-mode only. It always renders `askMessages` from its own
+general-mode connection; workflow sessions never render inside the widget.
+Its WebSocket declares `transport_purpose=ask_carrier` at connect time, so the
+backend never binds the widget's carrier chat to a workflow session,
+auto-starts a workflow on it, or replays workflow history into it. Each
+message sends the current route's `page_context` (the page's declared
+description) and `page_path` (the route pattern). The backend uses
+`page_path` to resolve the page's declared `meta.ask_context` actions —
+read-only module actions whose results ground the ask agent's answers in live
+page data. The client only ever names the page; the declarations and dispatch
+are server-side.
 
-- if a workflow is active, it defaults to `workflowMessages`
-- otherwise it shows `askMessages`
-
-The user can switch to ask context inline without navigating.
+Both schema-native `AppPageMeta` and custom-route metadata support the same
+`AppAskContextAction` declarations. App loading checks declared module/action
+references and ask eligibility; Factory acceptance checks the actual saved
+module contracts, including custom-route manifest metadata. Unknown references,
+actions without `ask_context_safe: true`, and actions requiring permissions
+fail before promotion. Plan-only action names cannot authorize ask context.
+Eligibility is independent of `api_surface`; it never makes an action public.
+Runtime dispatch remains best-effort for operational failures, not a substitute
+for this artifact validation. No user permissions or identity are added by it.
 
 ### Header contract
 
-The expanded widget keeps a two-button header:
+The expanded widget keeps a fixed header:
 
-- left button: switch to ask context or open the full ask chat
-- right button: return to the active workflow chat when one exists
+- left button (brand + "mozaiksai"): opens the full ask chat page
+- support button (🛟): opens the operator support form
+- right logo button (same brand logo as the collapsed toggle): returns to the
+  active workflow workspace when one exists — resolved from stored session
+  keys or the server's `/api/session/state` snapshot
 
 The compose affordance for ask mode lives in the sub-header as `+ New conversation`.
 

@@ -2,13 +2,24 @@ from __future__ import annotations
 
 """Canonical runtime contract for declarative app page schemas."""
 
+import json
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from mozaiksai.core.runtime.app.module_loader import LoadedModule
 from mozaiksai.core.workflow.ui_primitives import get_page_ui_primitive_names
@@ -78,6 +89,17 @@ class AppPageAction(PageContractModel):
     requires_selection: bool = False
     closes_modal: bool = True
 
+    @field_validator("payload", "context_variables")
+    @classmethod
+    def _unique_mapping_keys(cls, value):
+        if isinstance(value, list) and len({item.key for item in value}) != len(value):
+            raise ValueError("Action mapping keys must be unique")
+        return value
+
+    @field_serializer("payload", "context_variables")
+    def _serialize_mapping(self, value):
+        return {item.key: item.value for item in value} if isinstance(value, list) else value
+
     @model_validator(mode="after")
     def _validate_action_shape(self) -> AppPageAction:
         if self.action_type in {"navigate", "submit", "delete"} and not self.href:
@@ -109,6 +131,7 @@ class AppFormField(PageContractModel):
     label: str
     type: Literal["text", "email", "password", "number", "textarea", "select", "checkbox"]
     required: bool = False
+    default_value: PrimitiveValue = None
     placeholder: str | None = None
     options: list[AppSelectOption] | None = None
 
@@ -174,24 +197,47 @@ class AppDataTableConfig(DataBackedConfig):
     data_key: str | None = None
     selection: str | None = None
     pagination: bool = False
-    page_size: int | None = None
+    pagination_mode: Literal["client", "server"] = "client"
+    page_size: int | None = Field(default=None, ge=1, strict=True)
+    total_key: str | None = None
     search: bool = False
+    search_keys: list[str] | None = None
     actions: list[AppPageAction] | None = None
     empty: AppEmptyStateConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_pagination(self) -> AppDataTableConfig:
+        if self.pagination_mode == "server":
+            if not self.pagination or self.page_size is None or self.page_size > 100:
+                raise ValueError("Server pagination requires pagination=true and page_size (1-100)")
+            if not self.api_endpoint or not _MODULE_API_RE.fullmatch(self.api_endpoint):
+                raise ValueError("Server pagination requires a canonical module endpoint")
+            for key in (self.data_key, self.total_key):
+                if not key or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", key):
+                    raise ValueError("Server pagination requires explicit data_key and total_key response paths")
+        elif self.total_key is not None:
+            raise ValueError("total_key requires server pagination")
+        return self
 
 
 class AppResourceTableConfig(AppDataTableConfig):
     search: bool = True
     search_placeholder: str | None = None
-    search_keys: list[str] | None = None
     filters: list[AppTableFilter] | None = None
     default_filter: str | None = None
     sorts: list[AppTableSort] | None = None
     default_sort: str | None = None
 
+    @model_validator(mode="after")
+    def _client_pagination_only(self) -> AppResourceTableConfig:
+        if self.pagination_mode != "client":
+            raise ValueError("Server pagination is supported only by DataTable")
+        return self
+
 
 class AppFormConfig(PageContractModel):
     fields: list[AppFormField]
+    initial_values_key: Literal["selected_row"] | None = None
     layout: str | None = None
     columns: int | None = None
     submit_label: str | None = None
@@ -290,7 +336,7 @@ class AppSummaryItem(PageContractModel):
     trend_label: str | None = None
 
 
-class AppSummaryStripConfig(PageContractModel):
+class AppSummaryStripConfig(DataBackedConfig):
     items: list[AppSummaryItem]
 
 
@@ -328,7 +374,7 @@ class AppStatusPillConfig(PageContractModel):
     dot: bool | None = None
 
 
-class AppMetricConfig(AppSummaryItem):
+class AppMetricConfig(AppSummaryItem, DataBackedConfig):
     pass
 
 
@@ -343,6 +389,54 @@ class AppSegmentedBarConfig(PageContractModel):
     segments: list[AppSegment]
 
 
+class AppPricingCatalogManagedAI(PageContractModel):
+    display: str | None = None
+
+
+class AppPricingCatalogUsageLimit(PageContractModel):
+    label: str | None = None
+    monthly_limit_display: str | None = None
+
+
+class AppPricingCatalogPrice(PageContractModel):
+    display: str | None = None
+    interval: str | None = None
+
+
+class AppPricingCatalogPlan(PageContractModel):
+    plan_id: str
+    label: str
+    description: str | None = None
+    price_display: str | None = None
+    cta_label: str | None = None
+    highlights: list[str] | None = None
+    managed_ai: AppPricingCatalogManagedAI | None = None
+    usage_limits: list[AppPricingCatalogUsageLimit] | None = None
+    pricing: AppPricingCatalogPrice | None = None
+    is_default: bool | None = None
+
+
+class AppPricingCatalogGroup(PageContractModel):
+    group_id: str
+    label: str
+    description: str | None = None
+    kind: Literal["subscription", "service", "add_on", "mixed"] | None = None
+    plan_ids: list[str] | None = None
+    capability_groups: list[str] | None = None
+    add_on_ids: list[str] | None = None
+
+
+class AppPricingCatalogAddOn(PageContractModel):
+    id: str | None = None
+    add_on_id: str | None = None
+    label: str
+    description: str | None = None
+    price_display: str | None = None
+    price: AppPricingCatalogPrice | None = None
+    cta_label: str | None = None
+    highlights: list[str] | None = None
+
+
 class AppPricingCatalogConfig(DataBackedConfig):
     title: str | None = None
     subtitle: str | None = None
@@ -355,9 +449,9 @@ class AppPricingCatalogConfig(DataBackedConfig):
     highlighted_plan_id: str | None = None
     plan_action_label: str | None = None
     add_on_action_label: str | None = None
-    plans: list[dict[str, Any]] | None = None
-    groups: list[dict[str, Any]] | None = None
-    add_ons: list[dict[str, Any]] | None = None
+    plans: list[AppPricingCatalogPlan] | None = None
+    groups: list[AppPricingCatalogGroup] | None = None
+    add_ons: list[AppPricingCatalogAddOn] | None = None
     plan_action: AppPageAction | None = None
     add_on_action: AppPageAction | None = None
 
@@ -468,12 +562,26 @@ class AppRouteAuth(PageContractModel):
     params: list[AppRouteAuthParam] | PrimitiveMap | None = None
 
 
+class AppAskContextAction(PageContractModel):
+    """A read-only module action whose result grounds ask-mode answers on this page.
+
+    Only actions the module declares with ``ask_context_safe: true`` and
+    an empty permission list resolve at runtime; everything else fails closed.
+    """
+
+    module: str
+    action: str
+    params: list[AppRouteAuthParam] | PrimitiveMap | None = None
+    label: str | None = None
+
+
 class AppPageMeta(PageContractModel):
     requiresAuth: bool | None = None
     requiresRole: str | None = None
     authRedirect: str | None = None
     shellMode: Literal["standard", "workspace", "conversation", "focused", "immersive", "public"] | None = None
     routeAuth: AppRouteAuth | None = None
+    ask_context: list[AppAskContextAction] | None = None
 
 
 class AppPageSchema(PageContractModel):
@@ -522,14 +630,21 @@ class AppPageSchema(PageContractModel):
         return self
 
 
-def build_page_action_index(modules: Iterable[LoadedModule]) -> dict[str, frozenset[str]]:
+def build_page_action_index(
+    modules: Iterable[LoadedModule], *, ask_context_only: bool = False,
+) -> dict[str, frozenset[str]]:
     return {
-        module.name: frozenset(module.action_method_map)
+        module.name: frozenset(
+            action for action in module.action_method_map
+            if not ask_context_only or module.action_ask_context_map.get(action) is True
+        )
         for module in sorted(modules, key=lambda item: item.name)
     }
 
 
-def build_page_action_index_from_module_contracts(base_path: Path) -> dict[str, frozenset[str]]:
+def build_page_action_index_from_module_contracts(
+    base_path: Path, *, ask_context_only: bool = False,
+) -> dict[str, frozenset[str]]:
     """Build page action closure authority from declared module contracts."""
     index: dict[str, frozenset[str]] = {}
     modules_dir = base_path / "modules"
@@ -554,6 +669,9 @@ def build_page_action_index_from_module_contracts(base_path: Path) -> dict[str, 
             str(action.get("id") or "").strip()
             for action in data.get("actions") or []
             if isinstance(action, dict) and str(action.get("id") or "").strip()
+            and (not ask_context_only or (
+                action.get("ask_context_safe") is True and action.get("permissions", []) == []
+            ))
         ]
         index[module_id] = frozenset(sorted(action_ids))
     return index
@@ -564,6 +682,7 @@ def load_and_validate_page_schema(
     *,
     expected_name: str | None = None,
     action_index: Mapping[str, frozenset[str]] | None = None,
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
 ) -> AppPageSchema:
     try:
         raw = yaml.safe_load(page_path.read_text(encoding="utf-8"))
@@ -587,7 +706,9 @@ def load_and_validate_page_schema(
                 )
             ]
         )
-    return validate_page_schema(raw, expected_name=expected_name, action_index=action_index)
+    return validate_page_schema(
+        raw, expected_name=expected_name, action_index=action_index, ask_context_index=ask_context_index,
+    )
 
 
 def validate_page_schema(
@@ -595,6 +716,7 @@ def validate_page_schema(
     *,
     expected_name: str | None = None,
     action_index: Mapping[str, frozenset[str]] | None = None,
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
 ) -> AppPageSchema:
     try:
         page = AppPageSchema.model_validate(dict(schema))
@@ -620,10 +742,63 @@ def validate_page_schema(
                 message="Page schema name must match the requested page.",
             )
         )
-    diagnostics.extend(_validate_action_closure(page, action_index))
+    diagnostics.extend(_validate_action_closure(page, action_index, ask_context_index))
+    diagnostics.extend(_validate_interaction_contracts(page))
     if diagnostics:
         raise PageSchemaValidationError(diagnostics)
     return page
+
+
+def _validate_interaction_contracts(page: AppPageSchema) -> list[PageSchemaDiagnostic]:
+    nodes: list[tuple[str, Mapping[str, Any]]] = []
+
+    def form_references(value: Any) -> set[str]:
+        if isinstance(value, str):
+            return set(re.findall(r"\{(?:form|values)\.([^{}]+)\}", value))
+        if isinstance(value, Mapping):
+            return set().union(*(form_references(item) for item in value.values()))
+        if isinstance(value, list):
+            return set().union(*(form_references(item) for item in value))
+        return set()
+
+    def walk(value: Any, location: str) -> None:
+        if isinstance(value, Mapping):
+            nodes.append((location, value))
+            for key, item in value.items():
+                walk(item, f"{location}.{key}")
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                walk(item, f"{location}[{index}]")
+
+    walk(page.model_dump(exclude_none=True), "$")
+    modals = {node.get("id") for _, node in nodes if node.get("primitive") == "Modal"}
+    diagnostics = []
+    for location, node in nodes:
+        if node.get("primitive") == "Form":
+            config = node.get("config") or {}
+            submit = config.get("submit_action") or {}
+            if not config.get("disabled") and submit.get("action_type") == "submit" and submit.get("payload") is not None:
+                payload = submit["payload"]
+                submitted = form_references(payload)
+                missing = {
+                    field["name"] for field in config.get("fields") or []
+                    if field.get("name") and not field.get("disabled")
+                } - submitted
+                if missing:
+                    diagnostics.append(PageSchemaDiagnostic(
+                        code="page_schema.incomplete_form_payload", location=f"{location}.config.submit_action.payload",
+                        message=f"Explicit submit payload omits editable form values: {', '.join(sorted(missing))}. Bind each value with {{form.field}} or use null to submit all form values.",
+                    ))
+        if node.get("action_type") != "event" or node.get("event_type") not in {"ui.modal.open", "ui.modal.close"}:
+            continue
+        payload = node.get("payload") or {}
+        modal_id = payload.get("modal_id")
+        if not isinstance(modal_id, str) or modal_id not in modals:
+            diagnostics.append(PageSchemaDiagnostic(
+                code="page_schema.unknown_modal", location=f"{location}.payload.modal_id",
+                message="Modal actions require modal_id referencing a Modal on this page.",
+            ))
+    return diagnostics
 
 
 def _identity_key(value: str) -> str:
@@ -652,9 +827,33 @@ def load_app_page_schemas(
     base_path: Path,
     *,
     action_index: Mapping[str, frozenset[str]] | None = None,
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
 ) -> dict[str, AppPageSchema]:
+    manifest_path = base_path / "ui/route_manifest.json"
+    if action_index is not None and manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PageSchemaValidationError([PageSchemaDiagnostic(
+                code="page_schema.invalid_route_manifest", location="$.pages",
+                message="Route manifest could not be read for ask-context validation.",
+            )]) from exc
+        entries = manifest.get("pages", []) if isinstance(manifest, dict) else []
+        diagnostics = []
+        for index, entry in enumerate(entries if isinstance(entries, list) else []):
+            meta = entry.get("meta") if isinstance(entry, dict) else None
+            declarations = meta.get("ask_context") if isinstance(meta, dict) else None
+            if declarations is not None:
+                diagnostics.extend(validate_ask_context_references(
+                    declarations, action_index=action_index, ask_context_index=ask_context_index,
+                    location=f"$.pages[{index}].meta.ask_context",
+                ))
+        if diagnostics:
+            raise PageSchemaValidationError(diagnostics)
     pages = {
-        name: load_and_validate_page_schema(path, expected_name=name, action_index=action_index)
+        name: load_and_validate_page_schema(
+            path, expected_name=name, action_index=action_index, ask_context_index=ask_context_index,
+        )
         for name, path in discover_page_schema_paths(base_path).items()
     }
     return dict(sorted(pages.items()))
@@ -692,19 +891,20 @@ def _validate_href(value: str, action_type: str) -> None:
         _validate_api_endpoint(value)
         return
     if ".." in value or not _SAFE_ROUTE_RE.fullmatch(value):
-        raise ValueError("href must be a safe route or API path")
+        raise PydanticCustomError("page_href", "href must be a safe absolute route or API path; use null when the action does not use href")
 
 
 def _validate_api_endpoint(value: str) -> None:
     if "?" in value or "#" in value or ".." in value or "//" in value[1:]:
-        raise ValueError("api_endpoint must not contain traversal, query strings, or fragments")
+        raise PydanticCustomError("page_api_path", "api_endpoint must not contain traversal, query strings, or fragments")
     if not _API_PATH_RE.fullmatch(value):
-        raise ValueError("api_endpoint must be a safe absolute API path")
+        raise PydanticCustomError("page_api_path", "api_endpoint must be a safe absolute API path")
 
 
 def _validate_action_closure(
     page: AppPageSchema,
     action_index: Mapping[str, frozenset[str]] | None,
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
 ) -> list[PageSchemaDiagnostic]:
     if action_index is None:
         return []
@@ -712,6 +912,10 @@ def _validate_action_closure(
     route_auth = page.meta.routeAuth if page.meta is not None else None
     if route_auth is not None:
         diagnostics.extend(_validate_module_action(route_auth.module, route_auth.action, "$.meta.routeAuth", action_index))
+    if page.meta is not None:
+        diagnostics.extend(validate_ask_context_references(
+            page.meta.ask_context or [], action_index=action_index, ask_context_index=ask_context_index,
+        ))
     for location, endpoint in _walk_api_endpoints(page.model_dump(mode="json", exclude_none=True)):
         match = _MODULE_API_RE.fullmatch(endpoint)
         if match:
@@ -723,6 +927,36 @@ def _validate_action_closure(
                     action_index,
                 )
             )
+    return diagnostics
+
+
+def validate_ask_context_references(
+    declarations: Any,
+    *,
+    action_index: Mapping[str, frozenset[str]],
+    ask_context_index: Mapping[str, frozenset[str]] | None = None,
+    location: str = "$.meta.ask_context",
+) -> list[PageSchemaDiagnostic]:
+    """Shared reference closure for schema pages and route-manifest metadata."""
+    try:
+        parsed = TypeAdapter(list[AppAskContextAction]).validate_python(declarations)
+    except ValidationError:
+        return [PageSchemaDiagnostic(
+            code="page_schema.invalid_ask_context", location=location,
+            message="Ask context must contain valid module/action declarations.",
+        )]
+    diagnostics: list[PageSchemaDiagnostic] = []
+    for index, declaration in enumerate(parsed):
+        item_location = f"{location}[{index}]"
+        missing = _validate_module_action(declaration.module, declaration.action, item_location, action_index)
+        diagnostics.extend(missing)
+        if not missing and ask_context_index is not None and declaration.action not in ask_context_index.get(
+            declaration.module, frozenset(),
+        ):
+            diagnostics.append(PageSchemaDiagnostic(
+                code="page_schema.ineligible_ask_context", location=item_location,
+                message="Ask context requires an action with ask_context_safe: true and permissions: [].",
+            ))
     return diagnostics
 
 
@@ -791,6 +1025,9 @@ def _format_location(raw_location: Any) -> str:
 
 def _safe_validation_message(error: Mapping[str, Any]) -> str:
     error_type = str(error.get("type") or "invalid")
+    if error_type in {"page_href", "page_api_path"}:
+        # These validator-owned messages contain no rejected input values.
+        return str(error["msg"])
     if error_type == "extra_forbidden":
         return "Unknown runtime-affecting field is not allowed."
     if error_type == "missing":
@@ -808,6 +1045,7 @@ __all__ = [
     "VALID_PAGE_TYPES",
     "build_page_action_index",
     "build_page_action_index_from_module_contracts",
+    "validate_ask_context_references",
     "discover_page_schema_paths",
     "load_and_validate_page_schema",
     "load_app_page_schemas",

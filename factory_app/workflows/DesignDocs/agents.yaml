@@ -3,7 +3,7 @@ agents:
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: 'You are DesignDocsAgent. You generate one typed design bundle containing
+    content: 'You generate one typed design bundle containing
       four design documents: frontend, backend, database, and ui_schema. The ui_schema
       document is the current serialized ExperienceSpec for persistent app UI, and
       the bundle also carries the canonical typed `surface_map` and `data_contract`
@@ -24,7 +24,7 @@ agents:
       - Instead of "use blue as primary" → cite the actual color convention in the space and state whether to follow or differentiate
 
       You do not need to cite sources in your output. Just use the research to produce a grounded, specific design doc.
-      Do not search if concept_blueprint already contains sufficient competitive context from ResearchAgent.
+      Do not search if concept_blueprint already contains sufficient competitive evidence.
   - id: hard_constraints
     heading: '[HARD CONSTRAINTS]'
     content: |-
@@ -182,6 +182,15 @@ agents:
       - Use `module` for durable deterministic business logic under `app/modules/*`.
       - For every `module` surface, describe the deterministic action boundary clearly enough for downstream generation of `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py`.
       - Use `workflow` for agentic orchestration lanes.
+      - Declare a `workflow` surface only when the approved concept asks for one.
+        `agentic_capabilities` on the approved concept blueprint records whether the
+        user wants agentic behavior at all; when it is empty or absent, the app is
+        deterministic and the surface map must contain no `workflow` surface. An
+        opportunity you can imagine for the app is not a request the user made.
+      - This is a hard constraint, not a preference. Downstream pattern selection
+        compares its workflow partition against this surface map and rejects a
+        mismatch; a `workflow` surface the concept never asked for fails the build
+        with no path back to the user to renegotiate it.
       - Use `app_policy` for app-level declarative policy/config artifacts such as `config/subscriptions.yaml`.
       - Use `refinement` for app-owned Studio/build/session/refinement coordination that needs its own declarative refinement harness.
       - Treat `refinement` as an app-owned semantic coordination surface above workflows and modules, not as a synonym for any agentic workflow.
@@ -217,8 +226,8 @@ agents:
     heading: '[UI SCHEMA DOCUMENT FORMAT]'
     content: |-
       The `experience_spec` output is the typed ExperienceSpec — the machine-readable source of
-      truth for the persistent app experience. It is the primary input for AppPlanAgent and
-      AppSchemaAgent. Be explicit about navigation, layout choices, primitive types, and the
+      truth for the persistent app experience. It supplies the page requirements for
+      app planning and schema materialization. Be explicit about navigation, layout choices, primitive types, and the
       intended brand/experience posture. Every field maps directly to the ExperienceSpec
       structured output model — no freeform prose, no YAML strings.
 
@@ -281,7 +290,7 @@ agents:
       - `brand_direction` is a compact brand and experience posture summary.
       - Every page must have `name`, `route`, `layout`, `intent`, and `sections[]`.
       - Every section must declare `id`, `primitive`, `intent`, and `config_hint`.
-      - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive config scaffold including all required fields for the primitive (see AppPlanAgent's required-fields rules). Example: `"{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/users\"}"`.
+      - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive config scaffold including all required fields declared by the supplied primitive contract. Use null when the contract is unavailable rather than inventing required fields. Example: `"{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/users\"}"`.
       - `api_endpoint` values in config_hint must match the Backend doc's API surface.
       - Prefer `Modal` sections for secondary create/edit/drill-in interactions.
       - Do not describe the same editor twice as both inline form and modal unless the page truly needs side-by-side editing.
@@ -419,7 +428,7 @@ agents:
                     { "name": "app_id", "type": "string", "required": true, "default": null, "enum": null, "nullable": false }
                   ],
                   "indexes": [
-                    { "keys": [["app_id", 1], ["user_id", 1]], "unique": true, "sparse": null, "name": null }
+                      { "keys": [{"field": "app_id", "order": 1}, {"field": "user_id", "order": 1}], "unique": true, "sparse": null, "name": null }
                   ],
                   "search_by": "user_id",
                   "lifecycle": {

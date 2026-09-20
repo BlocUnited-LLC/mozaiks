@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,7 +10,11 @@ from mozaiksai.control_plane.contracts import ControlPlaneToolCall, ControlPlane
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
 from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
-from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
+from mozaiksai.core.adapters.ag2_agent_runner import (
+    AG2StructuredAgentRunner,
+    StructuredAgentFactory,
+)
+from mozaiksai.core.usage.context import AuxiliaryUsageContext, resolve_auxiliary_usage_context
 
 ChangeClassLiteral = Literal["patch", "design", "feature", "core"]
 _CHECKPOINT_EVENT = "request_submitted"
@@ -32,7 +35,7 @@ class LLMChangeClassifier:
     def __init__(
         self,
         *,
-        agent_factory: Callable[[str, dict[str, Any]], Any] | None = None,
+        agent_factory: StructuredAgentFactory | None = None,
         agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_refinement_harness,
@@ -53,9 +56,11 @@ class LLMChangeClassifier:
         build_record_id: str | None = None,
         source_surface: str | None = None,
         app_id: str | None = None,
+        target_app_id: str | None = None,
         user_id: str | None = None,
         requested_workflow_id: str | None = None,
         extra: dict[str, Any] | None = None,
+        usage_context: AuxiliaryUsageContext | None = None,
     ) -> ChangeClassifierResult:
         control_plane = self._load_config()
         if not control_plane.enabled:
@@ -80,6 +85,7 @@ class LLMChangeClassifier:
             build_record_id=build_record_id,
                 source_surface=source_surface,
                 app_id=app_id,
+                target_app_id=target_app_id,
                 user_id=user_id,
                 requested_workflow_id=requested_workflow_id,
                 extra=extra or {},
@@ -88,6 +94,10 @@ class LLMChangeClassifier:
         )
 
         result = await self._agent_runner.run(
+            usage_context=resolve_auxiliary_usage_context(
+                app_id=app_id, user_id=user_id, context=usage_context,
+                target_app_id=target_app_id or app_id,
+            ),
             agent_name="ChangeClassifier",
             system_prompt=self._load_system_prompt(),
             user_prompt=user_prompt,
@@ -125,6 +135,7 @@ class LLMChangeClassifier:
         build_record_id: str | None,
         source_surface: str | None,
         app_id: str | None,
+        target_app_id: str | None,
         user_id: str | None,
         requested_workflow_id: str | None,
         extra: dict[str, Any],
@@ -137,6 +148,7 @@ class LLMChangeClassifier:
         context = ControlPlaneToolContext(
             checkpoint=_CHECKPOINT_EVENT,
             app_id=app_id,
+            target_app_id=target_app_id,
             user_id=user_id,
             build_family=build_family or None,
             build_key=build_key,

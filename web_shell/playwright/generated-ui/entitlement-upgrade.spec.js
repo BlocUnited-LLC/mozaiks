@@ -1,3 +1,4 @@
+import { localDevelopmentAuth } from '../fixtures/localAuth.js';
 /**
  * Playwright acceptance tests — entitlement upgrade navigation.
  *
@@ -80,6 +81,7 @@ async function mockShellAndTheme(page) {
         version: '1.0.0',
         appName: 'Test App',
         appId: 'test-app',
+        auth: localDevelopmentAuth,
         landing_spot: '/gated-feature',
         pages: [
           { path: '/gated-feature', component: 'GatedFeaturePage', id: 'gated-feature', label: 'Feature', order: 10, meta: { title: 'Gated Feature', requiresAuth: false } },

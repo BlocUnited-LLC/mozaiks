@@ -22,6 +22,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.control_plane.contracts import is_secret_sensitive_path, safe_artifact_relpath
+from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
 
 WorkspaceViolationKind = Literal[
     "unsafe_path",
@@ -108,6 +109,8 @@ def materialize_coding_workspace(
             raise ValueError(f"WORKSPACE_UNSAFE_PATH: {raw_path!r} is not a safe bundle-relative path")
         if is_secret_sensitive_path(safe):
             raise ValueError(f"WORKSPACE_SECRET_PATH: refusing to materialize secret-sensitive path {safe!r}")
+        if is_secret_contract_path(safe):
+            validate_secret_contract_text(content)
 
         destination = (root / safe).resolve()
         if destination != root and not str(destination).startswith(str(root) + os.sep):

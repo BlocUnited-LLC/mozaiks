@@ -14,8 +14,8 @@ _STRATEGY_LABELS = {
 }
 
 _STRATEGY_DESCRIPTIONS = {
-    "e2b": "Run pre-deploy build validation in the hosted sandbox and expose a preview URL when available. Not a production hosting runtime.",
-    "docker": "Run build validation in a local Docker container and expose a preview URL via host port mapping. Requires Docker Desktop or Docker Engine with the daemon running.",
+    "e2b": "Run disposable pre-deploy build validation in E2B. Interactive previews use separate Studio sessions. Not a production hosting runtime.",
+    "docker": "Run disposable build validation in Docker. Interactive previews use separate Studio sessions. Requires a running Docker daemon.",
     "local": "Run build validation on the current machine without requiring sandbox credentials.",
     "skip": "Do not execute build validation for this run. Integration checks still gate export.",
 }
@@ -48,9 +48,8 @@ def default_app_validation_strategy(
     local_available: bool | None = None,
     docker_available: bool | None = None,
 ) -> tuple[str, str]:
-    env_map = env or os.environ
-    if str(env_map.get("E2B_API_KEY", "")).strip():
-        return "e2b", "resolved from E2B availability"
+    # A credential only makes the hosted provider available. It must never
+    # silently turn a local build into a billable hosted validation run.
     if docker_available is None:
         docker_available = docker_app_validation_available()
     if docker_available:
@@ -70,13 +69,13 @@ def resolve_app_validation_strategy(
     local_available: bool | None = None,
     docker_available: bool | None = None,
 ) -> tuple[str, str]:
-    env_map = env or os.environ
-    env_strategy = normalize_app_validation_strategy(env_map.get("MOZAIKS_APP_VALIDATION_STRATEGY"))
+    env_map = os.environ if env is None else env
+    env_strategy = str(env_map.get("MOZAIKS_APP_VALIDATION_STRATEGY", "")).strip() or None
 
     for candidate, source in (
+        (env_strategy, "environment"),
         (requested, "tool argument"),
         (context_value, "context variable"),
-        (env_strategy, "environment"),
     ):
         if candidate is None:
             continue
@@ -101,7 +100,7 @@ def build_app_validation_strategy_summary(
     local_available: bool | None = None,
     docker_available: bool | None = None,
 ) -> dict[str, Any]:
-    default_value, default_reason = default_app_validation_strategy(
+    default_value, default_reason = resolve_app_validation_strategy(
         env=env,
         local_available=local_available,
         docker_available=docker_available,

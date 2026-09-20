@@ -65,7 +65,7 @@ class UnifiedWorkflowManager:
     """Unified workflow manager focusing on config + UI tool metadata.
 
     Backend agent tools are bound directly during agent creation; prompt
-    middleware declarations are compiled into AG2 1.0 beta middleware.
+    middleware declarations are compiled into AG2 1.0 middleware.
     """
 
     _instance = None
@@ -99,6 +99,21 @@ class UnifiedWorkflowManager:
             "Initialized unified workflow manager with %s workflows", len(self._workflows))
 
     # ------------------------- UI TOOLS -------------------------
+    def _invalidate_workflow_ui_tools(self, workflow_name: str) -> None:
+        normalized_name = workflow_name.lower()
+        keys = {
+            key for key, record in self._ui_registry.items()
+            if record['workflow_name'].lower() == normalized_name
+        }
+        for key in keys:
+            self._ui_registry.pop(key)
+        self._ui_tool_path_cache = {
+            path: key for path, key in self._ui_tool_path_cache.items() if key not in keys
+        }
+        self._ui_loaded_workflows = {
+            name for name in self._ui_loaded_workflows if name.lower() != normalized_name
+        }
+
     def _load_workflow_tools(self, workflow_path: str, *, tools_payload: dict[str, Any] | None = None) -> None:
         from pathlib import Path as _P
         tools_yaml_path = _P(workflow_path) / "tools.yaml"
@@ -581,8 +596,18 @@ class UnifiedWorkflowManager:
             if workflow_info.module:
                 try:
                     module_name = getattr(workflow_info.module, "__name__", "")
-                    if module_name and module_name in sys.modules:
-                        importlib.reload(workflow_info.module)
+                    # importlib.reload requires sys.modules[name] to BE this object:
+                    #     if sys.modules.get(name) is not module: raise ImportError
+                    # Checking presence instead of identity let a stale handle
+                    # through, and reload raised "module workflows.AppGenerator
+                    # not in sys.modules" about a name that was plainly there -
+                    # an error that reads like a missing module and is actually a
+                    # replaced one. Reload the object sys.modules holds now, and
+                    # keep it, so the handle stops being stale.
+                    live = sys.modules.get(module_name) if module_name else None
+                    if live is not None:
+                        reloaded = importlib.reload(live)
+                        workflow_info.module = reloaded
                         logger.info("Reloaded workflow module: %s", workflow_name)
                     else:
                         logger.debug(
@@ -593,36 +618,52 @@ class UnifiedWorkflowManager:
                 except Exception as e:
                     logger.error("WORKFLOW_MODULE_RELOAD_FAILED workflow=%s: %s", workflow_name, e, exc_info=True)
         
-        # Reload embedded UI tool metadata
-        try:
-            workflow_path = self.resolve_workflow_path(workflow_name)
-            if workflow_path is None:
-                raise ValueError(f"Workflow not found: {workflow_name}")
-            keys_to_remove = [k for k,v in self._ui_registry.items() if v.get('workflow_name') == workflow_name]
-            for k in keys_to_remove:
-                self._ui_registry.pop(k, None)
-            self._load_workflow_tools(str(workflow_path))
-        except Exception as e:
-            logger.warning("Could not reload UI tools for %s: %s", workflow_name, e)
+        # Rebuild UI metadata only after the replacement workflow validates.
+        self._invalidate_workflow_ui_tools(workflow_name)
         
         # Reload the workflow completely
         try:
+            # Local import: outputs.structured imports this module at import time.
+            from .outputs.structured import invalidate_workflow_structured_outputs
+
+            # Evict the prior config, the prior loaded-workflow record, and the
+            # compiled structured-output models before re-reading from disk so a
+            # replacement config that fails validation fails closed on every
+            # lifecycle surface instead of leaving the prior workflow reported
+            # as successfully loaded.
+            self._config_cache.pop(normalized_name, None)
+            self._workflows.pop(normalized_name, None)
+            invalidate_workflow_structured_outputs(workflow_name)
             workflow_info = self._load_single_workflow(workflow_name)
             return workflow_info.to_dict()
         except Exception as e:
             logger.error("WORKFLOW_RELOAD_FAILED workflow=%s: %s", workflow_name, e, exc_info=True)
+            workflow_path = self.resolve_workflow_path(workflow_name)
+            self._workflows[normalized_name] = WorkflowInfo(
+                name=workflow_name,
+                config={},
+                path=str(workflow_path or (self.workflows_base_path / workflow_name)),
+                status="error",
+                error=str(e),
+            )
             return {"error": str(e)}
     
     def unload_workflow(self, workflow_name: str) -> None:
         """Unload a workflow (remove from active workflows)"""
+        # Local import: outputs.structured imports this module at import time.
+        from .outputs.structured import invalidate_workflow_structured_outputs
+
         normalized_name = workflow_name.lower()
-        
+
+        self._invalidate_workflow_ui_tools(workflow_name)
+
         if normalized_name in self._workflows:
             del self._workflows[normalized_name]
-        
+
         if normalized_name in self._config_cache:
             del self._config_cache[normalized_name]
-        
+
+        invalidate_workflow_structured_outputs(workflow_name)
         logger.info("Unloaded workflow: %s", workflow_name)
     
     def get_workflow_info(self, workflow_name: str) -> dict[str, Any] | None:
@@ -633,7 +674,7 @@ class UnifiedWorkflowManager:
     
     def list_loaded_workflows(self) -> list[str]:
         """List all currently loaded workflows"""
-        return [info.name for info in self._workflows.values()]
+        return [info.name for info in self._workflows.values() if info.status == "loaded"]
     
     def get_ui_tools(self, workflow_name: str) -> dict[str, Any]:
         return {k: v for k, v in getattr(self, '_ui_registry', {}).items() if v.get('workflow_name') == workflow_name}
@@ -765,10 +806,14 @@ class UnifiedWorkflowManager:
     
     def refresh_all(self) -> dict[str, Any]:
         """Refresh all workflows and return summary"""
+        # Local import: outputs.structured imports this module at import time.
+        from .outputs.structured import invalidate_all_workflow_structured_outputs
+
         logger.info("Refreshing all workflows...")
         self._workflows.clear()
         self._workflow_paths.clear()
         self._config_cache.clear()
+        invalidate_all_workflow_structured_outputs()
         self._load_all_workflows()
         return self.get_status_summary()
 
@@ -1000,6 +1045,14 @@ def get_workflow_manager() -> UnifiedWorkflowManager:
 def initialize_workflows(base_path: str | None = None) -> dict[str, dict[str, Any]]:
     """Initialize workflows with custom base path"""
     global _unified_workflow_manager, workflow_manager
+
+    # Local import: outputs.structured imports this module at import time.
+    from .outputs.structured import invalidate_all_workflow_structured_outputs
+
+    # Reinitialization can rebind the manager to a different workflow root, so
+    # every compiled structured-output model may describe replaced config.
+    # Drop them all before rebuilding; the drop also holds if the rebuild fails.
+    invalidate_all_workflow_structured_outputs()
 
     # Preserve object identity so modules that imported `workflow_manager`
     # by value don't retain stale references after reinitialization.

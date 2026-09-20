@@ -10,12 +10,13 @@ import {
   StudioLoadingState,
 } from '../../ui/components/StudioShared.jsx'
 import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
+import { studioFetch } from './studioApi.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function fetchCurrentProfileAppId() {
   try {
-    const response = await fetch('/api/me')
+    const response = await studioFetch('/api/me')
     if (!response.ok) return null
     const profile = await response.json()
     return profile?.app_id || profile?.appId || null
@@ -129,7 +130,7 @@ function SessionListCard({ run, active, onClick }) {
 
 // ─── Thread detail panel ──────────────────────────────────────────────────────
 
-function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) {
+function ThreadPanel({ run, onMessageSent, onDeleted, onStatusUpdated }) {
   const [extraMessages, setExtraMessages] = useState([])
   const [sendError, setSendError] = useState(null)
   const [deleteError, setDeleteError] = useState(null)
@@ -155,10 +156,10 @@ function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) 
     setSendError(null)
     if (run.request_id) {
       try {
-        const response = await fetch('/api/modules/workspace_support/add_support_message', {
+        const response = await studioFetch('/api/modules/workspace_support/add_support_message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ request_id: run.request_id, message: text, sender_role: 'operator', app_id: appId }),
+          body: JSON.stringify({ request_id: run.request_id, message: text }),
         })
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
         const body = await response.json()
@@ -177,10 +178,10 @@ function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) 
     setStatusUpdating(true)
     setStatusError(null)
     try {
-      const response = await fetch('/api/modules/workspace_support/update_support_request_status', {
+      const response = await studioFetch('/api/modules/workspace_support/update_support_request_status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: run.request_id, status: nextStatus, app_id: appId }),
+        body: JSON.stringify({ request_id: run.request_id, status: nextStatus }),
       })
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
       const body = await response.json()
@@ -200,10 +201,10 @@ function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) 
     setDeleting(true)
     setDeleteError(null)
     try {
-      const response = await fetch('/api/modules/workspace_support/delete_support_request', {
+      const response = await studioFetch('/api/modules/workspace_support/delete_support_request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: run.request_id, app_id: appId }),
+        body: JSON.stringify({ request_id: run.request_id }),
       })
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
       const body = await response.json()
@@ -254,12 +255,17 @@ function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) 
         </div>
       </div>
 
+      {run.error && (
+        <div role="alert" className="border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+          {run.error}
+        </div>
+      )}
       {/* ChatThread primitive handles messages + input */}
       <ChatThread
         messages={messages}
-        onSend={run.status === 'resolved' ? undefined : handleSend}
+        onSend={run.status === 'resolved' || run.error ? undefined : handleSend}
         inputPlaceholder="Reply to this ticket…"
-        emptyText="No messages yet."
+        emptyText={run.error ? 'Support conversation unavailable.' : 'No messages yet.'}
         className="flex-1 min-h-0"
       />
       {sendError && (
@@ -289,9 +295,10 @@ function supportRequestToRun(req) {
   const rid = req.request_id || req.id
   const subject = req.subject || req.page_title || String(req.message || 'Support request').slice(0, 80)
   const appId = req.subject_app_id || req.app_id || 'workspace'
+  const error = typeof req.error === 'string' ? req.error.trim() : null
   const messages = Array.isArray(req.messages) && req.messages.length > 0
     ? req.messages
-    : req.message
+    : !error && req.message
       ? [{ role: 'user', content: req.message }]
       : []
   const lastMessageByRole = req.last_message_by_role || messages[messages.length - 1]?.role || 'user'
@@ -312,6 +319,7 @@ function supportRequestToRun(req) {
     support_status: isResolved ? 'resolved' : lastMessageByRole === 'operator' ? 'responded' : 'needs-reply',
     awaiting_operator: !isResolved && lastMessageByRole !== 'operator',
     last_message_by_role: lastMessageByRole,
+    error,
     messages,
   }
 }
@@ -335,10 +343,10 @@ export default function AppSupportPage() {
         targetAppId = await fetchCurrentProfileAppId() || targetAppId
       }
       setEffectiveAppId(targetAppId)
-      const res = await fetch('/api/modules/workspace_support/list_support_requests', {
+      const res = await studioFetch('/api/modules/workspace_support/list_support_requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'all', limit: 50, scope: 'app', app_id: targetAppId }),
+        body: JSON.stringify({ status: 'all', limit: 50, scope: 'app', subject_app_id: targetAppId }),
       })
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`)
@@ -464,7 +472,6 @@ export default function AppSupportPage() {
             {/* Right: thread detail */}
             <ThreadPanel
               run={selectedRun}
-              appId={effectiveAppId}
               onMessageSent={loadSupportRequests}
               onStatusUpdated={loadSupportRequests}
               onDeleted={async () => {

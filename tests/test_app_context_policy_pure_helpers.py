@@ -83,7 +83,6 @@ from mozaiksai.control_plane.app_context import (
 from mozaiksai.control_plane.app_context_policy import (
     _context_state,
     _context_warnings,
-    _dedupe,
     _is_brownfield_source_affecting,
     _normalize_path,
     _paths_overlap,
@@ -91,6 +90,7 @@ from mozaiksai.control_plane.app_context_policy import (
     _touches_read_only_discovered_boundary,
     _touches_sensitive_boundary,
 )
+from mozaiksai.core.utils.sequences import dedupe_strings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,30 +159,30 @@ class TestNormalizePath:
 
 class TestDedupe:
     def test_empty_list(self):
-        assert _dedupe([]) == []
+        assert dedupe_strings([]) == []
 
     def test_duplicates_removed(self):
-        result = _dedupe(["a", "b", "a"])
+        result = dedupe_strings(["a", "b", "a"])
         assert result.count("a") == 1
 
     def test_order_preserved(self):
-        result = _dedupe(["c", "a", "b"])
+        result = dedupe_strings(["c", "a", "b"])
         assert result == ["c", "a", "b"]
 
     def test_empty_strings_excluded(self):
-        result = _dedupe(["a", "", "b"])
+        result = dedupe_strings(["a", "", "b"])
         assert "" not in result
 
     def test_whitespace_strings_excluded(self):
-        result = _dedupe(["a", "   ", "b"])
+        result = dedupe_strings(["a", "   ", "b"])
         assert len(result) == 2
 
     def test_none_excluded(self):
-        result = _dedupe(["a", None, "b"])  # type: ignore[list-item]
+        result = dedupe_strings(["a", None, "b"])  # type: ignore[list-item]
         assert None not in result
 
     def test_single_element(self):
-        assert _dedupe(["x"]) == ["x"]
+        assert dedupe_strings(["x"]) == ["x"]
 
 
 # ---------------------------------------------------------------------------

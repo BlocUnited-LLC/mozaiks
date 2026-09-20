@@ -312,6 +312,27 @@ class TestInjectModuleFileManifestGuard:
         assert "reactions.yaml" in msg
         assert "omit" in msg.lower() or "NOT" in msg
 
+    def test_guard_projects_planned_events_and_canonical_companion_paths(self):
+        agent = _FakeAgent(
+            name="ConfigMiddlewareAgent",
+            context_variables={
+                "current_build_task": {
+                    "task_type": "module_contract",
+                    "capability_pack_id": "orders",
+                    "owned_paths": ["modules/orders/module.yaml", "modules/orders/contracts/events.yaml"],
+                },
+                "app_build_plan": {"event_flows": [
+                    {"producer_pack_id": "orders", "producing_action": "create_order", "event_type": "domain.orders.created"},
+                    {"producer_pack_id": "other", "producing_action": "create_other", "event_type": "domain.other.created"},
+                ]},
+            },
+        )
+        self.mod.inject_module_file_manifest_guard(agent, [])
+        assert "modules/orders/contracts/events.yaml" in agent.system_message
+        assert "modules/orders/events.yaml" not in agent.system_message
+        assert "create_order emits domain.orders.created" in agent.system_message
+        assert "domain.other.created" not in agent.system_message
+
     def test_file_manifest_override_is_honoured(self):
         agent = _FakeAgent(
             name="ConfigMiddlewareAgent",

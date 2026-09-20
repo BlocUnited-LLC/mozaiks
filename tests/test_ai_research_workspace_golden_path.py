@@ -5,6 +5,7 @@ import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -21,6 +22,9 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
     assemble_app_tasks,
 )
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
+from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
+    materialize_app_config_contracts,
+)
 from factory_app.workflows.SubscriptionContractDesigner.tools import (
     save_subscription_contract as subscription_module,
 )
@@ -30,6 +34,7 @@ from mozaiksai.core.session.build_context import (
     load_build_context,
 )
 from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
+from scripts.appgenerator_fixture_replay import execute_file_replay
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_CONTEXT_ROOT = REPO_ROOT / "factory_app" / "build_context" / "mozaikspay"
@@ -179,8 +184,11 @@ def _research_module_task() -> dict[str, Any]:
         "initial_agent": "ConfigMiddlewareAgent",
         "description": "Declare saved research and workflow launch actions.",
         "initial_message": "Generate the canonical research module contract.",
-        "owned_paths": ["modules/research/module.yaml"],
-        "depends_on": ["research.subscription_config"],
+        "owned_paths": [
+            "modules/research/module.yaml", "modules/research/contracts/events.yaml",
+            "modules/research/contracts/reactions.yaml",
+        ],
+        "depends_on": ["research.subscription_config", "research.persistence"],
         "acceptance_criteria": ["execute_research is gated by research.execute."],
     }
 
@@ -196,14 +204,42 @@ def _research_page_task() -> dict[str, Any]:
         "initial_agent": "AppSchemaAgent",
         "description": "Generate the research workspace page.",
         "initial_message": "Generate a schema page for saved research and research execution.",
-        "owned_paths": ["app.json", "ui/pages/research.yaml"],
-        "depends_on": ["research.module"],
+        "owned_paths": [
+            "app.json", "config/ai.json", "config/shell.json",
+            "ui/route_manifest.json", "ui/pages/research.yaml",
+        ],
+        "depends_on": ["research.module", "research.services"],
         "acceptance_criteria": ["Research actions bind through the research module."],
     }
 
 
 def _build_plan(mozaikspay_pack: dict[str, Any]) -> dict[str, Any]:
-    tasks = [_subscription_task(), _research_module_task(), _research_page_task()]
+    tasks = [
+        _subscription_task(), _research_module_task(), _research_page_task(),
+        {
+            **_research_module_task(), "task_id": "research.persistence", "task_type": "persistence_contract",
+            "initial_agent": "DatabaseAgent", "owned_paths": ["data/contract.json"], "depends_on": [],
+            "description": "Declare research and subscription persistence.",
+            "initial_message": "Emit the approved research persistence contract.",
+        },
+        {
+            **_research_module_task(), "task_id": "research.models", "task_type": "data_models",
+            "initial_agent": "ModelAgent", "owned_paths": ["modules/research/backend/schemas.py"],
+            "depends_on": ["research.module", "research.persistence"],
+            "description": "Define typed research records.",
+            "initial_message": "Implement research record schemas from the supplied module and persistence contracts.",
+        },
+        {
+            **_research_module_task(), "task_id": "research.services", "task_type": "business_services",
+            "initial_agent": "ServiceAgent",
+            "owned_paths": [f"modules/research/backend/{name}.py" for name in (
+                "__init__", "handler", "service", "repo", "policy",
+            )],
+            "depends_on": ["research.module", "research.models", "research.persistence"],
+            "description": "Implement research actions behind the module contract.",
+            "initial_message": "Implement research actions using the supplied schemas and persistence contracts.",
+        },
+    ]
     return {
         "agent_message": "Deterministic AI Research Workspace plan ready.",
         "app_kind": "saas",
@@ -451,8 +487,7 @@ def _research_files() -> dict[str, str]:
                     self.collection = ctx.persistence.collection("research", "research_results")
 
                 async def list_results(self):
-                    cursor = self.collection.find({})
-                    return await cursor.to_list(length=100)
+                    return await self.collection.find_many({}, limit=100)
 
                 async def save(self, record):
                     await self.collection.insert_one(record)
@@ -490,6 +525,7 @@ def _research_workflow_files() -> dict[str, str]:
     return {
         "orchestrator.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.orchestrator.v1
             workflow_name: ResearchWorkflow
             workflow_startup_mode: UserDriven
             orchestration_pattern: ag2_network
@@ -580,6 +616,7 @@ async def test_ai_research_workspace_offline_golden_path(
     agents. This test does not prove raw-prompt generation, live AG2 execution,
     live MozaiksPay fulfillment, or monthly execution-count enforcement.
     """
+    monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     product_request = (
         "Build an AI Research Workspace with saved results, Free and Pro plans, "
         "MozaiksPay billing, gated AI research, usage visibility, and deployment output."
@@ -594,6 +631,10 @@ async def test_ai_research_workspace_offline_golden_path(
         {
             "workflow_name": "SubscriptionContractDesigner",
             "app_id": "research",
+            "run_build_binding": {
+                "build_registry_id": "registry_research", "target_app_id": "research",
+                "build_id": "build_golden", "phase": "genesis",
+            },
             "chat_id": "golden",
             "user_id": "offline-test-user",
             "product_request": product_request,
@@ -644,12 +685,14 @@ async def test_ai_research_workspace_offline_golden_path(
     assert workflow_info is not None
     assert workflow_info["status"] == "loaded", workflow_info
 
-    context.set(
-        "code_files",
-        [{"filename": path, "content": content} for path, content in _research_files().items()],
-    )
+    candidates = _research_files()
+    candidates.update({file["filename"]: file["content"] for file in materialize_app_config_contracts(
+        app_id="research", app_build_plan=normalized_plan, context_variables=context,
+    )})
+    accepted = await execute_file_replay(context.values, candidates)
     context.set("workflow_name", "AppGenerator")
     assembled = await assemble_app_tasks(context_variables=context)
+    assert context.get("app_task_batch_results") == accepted
     files = {entry["filename"]: entry["content"] for entry in assembled["code_files"]}
 
     subscriptions = yaml.safe_load(files["config/subscriptions.yaml"])
@@ -680,6 +723,8 @@ async def test_ai_research_workspace_offline_golden_path(
         "module_implementation",
         "module_runtime_quality",
         "module_wiring",
+        "planned_completeness",
+        "schema_quality",
         "workflow_integration",
     }
     assert acceptance["agent_backend"]["checks"][0]["id"] == "agent_backend_integration_not_required"
@@ -688,10 +733,6 @@ async def test_ai_research_workspace_offline_golden_path(
     assert context["integration_tests_passed"] is True
     export_gate = resolve_export_gate(context)
     assert export_gate["allow_export"] is True, export_gate["reasons"]
-
-    class _Persistence:
-        async def gather_latest_agent_jsons(self, **_kwargs: Any) -> dict[str, Any]:
-            return {}
 
     async def no_op(*_args: Any, **_kwargs: Any) -> None:
         return None
@@ -704,10 +745,11 @@ async def test_ai_research_workspace_offline_golden_path(
     # root, not the cwd, so an explicit override is required to keep this
     # test's bundle output inside tmp_path instead of the checkout.
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(download_module, "AG2PersistenceManager", lambda: _Persistence())
     monkeypatch.setattr(download_module, "get_latest_workflow_export", no_op)
     monkeypatch.setattr(download_module, "_register_app_bundle_artifact_version", no_op)
-    monkeypatch.setattr(download_module, "update_build_status", no_op)
+    monkeypatch.setattr(download_module, "AppRegistryService", lambda: SimpleNamespace(
+        update_build_status=AsyncMock(return_value={"success": True}),
+    ))
     monkeypatch.setattr(download_module, "use_ui_tool", download_ui)
 
     exported = await download_module.generate_and_download(

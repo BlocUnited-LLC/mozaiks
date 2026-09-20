@@ -62,16 +62,16 @@ class ModuleDispatchAuthority:
 
 def _local_development_allowed() -> bool:
     """local_development authority exists only while runtime auth is disabled
-    and the deployment environment is not production."""
-
-    import os
+    and the environment is one that permits unauthenticated operation, per the
+    canonical environment policy (recognized local/development/test names, or
+    no environment configured at all)."""
 
     from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+    from mozaiksai.core.environment import environment_permits_no_auth
 
-    if is_auth_enabled():
+    if not environment_permits_no_auth():
         return False
-    env_name = os.getenv("ENV", os.getenv("ENVIRONMENT", "")).strip().lower()
-    return env_name != "production"
+    return not is_auth_enabled()
 
 
 def workflow_user_authority(

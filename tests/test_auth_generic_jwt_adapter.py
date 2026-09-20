@@ -382,8 +382,19 @@ class TestGenericJWTAdapterValidation:
                 return issuer
 
         class _FakeJWKSClient:
-            def __init__(self, *, jwks_url: str, use_discovery: bool):
+            def __init__(
+                self,
+                *,
+                jwks_url: str,
+                use_discovery: bool,
+                cache_ttl: int | None = None,
+                consult_environment: bool = True,
+                discovery_client=None,
+            ):
                 self.jwks_url = jwks_url
+                self.cache_ttl = cache_ttl
+                self.consult_environment = consult_environment
+                self.discovery_client = discovery_client
                 self.use_discovery = use_discovery
 
             async def get_signing_key(self, kid: str):

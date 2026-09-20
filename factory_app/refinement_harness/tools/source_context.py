@@ -116,7 +116,7 @@ async def _load_source_bundle(
     tool_context: ControlPlaneToolContext,
     artifact_store: ArtifactStore | None,
 ) -> dict[str, Any]:
-    app_id = str(tool_context.app_id or "").strip()
+    app_id = str(tool_context.artifact_app_id or "").strip()
     if not app_id:
         return {"present": False, "reason": "missing_app_id", "warnings": []}
 

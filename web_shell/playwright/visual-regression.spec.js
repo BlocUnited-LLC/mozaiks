@@ -1,3 +1,4 @@
+import { localDevelopmentAuth } from './fixtures/localAuth.js';
 /**
  * Visual regression tests — Mozaiks web shell.
  *
@@ -26,6 +27,9 @@ import { expect, test } from '@playwright/test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
+const appConfig = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'app.json'), 'utf8'),
+);
 const themeConfig = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'brand', 'theme_config.json'), 'utf8'),
 );
@@ -36,7 +40,10 @@ const routeManifest = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'ui', 'route_manifest.json'), 'utf8'),
 );
 const composedShellConfig = {
+  auth: localDevelopmentAuth,
   ...shellConfig,
+  appId: appConfig.appId,
+  appName: appConfig.appName,
   pages: routeManifest.pages || [],
 };
 const appsPayload = {
@@ -176,6 +183,41 @@ function dynamicMasks(page) {
 test.describe('App shell visual regression', () => {
   test.beforeEach(async ({ page }) => {
     await mockStudioApis(page);
+  });
+
+  test('app identity is loaded before a workflow uses the host scope', async ({ page }) => {
+    const starts = [];
+    let releaseShell;
+    const shellReady = new Promise((resolve) => { releaseShell = resolve; });
+    await page.route('**/api/shell-config', async (route) => {
+      await shellReady;
+      await route.fulfill({ status: 200, json: composedShellConfig });
+    });
+    await page.route('**/api/workflows', (route) => route.fulfill({
+      status: 200, json: [{ workflow_name: 'RuntimeSmoke' }],
+    }));
+    await page.route('**/api/chats/*/*/start', (route) => {
+      starts.push(new URL(route.request().url()).pathname);
+      return route.fulfill({ status: 409, json: { detail: 'Admission stopped by browser test' } });
+    });
+    try {
+      await page.goto('/chat?workflow=RuntimeSmoke&mode=workflow&new=1');
+      await expect(page.getByRole('status')).toBeVisible();
+      expect(starts).toEqual([]);
+      releaseShell();
+      await expect.poll(() => starts.length).toBeGreaterThan(0);
+      expect(starts.every((entry) => entry === `/api/chats/${appConfig.appId}/RuntimeSmoke/start`)).toBe(true);
+    } finally {
+      releaseShell();
+    }
+  });
+
+  test('missing app identity stops the shell instead of creating a demo scope', async ({ page }) => {
+    await page.route('**/api/shell-config', (route) => route.fulfill({
+      status: 200, json: { ...composedShellConfig, appId: null },
+    }));
+    await page.goto('/apps');
+    await expect(page.getByRole('alert')).toHaveText('App configuration could not be loaded.');
   });
 
   test('landing / login screen matches baseline', async ({ page }) => {

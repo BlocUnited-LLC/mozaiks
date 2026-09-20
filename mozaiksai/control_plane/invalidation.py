@@ -84,7 +84,7 @@ class ArtifactInvalidationService:
                 "downstream_staled_families": [],
             }
 
-        app_id = str(refinement_request.app_id or "").strip()
+        app_id = str(refinement_request.artifact_app_id or "").strip()
         if not app_id:
             return {
                 "change_request_id": resolved_change_request_id,

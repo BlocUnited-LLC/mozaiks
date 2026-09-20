@@ -10,8 +10,11 @@ needs full payload materialization including admin surface codegen.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
     build_app_backend_admin_code_files,
@@ -19,12 +22,44 @@ from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
 from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import (
     build_refinement_harness_code_files,
 )
+from factory_app.workflows.AppGenerator.tools.task_integrity import (
+    RepairOwnershipError,
+    mark_repair_rejected,
+    mark_repair_responded,
+    validate_repair_candidate,
+)
+from mozaiksai.core.runtime.app.auth_contract import (
+    AppAuthContractError,
+    compose_app_auth_routes,
+    validate_app_auth_contract,
+)
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
 )
 from mozaiksai.core.workflow.generator_support.code_files import (
     safe_relpath,
 )
+
+
+def compose_bundle_auth_routes(files_map: dict[str, str]) -> None:
+    """Materialize auth routes after app-schema and auth-scaffold outputs merge."""
+    raw_contract = files_map.get("config/auth.yaml")
+    if raw_contract is None:
+        return  # Missing required declarations remain validation errors.
+    try:
+        contract_document = yaml.safe_load(raw_contract)
+        app_manifest = json.loads(files_map.get("app.json", "{}"))
+        manifest = json.loads(files_map.get("ui/route_manifest.json", '{"pages": []}'))
+    except (yaml.YAMLError, json.JSONDecodeError, TypeError):
+        raise AppAuthContractError("Auth route composition requires valid auth YAML and app/route JSON") from None
+    contract = validate_app_auth_contract(contract_document)
+    if not isinstance(app_manifest, dict) or app_manifest.get("authRequired") is not True:
+        raise AppAuthContractError("config/auth.yaml requires app.json.authRequired=true")
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("pages"), list):
+        raise AppAuthContractError("ui/route_manifest.json must declare pages")
+    manifest["pages"] = compose_app_auth_routes(contract, manifest["pages"])
+    files_map["ui/route_manifest.json"] = json.dumps(manifest, indent=2, ensure_ascii=False)
 
 
 def extract_code_file_map_from_payload(
@@ -108,6 +143,67 @@ def extract_deleted_file_paths_from_payload(payload: Any) -> list[str]:
     return paths
 
 
+def save_generated_code(context_variables: Any) -> dict[str, Any]:
+    """Persist the current validated output before AG2 advances to a quality gate."""
+    payload = detach(context_variables.get("structured_output"))
+    try:
+        if not isinstance(payload, dict):
+            raise ValueError("Generated code persistence requires validated structured_output.")
+        incoming = extract_code_file_map_from_payload(payload)
+        deleted = extract_deleted_file_paths_from_payload(payload)
+    except (TypeError, ValueError) as exc:
+        if mark_repair_rejected(context_variables, str(exc)):
+            return {"status": "rejected", "error": str(exc), "saved_files": [], "deleted_files": []}
+        raise
+    existing = detach(context_variables.get("code_files", [])) or []
+    files = extract_code_file_map_from_payload({"code_files": existing})
+    baseline = detach(context_variables.get("generated_files", {})) or {}
+    try:
+        incoming = validate_repair_candidate(
+            context_variables, incoming, deleted, existing={**baseline, **files},
+        )
+    except RepairOwnershipError as exc:
+        return {"status": "rejected", "error": str(exc), "saved_files": [], "deleted_files": []}
+    files.update(incoming)
+    removed = set(detach(context_variables.get("deleted_files", [])) or [])
+    removed.update(deleted)
+    removed.difference_update(incoming)
+    for path in removed:
+        files.pop(path, None)
+    values = {
+        "code_files": [{"filename": path, "content": content} for path, content in sorted(files.items())],
+        "deleted_files": sorted(removed),
+    }
+    for key, value in values.items():
+        if isinstance(context_variables, dict):
+            context_variables[key] = value
+        else:
+            context_variables.set(key, value)
+    mark_repair_responded(context_variables)
+    return {"saved_files": sorted(incoming), "deleted_files": deleted}
+
+
+def admitted_app_file_map(context_variables: Any) -> dict[str, str]:
+    """Project the current bundle and admitted repairs, never raw worker history."""
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return {}
+    raw = detach(context_variables.get("generated_files"))
+    files: dict[str, str] = {}
+    if isinstance(raw, dict):
+        for path, content in raw.items():
+            safe = safe_relpath(str(path))
+            if safe and safe != "." and ":" not in safe and "\x00" not in safe:
+                files[safe] = str(content)
+    files.update(extract_code_file_map_from_payload({
+        "code_files": detach(context_variables.get("code_files")),
+    }))
+    for path in extract_deleted_file_paths_from_payload({
+        "deleted_files": detach(context_variables.get("deleted_files")),
+    }):
+        files.pop(path, None)
+    return files
+
+
 def collect_generated_app_file_map(
     generated_app_dir: Any,
     *,
@@ -154,11 +250,14 @@ def collect_generated_app_file_entries(generated_app_dir: Any) -> list[dict[str,
 
 
 __all__ = [
+    "admitted_app_file_map",
+    "compose_bundle_auth_routes",
     "collect_generated_app_file_entries",
     "collect_generated_app_file_map",
     "extract_code_file_entries_from_payload",
     "extract_code_file_map_from_payload",
     "extract_deleted_file_paths_from_payload",
     "safe_relpath",
+    "save_generated_code",
 ]
 
