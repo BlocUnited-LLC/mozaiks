@@ -109,9 +109,9 @@ def test_layout_values_aligned_across_structured_output_and_renderer():
 # ---------------------------------------------------------------------------
 
 def _get_platform_shell_mode_values() -> frozenset[str]:
-    """Import _SHELL_MODE_VALUES from the platform host module."""
-    import mozaiksai.hosts.platform as plat  # noqa: PLC0415
-    return frozenset(plat._SHELL_MODE_VALUES)  # noqa: SLF001
+    """Import _SHELL_MODE_VALUES from the shell-config module that owns it."""
+    import mozaiksai.hosts.shell_config as shell  # noqa: PLC0415
+    return frozenset(shell._SHELL_MODE_VALUES)  # noqa: SLF001
 
 
 def test_shell_mode_values_aligned_across_structured_output_and_platform():
@@ -122,7 +122,7 @@ def test_shell_mode_values_aligned_across_structured_output_and_platform():
     assert so_values == platform_values, (
         f"Shell mode drift detected.\n"
         f"  structured_outputs.yaml AppShellMode: {sorted(so_values)}\n"
-        f"  platform._SHELL_MODE_VALUES: {sorted(platform_values)}\n"
+        f"  shell_config._SHELL_MODE_VALUES: {sorted(platform_values)}\n"
         f"  In SO only: {sorted(so_values - platform_values)}\n"
         f"  In platform only: {sorted(platform_values - so_values)}"
     )

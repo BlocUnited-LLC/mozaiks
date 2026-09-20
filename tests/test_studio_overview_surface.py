@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from mozaiksai.hosts import shell_config
+
 
 def _workspace() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -24,14 +26,13 @@ def test_studio_host_exposes_local_app_overview_endpoint() -> None:
 
 @pytest.mark.asyncio
 async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkeypatch) -> None:
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.hosts import studio as studio_app
 
     monkeypatch.setenv("PLATFORM_PATH", "factory_app/app")
     studio_source = _read("mozaiksai/hosts/studio.py")
     platform_source = _read("mozaiksai/hosts/platform.py")
-    studio_shell = await platform_app.build_shell_config(surface="studio")
-    platform_shell = await platform_app.build_shell_config(surface="platform")
+    studio_shell = await shell_config.build_shell_config(surface="studio")
+    platform_shell = await shell_config.build_shell_config(surface="platform")
 
     console_pages = {page.get("path"): page for page in studio_shell.get("pages", [])}
     platform_paths = {page.get("path") for page in platform_shell.get("pages", [])}

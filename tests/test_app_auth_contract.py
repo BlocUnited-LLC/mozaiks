@@ -19,6 +19,7 @@ from mozaiksai.core.runtime.app.auth_contract import (
     validate_app_auth_contract,
 )
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
+from mozaiksai.hosts import shell_config
 
 FACTORY_APP = Path(__file__).resolve().parents[1] / "factory_app" / "app"
 
@@ -228,11 +229,10 @@ async def test_missing_browser_env_never_disables_backend_auth(monkeypatch, auth
 
 @pytest.mark.asyncio
 async def test_shell_projects_auth_contract_and_effective_local_mode(monkeypatch):
-    from mozaiksai.hosts import platform
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
-    monkeypatch.setattr(platform, "resolve_app_root", lambda: FACTORY_APP)
-    result = await platform.build_shell_config(surface="studio")
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: FACTORY_APP)
+    result = await shell_config.build_shell_config(surface="studio")
     assert result["auth"]["contract"]["routes"]["post_login_default"] == "/apps"
     assert result["auth"]["runtime"]["local_development"] is True
     assert result["auth"]["runtime"]["user"]["id"] == "anonymous"
