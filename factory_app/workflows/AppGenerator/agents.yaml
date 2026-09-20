@@ -738,7 +738,17 @@ agents:
   max_consecutive_auto_reply: 8
   structured_outputs_required: true
 - name: AppSchemaAgent
+  pending_turn_replay: block
   prompt_sections:
+  - id: repair_scope
+    heading: '[OWNED REPAIR CONTRACT]'
+    content: |-
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
+      bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
+      Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
+      Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
+      When task_run_mode is true, execute only the assigned batch task; its retained rejection and prerequisite outputs define the correction.
   - id: role
     heading: '[ROLE]'
     content: |-
@@ -1316,7 +1326,17 @@ agents:
   max_consecutive_auto_reply: 6
   structured_outputs_required: true
 - name: DatabaseAgent
+  pending_turn_replay: block
   prompt_sections:
+  - id: repair_scope
+    heading: '[OWNED REPAIR CONTRACT]'
+    content: |-
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
+      bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
+      Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
+      Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
+      When task_run_mode is true, execute only the assigned batch task; its retained rejection and prerequisite outputs define the correction.
   - id: role
     heading: '[ROLE]'
     content: |-
@@ -1526,18 +1546,23 @@ agents:
   structured_outputs_required: true
   sandbox_shell: true
 - name: ConfigMiddlewareAgent
+  pending_turn_replay: block
   prompt_sections:
+  - id: repair_scope
+    heading: '[OWNED REPAIR CONTRACT]'
+    content: |-
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
+      bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
+      Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
+      Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
+      When task_run_mode is true, execute only the assigned batch task; its retained rejection and prerequisite outputs define the correction.
   - id: role
     heading: '[ROLE]'
     content: |-
       You are the Config & Middleware Agent. You have explicit operating modes — read
-      `workflow_integration_repair_status` and `bundle_repair_target` first, then `current_build_task_type`,
+      `bundle_repair_target` first, then `current_build_task_type`,
       and follow the matching mode exclusively.
-
-      **Mode R — workflow_integration_repair** (`workflow_integration_repair_status == "needs_revision"`):
-        Repair generated workflow wiring YAML for one affected module. This mode
-        is entered after the deterministic AppGenerator acceptance gate found
-        AgentGenerator-to-AppGenerator contract drift.
 
       **Mode BSR — bundle_scan_repair** (`bundle_repair_target == "ConfigMiddlewareAgent"`):
         Repair generated-bundle scanner failures in configuration, subscription,
@@ -1579,13 +1604,6 @@ agents:
         add_on_products with provider-neutral price.amount_cents/currency,
         usage_limits, token_allowances, usage_charge_policies, and
         pricing_catalog display metadata only.
-
-      **Mode R (workflow_integration_repair)**:
-      - Read `workflow_integration_repair_request` and `workflow_integration_repair_failed_tests`.
-      - Repair only the affected module contract YAML that wires the generated workflow into the app.
-      - Use `generated_files` as the current source files, then emit a complete corrected module contract bundle for the affected module.
-      - Preserve the existing module's actions, events, notifications, settings, admin panels, profile panels, stubs, and runtime extensions unless the repair request names them.
-      - Do not generate backend Python, frontend JS, app pages, service foundation files, data contracts, shell config, or unrelated modules.
 
       **Mode BSR (bundle_scan_repair)**:
       - Read `bundle_repair_request` and `bundle_repair_errors`.
@@ -1635,13 +1653,6 @@ agents:
         integration tools while generating module contracts or service
         foundation files.
 
-      **Mode R inputs**:
-      - `workflow_integration_repair_status`: `needs_revision` means repair mode is active and takes priority over task modes.
-      - `workflow_integration_repair_request`: deterministic acceptance-gate repair instructions. Treat this as the repair scope.
-      - `workflow_integration_repair_failed_tests`: raw failed test records with paths and fix suggestions.
-      - `generated_files`: current app bundle files. Read the affected module's existing YAML from this map.
-      - `[WORKFLOW INTEGRATION CONTRACT]` is injected when an AgentGenerator workflow exists. It contains the exact workflow capability id and trigger event reactions to use.
-
       **Mode BSR inputs**:
       - `bundle_repair_status`: `needs_revision` means generated-bundle scanner repair mode is active.
       - Repair only when `bundle_repair_target == "ConfigMiddlewareAgent"`.
@@ -1660,20 +1671,6 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      **If `workflow_integration_repair_status == "needs_revision"` (Mode R)**:
-
-      1. Read `workflow_integration_repair_request` and `workflow_integration_repair_failed_tests`.
-      2. Identify the affected module id from failed test paths such as `modules/{module_id}/module.yaml` or `modules/{module_id}/contracts/reactions.yaml`. If multiple modules are listed, choose the module with the first failed test and keep the output scoped to that module only.
-      3. Read that module's existing YAML from `generated_files`.
-      4. Produce `mode: "module_contract_bundle"` with a complete `module_contract` for the affected module, plus `code_files` for the corrected YAML files only.
-      5. Correct workflow wiring drift only:
-         - `module.yaml.capabilities[]` may declare the generated workflow capability only when required by the existing module contract and AgentGenerator metadata.
-         - `contracts/reactions.yaml` workflow targets must use `target.kind: capability` and the injected workflow capability id.
-         - Trigger events must come from the injected workflow integration contract; do not invent event types or route unrelated events.
-      6. Preserve unrelated YAML content from the existing module. Do not change backend stubs, UI stubs, admin/profile panels, settings, notification rules, or runtime extensions unless they directly reference the failed workflow wiring.
-      7. Set `service_foundation_bundle` to null. Do not emit Python, JavaScript, app shell, page, database, or service files.
-      8. If the affected module cannot be identified from failed tests or `generated_files`, fail clearly in `agent_message` instead of broadening scope.
-
       **If `bundle_repair_target == "ConfigMiddlewareAgent"` (Mode BSR)**:
 
       1. Read `bundle_repair_request`, `bundle_repair_errors`, and `generated_files`.
@@ -1993,7 +1990,15 @@ agents:
   structured_outputs_required: true
   sandbox_shell: true
 - name: RefinementHarnessAgent
+  pending_turn_replay: block
   prompt_sections:
+  - id: repair_scope
+    heading: '[OWNED REPAIR CONTRACT]'
+    content: |-
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
+      bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve unrelated accepted files and all required planned artifacts.
+      Read dependency_task_outputs and generated_files, then use the existing typed refinement_harness materializer. Do not invent missing root diagnostics or report blocked work as complete.
   - id: role
     heading: '[ROLE]'
     content: |-
@@ -2142,7 +2147,17 @@ agents:
   max_consecutive_auto_reply: 2
   structured_outputs_required: true
 - name: ModelAgent
+  pending_turn_replay: block
   prompt_sections:
+  - id: repair_scope
+    heading: '[OWNED REPAIR CONTRACT]'
+    content: |-
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
+      bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
+      Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
+      Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
+      When task_run_mode is true, execute only the assigned batch task; its retained rejection and prerequisite outputs define the correction.
   - id: role
     heading: '[ROLE]'
     content: You are the Model Agent responsible for defining module-local typed shapes in backend/schemas.py.
@@ -2244,17 +2259,16 @@ agents:
       - Build validation is disposable and returns no live preview URL. Interactive previews belong to separate Studio sessions.
       - The runtime gate runs app validation, agent-backend checks only when agent backend context exists, module/page wiring checks, and a final module.yaml-to-backend implementation contract check.
       - The runtime gate writes `app_validation_status`, `app_validation_result`, `wiring_validation_result`, `module_implementation_validation_result`, `workflow_integration_validation_result`, `bundle_scan_result`, `integration_tests_passed`, and `integration_test_result`.
-      - When AgentGenerator workflow wiring fails, the gate writes `workflow_integration_repair_status`:
-        - `needs_revision`: runtime routing schedules a bounded workflow-integration contract repair pass.
-        - `blocked`: repair attempts are exhausted and workflow routing returns to the user.
-        - `passed` or `not_applicable`: no workflow-integration repair pass is needed.
+      - Planned completeness requires every approved task's accepted output and required final artifacts. A partial bundle cannot pass because its remaining files are structurally valid.
+      - Original failed-task diagnostics, rejected candidates, and dependency-blocked reasons remain in authoritative batch results. Assembly summaries are projections only.
+      - Factory may request one correction for an evidenced output rejection through the same AG2 batch. Missing diagnostics, exhausted attempts, stale inputs, and interrupted attempts remain blocked.
       - When generated-bundle scanner, runtime-load, runtime-quality, or module-implementation failures are repairable, the gate writes `bundle_repair_status`, `bundle_repair_target`, `bundle_repair_request`, and `bundle_repair_result`:
         - `needs_revision`: a bounded repair pass is scheduled and workflow routing returns to the owning agent named by `bundle_repair_target`.
         - `blocked`: scanner repair attempts are exhausted or the scanner error has no deterministic owner, and workflow routing returns to the user.
         - `passed` or `not_applicable`: no scanner repair pass is needed.
 
       **Downstream**:
-      - The runtime schedules workflow-integration contract repair when `workflow_integration_repair_status == "needs_revision"`.
+      - Workflow integration errors share the same task ownership and finite artifact-repair budget as other acceptance diagnostics.
       - The runtime selects the bounded repair lane from the declared `bundle_repair_target`; this validation step does not select or invoke another worker.
       - The runtime advances to export only when validation does not fail and integration checks pass.
   - id: instructions
@@ -2449,7 +2463,17 @@ agents:
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
 - name: ServiceAgent
+  pending_turn_replay: block
   prompt_sections:
+  - id: repair_scope
+    heading: '[OWNED REPAIR CONTRACT]'
+    content: |-
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
+      bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
+      Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
+      Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
+      When task_run_mode is true, execute only the assigned batch task; its retained rejection and prerequisite outputs define the correction.
   - id: role
     heading: '[ROLE]'
     content: |-
@@ -2531,7 +2555,7 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. In task batch mode, implement exactly the backend files listed in `current_build_task.owned_paths`. They must be a subset of `module_contract.python_stubs`.
+      1. Read the accepted prerequisite module.yaml handler entrypoint and every actions[].handler_method. Define that exact handler class and every required method; a class rename alone does not complete missing actions. In task batch mode, implement exactly the backend files listed in `current_build_task.owned_paths`. They must be a subset of `module_contract.python_stubs`.
       2. For durable module surfaces, make `backend/handler.py` a thin adapter that delegates to service/policy/repo/schemas helpers rather than holding all business logic inline.
       3. Reference model details from the Code Context.
       4. For persistent modules, generate `backend/repo.py` around `context.persistence.collection(module_id, entity_name)`. If `context.persistence` is unavailable, raise a clear RuntimeError from repo.py. Do not use `ctx.db`, `context.db`, `get_mongo_client()`, `get_database()`, or hardcoded database names.
@@ -2706,7 +2730,17 @@ agents:
   max_consecutive_auto_reply: 2
   structured_outputs_required: true
 - name: FrontendStubAgent
+  pending_turn_replay: block
   prompt_sections:
+  - id: repair_scope
+    heading: '[OWNED REPAIR CONTRACT]'
+    content: |-
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
+      bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
+      Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
+      Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
+      When task_run_mode is true, execute only the assigned batch task; its retained rejection and prerequisite outputs define the correction.
   - id: role
     heading: '[ROLE]'
     content: |-
@@ -2822,7 +2856,17 @@ agents:
   structured_outputs_required: true
   sandbox_shell: true
 - name: ControllerAgent
+  pending_turn_replay: block
   prompt_sections:
+  - id: repair_scope
+    heading: '[OWNED REPAIR CONTRACT]'
+    content: |-
+      When task_run_mode is false and bundle_repair_result.active.status is selected, repair only the approved task in current_build_task.
+      Its task_id must match bundle_repair_result.active.task_id; report a mismatch without changing artifacts.
+      bundle_repair_result.active.allowed_paths is the complete mutation boundary. Preserve all other accepted files and never delete a required planned artifact.
+      Read dependency_task_outputs for the accepted prerequisite contracts and generated_files for the current source. Preserve canonical identities and references; use the existing typed materializers for their serialization.
+      Deferred failures belong to their recorded task owners. Do not regenerate another lane, invent a missing root diagnostic, or report blocked work as complete.
+      When task_run_mode is true, execute only the assigned batch task; its retained rejection and prerequisite outputs define the correction.
   - id: role
     heading: '[ROLE]'
     content: You are the Controller Agent responsible for generating bounded API surfaces for canonical Mozaiks modules and optional split app-backend routes.

@@ -133,6 +133,7 @@ class AgentSpec(DeclarativeModel):
     description: str | None = None
     human_input_mode: str | None = None
     max_consecutive_auto_reply: int = 2
+    pending_turn_replay: Literal["allow", "block"] = "allow"
     structured_outputs_required: bool
     multimodal_inputs_enabled: bool = False
     image_generation_enabled: bool = False

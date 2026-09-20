@@ -14,6 +14,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     app_build_plan,
 )
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.dependency_graph import deterministic_topological_order
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
@@ -326,9 +327,6 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
         if pack.get("user_data_scope") is True:
             required["business_services"].add(f"modules/{module_id}/backend/account_data_handler.py")
 
-        contract_task = next(
-            (t.get("task_id") for t in module_tasks if t.get("task_type") == "module_contract"), None
-        )
         for kind, paths in required.items():
             typed = [t for t in module_tasks if t.get("task_type") == kind]
             owned = {path for t in typed for path in _normalized_owned_paths(t)}
@@ -351,13 +349,62 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                     "description": _synthesized_task_brief(kind, module_id, pack),
                     "initial_message": _synthesized_task_brief(kind, module_id, pack),
                     "owned_paths": missing,
-                    "depends_on": [contract_task] if contract_task and kind != "module_contract" else [],
+                    "depends_on": [],
                 }
                 tasks.append(synthesized)
                 module_tasks.append(synthesized)
                 repairs.append(f"synthesized {synthesized['task_id']!r} owning {missing}")
 
     plan["build_tasks"] = tasks
+    repairs.extend(_repair_module_task_dependencies(plan))
+    return repairs
+
+
+def _repair_module_task_dependencies(plan: dict[str, Any]) -> list[str]:
+    """Supply direct contract inputs after every module task has been synthesized."""
+    repairs: list[str] = []
+    tasks = plan.get("build_tasks") or []
+    persistence_tasks = [
+        str(task["task_id"])
+        for task in tasks
+        if task.get("task_type") == "persistence_contract"
+        and "data/contract.json" in _normalized_owned_paths(task)
+    ]
+    for pack in plan.get("capability_packs") or []:
+        if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
+            continue
+        module_id = _pack_id_from_descriptor(pack)
+        module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
+        prerequisites: list[str] = []
+        for kind, path in (
+            ("module_contract", f"modules/{module_id}/module.yaml"),
+            ("data_models", f"modules/{module_id}/backend/schemas.py"),
+        ):
+            owners = [
+                task for task in module_tasks
+                if task.get("task_type") == kind and path in _normalized_owned_paths(task)
+            ]
+            if len(owners) != 1:
+                raise ValueError(
+                    f"{path}: expected exactly one {kind} task owner; "
+                    f"found {[task.get('task_id') for task in owners]}"
+                )
+            prerequisites.append(str(owners[0]["task_id"]))
+
+        for task in module_tasks:
+            kind = task.get("task_type")
+            if kind not in {"data_models", "business_services"}:
+                continue
+            required = prerequisites[:1] if kind == "data_models" else list(prerequisites)
+            if pack.get("primary_entities"):
+                required.extend(persistence_tasks)
+            declared = list(task.get("depends_on") or [])
+            missing = [task_id for task_id in required if task_id not in declared]
+            if missing:
+                task["depends_on"] = [*declared, *missing]
+                repairs.append(
+                    f"{task.get('task_id')}: added prerequisite contract inputs {missing}"
+                )
     return repairs
 
 # What each synthesized task tells its worker to do. A task the coverage
@@ -603,15 +650,19 @@ def validate_plan_dependencies(plan: dict[str, Any], context: Any) -> None:
         ]
         if missing:
             dangling[str(task.get("task_id"))] = missing
-    if not dangling:
-        return
-    detail = "; ".join(
-        f"{task_id} waits on {missing}" for task_id, missing in sorted(dangling.items())
-    )
-    raise ValueError(
-        "Every depends_on must name a task_id this plan declares. "
-        f"{detail}. Either declare the missing tasks, or drop the dependency "
-        "if the work is already covered by a task that is present."
+    if dangling:
+        detail = "; ".join(
+            f"{task_id} waits on {missing}" for task_id, missing in sorted(dangling.items())
+        )
+        raise ValueError(
+            "Every depends_on must name a task_id this plan declares. "
+            f"{detail}. Either declare the missing tasks, or drop the dependency "
+            "if the work is already covered by a task that is present."
+        )
+    deterministic_topological_order(
+        tasks,
+        item_id=lambda task: str(task.get("task_id") or ""),
+        dependencies=lambda task: task.get("depends_on") or [],
     )
 
 
@@ -833,6 +884,7 @@ def review_app_build_plan(
         cached = detach(context_variables.get("app_build_plan"))
         if not context_variables.get("app_plan_ready") or not isinstance(cached, dict):
             raise RuntimeError("Validated plan was not cached")
+        validate_plan_dependencies(cached, context_variables)
         validate_plan_coverage(cached, context_variables)
     except ValueError as error:
         _clear_plan(context_variables)

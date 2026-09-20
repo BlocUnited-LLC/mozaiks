@@ -80,7 +80,7 @@ def _make_request(**overrides: Any) -> AG2NetworkRunnerRequest:
         workflow_name="TestWorkflow",
         chat_id="chat-1",
         app_id="app-1",
-        agents={"AgentA": MagicMock()},
+        agents={"AgentA": MagicMock(_mozaiks_pending_turn_replay="allow")},
         transition_rules=[],
         initial_agent_name="AgentA",
         initial_message="hello",

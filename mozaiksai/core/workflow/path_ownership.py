@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from mozaiksai.core.runtime.app.paths import APP_SECURITY_SECRETS_PATH
+
 from .generator_support.code_files import safe_relpath
 
 _GLOB_CHARS = frozenset("*?[")
@@ -49,6 +51,9 @@ def normalize_owned_path(path: str) -> str:
     normalized = safe_relpath(cleaned)
     if not normalized:
         raise ValueError(f"unsafe owned path: {path!r}")
+    # The names-only manifest is a canonical artifact; its content is validated separately.
+    if normalized == APP_SECURITY_SECRETS_PATH:
+        return normalized
     lower = normalized.lower()
     for term in _SECRET_PATH_TERMS:
         if term in lower:

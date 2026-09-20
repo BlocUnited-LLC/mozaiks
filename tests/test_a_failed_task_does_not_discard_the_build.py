@@ -1,29 +1,11 @@
-"""One agent mistake must not discard every finished task in the run.
+"""Failed tasks drain their dependents while preserving accepted independent work."""
 
-A live build ran 1.3h and died on a single module_contract task:
-
-    task batch 'app_build_tasks' failed at task 'task_habit_management_module':
-    module_contract.events_yaml is null but raw output emits .../contracts/events.yaml
-
-fail_batch discarded the five tasks that had already succeeded, and the
-bundle-level repair loop never saw anything because no bundle was ever
-produced. Three retry layers exist; the fatal one was the bottom one, so the
-two that can actually repair were unreachable.
-
-The scheduler already drains tasks whose dependency failed, marking them
-"dependency 'X' failed", so continue_with_available fails the dependent subtree
-and keeps the rest. Acceptance then judges what arrived - which is what it is
-for, and it now has a repair path.
-
-The second half matters as much as the first: the AppPlanAgent -> AssemblyAgent
-rule only matched status "completed". Switching the policy alone would have
-turned a loud crash into a silent stall.
-"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,26 +39,33 @@ def test_a_partial_batch_still_reaches_assembly() -> None:
     assert targets.get("partial") == "AssemblyAgent"
 
 
-def test_the_scheduler_drains_dependents_of_a_failed_task() -> None:
-    """The subtree fails; the rest of the build does not."""
-    import asyncio
+@pytest.mark.asyncio
+async def test_identical_rejection_stops_and_preserves_independent_work(monkeypatch) -> None:
+    from collections import Counter
 
-    from mozaiksai.core.workflow.task_batches import _task_dependencies
+    from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
+    from mozaiksai.core.ports.orchestration import RunStatus
+    from mozaiksai.core.workflow import task_batches as tb
+    from tests.test_task_batch_recovery import _config, _context, _execute
 
-    # The behaviour under test lives in the scheduling loop: a task whose
-    # dependency failed is moved to `failed` with a dependency error rather than
-    # left pending, which is what makes continue_with_available terminate.
-    source = (ROOT / "mozaiksai/core/workflow/task_batches.py").read_text(encoding="utf-8")
-    assert "Drain tasks that can never run because a required dependency failed." in source
-    assert "f\"dependency '{failed_dep}' failed\"" in source
-    assert _task_dependencies({"depends_on": ["a"]}, "depends_on") == ["a"]
-    assert asyncio  # the loop is async; imported to document where this runs
+    config, context, counts = _config(), _context(), Counter()
+    config.batches[0].recovery = None
 
+    async def run(self, request):
+        counts[request.task_id] += 1
+        task = request.context_variables["current_task"]
+        files = [{"filename": path, "content": "{}"} for path in task["owned_paths"]]
+        if request.task_id == "services":
+            files.append({"filename": "modules/task_management/backend/schemas.py", "content": "invalid"})
+        return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output={"code_files": files})
 
-def test_an_identical_retry_stops_instead_of_spending_the_budget() -> None:
-    source = (ROOT / "mozaiksai/core/workflow/task_batches.py").read_text(encoding="utf-8")
+    monkeypatch.setattr(tb.AG2TaskBatchRunner, "run", run)
+    await _execute(context, config, [])
 
-    assert "if _attempt == attempts - 1 or message == last_error:" in source
+    assert counts == {"models": 1, "services": 2, "independent": 1}
+    assert context["status"] == "partial"
+    assert context["results"]["_failed"]["page"]["blocked_by"] == ["services"]
+    assert "models" in context["results"] and "independent" in context["results"]
 
 
 def test_the_retry_budget_is_unchanged_for_failures_that_differ() -> None:

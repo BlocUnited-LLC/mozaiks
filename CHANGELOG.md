@@ -12,8 +12,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- App download and validation now use admitted current artifacts and repairs.
+  Historical worker responses cannot restore rejected changes/deletions or
+  overwrite a newer authorized repair, and migration registration preserves
+  the accepted file bytes used by download and export.
+- Factory generation now preserves task failures and successful outputs, supplies
+  synthesized workers their actual prerequisites, and recovers eligible rejected
+  tasks through the existing AG2 batch within finite budgets. Repairs respect
+  approved task ownership; acceptance and export require the complete planned
+  snapshot. Runs with missing diagnostics or uncertain interrupted attempts stay
+  blocked instead of being reconstructed.
+- Task ownership now accepts the canonical `security/secrets.yaml` policy
+  artifact while retaining path safety checks and rejecting raw secret values.
+
 ### Changed
 
+- Workflow agents can declare `pending_turn_replay: block` to stop automatic
+  replay of uncertain AG2 pending turns. Existing agents default to `allow`;
+  AppGenerator artifact workers now block replay. Deploy the runtime and Factory
+  contracts together; migration and rollback are documented in
+  [ADR 0011](docs/adr/0011-factory-bounded-task-recovery.md).
 - Generated page actions are now five closed shapes chosen by `action_type`
   (`navigate`, `submit`, `delete`, `event`, `workflow`) instead of one shape
   with every field nullable. Each declares only the fields that behave on it,

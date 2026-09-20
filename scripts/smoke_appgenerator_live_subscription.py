@@ -21,11 +21,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from scripts.appgenerator_fixture_replay import execute_file_replay
 from scripts.smoke_appgenerator_live_acceptance import SmokeContext
 
 DEFAULT_APP_ID = "subscription-reporting-live-smoke"
@@ -189,8 +191,8 @@ def _subscription_task() -> dict[str, Any]:
         "task_type": "subscription_config",
         "capability_pack_id": None,
         "surface_id": "subscription_contract",
-        "surface_kind": "refinement",
-        "execution_target": "app_bundle",
+        "surface_kind": "app_policy",
+        "execution_target": "AppGenerator",
         "initial_agent": "ConfigMiddlewareAgent",
         "description": "Materialize the provider-neutral subscription plan catalog.",
         "initial_message": (
@@ -214,7 +216,7 @@ def _module_contract_task() -> dict[str, Any]:
         "capability_pack_id": "reports",
         "surface_id": "reports",
         "surface_kind": "module",
-        "execution_target": "app_bundle",
+        "execution_target": "AppGenerator",
         "initial_agent": "ConfigMiddlewareAgent",
         "description": "Declare the reports module contract with SaaS entitlement gates.",
         "initial_message": textwrap.dedent(
@@ -254,6 +256,7 @@ def _build_plan(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "agent_message": "Plan ready for subscription smoke.",
         "app_kind": "saas",
+        "monetization_provider": "entitlement_dispatch",
         "pages": [
             {
                 "name": "Reports",
@@ -277,8 +280,17 @@ def _build_plan(tasks: list[dict[str, Any]]) -> dict[str, Any]:
                 "surface_id": "reports",
                 "surface_kind": "module",
                 "label": "Reports",
+                "capability_source": "generated_module",
                 "operations": ["list_reports", "generate_report"],
-            }
+            },
+            {
+                "capability_pack_id": "entitlement_dispatch",
+                "surface_id": "entitlement_dispatch",
+                "surface_kind": "module",
+                "label": "Self-managed subscription assignments",
+                "capability_source": "generated_module",
+                "operations": ["activate_subscription", "deactivate_subscription"],
+            },
         ],
         "external_integrations": [],
         "agent_backend_required": False,
@@ -633,7 +645,7 @@ def deterministic_module_contract_output() -> dict[str, Any]:
             "module_yaml": yaml.safe_load(module_yaml),
             "events_yaml": {"schema_version": "mozaiks.events.v1", "events": []},
             "reactions_yaml": {"schema_version": "mozaiks.reactions.v1", "reactions": []},
-            "notifications_yaml": {"schema_version": "mozaiks.notifications.v1", "rules": []},
+            "notifications_yaml": {"schema_version": "mozaiks.notifications.v1", "notifications": []},
             "settings_yaml": {"schema_version": "mozaiks.settings.v1", "settings": [], "features": []},
             "admin_yaml": {"schema_version": "mozaiks.admin.v2", "panels": []},
             "profile_yaml": None,
@@ -1025,8 +1037,45 @@ async def validate_subscription_acceptance_handoff(
     *,
     subscription_yaml: str,
     module_yaml: str,
+    task_outputs: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     files = build_acceptance_files(subscription_yaml, module_yaml)
+    tasks = [_subscription_task(), _module_contract_task()]
+    contract = tasks[1]
+    tasks.extend([
+        {
+            **contract, "task_id": "subscription_persistence", "task_type": "persistence_contract",
+            "initial_agent": "DatabaseAgent", "owned_paths": ["data/contract.json"], "depends_on": [],
+        },
+        {
+            **contract, "task_id": "reports_models", "task_type": "data_models", "initial_agent": "ModelAgent",
+            "owned_paths": ["modules/reports/backend/schemas.py"],
+            "depends_on": [contract["task_id"], "subscription_persistence"],
+        },
+        {
+            **contract, "task_id": "reports_services", "task_type": "business_services", "initial_agent": "ServiceAgent",
+            "owned_paths": [f"modules/reports/backend/{name}.py" for name in ("__init__", "handler", "service", "repo", "policy")],
+            "depends_on": [contract["task_id"], "reports_models", "subscription_persistence"],
+        },
+        {
+            **contract, "task_id": "entitlement_contract", "capability_pack_id": "entitlement_dispatch",
+            "surface_id": "entitlement_dispatch", "owned_paths": ["modules/entitlement_dispatch/module.yaml"],
+            "depends_on": ["task_subscription_config", "subscription_persistence"],
+        },
+        {
+            **contract, "task_id": "entitlement_services", "task_type": "business_services", "initial_agent": "ServiceAgent",
+            "capability_pack_id": "entitlement_dispatch", "surface_id": "entitlement_dispatch",
+            "owned_paths": [f"modules/entitlement_dispatch/backend/{name}.py" for name in ("__init__", "handler", "service", "repo")],
+            "depends_on": ["entitlement_contract", "subscription_persistence"],
+        },
+        {
+            **contract, "task_id": "subscription_pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+            "capability_pack_id": None, "surface_kind": "ui_only", "surface_id": "reporting",
+            "owned_paths": ["app.json", "config/ai.json", "config/shell.json", "ui/route_manifest.json",
+                            "ui/pages/reports.yaml", "ui/pages/usage.yaml"],
+            "depends_on": ["reports_services", "entitlement_services", "task_subscription_config"],
+        },
+    ])
     context = SmokeContext(
         {
             "workflow_name": "AppGenerator",
@@ -1035,9 +1084,13 @@ async def validate_subscription_acceptance_handoff(
             "generated_files": files,
             "app_validation_status": "skipped",
             "app_validation_strategy_used": "skip",
-            "app_build_plan": _build_plan([_subscription_task(), _module_contract_task()]),
         }
     )
+    app_build_plan(AppBuildPlan=_build_plan(tasks), context_variables=context)
+    accepted = await execute_file_replay(context.data, files, task_outputs=task_outputs)
+    files.update({file["filename"]: file["content"] for task_id, output in accepted.items()
+                  if not task_id.startswith("_") for file in output["code_files"]})
+    context.set("generated_files", files)
 
     wiring = await validate_wiring(context_variables=context)
     acceptance = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
@@ -1105,6 +1158,10 @@ async def validate_subscription_acceptance_handoff(
             "acceptance": acceptance,
             "export_gate": export_gate,
             "runtime_loader": loader_result,
+            "task_batch_status": context.get("app_task_batch_status"),
+            "accepted_task_ids": sorted(task_id for task_id in accepted if not task_id.startswith("_")),
+            "failed_tasks": accepted.get("_failed", {}),
+            "generated_paths": sorted(files),
             "context": context.to_dict(),
         }
     )
@@ -1129,6 +1186,7 @@ async def run_deterministic_appgenerator_subscription_smoke() -> dict[str, Any]:
     acceptance = await validate_subscription_acceptance_handoff(
         subscription_yaml=subscription_yaml,
         module_yaml=module_yaml,
+        task_outputs={"task_subscription_config": subscription_output, "task_reports_module_contract": module_output},
     )
     return {
         "success": bool(acceptance.get("success")),
@@ -1287,6 +1345,7 @@ async def run_live_appgenerator_subscription_smoke(
     acceptance = await validate_subscription_acceptance_handoff(
         subscription_yaml=subscription_yaml,
         module_yaml=module_yaml,
+        task_outputs={"task_subscription_config": subscription_output, "task_reports_module_contract": module_output},
     )
     errors = list(acceptance.get("validation_errors") or [])
 

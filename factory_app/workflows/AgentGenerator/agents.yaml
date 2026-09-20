@@ -565,6 +565,12 @@ agents:
       - `structured_outputs_required` in agents.yaml must be a boolean scalar
         exactly `true` or `false`. Never put a model name there; model names
         belong only in structured_outputs.yaml `registry`.
+      - `pending_turn_replay` in agents.yaml follows the runtime AgentSpec contract:
+        `allow` (the default) or `block`. Use `block` when an interrupted worker
+        requires workflow-owned recovery or reconciliation before a new attempt.
+        It prevents replay of an uncertain pending turn on resume; fresh turns
+        still execute normally. It does not authorize retries or replace the
+        workflow's finite attempt budget and recovery policy.
       - `transition_graph.yaml` must use flat rule objects with `source_agent`,
         `target_agent`, and `transition_type`. Never emit nested keys such as
         `after_turn: {source_agent: ...}`.

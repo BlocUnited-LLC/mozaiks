@@ -428,7 +428,9 @@ async def assemble_app_tasks(
     if not app_id:
         raise ValueError("app_id is required to assemble task outputs")
 
-    if not feature_outputs:
+    if not feature_outputs and not _failed_batch_task_ids(
+        detach(context_variables.get("app_task_batch_results")) if context_variables else None
+    ):
         raise ValueError("No AppGenerator schema artifacts, task batch outputs, or accumulated code files are available for assembly")
 
     result = await assemble_features(
@@ -497,14 +499,6 @@ async def assemble_app_tasks(
                             for key in task_results
                             if not str(key).startswith("_")
                         ],
-                    },
-                )
-                context_variables.set(
-                    "app_task_batch_results",
-                    {
-                        "_meta": meta,
-                        "assembled": True,
-                        "result_context_key": "app_task_batch_results_summary",
                     },
                 )
         except Exception:

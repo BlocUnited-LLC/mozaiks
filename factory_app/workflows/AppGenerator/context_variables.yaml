@@ -944,113 +944,90 @@ definitions:
       fields:
       - trigger_events
       default: []
-  workflow_integration_repair_status:
-    type: string
-    description: >
-      Bounded repair status for AgentGenerator-to-AppGenerator workflow wiring.
-      One of not_applicable | needs_revision | passed | blocked.
-    source:
-      type: computed
-      default: null
-  workflow_integration_repair_count:
-    type: integer
-    description: Number of workflow-integration repair passes already scheduled.
-    source:
-      type: computed
-      default: 0
-  workflow_integration_repair_max_attempts:
-    type: integer
-    description: Maximum automated workflow-integration repair attempts before blocking.
-    source:
-      type: computed
-      default: 2
-  workflow_integration_repair_request:
-    type: string
-    description: Focused ConfigMiddlewareAgent repair instruction derived from acceptance gate failures.
-    source:
-      type: computed
-      default: null
-  workflow_integration_repair_failed_tests:
-    type: array
-    description: Raw workflow integration failed tests that caused the repair pass.
-    source:
-      type: computed
-      default: []
-  workflow_integration_repair_failure_fingerprint:
-    type: string
-    description: Stable digest of the last workflow-integration failure evidence.
-    source:
-      type: computed
-      default: null
-  workflow_integration_repair_no_progress:
-    type: boolean
-    description: True when a repair pass reproduces the identical workflow-integration failure.
-    source:
-      type: computed
-      default: false
-  workflow_integration_repair_result:
-    type: object
-    description: Full workflow integration repair scheduling result.
-    source:
-      type: computed
-      default: null
   bundle_repair_status:
     type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: >
       Bounded repair status for deterministic generated-bundle validation failures.
       One of not_applicable | needs_revision | passed | blocked.
     source:
-      type: computed
+      type: state
       default: null
   bundle_repair_target:
     type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: >
       Agent that owns the next generated-bundle repair pass. Null unless
       bundle_repair_status is needs_revision.
     source:
-      type: computed
+      type: state
       default: null
   bundle_repair_attempt_count:
     type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: Number of generated-bundle validation repair passes already scheduled.
     source:
-      type: computed
+      type: state
       default: 0
   bundle_repair_max_attempts:
     type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: Maximum automated generated-bundle validation repair attempts before blocking.
     source:
-      type: computed
+      type: state
       default: 2
   bundle_repair_request:
     type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: Focused repair instruction derived from generated-bundle validation failures.
     source:
-      type: computed
+      type: state
       default: null
   bundle_repair_errors:
     type: array
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: Generated-bundle validation errors that caused the repair pass.
     source:
-      type: computed
+      type: state
       default: []
   bundle_repair_failure_fingerprint:
     type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: Stable digest of the last targeted generated-bundle failure evidence.
     source:
-      type: computed
+      type: state
       default: null
   bundle_repair_no_progress:
     type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: True when a repair pass reproduces the identical targeted bundle failure.
     source:
-      type: computed
+      type: state
       default: false
   bundle_repair_result:
     type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
     description: Full generated-bundle validation repair scheduling result.
     source:
-      type: computed
+      type: state
       default: null
   interview_complete:
     type: boolean
@@ -1105,18 +1082,52 @@ definitions:
       default: []
   app_task_batch_status:
     type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [task_batch]
+    persisted: true
     description: >
       Status of AppGenerator task batch execution: planned | running |
-      completed | failed.
+      completed | partial | failed.
     source:
-      type: computed
+      type: state
       default: null
   app_task_batch_results:
     type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [task_batch]
+    persisted: true
     description: Normalized results from AppGenerator task batch execution.
     source:
-      type: computed
+      type: state
       default: null
+  app_task_recovery_request:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Factory-selected failed roots and immutable input fingerprint for the existing batch.
+    source: {type: state, default: null}
+  app_task_recovery_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [task_batch]
+    persisted: true
+    description: Retained recovery outcome and exact blocked reasons from batch execution.
+    source: {type: state, default: null}
+  app_task_recovery_status:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [task_batch]
+    persisted: true
+    description: 'Routing projection of recovery state: idle, running, completed, partial, or blocked.'
+    source: {type: state, default: idle}
+  dependency_task_outputs:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Accepted direct prerequisite contracts for an ownership-scoped artifact repair.
+    source: {type: state, default: null}
   app_task_batch_results_summary:
     type: object
     description: Compact task batch status and task-key summary written after AssemblyAgent merges task outputs.
@@ -1744,6 +1755,8 @@ agents:
     - bundle_repair_target
     - bundle_repair_request
     - bundle_repair_errors
+    - bundle_repair_result
+    - dependency_task_outputs
   AssemblyAgent:
     variables:
     - app_build_plan
@@ -1818,6 +1831,8 @@ agents:
     - tool_names
     - available_agents
     - available_tools
+    - bundle_repair_result
+    - dependency_task_outputs
   ConfigMiddlewareAgent:
     variables:
     - refinement_request
@@ -1842,13 +1857,12 @@ agents:
     - generated_workflow_capability_id
     - generated_workflow_trigger_events
     - generated_files
-    - workflow_integration_repair_status
-    - workflow_integration_repair_request
-    - workflow_integration_repair_failed_tests
     - bundle_repair_status
     - bundle_repair_target
     - bundle_repair_request
     - bundle_repair_errors
+    - bundle_repair_result
+    - dependency_task_outputs
   AdminRegistryAgent:
     variables:
     - app_build_plan
@@ -1879,6 +1893,26 @@ agents:
     - current_build_task
     - current_build_task_id
     - current_build_task_type
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_errors
+    - bundle_repair_result
+    - dependency_task_outputs
+  RefinementHarnessAgent:
+    variables:
+    - current_build_task
+    - current_build_task_id
+    - current_build_task_type
+    - task_run_mode
+    - generated_files
+    - app_build_plan
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_errors
+    - bundle_repair_result
+    - dependency_task_outputs
   ServiceAgent:
     variables:
     - refinement_request
@@ -1902,6 +1936,8 @@ agents:
     - bundle_repair_target
     - bundle_repair_request
     - bundle_repair_errors
+    - bundle_repair_result
+    - dependency_task_outputs
   ControllerAgent:
     variables:
     - generated_files
@@ -1917,6 +1953,12 @@ agents:
     - current_build_task_id
     - current_build_task_type
     - integration_needs
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_errors
+    - bundle_repair_result
+    - dependency_task_outputs
   AppValidationAgent:
     variables:
     - generated_files
@@ -1938,9 +1980,6 @@ agents:
     - module_implementation_validation_result
     - workflow_integration_validation_passed
     - workflow_integration_validation_result
-    - workflow_integration_repair_status
-    - workflow_integration_repair_request
-    - workflow_integration_repair_result
     - bundle_repair_status
     - bundle_repair_target
     - bundle_repair_request
@@ -1954,6 +1993,8 @@ agents:
     - bundle_repair_target
     - bundle_repair_request
     - bundle_repair_errors
+    - bundle_repair_result
+    - dependency_task_outputs
   DownloadAgent:
     variables:
     - integration_readiness_status

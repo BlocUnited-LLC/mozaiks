@@ -85,16 +85,126 @@ def test_partial_schema_repair_preserves_pages_and_updates_validation_bundle(tmp
         manifest=_base_manifest(), pages=[customers], context_variables=context,
     )
 
-    from factory_app.workflows.AppGenerator.tools.app_validation import (
-        _generated_files_from_context,
-    )
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
 
-    files = _generated_files_from_context(context)
+    files = admitted_app_file_map(context)
     assert files["modules/customers/backend/handler.py"] == backend
     assert yaml.safe_load(files["ui/pages/Dashboard.yaml"]) == dashboard
     assert yaml.safe_load(files["ui/pages/Customers.yaml"])["title"] == "My Customers"
     assert {page["route"] for page in context.get("app_pages")} == {"/dashboard", "/customers"}
     assert json.loads(files["app.json"])["startup"]["landing_spot"] == "/dashboard"
+
+
+def _page_repair_context(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    context = _Context()
+    save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[_base_page()], context_variables=context,
+    )
+    tasks = [
+        {"task_id": "page", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+         "owned_paths": ["ui/pages/Dashboard.yaml"], "depends_on": []},
+        {"task_id": "config", "task_type": "app_config", "initial_agent": "ConfigMiddlewareAgent",
+         "owned_paths": ["config/shell.json"], "depends_on": []},
+    ]
+    context.set("app_build_plan", {"build_tasks": tasks})
+    context.set("app_task_batch_items", tasks)
+    context.set("bundle_repair_target", "AppSchemaAgent")
+    context.set("bundle_repair_result", {"active": {
+        "task_id": "page", "target_agent": "AppSchemaAgent", "request_id": "page-repair-1",
+        "allowed_paths": ["ui/pages/Dashboard.yaml"], "status": "selected",
+    }})
+    return context
+
+
+def test_schema_repair_checks_materialized_ownership_before_any_bundle_mutation(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    context = _page_repair_context(tmp_path, monkeypatch)
+    before = deepcopy(context.data)
+    output_dir = Path(context.get("generated_app_dir"))
+    disk_before = {path.relative_to(output_dir).as_posix(): path.read_bytes()
+                   for path in output_dir.rglob("*") if path.is_file()}
+    changed = {**_base_page(), "title": "Repaired dashboard"}
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[changed], shell_config={"navigation": {}},
+        context_variables=context,
+    )
+
+    assert "repair rejected" in result
+    assert "config/shell.json" in result
+    assert context.get("generated_files") == before["generated_files"]
+    assert context.get("code_files") == before["code_files"]
+    assert context.get("app_pages") == before["app_pages"]
+    assert context.get("bundle_repair_result")["active"]["status"] == "rejected"
+    assert {path.relative_to(output_dir).as_posix(): path.read_bytes()
+            for path in output_dir.rglob("*") if path.is_file()} == disk_before
+
+
+def test_schema_repair_preserves_deterministic_scaffolds_and_unrelated_bytes(tmp_path, monkeypatch):
+    context = _page_repair_context(tmp_path, monkeypatch)
+    before = dict(context.get("generated_files"))
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[{**_base_page(), "title": "Repaired dashboard"}],
+        context_variables=context,
+    )
+
+    assert "repair rejected" not in result
+    assert context.get("bundle_repair_result")["active"]["status"] == "responded"
+    assert yaml.safe_load(context.get("generated_files")["ui/pages/Dashboard.yaml"])["title"] == "Repaired dashboard"
+    for path, content in before.items():
+        if path != "ui/pages/Dashboard.yaml":
+            assert context.get("generated_files")[path] == content
+
+
+def test_invalid_page_repair_is_rejected_before_context_or_disk_changes(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    context = _page_repair_context(tmp_path, monkeypatch)
+    before = deepcopy(context.data)
+    output_dir = Path(context.get("generated_app_dir"))
+    disk_before = {path.relative_to(output_dir).as_posix(): path.read_bytes()
+                   for path in output_dir.rglob("*") if path.is_file()}
+    invalid_page = {**_base_page(), "sections": []}
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(), pages=[invalid_page], context_variables=context,
+    )
+
+    assert "repair rejected" in result
+    assert "at least one section" in result
+    assert context.get("bundle_repair_result")["active"]["status"] == "rejected"
+    assert context.get("app_pages") == before["app_pages"]
+    assert context.get("code_files") == before["code_files"]
+    assert context.get("generated_files") == before["generated_files"]
+    assert {path.relative_to(output_dir).as_posix(): path.read_bytes()
+            for path in output_dir.rglob("*") if path.is_file()} == disk_before
+    context.set("bundle_repair_result", {})
+    context.set("bundle_repair_target", None)
+    with pytest.raises(ValueError, match="at least one section"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(), pages=[invalid_page], context_variables=context,
+        )
+
+
+def test_schema_repair_filesystem_failure_remains_uncertain(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    context = _page_repair_context(tmp_path, monkeypatch)
+    before = deepcopy(context.data)
+
+    def unavailable(*args, **kwargs):
+        raise OSError("storage unavailable")
+
+    monkeypatch.setattr(save_app_schema_module, "_persist_to_filesystem", unavailable)
+    with pytest.raises(RuntimeError, match="Could not write schema files to disk"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(), pages=[_base_page()], context_variables=context,
+        )
+    assert context.get("bundle_repair_result")["active"]["status"] == "selected"
+    assert context.data == before
 
 
 def _canonical_page():

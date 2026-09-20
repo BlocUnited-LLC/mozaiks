@@ -2,7 +2,7 @@
 App validation tool for generated applications.
 
 This tool can:
-- resolve generated files from an explicit `files` mapping or persisted agent outputs
+- resolve generated files from an explicit `files` mapping or the current admitted artifacts
 - validate the generated app with an explicit strategy: `e2b`, `docker`, `local`, or `skip`
 - run build/test commands
 - optionally start a preview server (e2b and docker strategies expose a URL)
@@ -12,7 +12,6 @@ This tool can:
 import ast
 import asyncio
 import builtins
-import hashlib
 import json
 import logging
 import os
@@ -33,12 +32,19 @@ from factory_app.workflows._shared.workflow_integration import (
     workflow_integration_metadata_from_context,
 )
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
-    collect_generated_app_file_map,
-    extract_code_file_map_from_payload,
-    extract_deleted_file_paths_from_payload,
+    admitted_app_file_map,
+)
+from factory_app.workflows.AppGenerator.tools.repair_policy import (
+    prepare_bundle_repair as _prepare_bundle_repair,
+)
+from factory_app.workflows.AppGenerator.tools.repair_policy import (
+    prepare_task_recovery,
+)
+from factory_app.workflows.AppGenerator.tools.task_integrity import (
+    artifact_snapshot_digest,
+    planned_artifact_diagnostics,
 )
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     local_app_validation_available,
@@ -111,75 +117,6 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _extract_code_files(collected: dict[str, Any]) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for _agent_name, data in (collected or {}).items():
-        if not isinstance(data, dict):
-            continue
-        out.update(extract_code_file_map_from_payload(data))
-    return out
-
-
-def _extract_deleted_files(collected: dict[str, Any]) -> list[str]:
-    deleted: list[str] = []
-    seen: set[str] = set()
-    for _agent_name, data in (collected or {}).items():
-        if not isinstance(data, dict):
-            continue
-        for path in extract_deleted_file_paths_from_payload(data):
-            if path in seen:
-                continue
-            seen.add(path)
-            deleted.append(path)
-    return deleted
-
-
-def _context_code_files(context_variables: Any | None) -> dict[str, str]:
-    if context_variables is None or not hasattr(context_variables, "get"):
-        return {}
-    try:
-        raw = detach(context_variables.get("code_files"))
-    except Exception:
-        raw = None
-    return extract_code_file_map_from_payload({"code_files": raw})
-
-
-def _context_deleted_files(context_variables: Any | None) -> list[str]:
-    if context_variables is None or not hasattr(context_variables, "get"):
-        return []
-    try:
-        raw = detach(context_variables.get("deleted_files"))
-    except Exception:
-        raw = None
-    return extract_deleted_file_paths_from_payload({"deleted_files": raw})
-
-
-def _apply_deleted_files(files: dict[str, str], deleted_files: list[str]) -> dict[str, str]:
-    if not deleted_files:
-        return files
-    merged = dict(files)
-    for path in deleted_files:
-        merged.pop(path, None)
-    return merged
-
-
-async def _merge_latest_persisted_agent_outputs(
-    files: dict[str, str],
-    *,
-    chat_id: Any | None,
-    app_id: Any | None,
-) -> dict[str, str]:
-    if not chat_id or not app_id:
-        return files
-    pm = AG2PersistenceManager()
-    collected = await pm.gather_latest_agent_jsons(chat_id=str(chat_id), app_id=str(app_id))
-    if not collected:
-        return files
-    merged = dict(files)
-    merged.update(_extract_code_files(collected))
-    return _apply_deleted_files(merged, _extract_deleted_files(collected))
 
 
 def _append_command_output(result: dict[str, Any], *, command: str, stdout: str, stderr: str) -> None:
@@ -271,58 +208,13 @@ async def _resolve_files(
     context_variables: Any | None,
     wf_logger,
 ) -> tuple[dict[str, str], str | None, str | None]:
-    if isinstance(files, dict) and files:
-        safe_files: dict[str, str] = {}
-        for raw_path, content in files.items():
-            safe = _safe_relpath(str(raw_path))
-            if not safe:
-                continue
-            safe_files[safe] = str(content)
-        return safe_files, None, None
-
-    chat_id = None
-    app_id = None
-    try:
-        if context_variables is not None and hasattr(context_variables, "get"):
-            chat_id = context_variables.get("chat_id")
-            app_id = context_variables.get("app_id")
-            safe_ctx = _generated_files_from_context(context_variables)
-            if safe_ctx:
-                safe_ctx = await _merge_latest_persisted_agent_outputs(
-                    safe_ctx,
-                    chat_id=chat_id,
-                    app_id=app_id,
-                )
-                return safe_ctx, chat_id, app_id
-            if _is_truthy(context_variables.get("app_schema_ready")):
-                schema_files = collect_generated_app_file_map(
-                    context_variables.get("generated_app_dir")
-                )
-                if schema_files:
-                    schema_files.update(_context_code_files(context_variables))
-                    schema_files = _apply_deleted_files(
-                        schema_files,
-                        _context_deleted_files(context_variables),
-                    )
-                    schema_files = await _merge_latest_persisted_agent_outputs(
-                        schema_files,
-                        chat_id=chat_id,
-                        app_id=app_id,
-                    )
-                    return schema_files, chat_id, app_id
-    except Exception:
-        pass
-
-    if not chat_id or not app_id:
-        return {}, chat_id, app_id
-
-    pm = AG2PersistenceManager()
-    collected = await pm.gather_latest_agent_jsons(chat_id=str(chat_id), app_id=str(app_id))
-    resolved = _extract_code_files(collected)
-    resolved = _apply_deleted_files(resolved, _extract_deleted_files(collected))
-    if not resolved:
-        wf_logger.warning("No code_files found in persisted agent outputs for validation.")
-    return resolved, str(chat_id), str(app_id)
+    if files is not None:
+        return _safe_files_map(files), None, None
+    return (
+        admitted_app_file_map(context_variables),
+        _context_get(context_variables, "chat_id"),
+        _context_get(context_variables, "app_id"),
+    )
 
 
 def _write_files_to_dir(root: Path, files_map: dict[str, str]) -> None:
@@ -333,26 +225,6 @@ def _write_files_to_dir(root: Path, files_map: dict[str, str]) -> None:
         out_path = root / safe
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(str(content), encoding="utf-8", newline="")
-
-
-def _generated_files_from_context(context_variables: Any | None) -> dict[str, str]:
-    if context_variables is None or not hasattr(context_variables, "get"):
-        return {}
-    try:
-        raw = detach(context_variables.get("generated_files"))
-    except Exception:
-        raw = None
-    if not isinstance(raw, dict):
-        return {}
-
-    files: dict[str, str] = {}
-    for raw_path, content in raw.items():
-        safe = _safe_relpath(str(raw_path))
-        if safe:
-            files[safe] = str(content)
-    files.update(_context_code_files(context_variables))
-    files = _apply_deleted_files(files, _context_deleted_files(context_variables))
-    return files
 
 
 def _normalize_module_yaml(path: str, content: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
@@ -1870,149 +1742,6 @@ def validate_workflow_integration_contract(
     }
 
 
-def _workflow_integration_repair_request(failed_tests: list[dict[str, Any]]) -> str:
-    lines = [
-        "Repair the generated app workflow integration contracts only.",
-        "Use AgentGenerator workflow_integration_metadata as the authority.",
-        "Update only the affected module contract YAML files: module.yaml, contracts/events.yaml, and contracts/reactions.yaml.",
-    ]
-    for item in failed_tests:
-        test_id = str(item.get("test") or "workflow_integration")
-        path = str(item.get("path") or "modules/*")
-        error = str(item.get("error") or "Workflow integration contract failed.")
-        fix = str(item.get("fix_suggestion") or "Regenerate the affected workflow integration contract.")
-        lines.append(f"- {test_id} at {path}: {error} Fix: {fix}")
-    return "\n".join(lines)
-
-
-_BUNDLE_REPAIR_TARGET_LABELS = {
-    "DatabaseAgent": "data contracts and additive migrations",
-    "AppSchemaAgent": "schema-driven generated app UI pages",
-    "ConfigMiddlewareAgent": "configuration, subscription, module contract, or service-foundation files",
-    "ServiceAgent": "module backend Python files",
-    "FrontendStubAgent": "frontend customization stubs or registration files",
-}
-
-_BUNDLE_REPAIR_TARGET_PRIORITY = (
-    "DatabaseAgent",
-    "AppSchemaAgent",
-    "ConfigMiddlewareAgent",
-    "ServiceAgent",
-    "FrontendStubAgent",
-)
-
-
-def _bundle_repair_target_for_error(error: str) -> str | None:
-    text = str(error or "").strip()
-    lowered = text.lower()
-    path = text.split(":", 1)[0].strip().replace("\\", "/").lower()
-
-    if path == "data/contract.json" or path.startswith("data/migrations/"):
-        return "DatabaseAgent"
-
-    if path.startswith("ui/pages/") or "generated saas page" in lowered:
-        return "AppSchemaAgent"
-
-    if path.startswith("ui/"):
-        return "FrontendStubAgent"
-
-    if (
-        path == "config/subscriptions.yaml"
-        or path.endswith("/module.yaml")
-        or "/contracts/" in path
-        or "config/subscriptions.yaml" in lowered
-        or "token_allowances require declared token_wallets" in lowered
-        or "top_up_products require declared token_wallets" in lowered
-        or "token_wallets must be emitted only" in lowered
-        or "assignment_store" in lowered
-        or "entitlement_dispatch" in lowered
-        or "entitlement_gate" in lowered
-        or "plan's capabilities" in lowered
-        or "modules/billing_portal/module.yaml" in lowered
-        or "module.id 'billing_portal'" in lowered
-        or "forbidden output prefixes" in lowered
-        or "must not generate provider internals" in lowered
-        or "services/integrations/" in lowered
-        or "app-owned adapter" in lowered
-        or ".env.example must document" in lowered
-        or "deployment artifacts" in lowered
-        or "authenticated generated apps must document" in lowered
-    ):
-        return "ConfigMiddlewareAgent"
-
-    if (
-        "/backend/" in path
-        or path.startswith("services/")
-        or "raw provider secret key literal" in lowered
-        or "payment_provider.api_key" in lowered
-        or "refunds apis directly" in lowered
-        or "references a refunds endpoint" in lowered
-        or "app-local token wallet or usage ledger" in lowered
-        or "imports the payment provider sdk directly" in lowered
-        or "imports raw payment provider sdk" in lowered
-        or "must delegate subscription, usage" in lowered
-        or "must not expose managed billing internals" in lowered
-    ):
-        return "ServiceAgent"
-
-    return None
-
-
-def _classified_bundle_repair_errors(errors: list[str]) -> dict[str, list[str]]:
-    classified: dict[str, list[str]] = {}
-    for error in errors:
-        target = _bundle_repair_target_for_error(error)
-        if not target:
-            continue
-        classified.setdefault(target, []).append(error)
-    return classified
-
-
-def _select_bundle_repair_target(classified: dict[str, list[str]]) -> str | None:
-    for target in _BUNDLE_REPAIR_TARGET_PRIORITY:
-        if classified.get(target):
-            return target
-    return None
-
-
-def _repair_failure_fingerprint(*, repair_kind: str, evidence: Any) -> str:
-    """Return a stable digest for deterministic repair no-progress checks."""
-
-    normalized = json.dumps(
-        {"repair_kind": repair_kind, "evidence": evidence},
-        ensure_ascii=True,
-        separators=(",", ":"),
-        sort_keys=True,
-        default=str,
-    )
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-
-def _bundle_repair_request(
-    *,
-    target: str,
-    target_errors: list[str],
-    deferred_errors: list[str],
-) -> str:
-    target_label = _BUNDLE_REPAIR_TARGET_LABELS.get(target, "generated app files")
-    lines = [
-        f"Repair generated app bundle validation failures in {target_label} only.",
-        "Use generated_files as the current source of truth and emit only files owned by this agent's canonical output lane.",
-        "When a named stale/forbidden artifact must be removed rather than overwritten, put its relative path in deleted_files.",
-        "Do not introduce payment-provider SDKs, app-local ledgers, hosted internal endpoints, raw secrets, or hosted product policy.",
-    ]
-    for error in target_errors:
-        lines.append(f"- {error}")
-    if deferred_errors:
-        lines.append(
-            "Leave unrelated scanner failures for a later targeted repair pass; do not broaden this agent's scope."
-        )
-        for error in deferred_errors:
-            lines.append(f"- deferred: {error}")
-    return "\n".join(lines)
-
-
-
 def _wiring_repair_errors(
     wiring_result: dict[str, Any], generated_files: dict[str, str]
 ) -> list[str]:
@@ -2062,236 +1791,6 @@ def _wiring_repair_errors(
     return errors
 
 
-def _prepare_bundle_repair(
-    bundle_scan_result: dict[str, Any],
-    context_variables: Any | None,
-    *,
-    max_attempts: int = 2,
-) -> dict[str, Any]:
-    errors = [
-        str(error)
-        for error in bundle_scan_result.get("errors") or []
-        if str(error or "").strip()
-    ]
-    prior_attempts = _as_int(
-        _context_get(context_variables, "bundle_repair_attempt_count", 0),
-        0,
-    )
-    previous_fingerprint = str(
-        _context_get(context_variables, "bundle_repair_failure_fingerprint", "") or ""
-    ).strip()
-    max_attempts = max(0, _as_int(max_attempts, 2))
-
-    if bundle_scan_result.get("passed"):
-        result = {
-            "status": "passed",
-            "repairable": False,
-            "target_agent": None,
-            "error_count": 0,
-            "attempt": prior_attempts,
-            "max_attempts": max_attempts,
-            "repair_request": None,
-            "errors": [],
-            "target_errors": [],
-            "deferred_errors": [],
-            "failure_fingerprint": None,
-            "no_progress": False,
-        }
-        _context_set(context_variables, "bundle_repair_status", "passed")
-        _context_set(context_variables, "bundle_repair_target", None)
-        _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
-        _context_set(context_variables, "bundle_repair_request", None)
-        _context_set(context_variables, "bundle_repair_errors", [])
-        _context_set(context_variables, "bundle_repair_failure_fingerprint", None)
-        _context_set(context_variables, "bundle_repair_no_progress", False)
-        _context_set(context_variables, "bundle_repair_result", result)
-        return result
-
-    classified = _classified_bundle_repair_errors(errors)
-    target = _select_bundle_repair_target(classified)
-
-    if not errors or not target:
-        status = "blocked" if errors else "not_applicable"
-        result = {
-            "status": status,
-            "repairable": False,
-            "target_agent": None,
-            "error_count": len(errors),
-            "attempt": prior_attempts,
-            "max_attempts": max_attempts,
-            "repair_request": None,
-            "errors": errors,
-            "target_errors": [],
-            "deferred_errors": errors,
-            "failure_fingerprint": None,
-            "no_progress": False,
-        }
-        _context_set(context_variables, "bundle_repair_status", status)
-        _context_set(context_variables, "bundle_repair_target", None)
-        _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
-        _context_set(context_variables, "bundle_repair_request", None)
-        _context_set(context_variables, "bundle_repair_errors", errors)
-        _context_set(context_variables, "bundle_repair_failure_fingerprint", None)
-        _context_set(context_variables, "bundle_repair_no_progress", False)
-        _context_set(context_variables, "bundle_repair_result", result)
-        return result
-
-    target_errors = list(classified.get(target) or [])
-    deferred_errors = [
-        error
-        for error in errors
-        if error not in target_errors
-    ]
-    repair_request = _bundle_repair_request(
-        target=target,
-        target_errors=target_errors,
-        deferred_errors=deferred_errors,
-    )
-    failure_fingerprint = _repair_failure_fingerprint(
-        repair_kind=f"bundle:{target}",
-        evidence={
-            "target_errors": sorted(target_errors),
-            "deferred_errors": sorted(deferred_errors),
-        },
-    )
-    no_progress = bool(
-        prior_attempts > 0
-        and previous_fingerprint
-        and previous_fingerprint == failure_fingerprint
-    )
-
-    if no_progress or prior_attempts >= max_attempts:
-        status = "blocked"
-        attempt = prior_attempts
-        repairable = False
-        repair_target = None
-    else:
-        status = "needs_revision"
-        attempt = prior_attempts + 1
-        repairable = True
-        repair_target = target
-
-    result = {
-        "status": status,
-        "repairable": repairable,
-        "target_agent": repair_target,
-        "error_count": len(errors),
-        "attempt": attempt,
-        "max_attempts": max_attempts,
-        "repair_request": repair_request,
-        "errors": errors,
-        "target_errors": target_errors,
-        "deferred_errors": deferred_errors,
-        "failure_fingerprint": failure_fingerprint,
-        "no_progress": no_progress,
-    }
-    _context_set(context_variables, "bundle_repair_status", status)
-    _context_set(context_variables, "bundle_repair_target", repair_target)
-    _context_set(context_variables, "bundle_repair_attempt_count", attempt)
-    _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
-    _context_set(context_variables, "bundle_repair_request", repair_request)
-    _context_set(context_variables, "bundle_repair_errors", errors)
-    _context_set(context_variables, "bundle_repair_failure_fingerprint", failure_fingerprint)
-    _context_set(context_variables, "bundle_repair_no_progress", no_progress)
-    _context_set(context_variables, "bundle_repair_result", result)
-    return result
-
-
-def _prepare_workflow_integration_repair(
-    workflow_integration_result: dict[str, Any],
-    context_variables: Any | None,
-    *,
-    max_attempts: int = 2,
-) -> dict[str, Any]:
-    failed_tests = [
-        item
-        for item in workflow_integration_result.get("failed_tests") or []
-        if isinstance(item, dict)
-    ]
-    if workflow_integration_result.get("passed"):
-        result = {
-            "status": "passed",
-            "repairable": False,
-            "failed_test_count": 0,
-            "attempt": _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0),
-            "max_attempts": max_attempts,
-            "repair_request": None,
-            "failure_fingerprint": None,
-            "no_progress": False,
-        }
-        _context_set(context_variables, "workflow_integration_repair_status", "passed")
-        _context_set(context_variables, "workflow_integration_repair_request", None)
-        _context_set(context_variables, "workflow_integration_repair_failure_fingerprint", None)
-        _context_set(context_variables, "workflow_integration_repair_no_progress", False)
-        _context_set(context_variables, "workflow_integration_repair_result", result)
-        return result
-    if not failed_tests:
-        result = {
-            "status": "not_applicable",
-            "repairable": False,
-            "failed_test_count": 0,
-            "attempt": _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0),
-            "max_attempts": max_attempts,
-            "repair_request": None,
-            "failure_fingerprint": None,
-            "no_progress": False,
-        }
-        _context_set(context_variables, "workflow_integration_repair_status", "not_applicable")
-        _context_set(context_variables, "workflow_integration_repair_failure_fingerprint", None)
-        _context_set(context_variables, "workflow_integration_repair_no_progress", False)
-        _context_set(context_variables, "workflow_integration_repair_result", result)
-        return result
-
-    prior_attempts = _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0)
-    previous_fingerprint = str(
-        _context_get(context_variables, "workflow_integration_repair_failure_fingerprint", "") or ""
-    ).strip()
-    max_attempts = max(0, _as_int(max_attempts, 2))
-    repair_request = _workflow_integration_repair_request(failed_tests)
-    failure_fingerprint = _repair_failure_fingerprint(
-        repair_kind="workflow_integration",
-        evidence=sorted(
-            failed_tests,
-            key=lambda item: json.dumps(item, sort_keys=True, default=str),
-        ),
-    )
-    no_progress = bool(
-        prior_attempts > 0
-        and previous_fingerprint
-        and previous_fingerprint == failure_fingerprint
-    )
-
-    if no_progress or prior_attempts >= max_attempts:
-        status = "blocked"
-        attempt = prior_attempts
-        repairable = False
-    else:
-        status = "needs_revision"
-        attempt = prior_attempts + 1
-        repairable = True
-
-    result = {
-        "status": status,
-        "repairable": repairable,
-        "failed_test_count": len(failed_tests),
-        "attempt": attempt,
-        "max_attempts": max_attempts,
-        "repair_request": repair_request,
-        "failed_tests": failed_tests,
-        "failure_fingerprint": failure_fingerprint,
-        "no_progress": no_progress,
-    }
-    _context_set(context_variables, "workflow_integration_repair_status", status)
-    _context_set(context_variables, "workflow_integration_repair_count", attempt)
-    _context_set(context_variables, "workflow_integration_repair_max_attempts", max_attempts)
-    _context_set(context_variables, "workflow_integration_repair_request", repair_request)
-    _context_set(context_variables, "workflow_integration_repair_failed_tests", failed_tests)
-    _context_set(context_variables, "workflow_integration_repair_failure_fingerprint", failure_fingerprint)
-    _context_set(context_variables, "workflow_integration_repair_no_progress", no_progress)
-    _context_set(context_variables, "workflow_integration_repair_result", result)
-    return result
-
-
 async def run_app_bundle_acceptance_gate(
     *,
     files: dict[str, str] | None = None,
@@ -2305,32 +1804,17 @@ async def run_app_bundle_acceptance_gate(
     """
 
     explicit_files = _safe_files_map(files)
-    if explicit_files:
+    if files is not None:
         generated_files = explicit_files
     else:
-        generated_files = _generated_files_from_context(context_variables)
-        chat_id = None
-        app_id = None
-        if context_variables is not None and hasattr(context_variables, "get"):
-            try:
-                chat_id = context_variables.get("chat_id")
-                app_id = context_variables.get("app_id")
-            except Exception:
-                chat_id = None
-                app_id = None
-        generated_files = await _merge_latest_persisted_agent_outputs(
-            generated_files,
-            chat_id=chat_id,
-            app_id=app_id,
-        )
+        generated_files = admitted_app_file_map(context_variables)
     selected_capability_packs = (
         [pack for pack in capability_packs if isinstance(pack, dict)]
         if isinstance(capability_packs, list)
         else _capability_packs_from_context(context_variables)
     )
 
-    if generated_files:
-        _context_set(context_variables, "generated_files", generated_files)
+    _context_set(context_variables, "generated_files", generated_files)
 
     from mozaiksai.core.validation.functional_generated_app import (
         scan_functional_generated_app,
@@ -2354,6 +1838,7 @@ async def run_app_bundle_acceptance_gate(
             context_variables,
         ),
     )
+    planned_diagnostics = planned_artifact_diagnostics(context_variables, generated_files)
     all_scan_errors = [*required_bundle_errors, *scanner_errors]
     bundle_scan_result = {
         "contract_version": "1.0",
@@ -2447,7 +1932,29 @@ async def run_app_bundle_acceptance_gate(
     )
     app_runtime_load_result = await _app_runtime_load_result(generated_files)
 
+    completeness_result = {
+        "passed": not planned_diagnostics,
+        "diagnostics": planned_diagnostics,
+        "failed_tests": [{"test": item["code"], **item} for item in planned_diagnostics],
+    }
+    schema_quality_passed = (
+        not _is_truthy(_context_get(context_variables, "app_schema_ready"))
+        or _context_get(context_variables, "app_ui_quality_status") == "passed"
+    )
+    schema_task = _context_get(context_variables, "current_build_task", {}) or {}
+    schema_quality_result = {
+        "passed": schema_quality_passed,
+        "failed_tests": [] if schema_quality_passed else [{
+            "test": "app_schema_quality",
+            "path": next((path for path in schema_task.get("owned_paths", []) if path.startswith("ui/pages/")), "app.json"),
+            "error": "Schema quality has not passed: " + "; ".join(
+                str(warning) for warning in _context_get(context_variables, "app_ui_quality_warnings", []) or []
+            ),
+        }],
+    }
     subresults = {
+        "planned_completeness": completeness_result,
+        "schema_quality": schema_quality_result,
         "bundle_scan": bundle_scan_result,
         "agent_backend": agent_integration_result,
         "module_wiring": wiring_result,
@@ -2492,6 +1999,8 @@ async def run_app_bundle_acceptance_gate(
         "status": "passed" if acceptance_passed else "failed",
         "passed": acceptance_passed,
         "checks": [
+            _result_check(completeness_result, default_id="planned_completeness", default_message="Approved plan completeness checked."),
+            _result_check(schema_quality_result, default_id="schema_quality", default_message="Schema quality checked."),
             _result_check(bundle_scan_result, default_id="generated_bundle_scan", default_message="Generated bundle scan completed."),
             _result_check(agent_integration_result, default_id="agent_backend", default_message="Agent backend integration check completed."),
             _result_check(wiring_result, default_id="module_wiring", default_message="Module wiring check completed."),
@@ -2509,34 +2018,26 @@ async def run_app_bundle_acceptance_gate(
         "warnings": warnings,
         **subresults,
     }
-    workflow_integration_repair = _prepare_workflow_integration_repair(
-        workflow_integration_result,
-        context_variables,
-    )
+    repair_diagnostics = [
+        *planned_diagnostics,
+        *[{"error": error} for error in all_scan_errors],
+        *[{"error": error} for error in _wiring_repair_errors(wiring_result, generated_files)],
+        *[{"error": error} for error in runtime_quality_result.get("warnings", [])],
+        *[
+            {**item, "error": f"{item.get('test', 'validation')}: {item['error']}"}
+            for check in (module_implementation_result, app_runtime_load_result, functional_result, workflow_integration_result, schema_quality_result)
+            for item in check.get("failed_tests", [])
+        ],
+    ]
+    recovery_request = prepare_task_recovery(context_variables)
     bundle_repair = _prepare_bundle_repair(
-        {
-            "passed": all(item["passed"] for item in (
-                bundle_scan_result, app_runtime_load_result, runtime_quality_result,
-                module_implementation_result, wiring_result,
-            )),
-            "errors": [
-                *bundle_scan_result.get("errors", []),
-                *[
-                    f"{item['path']}: {item['error']}" if item.get("path") else item["error"]
-                    for item in app_runtime_load_result.get("failed_tests", [])
-                ],
-                *runtime_quality_result.get("warnings", []),
-                *[
-                    f"{item['path']}: {item['test']}: {item['error']} Fix: {item['fix_suggestion']}"
-                    for item in module_implementation_result.get("failed_tests", [])
-                ],
-                *_wiring_repair_errors(wiring_result, generated_files),
-            ],
-        },
-        context_variables,
+        {"passed": acceptance_passed, "diagnostics": repair_diagnostics},
+        context_variables, select_repairs=recovery_request is None,
     )
-    result["workflow_integration_repair"] = workflow_integration_repair
     result["bundle_repair"] = bundle_repair
+    result["task_recovery_request"] = recovery_request
+    if acceptance_passed:
+        result["snapshot_digest"] = artifact_snapshot_digest(context_variables, generated_files)
 
     _context_set(context_variables, "bundle_scan_passed", bundle_scan_result["passed"])
     _context_set(context_variables, "bundle_scan_result", bundle_scan_result)
@@ -2556,7 +2057,6 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "integration_tests_passed", acceptance_passed)
     _context_set(context_variables, "integration_test_result", {
         **subresults,
-        "workflow_integration_repair": workflow_integration_repair,
         "bundle_repair": bundle_repair,
         "passed": acceptance_passed,
     })
@@ -2703,18 +2203,19 @@ async def validate_app_bundle_from_request(
     if not isinstance(commands, list):
         commands = None
 
-    validation = await validate_app_build(
-        files={},
-        commands=commands,
-        start_dev_server=bool(request.get("start_dev_server", True)),
-        timeout_seconds=int(request.get("timeout_seconds") or 120),
-        validation_strategy=request.get("validation_strategy"),
-        context_variables=context_variables,
-    )
-
-    acceptance_result = await run_app_bundle_acceptance_gate(
-        context_variables=context_variables,
-    )
+    acceptance_result = await run_app_bundle_acceptance_gate(context_variables=context_variables)
+    if acceptance_result["passed"]:
+        validation = await validate_app_build(
+            files=admitted_app_file_map(context_variables), commands=commands,
+            start_dev_server=bool(request.get("start_dev_server", True)),
+            timeout_seconds=int(request.get("timeout_seconds") or 120),
+            validation_strategy=request.get("validation_strategy"), context_variables=context_variables,
+        )
+    else:
+        validation = _base_result(strategy="skip", status="pending")
+        validation["success"] = False
+        validation["strategy_reason"] = "Deterministic acceptance must pass before validation-environment execution."
+        _persist_validation_context(context_variables=context_variables, result=validation)
     agent_integration_result = acceptance_result["agent_backend"]
     wiring_result = acceptance_result["module_wiring"]
     module_implementation_result = acceptance_result["module_implementation"]
@@ -2722,9 +2223,8 @@ async def validate_app_bundle_from_request(
     functional_result = acceptance_result["functional_completeness"]
     workflow_integration_result = acceptance_result["workflow_integration"]
     app_runtime_load_result = acceptance_result["app_runtime_load"]
-    workflow_integration_repair = acceptance_result.get("workflow_integration_repair")
     bundle_repair = acceptance_result.get("bundle_repair")
-    validation_passed = str(validation.get("validation_status") or "").strip().lower() != "failed"
+    validation_passed = str(validation.get("validation_status") or "").strip().lower() in {"passed", "skipped"}
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
     _context_set(context_variables, "integration_tests_passed", combined_passed)
     integration_test_result = {
@@ -2736,7 +2236,6 @@ async def validate_app_bundle_from_request(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
-        "workflow_integration_repair": workflow_integration_repair,
         "bundle_repair": bundle_repair,
         "passed": combined_passed,
     }
@@ -2755,7 +2254,6 @@ async def validate_app_bundle_from_request(
         "generated_app_functional_completeness_result": functional_result,
         "workflow_integration_validation_result": workflow_integration_result,
         "app_runtime_load_result": app_runtime_load_result,
-        "workflow_integration_repair": workflow_integration_repair,
         "bundle_repair": bundle_repair,
         "integration_tests_passed": combined_passed,
     }

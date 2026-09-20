@@ -468,7 +468,9 @@ def test_appgenerator_download_tool_does_not_inject_removed_admin_surfaces() -> 
 
     assert "admin_surfaces" not in source
     assert "_inject_admin_surfaces(files_map)" not in source
-    assert "extract_code_file_map_from_payload" in source
+    assert "admitted_app_file_map" in source
+    assert "extract_code_file_map_from_payload" not in source
+    assert "gather_latest_agent_jsons" not in source
     assert "extract_code_file_entries_from_payload" in assembly
 
 

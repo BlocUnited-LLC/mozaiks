@@ -1124,6 +1124,7 @@ async def test_ag2_network_runner_commits_multiple_context_updates_and_deletes()
             ],
             initial_agent_name="PlannerAgent",
             initial_message="Set route, phase, and delete obsolete.",
+            context_variables=context,
             close_timeout_seconds=10.0,
         )
     )

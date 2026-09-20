@@ -24,29 +24,17 @@ batches:
     execution:
       concurrency: 8
       dependency_field: depends_on
-      # A single agent mistake used to discard every completed task in the run.
-      # A live build died on one module_contract task after 1.3h of work, taking
-      # five finished tasks with it, and the bundle-level repair loop never got
-      # to see anything because no bundle was ever produced.
-      #
-      # The scheduler already drains tasks whose dependency failed, marking them
-      # 'dependency X failed'. So this fails the dependent subtree and keeps the
-      # rest: a failed page_bundle costs that page, a failed module_contract
-      # costs its own modules's tasks, and acceptance still judges what arrived.
       failure_policy: continue_with_available
-      # One retry was not enough for mechanical contract errors. A live build
-      # failed the whole batch on "Schema contract required names must match
-      # property required flags" - a rule already stated in the agent's prompt,
-      # fed back verbatim with the rejected output, and still unfixed after two
-      # attempts.
-      #
-      # The feedback loop is sound: the retry prompt carries the validator
-      # message and the rejected candidate. What was short was the budget. With
-      # fail_batch, one task giving up discards every completed task in the run,
-      # so a few more attempts on a task that is being told exactly what is
-      # wrong costs far less than rebuilding everything.
+      # Four total AG2 attempts per task, including its one bounded correction.
+      # An output rejection defers correction to Factory policy without losing evidence.
       retry_limit: 3
       timeout_seconds: 600
+    recovery:
+      trigger_agent: AppValidationAgent
+      request_key: app_task_recovery_request
+      outcome_key: app_task_recovery_result
+      status_key: app_task_recovery_status
+      input_keys: [app_build_plan, build_timestamp]
     result:
       context_key: app_task_batch_results
       status_key: app_task_batch_status

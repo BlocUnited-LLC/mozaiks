@@ -1,28 +1,11 @@
-"""A wiring failure should be repaired, not just reported.
-
-A wiring failure already blocked acceptance - it is in the acceptance
-subresults - but it was never handed to _prepare_bundle_repair, whose errors
-come only from the bundle scan, runtime load, runtime quality and module
-implementation results. So a build with orphaned endpoints failed without ever
-attempting a fix.
-
-The loop it was missing out on already does the right things: it routes
-ui/pages/* to AppSchemaAgent, bounds itself with max_attempts, hands each agent
-only its own files, and stops when a retry produces the same failure
-fingerprint. The errors simply never arrived.
-
-Each message names the declared actions. A page agent told only "unknown
-action" would guess again - which is how /api/habits, and a delete_habit that
-was never declared, reached a bundle whose module contract was right there in
-the same generated_files.
-"""
+"""Orphaned page endpoints reach their approved owner with the real action IDs."""
 
 from __future__ import annotations
 
 from factory_app.workflows.AppGenerator.tools.app_validation import (
-    _bundle_repair_target_for_error,
     _wiring_repair_errors,
 )
+from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
 
 FILES = {
     "modules/habit_registry/module.yaml": (
@@ -39,6 +22,23 @@ def _wiring(*orphans: tuple[str, str, str]) -> dict:
             {"page": page, "section": section, "endpoint": endpoint}
             for page, section, endpoint in orphans
         ],
+    }
+
+
+def _repair_context() -> dict:
+    contract_path = "modules/habit_registry/module.yaml"
+    page_path = "ui/pages/habits.yaml"
+    return {
+        "app_build_plan": {"build_tasks": [
+            {"task_id": "habit_contract", "task_type": "module_contract",
+             "initial_agent": "ConfigMiddlewareAgent", "owned_paths": [contract_path], "depends_on": []},
+            {"task_id": "habit_page", "task_type": "page_bundle",
+             "initial_agent": "AppSchemaAgent", "owned_paths": [page_path], "depends_on": ["habit_contract"]},
+        ]},
+        "app_task_batch_results": {
+            "habit_contract": {"code_files": [{"filename": contract_path, "content": FILES[contract_path]}]},
+            "habit_page": {"code_files": [{"filename": page_path, "content": "page_id: habits\n"}]},
+        },
     }
 
 
@@ -61,10 +61,40 @@ def test_each_orphan_becomes_one_repairable_error() -> None:
 
 
 def test_the_error_routes_to_the_agent_that_owns_pages() -> None:
-    """The routing already existed; only the errors were missing."""
     errors = _wiring_repair_errors(_wiring(("habits", "habit-list", "/api/habits")), FILES)
 
-    assert _bundle_repair_target_for_error(errors[0]) == "AppSchemaAgent"
+    result = prepare_bundle_repair({"passed": False, "errors": errors}, _repair_context())
+
+    assert result["status"] == "needs_revision"
+    assert result["target_agent"] == "AppSchemaAgent"
+    assert result["active"]["task_id"] == "habit_page"
+    assert result["active"]["allowed_paths"] == ["ui/pages/habits.yaml"]
+    assert result["target_errors"] == errors
+    assert result["attempt"] == 1
+
+
+def test_an_unowned_page_diagnostic_cannot_infer_repair_authority_from_its_path() -> None:
+    errors = _wiring_repair_errors(_wiring(("dashboard", "stats", "/api/habits")), FILES)
+
+    result = prepare_bundle_repair({"passed": False, "errors": errors}, _repair_context())
+
+    assert result["status"] == "blocked"
+    assert result["target_agent"] is None
+    assert result["diagnostics"][0]["block_reason"] == "missing_or_ambiguous_owner"
+    assert result["attempt"] == 0
+
+
+def test_a_page_repair_cannot_bypass_its_missing_prerequisite_output() -> None:
+    context = _repair_context()
+    context["app_task_batch_results"].pop("habit_contract")
+    errors = _wiring_repair_errors(_wiring(("habits", "habit-list", "/api/habits")), FILES)
+
+    result = prepare_bundle_repair({"passed": False, "errors": errors}, context)
+
+    assert result["status"] == "blocked"
+    assert result["target_agent"] is None
+    assert result["diagnostics"][0]["block_reason"] == "prerequisite_not_accepted"
+    assert result["attempt"] == 0
 
 
 def test_the_declared_actions_are_named_so_the_fix_is_not_a_guess() -> None:

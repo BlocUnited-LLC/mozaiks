@@ -67,10 +67,16 @@ def validate_workflow_context_contract(
         raw = yaml.safe_load(task_batches_path.read_text(encoding="utf-8")) or {}
         task_batches = parse_task_batches_config(raw)
         for batch in task_batches.batches:
-            for key in (batch.result.context_key, batch.result.status_key):
+            written_keys = [batch.result.context_key, batch.result.status_key]
+            read_keys = []
+            if batch.recovery:
+                written_keys.extend([batch.recovery.outcome_key, batch.recovery.status_key])
+                read_keys.extend([batch.recovery.request_key, *batch.recovery.input_keys])
+            for key in [*written_keys, *read_keys]:
                 if key not in declared:
+                    action = "writes" if key in written_keys else "reads"
                     missing.append(
-                        f"task_batches {batch.id!r} writes undeclared context variable {key!r}"
+                        f"task_batches {batch.id!r} {action} undeclared context variable {key!r}"
                     )
 
     if missing:
@@ -95,6 +101,8 @@ def validate_workflow_tool_outcomes(
         task_agents.add(str(workflow_config.get("initial_agent") or ""))
         for batch in task_batches.batches:
             task_agents.add(batch.trigger_agent)
+            if batch.recovery:
+                task_agents.add(batch.recovery.trigger_agent)
             task_agents.update(batch.allowed_execution_agents)
     errors: list[str] = []
     owned_keys: set[str] = set()

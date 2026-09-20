@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, cast
@@ -52,6 +53,19 @@ from mozaiksai.core.workflow.execution.network_graph import compile_transition_r
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
 
 _INITIATOR_NAME = "mozaiks_user"
+_context_checkpoint: ContextVar[Callable[[], Awaitable[None]] | None] = ContextVar(
+    "ag2_authorized_context_checkpoint", default=None,
+)
+async def checkpoint_agent_context() -> None:
+    """Persist authorized hook facts through the active AG2 channel before dispatch.
+
+    Only an active packet hook can checkpoint its bound context bridge. AG2's
+    existing context events and writer policy remain the persistence authority.
+    """
+    checkpoint = _context_checkpoint.get()
+    if checkpoint is None:
+        raise RuntimeError("no active AG2 packet context checkpoint")
+    await checkpoint()
 
 
 def _json_safe_key(value: Any) -> str:
@@ -171,6 +185,10 @@ async def _attach_human_client(
     return human
 
 
+class _PendingTurnReplayBlocked(RuntimeError):
+    """A declared worker has uncertain execution recorded by the AG2 Hub."""
+
+
 async def _resume_pending_agent_turns(
     *,
     hub: Any,
@@ -178,6 +196,7 @@ async def _resume_pending_agent_turns(
     agent_clients: Mapping[str, Any],
     workflow_name: str,
     chat_id: str,
+    pending_turn_replay: Mapping[str, str] | None = None,
 ) -> int:
     """Re-fire turns that AG2 persisted as pending before process loss."""
 
@@ -186,6 +205,19 @@ async def _resume_pending_agent_turns(
         pending = await hub.pending_turns_for(client.agent_id)
         if any(turn.channel_id == channel_id for turn in pending):
             pending_clients.append((name, client))
+    blocked = []
+    for name, _client in pending_clients:
+        replay_policy = (pending_turn_replay or {}).get(name, "allow")
+        if replay_policy not in ("allow", "block"):
+            raise ValueError(f"invalid pending_turn_replay for agent {name!r}: {replay_policy!r}")
+        if replay_policy == "block":
+            blocked.append(name)
+    if blocked:
+        # Preflight every pending turn before replaying any allowed agent.
+        raise _PendingTurnReplayBlocked(
+            f"ag2_pending_turn_replay_blocked channel={channel_id} agents={','.join(blocked)}; "
+            "interrupted worker execution is uncertain"
+        )
     total = 0
     # Recovery must not rediscover downstream turns already receiving live delivery.
     for name, client in pending_clients:
@@ -415,6 +447,7 @@ class AG2NetworkRunner:
                     agent_output_handler=request.agent_output_handler,
                     context_authority_policy=request.context_authority_policy,
                     broadcast_audience=list(dict.fromkeys(agent_id_by_name.values())) if self_routing else None,
+                    channel_context_provider=lambda channel: getattr(hub.adapter_state(channel), "context_vars", {}) or {},
                 )
 
             if initial_agent_name not in agent_clients:
@@ -506,13 +539,20 @@ class AG2NetworkRunner:
                 )
 
             if existing_channel is not None:
-                resumed_pending_turns = await _resume_pending_agent_turns(
-                    hub=hub,
-                    channel_id=channel.channel_id,
-                    agent_clients=agent_clients,
-                    workflow_name=request.workflow_name,
-                    chat_id=request.chat_id,
-                )
+                try:
+                    resumed_pending_turns = await _resume_pending_agent_turns(
+                        hub=hub,
+                        channel_id=channel.channel_id,
+                        agent_clients=agent_clients,
+                        workflow_name=request.workflow_name,
+                        chat_id=request.chat_id,
+                        pending_turn_replay={
+                            name: getattr(agent, "_mozaiks_pending_turn_replay", "allow")
+                            for name, agent in request.agents.items()
+                        },
+                    )
+                except _PendingTurnReplayBlocked as exc:
+                    return await _snapshot_result(status=RunStatus.FAILED, error=str(exc))
                 if resumed_pending_turns:
                     resumed_wal = await hub.read_wal(channel.channel_id)
                     channel_closed, close_reason = _closed_reason_from_wal(resumed_wal)
@@ -715,6 +755,10 @@ class AG2NetworkRunner:
             return "AG2NetworkRunner requires initial_agent_name"
         if initial_agent_name not in request.agents:
             return f"initial agent {initial_agent_name!r} is not registered"
+        for name, agent in request.agents.items():
+            replay_policy = getattr(agent, "_mozaiks_pending_turn_replay", "allow")
+            if replay_policy not in ("allow", "block"):
+                return f"invalid pending_turn_replay for agent {name!r}: {replay_policy!r}"
         return None
 
     @staticmethod
@@ -970,6 +1014,7 @@ def _install_context_update_handler(
     agent_output_handler: Callable[[str, Any], Awaitable[None]] | None = None,
     context_authority_policy: ContextAuthorityPolicy | None = None,
     broadcast_audience: list[str] | None = None,
+    channel_context_provider: Callable[[str], Mapping[str, Any]] | None = None,
 ) -> None:
     """Commit Mozaiks tool context mutations through AG2 workflow packets.
 
@@ -995,7 +1040,13 @@ def _install_context_update_handler(
 
     async def _handle_envelope(envelope: Any) -> None:
         if bridge is not None:
-            bridge.clear_context_updates()
+            if channel_context_provider is not None:
+                bridge._hydrate_channel_context(
+                    channel_context_provider(envelope.channel_id),
+                    policy=context_authority_policy, run_identity=run_identity,
+                )
+            else:
+                bridge.clear_context_updates()
         original_send_envelope = client.send_envelope
 
         async def _send_with_context_updates(out_envelope: Any) -> str:
@@ -1012,6 +1063,22 @@ def _install_context_update_handler(
                 if tool_outcome is not None and (event_data.get("routing") or {}).get("kind") in {"handoff", "finish"}:
                     raise ValueError(f"tool_outcome.requires_declared_graph:{agent_name}")
                 if agent_output_handler is not None:
+                    async def _checkpoint() -> None:
+                        if bridge is None:
+                            raise RuntimeError("AG2 packet checkpoint requires a bound context bridge")
+                        updates = bridge.consume_authorized_context_updates(
+                            policy=context_authority_policy, run_identity=run_identity,
+                        )
+                        if updates.get("set") or updates.get("delete"):
+                            await original_send_envelope(Envelope(
+                                channel_id=out_envelope.channel_id,
+                                sender_id=client.agent_id,
+                                audience=[],
+                                event_type=EV_CONTEXT_SET,
+                                event_data=_json_safe_dict(updates),
+                            ))
+
+                    checkpoint_token = _context_checkpoint.set(_checkpoint)
                     try:
                         await agent_output_handler(agent_name, out_envelope)
                     except Exception:
@@ -1030,6 +1097,8 @@ def _install_context_update_handler(
                                     event_data=_json_safe_dict(updates),
                                 ))
                         raise
+                    finally:
+                        _context_checkpoint.reset(checkpoint_token)
                 existing = dict(event_data.get("context_updates") or {})
                 existing_set = _authorized_context_updates(
                     existing.get("set") or {},
@@ -1208,4 +1277,5 @@ __all__ = [
     "AG2NetworkRunner",
     "AG2NetworkRunnerRequest",
     "AG2NetworkRunnerResult",
+    "checkpoint_agent_context",
 ]

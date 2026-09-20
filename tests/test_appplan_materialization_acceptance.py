@@ -587,6 +587,11 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
 
     original_run = ag2_task_batch_runner.AG2TaskBatchRunner.run
     ag2_task_batch_runner.AG2TaskBatchRunner.run = _app_builder_runner()
+    checkpoints: list[dict[str, Any]] = []
+
+    async def checkpoint(updates: dict[str, Any]) -> None:
+        checkpoints.append(deepcopy(updates))
+
     try:
         await execute_task_batches_for_trigger(
             workflow_name="AppGenerator",
@@ -604,9 +609,17 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
             app_id=ctx.get("app_id"),
             user_id="user-1",
             fresh_agents_per_task=False,
+            checkpoint=checkpoint,
+            parent_channel_id="test-parent-channel",
         )
     finally:
         ag2_task_batch_runner.AG2TaskBatchRunner.run = original_run
+
+    assert checkpoints[-1]["app_task_batch_status"] == "completed"
+    assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"] == {}
+    assert set(checkpoints[-1]["app_task_batch_results"]["_meta"]["completed_tasks"]) == {
+        task["task_id"] for task in ctx.get("app_task_batch_items")
+    }
 
     assembled = await assemble_app_tasks(context_variables=ctx)
     files = _file_map(assembled)

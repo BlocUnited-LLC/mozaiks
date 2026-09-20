@@ -38,7 +38,7 @@ Covers helpers NOT tested in test_task_batches_helpers.py:
     - Mapping input → values() used
     - non-dict entries skipped
 
-  _optional_task_output_paths:
+  optional_task_output_paths:
     - task_type="page_bundle" → set includes "ui/route_manifest.json"
     - task_type="module_contract" with module_id → module-specific optional paths
     - task_type="module_contract" without module_id → empty set
@@ -54,9 +54,9 @@ from pydantic import BaseModel
 from mozaiksai.core.workflow.task_batches import (
     _normalize_agent_reply,
     _normalize_task_items,
-    _optional_task_output_paths,
     _task_dependencies,
     _to_plain_data,
+    optional_task_output_paths,
 )
 
 # ---------------------------------------------------------------------------
@@ -234,33 +234,33 @@ class TestNormalizeTaskItems:
 
 
 # ---------------------------------------------------------------------------
-# 5. _optional_task_output_paths
+# 5. optional_task_output_paths
 # ---------------------------------------------------------------------------
 
 class TestOptionalTaskOutputPaths:
     def test_page_bundle_includes_route_manifest(self):
-        result = _optional_task_output_paths({"task_type": "page_bundle"})
+        result = optional_task_output_paths({"task_type": "page_bundle"})
         assert "ui/route_manifest.json" in result
 
     def test_page_bundle_includes_multiple_shared_paths(self):
-        result = _optional_task_output_paths({"task_type": "page_bundle"})
+        result = optional_task_output_paths({"task_type": "page_bundle"})
         assert "config/shell.json" in result
         assert "data/contract.json" in result
         assert "provenance.yaml" in result
 
     def test_module_contract_with_module_id_returns_paths(self):
         task = {"task_type": "module_contract", "capability_pack_id": "billing"}
-        result = _optional_task_output_paths(task)
+        result = optional_task_output_paths(task)
         assert "modules/billing/contracts/notifications.yaml" in result
         assert "modules/billing/contracts/policy_hooks.yaml" in result
         assert "modules/billing/runtime_extensions.yaml" in result
 
     def test_module_contract_without_module_id_returns_empty(self):
         task = {"task_type": "module_contract"}
-        assert _optional_task_output_paths(task) == set()
+        assert optional_task_output_paths(task) == set()
 
     def test_other_task_type_returns_empty(self):
-        assert _optional_task_output_paths({"task_type": "experience_design"}) == set()
+        assert optional_task_output_paths({"task_type": "experience_design"}) == set()
 
     def test_no_task_type_returns_empty(self):
-        assert _optional_task_output_paths({}) == set()
+        assert optional_task_output_paths({}) == set()

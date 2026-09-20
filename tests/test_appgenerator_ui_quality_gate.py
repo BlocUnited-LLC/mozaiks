@@ -437,7 +437,9 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
     }
     assert context.data["assembled_source"] == "schema_and_task_batch_outputs"
     assert context.data["generated_files"]["app.json"] == '{"appName":"Support"}\n'
-    assert context.data["app_task_batch_results"]["assembled"] is True
+    assert context.data["app_task_batch_results"]["tickets_module"]["code_files"] == [
+        {"filename": "modules/tickets/module.yaml", "content": "id: tickets\n"}
+    ]
     assert context.data["app_task_batch_results_summary"]["result_keys"] == ["tickets_module"]
 
 
@@ -477,7 +479,8 @@ async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_qual
         "config/targets.json",
         "modules/tickets/module.yaml",
     }
-    assert context.get("app_task_batch_results")["assembled"] is True
+    assert context.get("app_task_batch_results")["tickets_module"]["code_files"][0]["content"] == "id: tickets\n"
+    assert context.get("app_task_batch_results")["_meta"]["task_count"] == 1
     assert list(context.get("app_task_batch_results_summary")["completed_tasks"]) == ["tickets_module"]
     assert context.get("generated_files")["modules/tickets/module.yaml"] == "id: tickets\n"
 

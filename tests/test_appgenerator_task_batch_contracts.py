@@ -460,6 +460,10 @@ async def test_appgenerator_task_batch_dogfood_path_executes_and_assembles() -> 
         )
 
     fake_agent = AsyncMock(_mozaiks_tool_outcome=None)
+    checkpoints = []
+
+    async def checkpoint(updates):
+        checkpoints.append(updates)
 
     with patch("mozaiksai.core.workflow.task_batches.AG2TaskBatchRunner") as mock_runner_cls:
         mock_runner_cls.return_value.run = _fake_runner_run
@@ -477,6 +481,8 @@ async def test_appgenerator_task_batch_dogfood_path_executes_and_assembles() -> 
             app_id="dogfood_app",
             user_id="user-dogfood",
             fresh_agents_per_task=False,
+            checkpoint=checkpoint,
+            parent_channel_id="test-parent-channel",
         )
 
     assert context.get("app_task_batch_status") == "completed"
@@ -492,6 +498,7 @@ async def test_appgenerator_task_batch_dogfood_path_executes_and_assembles() -> 
         "task_notifications_pages",
     }
     assert all(item["task_run_mode"] is True for item in seen_tasks)
+    assert any(update["app_task_batch_results"]["_meta"]["in_flight"] for update in checkpoints)
 
     assembled = await assemble_module.assemble_app_tasks(context_variables=context)
 
@@ -505,6 +512,7 @@ async def test_appgenerator_task_batch_dogfood_path_executes_and_assembles() -> 
     }
     assert {item["filename"] for item in assembled["code_files"]} == set(generated_files)
     assert context.get("assembled_source") == "schema_and_task_batch_outputs"
+    assert context.get("app_task_batch_results") == results
 
 
 @pytest.mark.asyncio

@@ -336,6 +336,19 @@ class ContextVariablesBridge:
         """
         return detach(self.__data)
 
+    def _hydrate_channel_context(
+        self, data: Mapping[str, Any], *, policy: ContextAuthorityPolicy | None,
+        run_identity: tuple[str, str, str],
+    ) -> None:
+        """Restore the trusted AG2 channel snapshot before executing a turn.
+
+        Hydration is not a tool mutation: the Hub already authorized and stored
+        these facts. Replacement also removes stale seed keys absent from AG2.
+        """
+        self._bind_run(run_identity, policy)
+        self.__data = detach(dict(data))
+        self.clear_context_updates()
+
     @property
     def data(self) -> dict[str, Any]:
         raise AttributeError(
@@ -639,6 +652,7 @@ async def create_agents(
             try:
                 remote = create_a2a_remote_agent(a2a_spec, context_variables=context_variables)
                 remote._mozaiks_agent_kind = "a2a_remote"
+                remote._mozaiks_pending_turn_replay = agent_config.get("pending_turn_replay", "allow")
                 agents[agent_name] = remote
                 continue
             except Exception as a2a_err:
@@ -971,6 +985,7 @@ async def create_agents(
         agent._mozaiks_agent_kind = "local"
         agent._mozaiks_context_bridge = context_bridge
         agent._mozaiks_tool_outcome = tool_outcomes.get(agent_name)
+        agent._mozaiks_pending_turn_replay = agent_config.get("pending_turn_replay", "allow")
 
         if structured_model_cls is not None:
             model_name = getattr(structured_model_cls, "__name__", None)

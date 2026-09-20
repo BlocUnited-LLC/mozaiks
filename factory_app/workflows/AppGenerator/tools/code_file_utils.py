@@ -22,6 +22,12 @@ from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
 from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import (
     build_refinement_harness_code_files,
 )
+from factory_app.workflows.AppGenerator.tools.task_integrity import (
+    RepairOwnershipError,
+    mark_repair_rejected,
+    mark_repair_responded,
+    validate_repair_candidate,
+)
 from mozaiksai.core.runtime.app.auth_contract import (
     AppAuthContractError,
     compose_app_auth_routes,
@@ -140,12 +146,24 @@ def extract_deleted_file_paths_from_payload(payload: Any) -> list[str]:
 def save_generated_code(context_variables: Any) -> dict[str, Any]:
     """Persist the current validated output before AG2 advances to a quality gate."""
     payload = detach(context_variables.get("structured_output"))
-    if not isinstance(payload, dict):
-        raise ValueError("Generated code persistence requires validated structured_output.")
-    incoming = extract_code_file_map_from_payload(payload)
-    deleted = extract_deleted_file_paths_from_payload(payload)
+    try:
+        if not isinstance(payload, dict):
+            raise ValueError("Generated code persistence requires validated structured_output.")
+        incoming = extract_code_file_map_from_payload(payload)
+        deleted = extract_deleted_file_paths_from_payload(payload)
+    except (TypeError, ValueError) as exc:
+        if mark_repair_rejected(context_variables, str(exc)):
+            return {"status": "rejected", "error": str(exc), "saved_files": [], "deleted_files": []}
+        raise
     existing = detach(context_variables.get("code_files", [])) or []
     files = extract_code_file_map_from_payload({"code_files": existing})
+    baseline = detach(context_variables.get("generated_files", {})) or {}
+    try:
+        incoming = validate_repair_candidate(
+            context_variables, incoming, deleted, existing={**baseline, **files},
+        )
+    except RepairOwnershipError as exc:
+        return {"status": "rejected", "error": str(exc), "saved_files": [], "deleted_files": []}
     files.update(incoming)
     removed = set(detach(context_variables.get("deleted_files", [])) or [])
     removed.update(deleted)
@@ -161,7 +179,29 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             context_variables[key] = value
         else:
             context_variables.set(key, value)
+    mark_repair_responded(context_variables)
     return {"saved_files": sorted(incoming), "deleted_files": deleted}
+
+
+def admitted_app_file_map(context_variables: Any) -> dict[str, str]:
+    """Project the current bundle and admitted repairs, never raw worker history."""
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return {}
+    raw = detach(context_variables.get("generated_files"))
+    files: dict[str, str] = {}
+    if isinstance(raw, dict):
+        for path, content in raw.items():
+            safe = safe_relpath(str(path))
+            if safe and safe != "." and ":" not in safe and "\x00" not in safe:
+                files[safe] = str(content)
+    files.update(extract_code_file_map_from_payload({
+        "code_files": detach(context_variables.get("code_files")),
+    }))
+    for path in extract_deleted_file_paths_from_payload({
+        "deleted_files": detach(context_variables.get("deleted_files")),
+    }):
+        files.pop(path, None)
+    return files
 
 
 def collect_generated_app_file_map(
@@ -210,6 +250,7 @@ def collect_generated_app_file_entries(generated_app_dir: Any) -> list[dict[str,
 
 
 __all__ = [
+    "admitted_app_file_map",
     "compose_bundle_auth_routes",
     "collect_generated_app_file_entries",
     "collect_generated_app_file_map",
