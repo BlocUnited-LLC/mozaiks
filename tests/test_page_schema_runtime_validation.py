@@ -410,7 +410,7 @@ def test_shell_endpoint_serves_validated_page(tmp_path: Path, monkeypatch: pytes
 @pytest.mark.parametrize("folder", [False, True])
 def test_shell_route_uses_exact_discovered_page_key(tmp_path, monkeypatch, folder):
     from mozaiksai.core.runtime.app.page_schema import load_app_page_schemas
-    from mozaiksai.hosts.platform import _load_page_schema_routes
+    from mozaiksai.hosts.shell_config import _load_page_schema_routes
 
     _write_app(tmp_path, _valid_page(name="CustomerList", route="/customers"), page_name="customer_list")
     if folder:

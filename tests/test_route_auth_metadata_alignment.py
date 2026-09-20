@@ -6,9 +6,22 @@ from pathlib import Path
 
 import yaml
 
+from mozaiksai.hosts import shell_config
+
 ROOT = Path(__file__).resolve().parents[1]
 STRUCTURED_OUTPUTS = ROOT / "factory_app" / "workflows" / "AppGenerator" / "structured_outputs.yaml"
 PLATFORM_SOURCE = ROOT / "mozaiksai" / "hosts" / "platform.py"
+# The platform host is two modules since the shell-config extraction; these
+# source assertions are about the layer, not about which file holds a line.
+SHELL_CONFIG_SOURCE = ROOT / "mozaiksai" / "hosts" / "shell_config.py"
+
+
+def _platform_layer_source() -> str:
+    return (
+        PLATFORM_SOURCE.read_text(encoding="utf-8")
+        + "\n"
+        + SHELL_CONFIG_SOURCE.read_text(encoding="utf-8")
+    )
 ROUTE_RENDERER = ROOT / "chat-ui" / "src" / "components" / "RouteRenderer.jsx"
 WORKSPACE_LAYOUT = ROOT / "chat-ui" / "src" / "workspace" / "WorkspaceLayout.jsx"
 
@@ -80,7 +93,6 @@ def test_route_schema_declares_routeauth_not_requirespermission() -> None:
 
 
 def test_load_page_schema_routes_normalizes_meta_roles_to_requiresrole(tmp_path: Path) -> None:
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -98,7 +110,7 @@ def test_load_page_schema_routes_normalizes_meta_roles_to_requiresrole(tmp_path:
         ],
     )
 
-    pages = platform_app._load_page_schema_routes(app_root)
+    pages = shell_config._load_page_schema_routes(app_root)
 
     assert len(pages) == 1
     assert pages[0]["path"] == "/review"
@@ -110,7 +122,6 @@ def test_load_page_schema_routes_normalizes_meta_roles_to_requiresrole(tmp_path:
 def test_build_shell_config_preserves_requiresrole_route_metadata(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -126,9 +137,9 @@ def test_build_shell_config_preserves_requiresrole_route_metadata(
             }
         ],
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [page for page in shell["pages"] if page["path"] == "/apps"]
     assert matching
@@ -138,7 +149,6 @@ def test_build_shell_config_preserves_requiresrole_route_metadata(
 def test_build_shell_config_preserves_route_manifest_meta_requiresauth_false(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -152,9 +162,9 @@ def test_build_shell_config_preserves_route_manifest_meta_requiresauth_false(
             }
         ],
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [page for page in shell["pages"] if page["path"] == "/login"]
     assert matching
@@ -164,7 +174,6 @@ def test_build_shell_config_preserves_route_manifest_meta_requiresauth_false(
 def test_build_shell_config_normalizes_page_schema_roles_in_shell_output(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -181,9 +190,9 @@ def test_build_shell_config_normalizes_page_schema_roles_in_shell_output(
             )
         ],
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [page for page in shell["pages"] if page["path"] == "/admin-only"]
     assert matching
@@ -194,7 +203,6 @@ def test_build_shell_config_normalizes_page_schema_roles_in_shell_output(
 def test_page_schema_routeauth_passes_through_shell_output(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -217,9 +225,9 @@ def test_page_schema_routeauth_passes_through_shell_output(
             )
         ],
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [page for page in shell["pages"] if page["path"] == "/projects/:projectId/settings"]
     assert matching
@@ -230,7 +238,6 @@ def test_page_schema_routeauth_passes_through_shell_output(
 def test_neutral_generated_app_shell_composes_scoped_settings_and_admin_routes(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_app_root(
         tmp_path,
@@ -292,10 +299,10 @@ def test_neutral_generated_app_shell_composes_scoped_settings_and_admin_routes(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
-    monkeypatch.setattr(platform_app, "resolve_active_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_active_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     pages = {page["path"]: page for page in shell["pages"]}
     settings_page = pages["/projects/:projectId/settings"]
@@ -308,7 +315,7 @@ def test_neutral_generated_app_shell_composes_scoped_settings_and_admin_routes(
     nav_items = {item["id"]: item for item in shell["navigation"]["items"]}
     assert nav_items["project-settings"]["path"] == "/projects/:projectId/settings"
     assert nav_items["project-settings"]["requiresRole"] == "project_admin"
-    assert "settings" not in platform_app._shell_shortcut_catalog([], {})
+    assert "settings" not in shell_config._shell_shortcut_catalog([], {})
 
 
 def test_route_renderer_enforces_requiresauth_and_routeauth() -> None:
@@ -334,7 +341,7 @@ def test_shell_components_filter_navigation_by_role() -> None:
 
 
 def test_platform_comments_distinguish_route_metadata_from_module_authorization() -> None:
-    source = PLATFORM_SOURCE.read_text(encoding="utf-8").lower()
+    source = _platform_layer_source().lower()
 
     assert "frontend role checks are ux gates" in source
     assert "module policy remains the" in source

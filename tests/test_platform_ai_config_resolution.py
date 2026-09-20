@@ -41,7 +41,11 @@ def test_mozaiks_platform_has_platform_scoped_ai_config() -> None:
 
 
 def test_shell_config_uses_active_platform_path_first() -> None:
-    source = _read("mozaiksai/hosts/platform.py")
+    # The platform host is two modules since the shell-config extraction;
+    # this assertion is about the layer, not which file holds the line.
+    source = _read("mozaiksai/hosts/platform.py") + "\n" + _read(
+        "mozaiksai/hosts/shell_config.py"
+    )
     assert 'def resolve_app_root() -> Path:' in source
     assert 'app_root = resolve_app_root()' in source
     assert 'ai_path = app_root / "config" / "ai.json"' in source

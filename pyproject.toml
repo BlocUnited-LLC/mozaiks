@@ -164,6 +164,13 @@ exclude = ["factory_app/build_context/.*/templates/.*\\.py$"]
 module = "mozaiksai.hosts.platform"
 ignore_errors = true
 
+# Carried over with the shell-config extraction, not newly granted: these 61
+# errors were already inside hosts.platform and hidden by the line above.
+# Isolating them in a 1.1k-line module is what makes fixing them reviewable.
+[[tool.mypy.overrides]]
+module = "mozaiksai.hosts.shell_config"
+ignore_errors = true
+
 [[tool.mypy.overrides]]
 module = "mozaiksai.hosts.studio"
 ignore_errors = true

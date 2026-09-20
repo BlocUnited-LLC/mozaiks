@@ -10,6 +10,8 @@ import asyncio
 import json
 from pathlib import Path
 
+from mozaiksai.hosts import shell_config
+
 # ---------------------------------------------------------------------------
 # Fix 1 – vite.config.js: isProductUiJs covers non-*-platform workspace dirs
 # ---------------------------------------------------------------------------
@@ -61,7 +63,6 @@ def _make_app_root(tmp_path: Path, pages: list[dict]) -> Path:
 
 def test_appshell_auto_inferred_when_navigation_group_present(monkeypatch, tmp_path: Path) -> None:
     """A route manifest entry with navigation.group must have appShell inferred as True."""
-    from mozaiksai.hosts import platform as platform_app
 
     pages = [
         {
@@ -80,9 +81,9 @@ def test_appshell_auto_inferred_when_navigation_group_present(monkeypatch, tmp_p
         }
     ]
     app_root = _make_app_root(tmp_path, pages)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [p for p in shell["pages"] if p["path"] == "/apps"]
     assert matching, "Route /apps should appear in shell pages"
@@ -93,7 +94,6 @@ def test_appshell_auto_inferred_when_navigation_group_present(monkeypatch, tmp_p
 
 def test_appshell_not_inferred_when_navigation_group_absent(monkeypatch, tmp_path: Path) -> None:
     """A route with no navigation.group must not have appShell auto-set."""
-    from mozaiksai.hosts import platform as platform_app
 
     pages = [
         {
@@ -106,9 +106,9 @@ def test_appshell_not_inferred_when_navigation_group_absent(monkeypatch, tmp_pat
         }
     ]
     app_root = _make_app_root(tmp_path, pages)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [p for p in shell["pages"] if p["path"] == "/login"]
     assert matching, "Route /login should appear in shell pages"
@@ -120,7 +120,6 @@ def test_appshell_not_inferred_when_navigation_group_absent(monkeypatch, tmp_pat
 
 def test_explicit_appshell_false_not_overridden(monkeypatch, tmp_path: Path) -> None:
     """An explicit appShell: false must not be overridden even if navigation.group is set."""
-    from mozaiksai.hosts import platform as platform_app
 
     pages = [
         {
@@ -137,9 +136,9 @@ def test_explicit_appshell_false_not_overridden(monkeypatch, tmp_path: Path) -> 
         }
     ]
     app_root = _make_app_root(tmp_path, pages)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     matching = [p for p in shell["pages"] if p["path"] == "/opt-out"]
     assert matching, "Route /opt-out should appear in shell pages"
@@ -155,7 +154,7 @@ def test_explicit_appshell_false_not_overridden(monkeypatch, tmp_path: Path) -> 
 
 
 def test_inject_admin_portal_inserts_before_signout() -> None:
-    from mozaiksai.hosts.platform import _inject_admin_portal
+    from mozaiksai.hosts.shell_config import _inject_admin_portal
 
     result: dict = {
         "profile": {
@@ -175,7 +174,7 @@ def test_inject_admin_portal_inserts_before_signout() -> None:
 
 
 def test_inject_admin_portal_appends_when_no_signout() -> None:
-    from mozaiksai.hosts.platform import _inject_admin_portal
+    from mozaiksai.hosts.shell_config import _inject_admin_portal
 
     result: dict = {
         "profile": {
@@ -193,7 +192,7 @@ def test_inject_admin_portal_appends_when_no_signout() -> None:
 
 
 def test_inject_admin_portal_is_idempotent() -> None:
-    from mozaiksai.hosts.platform import _inject_admin_portal
+    from mozaiksai.hosts.shell_config import _inject_admin_portal
 
     result: dict = {
         "profile": {
@@ -212,7 +211,7 @@ def test_inject_admin_portal_is_idempotent() -> None:
 
 
 def test_inject_admin_portal_creates_profile_when_missing() -> None:
-    from mozaiksai.hosts.platform import _inject_admin_portal
+    from mozaiksai.hosts.shell_config import _inject_admin_portal
 
     result: dict = {}
     _inject_admin_portal(result)
@@ -224,7 +223,6 @@ def test_inject_admin_portal_creates_profile_when_missing() -> None:
 
 def test_build_shell_config_platform_does_not_inject_admin_portal(monkeypatch, tmp_path: Path) -> None:
     """App/platform shell config must not auto-inject admin-portal."""
-    from mozaiksai.hosts import platform as platform_app
 
     # Minimal app with no shell.json shortcuts at all
     app_root = tmp_path / "app"
@@ -242,9 +240,9 @@ def test_build_shell_config_platform_does_not_inject_admin_portal(monkeypatch, t
     (app_root / "ui" / "route_manifest.json").write_text(
         json.dumps({"pages": []}), encoding="utf-8"
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     profile = shell.get("profile", {})
     menu = profile.get("menu", [])
@@ -256,7 +254,6 @@ def test_build_shell_config_platform_does_not_inject_admin_portal(monkeypatch, t
 
 def test_build_shell_config_studio_injects_admin_portal(monkeypatch, tmp_path: Path) -> None:
     """Studio shell config should still inject admin-portal for admins."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = tmp_path / "app"
     (app_root / "config").mkdir(parents=True)
@@ -273,9 +270,9 @@ def test_build_shell_config_studio_injects_admin_portal(monkeypatch, tmp_path: P
     (app_root / "ui" / "route_manifest.json").write_text(
         json.dumps({"pages": []}), encoding="utf-8"
     )
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="studio"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="studio"))
 
     profile = shell.get("profile", {})
     menu = profile.get("menu", [])
@@ -309,21 +306,19 @@ def _make_minimal_app_root(tmp_path: Path) -> Path:
 
 def test_user_surface_landing_spot_is_me(monkeypatch, tmp_path: Path) -> None:
     """User surface must land on /me, not / or /apps."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_minimal_app_root(tmp_path)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
-    shell = asyncio.run(platform_app.build_shell_config(surface="user"))
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    shell = asyncio.run(shell_config.build_shell_config(surface="user"))
     assert shell["landing_spot"] == "/me", "User surface landing_spot must be /me"
 
 
 def test_user_surface_does_not_inject_admin_portal(monkeypatch, tmp_path: Path) -> None:
     """User surface must never receive admin-portal."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_minimal_app_root(tmp_path)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
-    shell = asyncio.run(platform_app.build_shell_config(surface="user"))
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    shell = asyncio.run(shell_config.build_shell_config(surface="user"))
     menu = shell.get("profile", {}).get("menu", [])
     ids = [item.get("id") for item in menu if isinstance(item, dict)]
     assert "admin-portal" not in ids, "admin-portal must not appear in the user surface"
@@ -331,12 +326,11 @@ def test_user_surface_does_not_inject_admin_portal(monkeypatch, tmp_path: Path) 
 
 def test_shell_config_response_includes_surface_field(monkeypatch, tmp_path: Path) -> None:
     """build_shell_config must echo back the resolved surface in the response."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_minimal_app_root(tmp_path)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
     for surface, expected in (("platform", "platform"), ("studio", "studio"), ("user", "user"), (None, "platform")):
-        shell = asyncio.run(platform_app.build_shell_config(surface=surface))
+        shell = asyncio.run(shell_config.build_shell_config(surface=surface))
         assert shell.get("surface") == expected, (
             f"surface={surface!r} → response.surface must be {expected!r}, got {shell.get('surface')!r}"
         )
@@ -344,10 +338,9 @@ def test_shell_config_response_includes_surface_field(monkeypatch, tmp_path: Pat
 
 def test_unknown_surface_falls_back_to_platform(monkeypatch, tmp_path: Path) -> None:
     """An unrecognized surface value must normalize to 'platform'."""
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = _make_minimal_app_root(tmp_path)
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
-    shell = asyncio.run(platform_app.build_shell_config(surface="bogus"))
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    shell = asyncio.run(shell_config.build_shell_config(surface="bogus"))
     assert shell.get("surface") == "platform", "Unknown surface must normalize to 'platform'"
 
