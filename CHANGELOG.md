@@ -20,6 +20,8 @@ This project follows a practical pre-1.0 changelog format:
   approved task ownership; acceptance and export require the complete planned
   snapshot. Runs with missing diagnostics or uncertain interrupted attempts stay
   blocked instead of being reconstructed.
+- Task ownership now accepts the canonical `security/secrets.yaml` policy
+  artifact while retaining path safety checks and rejecting raw secret values.
 
 ### Changed
 

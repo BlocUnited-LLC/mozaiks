@@ -91,6 +91,14 @@ No repair may broaden ownership, delete a required final artifact, or discard
 unrelated accepted output. Save tools validate an entire candidate before
 mutation; AppSchema repair stages the existing deterministic materializer first.
 
+Task path admission also accepts the existing canonical `security/secrets.yaml`
+artifact, using `APP_SECURITY_SECRETS_PATH` rather than a second path definition.
+The exact normalized path is allowed only after absolute-path, traversal, and
+glob checks. Other secret-like paths remain rejected. This resolves the previous
+contradiction between approved plan ownership and runtime admission; it does not
+permit credential values. Existing names-first generation and runtime content
+validators still reject raw secrets in the manifest.
+
 Acceptance checks the complete final snapshot against the approved plan and
 execution evidence, in addition to existing schema, module, wiring, runtime,
 functional, and quality gates. Passing evidence includes a digest of the plan,
@@ -106,6 +114,7 @@ final-snapshot validation.
 | `AppGenerator/tools/app_plan_review.py` | Synthesize prerequisites, reject ambiguity/cycles, retain explicit edges |
 | `extended_orchestration/task_batches.yaml` | Opt into bounded recovery on the existing batch |
 | Runtime `task_batches.py` | Typed recovery request/failure/config, original DAG execution and finite budgets |
+| Runtime `path_ownership.py` | Admit the exact canonical names-first secret policy path while retaining path safety checks |
 | Runtime `orchestration_patterns.py`, `ag2_network_runner.py`, `agents/factory.py` | Declared trigger, trusted Hub context hydration, channel lineage, and authorized AG2 checkpoints |
 | `context_variables.yaml` | Persist authoritative batch evidence, repair state, requests, and routing projections with closed writers |
 | `agents.yaml`, canonical `AgentSpec` | Consume actual prerequisite contracts and exact repair scope; declare pending worker replay policy |
