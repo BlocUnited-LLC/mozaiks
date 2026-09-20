@@ -51,6 +51,7 @@ from types import SimpleNamespace
 
 from pydantic import BaseModel
 
+from mozaiksai.core.workflow.generator_support.code_files import _MODULE_CONTRACT_OUTPUT_PATHS
 from mozaiksai.core.workflow.task_batches import (
     _normalize_agent_reply,
     _normalize_task_items,
@@ -254,6 +255,51 @@ class TestOptionalTaskOutputPaths:
         assert "modules/billing/contracts/notifications.yaml" in result
         assert "modules/billing/contracts/policy_hooks.yaml" in result
         assert "modules/billing/runtime_extensions.yaml" in result
+
+    def test_module_contract_events_settings_admin_are_optional(self):
+        """The three that were missing. A module with none of these declares
+        null and emits nothing, so owning the path must not require the file."""
+        task = {"task_type": "module_contract", "capability_pack_id": "billing"}
+        result = optional_task_output_paths(task)
+        assert "modules/billing/contracts/events.yaml" in result
+        assert "modules/billing/contracts/settings.yaml" in result
+        assert "modules/billing/contracts/admin.yaml" in result
+
+    def test_every_guarded_companion_manifest_is_optional(self):
+        """Set equality with the raw-file guard's own map, minus module.yaml.
+
+        The guard in code_files.py refuses a raw companion file whose typed
+        field is null. If that same file is also a required owned path, a
+        module with nothing to declare has no output that passes. Equality in
+        both directions: a guarded manifest missing here is that trap, and an
+        optional path the guard does not know is a file the typed pipeline
+        never materializes.
+
+        Two assertions on purpose. The literal pins the nine files the typed
+        pipeline materializes today, so a key dropped from the guard's map
+        fails here instead of silently shrinking both sets together. The
+        derived form pins that the set is taken from that map at all.
+        """
+        task = {"task_type": "module_contract", "capability_pack_id": "billing"}
+        result = optional_task_output_paths(task)
+
+        assert result == {
+            "modules/billing/contracts/admin.yaml",
+            "modules/billing/contracts/events.yaml",
+            "modules/billing/contracts/notifications.yaml",
+            "modules/billing/contracts/policy_hooks.yaml",
+            "modules/billing/contracts/profile.yaml",
+            "modules/billing/contracts/reactions.yaml",
+            "modules/billing/contracts/relationships.yaml",
+            "modules/billing/contracts/settings.yaml",
+            "modules/billing/runtime_extensions.yaml",
+        }
+        assert result == {
+            f"modules/billing/{relative_path}"
+            for key, relative_path in _MODULE_CONTRACT_OUTPUT_PATHS.items()
+            if key != "module_yaml"
+        }
+        assert "modules/billing/module.yaml" not in result
 
     def test_module_contract_without_module_id_returns_empty(self):
         task = {"task_type": "module_contract"}

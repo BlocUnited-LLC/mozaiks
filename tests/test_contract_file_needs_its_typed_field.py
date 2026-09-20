@@ -59,6 +59,13 @@ def test_the_error_says_what_to_do_instead_of_only_what_is_wrong() -> None:
     message = str(error.value)
     assert "Set module_contract.events_yaml" in message
     assert "skips schema materialization" in message
+    # A module with no events is told to set the field, which its prompt says
+    # to leave null. Without the second branch it retries the same output until
+    # the budget ends - a live build did exactly that. The advice must say what
+    # the null case does instead.
+    assert "when module_contract.events_yaml is null" in message
+    assert "omit contracts/events.yaml from code_files" in message
+    assert "a null field emits nothing" in message
 
 
 def test_the_typed_field_alone_is_accepted() -> None:
@@ -89,3 +96,16 @@ def test_the_prompt_states_the_invariant_in_the_direction_agents_get_wrong() -> 
     text = (ROOT / "factory_app/workflows/AppGenerator/agents.yaml").read_text(encoding="utf-8")
 
     assert "A contract file in `code_files` requires its `module_contract` field to be set." in text
+
+
+def test_an_absent_field_is_treated_as_null() -> None:
+    """The strict structured output always carries every key, so only a
+    hand-built bundle can omit one. A raw companion file must not slip past the
+    guard on that alone - once the companion is an optional owned path, nothing
+    downstream would catch it."""
+    payload = {
+        "module_contract": {"module_id": "habits", "module_yaml": {"module": {"id": "habits"}}},
+        "code_files": [{"path": "modules/habits/contracts/events.yaml", "content": "events: []\n"}],
+    }
+    with pytest.raises(ValueError, match="is null but raw output emits"):
+        extract_code_file_map_from_payload(payload)

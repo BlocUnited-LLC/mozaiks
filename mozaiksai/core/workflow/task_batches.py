@@ -20,6 +20,7 @@ from mozaiksai.core.workflow.context.authority import ContextAuthorityPolicy
 
 from .dependency_graph import deterministic_topological_order
 from .generator_support.code_files import (
+    _MODULE_CONTRACT_OUTPUT_PATHS,
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
     safe_relpath,
@@ -1385,14 +1386,17 @@ def optional_task_output_paths(task: dict[str, Any]) -> set[str]:
     module_id = str(task.get("capability_pack_id") or "").strip()
     if not module_id:
         return set()
-    prefix = f"modules/{module_id}"
+    # Every companion manifest the typed pipeline materializes is optional: its
+    # typed field is null when the module has nothing to declare, and a null
+    # field emits nothing. Only module.yaml is required. Deriving the set from
+    # the same map the raw-file guard in code_files.py iterates keeps the two
+    # naming the same files. Listing them by hand left events.yaml, settings.yaml
+    # and admin.yaml guarded as typed-only yet required as raw paths, and a
+    # zero-events module that owned events.yaml had no output that passed.
     return {
-        f"{prefix}/contracts/notifications.yaml",
-        f"{prefix}/contracts/policy_hooks.yaml",
-        f"{prefix}/contracts/profile.yaml",
-        f"{prefix}/contracts/relationships.yaml",
-        f"{prefix}/contracts/reactions.yaml",
-        f"{prefix}/runtime_extensions.yaml",
+        f"modules/{module_id}/{relative_path}"
+        for key, relative_path in _MODULE_CONTRACT_OUTPUT_PATHS.items()
+        if key != "module_yaml"
     }
 
 
