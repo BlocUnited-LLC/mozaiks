@@ -231,6 +231,11 @@ async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata
     assert result["hydration"]["source"] == "workflow_bundle_artifact"
     assert result["workflow_integration_metadata"]["source_artifact_version_id"] == result["artifact_lineage"]["workflow_bundle_id"]
     assert "workflow_integration" in result["appgenerator_acceptance"]["validation_evidence"]["completed"]
+    assert result["appgenerator_acceptance"]["task_batch_status"] == "completed"
+    assert result["appgenerator_acceptance"]["accepted_task_ids"] == [
+        "support_contract", "support_models", "support_pages", "support_persistence", "support_services",
+    ]
+    assert result["appgenerator_acceptance"]["failed_tasks"] == {}
     assert result["export_gate"]["allow_export"] is True
     assert result["runtime_loader"]["workflow_reaction_loaded"] is True
 

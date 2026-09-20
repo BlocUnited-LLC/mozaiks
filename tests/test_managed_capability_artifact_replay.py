@@ -31,7 +31,7 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, M
 from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
-from tests.app_task_replay_helpers import execute_file_replay
+from scripts.appgenerator_fixture_replay import execute_file_replay
 from tests.factory_context import factory_context
 from tests.module_authority_test_helpers import enforce_authority
 from tests.test_generated_saas_subscription_runtime_acceptance import (
@@ -746,7 +746,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     )}
     candidates.update({file["filename"]: file["content"] for output in _mozaikspay_task_outputs().values()
                        for file in output["code_files"]})
-    accepted = await execute_file_replay(monkeypatch, ctx.data, candidates)
+    accepted = await execute_file_replay(ctx.data, candidates)
     assembled = await assemble_app_tasks(context_variables=ctx)
     assert ctx.get("app_task_batch_results") == accepted
     files = _file_map(assembled)

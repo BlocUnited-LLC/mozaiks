@@ -34,7 +34,7 @@ from mozaiksai.core.session.build_context import (
     load_build_context,
 )
 from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
-from tests.app_task_replay_helpers import execute_file_replay
+from scripts.appgenerator_fixture_replay import execute_file_replay
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_CONTEXT_ROOT = REPO_ROOT / "factory_app" / "build_context" / "mozaikspay"
@@ -689,7 +689,7 @@ async def test_ai_research_workspace_offline_golden_path(
     candidates.update({file["filename"]: file["content"] for file in materialize_app_config_contracts(
         app_id="research", app_build_plan=normalized_plan, context_variables=context,
     )})
-    accepted = await execute_file_replay(monkeypatch, context.values, candidates)
+    accepted = await execute_file_replay(context.values, candidates)
     context.set("workflow_name", "AppGenerator")
     assembled = await assemble_app_tasks(context_variables=context)
     assert context.get("app_task_batch_results") == accepted
@@ -734,10 +734,6 @@ async def test_ai_research_workspace_offline_golden_path(
     export_gate = resolve_export_gate(context)
     assert export_gate["allow_export"] is True, export_gate["reasons"]
 
-    class _Persistence:
-        async def gather_latest_agent_jsons(self, **_kwargs: Any) -> dict[str, Any]:
-            return {}
-
     async def no_op(*_args: Any, **_kwargs: Any) -> None:
         return None
 
@@ -749,7 +745,6 @@ async def test_ai_research_workspace_offline_golden_path(
     # root, not the cwd, so an explicit override is required to keep this
     # test's bundle output inside tmp_path instead of the checkout.
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(download_module, "AG2PersistenceManager", lambda: _Persistence())
     monkeypatch.setattr(download_module, "get_latest_workflow_export", no_op)
     monkeypatch.setattr(download_module, "_register_app_bundle_artifact_version", no_op)
     monkeypatch.setattr(download_module, "AppRegistryService", lambda: SimpleNamespace(

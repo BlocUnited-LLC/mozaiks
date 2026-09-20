@@ -498,13 +498,18 @@ def build_appgenerator_acceptance_task_state(files: dict[str, str]) -> dict[str,
     tasks = [
         {"task_id": "support_" + lane, "task_type": task_type, "initial_agent": agent,
          "capability_pack_id": "support_tickets", "owned_paths": paths,
+         "surface_id": "support_tickets", "surface_kind": "ui_only" if lane == "pages" else "module",
+         "execution_target": "AppGenerator", "description": f"Emit the support {lane} fixture.",
+         "initial_message": "Emit the assigned support fixture using its supplied prerequisite contracts.",
+         "acceptance_criteria": ["Preserve declared ownership and prerequisite contracts."],
          "depends_on": ["support_" + dependency for dependency in dependencies]}
         for lane, task_type, agent, paths, dependencies in lanes
     ]
     return {
         "app_build_plan": {
+            "app_kind": "internal_app", "auth_strategy": "none", "roles": [], "entities": [],
             "build_tasks": tasks,
-            "pages": [{"name": "SupportTickets", "route": "/support-tickets"}],
+            "pages": [{"name": "SupportTickets", "route": "/support-tickets", "purpose": "Manage support tickets."}],
             "capability_packs": [{
                 "capability_pack_id": "support_tickets", "surface_id": "support_tickets",
                 "surface_kind": "module", "capability_source": "generated_module",
@@ -645,14 +650,11 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
     repaired_acceptance = await run_app_bundle_acceptance_gate(context_variables=context)
     export_gate = resolve_export_gate(context)
 
-    from factory_app.workflows.AppGenerator.tools.generate_and_download import (
-        _merge_bundle_sources,
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+        admitted_app_file_map,
     )
 
-    packaged_files = _merge_bundle_sources(
-        context_variables=context,
-        collected={},
-    )
+    packaged_files = admitted_app_file_map(context)
     runtime_loader = await _load_runtime_app(
         dict(context.get("generated_files") or {}),
         temp_prefix="mozaiks-appgenerator-repair-",

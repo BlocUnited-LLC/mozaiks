@@ -9,6 +9,7 @@ from scripts.smoke_appgenerator_live_subscription import (
     run_deterministic_appgenerator_subscription_smoke,
     sample_subscription_contract,
     validate_module_contract_output,
+    validate_subscription_acceptance_handoff,
     validate_subscription_output,
 )
 from tests.import_utils import import_module_directly
@@ -184,8 +185,18 @@ def test_module_contract_validator_rejects_action_field_indentation_drift() -> N
 async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_wiring() -> None:
     payload = await run_deterministic_appgenerator_subscription_smoke()
 
-    assert payload["success"] is True
+    assert payload["success"] is True, payload
     acceptance = payload["appgenerator_acceptance"]
+    assert acceptance["task_batch_status"] == "completed"
+    assert acceptance["failed_tasks"] == {}
+    assert acceptance["accepted_task_ids"] == [
+        "entitlement_contract", "entitlement_services", "reports_models", "reports_services",
+        "subscription_pages", "subscription_persistence", "task_reports_module_contract", "task_subscription_config",
+    ]
+    assert {
+        f"modules/reports/contracts/{name}.yaml"
+        for name in ("admin", "events", "notifications", "reactions", "settings")
+    }.issubset(acceptance["generated_paths"])
     assert acceptance["acceptance"]["passed"] is True
     assert acceptance["export_gate"]["allow_export"] is True
     assert acceptance["runtime_loader"]["subscriptions_loaded"] is True
@@ -194,3 +205,30 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
     details = acceptance["wiring"]["checks"][0]["details"]
     assert details["platform_endpoint_count"] == 3
     assert details["wired_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_subscription_handoff_retains_invalid_companion_for_acceptance() -> None:
+    subscription = deterministic_subscription_output()
+    module = deterministic_module_contract_output()
+    subscription_yaml, errors = validate_subscription_output(subscription, sample_subscription_contract())
+    assert not errors and subscription_yaml is not None
+    module_yaml, errors = validate_module_contract_output(module)
+    assert not errors and module_yaml is not None
+    module["module_contract"]["notifications_yaml"] = {
+        "schema_version": "mozaiks.notifications.v1", "rules": [],
+    }
+
+    result = await validate_subscription_acceptance_handoff(
+        subscription_yaml=subscription_yaml, module_yaml=module_yaml,
+        task_outputs={"task_subscription_config": subscription, "task_reports_module_contract": module},
+    )
+
+    assert result["task_batch_status"] == "completed"
+    assert "modules/reports/contracts/notifications.yaml" in result["generated_paths"]
+    assert result["acceptance"]["passed"] is False
+    assert result["export_gate"]["allow_export"] is False
+    assert any(
+        "Invalid notifications.yaml" in failure["error"] and "rules" in failure["error"]
+        for failure in result["acceptance"]["failed_tests"]
+    )

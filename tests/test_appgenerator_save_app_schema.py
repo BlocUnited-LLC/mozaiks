@@ -85,11 +85,9 @@ def test_partial_schema_repair_preserves_pages_and_updates_validation_bundle(tmp
         manifest=_base_manifest(), pages=[customers], context_variables=context,
     )
 
-    from factory_app.workflows.AppGenerator.tools.app_validation import (
-        _generated_files_from_context,
-    )
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
 
-    files = _generated_files_from_context(context)
+    files = admitted_app_file_map(context)
     assert files["modules/customers/backend/handler.py"] == backend
     assert yaml.safe_load(files["ui/pages/Dashboard.yaml"]) == dashboard
     assert yaml.safe_load(files["ui/pages/Customers.yaml"])["title"] == "My Customers"

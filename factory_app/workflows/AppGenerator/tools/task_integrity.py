@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, NoReturn
 
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
@@ -91,11 +91,15 @@ def approved_task_inventory(context: Any) -> list[dict[str, Any]]:
 
 def task_allowed_paths(task: dict[str, Any], tasks: list[dict[str, Any]]) -> set[str]:
     """Use the batch's optionality rules without overriding another explicit owner."""
-    own = {safe_relpath(str(path)) for path in task.get("owned_paths") or []}
+    own = {
+        path for raw in task.get("owned_paths") or []
+        if (path := safe_relpath(str(raw))) is not None
+    }
     foreign = {
-        safe_relpath(str(path))
+        path
         for other in tasks if other.get("task_id") != task.get("task_id")
-        for path in other.get("owned_paths") or []
+        for raw in other.get("owned_paths") or []
+        if (path := safe_relpath(str(raw))) is not None
     }
     return (own | optional_task_output_paths(task)) - foreign - {""}
 
@@ -131,8 +135,9 @@ def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[di
     failed_ids = set(failed) | set(meta.get("failed_tasks") or [])
     by_id = {str(task["task_id"]): task for task in tasks}
     owners = {
-        safe_relpath(str(path)): task
-        for task in tasks for path in task.get("owned_paths") or []
+        path: task
+        for task in tasks for raw in task.get("owned_paths") or []
+        if (path := safe_relpath(str(raw))) is not None
     }
     for task in tasks:
         task_id = str(task["task_id"])
@@ -158,9 +163,10 @@ def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[di
         ):
             add("TASK_EVIDENCE_INVALID", task=task, reason="accepted task output differs from its execution evidence")
         for path in sorted(set(task.get("owned_paths") or []) - optional_task_output_paths(task)):
-            path = safe_relpath(str(path))
-            if path not in files:
-                add("PLANNED_ARTIFACT_MISSING", path, task, "required planned artifact is missing", blocked)
+            normalized_path = safe_relpath(str(path))
+            assert normalized_path is not None  # Approved inventory already validated every owned path.
+            if normalized_path not in files:
+                add("PLANNED_ARTIFACT_MISSING", normalized_path, task, "required planned artifact is missing", blocked)
 
     plan = _get(context, "app_build_plan") or {}
     if not isinstance(plan, dict) or not (tasks or plan.get("pages") or plan.get("modules")):
@@ -233,7 +239,7 @@ def validate_repair_candidate(
             raise RepairOwnershipError("repair has no approved task ownership request")
         return incoming
 
-    def reject(reason: str) -> None:
+    def reject(reason: str) -> NoReturn:
         _settle_repair(context, "rejected", reason)
         raise RepairOwnershipError(reason)
 

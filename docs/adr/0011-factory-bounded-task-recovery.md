@@ -104,8 +104,15 @@ execution evidence, in addition to existing schema, module, wiring, runtime,
 functional, and quality gates. Passing evidence includes a digest of the plan,
 task inventory/results, build binding, and exact file contents. Export verifies
 the actual canonical archive against that evidence before contacting GitHub.
-Missing files cannot be refilled from historical worker output during explicit
-final-snapshot validation.
+Validation and download share one projection of `generated_files` plus the
+admitted `code_files` overlay and `deleted_files` tombstones. Raw historical
+responses never participate in that projection, including when the current
+snapshot or task evidence is empty. Download does not reload files from a prior
+generated directory. This prevents rejected changes/deletions and older foreign
+readbacks from bypassing save admission. Authorized deterministic renderers add
+their artifacts before final acceptance; migration-history registration does not
+rewrite an accepted file. Acceptance, the download archive, and export use the
+same resulting snapshot.
 
 ## Workflow and contract changes
 

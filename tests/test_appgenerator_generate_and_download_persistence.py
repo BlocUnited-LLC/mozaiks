@@ -84,7 +84,7 @@ class _FakeArtifactStore:
         )
 
 
-def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_deletions() -> None:
+def test_download_projects_admitted_bundle_overlays_and_deletions() -> None:
     forbidden_path = "modules/billing/backend/token_wallet_ledger.py"
     context = ContextVariablesBridge(
         {
@@ -102,23 +102,10 @@ def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_de
             "deleted_files": [forbidden_path],
         }
     )
-    collected = {
-        "ServiceAgent": {
-            "code_files": [
-                {"filename": "modules/billing/backend/helper.py", "content": "VALUE = 1\n"}
-            ],
-            "deleted_files": [forbidden_path],
-        },
-    }
-
-    files_map = generate_and_download_module._merge_bundle_sources(
-        context_variables=context,
-        collected=collected,
-    )
+    files_map = generate_and_download_module.admitted_app_file_map(context)
 
     assert files_map["app.json"] == '{"id":"billing-app"}'
     assert "async def list_products" in files_map["modules/billing/backend/service.py"]
-    assert files_map["modules/billing/backend/helper.py"] == "VALUE = 1\n"
     assert forbidden_path not in files_map
 
 
@@ -127,6 +114,10 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch, tm
     monkeypatch.setattr(generate_and_download_module, "BuilderArtifactStore", lambda: fake_store)
 
     context = _Context({"artifact_version_id": "artifact_123", "revision_scope": "feature"})
+    migration_file = tmp_path / "data/migrations/m_1.json"
+    migration_file.parent.mkdir(parents=True)
+    accepted_bytes = b'{"migration_id":"m_1","changes":{"new_collections":["users"]}}\r\n'
+    migration_file.write_bytes(accepted_bytes)
     record = asyncio.run(
         generate_and_download_module._persist_pending_schema_migration(
             pending_migration={"migration_id": "m_1", "changes": {"new_collections": ["users"]}},
@@ -144,7 +135,7 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch, tm
     assert fake_store.calls[0]["change_class"] == "feature"
     assert context.data["persisted_database_migration"]["status"] == "staged"
     assert context.data["staged_database_migration_path"] == "data/migrations/m_1.json"
-    assert (tmp_path / "data" / "migrations" / "m_1.json").exists()
+    assert migration_file.read_bytes() == accepted_bytes
 
 
 def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatch, tmp_path: Path) -> None:
@@ -251,17 +242,12 @@ def test_register_app_bundle_artifact_version_marks_failed_acceptance(monkeypatc
 
 
 def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypatch) -> None:
-    class _FakePersistence:
-        async def gather_latest_agent_jsons(self, **_kwargs):
-            return {}
-
     async def fail_if_called(*_args, **_kwargs):
         raise AssertionError("finalization continued after failed acceptance")
 
     async def noop(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(generate_and_download_module, "AG2PersistenceManager", lambda: _FakePersistence())
     monkeypatch.setattr(generate_and_download_module, "_inject_agent_context_env", noop)
     from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 
@@ -298,10 +284,6 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
     tmp_path: Path,
     line_ending: str,
 ) -> None:
-    class _FakePersistence:
-        async def gather_latest_agent_jsons(self, **_kwargs):
-            return {}
-
     async def noop(*_args, **_kwargs):
         return None
 
@@ -317,7 +299,6 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
         raise RuntimeError("artifact registration failed")
 
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(generate_and_download_module, "AG2PersistenceManager", lambda: _FakePersistence())
     monkeypatch.setattr(generate_and_download_module, "_inject_agent_context_env", noop)
     monkeypatch.setattr(generate_and_download_module, "run_app_bundle_acceptance_gate", passed_acceptance)
     monkeypatch.setattr(
@@ -357,9 +338,7 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
 @pytest.mark.parametrize("export_result", [{"success": True}, {"success": False}, None, "exception"])
 def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_path, export_result):
     module = generate_and_download_module
-    persistence = type("Persistence", (), {"gather_latest_agent_jsons": AsyncMock(return_value={})})()
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    monkeypatch.setattr(module, "AG2PersistenceManager", lambda: persistence)
     for name in ("_inject_agent_context_env", "_register_app_bundle_artifact_version"):
         monkeypatch.setattr(module, name, AsyncMock(return_value=None))
     from factory_app.app.modules.app_registry.backend.service import AppRegistryService
@@ -440,8 +419,6 @@ async def test_packaging_publishes_registered_review_path_under_real_context_aut
     }), authority_policy=policy)
     context._bind_run(("AppGenerator", "host", "chat"), policy)
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    persistence = type("Persistence", (), {"gather_latest_agent_jsons": AsyncMock(return_value={})})()
-    monkeypatch.setattr(module, "AG2PersistenceManager", lambda: persistence)
     for name in ("_inject_agent_context_env", "_register_app_bundle_artifact_version"):
         monkeypatch.setattr(module, name, AsyncMock(return_value=None))
     update = AsyncMock(return_value={"success": True})
@@ -466,4 +443,3 @@ async def test_packaging_publishes_registered_review_path_under_real_context_aut
     assert context.consume_authorized_context_updates(
         policy=policy, run_identity=("AppGenerator", "host", "chat"),
     )["set"]["bundle_path"] == staged
-

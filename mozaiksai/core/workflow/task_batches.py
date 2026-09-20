@@ -759,8 +759,11 @@ async def _execute_one_batch(
             metadata["in_flight"][task_id] = {"attempt": attempt, "request_id": metadata.get("request_id")}
             await persist()
 
-    async def execute_task(item: dict[str, Any], semaphore: asyncio.Semaphore, outputs: dict[str, Any]) -> Any:
+    async def execute_task(
+        item: dict[str, Any], semaphore: asyncio.Semaphore, outputs: dict[str, Any],
+    ) -> dict[str, Any] | Exception:
         task_id = str(item["task_id"])
+        outcome: dict[str, Any] | Exception
         try:
             outcome = await _run_one_task(
                 workflow_name=workflow_name, batch=batch, task=item, all_task_items=task_items,
@@ -886,16 +889,16 @@ async def _execute_one_batch(
             return_exceptions=True,
         )
 
-        for task, outcome in zip(ready, settled, strict=False):
+        for task, task_outcome in zip(ready, settled, strict=False):
             task_id = str(task["task_id"])
-            if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
-                raise outcome
-            if isinstance(outcome, Exception):
+            if isinstance(task_outcome, BaseException) and not isinstance(task_outcome, Exception):
+                raise task_outcome
+            if isinstance(task_outcome, Exception):
                 if batch.execution.failure_policy == "fail_batch":
                     await persist("failed")
                     raise RuntimeError(
-                        f"task batch {batch.id!r} failed at task {task_id!r}: {outcome}"
-                    ) from outcome
+                        f"task batch {batch.id!r} failed at task {task_id!r}: {task_outcome}"
+                    ) from task_outcome
                 continue
 
         if pending:

@@ -183,6 +183,27 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
     return {"saved_files": sorted(incoming), "deleted_files": deleted}
 
 
+def admitted_app_file_map(context_variables: Any) -> dict[str, str]:
+    """Project the current bundle and admitted repairs, never raw worker history."""
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return {}
+    raw = detach(context_variables.get("generated_files"))
+    files: dict[str, str] = {}
+    if isinstance(raw, dict):
+        for path, content in raw.items():
+            safe = safe_relpath(str(path))
+            if safe and safe != "." and ":" not in safe and "\x00" not in safe:
+                files[safe] = str(content)
+    files.update(extract_code_file_map_from_payload({
+        "code_files": detach(context_variables.get("code_files")),
+    }))
+    for path in extract_deleted_file_paths_from_payload({
+        "deleted_files": detach(context_variables.get("deleted_files")),
+    }):
+        files.pop(path, None)
+    return files
+
+
 def collect_generated_app_file_map(
     generated_app_dir: Any,
     *,
@@ -229,6 +250,7 @@ def collect_generated_app_file_entries(generated_app_dir: Any) -> list[dict[str,
 
 
 __all__ = [
+    "admitted_app_file_map",
     "compose_bundle_auth_routes",
     "collect_generated_app_file_entries",
     "collect_generated_app_file_map",

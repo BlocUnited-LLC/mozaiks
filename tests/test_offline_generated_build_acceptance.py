@@ -14,7 +14,7 @@ from factory_app.workflows.AppGenerator.tools.app_validation import (
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 from mozaiksai.core.runtime.app.loader import AppLoader
-from tests.app_task_replay_helpers import execute_file_replay
+from scripts.appgenerator_fixture_replay import execute_file_replay
 
 
 class _Context:
@@ -464,7 +464,7 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         "agent_backend_required": False,
     }
     app_build_plan(AppBuildPlan=plan, context_variables=context)
-    accepted = await execute_file_replay(monkeypatch, context.data, files)
+    accepted = await execute_file_replay(context.data, files)
     admitted_files = {file["filename"]: file["content"] for key, output in accepted.items()
                       if not key.startswith("_") for file in output["code_files"]}
     assert set(admitted_files) == set(files)

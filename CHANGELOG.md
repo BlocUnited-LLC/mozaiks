@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- App download and validation now use admitted current artifacts and repairs.
+  Historical worker responses cannot restore rejected changes/deletions or
+  overwrite a newer authorized repair, and migration registration preserves
+  the accepted file bytes used by download and export.
 - Factory generation now preserves task failures and successful outputs, supplies
   synthesized workers their actual prerequisites, and recovers eligible rejected
   tasks through the existing AG2 batch within finite budgets. Repairs respect

@@ -559,6 +559,15 @@ It does not reason about artifact ownership. It packages the materialized file s
 into the downloadable app bundle after the deterministic app-bundle acceptance
 gate passes.
 
+Validation and download use `admitted_app_file_map`: the current `generated_files`
+map, admitted `code_files` repairs, and admitted `deleted_files` tombstones.
+Historical raw worker responses and prior generated directories cannot overwrite,
+refill, or delete that snapshot. An older foreign readback filtered by a save tool
+cannot reappear during packaging. Empty current artifacts remain empty.
+Authorized deterministic scaffold additions run before acceptance; migration
+history registration records metadata without rewriting accepted file bytes.
+The archive and export gate consume that same final accepted snapshot.
+
 Download archives may include a single top-level folder named for the bundle
 such as `GeneratedApp/`. Studio artifact promotion treats that folder as a zip
 transport wrapper only when stripping it reveals an app-root bundle containing
@@ -706,8 +715,8 @@ Materialization rule:
 - typed agent outputs such as `app_backend_admin_config`, `python_files`, and
   `js_files` are the source of truth for their owned lanes
 - the same applies to `database_files`, `model_files`, and `service_foundation_bundle.files`
-- extraction may regenerate canonical file content from those typed fields before
-  packaging
+- extraction materializes canonical file content from those typed fields before
+  task/save admission; packaging consumes the admitted serialization
 - raw `code_files` are the serialized mirror, not the authority, when a typed
   lane exists
 

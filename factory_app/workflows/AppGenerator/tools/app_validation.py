@@ -2,7 +2,7 @@
 App validation tool for generated applications.
 
 This tool can:
-- resolve generated files from an explicit `files` mapping or persisted agent outputs
+- resolve generated files from an explicit `files` mapping or the current admitted artifacts
 - validate the generated app with an explicit strategy: `e2b`, `docker`, `local`, or `skip`
 - run build/test commands
 - optionally start a preview server (e2b and docker strategies expose a URL)
@@ -32,9 +32,7 @@ from factory_app.workflows._shared.workflow_integration import (
     workflow_integration_metadata_from_context,
 )
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
-    collect_generated_app_file_map,
-    extract_code_file_map_from_payload,
-    extract_deleted_file_paths_from_payload,
+    admitted_app_file_map,
 )
 from factory_app.workflows.AppGenerator.tools.repair_policy import (
     prepare_bundle_repair as _prepare_bundle_repair,
@@ -47,7 +45,6 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
     planned_artifact_diagnostics,
 )
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     local_app_validation_available,
@@ -120,75 +117,6 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _extract_code_files(collected: dict[str, Any]) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for _agent_name, data in (collected or {}).items():
-        if not isinstance(data, dict):
-            continue
-        out.update(extract_code_file_map_from_payload(data))
-    return out
-
-
-def _extract_deleted_files(collected: dict[str, Any]) -> list[str]:
-    deleted: list[str] = []
-    seen: set[str] = set()
-    for _agent_name, data in (collected or {}).items():
-        if not isinstance(data, dict):
-            continue
-        for path in extract_deleted_file_paths_from_payload(data):
-            if path in seen:
-                continue
-            seen.add(path)
-            deleted.append(path)
-    return deleted
-
-
-def _context_code_files(context_variables: Any | None) -> dict[str, str]:
-    if context_variables is None or not hasattr(context_variables, "get"):
-        return {}
-    try:
-        raw = detach(context_variables.get("code_files"))
-    except Exception:
-        raw = None
-    return extract_code_file_map_from_payload({"code_files": raw})
-
-
-def _context_deleted_files(context_variables: Any | None) -> list[str]:
-    if context_variables is None or not hasattr(context_variables, "get"):
-        return []
-    try:
-        raw = detach(context_variables.get("deleted_files"))
-    except Exception:
-        raw = None
-    return extract_deleted_file_paths_from_payload({"deleted_files": raw})
-
-
-def _apply_deleted_files(files: dict[str, str], deleted_files: list[str]) -> dict[str, str]:
-    if not deleted_files:
-        return files
-    merged = dict(files)
-    for path in deleted_files:
-        merged.pop(path, None)
-    return merged
-
-
-async def _merge_latest_persisted_agent_outputs(
-    files: dict[str, str],
-    *,
-    chat_id: Any | None,
-    app_id: Any | None,
-) -> dict[str, str]:
-    if not chat_id or not app_id:
-        return files
-    pm = AG2PersistenceManager()
-    collected = await pm.gather_latest_agent_jsons(chat_id=str(chat_id), app_id=str(app_id))
-    if not collected:
-        return files
-    merged = dict(files)
-    merged.update(_extract_code_files(collected))
-    return _apply_deleted_files(merged, _extract_deleted_files(collected))
 
 
 def _append_command_output(result: dict[str, Any], *, command: str, stdout: str, stderr: str) -> None:
@@ -280,58 +208,13 @@ async def _resolve_files(
     context_variables: Any | None,
     wf_logger,
 ) -> tuple[dict[str, str], str | None, str | None]:
-    if isinstance(files, dict) and files:
-        safe_files: dict[str, str] = {}
-        for raw_path, content in files.items():
-            safe = _safe_relpath(str(raw_path))
-            if not safe:
-                continue
-            safe_files[safe] = str(content)
-        return safe_files, None, None
-
-    chat_id = None
-    app_id = None
-    try:
-        if context_variables is not None and hasattr(context_variables, "get"):
-            chat_id = context_variables.get("chat_id")
-            app_id = context_variables.get("app_id")
-            safe_ctx = _generated_files_from_context(context_variables)
-            if safe_ctx:
-                safe_ctx = await _merge_latest_persisted_agent_outputs(
-                    safe_ctx,
-                    chat_id=chat_id,
-                    app_id=app_id,
-                )
-                return safe_ctx, chat_id, app_id
-            if _is_truthy(context_variables.get("app_schema_ready")):
-                schema_files = collect_generated_app_file_map(
-                    context_variables.get("generated_app_dir")
-                )
-                if schema_files:
-                    schema_files.update(_context_code_files(context_variables))
-                    schema_files = _apply_deleted_files(
-                        schema_files,
-                        _context_deleted_files(context_variables),
-                    )
-                    schema_files = await _merge_latest_persisted_agent_outputs(
-                        schema_files,
-                        chat_id=chat_id,
-                        app_id=app_id,
-                    )
-                    return schema_files, chat_id, app_id
-    except Exception:
-        pass
-
-    if not chat_id or not app_id:
-        return {}, chat_id, app_id
-
-    pm = AG2PersistenceManager()
-    collected = await pm.gather_latest_agent_jsons(chat_id=str(chat_id), app_id=str(app_id))
-    resolved = _extract_code_files(collected)
-    resolved = _apply_deleted_files(resolved, _extract_deleted_files(collected))
-    if not resolved:
-        wf_logger.warning("No code_files found in persisted agent outputs for validation.")
-    return resolved, str(chat_id), str(app_id)
+    if files is not None:
+        return _safe_files_map(files), None, None
+    return (
+        admitted_app_file_map(context_variables),
+        _context_get(context_variables, "chat_id"),
+        _context_get(context_variables, "app_id"),
+    )
 
 
 def _write_files_to_dir(root: Path, files_map: dict[str, str]) -> None:
@@ -342,26 +225,6 @@ def _write_files_to_dir(root: Path, files_map: dict[str, str]) -> None:
         out_path = root / safe
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(str(content), encoding="utf-8", newline="")
-
-
-def _generated_files_from_context(context_variables: Any | None) -> dict[str, str]:
-    if context_variables is None or not hasattr(context_variables, "get"):
-        return {}
-    try:
-        raw = detach(context_variables.get("generated_files"))
-    except Exception:
-        raw = None
-    if not isinstance(raw, dict):
-        return {}
-
-    files: dict[str, str] = {}
-    for raw_path, content in raw.items():
-        safe = _safe_relpath(str(raw_path))
-        if safe:
-            files[safe] = str(content)
-    files.update(_context_code_files(context_variables))
-    files = _apply_deleted_files(files, _context_deleted_files(context_variables))
-    return files
 
 
 def _normalize_module_yaml(path: str, content: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
@@ -1944,20 +1807,7 @@ async def run_app_bundle_acceptance_gate(
     if files is not None:
         generated_files = explicit_files
     else:
-        generated_files = _generated_files_from_context(context_variables)
-        chat_id = None
-        app_id = None
-        if context_variables is not None and hasattr(context_variables, "get"):
-            try:
-                chat_id = context_variables.get("chat_id")
-                app_id = context_variables.get("app_id")
-            except Exception:
-                chat_id = None
-                app_id = None
-        if not _context_get(context_variables, "app_task_batch_results"):
-            generated_files = await _merge_latest_persisted_agent_outputs(
-                generated_files, chat_id=chat_id, app_id=app_id,
-            )
+        generated_files = admitted_app_file_map(context_variables)
     selected_capability_packs = (
         [pack for pack in capability_packs if isinstance(pack, dict)]
         if isinstance(capability_packs, list)
@@ -2356,7 +2206,7 @@ async def validate_app_bundle_from_request(
     acceptance_result = await run_app_bundle_acceptance_gate(context_variables=context_variables)
     if acceptance_result["passed"]:
         validation = await validate_app_build(
-            files=_generated_files_from_context(context_variables), commands=commands,
+            files=admitted_app_file_map(context_variables), commands=commands,
             start_dev_server=bool(request.get("start_dev_server", True)),
             timeout_seconds=int(request.get("timeout_seconds") or 120),
             validation_strategy=request.get("validation_strategy"), context_variables=context_variables,

@@ -2,8 +2,8 @@
 generate_and_download - Bundle generated app code and present AppWorkbench + DownloadCenter UI.
 
 This tool:
-1) Collects latest agent JSON outputs for the chat/app
-2) Extracts `code_files` from any agent output
+1) Projects the current admitted app files and repair overlays
+2) Adds authorized deterministic deployment and runtime scaffolding
 3) Writes files under generated/apps/<app_id>/<build_id>/app/
 4) Creates a ZIP bundle
 5) Presents AppWorkbench export actions and (optionally) triggers export_to_github
@@ -25,10 +25,8 @@ from factory_app.app.modules.app_registry.backend.service import AppRegistryServ
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
-    collect_generated_app_file_map,
+    admitted_app_file_map,
     compose_bundle_auth_routes,
-    extract_code_file_map_from_payload,
-    extract_deleted_file_paths_from_payload,
 )
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     PRODUCTION_DEPLOYMENT_PROFILES,
@@ -59,7 +57,6 @@ except Exception:  # pragma: no cover
     _log_tool_event = None  # type: ignore
 
 BuilderArtifactStore = None
-AG2PersistenceManager = None
 
 
 def _repo_root() -> Path:
@@ -105,17 +102,6 @@ def _builder_artifact_store():
     return BuilderArtifactStore()
 
 
-def _ag2_persistence_manager():
-    global AG2PersistenceManager
-    if AG2PersistenceManager is None:
-        from mozaiksai.core.data.persistence.persistence_manager import (
-            AG2PersistenceManager as _AG2PersistenceManager,
-        )
-
-        AG2PersistenceManager = _AG2PersistenceManager
-    return AG2PersistenceManager()
-
-
 def _safe_relpath(raw: str) -> str | None:
     if not isinstance(raw, str):
         return None
@@ -128,38 +114,6 @@ def _safe_relpath(raw: str) -> str | None:
     if any(part in {".."} for part in p.parts):
         return None
     return str(p)
-
-
-def _discover_code_files(col: dict[str, Any]) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for _agent_name, data in (col or {}).items():
-        try:
-            if isinstance(data, dict):
-                out.update(extract_code_file_map_from_payload(data))
-            elif isinstance(data, str):
-                try:
-                    parsed = json.loads(data)
-                    if isinstance(parsed, dict):
-                        out.update(extract_code_file_map_from_payload(parsed))
-                except Exception:
-                    pass
-        except Exception:
-            continue
-    return out
-
-
-def _discover_deleted_files(col: dict[str, Any]) -> list[str]:
-    deleted: list[str] = []
-    seen: set[str] = set()
-    for _agent_name, data in (col or {}).items():
-        if not isinstance(data, dict):
-            continue
-        for path in extract_deleted_file_paths_from_payload(data):
-            if path in seen:
-                continue
-            seen.add(path)
-            deleted.append(path)
-    return deleted
 
 
 def _context_get(context_variables: Any | None, key: str) -> Any | None:
@@ -292,49 +246,6 @@ def _is_truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "passed", "ready"}
     return bool(value)
-
-
-def _discover_context_files(context_variables: Any | None) -> dict[str, str]:
-    raw = _context_get(context_variables, "generated_files")
-    out: dict[str, str] = {}
-    if isinstance(raw, dict):
-        for rel_path, content in raw.items():
-            safe = _safe_relpath(str(rel_path))
-            if safe:
-                out[safe] = str(content)
-    out.update(extract_code_file_map_from_payload({"code_files": _context_get(context_variables, "code_files")}))
-    return _apply_deleted_files(out, _context_deleted_files(context_variables))
-
-
-def _context_deleted_files(context_variables: Any | None) -> list[str]:
-    return extract_deleted_file_paths_from_payload({"deleted_files": _context_get(context_variables, "deleted_files")})
-
-
-def _apply_deleted_files(files_map: dict[str, str], deleted_files: list[str]) -> dict[str, str]:
-    if not deleted_files:
-        return files_map
-    merged = dict(files_map)
-    for path in deleted_files:
-        merged.pop(path, None)
-    return merged
-
-
-def _merge_bundle_sources(
-    *,
-    context_variables: Any | None,
-    collected: dict[str, Any],
-) -> dict[str, str]:
-    files_map = _discover_context_files(context_variables)
-    persisted_files = _discover_code_files(collected)
-    if persisted_files:
-        files_map.update(persisted_files)
-    return _apply_deleted_files(
-        files_map,
-        [
-            *_context_deleted_files(context_variables),
-            *_discover_deleted_files(collected),
-        ],
-    )
 
 
 def _generated_app_auth_required(files_map: dict[str, str]) -> bool:
@@ -544,18 +455,8 @@ async def _persist_pending_schema_migration(
     if not migration_id:
         return None
 
-    migration_path = (
-        Path(generated_app_dir)
-        / "data"
-        / "migrations"
-        / f"{migration_id}.json"
-    )
-    migration_path.parent.mkdir(parents=True, exist_ok=True)
-    migration_path.write_text(
-        json.dumps(pending_migration, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
+    # The accepted snapshot already owns the migration file's exact bytes.
+    # Registration records its history without materializing it a second time.
     artifact_version_id = None
     change_class = None
     if context_variables is not None and hasattr(context_variables, "get"):
@@ -893,31 +794,9 @@ async def generate_and_download(
     if not chat_id or not app_id:
         return {"status": "error", "message": "chat_id and app_id are required"}
 
-    pm = _ag2_persistence_manager()
-    collected = await pm.gather_latest_agent_jsons(chat_id=chat_id, app_id=app_id)
-    files_map = _merge_bundle_sources(
-        context_variables=context_variables,
-        collected=collected,
-    )
-    if not files_map and _is_truthy(_context_get(context_variables, "app_schema_ready")):
-        files_map = collect_generated_app_file_map(
-            _context_get(context_variables, "generated_app_dir")
-        )
-        files_map.update(extract_code_file_map_from_payload({"code_files": _context_get(context_variables, "code_files")}))
-        files_map = _apply_deleted_files(
-            files_map,
-            [
-                *_context_deleted_files(context_variables),
-                *_discover_deleted_files(collected),
-            ],
-        )
-        if files_map and context_variables is not None and hasattr(context_variables, "set"):
-            try:
-                context_variables.set("generated_files", files_map)
-            except Exception:
-                pass
+    files_map = admitted_app_file_map(context_variables)
     if not files_map:
-        return {"status": "error", "message": "No code_files found to bundle."}
+        return {"status": "error", "message": "No admitted app files are available to bundle."}
 
     # Merge Phase 7A carry-forward preserved declarative files.
     # These were written to context["carry_forward_additions"] by the resolver.
@@ -1021,17 +900,7 @@ async def generate_and_download(
             "bundle_errors": acceptance_result.get("bundle_scan", {}).get("errors") or [],
         }
 
-    bundle_name = "GeneratedApp"
-    try:
-        # Best-effort: allow agent to provide a bundle name
-        for _agent, data in collected.items():
-            if isinstance(data, dict):
-                candidate = data.get("app_name") or data.get("bundle_name") or data.get("project_name")
-                if isinstance(candidate, str) and candidate.strip():
-                    bundle_name = candidate.strip()
-                    break
-    except Exception:
-        pass
+    bundle_name = str(_context_get(context_variables, "app_name") or "GeneratedApp")
 
     # Normalize bundle name to a safe folder name
     # Derivation from the display name, constrained to the closed shared
@@ -1312,6 +1181,5 @@ async def generate_and_download(
         "files_written": download_result["files_written"],
         "storage_backend": storage_backend,
     }
-
 
 
