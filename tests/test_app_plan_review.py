@@ -7,12 +7,14 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
+    _repair_plan,
     review_app_build_plan,
     validate_plan_coverage,
     validate_plan_origins,
 )
 from mozaiksai.core.session.build_context_schema import VALID_CAPABILITY_SOURCES
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
 from tests.test_continuous_deterministic_materialization import _load_models, _plan_payload
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +83,30 @@ def test_review_queues_synthesized_module_workers_with_actual_prerequisites():
     for kind in ("data_models", "business_services"):
         assert tasks[kind]["current_build_task"]["depends_on"] == tasks[kind]["depends_on"]
     assert contract_id in tasks["page_bundle"]["depends_on"]
+
+
+def test_repeated_plan_normalization_preserves_owned_reaction_contract():
+    plan = _plan()
+    contract = next(task for task in plan["build_tasks"] if task["task_type"] == "module_contract")
+    reaction_path = "modules/reports/contracts/reactions.yaml"
+    contract["owned_paths"].append(reaction_path)
+    plan["event_flows"] = [{
+        "event_type": "domain.documents.analysis_requested",
+        "producer_pack_id": "documents",
+        "producing_action": "request_analysis",
+        "subscriber_intents": ["reports-review"],
+        "workflow_capability_ids": ["reports-review"],
+    }]
+    context = _context()
+
+    _repair_plan(plan, context)
+    normalized = detach(plan)
+    _repair_plan(normalized, context)
+    contract_after = next(
+        task for task in normalized["build_tasks"]
+        if task["task_type"] == "module_contract" and task["capability_pack_id"] == "reports"
+    )
+    assert reaction_path in contract_after["owned_paths"]
 
 
 def test_review_routes_a_dependency_cycle_to_feedback_before_queuing_workers():

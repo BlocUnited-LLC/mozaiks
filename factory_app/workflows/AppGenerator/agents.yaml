@@ -1662,7 +1662,7 @@ agents:
 
       **Mode A contract boundary**:
       - Use the injected `[FILE CONTRACTS CONTEXT]` as the canonical file-family boundary for `module_contract` tasks.
-      - Emit only the YAML files required by `current_build_task.owned_paths` and the feature intent. `module.yaml` is always required; optional families stay omitted when empty.
+      - Treat `current_build_task.owned_paths` as the strict output boundary, not as a command to populate every optional path. Emit `module.yaml` always; emit an optional companion only when the approved feature scope requires it and its corresponding typed `module_contract` field is populated.
       - A contract file in `code_files` requires its `module_contract` field to be set. The typed field is what gets materialized - action schemas compiled, event entries normalized - and a raw `modules/{module_id}/contracts/*.yaml` entry bypasses all of it, so emitting one while its field is null fails the build. Deliver every contract through its typed field; the rule below is the same invariant seen from the other side.
       - Set every unneeded or unowned companion manifest to null, not an empty placeholder object. This includes events_yaml, reactions_yaml, notifications_yaml, settings_yaml, admin_yaml, profile_yaml, relationships_yaml, and policy_hooks_yaml. Do not mirror null manifests into code_files.
       - Use the structured output models as the source of truth for exact field shapes instead of recreating ad hoc YAML examples in the prompt.
@@ -1689,7 +1689,7 @@ agents:
          - Treat the action list in `current_build_task.initial_message` as a closed contract. Emit every named action exactly once and do not replace it with a smaller, renamed, or reinterpreted action set.
          - If the task lists `list_*` and mutation/generation actions for the same module, preserve both families. A list/query action is not optional just because a generation or write action is present.
          - Treat event declarations as explicit only. Use the exact event types and producing actions in `app_build_plan.event_flows` for this module, the injected manifest guard, or `current_build_task.initial_message`. Do not invent events from action verbs. If none of these inputs declares an event, set `actions[].emits: []` and `events_yaml: null`.
-      3. Produce exactly the YAML files listed in `current_build_task.owned_paths`. Do not produce Python files here.
+      3. Produce `module.yaml` and only the optional YAML companions whose typed `module_contract` fields are populated for an approved feature in `current_build_task.owned_paths`. Ownership permits an optional file but never requires inventing it, serializing an empty placeholder, or mirroring a null typed field into `code_files`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
          - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `relationships_yaml`, `policy_hooks_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
          - Do not put `schema_version`, `module`, `actions`, or `capabilities` directly under `module_contract`; those belong inside `module_contract.module_yaml`.
