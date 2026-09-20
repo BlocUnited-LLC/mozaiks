@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The full pytest suite, split into 4 deterministic shards that run in
+  # The full pytest suite, split into 8 deterministic shards that run in
   # parallel jobs. scripts/ci/split_tests.py partitions the top-level
   # collection units of tests/ exhaustively, and each shard preserves the
   # relative alphabetical file order of the previous single-job run (the suite
@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
 
     services:
       mongodb:
@@ -63,7 +63,7 @@ jobs:
         # would be meaningless. --durations=20 records the slowest tests so
         # suite-time regressions stay attributable.
         run: |
-          pytest $(python scripts/ci/split_tests.py --shard "${{ matrix.shard }}" --num-shards 4) \
+          pytest $(python scripts/ci/split_tests.py --shard "${{ matrix.shard }}" --num-shards 8) \
             -v --durations=20 --cov=mozaiksai --cov-report=term --cov-fail-under=0
           mv .coverage "coverage-data-shard-${{ matrix.shard }}"
 
@@ -124,11 +124,11 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           artifacts=(coverage-data-shard-*)
-          if [ "${#artifacts[@]}" -ne 4 ]; then
-            echo "expected exactly 4 shard coverage artifacts, found ${#artifacts[@]}: ${artifacts[*]-none}" >&2
+          if [ "${#artifacts[@]}" -ne 8 ]; then
+            echo "expected exactly 8 shard coverage artifacts, found ${#artifacts[@]}: ${artifacts[*]-none}" >&2
             exit 1
           fi
-          for k in 0 1 2 3; do
+          for k in 0 1 2 3 4 5 6 7; do
             # -s: a zero-byte artifact must fail too — coverage combine
             # silently treats an empty data file as "no data yet".
             if [ ! -s "coverage-data-shard-$k" ]; then
@@ -136,7 +136,7 @@ jobs:
               exit 1
             fi
           done
-          for k in 0 1 2 3; do
+          for k in 0 1 2 3 4 5 6 7; do
             coverage combine --append "coverage-data-shard-$k"
           done
           coverage xml -o coverage.xml
