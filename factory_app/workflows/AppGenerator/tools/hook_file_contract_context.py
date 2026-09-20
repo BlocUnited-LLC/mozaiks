@@ -24,12 +24,18 @@ _FILE_CONTRACTS_HEADER = "[FILE CONTRACTS CONTEXT]"
 _MODULE_ARCHETYPES_HEADER = "[MODULE ARCHETYPES CONTEXT]"
 _WORKFLOW_ARCHETYPES_HEADER = "[WORKFLOW ARCHETYPE CONTEXT]"
 
+# Every task contract in file_contracts.yaml, because the planner is told to
+# copy owned_paths from this context and can only copy what it is shown. A
+# contract left out here still reaches the planner as a legal task type through
+# the vocabulary line, so the omission reads to the model as a task that owns
+# nothing. test_planner_contract_surface.py fails when the two drift apart.
 _PLANNING_CONTRACT_ORDER = (
     "page_bundle",
     "module_contract",
     "persistence_contract",
     "service_foundation",
     "refinement_harness",
+    "subscription_config",
     "api_surface",
 )
 
