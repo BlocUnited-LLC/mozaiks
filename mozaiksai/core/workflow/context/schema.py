@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -231,6 +231,41 @@ def load_context_variables_config(raw: dict[str, Any]) -> ContextVariablesPlan:
         raise ValueError(f"Invalid context variables configuration: {err}") from err
 
 
+class CampaignOverview(BaseModel):
+    name: str = Field(description="Name of the marketing campaign")
+    objective: str = Field(description="Main goal of the campaign")
+
+
+class AudienceProfile(BaseModel):
+    target_persona: str = Field(description="Who the target audience is")
+    pain_points: list[str] = Field(description="List of customer pain points")
+
+
+class MarketingInterviewOutput(BaseModel):
+    campaign_overview: CampaignOverview
+    audience_profile: AudienceProfile
+    channel_strategy: list[str] = Field(description="Channels like email, linkedin, ads")
+
+
+class ContentItem(BaseModel):
+    title: str = Field(description="Title or topic of the marketing content piece")
+    platform: str = Field(description="Social media platform e.g., LinkedIn, Twitter, Instagram")
+    scheduled_date: str = Field(description="Scheduled date and time for publishing")
+    content_format: str = Field(description="Format of the content e.g., text, image, video, carousel")
+    caption_or_copy: str = Field(description="Main caption or post copy")
+
+
+class MarketingContentCalendar(BaseModel):
+    campaign_name: str = Field(description="Name of the associated campaign")
+    content_items: list[ContentItem] = Field(description="List of scheduled content items for the calendar")
+
+
+class SocialAPIConfig(BaseModel):
+    platform_name: str = Field(description="Name of the social media platform")
+    api_endpoint: str = Field(description="Target API endpoint for integration")
+    integration_status: str = Field(description="Current status of the API connection e.g., active, pending")
+
+
 __all__ = [
     "ContextVariablesPlan",
     "ContextVariableDefinition",
@@ -242,35 +277,7 @@ __all__ = [
     "CampaignOverview",
     "AudienceProfile",
     "MarketingInterviewOutput",
+    "ContentItem",
+    "MarketingContentCalendar",
+    "SocialAPIConfig",
 ]
-from pydantic import BaseModel, Field
-from typing import List
-
-class CampaignOverview(BaseModel):
-    name: str = Field(description="Name of the marketing campaign")
-    objective: str = Field(description="Main goal of the campaign")
-
-class AudienceProfile(BaseModel):
-    target_persona: str = Field(description="Who the target audience is")
-    pain_points: List[str] = Field(description="List of customer pain points")
-
-class MarketingInterviewOutput(BaseModel):
-    campaign_overview: CampaignOverview
-    audience_profile: AudienceProfile
-    channel_strategy: List[str] = Field(description="Channels like email, linkedin, ads")
-
-class ContentItem(BaseModel):
-    title: str = Field(description="Title or topic of the marketing content piece")
-    platform: str = Field(description="Social media platform e.g., LinkedIn, Twitter, Instagram")
-    scheduled_date: str = Field(description="Scheduled date and time for publishing")
-    content_format: str = Field(description="Format of the content e.g., text, image, video, carousel")
-    caption_or_copy: str = Field(description="Main caption or post copy")
-
-class MarketingContentCalendar(BaseModel):
-    campaign_name: str = Field(description="Name of the associated campaign")
-    content_items: List[ContentItem] = Field(description="List of scheduled content items for the calendar")
-
-class SocialAPIConfig(BaseModel):
-    platform_name: str = Field(description="Name of the social media platform")
-    api_endpoint: str = Field(description="Target API endpoint for integration")
-    integration_status: str = Field(description="Current status of the API connection e.g., active, pending")
