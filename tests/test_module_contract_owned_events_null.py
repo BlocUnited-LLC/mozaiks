@@ -144,6 +144,37 @@ def test_null_events_with_no_events_file_passes():
     assert EVENTS not in files, "a null field emits nothing"
 
 
+def test_null_reactions_with_no_reactions_file_passes():
+    files = _admit(_output(None, raw_events_file=False))
+
+    assert MANIFEST in files
+    assert REACTIONS not in files
+
+
+def test_null_reactions_with_raw_file_remains_rejected():
+    output = _output(None, raw_events_file=False)
+    output["code_files"].append({"filename": REACTIONS, "content": "schema_version: mozaiks.reactions.v1\nreactions: []\n"})
+    with pytest.raises(ValueError, match=f"module_contract.reactions_yaml is null but raw output emits {REACTIONS}"):
+        _admit(output)
+
+
+def test_typed_reactions_materialize_without_raw_mirror():
+    output = _output(None, raw_events_file=False)
+    output["module_contract"]["reactions_yaml"] = {
+        "schema_version": "mozaiks.reactions.v1",
+        "reactions": [{
+            "id": "workflow_review",
+            "event_type": "domain.documents.analysis_requested",
+            "target": {"kind": "capability", "capability_id": "auth-review"},
+            "idempotency_key": "analysis:{event.id}",
+        }],
+    }
+    files = _admit(output)
+    assert REACTIONS in files
+    rendered = yaml.safe_load(files and extract_code_file_map_from_payload(output)[REACTIONS])
+    assert rendered["reactions"][0]["target"]["capability_id"] == "auth-review"
+
+
 # --------------------------------------------------------------------------
 # 2. The live output is still rejected - the guard is untouched
 # --------------------------------------------------------------------------

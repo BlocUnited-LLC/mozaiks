@@ -19,9 +19,10 @@ AppPlanAgent hook  — inject_domain_catalog_context
 
 ConfigMiddlewareAgent hook — inject_module_file_manifest_guard
   Reads current_build_task from context variables. If the task is a module_contract,
-  inspects owned_paths to derive which YAML files were declared for this module and
-  injects a [MODULE FILE MANIFEST GUARD] block that tells ConfigMiddlewareAgent to
-  generate only those files — not the full six-file default set.
+  inspects owned_paths to derive the allowed YAML boundary for this module and
+  injects a [MODULE FILE MANIFEST GUARD] block that keeps module.yaml mandatory while
+  requiring optional companions to come from populated typed fields and approved
+  feature scope — never from raw code_files or empty placeholders.
 """
 
 from __future__ import annotations
@@ -224,7 +225,7 @@ def _build_app_plan_body(
             "  - Do NOT include all six YAML files by default for every module.",
             "  - Include module.yaml always.",
             "  - Include events.yaml only if the module publishes domain events.",
-            "  - Include reactions.yaml only if the module reacts to events from other modules.",
+            "  - Include reactions.yaml only if approved scope declares an incoming, self, platform, or workflow-triggered reaction.",
             "  - Include notifications.yaml only if module events should trigger user notifications.",
             "  - Include settings.yaml only if the module has configurable behavior or feature flags.",
             "  - Include admin.yaml only if the module needs admin or backoffice panels.",
@@ -248,7 +249,7 @@ def _build_manifest_guard_body(
 
     lines = [
         f"Module: {module_id}",
-        "Declared YAML files for this module (generate ONLY these):",
+        "Allowed YAML files for this module (module.yaml is mandatory; optional files require populated typed fields and approved scope):",
     ]
     for f in declared_sorted:
         relative = f if f in {"module.yaml", "runtime_extensions.yaml"} else f"contracts/{f}"
@@ -263,14 +264,16 @@ def _build_manifest_guard_body(
     lines += [
         "",
         "HARD CONSTRAINTS:",
-        "  1. Generate ONLY the YAML files listed above.",
-        "  2. Do NOT emit events.yaml if the module publishes no events.",
-        "  3. Do NOT emit reactions.yaml if the module reacts to no events.",
-        "  4. Do NOT emit notifications.yaml if no events warrant user notifications.",
-        "  5. Do NOT emit settings.yaml if the module has no configurable behavior.",
-        "  6. Do NOT emit admin.yaml if the module needs no admin panels.",
-        "  7. Do NOT emit channels.yaml.",
-        "  8. Do NOT emit a file with only an empty array or null object.",
+        "  1. Generate module.yaml. Optional files listed above are an ownership boundary, not a requirement to invent content.",
+        "  2. Every optional file must be serialized from its populated typed module_contract field and required by approved feature scope.",
+        "  3. Never mirror a null typed field into code_files; raw files cannot substitute for typed manifests.",
+        "  4. Do NOT emit events.yaml if the module publishes no events.",
+        "  5. Do NOT emit reactions.yaml if approved scope declares no incoming, self, platform, or workflow-triggered reaction.",
+        "  6. Do NOT emit notifications.yaml if no events warrant user notifications.",
+        "  7. Do NOT emit settings.yaml if the module has no configurable behavior.",
+        "  8. Do NOT emit admin.yaml if the module needs no admin panels.",
+        "  9. Do NOT emit channels.yaml.",
+        "  10. Do NOT emit a file with only an empty array or null object.",
     ]
 
     return "\n".join(lines)

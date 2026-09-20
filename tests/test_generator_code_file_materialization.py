@@ -263,6 +263,38 @@ def test_extract_code_file_map_materializes_typed_module_contract_bundle() -> No
     assert yaml.safe_load(file_map["modules/tickets/module.yaml"])["id"] == "tickets"
 
 
+def test_typed_reactions_materialize_incoming_and_workflow_triggered_targets() -> None:
+    payload = {
+        "module_contract": {
+            "module_id": "orders",
+            "module_yaml": {"schema_version": "mozaiks.module.v1", "id": "orders", "actions": []},
+            "reactions_yaml": {
+                "schema_version": "mozaiks.reactions.v1",
+                "reactions": [
+                    {
+                        "id": "order_created_notify",
+                        "event_type": "domain.orders.created",
+                        "target": {"kind": "notification", "notification_id": "order-created"},
+                        "idempotency_key": "order-created:{event.id}",
+                    },
+                    {
+                        "id": "workflow_review",
+                        "event_type": "domain.documents.analysis_requested",
+                        "target": {"kind": "capability", "capability_id": "orders-review"},
+                        "idempotency_key": "analysis:{event.id}",
+                    },
+                ],
+            },
+        }
+    }
+
+    files = extract_code_file_map_from_payload(payload)
+    rendered = yaml.safe_load(files["modules/orders/contracts/reactions.yaml"])
+    assert rendered["schema_version"] == "mozaiks.reactions.v1"
+    assert [item["target"]["kind"] for item in rendered["reactions"]] == ["notification", "capability"]
+    assert rendered["reactions"][1]["target"]["capability_id"] == "orders-review"
+
+
 def test_extract_code_file_map_materializes_module_contract_with_profile_yaml() -> None:
     payload = {
         "module_contract": {

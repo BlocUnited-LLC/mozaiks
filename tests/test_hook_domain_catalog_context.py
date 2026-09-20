@@ -333,6 +333,51 @@ class TestInjectModuleFileManifestGuard:
         assert "create_order emits domain.orders.created" in agent.system_message
         assert "domain.other.created" not in agent.system_message
 
+    def test_composed_worker_context_does_not_turn_optional_ownership_into_emission(self):
+        """Owned optional paths are an allowlist; typed fields decide emission."""
+        agent = _FakeAgent(
+            name="ConfigMiddlewareAgent",
+            context_variables={
+                "current_build_task": {
+                    "task_type": "module_contract",
+                    "capability_pack_id": "user_authentication",
+                    "owned_paths": [
+                        "modules/user_authentication/module.yaml",
+                        "modules/user_authentication/contracts/events.yaml",
+                        "modules/user_authentication/contracts/reactions.yaml",
+                    ],
+                },
+            },
+        )
+        self.mod.inject_module_file_manifest_guard(agent, [])
+        msg = agent.system_message
+        assert "Optional files listed above are an ownership boundary" in msg
+        assert "populated typed module_contract field" in msg
+        assert "Never mirror a null typed field into code_files" in msg
+        assert "Generate ONLY the YAML files listed above" not in msg
+
+        agents_text = (_APPGEN_DIR / "agents.yaml").read_text(encoding="utf-8")
+        assert "Produce exactly the YAML files listed in `current_build_task.owned_paths`" not in agents_text
+        assert "optional YAML companions whose typed `module_contract` fields are populated" in agents_text
+
+    def test_guard_keeps_incoming_and_workflow_reactions_in_scope(self):
+        agent = _FakeAgent(
+            name="ConfigMiddlewareAgent",
+            context_variables={
+                "current_build_task": {
+                    "task_type": "module_contract",
+                    "capability_pack_id": "orders",
+                    "owned_paths": [
+                        "modules/orders/module.yaml",
+                        "modules/orders/contracts/reactions.yaml",
+                    ],
+                },
+            },
+        )
+        self.mod.inject_module_file_manifest_guard(agent, [])
+        msg = agent.system_message
+        assert "incoming, self, platform, or workflow-triggered reaction" in msg
+
     def test_file_manifest_override_is_honoured(self):
         agent = _FakeAgent(
             name="ConfigMiddlewareAgent",
