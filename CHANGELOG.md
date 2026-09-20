@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Monetized app builds no longer stall at plan admission. AppPlanAgent is
+  instructed to copy a task's `owned_paths` from its file contract, but the
+  `subscription_config` contract was never included in the planner's injected
+  context, so the planner produced a subscription task owning no files and the
+  build was rejected before any work started.
 - AppGenerator plan review no longer fails on its first attempt. The
   `app_task_batch_status` context variable listed only the task batch runner as
   an authorized writer, which locked out the declared workflow tools that set it
