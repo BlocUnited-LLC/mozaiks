@@ -372,17 +372,25 @@ def extract_code_file_map_from_payload(
         prefix = PurePosixPath("modules", str(bundle["module_id"]).strip())
         for key, relative_path in _MODULE_CONTRACT_OUTPUT_PATHS.items():
             path = str(prefix / relative_path)
-            if key in bundle and bundle[key] is None and path in file_map:
+            # An absent key is treated as null. The strict structured output
+            # always carries every key, so only a hand-built bundle can omit
+            # one, and a raw companion file must not slip past on that alone.
+            if bundle.get(key) is None and path in file_map:
                 # Not a consistency nicety. Typed fields are materialized above -
                 # action schemas compiled, event entries normalized - and a raw
                 # file in code_files bypasses every bit of that. Accepting the
                 # raw file would ship a contract that never went through the
                 # typed pipeline, so the disagreement has to be an error and the
                 # typed field is the side that must win.
+                # The advice has to cover both cases or a module with nothing
+                # to declare is told to set a field its prompt says to leave
+                # null, and retries with the same output until the budget ends.
                 raise ValueError(
                     f"module_contract.{key} is null but raw output emits {path}. "
-                    f"Set module_contract.{key} to the contract instead of emitting the file; "
-                    "a raw contract file skips schema materialization."
+                    f"Set module_contract.{key} to the contract when the module declares one; "
+                    f"when module_contract.{key} is null, omit {relative_path} from code_files "
+                    "entirely, since a null field emits nothing and a raw contract file "
+                    "skips schema materialization."
                 )
 
     return file_map

@@ -14,6 +14,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- A module with no events, settings, or admin panels can now complete its
+  contract task. Those companion manifests were required whenever a task owned
+  their path, yet the same files were refused as raw output when their typed
+  field was null, so a module with nothing to declare had no output that
+  passed and its dependent pages and `app.json` were never built. Every typed
+  companion manifest is now optional; only `module.yaml` is required. The
+  rejection for a raw contract file now also says what to do when the field
+  is null.
 - Monetized app builds no longer stall at plan admission. AppPlanAgent is
   instructed to copy a task's `owned_paths` from its file contract, but the
   `subscription_config` contract was never included in the planner's injected
