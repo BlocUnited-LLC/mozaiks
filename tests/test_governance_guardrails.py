@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load_guardrails_module():
     workspace = Path(__file__).resolve().parents[1]
@@ -251,3 +253,42 @@ def test_governance_guardrail_passes_current_repo_all_scan() -> None:
     errors, _notices = guardrails.run_scan(all_files=True)
 
     assert errors == []
+
+
+def test_all_scan_enumerates_only_files_git_knows_about() -> None:
+    guardrails = _load_guardrails_module()
+    repo_root = Path(__file__).resolve().parents[1]
+
+    scanned = {
+        path.resolve().relative_to(repo_root).as_posix()
+        for path in guardrails._iter_all_files(repo_root)
+    }
+    known = set(
+        subprocess.run(
+            ["git", "ls-files"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.split()
+    ) | set(
+        subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.split()
+    )
+
+    # An rglob walk read agent worktrees and build output too: 67% of its
+    # enumeration locally, and a 344s scan instead of a 7s one.
+    assert scanned - known == set()
+
+
+def test_all_scan_skips_an_ignored_directory_on_disk() -> None:
+    guardrails = _load_guardrails_module()
+    repo_root = Path(__file__).resolve().parents[1]
+
+    leftovers = repo_root / ".codex-worktrees"
+    if not leftovers.is_dir():
+        pytest.skip("no ignored agent worktrees present on this checkout")
+
+    assert not any(
+        ".codex-worktrees" in path.resolve().relative_to(repo_root).parts
+        for path in guardrails._iter_all_files(repo_root)
+    )

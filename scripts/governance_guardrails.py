@@ -200,10 +200,20 @@ def _is_git_tracked(path: Path, repo_root: Path) -> bool:
 
 
 def _iter_all_files(repo_root: Path) -> list[Path]:
+    """Every repo file git knows about, tracked or newly added but not ignored.
+
+    An rglob walk also reads agent worktrees, build output and temp dirs that
+    are not this repo's source: 67% of what it enumerated locally, and the
+    difference between a 2s scan and a 344s one.
+    """
+    tracked = _git_files(["ls-files"], repo_root)
+    untracked = _git_files(["ls-files", "--others", "--exclude-standard"], repo_root)
+    seen: set[Path] = set()
     files: list[Path] = []
-    for path in repo_root.rglob("*"):
-        if _excluded(path, repo_root):
+    for path in (*tracked, *untracked):
+        if path in seen or _excluded(path, repo_root):
             continue
+        seen.add(path)
         if path.is_file() and _text_file(path):
             files.append(path)
     return files
