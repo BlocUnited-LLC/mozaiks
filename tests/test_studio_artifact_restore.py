@@ -20,6 +20,7 @@ from mozaiksai.core.artifacts import (
     RefinementSessionStatus,
 )
 from mozaiksai.core.auth import reset_auth_adapter
+from mozaiksai.hosts import shell_config
 
 
 def _write_bundle_zip(zip_path: Path, entries: dict[str, str], *, symlink_entry: tuple[str, str] | None = None) -> None:
@@ -184,7 +185,7 @@ def _studio_app(monkeypatch):
 def _promote_client(monkeypatch, runtime_root: Path, store: _PromoteStore):
     studio_app = _studio_app(monkeypatch)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
-    monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: runtime_root)
     monkeypatch.setattr(
         studio_app, "_start_studio_app_intelligence_index_job",
         AsyncMock(return_value={"status": "queued"}),
@@ -534,7 +535,6 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
     assert not (runtime_root / "GeneratedApp" / "app.json").exists()
 
     from mozaiksai.core.runtime.app.loader import AppLoader
-    from mozaiksai.hosts import platform as platform_app
 
     loaded = asyncio.run(AppLoader.load(str(runtime_root)))
     assert loaded.definition.name == "Golden Path App"
@@ -542,9 +542,9 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
     assert [page.name for page in loaded.definition.pages] == ["dashboard"]
     assert [workflow.name for workflow in loaded.definition.workflows] == ["SupportWorkflow"]
 
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: runtime_root)
-    monkeypatch.setattr(platform_app, "resolve_active_app_root", lambda: runtime_root)
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: runtime_root)
+    monkeypatch.setattr(shell_config, "resolve_active_app_root", lambda: runtime_root)
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
     assert shell["appId"] == "app_1"
     assert shell["appName"] == "Golden Path App"
     assert shell["landing_spot"] == "/dashboard"

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from mozaiksai.hosts import shell_config
+
 
 @pytest.mark.asyncio
 async def test_studio_shell_config_injects_studio_routes(monkeypatch):
@@ -378,11 +380,10 @@ async def test_platform_host_invokes_capability_route_into_workflow_session():
 @pytest.mark.asyncio
 async def test_platform_host_loads_app_zero_product_modules(monkeypatch):
     from mozaiksai.core.runtime.app.loader import AppLoader
-    from mozaiksai.hosts import platform as platform_app
     from tests.import_utils import active_app_root
 
     monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
-    load_result = await AppLoader.load(str(platform_app.resolve_app_root()))
+    load_result = await AppLoader.load(str(shell_config.resolve_app_root()))
     loaded_modules = {module.name: type(module.handler).__name__ for module in load_result.modules}
 
     product_modules = {"communications", "investor_marketplace"}

@@ -4,9 +4,10 @@ import asyncio
 import json
 from pathlib import Path
 
+from mozaiksai.hosts import shell_config
+
 
 def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) -> None:
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = tmp_path / "app"
     (app_root / "config").mkdir(parents=True)
@@ -60,9 +61,9 @@ def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) ->
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     assert shell["header"]["logo"]["href"] == "/"
     assert [item["path"] for item in shell["header"]["pages"]] == ["/", "/wallet"]
@@ -77,9 +78,8 @@ def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) ->
 
 
 def test_shell_shortcut_catalog_uses_workspace_home_primitives_without_dashboard_builtin() -> None:
-    from mozaiksai.hosts import platform as platform_app
 
-    catalog = platform_app._shell_shortcut_catalog([], {})
+    catalog = shell_config._shell_shortcut_catalog([], {})
 
     assert catalog["home"]["path"] == "/"
     assert catalog["apps"]["path"] == "/apps"
@@ -94,9 +94,8 @@ def test_shell_shortcut_catalog_uses_workspace_home_primitives_without_dashboard
 
 
 def test_shell_shortcut_catalog_allows_app_owned_settings_routes() -> None:
-    from mozaiksai.hosts import platform as platform_app
 
-    catalog = platform_app._shell_shortcut_catalog(
+    catalog = shell_config._shell_shortcut_catalog(
         [
             {
                 "id": "settings",
@@ -113,9 +112,8 @@ def test_shell_shortcut_catalog_allows_app_owned_settings_routes() -> None:
 
 
 def test_shell_shortcut_catalog_allows_app_owned_dashboard_routes() -> None:
-    from mozaiksai.hosts import platform as platform_app
 
-    catalog = platform_app._shell_shortcut_catalog(
+    catalog = shell_config._shell_shortcut_catalog(
         [
             {
                 "id": "dashboard",
@@ -132,7 +130,6 @@ def test_shell_shortcut_catalog_allows_app_owned_dashboard_routes() -> None:
 
 
 def test_platform_shell_config_resolves_page_navigation_policy(monkeypatch, tmp_path: Path) -> None:
-    from mozaiksai.hosts import platform as platform_app
 
     app_root = tmp_path / "app"
     (app_root / "config").mkdir(parents=True)
@@ -217,9 +214,9 @@ sections:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
 
-    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    shell = asyncio.run(shell_config.build_shell_config(surface="platform"))
 
     assert [item["path"] for item in shell["header"]["pages"]] == ["/dashboard", "/messages"]
     assert [item["path"] for item in shell["mobile"]["bottomBar"]["items"]] == ["/dashboard", "/messages"]

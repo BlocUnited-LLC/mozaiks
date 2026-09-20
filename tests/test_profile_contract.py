@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from mozaiksai.hosts import shell_config
+
 
 class _Collection:
     def __init__(self) -> None:
@@ -179,13 +181,12 @@ async def test_platform_profile_preferences_are_app_scoped(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_platform_shell_config_injects_profile_route():
-    from mozaiksai.hosts import platform as platform_app
 
-    shell_config = await platform_app.build_shell_config(surface="studio")
-    pages = {page.get("path"): page for page in shell_config.get("pages", [])}
+    shell = await shell_config.build_shell_config(surface="studio")
+    pages = {page.get("path"): page for page in shell.get("pages", [])}
     header_paths = {
         page.get("path")
-        for page in (shell_config.get("header") or {}).get("pages", [])
+        for page in (shell.get("header") or {}).get("pages", [])
         if isinstance(page, dict)
     }
 

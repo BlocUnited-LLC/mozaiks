@@ -62,7 +62,7 @@ def test_admin_portal_embeds_app_admin_panels() -> None:
 
 
 def test_platform_shell_registers_admin_section_routes() -> None:
-    platform_source = _read("mozaiksai/hosts/platform.py")
+    platform_source = _read("mozaiksai/hosts/platform.py") + "\n" + _read("mozaiksai/hosts/shell_config.py")
     registry_source = _read("factory_app/app/admin/admin_registry.yaml")
     route_manifest = _read("factory_app/app/ui/route_manifest.json")
 

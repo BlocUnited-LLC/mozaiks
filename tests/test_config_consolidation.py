@@ -190,7 +190,7 @@ class TestShellConfig:
         assert shortcuts["footerHideOnMobile"] is True
 
     def test_admin_portal_is_runtime_injected_not_authored(self, shell):
-        from mozaiksai.hosts.platform import _inject_admin_portal
+        from mozaiksai.hosts.shell_config import _inject_admin_portal
 
         result = {"profile": {"show": True, "menu": [{"id": item} for item in shell["shortcuts"]["profile"]]}}
         _inject_admin_portal(result)

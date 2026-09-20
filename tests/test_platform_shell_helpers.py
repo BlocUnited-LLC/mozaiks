@@ -94,7 +94,7 @@ Covers:
 """
 from __future__ import annotations
 
-from mozaiksai.hosts.platform import (
+from mozaiksai.hosts.shell_config import (
     _append_page_once,
     _clean_string,
     _footer_link_from_item,
