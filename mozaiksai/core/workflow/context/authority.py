@@ -205,6 +205,7 @@ class ContextVariableAuthority:
     authorization: bool
     writer_ids: frozenset[ContextWriterId] = field(default_factory=frozenset)
     value_type: str | None = None
+    source_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +219,10 @@ class ContextAuthorityPolicy:
     # declaration set is NOT the same as "this key is stale": the former must
     # fail closed so durable state is never silently discarded wholesale.
     declarations_resolved: bool = True
+
+    @property
+    def build_context_keys(self) -> frozenset[str]:
+        return frozenset(key for key, authority in self.variables.items() if authority.source_type == "build_context")
 
     def require_can_write(self, key: str, *, writer_id: ContextWriterId, operation: str = "set") -> None:
         clean_key = _clean_key(key)
@@ -241,6 +246,8 @@ class ContextAuthorityPolicy:
         if writer_id == RUNTIME_SYSTEM_WRITER:
             return True
         if writer_id == PERSISTED_REPLAY_WRITER:
+            return False
+        if authority.source_type == "build_context":
             return False
         if authority.authority_class is ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY:
             return writer_id == RUNTIME_SYSTEM_WRITER
@@ -395,7 +402,10 @@ def require_unchanged_runtime_authority(
         authority = policy.variables.get(key) if policy is not None else None
         immutable = _is_immutable_key(key) or (
             authority is not None
-            and authority.authority_class is ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY
+            and (
+                authority.authority_class is ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY
+                or authority.source_type == "build_context"
+            )
         )
         if immutable and before.get(key, missing) != after.get(key, missing):
             raise ContextAuthorityError(
@@ -477,6 +487,35 @@ def infer_context_authority(
         for trigger in triggers
     )
 
+    if source_type == "build_context":
+        if (
+            metadata.authority_class not in {None, ContextAuthorityClass.TOOL_ONLY_INFORMATION}
+            or metadata.model_visible is True
+            or metadata.persisted is True
+            or metadata.routing is True
+            or metadata.authorization is True
+            or set(metadata.writer_ids) - {RUNTIME_SYSTEM_WRITER}
+            or triggers
+            or _is_immutable_key(clean_key)
+            or clean_key in routing_keys
+            or clean_key in task_keys
+        ):
+            raise ContextAuthorityError(
+                f"build_context '{clean_key}' must remain tool-only, non-persisted trusted projection authority"
+            )
+        return ContextVariableAuthority(
+            key=clean_key,
+            authority_class=ContextAuthorityClass.TOOL_ONLY_INFORMATION,
+            model_visible=False,
+            tool_visible=metadata.tool_visible if metadata.tool_visible is not None else True,
+            persisted=False,
+            routing=False,
+            authorization=False,
+            writer_ids=frozenset({RUNTIME_SYSTEM_WRITER}),
+            value_type=_definition_type(definition),
+            source_type=source_type,
+        )
+
     authority_class = metadata.authority_class
     if source_type == "runtime" and authority_class not in {None, ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY}:
         raise ValueError(f"runtime context '{clean_key}' must be immutable_runtime_authority")
@@ -518,6 +557,7 @@ def infer_context_authority(
         authorization=authorization,
         writer_ids=frozenset(writer_ids),
         value_type=_definition_type(definition),
+        source_type=source_type or None,
     )
 
 

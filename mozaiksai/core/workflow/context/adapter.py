@@ -90,11 +90,17 @@ class _RuntimeContextVariables:
             writer_id=PERSISTED_REPLAY_WRITER,
             diagnostics=diagnostics,
         )
+        from mozaiksai.core.session.build_context import revalidate_build_context
+
+        accepted = revalidate_build_context(policy, accepted)
         prepared = detach(accepted)
         if not isinstance(prepared, dict):  # pragma: no cover - detach preserves mappings
             raise ContextAuthorityError("context_authority.invalid_replay_snapshot")
 
         new_data = dict(self.__data)
+        # Revoked/missing registry projections must also clear stale live copies.
+        for key in policy.build_context_keys:
+            new_data[key] = None
         new_data.update(prepared)
         self.__data = new_data
 

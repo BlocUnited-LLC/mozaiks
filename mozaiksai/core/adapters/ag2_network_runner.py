@@ -251,6 +251,24 @@ def _closed_reason_from_wal(wal: Sequence[Any]) -> tuple[bool, str | None]:
     return True, reason or None
 
 
+def _require_current_build_context(
+    *,
+    saved: Mapping[str, Any],
+    policy: ContextAuthorityPolicy | None,
+) -> None:
+    """Prevent durable channel state from restoring stale projection authority."""
+    if policy is None:
+        return
+    from mozaiksai.core.session.build_context import load_trusted_build_context
+
+    current = load_trusted_build_context(policy)
+    for key in sorted(policy.build_context_keys):
+        if saved.get(key) != current.get(key):
+            raise ContextAuthorityError(
+                f"context_authority.stale_build_context workflow={policy.workflow_name} key={key}"
+            )
+
+
 @dataclass(slots=True)
 class AG2NetworkRunnerRequest:
     """Already-loaded workflow execution inputs for the AG2 Network runner."""
@@ -368,6 +386,23 @@ class AG2NetworkRunner:
             if len(active_channels) > 1:
                 raise RuntimeError("multiple_active_ag2_network_channels")
             existing_channel = active_channels[0] if active_channels else None
+            if request.context_authority_policy is not None:
+                try:
+                    _require_current_build_context(
+                        saved=(getattr(hub.adapter_state(existing_channel.channel_id), "context_vars", {}) or {}
+                               if existing_channel is not None else request.context_variables),
+                        policy=request.context_authority_policy,
+                    )
+                except ContextAuthorityError as exc:
+                    logger.warning("AG2 resume rejected: %s", exc)
+                    return AG2NetworkRunnerResult(
+                        status=RunStatus.FAILED,
+                        workflow_name=request.workflow_name,
+                        chat_id=request.chat_id,
+                        app_id=request.app_id,
+                        channel_id=existing_channel.channel_id if existing_channel is not None else None,
+                        error="ag2_network_stale_build_context",
+                    )
             if existing_channel is None:
                 # Never open another channel over a settled chat-scoped WAL,
                 # including old sessions whose lifecycle projection stayed at 0.
@@ -844,6 +879,23 @@ class _AG2LiveWorkflowRun:
                     app_id=self.app_id,
                     channel_id=self.channel_id,
                     error="live_ag2_channel_closed",
+                )
+
+            try:
+                _require_current_build_context(
+                    saved=getattr(self._hub.adapter_state(self.channel_id), "context_vars", {}) or {},
+                    policy=self._context_authority_policy,
+                )
+            except ContextAuthorityError as exc:
+                logger.warning("AG2 live resume rejected: %s", exc)
+                await self.close()
+                return AG2NetworkRunnerResult(
+                    status=RunStatus.FAILED,
+                    workflow_name=self.workflow_name,
+                    chat_id=self.chat_id,
+                    app_id=self.app_id,
+                    channel_id=self.channel_id,
+                    error="ag2_network_stale_build_context",
                 )
 
             prior_wal = await self._hub.read_wal(self.channel_id)

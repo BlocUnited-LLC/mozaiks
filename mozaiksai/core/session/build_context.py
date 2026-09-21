@@ -14,11 +14,14 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from mozaiksai.core.session.build_context_schema import validate_pack_context
+
+if TYPE_CHECKING:
+    from mozaiksai.core.workflow.context.authority import ContextAuthorityPolicy
 
 
 class BuildContextError(RuntimeError):
@@ -325,9 +328,9 @@ def merge_build_context(
 ) -> dict[str, Any]:
     """Merge workspace build-context projections into workflow context variables.
 
-    Explicit launch ``context_variables`` win over projected build-context
-    values. The launcher still validates the merged keys against the target
-    workflow's ``context_variables.yaml`` after this provider returns.
+    Caller-owned values retain precedence. Protected build-context values are
+    admitted separately from static registry declarations and cannot be supplied
+    by callers or recovered from descriptive prompt context.
     """
 
     merged = dict(context_variables or {})
@@ -337,6 +340,16 @@ def merge_build_context(
     )
     if root is None or not root.exists():
         return merged
+
+    from mozaiksai.core.data.persistence.persistence_manager import (
+        _context_authority_policy_for_workflow,
+    )
+
+    policy = _context_authority_policy_for_workflow(workflow_id)
+    trusted = load_trusted_build_context(policy, build_context_root=root)
+    for key in policy.build_context_keys.intersection(merged):
+        if key not in trusted or merged[key] != trusted[key]:
+            raise BuildContextError(f"Untrusted override of protected build-context key {key!r}")
 
     for context_path in discover_build_context_files(root.resolve(), workflow_id):
         context_root = context_path.parent.resolve()
@@ -351,10 +364,120 @@ def merge_build_context(
         )
 
         for key, value in projected.items():
-            if key not in merged:
+            if key not in policy.build_context_keys and key not in merged:
                 merged[key] = value
-
+    merged.update(trusted)
     return merged
+
+
+def _merge_trusted_projection(target: dict[str, Any], projected: Mapping[str, Any]) -> None:
+    for key, value in projected.items():
+        if key not in target or target[key] == value:
+            target[key] = value
+        elif isinstance(target[key], list) and isinstance(value, list):
+            combined = list(target[key])
+            for item in value:
+                if item not in combined:
+                    combined.append(item)
+            target[key] = combined
+        else:
+            raise BuildContextError(f"Conflicting trusted build-context projections for {key!r}")
+
+
+def _trusted_projection(
+    policy: ContextAuthorityPolicy, context_path: Path, config: Mapping[str, Any],
+) -> dict[str, Any]:
+    from mozaiksai.core.workflow.context.authority import _is_valid_context_value
+
+    rules = (config.get("projections") or {}).get("context_variables", {})
+    if not isinstance(rules, Mapping):
+        raise BuildContextError(f"context_variables projection must be a mapping: {context_path}")
+    selected: dict[str, Any] = {}
+    for key, rule in rules.items():
+        if key not in policy.variables:
+            raise BuildContextError(f"Undeclared build-context projection {key!r} for {policy.workflow_name}")
+        if key not in policy.build_context_keys:
+            continue
+        if isinstance(rule, Mapping):
+            if set(rule) - {"from", "value"} or len(rule) != 1:
+                raise BuildContextError(f"Protected build-context projection {key!r} requires a static registry source")
+        elif not isinstance(rule, str) or not rule.strip():
+            raise BuildContextError(f"Malformed build-context projection {key!r}")
+        # Registration comes from validated pack declarations, never descriptive text.
+        if key == "capability_packs" and rule not in ("capability_packs", {"from": "capability_packs"}):
+            raise BuildContextError("capability_packs must project registered pack declarations")
+        selected[key] = rule
+    if not selected:
+        return {}
+    values = build_provider_values(root=context_path.parent, config=config)
+    projected: dict[str, Any] = {}
+    for key, rule in selected.items():
+        present, value = _project_rule(rule, provider_values=values, context_variables={}, trigger_payload={})
+        if not present or value is None or not _is_valid_context_value(value, value_type=policy.variables[key].value_type):
+            raise BuildContextError(f"Invalid trusted build-context value for {key!r} in {context_path}")
+        projected[key] = value
+    return projected
+
+
+def load_trusted_build_context(
+    policy: ContextAuthorityPolicy,
+    *,
+    build_context_root: str | os.PathLike[str] | None = None,
+    workspace_path: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    """Re-admit protected values from current registries, never from chat data.
+
+    This is the shared launch/replay trust boundary. Stored copies are evidence,
+    not provenance: every hydration resolves applicable declarations again.
+    """
+    if not policy.build_context_keys:
+        return {}
+    root = resolve_build_context_root(build_context_root=build_context_root, workspace_path=workspace_path)
+    if root is None or not root.exists():
+        return {}
+    projected: dict[str, Any] = {}
+    workspace_pack_ids: set[str] = set()
+    for context_path in discover_build_context_files(root, policy.workflow_name):
+        config = load_build_context(context_path)
+        if isinstance(config.get("pack"), Mapping):
+            workspace_pack_ids.add(config["pack"]["id"])
+        _merge_trusted_projection(projected, _trusted_projection(policy, context_path, config))
+
+    # Resolve exact operator-selected pack IDs against the installed public
+    # registry. A workspace directory/catalog alone does not register a provider.
+    selected = projected.get("operator_capabilities", [])
+    if not isinstance(selected, list) or any(not isinstance(item, str) for item in selected):
+        raise BuildContextError("operator_capabilities must contain canonical capability IDs")
+    if selected and "capability_packs" in policy.build_context_keys:
+        from mozaiksai.resources import resolve_factory_app_root
+
+        factory_root = resolve_factory_app_root()
+        if factory_root is not None and (factory_root / "build_context").resolve() != root.resolve():
+            for context_path in discover_build_context_files(factory_root / "build_context", policy.workflow_name):
+                config = load_build_context(context_path)
+                pack = config.get("pack") or {}
+                if pack.get("id") in selected and pack.get("id") not in workspace_pack_ids and pack.get("status", "active") == "active":
+                    _merge_trusted_projection(projected, _trusted_projection(policy, context_path, config))
+    packs = projected.get("capability_packs", [])
+    identities: set[str] = set()
+    for pack in packs:
+        pack_id = pack["id"]
+        if pack_id in identities:
+            raise BuildContextError(f"Conflicting registered capability pack {pack_id!r}")
+        identities.add(pack_id)
+    return projected
+
+
+def revalidate_build_context(
+    policy: ContextAuthorityPolicy, values: Mapping[str, Any], *, reject_overrides: bool = False,
+) -> dict[str, Any]:
+    """Replace stored/provider copies with freshly admitted registry projections."""
+    trusted = load_trusted_build_context(policy)
+    if reject_overrides:
+        for key in policy.build_context_keys.intersection(values):
+            if key not in trusted or values[key] != trusted[key]:
+                raise BuildContextError(f"Untrusted override of protected build-context key {key!r}")
+    return {**{key: value for key, value in values.items() if key not in policy.build_context_keys}, **trusted}
 
 
 __all__ = [
@@ -366,6 +489,7 @@ __all__ = [
     "load_build_context",
     "load_catalog_descriptors",
     "load_contract_descriptors",
+    "load_trusted_build_context",
     "merge_build_context",
     "normalize_pack_descriptor",
     "project_build_context",

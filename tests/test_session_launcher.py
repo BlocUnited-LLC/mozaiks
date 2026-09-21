@@ -209,7 +209,7 @@ async def test_apply_launch_context_provider_invokes_env_provider(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_prepare_routed_workflow_launch_applies_context_provider_before_validation(
+async def test_prepare_routed_workflow_launch_rejects_unregistered_provider_claims(
     monkeypatch,
 ) -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
@@ -253,23 +253,21 @@ async def test_prepare_routed_workflow_launch_applies_context_provider_before_va
                 journey_id=trigger.journey_id,
             )
 
-    launch = await _session_launcher.prepare_routed_workflow_launch(
-        workflow_id="AppGenerator",
-        app_id="app_1",
-        user_id="user_1",
-        trigger_source="transition",
-        context_variables={"concept_overview": "paid downloads"},
-        trigger_payload={"source": "ui"},
-        journey_id="build",
-        session_router=_Router(),
-    )
+    from mozaiksai.core.session.build_context import BuildContextError
 
-    assert launch.validated_context["concept_overview"] == "paid downloads"
-    assert launch.validated_context["capability_packs"] == [{"id": "paid_downloads"}]
-    assert launch.validated_context["provider_backed_capabilities"] == [
-        {"intent_id": "monetization", "pack_id": "paid_downloads"}
-    ]
-    assert "not_declared_for_appgenerator" not in launch.validated_context
+    monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH", raising=False)
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    with pytest.raises(BuildContextError, match="protected build-context key"):
+        await _session_launcher.prepare_routed_workflow_launch(
+            workflow_id="AppGenerator",
+            app_id="app_1",
+            user_id="user_1",
+            trigger_source="transition",
+            context_variables={"concept_overview": "paid downloads"},
+            trigger_payload={"source": "ui"},
+            journey_id="build",
+            session_router=_Router(),
+        )
 
 
 @pytest.mark.parametrize(

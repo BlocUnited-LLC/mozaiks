@@ -245,9 +245,9 @@ class JourneyOrchestrator:
                 return
 
             from mozaiksai.core.session.launcher import (
+                admit_launch_context,
                 apply_launch_context_provider,
                 create_routed_chat_session,
-                validate_context_for_workflow,
             )
 
             merged_context = {**dict(route_decision.context_seed), **route_context}
@@ -261,7 +261,7 @@ class JourneyOrchestrator:
                 trigger_source="run_complete",
                 trigger_payload=trigger_payload,
             )
-            validated_context = validate_context_for_workflow(wf, provided_context)
+            validated_context = admit_launch_context(wf, provided_context)
 
             existing_next = await coll.find_one(
                 {

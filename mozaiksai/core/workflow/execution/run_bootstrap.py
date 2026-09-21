@@ -10,7 +10,10 @@ from typing import Any
 
 def merge_persisted_extra_context(context: Any, extra_ctx: dict[str, Any]) -> None:
     """Hydrate validated persisted state over workflow-declared defaults."""
-    if not isinstance(extra_ctx, dict) or not extra_ctx:
+    if not isinstance(extra_ctx, dict):
+        return
+    policy = getattr(context, "_mozaiks_context_authority_policy", None)
+    if not extra_ctx and not getattr(policy, "build_context_keys", frozenset()):
         return
     from ..context.adapter import _hydrate_persisted_context
 
