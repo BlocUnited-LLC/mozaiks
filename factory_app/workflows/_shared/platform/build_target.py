@@ -31,6 +31,10 @@ async def bind_factory_session(
     config = workflow_manager.get_config(workflow_name) or {}
     definitions = (config.get("context_variables") or {}).get("definitions") or {}
     source = (definitions.get("run_build_binding") or {}).get("source") or {}
+    if source.get("type") == "runtime" and not (
+        build_registry_id or session_fields.get("run_build_binding") or source_chat_id or trigger_source == "refinement"
+    ):
+        raise ValueError("A registered build target is required for this workflow")
     if source.get("type") != "runtime" and not (
         build_registry_id or session_fields.get("run_build_binding") or trigger_source == "refinement"
     ):
