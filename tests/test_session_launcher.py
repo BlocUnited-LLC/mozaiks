@@ -5,6 +5,7 @@ import types
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -686,6 +687,75 @@ async def test_launch_transition_starts_workflow_chat(monkeypatch):
     assert state is not None
     assert state.current_chat_id == launch.workflow_launch.chat_id
     assert state.current_workflow_id == "DesignDocs"
+
+
+@pytest.mark.asyncio
+async def test_value_engine_to_theme_capture_keeps_host_after_target_router_retarget(monkeypatch):
+    host = "mozaiks-platform"
+    target = "release-greenfield-value-target"
+    binding = {
+        "build_registry_id": "appreg_value",
+        "target_app_id": target,
+        "build_id": "build_value",
+        "phase": "genesis",
+    }
+
+    class _Hooks:
+        async def call_chat_session_fields(self, **kwargs):  # noqa: ANN003
+            assert kwargs["app_id"] == host
+            return {"run_build_binding": binding}
+
+    class _Router:
+        def __init__(self):
+            self.target_app_id = None
+
+        def for_target(self, target_app_id):
+            self.target_app_id = target_app_id
+            return self
+
+        async def resolve_transition(self, **kwargs):  # noqa: ANN003
+            assert kwargs["app_id"] == host
+            assert self.target_app_id == target
+            return _session_model.TransitionResolution(
+                resolution_type="workflow",
+                transition_id="value_engine_to_theme_capture",
+                target_id="ThemeCapture",
+                route_type="workflow",
+                journey_id="build",
+                option_id="continue",
+                routing_decision=_session_model.RoutingDecision(
+                    workflow_id="ThemeCapture",
+                    requested_workflow_id="ThemeCapture",
+                    journey_id="build",
+                ),
+            )
+
+    launched = SimpleNamespace(
+        chat_id="theme-chat",
+        workflow_id="ThemeCapture",
+        requested_workflow_id="ThemeCapture",
+        journey_id="build",
+        websocket_url="/unused",
+        routing_explanation="handoff",
+        rerouted_by_dependency=False,
+    )
+    launch_workflow = AsyncMock(return_value=launched)
+    monkeypatch.setattr(_session_launcher, "get_platform_hooks", lambda: _Hooks())
+    monkeypatch.setattr(_session_launcher, "launch_routed_workflow", launch_workflow)
+
+    router = _Router()
+    result = await _session_launcher.launch_transition(
+        app_id=host,
+        user_id="owner",
+        transition_id="value_engine_to_theme_capture",
+        option_id="continue",
+        session_router=router,
+        build_registry_id="appreg_value",
+    )
+
+    assert result.workflow_launch is launched
+    assert launch_workflow.await_args.kwargs["app_id"] == host
+    assert launch_workflow.await_args.kwargs["session_router"] is router
 
 
 @pytest.mark.asyncio
