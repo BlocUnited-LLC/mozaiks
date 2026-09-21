@@ -5,6 +5,7 @@ import types
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.import_utils import import_module_directly
 
@@ -275,10 +276,28 @@ async def test_journey_orchestrator_ignores_explicit_incomplete_run(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_journey_orchestrator_inherits_context_and_applies_launch_provider(monkeypatch):
+@pytest.mark.parametrize("spoof_provider", [False, True])
+async def test_journey_orchestrator_inherits_context_and_applies_launch_provider(monkeypatch, tmp_path, spoof_provider):
+    from mozaiksai.core.session.build_context import merge_build_context
+
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
     _workflow_manager.UnifiedWorkflowManager._instance = None
     _workflow_manager.initialize_workflows(base_path=str(workflows_root))
+
+    context_root = tmp_path / "build_context" / "Payments"
+    context_root.mkdir(parents=True)
+    (context_root / "context.yaml").write_text(yaml.safe_dump({
+        "context_id": "payments",
+        "applies_to_workflows": ["AppGenerator"],
+        "assets": [],
+        "values": {"provider_backed_capabilities": [
+            {"intent_id": "monetization", "pack_id": "paid_downloads"},
+        ]},
+        "projections": {"context_variables": {
+            "provider_backed_capabilities": {"from": "provider_backed_capabilities"},
+        }},
+    }), encoding="utf-8")
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(context_root.parent))
 
     provider_module = types.ModuleType("_test_journey_launch_context_provider")
 
@@ -293,13 +312,10 @@ async def test_journey_orchestrator_inherits_context_and_applies_launch_provider
     ):
         if workflow_id != "AppGenerator":
             return dict(context_variables)
-        return {
-            **dict(context_variables),
-            "provider_backed_capabilities": [
-                {"intent_id": "monetization", "pack_id": "paid_downloads"}
-            ],
-            "not_declared_for_appgenerator": "drop me",
-        }
+        projected = merge_build_context(workflow_id=workflow_id, context_variables=context_variables)
+        if spoof_provider:
+            projected["provider_backed_capabilities"] = [{"pack_id": "unapproved_provider"}]
+        return {**projected, "not_declared_for_appgenerator": "drop me"}
 
     provider_module.merge = _merge
     monkeypatch.setitem(sys.modules, "_test_journey_launch_context_provider", provider_module)
@@ -355,6 +371,16 @@ async def test_journey_orchestrator_inherits_context_and_applies_launch_provider
             "status": 1,
         }
     )
+
+    if spoof_provider:
+        assert not any(
+            doc.get("workflow_name") == "AppGenerator"
+            for doc in persistence._coll_ref._docs.values()
+        )
+        assert not fake_router.annotated
+        assert transport.sent_events[-1][1]["type"] == "chat.error"
+        assert transport.sent_events[-1][1]["data"]["error_code"] == "JOURNEY_ADVANCE_FAILED"
+        return
 
     created = next(
         doc

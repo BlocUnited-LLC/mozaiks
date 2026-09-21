@@ -34,6 +34,7 @@ def _build_context_root(tmp_path: Path) -> Path:
                 ],
                 "values": {
                     "operator_capabilities": ["enterprise_sso", "audit_export"],
+                    "provider_backed_capabilities": [{"capability_id": "sso.login"}],
                     "capability_registry": {
                         "sso": {
                             "capability_pack_id": "enterprise_sso",
@@ -56,8 +57,7 @@ def _build_context_root(tmp_path: Path) -> Path:
                         "operator_contracts": {"from": "operator_contracts"},
                         "capability_registry": {"from": "capability_registry"},
                         "provider_backed_capabilities": {
-                            "from_trigger": "builder_options.provider_backed_capabilities",
-                            "default": [],
+                            "from": "provider_backed_capabilities",
                         },
                     },
                 },
@@ -112,16 +112,15 @@ def test_build_context_does_not_project_to_unmapped_workflow(tmp_path: Path) -> 
     assert context == {}
 
 
-def test_existing_context_variables_take_precedence_over_build_context(tmp_path: Path) -> None:
+def test_existing_context_cannot_override_trusted_build_context(tmp_path: Path) -> None:
     root = _build_context_root(tmp_path)
 
-    context = merge_build_context(
-        build_context_root=root,
-        workflow_id="AppGenerator",
-        context_variables={"operator_capabilities": ["already_set"]},
-    )
-
-    assert context["operator_capabilities"] == ["already_set"]
+    with pytest.raises(BuildContextError, match="operator_capabilities"):
+        merge_build_context(
+            build_context_root=root,
+            workflow_id="AppGenerator",
+            context_variables={"operator_capabilities": ["already_set"]},
+        )
 
 
 def test_merge_build_context_rejects_missing_explicit_root(tmp_path: Path) -> None:

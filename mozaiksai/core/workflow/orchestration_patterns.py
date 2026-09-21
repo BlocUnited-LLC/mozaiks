@@ -742,11 +742,10 @@ async def run_workflow_orchestration(
                     wf_logger.debug("[%s] frontend_context inject failed key=%s: %s", workflow_name_upper, prefixed, _ctx_err)
 
         if context is not None:
-            if persisted_extra_ctx:
-                merge_persisted_extra_context(
-                    context,
-                    {key: value for key, value in persisted_extra_ctx.items() if key not in SERVER_OWNED_SESSION_FIELDS},
-                )
+            merge_persisted_extra_context(
+                context,
+                {key: value for key, value in persisted_extra_ctx.items() if key not in SERVER_OWNED_SESSION_FIELDS},
+            )
 
         context_time = (perf_counter() - context_start) * 1000
         performance_logger.info("context_load_duration_ms", extra={

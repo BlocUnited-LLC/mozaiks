@@ -167,8 +167,36 @@ The bridge is explicit:
 
 1. A workflow declares a variable with `source.type: build_context`.
 2. A build-context registry declares `projections.context_variables`.
-3. The launch provider projects only those declared values into the workflow
-   context before execution.
+3. The trusted launch projection validates the applicable registry and the
+   workflow declaration before admitting a value.
+4. Replay discards stored build-context values and projects them again from the
+   current trusted registry before workflow bootstrap. Chat storage is evidence
+   of the launch input, not authority to restore a provider registration.
+
+Build-context values remain tool-only and non-persisted under the ordinary
+context replay policy. Callers, context bridges, agent outputs, prompt text, and
+generic configuration cannot write them. Do not set `persisted: true` or make
+them model-visible to bridge launch and execution. Missing or stale historical
+values cannot authorize anything: only a fresh valid projection can restore
+them. With no configured registry, protected values remain absent; an invalid
+configured registry or a malformed or undeclared projection fails validation.
+
+Provider registration requires the canonical `pack:` descriptor in
+`capability_packs`. A descriptive `capability_registry` entry or an instruction
+to use a provider does not register it. Trusted `operator_capabilities` selections
+may resolve exact pack IDs against installed, active, workflow-applicable named
+pack registries. Only selected packs are added; discovery does not select every
+installed provider. The same strict AppBuildPlan provider validation applies
+after bootstrap.
+
+No database migration or provenance store is required: historical chat values
+are revalidated through the same registry projection as new launches. Durable
+AG2 channels and paused live runs must match the current protected projection
+before any pending worker turn resumes. A changed or revoked projection blocks
+that channel with `ag2_network_stale_build_context`; start a fresh run to use the
+new registry. Existing channel state is never reconstructed or rewritten to
+fabricate an accepted handoff. Rolling back the code leaves stored evidence
+intact but restores the previous loss of build-context values during replay.
 
 Prompt-heavy input follows a different path. Catalog assets are declared in
 `context.yaml` `assets[]` and injected by deterministic prompt middleware. They

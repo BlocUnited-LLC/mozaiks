@@ -12,6 +12,7 @@ from logs.logging_config import get_core_logger
 from mozaiksai.core.data.persistence.persistence_manager import (
     SERVER_OWNED_SESSION_FIELDS,
     AG2PersistenceManager,
+    _context_authority_policy_for_workflow,
 )
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.workflow.context.authority import (
@@ -25,6 +26,7 @@ from mozaiksai.core.workflow.pack.config import get_transition, load_global_pack
 from mozaiksai.core.workflow.pack.schema import WorkflowTransition
 
 from .build_binding import RunBuildBinding
+from .build_context import revalidate_build_context
 from .model import RoutingDecision, TriggerInput
 from .trigger_routing import TriggerRoutingContribution
 
@@ -149,6 +151,19 @@ def validate_context_for_workflow(
     return validated_context
 
 
+def admit_launch_context(
+    workflow_id: str, context: dict[str, Any], *, writer_id: ContextWriterId = TRANSITION_ROUTER_WRITER,
+) -> dict[str, Any]:
+    """Validate ordinary launch input separately from trusted registry projections."""
+    policy = _context_authority_policy_for_workflow(workflow_id)
+    admitted = revalidate_build_context(policy, context, reject_overrides=True)
+    ordinary = {key: value for key, value in admitted.items() if key not in policy.build_context_keys}
+    return {
+        **validate_context_for_workflow(workflow_id, ordinary, writer_id=writer_id),
+        **{key: value for key, value in admitted.items() if key in policy.build_context_keys},
+    }
+
+
 async def apply_launch_context_provider(
     *,
     workflow_id: str,
@@ -240,6 +255,9 @@ async def create_routed_chat_session(
     extra_fields: dict[str, Any] = {"trigger_meta": trigger_meta}
     extra_fields.update(context_variables)
     extra_fields.update({key: value for key, value in session_fields.items() if key not in SERVER_OWNED_SESSION_FIELDS})
+    # Direct host/journey creation and session hooks share the launch trust boundary.
+    policy = _context_authority_policy_for_workflow(workflow_id)
+    extra_fields = revalidate_build_context(policy, extra_fields, reject_overrides=True)
 
     await persistence.create_chat_session(
         chat_id=chat_id,
@@ -338,6 +356,11 @@ async def prepare_routed_workflow_launch(
         **({"contribution": routing_contribution} if routing_contribution is not None else {}),
     )
     resolved_workflow_id = routing_decision.workflow_id
+    policy = _context_authority_policy_for_workflow(resolved_workflow_id)
+    for key in policy.build_context_keys.intersection(context_variables or {}):
+        policy.require_can_write(key, writer_id=CALLER_INPUT_WRITER)
+    for key in policy.build_context_keys.intersection(routing_decision.context_seed):
+        policy.require_can_write(key, writer_id=TRANSITION_ROUTER_WRITER)
     if routing_contribution is not None:
         # A trusted router seed must not upgrade the authority of browser input.
         validate_context_for_workflow(
@@ -359,7 +382,7 @@ async def prepare_routed_workflow_launch(
         if trigger_source == "transition" or routing_contribution is not None
         else CALLER_INPUT_WRITER
     )
-    validated_context = validate_context_for_workflow(
+    validated_context = admit_launch_context(
         resolved_workflow_id,
         merged_context,
         writer_id=launch_writer,

@@ -576,7 +576,7 @@ class AG2PersistenceManager:
             if k in protected:
                 continue
             extra[k] = v
-        if not extra:
+        if not extra and not clean_workflow_name:
             return {}
         if not clean_workflow_name:
             raise ContextAuthorityError(
@@ -608,6 +608,9 @@ class AG2PersistenceManager:
             writer_id=PERSISTED_REPLAY_WRITER,
             diagnostics=replay_diagnostics,
         )
+        from mozaiksai.core.session.build_context import revalidate_build_context
+
+        filtered = revalidate_build_context(policy, filtered)
         if replay_diagnostics:
             logger.debug(
                 "[FETCH_EXTRA_CONTEXT] Replay diagnostics workflow=%s chat_id=%s diagnostics=%s",

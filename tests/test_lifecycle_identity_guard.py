@@ -55,6 +55,17 @@ def test_missing_authority_is_not_equivalent_to_null():
         require_unchanged_runtime_authority({"app_id": None}, {})
 
 
+@pytest.mark.parametrize("after", [{}, {"capability_packs": None}, {"capability_packs": [{"id": "forged"}]}])
+def test_lifecycle_cannot_replace_or_delete_trusted_build_context(after):
+    policy = build_context_authority_policy(workflow_name="GuardSmoke", definitions={
+        "capability_packs": {"type": "array", "source": {"type": "build_context"}},
+    })
+    with pytest.raises(ContextAuthorityError, match="key=capability_packs"):
+        require_unchanged_runtime_authority(
+            {"capability_packs": [{"id": "registered"}]}, after, policy=policy,
+        )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("container_kind", ["runtime", "dict"])
 @pytest.mark.parametrize("mutation", ["replace", "delete", "nested", "caught_error", "build_binding"])

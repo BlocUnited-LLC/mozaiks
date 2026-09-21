@@ -40,13 +40,18 @@ from mozaiksai.core.adapters.ag2_network_runner import (
     AG2NetworkRunnerRequest,
     _closed_reason_from_wal,
     _json_safe_dict,
+    _require_current_build_context,
     _resume_pending_agent_turns,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+from mozaiksai.core.session.build_context import load_trusted_build_context
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.adapter import create_context_container
-from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+from mozaiksai.core.workflow.context.authority import (
+    ContextAuthorityError,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
 from mozaiksai.core.workflow.task_batches import parse_task_batches_config
 
@@ -61,6 +66,112 @@ def test_channel_context_projects_large_source_bundle_to_artifact_reference() ->
 
     assert projected["source_context_bundle"] is None
     assert projected["source_context_artifact_version_id"] == "artifact_source_1"
+
+
+def _registered_projection(tmp_path, monkeypatch, capability_id="registered"):
+    context_path = tmp_path / "build_context" / "registered" / "context.yaml"
+    context_path.parent.mkdir(parents=True, exist_ok=True)
+    context_path.write_text(json.dumps({
+        "context_id": "registered", "assets": [], "pack": {"id": capability_id, "version": "1.0.0"},
+        "applies_to_workflows": ["ProjectionFlow", "ProjectionResume"],
+        "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
+    }), encoding="utf-8")
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(context_path.parent.parent))
+
+
+@pytest.mark.parametrize("saved", [
+    {}, {"capability_packs": None}, {"capability_packs": [{"id": "untrusted"}]},
+])
+def test_channel_requires_fresh_build_context_before_restoring_saved_authority(saved, tmp_path, monkeypatch):
+    _registered_projection(tmp_path, monkeypatch)
+    policy = build_context_authority_policy(workflow_name="ProjectionFlow", definitions={
+        "capability_packs": {"type": "array", "source": {"type": "build_context"}},
+    })
+    with pytest.raises(ContextAuthorityError, match="stale_build_context.*key=capability_packs"):
+        _require_current_build_context(
+            saved=saved, policy=policy,
+        )
+
+
+def test_channel_build_context_check_preserves_unrelated_workflow_state(tmp_path, monkeypatch):
+    _registered_projection(tmp_path, monkeypatch)
+    policy = build_context_authority_policy(workflow_name="ProjectionFlow", definitions={
+        "capability_packs": {"type": "array", "source": {"type": "build_context"}},
+    })
+    _require_current_build_context(
+        saved={**load_trusted_build_context(policy), "summary": "saved"},
+        policy=policy,
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("current_id", ["registered", "changed"])
+async def test_durable_resume_revalidates_build_context_before_pending_turn_execution(current_id, tmp_path, monkeypatch):
+    _registered_projection(tmp_path, monkeypatch)
+    store = MemoryKnowledgeStore()
+    policy = build_context_authority_policy(workflow_name="ProjectionResume", definitions={
+        "capability_packs": {"type": "array", "source": {"type": "build_context"}},
+    })
+
+    class InterruptedPlanner(_DeterministicAgent):
+        async def ask(self, *msg, **kwargs):
+            raise RuntimeError("interrupted before reply")
+
+    def request(agent):
+        return AG2NetworkRunnerRequest(
+            workflow_name="ProjectionResume", chat_id="projection-resume", app_id="app",
+            agents={"Planner": agent}, initial_agent_name="Planner", initial_message="Start",
+            transition_rules=[{
+                "source_agent": "Planner", "target_agent": "terminate", "transition_type": "after_turn",
+            }],
+            knowledge_store=store, close_timeout_seconds=3.0,
+            context_authority_policy=policy,
+            context_variables=load_trusted_build_context(policy),
+        )
+
+    first = await AG2NetworkRunner().run(request(InterruptedPlanner("Planner", "unused")))
+    assert first.status is RunStatus.FAILED
+    assert first.channel_id
+    _registered_projection(tmp_path, monkeypatch, current_id)
+    planner = _DeterministicAgent("Planner", "Recovered")
+    resumed = await AG2NetworkRunner().run(request(planner))
+    if current_id == "registered":
+        assert resumed.status is RunStatus.COMPLETED, resumed.error
+        assert planner.ask_calls
+        assert resumed.context_variables["capability_packs"][0]["id"] == "registered"
+    else:
+        assert resumed.status is RunStatus.FAILED
+        assert "stale_build_context" in (resumed.error or "")
+        assert not planner.ask_calls
+
+
+@pytest.mark.anyio
+async def test_live_resume_rejects_build_context_changed_while_paused(tmp_path, monkeypatch):
+    _registered_projection(tmp_path, monkeypatch)
+    policy = build_context_authority_policy(workflow_name="ProjectionResume", definitions={
+        "capability_packs": {"type": "array", "source": {"type": "build_context"}},
+    })
+    worker = _DeterministicAgent("Worker", "Must not execute")
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="ProjectionResume", chat_id="projection-live", app_id="app",
+        agents={"Planner": _DeterministicAgent("Planner", "Approve"), "Worker": worker},
+        initial_agent_name="Planner", initial_message="Start", close_timeout_seconds=3.0,
+        context_authority_policy=policy, context_variables=load_trusted_build_context(policy),
+        transition_rules=[
+            {"source_agent": "Planner", "target_agent": "user", "transition_type": "after_turn"},
+            {"source_agent": "user", "target_agent": "Worker", "transition_type": "after_turn"},
+            {"source_agent": "Worker", "target_agent": "terminate", "transition_type": "after_turn"},
+        ],
+    ))
+    assert result.status is RunStatus.PAUSED
+    _registered_projection(tmp_path, monkeypatch, "changed")
+    try:
+        resumed = await result.live_run.continue_with_user_message("Approved")
+        assert resumed.status is RunStatus.FAILED
+        assert resumed.error == "ag2_network_stale_build_context"
+        assert not worker.ask_calls
+    finally:
+        await result.live_run.close()
 
 
 @pytest.fixture(autouse=True)

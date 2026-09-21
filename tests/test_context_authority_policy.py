@@ -17,6 +17,7 @@ from mozaiksai.core.workflow.context.authority import (
     RUNTIME_SYSTEM_WRITER,
     UI_RESPONSE_TRIGGER_WRITER,
     USER_TEXT_TRIGGER_WRITER,
+    ContextAuthorityClass,
     ContextAuthorityError,
     ScopedContextWriter,
     build_context_authority_policy,
@@ -28,6 +29,71 @@ from mozaiksai.core.workflow.execution.network_graph import (
     compile_transition_rules_to_graph,
     resolve_next_agent,
 )
+
+
+def _build_projection_policy(**metadata):
+    return build_context_authority_policy(
+        workflow_name="ProjectionFlow",
+        definitions={"capability_packs": {
+            "type": "array", "source": {"type": "build_context"}, **metadata,
+        }},
+    )
+
+
+@pytest.mark.parametrize("writer", [
+    CALLER_INPUT_WRITER, CONTEXT_BRIDGE_WRITER, AGENT_TEXT_WRITER,
+    DETERMINISTIC_TOOL_WRITER, UI_RESPONSE_TRIGGER_WRITER, USER_TEXT_TRIGGER_WRITER,
+    PERSISTED_REPLAY_WRITER, "transition_router", "structured_output", "lifecycle_tool",
+])
+def test_build_context_rejects_untrusted_set_and_delete(writer):
+    policy = _build_projection_policy()
+    assert policy.build_context_keys == frozenset({"capability_packs"})
+    for operation in ("set", "delete"):
+        with pytest.raises(ContextAuthorityError, match="context_authority.rejected"):
+            policy.require_can_write("capability_packs", writer_id=writer, operation=operation)
+    policy.require_can_write("capability_packs", writer_id=RUNTIME_SYSTEM_WRITER)
+
+
+@pytest.mark.parametrize("metadata", [
+    {"model_visible": True}, {"persisted": True}, {"routing": True},
+    {"authorization": True}, {"writer_ids": ["caller_input"]},
+    {"writer_ids": ["runtime_system", "deterministic_tool"]},
+    {"authority_class": "model_visible_information"},
+    {"authority_class": "immutable_runtime_authority"},
+])
+def test_build_context_rejects_authority_metadata_overrides(metadata):
+    with pytest.raises(ContextAuthorityError, match="must remain tool-only"):
+        _build_projection_policy(**metadata)
+
+
+def test_build_context_and_generic_tool_only_state_are_never_raw_replayed():
+    policy = build_context_authority_policy(workflow_name="ProjectionFlow", definitions={
+        "capability_packs": {"type": "array", "source": {"type": "build_context"}},
+        "configuration": {"type": "object", "source": {"type": "config"}},
+        "reference_file": {"type": "object", "source": {"type": "file"}},
+        "external_value": {"type": "object", "source": {"type": "external"}},
+    })
+    values = {key: [] if key == "capability_packs" else {} for key in policy.variables
+              if key not in {"app_id", "user_id", "chat_id", "workflow_name"}}
+    assert policy.filter_for_replay(values, writer_id=PERSISTED_REPLAY_WRITER) == {}
+    assert policy.filter_for_persistence(values) == {}
+    authority = policy.variables["capability_packs"]
+    assert authority.authority_class is ContextAuthorityClass.TOOL_ONLY_INFORMATION
+    assert authority.model_visible is False
+    assert authority.tool_visible is True
+    assert authority.persisted is False
+
+
+def test_build_context_bridge_cannot_replace_delete_or_mutate_nested_projection():
+    policy = _build_projection_policy()
+    bridge = ContextVariablesBridge({"capability_packs": [{"id": "registered"}]}, authority_policy=policy)
+    with pytest.raises(ContextAuthorityError):
+        bridge["capability_packs"] = [{"id": "forged"}]
+    with pytest.raises(ContextAuthorityError):
+        bridge.pop("capability_packs")
+    with pytest.raises(TypeError):
+        bridge["capability_packs"][0]["id"] = "forged"
+    assert bridge.snapshot()["capability_packs"] == [{"id": "registered"}]
 
 
 def _policy():
