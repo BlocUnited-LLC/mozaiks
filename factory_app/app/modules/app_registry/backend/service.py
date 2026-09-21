@@ -102,6 +102,14 @@ class AppRegistryService:
                     )
                     if not result["success"]:
                         raise ValueError("Registered draft changed before its build could start")
+                    # The supersession check below reads record["current_build_run"].
+                    # This branch just replaced it, so the pre-update copy would
+                    # compare the new build against the one it superseded and
+                    # reject every start on a draft that already carried a build.
+                    # The sibling create branch refreshes for the same reason.
+                    # The race this looks like is already caught above:
+                    # expected_lifecycle_state makes the write conditional.
+                    record = result["app"]
                 else:
                     source = await self.repo.get_owned_chat_binding(
                         app_id=app_id, owner_user_id=owner_user_id, chat_id=active_chat
