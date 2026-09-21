@@ -8,7 +8,10 @@ import pytest
 from pydantic import ValidationError
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
-from factory_app.workflows._shared.platform.build_target import require_build_binding
+from factory_app.workflows._shared.platform.build_target import (
+    bind_factory_session,
+    require_build_binding,
+)
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.core.session.build_binding import BuildTargetReference, RunBuildBinding
 from mozaiksai.core.session.persistence import SessionStateStore
@@ -180,6 +183,25 @@ async def test_a_draft_start_is_refused_without_create_authority():
             workflow_name="AppGenerator", build_registry_id="appreg_tracker",
         )
     repo.update_lifecycle_state.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_missing_required_factory_target_fails_closed(monkeypatch) -> None:
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    monkeypatch.setattr(
+        workflow_manager,
+        "get_config",
+        lambda _: {"context_variables": {"definitions": {
+            "run_build_binding": {"type": "object", "source": {"type": "runtime", "required": True}},
+        }}},
+    )
+    with pytest.raises(ValueError, match="registered build target is required"):
+        await bind_factory_session(
+            app_id="factory", user_id="owner", workflow_name="ValueEngine", chat_id="orphan",
+            phase="start", trigger_source="chat", build_registry_id=None, source_chat_id=None,
+            session_fields={},
+        )
 
 
 @pytest.mark.asyncio
