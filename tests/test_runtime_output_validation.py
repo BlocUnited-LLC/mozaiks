@@ -263,9 +263,9 @@ class TestValidateAgentStructuredOutput:
 
 class TestMergePersistedExtraContext:
     def test_empty_extra_ctx_no_op(self):
-        ctx = MagicMock()
+        ctx = _replay_context({"key": "default"})
         merge_persisted_extra_context(ctx, {})
-        ctx.set.assert_not_called()
+        assert ctx.snapshot() == {"key": "default"}
 
     def test_none_extra_ctx_no_op(self):
         ctx = MagicMock()
