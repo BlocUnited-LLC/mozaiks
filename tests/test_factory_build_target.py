@@ -99,6 +99,89 @@ async def test_superseded_session_is_rejected_before_execution():
     repo.update_lifecycle_state.assert_not_awaited()
 
 
+def _draft_with_prior_build(repo, prior_build_id="build_prepared"):
+    """A registered draft that already carried a build and has no active chat.
+
+    This is what a re-run looks like: the target is prepared, its previous
+    build id is still on the record, and no chat is attached yet.
+    """
+    repo.get_by_build_registry_id.return_value = {
+        "app_id": "customer_tracker", "chat_app_id": "factory",
+        "build_registry_id": "appreg_tracker", "active_chat_id": None,
+        "lifecycle_state": "draft",
+        "current_build_run": {"build_id": prior_build_id, "phase": "genesis"},
+    }
+
+    async def _persist(**kwargs):
+        # Echo the write, as the real repo does, so the caller can read back
+        # what it just stored rather than the copy it read beforehand.
+        return {
+            **repo.get_by_build_registry_id.return_value,
+            "lifecycle_state": kwargs["lifecycle_state"],
+            "active_chat_id": kwargs["active_chat_id"],
+            "current_build_run": kwargs["current_build_run"],
+        }
+
+    repo.update_lifecycle_state.side_effect = _persist
+    return repo
+
+
+@pytest.mark.asyncio
+async def test_starting_a_draft_that_already_carried_a_build_is_not_superseded():
+    """The live failure: a re-run against a prepared target was rejected.
+
+    OSS 859d6c59, chat 741a31e4, requested release-greenfield-value-target.
+    The start returned HTTP 500 "The selected build session has been
+    superseded" before any plan review. This branch mints a build id and
+    persists it, then the supersession check read the pre-update record and
+    compared the new build against the one it had just replaced.
+    """
+    service, repo = registry()
+    _draft_with_prior_build(repo)
+
+    result = await service.resolve_build_binding(
+        app_id="factory", owner_user_id="owner", chat_id="fresh_chat",
+        workflow_name="ValueEngine", build_registry_id="appreg_tracker",
+        allow_create=True,
+    )
+
+    assert result.target_app_id == "customer_tracker"
+    assert result.build_id != "build_prepared", "a new chat starts a new build run"
+    persisted = repo.update_lifecycle_state.await_args.kwargs["current_build_run"]
+    assert persisted["build_id"] == result.build_id, "the binding must be the one stored"
+
+
+@pytest.mark.asyncio
+async def test_a_concurrent_writer_still_stops_the_start():
+    """The race the supersession check exists for is caught by the conditional
+    write, so relaxing the stale comparison does not open it."""
+    service, repo = registry()
+    _draft_with_prior_build(repo)
+    repo.update_lifecycle_state.side_effect = None
+    repo.update_lifecycle_state.return_value = None  # expected_lifecycle_state no longer matched
+
+    with pytest.raises(ValueError, match="changed before its build could start"):
+        await service.resolve_build_binding(
+            app_id="factory", owner_user_id="owner", chat_id="fresh_chat",
+            workflow_name="ValueEngine", build_registry_id="appreg_tracker",
+            allow_create=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_draft_start_is_refused_without_create_authority():
+    """Reading back the write must not become a way to create one."""
+    service, repo = registry()
+    _draft_with_prior_build(repo)
+
+    with pytest.raises(ValueError, match="no resumable build session"):
+        await service.resolve_build_binding(
+            app_id="factory", owner_user_id="owner", chat_id="fresh_chat",
+            workflow_name="AppGenerator", build_registry_id="appreg_tracker",
+        )
+    repo.update_lifecycle_state.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_cannot_switch_targets_using_another_registry_selector():
     service, repo = registry()
