@@ -149,6 +149,28 @@ Generated pages should explicitly declare navigation when they belong in shell
 navigation. Use `navigation: null` or omit it for routes reached only by direct
 links or in-page actions.
 
+### Local navigation sections
+
+A `local`-scope page may also declare `navigation.section`, a heading that
+groups it with its siblings in the studio sidebar:
+
+```json
+{
+  "path": "/operations/billing",
+  "label": "Billing Ops",
+  "order": 3,
+  "navigation": { "scope": "local", "group": "workspace-studio", "section": "Money" }
+}
+```
+
+Pages that declare no `section` stay in a single unlabeled group ahead of every
+labeled one, so a manifest that uses no sections renders exactly as it did
+before the field existed. Section sequence is derived from the lowest `order`
+among a section's own members — `order` remains the only place sequence is
+declared, and there is no separate section-order field to fall out of sync.
+Section labels are trimmed before comparison, so `"Money"` and `" Money "`
+group together.
+
 Default placement policy:
 
 - desktop global nav: `header`
