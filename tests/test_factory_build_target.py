@@ -76,7 +76,13 @@ async def test_foreign_or_missing_registry_fails_closed(record):
         )
     message = str(exc_info.value)
     assert "host='factory'" in message
+    assert "owner='other_owner'" in message
     assert "registered_host=" in message
+    assert f"record_found={record is not None}" in message
+    if record is None:
+        assert "registered_host=None" in message
+    else:
+        assert "registered_host='other_host'" in message
     repo.upsert_app_record.assert_not_called()
 
 
