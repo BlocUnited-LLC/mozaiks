@@ -226,6 +226,105 @@ def test_product_category_cannot_become_an_unregistered_managed_service():
         validate_plan_origins(plan, _context())
 
 
+def test_billing_pack_is_only_a_category_for_generated_modules():
+    plan = _plan()
+    pack = plan["capability_packs"][0]
+    pack["pack_type"] = "billing_pack"
+    pack["capability_source"] = "generated_module"
+
+    validate_plan_origins(plan, _context())
+    assert pack["capability_pack_id"] == "reports"
+    assert pack["pack_type"] == "billing_pack"
+
+
+def test_planner_guidance_separates_billing_category_provider_and_subscription_task():
+    guidance = (ROOT / "factory_app/workflows/AppGenerator/agents.yaml").read_text(encoding="utf-8")
+
+    assert "Never emit a category such as `billing_pack` as a managed `capability_pack_id`" in guidance
+    assert "canonical managed capability identity is `mozaikspay`" in guidance
+    assert "exactly one `generated_module` capability" in guidance
+    assert "task_type: subscription_config" in guidance
+    assert 'owned_paths: ["config/subscriptions.yaml"]' in guidance
+
+
+def test_mozaikspay_is_the_canonical_managed_subscription_identity():
+    plan = _plan()
+    plan["capability_packs"] = [{
+        "capability_pack_id": "mozaikspay",
+        "surface_id": "mozaikspay_managed",
+        "surface_kind": "external_integration",
+        "pack_type": "mozaikspay",
+        "label": "MozaiksPay",
+        "summary": "Managed subscription assignment provider.",
+        "implementation_mode": "external_integration",
+        "capability_source": "managed_capability",
+    }]
+    plan["build_tasks"] = []
+    context = _context()
+    context.set("design_surface_map", {"surfaces": []})
+    context.set("capability_packs", [{
+        "id": "mozaikspay",
+        "capability_source": "managed_capability",
+    }])
+
+    validate_plan_origins(plan, context)
+
+
+def test_missing_approved_modules_are_repaired_to_surface_bound_generated_capabilities():
+    plan = _plan()
+    plan["capability_packs"] = []
+    context = _context()
+    context.set("design_surface_map", {
+        "surfaces": [
+            {"surface_id": "user_authentication", "surface_kind": "module", "owner": "app"},
+            {"surface_id": "task_management", "surface_kind": "module", "owner": "app"},
+        ]
+    })
+
+    _repair_plan(plan, context)
+
+    capabilities = {
+        pack["capability_pack_id"]: pack
+        for pack in plan["capability_packs"]
+    }
+    assert set(capabilities) == {"user_authentication", "task_management"}
+    assert all(pack["capability_source"] == "generated_module" for pack in capabilities.values())
+    assert all(pack["surface_id"] == pack_id for pack_id, pack in capabilities.items())
+
+    plan["build_tasks"] = [
+        {
+            "task_id": f"{module_id}.contract",
+            "task_type": "module_contract",
+            "capability_pack_id": module_id,
+            "surface_id": module_id,
+            "surface_kind": "module",
+            "owned_paths": [f"modules/{module_id}/module.yaml"],
+        }
+        for module_id in sorted(capabilities)
+    ]
+    validate_plan_origins(plan, context)
+
+
+def test_invalid_provider_blocks_after_budget_and_never_queues_a_batch():
+    plan = _plan()
+    plan["capability_packs"][0].update(
+        capability_pack_id="billing_pack",
+        capability_source="managed_capability",
+        surface_id="billing_pack",
+    )
+    plan["build_tasks"] = [
+        task for task in plan["build_tasks"]
+        if task.get("capability_pack_id") == "billing_pack"
+    ]
+    context = _context()
+
+    for _ in range(3):
+        result = review_app_build_plan(AppBuildPlan=deepcopy(plan), context_variables=context)
+
+    assert result["outcome"] == "blocked"
+    assert not context.get("app_task_batch_items")
+
+
 def test_registered_pack_origin_is_read_from_frozen_context():
     context = _context()
     context.set("capability_packs", [{"id": "reports", "capability_source": "framework_pack"}])
