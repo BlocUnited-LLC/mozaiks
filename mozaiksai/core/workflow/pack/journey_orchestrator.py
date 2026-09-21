@@ -136,13 +136,28 @@ class JourneyOrchestrator:
             user_id = user_id or str(conn.get("user_id") or "").strip()
 
         if not workflow_name or not app_id or not user_id:
+            logger.warning(
+                "[JOURNEY] Run-complete handoff skipped chat=%s missing identity "
+                "workflow_name=%r app_id=%r user_id=%r",
+                chat_id, workflow_name, app_id, user_id,
+            )
             return
         if not transport or not conn:
+            logger.warning(
+                "[JOURNEY] Run-complete handoff skipped chat=%s missing transport "
+                "or connection transport_present=%s connection_present=%s",
+                chat_id, transport is not None, conn is not None,
+            )
             return
 
         websocket = conn.get("websocket")
         ws_id = conn.get("ws_id")
         if websocket is None or ws_id is None:
+            logger.warning(
+                "[JOURNEY] Run-complete handoff skipped chat=%s missing websocket "
+                "connection fields websocket_present=%s ws_id_present=%s",
+                chat_id, websocket is not None, ws_id is not None,
+            )
             return
 
         pm = transport._get_or_create_persistence_manager()
@@ -393,6 +408,7 @@ class JourneyOrchestrator:
             conn = transport.connections.get(chat_id) or {}
             return (conn if isinstance(conn, dict) and conn else None), transport
         except Exception:
+            logger.exception("[JOURNEY] Could not resolve transport connection chat=%s", chat_id)
             return None, None
 
     def _ensure_connection_alias(
