@@ -82,7 +82,11 @@ class AppRegistryService:
                 build_registry_id=build_registry_id, owner_user_id=owner_user_id
             )
             if not record or record.get("chat_app_id") != app_id:
-                raise ValueError("Registered build target is not available in this host")
+                raise ValueError(
+                    "Registered build target is not available in this host "
+                    f"(build_registry_id={build_registry_id}, host={app_id!r}, "
+                    f"registered_host={(record or {}).get('chat_app_id')!r})"
+                )
             if binding is not None and binding.target_app_id != record["app_id"]:
                 raise ValueError("Persisted build target does not match the registry")
             if binding is None and not refinement:
@@ -161,7 +165,11 @@ class AppRegistryService:
             build_registry_id=build_registry_id, owner_user_id=owner_user_id,
         )
         if not record or record.get("chat_app_id") != app_id:
-            raise ValueError("Registered build target is not available in this host")
+            raise ValueError(
+                "Registered build target is not available in this host "
+                f"(build_registry_id={build_registry_id}, host={app_id!r}, "
+                f"registered_host={(record or {}).get('chat_app_id')!r})"
+            )
         binding = RunBuildBinding(
             build_registry_id=record["build_registry_id"], target_app_id=record["app_id"],
             build_id=f"build_{uuid4().hex}", phase="refinement",
