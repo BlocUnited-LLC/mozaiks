@@ -66,11 +66,14 @@ async def test_resume_revalidates_owner_and_host():
 async def test_foreign_or_missing_registry_fails_closed(record):
     service, repo = registry()
     repo.get_by_build_registry_id.return_value = record
-    with pytest.raises(ValueError, match="not available"):
+    with pytest.raises(ValueError, match="not available") as exc_info:
         await service.resolve_build_binding(
             app_id="factory", owner_user_id="other_owner", chat_id="next_chat",
             workflow_name="AppGenerator", build_registry_id="appreg_tracker",
         )
+    message = str(exc_info.value)
+    assert "host='factory'" in message
+    assert "registered_host=" in message
     repo.upsert_app_record.assert_not_called()
 
 
