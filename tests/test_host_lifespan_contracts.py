@@ -1,4 +1,4 @@
-"""Hosts must start and stop through a lifespan, not deprecated event hooks.
+"""Hosts must start and stop through their lifespan context.
 
 Asserted against the composed app objects rather than the text of the host
 modules. A source scan only catches the spellings it was told to look for, and
