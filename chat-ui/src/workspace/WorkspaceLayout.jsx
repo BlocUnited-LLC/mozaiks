@@ -13,6 +13,7 @@ import {
 import { useNavigation } from '../providers/NavigationProvider.jsx'
 import { useChatUI } from '../context/ChatUIContext.jsx'
 import { getUserRoles, isShellItemVisible } from '../navigation/shellActions.js'
+import { groupItemsIntoSections, resolveSectionLabel } from '../navigation/navSections.js'
 
 const ICON_MAP = {
   apps: RiAppsFill,
@@ -84,6 +85,7 @@ function buildNavGroupsFromPages(pages, appId = null, roles = []) {
         icon: resolveIcon(navigation.icon),
         exact: true,
         order: Number.isFinite(page.order) ? page.order : 500,
+        section: resolveSectionLabel(navigation),
       }
     })
     .filter(Boolean)
@@ -91,7 +93,7 @@ function buildNavGroupsFromPages(pages, appId = null, roles = []) {
       left.order - right.order || left.label.localeCompare(right.label)
     ))
 
-  return [{ label: null, items }]
+  return groupItemsIntoSections(items)
 }
 
 function MenuGlyph() {
