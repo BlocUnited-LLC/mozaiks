@@ -482,6 +482,9 @@ async def launch_transition(
 ) -> TransitionLaunchResult:
     from .router import get_session_router, get_session_router_for_chat
 
+    # Keep the authenticated execution host separate from the build target used
+    # to scope router state and artifact queries.
+    host_app_id = app_id
     router = session_router or get_session_router()
     if source_chat_id is not None:
         router = await get_session_router_for_chat(
@@ -533,7 +536,7 @@ async def launch_transition(
 
     workflow_launch = await launch_routed_workflow(
         workflow_id=route_decision.requested_workflow_id,
-        app_id=app_id,
+        app_id=host_app_id,
         user_id=user_id,
         trigger_source="transition",
         context_variables=dict(resolution.context_seed),
