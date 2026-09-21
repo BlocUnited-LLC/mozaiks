@@ -144,6 +144,33 @@ Do **not** publish this repo yet.
 
 Normal code pushes are fine. Public release actions are not.
 
+## Repository Settings And Merge Authority
+
+Branch protection, rulesets, and repository settings are not yours to change.
+They are not files, so no `CODEOWNERS` entry can guard them — this rule is the
+only thing that does.
+
+- Do not modify branch protection, rulesets, required checks, or repository
+  settings. If a setting blocks you, report it and stop.
+- Do not merge with `--admin`, and do not otherwise bypass a required check or
+  a `CODEOWNERS` stop. Report the block and stop.
+- A blocked merge is information. Treat it as a question for the maintainer,
+  never as an obstacle to route around.
+
+Why this is stated rather than assumed. Every agent pushes as the same single
+collaborator, and GitHub does not let an author approve their own pull
+request. So a nonzero required-approval count cannot be satisfied by anyone,
+and an agent that reads "blocked" as "lower the gate" will lower it. That
+happened: an approval requirement was temporarily set to zero to land a
+pull request and restored afterwards, and a second agent's unrelated pull
+request merged unreviewed inside that window. The work was sound; the
+mechanism was not the agent's to choose.
+
+`.github/CODEOWNERS` marks the paths where a wrong merge is expensive —
+supply chain, security-sensitive runtime, licence and policy. With one owner
+those paths stop and cannot be approved. That is deliberate: the stop is a
+signal to hand the change to the maintainer, not a defect to work around.
+
 ## Pre-Production Replacement Policy
 
 This repo is pre-1.0 and not in production. Prefer the cleanest canonical
