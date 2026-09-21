@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 import types
 from pathlib import Path
@@ -58,6 +59,29 @@ del _restore, _orig_session, _orig_transport, _orig_session_registry
 JourneyOrchestrator = _journey_mod.JourneyOrchestrator
 JourneyAdvanceDecision = _session_model.JourneyAdvanceDecision
 RoutingDecision = _session_model.RoutingDecision
+
+
+@pytest.mark.asyncio
+async def test_missing_transport_connection_is_logged(monkeypatch, caplog):
+    orchestrator = JourneyOrchestrator()
+
+    async def missing_transport(_chat_id):
+        return None, None
+
+    monkeypatch.setattr(orchestrator, "_get_transport_conn", missing_transport)
+    with caplog.at_level(logging.WARNING):
+        await orchestrator._handle_run_complete_inner(
+            {
+                "chat_id": "chat_missing_transport",
+                "workflow_name": "ValueEngine",
+                "app_id": "app_1",
+                "user_id": "user_1",
+            },
+            "chat_missing_transport",
+        )
+
+    assert "chat_missing_transport" in caplog.text
+    assert "missing transport or connection" in caplog.text
 
 
 class _MemoryCollection:
