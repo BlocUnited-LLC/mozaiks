@@ -1,0 +1,47 @@
+# Code owners — the review gate for paths where a wrong merge is expensive.
+#
+# Most of this repository merges on green CI with no approval required, so
+# ordinary work moves at the speed of the test suite. The paths below are the
+# exception: a mistake in them is costly, slow to notice, or hard to walk back
+# once published, so each one stops for a deliberate human look.
+#
+# Note on mechanics: GitHub does not let anyone approve their own pull request.
+# With a single owner, a PR touching these paths cannot be approved by its
+# author — it stops, and merging it is a conscious override rather than a
+# click. That is the intended behavior: the gate is a stop sign, not a queue.
+
+# ---------------------------------------------------------------------------
+# Supply chain — what gets built, published, and executed in CI
+# ---------------------------------------------------------------------------
+/.github/workflows/        @elCaptnCode
+/.github/CODEOWNERS        @elCaptnCode
+/.github/dependabot.yml    @elCaptnCode
+/pyproject.toml            @elCaptnCode
+/setup.py                  @elCaptnCode
+/MANIFEST.in               @elCaptnCode
+/requirements.txt          @elCaptnCode
+/requirements-docs.txt     @elCaptnCode
+
+# ---------------------------------------------------------------------------
+# Security and tenancy — the boundaries that keep tenants apart
+# ---------------------------------------------------------------------------
+/mozaiksai/core/auth/          @elCaptnCode
+/mozaiksai/core/secrets/       @elCaptnCode
+/mozaiksai/core/multitenant/   @elCaptnCode
+/mozaiksai/core/sandbox/       @elCaptnCode
+/mozaiksai/core/audit/         @elCaptnCode
+/mozaiksai/core/policy_hooks/  @elCaptnCode
+
+# ---------------------------------------------------------------------------
+# Money — entitlement and billing mechanism
+# ---------------------------------------------------------------------------
+/mozaiksai/core/billing/       @elCaptnCode
+
+# ---------------------------------------------------------------------------
+# Legal and publication policy
+# ---------------------------------------------------------------------------
+/LICENSE                       @elCaptnCode
+/SECURITY.md                   @elCaptnCode
+/TRADEMARK.md                  @elCaptnCode
+/OSS_PUBLICATION_POLICY.md     @elCaptnCode
+/DCO.md                        @elCaptnCode
