@@ -84,34 +84,52 @@ async def test_missing_transport_connection_is_logged(monkeypatch, caplog):
     assert "missing transport or connection" in caplog.text
 
 
+def _matches(doc, key, expected):  # noqa: ANN001
+    value = doc
+    for part in key.split("."):
+        value = value.get(part) if isinstance(value, dict) else None
+    if isinstance(expected, dict) and "$exists" in expected:
+        return (value is not None) is bool(expected["$exists"])
+    return value == expected
+
+
 class _MemoryCollection:
     def __init__(self) -> None:
         self._docs = {}
+        self.queries = []
 
     async def find_one(self, query, projection=None, sort=None):  # noqa: ANN001
-        for doc in self._docs.values():
-            if all(doc.get(k) == v for k, v in query.items()):
-                return dict(doc)
-        return None
+        self.queries.append(dict(query))
+        matches = [doc for doc in self._docs.values() if all(_matches(doc, k, v) for k, v in query.items())]
+        for key, direction in reversed(list(sort or [])):
+            matches.sort(key=lambda doc: doc.get(key) or 0, reverse=direction < 0)
+        return dict(matches[0]) if matches else None
 
 
 class _FakePersistenceManager:
     def __init__(self) -> None:
         self._coll_ref = _MemoryCollection()
+        self._created = 0
 
     async def _coll(self):
         return self._coll_ref
 
     async def create_chat_session(self, chat_id, app_id, workflow_name, user_id, extra_fields=None):  # noqa: ANN001
+        self._created += 1
         doc = {
             "_id": chat_id,
             "app_id": app_id,
             "workflow_name": workflow_name,
             "user_id": user_id,
+            "status": 0,
+            "created_at": self._created,
         }
         if isinstance(extra_fields, dict):
             doc.update(extra_fields)
         self._coll_ref._docs[chat_id] = doc
+
+    async def persist_server_owned_session_fields(self, *, chat_id, fields=None, **_):  # noqa: ANN001, ANN003
+        self._coll_ref._docs[chat_id].update(dict(fields or {}))
 
 
 class _FakeTransport:
@@ -534,3 +552,182 @@ async def test_unresolved_chat_session_transition_reports_handoff_failure(monkey
     assert event["type"] == "chat.error"
     assert event["data"]["error_code"] == "JOURNEY_ADVANCE_FAILED"
 
+
+
+_CURRENT_BINDING = {
+    "build_registry_id": "appreg_current",
+    "target_app_id": "tracker",
+    "build_id": "build_current",
+    "phase": "genesis",
+}
+_PRIOR_BINDING = {**_CURRENT_BINDING, "build_registry_id": "appreg_prior", "build_id": "build_prior"}
+_TARGET_SCOPE = "session_router::app_1::user_1::tracker"
+_UNBOUND_SCOPE = "session_router::app_1::user_1"
+
+
+def _theme_child(chat_id, *, status, binding, scope=_TARGET_SCOPE):  # noqa: ANN001
+    doc = {
+        "_id": chat_id, "app_id": "app_1", "user_id": "user_1", "workflow_name": "ThemeCapture",
+        "session_router_session_id": scope, "journey_instance_id": "journey_run_1",
+        "journey_key": "build", "journey_position": 1, "status": status, "created_at": 0,
+    }
+    if binding is not None:
+        doc["run_build_binding"] = dict(binding)
+    return doc
+
+
+async def _complete_value_engine(monkeypatch, *, source_binding, children):  # noqa: ANN001
+    """Run the ValueEngine -> ThemeCapture handoff against persisted sibling chats."""
+    from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    monkeypatch.setattr(
+        workflow_manager, "get_config",
+        lambda name: {"context_variables": {"definitions": {}}} if name == "ThemeCapture" else None,
+    )
+    persistence = _FakePersistenceManager()
+    source = {"_id": "chat_source", "app_id": "app_1", "user_id": "user_1", "workflow_name": "ValueEngine", "status": 1}
+    if source_binding is not None:
+        source["run_build_binding"] = dict(source_binding)
+    persistence._coll_ref._docs["chat_source"] = source
+    for child in children:
+        persistence._coll_ref._docs[child["_id"]] = child
+
+    binding_requests = []
+
+    async def chat_session_fields(**kwargs):  # noqa: ANN003
+        binding_requests.append(kwargs)
+        return {"run_build_binding": dict(source_binding)} if source_binding is not None else {}
+
+    get_platform_hooks().register_bundle({"chat_session_fields": chat_session_fields}, source="test")
+
+    transport = _FakeTransport(persistence)
+    transport.connections["chat_source"] = {
+        "websocket": object(), "ws_id": 77, "workflow_name": "ValueEngine", "app_id": "app_1", "user_id": "user_1",
+    }
+    fake_router = _FakeSessionRouter(next_workflows=["ThemeCapture"])
+    orchestrator = JourneyOrchestrator()
+
+    async def connected(chat_id):  # noqa: ANN001
+        return transport.connections.get(chat_id), transport
+
+    async def router_for_chat(**kwargs):  # noqa: ANN003
+        return fake_router
+
+    activated = []
+    monkeypatch.setattr(orchestrator, "_get_transport_conn", connected)
+    monkeypatch.setattr(_journey_mod, "get_session_router_for_chat", router_for_chat)
+    monkeypatch.setattr(_journey_mod.session_registry, "complete_workflow", lambda ws_id, chat_id: None)
+    monkeypatch.setattr(_journey_mod.session_registry, "add_workflow", lambda **kwargs: activated.append(kwargs))
+
+    await orchestrator.handle_run_complete({
+        "chat_id": "chat_source", "workflow_name": "ValueEngine", "app_id": "app_1", "user_id": "user_1",
+        "status": "completed", "run_completed": True,
+    })
+    return types.SimpleNamespace(
+        persistence=persistence, transport=transport, activated=activated, binding_requests=binding_requests,
+        theme_chats=[doc for doc in persistence._coll_ref._docs.values() if doc["workflow_name"] == "ThemeCapture"],
+        switched_to=next(
+            (event["data"]["to_chat_id"] for _cid, event in transport.sent_events if event["type"] == "chat.context_switched"),
+            None,
+        ),
+        errors=[event for _cid, event in transport.sent_events if event["type"] == "chat.error"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_new_build_creates_its_own_child_instead_of_a_prior_builds_completed_sibling(monkeypatch):
+    result = await _complete_value_engine(
+        monkeypatch,
+        source_binding=_CURRENT_BINDING,
+        children=[_theme_child("theme_prior_build", status=1, binding=_PRIOR_BINDING)],
+    )
+
+    assert result.errors == []
+    assert result.switched_to not in (None, "theme_prior_build")
+    assert [call["chat_id"] for call in result.activated] == [result.switched_to]
+    created = result.persistence._coll_ref._docs[result.switched_to]
+    assert created["run_build_binding"] == _CURRENT_BINDING
+    assert created["journey_instance_id"] == "journey_run_1"
+    assert created["journey_position"] == 1
+    assert [call["source_chat_id"] for call in result.binding_requests] == ["chat_source"]
+    assert result.persistence._coll_ref._docs["theme_prior_build"]["status"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", [1, 2])
+async def test_terminal_child_of_the_same_build_is_never_selected(monkeypatch, terminal_status):
+    result = await _complete_value_engine(
+        monkeypatch,
+        source_binding=_CURRENT_BINDING,
+        children=[_theme_child("theme_terminal", status=terminal_status, binding=_CURRENT_BINDING)],
+    )
+
+    assert result.errors == []
+    assert result.switched_to not in (None, "theme_terminal")
+    assert [call["chat_id"] for call in result.activated] == [result.switched_to]
+    assert result.persistence._coll_ref._docs[result.switched_to]["run_build_binding"] == _CURRENT_BINDING
+    assert len(result.theme_chats) == 2
+
+
+@pytest.mark.asyncio
+async def test_in_progress_child_of_the_same_build_is_reused(monkeypatch):
+    result = await _complete_value_engine(
+        monkeypatch,
+        source_binding=_CURRENT_BINDING,
+        children=[
+            _theme_child("theme_prior_build", status=0, binding=_PRIOR_BINDING),
+            _theme_child("theme_in_progress", status=0, binding=_CURRENT_BINDING),
+        ],
+    )
+
+    assert result.errors == []
+    assert result.switched_to == "theme_in_progress"
+    assert [call["chat_id"] for call in result.activated] == ["theme_in_progress"]
+    assert result.binding_requests == []
+    assert len(result.theme_chats) == 2
+
+
+@pytest.mark.asyncio
+async def test_unbound_source_never_adopts_a_bound_child(monkeypatch):
+    result = await _complete_value_engine(
+        monkeypatch,
+        source_binding=None,
+        children=[_theme_child("theme_bound", status=0, binding=_CURRENT_BINDING, scope=_UNBOUND_SCOPE)],
+    )
+
+    assert result.errors == []
+    assert result.switched_to not in (None, "theme_bound")
+    created = result.persistence._coll_ref._docs[result.switched_to]
+    assert "run_build_binding" not in created
+    assert created["session_router_session_id"] == _UNBOUND_SCOPE
+    reuse_query = next(q for q in result.persistence._coll_ref.queries if q.get("workflow_name") == "ThemeCapture")
+    assert reuse_query["run_build_binding"] == {"$exists": False}
+    assert reuse_query["status"] == 0
+
+
+@pytest.mark.asyncio
+async def test_unbound_source_reuses_its_own_unbound_in_progress_child(monkeypatch):
+    result = await _complete_value_engine(
+        monkeypatch,
+        source_binding=None,
+        children=[_theme_child("theme_unbound", status=0, binding=None, scope=_UNBOUND_SCOPE)],
+    )
+
+    assert result.errors == []
+    assert result.switched_to == "theme_unbound"
+    assert len(result.theme_chats) == 1
+
+
+def test_next_chat_reuse_filter_pins_every_binding_field_and_in_progress_status():
+    from mozaiksai.core.session.build_binding import RunBuildBinding
+
+    scope = _journey_mod._next_chat_reuse_filter(RunBuildBinding.model_validate(_CURRENT_BINDING))
+    assert scope == {
+        "status": 0,
+        "run_build_binding.build_registry_id": "appreg_current",
+        "run_build_binding.target_app_id": "tracker",
+        "run_build_binding.build_id": "build_current",
+        "run_build_binding.phase": "genesis",
+    }
+    assert _journey_mod._next_chat_reuse_filter(None) == {"status": 0, "run_build_binding": {"$exists": False}}

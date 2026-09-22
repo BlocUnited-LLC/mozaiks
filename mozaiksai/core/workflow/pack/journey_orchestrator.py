@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.data.persistence.persistence_manager import SERVER_OWNED_SESSION_FIELDS
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.session.build_binding import RunBuildBinding
@@ -83,6 +84,21 @@ def _project_launch_context(chat_doc: Any, workflow_name: str) -> dict[str, Any]
         and (definitions[key].get("source") or {}).get("type") == "state"
         and policy.can_write(key, writer_id=TRANSITION_ROUTER_WRITER)
     }
+
+
+def _next_chat_reuse_filter(binding: RunBuildBinding | None) -> dict[str, Any]:
+    """Only an in-progress child of the completed chat's own build may be reused.
+
+    A build id is shared by the workflows of one build, so the whole validated
+    binding must match. An unbound source never adopts a bound child, and a
+    terminal child is never restarted.
+    """
+    scope: dict[str, Any] = {"status": int(WorkflowStatus.IN_PROGRESS)}
+    if binding is None:
+        scope["run_build_binding"] = {"$exists": False}
+    else:
+        scope.update({f"run_build_binding.{key}": value for key, value in binding.model_dump().items()})
+    return scope
 
 
 class JourneyOrchestrator:
@@ -284,6 +300,7 @@ class JourneyOrchestrator:
                     "journey_instance_id": advance.journey_instance_id,
                     "journey_position": next_group_index,
                     "workflow_name": wf,
+                    **_next_chat_reuse_filter(binding),
                     **build_app_scope_filter(app_id),
                 },
                 projection={"_id": 1},
@@ -316,6 +333,13 @@ class JourneyOrchestrator:
                     source_chat_id=chat_id,
                 )
                 created_new = True
+            logger.info(
+                "JOURNEY_NEXT_CHAT workflow=%s chat=%s reused=%s build_id=%s",
+                wf,
+                next_chat_id,
+                not created_new,
+                binding.build_id if binding is not None else None,
+            )
             await session_router.annotate_workflow_chat(
                 app_id=app_id,
                 user_id=user_id,
