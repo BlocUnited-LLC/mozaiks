@@ -31,12 +31,24 @@ Supporting modules include:
 
 ## Execution Outcomes
 
-Background execution emits successful `runtime.process_completed` events and marks
-the workflow completed only when the operation succeeds with an explicit completed
-run status. A rejected start can report an earlier run's terminal status; its
-event instead reports failure and retains the rejection's error code and context.
-Accepting input into an existing session without an execution outcome does not
-emit completion.
+An accepted execution that reaches a terminal AG2 outcome sends one
+`chat.run_complete` envelope, and `send_event_to_ui` dispatches
+`runtime.process_completed` from it. That is the single source of the event for
+accepted runs: background execution does not emit it again. A second dispatch
+advances the journey twice, and the duplicate start of the next step is then
+refused by its chat execution lease.
+
+A start rejected before execution — a busy or unavailable chat lease, a lost
+lease, a terminal session — sends no envelope, so background execution emits the
+event itself. Such a rejection can report an earlier run's terminal status, so
+that event reports failure and retains the rejection's error code and context.
+The workflow is marked completed only when the operation succeeds with an
+explicit completed run status. Accepting input into an existing session without
+an execution outcome does not emit completion.
+
+Ordering caveat: a run announces its outcome before its terminal status is
+persisted, while a journey advance reads that persisted status. The two are not
+synchronized today.
 
 ## Related Docs
 
