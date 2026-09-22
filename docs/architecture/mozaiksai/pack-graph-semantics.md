@@ -147,11 +147,12 @@ Enforcement is defense-in-depth:
 When a workflow in a sequence step completes, the runtime checks whether the
 whole step group is complete. If so, it starts the next step group.
 
-- It reuses an in-progress `ChatSession` for the next step group only when
-  that chat carries the same validated `run_build_binding` as the completed
-  source chat (or both are unbound); otherwise it creates a new one through
-  the source chat's binding path. A terminal chat is never reused, so a
-  new build never restarts a prior build's completed step.
+- Among chats of the same session scope, journey instance, position and
+  workflow, it reuses an in-progress `ChatSession` only when that chat
+  carries the same validated `run_build_binding` as the completed source
+  chat (or both are unbound); otherwise it creates a new one through the
+  source chat's binding path. A terminal chat is never reused, so a new
+  build never restarts a prior build's completed step.
 - switches the UI to the new `chat_id` (`chat.context_switched`)
 - auto-starts the next workflow through the same transport connection
 - if the next sequence step is `{ "transition": "<id>" }`, emits

@@ -84,13 +84,17 @@ async def test_missing_transport_connection_is_logged(monkeypatch, caplog):
     assert "missing transport or connection" in caplog.text
 
 
+_MISSING = object()
+
+
 def _matches(doc, key, expected):  # noqa: ANN001
+    """Mongo semantics for the queries the orchestrator issues: dotted paths and field presence."""
     value = doc
     for part in key.split("."):
-        value = value.get(part) if isinstance(value, dict) else None
+        value = value.get(part, _MISSING) if isinstance(value, dict) else _MISSING
     if isinstance(expected, dict) and "$exists" in expected:
-        return (value is not None) is bool(expected["$exists"])
-    return value == expected
+        return (value is not _MISSING) is bool(expected["$exists"])
+    return value is not _MISSING and value == expected
 
 
 class _MemoryCollection:
@@ -565,11 +569,11 @@ _TARGET_SCOPE = "session_router::app_1::user_1::tracker"
 _UNBOUND_SCOPE = "session_router::app_1::user_1"
 
 
-def _theme_child(chat_id, *, status, binding, scope=_TARGET_SCOPE):  # noqa: ANN001
+def _theme_child(chat_id, *, status, binding, scope=_TARGET_SCOPE, created_at=0):  # noqa: ANN001
     doc = {
         "_id": chat_id, "app_id": "app_1", "user_id": "user_1", "workflow_name": "ThemeCapture",
         "session_router_session_id": scope, "journey_instance_id": "journey_run_1",
-        "journey_key": "build", "journey_position": 1, "status": status, "created_at": 0,
+        "journey_key": "build", "journey_position": 1, "status": status, "created_at": created_at,
     }
     if binding is not None:
         doc["run_build_binding"] = dict(binding)
@@ -691,7 +695,24 @@ async def test_in_progress_child_of_the_same_build_is_reused(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_newest_in_progress_child_of_the_same_build_wins(monkeypatch):
+    result = await _complete_value_engine(
+        monkeypatch,
+        source_binding=_CURRENT_BINDING,
+        children=[
+            _theme_child("theme_newest", status=0, binding=_CURRENT_BINDING, created_at=2),
+            _theme_child("theme_oldest", status=0, binding=_CURRENT_BINDING, created_at=1),
+        ],
+    )
+
+    assert result.switched_to == "theme_newest"
+    assert result.binding_requests == []
+    assert len(result.theme_chats) == 2
+
+
+@pytest.mark.asyncio
 async def test_unbound_source_never_adopts_a_bound_child(monkeypatch):
+    """A host that permits unbound sessions gets an unbound child, never the bound sibling."""
     result = await _complete_value_engine(
         monkeypatch,
         source_binding=None,
