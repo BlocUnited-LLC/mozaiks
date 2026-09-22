@@ -77,7 +77,16 @@ async def test_background_terminal_rejection_preserves_error_without_completion(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("run_status", list(RunStatus))
-async def test_background_execution_preserves_explicit_outcome(background_run, run_status):
+async def test_accepted_execution_leaves_the_outcome_event_to_its_run_complete_envelope(
+    background_run, run_status
+):
+    """An accepted run must not be announced twice.
+
+    Every accepted execution sends one run_complete envelope, and
+    ``SimpleTransport.send_event_to_ui`` dispatches ``runtime.process_completed``
+    from it. A second emission here made the journey handoff run twice and the
+    duplicate start was refused as CHAT_LOCK_BUSY.
+    """
     background_run.adapter.run.return_value = SimpleNamespace(status=run_status)
 
     result = await background_run.run()
@@ -85,13 +94,7 @@ async def test_background_execution_preserves_explicit_outcome(background_run, r
     assert result["status"] == "success"
     assert result["run_status"] == run_status.value
     background_run.adapter.run.assert_awaited_once()
-    background_run.dispatcher.emit.assert_awaited_once_with(
-        "runtime.process_completed",
-        {
-            "chat_id": "chat-1", "workflow_name": "ValueEngine", "app_id": "app-1",
-            "user_id": "user-1", "status": run_status.value,
-        },
-    )
+    background_run.dispatcher.emit.assert_not_awaited()
     if run_status == RunStatus.COMPLETED:
         background_run.completed.assert_called_once_with(42, "chat-1")
     else:

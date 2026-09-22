@@ -929,44 +929,50 @@ class WorkflowBridgeMixin:
                     )
                     run_status = str(result.get("run_status") or "").strip().lower()
                     execution_accepted = result.get("status") == "success"
+                    if execution_accepted and not run_status:
+                        # Input delivery alone provides no execution outcome.
+                        return result
                     if not execution_accepted:
                         # A rejected start may report a previous run's completed status.
                         run_status = "failed"
-                    elif not run_status:
-                        # Input delivery alone provides no execution outcome.
-                        return result
                     run_status_value = run_status
-                    # Emit the execution outcome without discarding rejection evidence.
-                    try:
-                        from mozaiksai.core.events.unified_event_dispatcher import (
-                            get_event_dispatcher,
-                        )
-
-                        dispatcher = get_event_dispatcher()
-                        _t = asyncio.create_task(
-                            dispatcher.emit(
-                                "runtime.process_completed",
-                                {
-                                    "chat_id": chat_id,
-                                    "workflow_name": workflow_name,
-                                    "app_id": app_id,
-                                    "user_id": user_id,
-                                    "status": run_status,
-                                    **({
-                                        key: result[key]
-                                        for key in ("error_code", "error", "message", "route", "run_status")
-                                        if key in result
-                                    } if not execution_accepted else {}),
-                                },
+                    # An accepted execution reports its own outcome: the
+                    # run_complete envelope it sends is dispatched exactly once
+                    # by send_event_to_ui. Emitting here as well would make
+                    # every journey handoff run twice, and the duplicate start
+                    # is then refused as CHAT_LOCK_BUSY. A rejected start sends
+                    # no envelope, so this is its only outcome signal.
+                    if not execution_accepted:
+                        try:
+                            from mozaiksai.core.events.unified_event_dispatcher import (
+                                get_event_dispatcher,
                             )
-                        )
-                        _t.add_done_callback(
-                            lambda t: logger.debug("PROCESS_COMPLETED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
-                            if not t.cancelled() and t.exception() is not None
-                            else None
-                        )
-                    except Exception as _ev_exc:
-                        logger.debug("PROCESS_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
+
+                            dispatcher = get_event_dispatcher()
+                            _t = asyncio.create_task(
+                                dispatcher.emit(
+                                    "runtime.process_completed",
+                                    {
+                                        "chat_id": chat_id,
+                                        "workflow_name": workflow_name,
+                                        "app_id": app_id,
+                                        "user_id": user_id,
+                                        "status": run_status,
+                                        **{
+                                            key: result[key]
+                                            for key in ("error_code", "error", "message", "route", "run_status")
+                                            if key in result
+                                        },
+                                    },
+                                )
+                            )
+                            _t.add_done_callback(
+                                lambda t: logger.debug("PROCESS_COMPLETED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
+                                if not t.cancelled() and t.exception() is not None
+                                else None
+                            )
+                        except Exception as _ev_exc:
+                            logger.debug("PROCESS_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
                     # A paused run is resumable as soon as AG2 has returned its
                     # checkpoint. Release the background-task slot before the
                     # pause event reaches the UI so an immediate user reply is
