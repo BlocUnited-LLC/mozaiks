@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -12,6 +14,121 @@ _bridge_mod = import_module_directly("mozaiksai.core.transport.workflow_bridge")
 _ag2_mod = import_module_directly("mozaiksai.core.adapters.ag2_orchestration")
 
 WorkflowBridgeMixin = _bridge_mod.WorkflowBridgeMixin
+
+
+@pytest.fixture
+def background_run(monkeypatch):
+    persistence = _FakePersistenceManager()
+    persistence.pending_input_request = None
+    transport = _DummyTransport(persistence)
+    transport._workflow_spawn_semaphore = asyncio.Semaphore(1)
+    adapter = _FakeAdapter()
+    adapter.run = AsyncMock(return_value=SimpleNamespace(status=RunStatus.COMPLETED))
+    dispatcher = SimpleNamespace(emit=AsyncMock())
+    completed = Mock()
+    events_module = import_module_directly("mozaiksai.core.events.unified_event_dispatcher")
+    monkeypatch.setattr(events_module, "get_event_dispatcher", lambda: dispatcher)
+    monkeypatch.setattr(_bridge_mod.session_registry, "complete_workflow", completed)
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _name: {})
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: adapter)
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", AsyncMock(return_value={}))
+
+    async def run():
+        result = await transport._run_workflow_background(
+            chat_id="chat-1", workflow_name="ValueEngine", app_id="app-1",
+            user_id="user-1", ws_id=42, initial_message="Continue",
+        )
+        await asyncio.sleep(0)
+        return result
+
+    return SimpleNamespace(
+        persistence=persistence, transport=transport, adapter=adapter,
+        dispatcher=dispatcher, completed=completed, run=run,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", [1, 2])
+async def test_background_terminal_rejection_preserves_error_without_completion(background_run, terminal_status):
+    from mozaiksai.core.data.models import WorkflowStatus
+
+    background_run.persistence.status = terminal_status
+
+    result = await background_run.run()
+
+    assert result == {
+        "status": "error", "chat_id": "chat-1", "route": "terminal_session",
+        "run_status": str(WorkflowStatus(terminal_status)),
+        "error_code": "WORKFLOW_SESSION_TERMINAL",
+    }
+    background_run.dispatcher.emit.assert_awaited_once_with(
+        "runtime.process_completed",
+        {
+            "chat_id": "chat-1", "workflow_name": "ValueEngine", "app_id": "app-1",
+            "user_id": "user-1", "status": "failed", "route": "terminal_session",
+            "run_status": result["run_status"], "error_code": "WORKFLOW_SESSION_TERMINAL",
+        },
+    )
+    background_run.completed.assert_not_called()
+    background_run.adapter.run.assert_not_awaited()
+    assert background_run.persistence.completed == []
+    assert background_run.persistence.status == terminal_status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("run_status", list(RunStatus))
+async def test_background_execution_preserves_explicit_outcome(background_run, run_status):
+    background_run.adapter.run.return_value = SimpleNamespace(status=run_status)
+
+    result = await background_run.run()
+
+    assert result["status"] == "success"
+    assert result["run_status"] == run_status.value
+    background_run.adapter.run.assert_awaited_once()
+    background_run.dispatcher.emit.assert_awaited_once_with(
+        "runtime.process_completed",
+        {
+            "chat_id": "chat-1", "workflow_name": "ValueEngine", "app_id": "app-1",
+            "user_id": "user-1", "status": run_status.value,
+        },
+    )
+    if run_status == RunStatus.COMPLETED:
+        background_run.completed.assert_called_once_with(42, "chat-1")
+    else:
+        background_run.completed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_background_execution_error_is_not_completion(background_run):
+    background_run.adapter.run.side_effect = RuntimeError("execution refused")
+
+    result = await background_run.run()
+
+    assert result["status"] == "error"
+    background_run.dispatcher.emit.assert_awaited_once_with(
+        "runtime.process_completed",
+        {
+            "chat_id": "chat-1", "workflow_name": "ValueEngine", "app_id": "app-1",
+            "user_id": "user-1", "status": "failed", "message": "Workflow execution failed",
+        },
+    )
+    background_run.completed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_background_callback_submission_does_not_complete_execution(background_run):
+    background_run.transport._input_request_registries["chat-1"] = {"req-pending": object()}
+
+    result = await background_run.run()
+
+    assert result["status"] == "success"
+    assert result["route"] == "existing_session"
+    assert background_run.transport.submitted_inputs == [
+        {"request_id": "req-pending", "user_input": "Continue"},
+    ]
+    background_run.dispatcher.emit.assert_not_awaited()
+    background_run.completed.assert_not_called()
+    background_run.adapter.run.assert_not_awaited()
 
 
 class _LiveRunResult:

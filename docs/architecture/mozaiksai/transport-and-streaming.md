@@ -29,6 +29,15 @@ Supporting modules include:
 - workflow decomposition logic
 - product-specific orchestration semantics
 
+## Execution Outcomes
+
+Background execution emits successful `runtime.process_completed` events and marks
+the workflow completed only when the operation succeeds with an explicit completed
+run status. A rejected start can report an earlier run's terminal status; its
+event instead reports failure and retains the rejection's error code and context.
+Accepting input into an existing session without an execution outcome does not
+emit completion.
+
 ## Related Docs
 
 - [Workflow Architecture](../../architecture/workflows/workflow-architecture.md)
