@@ -7,8 +7,11 @@ handoff-started run dispatched twice: the journey advanced twice, the second
 advance spawned a second start of the same in-progress child, and the chat
 execution lease correctly refused it as CHAT_LOCK_BUSY.
 
-These tests drive the real send path — real transport, real envelope builder —
-so the count is the system's, not a fake's.
+These tests drive the real send path — real transport, real envelope builder,
+real dispatch hook — so the count is the system's, not a fake's. The AG2
+outcome itself is stubbed; one case has that stub announce its own outcome the
+way ``orchestration_patterns`` does, so the production emitter is covered and
+not only the completion backstop.
 """
 
 from __future__ import annotations
@@ -73,16 +76,45 @@ class _FakePersistence:
 
 
 class _FakeAdapter:
+    """Stands in for AG2. With ``announce`` it also reports its own outcome.
+
+    ``orchestration_patterns`` sends one run_complete envelope for every
+    terminal outcome before returning. Without ``announce`` the only envelope
+    is the bridge's completion backstop, which is a different, later ordering.
+    """
+
     def __init__(self, status: RunStatus = RunStatus.COMPLETED) -> None:
         self.status = status
         self.runs = 0
+        self.transport = None
+        self.announce = False
+
+    async def _announce(self) -> None:
+        run_completed = self.status is RunStatus.COMPLETED
+        awaiting = self.status is RunStatus.PAUSED
+        await self.transport.send_event_to_ui(
+            {
+                "kind": "run_complete",
+                "workflow": WORKFLOW,
+                "chat_id": CHAT_ID,
+                "run_completed": run_completed,
+                "awaiting_user_input": awaiting,
+                "status": self.status.value,
+                "reason": "finished" if run_completed else self.status.value,
+            },
+            CHAT_ID,
+        )
 
     async def run(self, request):  # noqa: ANN001
         self.runs += 1
+        if self.announce and self.transport is not None:
+            await self._announce()
         return SimpleNamespace(status=self.status, error=None)
 
     async def resume(self, request):  # noqa: ANN001
         self.runs += 1
+        if self.announce and self.transport is not None:
+            await self._announce()
         return SimpleNamespace(status=self.status, error=None)
 
 
@@ -92,6 +124,7 @@ def live_send_path(monkeypatch):
     transport = SimpleTransport()
     persistence = _FakePersistence()
     adapter = _FakeAdapter()
+    adapter.transport = transport
 
     broadcast: list[dict] = []
 
@@ -101,7 +134,8 @@ def live_send_path(monkeypatch):
     emitted: list[tuple[str, dict]] = []
     dispatcher = _dispatcher_mod.get_event_dispatcher()
 
-    async def _record_emit(event_name, payload=None, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+    # Patched on the class, so the recorder takes the dispatcher as ``self``.
+    async def _record_emit(_self, event_name, payload=None, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
         emitted.append((event_name, payload))
 
     # The journey handoff aliases the source connection onto the new chat before
@@ -116,7 +150,7 @@ def live_send_path(monkeypatch):
         "active": True,
     }
 
-    monkeypatch.setattr(dispatcher, "emit", _record_emit)
+    monkeypatch.setattr(type(dispatcher), "emit", _record_emit)
     monkeypatch.setattr(transport, "_broadcast_to_websockets", _record_broadcast)
     monkeypatch.setattr(transport, "_get_or_create_persistence_manager", lambda: persistence)
     monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _name: {})
@@ -152,8 +186,38 @@ def _completions(emitted: list[tuple[str, dict]]) -> list[dict]:
     return [payload for name, payload in emitted if name == "runtime.process_completed"]
 
 
+def _run_complete_envelopes(broadcast: list[dict]) -> list[dict]:
+    return [
+        entry["envelope"]
+        for entry in broadcast
+        if isinstance(entry["envelope"], dict)
+        and entry["envelope"].get("type") == "chat.run_complete"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [RunStatus.COMPLETED, RunStatus.PAUSED, RunStatus.FAILED])
+async def test_a_run_that_announces_its_own_outcome_dispatches_once(live_send_path, status):
+    """The production ordering: the run sends its envelope, the wrapper adds nothing."""
+    live_send_path.adapter.status = status
+    live_send_path.adapter.announce = True
+
+    await live_send_path.run()
+
+    completions = _completions(live_send_path.emitted)
+    assert len(completions) == 1, f"expected one completion dispatch, got {completions}"
+    assert completions[0]["status"] == status.value
+    assert completions[0]["chat_id"] == CHAT_ID
+
+    envelopes = _run_complete_envelopes(live_send_path.broadcast)
+    assert len(envelopes) == 1
+    # The run announced itself, so the bridge's completion backstop stayed silent.
+    assert (envelopes[0].get("data") or {}).get("metadata", {}).get("source") is None
+
+
 @pytest.mark.asyncio
 async def test_accepted_run_dispatches_process_completed_exactly_once(live_send_path):
+    """A run that announces nothing: the completion backstop is the single emitter."""
     await live_send_path.run()
 
     completions = _completions(live_send_path.emitted)
@@ -170,13 +234,7 @@ async def test_accepted_run_dispatches_process_completed_exactly_once(live_send_
     assert (surviving.get("workflow_name") or surviving.get("workflow")) == WORKFLOW
     assert journey_orchestrator._is_successful_completion(surviving), surviving
 
-    run_complete_envelopes = [
-        entry["envelope"]
-        for entry in live_send_path.broadcast
-        if isinstance(entry["envelope"], dict)
-        and entry["envelope"].get("type") == "chat.run_complete"
-    ]
-    assert len(run_complete_envelopes) == 1
+    assert len(_run_complete_envelopes(live_send_path.broadcast)) == 1
     assert live_send_path.adapter.runs == 1
 
 
@@ -193,9 +251,4 @@ async def test_rejected_start_still_dispatches_its_outcome(live_send_path):
     assert completions[0]["error_code"] == "WORKFLOW_SESSION_TERMINAL"
     assert completions[0]["route"] == "terminal_session"
     assert live_send_path.adapter.runs == 0
-    assert not [
-        entry
-        for entry in live_send_path.broadcast
-        if isinstance(entry["envelope"], dict)
-        and entry["envelope"].get("type") == "chat.run_complete"
-    ]
+    assert not _run_complete_envelopes(live_send_path.broadcast)

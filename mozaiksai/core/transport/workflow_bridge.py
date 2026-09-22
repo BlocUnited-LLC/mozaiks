@@ -940,8 +940,11 @@ class WorkflowBridgeMixin:
                     # run_complete envelope it sends is dispatched exactly once
                     # by send_event_to_ui. Emitting here as well would make
                     # every journey handoff run twice, and the duplicate start
-                    # is then refused as CHAT_LOCK_BUSY. A rejected start sends
-                    # no envelope, so this is its only outcome signal.
+                    # is then refused as CHAT_LOCK_BUSY. A start rejected before
+                    # execution sends no envelope, so this is its only outcome
+                    # signal. A live-AG2 continue that fails reports "error"
+                    # after announcing itself; the extra failed event is inert,
+                    # because only a successful completion advances a journey.
                     if not execution_accepted:
                         try:
                             from mozaiksai.core.events.unified_event_dispatcher import (
