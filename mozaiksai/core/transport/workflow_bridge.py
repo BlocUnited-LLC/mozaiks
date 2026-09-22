@@ -927,9 +927,16 @@ class WorkflowBridgeMixin:
                         app_id=app_id,
                         initial_agent_name_override=initial_agent_name_override,
                     )
-                    run_status = str(result.get("run_status") or "completed").strip().lower() or "completed"
+                    run_status = str(result.get("run_status") or "").strip().lower()
+                    execution_accepted = result.get("status") == "success"
+                    if not execution_accepted:
+                        # A rejected start may report a previous run's completed status.
+                        run_status = "failed"
+                    elif not run_status:
+                        # Input delivery alone provides no execution outcome.
+                        return result
                     run_status_value = run_status
-                    # Emit run_complete success asynchronously to dispatcher
+                    # Emit the execution outcome without discarding rejection evidence.
                     try:
                         from mozaiksai.core.events.unified_event_dispatcher import (
                             get_event_dispatcher,
@@ -945,6 +952,11 @@ class WorkflowBridgeMixin:
                                     "app_id": app_id,
                                     "user_id": user_id,
                                     "status": run_status,
+                                    **({
+                                        key: result[key]
+                                        for key in ("error_code", "error", "message", "route", "run_status")
+                                        if key in result
+                                    } if not execution_accepted else {}),
                                 },
                             )
                         )
@@ -1040,7 +1052,7 @@ class WorkflowBridgeMixin:
             except Exception:
                 pass
 
-            # Mark completed ONLY if we weren't cancelled.
+            # Only an accepted, completed execution can complete the workflow.
             try:
                 if ws_id:
                     task = asyncio.current_task()
