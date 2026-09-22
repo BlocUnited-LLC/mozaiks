@@ -104,6 +104,18 @@ def live_send_path(monkeypatch):
     async def _record_emit(event_name, payload=None, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
         emitted.append((event_name, payload))
 
+    # The journey handoff aliases the source connection onto the new chat before
+    # it spawns the run (JourneyOrchestrator._ensure_connection_alias), and the
+    # send path reads identity from that entry. Reproduce it.
+    transport.connections[CHAT_ID] = {
+        "websocket": object(),
+        "ws_id": 7,
+        "app_id": APP_ID,
+        "user_id": USER_ID,
+        "workflow_name": WORKFLOW,
+        "active": True,
+    }
+
     monkeypatch.setattr(dispatcher, "emit", _record_emit)
     monkeypatch.setattr(transport, "_broadcast_to_websockets", _record_broadcast)
     monkeypatch.setattr(transport, "_get_or_create_persistence_manager", lambda: persistence)
@@ -146,8 +158,17 @@ async def test_accepted_run_dispatches_process_completed_exactly_once(live_send_
 
     completions = _completions(live_send_path.emitted)
     assert len(completions) == 1, f"expected one completion dispatch, got {completions}"
-    assert completions[0]["chat_id"] == CHAT_ID
-    assert completions[0].get("status") in {"completed", 1}
+
+    # The surviving dispatch must be one the journey orchestrator acts on, and
+    # must carry the identity it needs; otherwise the handoff silently stops.
+    from mozaiksai.core.workflow.pack import journey_orchestrator
+
+    surviving = completions[0]
+    assert surviving["chat_id"] == CHAT_ID
+    assert surviving["app_id"] == APP_ID
+    assert surviving["user_id"] == USER_ID
+    assert (surviving.get("workflow_name") or surviving.get("workflow")) == WORKFLOW
+    assert journey_orchestrator._is_successful_completion(surviving), surviving
 
     run_complete_envelopes = [
         entry["envelope"]
