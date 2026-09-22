@@ -576,7 +576,7 @@ def _theme_child(chat_id, *, status, binding, scope=_TARGET_SCOPE):  # noqa: ANN
     return doc
 
 
-async def _complete_value_engine(monkeypatch, *, source_binding, children):  # noqa: ANN001
+async def _complete_value_engine(monkeypatch, *, source_binding, children, binding_error=None):  # noqa: ANN001
     """Run the ValueEngine -> ThemeCapture handoff against persisted sibling chats."""
     from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
@@ -597,6 +597,8 @@ async def _complete_value_engine(monkeypatch, *, source_binding, children):  # n
 
     async def chat_session_fields(**kwargs):  # noqa: ANN003
         binding_requests.append(kwargs)
+        if binding_error is not None:
+            raise binding_error
         return {"run_build_binding": dict(source_binding)} if source_binding is not None else {}
 
     get_platform_hooks().register_bundle({"chat_session_fields": chat_session_fields}, source="test")
@@ -704,6 +706,24 @@ async def test_unbound_source_never_adopts_a_bound_child(monkeypatch):
     reuse_query = next(q for q in result.persistence._coll_ref.queries if q.get("workflow_name") == "ThemeCapture")
     assert reuse_query["run_build_binding"] == {"$exists": False}
     assert reuse_query["status"] == 0
+
+
+@pytest.mark.asyncio
+async def test_unbound_source_fails_closed_when_the_host_refuses_to_bind(monkeypatch):
+    """A factory host rejects a child for an unbound source; nothing is created or activated."""
+    result = await _complete_value_engine(
+        monkeypatch,
+        source_binding=None,
+        children=[_theme_child("theme_bound", status=0, binding=_CURRENT_BINDING, scope=_UNBOUND_SCOPE)],
+        binding_error=ValueError("Source session has no build binding"),
+    )
+
+    assert result.switched_to is None
+    assert result.activated == []
+    assert result.theme_chats == [result.persistence._coll_ref._docs["theme_bound"]]
+    assert [call["source_chat_id"] for call in result.binding_requests] == ["chat_source"]
+    assert [event["data"]["error_code"] for event in result.errors] == ["JOURNEY_ADVANCE_FAILED"]
+    assert "Source session" not in str(result.errors)
 
 
 @pytest.mark.asyncio
