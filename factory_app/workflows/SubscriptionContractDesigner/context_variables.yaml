@@ -193,7 +193,10 @@ definitions:
       default: null
   monetization_enabled:
     type: boolean
-    description: Flag indicating whether monetization is enabled for this build.
+    description: >
+      Operator switch: whether monetization is enabled for this build. It says
+      nothing about the concept; the concept's own answer is
+      concept_blueprint.monetization_intent.
     source:
       type: config
       env_var: MONETIZATION_ENABLED
@@ -218,7 +221,13 @@ definitions:
       default: null
   concept_blueprint:
     type: object
-    description: Structured ConceptBlueprint from ValueEngine.
+    description: >
+      Structured ConceptBlueprint from ValueEngine. Carries
+      monetization_intent (monetized, likely_revenue_models,
+      subscription_contract_likely, money_flow_summary), the approved concept's
+      own monetization answer. With monetization_enabled, monetized=true and
+      subscription_contract_likely=true together require contract_required=true;
+      the save tool enforces that.
     source:
       type: data_reference
       database_name: mozaiksai

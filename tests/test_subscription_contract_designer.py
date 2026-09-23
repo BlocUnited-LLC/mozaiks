@@ -891,3 +891,301 @@ def test_null_revision_field_survives_the_full_generator_roundtrip() -> None:
     assert reloaded.assignment_store.revision_field is None, (
         "the opt-out must survive the roundtrip"
     )
+
+
+# ---------------------------------------------------------------------------
+# The concept's own monetization answer has to reach the designer and bind it
+# ---------------------------------------------------------------------------
+#
+# On a live monetized greenfield run the designer emitted contract_required=false
+# for a concept whose monetization_intent recorded subscription_contract_likely
+# true. The signal was in its context, nested inside concept_blueprint, but the
+# prompt never named it and called "monetized" not enough. These cases drive the
+# save tool through a real ContextVariablesBridge under a real
+# StructuredOutputOverlay: every read is frozen, so a `dict` test anywhere in
+# the guard would silently disarm it, exactly as DesignDocs' guard was until
+# #708.
+
+
+def _monetized_blueprint(*, likely: bool = True) -> dict:
+    return {
+        "app_name": "TaskTracker Pro",
+        "agentic_capabilities": [],
+        "monetization_intent": {
+            "monetized": True,
+            "likely_revenue_models": ["subscriptions"],
+            "subscription_contract_likely": likely,
+            "money_flow_summary": "Users can upgrade to a Pro subscription for advanced features and unlimited tasks.",
+            "rationale": "Free tier plus a Pro subscription.",
+        },
+    }
+
+
+def _no_contract_output() -> dict:
+    return {
+        "agent_message": "No subscription contract required for TaskTracker Pro.",
+        "contract_required": False,
+        "rationale": "The app does not sell recurring access or paid feature gates.",
+        "plan_design_rationale": [],
+        "app_id": "app_test",
+        "app_name": "TaskTracker Pro",
+        "subscription_config_file": None,
+        "metering_declarations": [],
+        "module_contract_updates": [],
+        "workflow_contract_updates": [],
+        "page_surface_requirements": [],
+        "app_generator_instructions": [],
+        "validation_notes": [],
+        "forbidden_outputs": [],
+    }
+
+
+def _live_designer_context(*, blueprint: dict | None, monetization_enabled: bool, output: dict, chat_id: str | None = "chat_1"):
+    """What the tool really receives: a bridge under an overlay, frozen on read."""
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+    from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+
+    data = {
+        **factory_context({"app_id": "app_test"}),
+        "user_id": "user_1",
+        "workflow_name": "SubscriptionContractDesigner",
+        "monetization_enabled": monetization_enabled,
+        # The runtime seeds declared state; the outcome wrapper refuses to run
+        # without a real attempt count.
+        "subscription_contract_review_status": "blocked",
+        "subscription_contract_review_attempts": 0,
+        "subscription_contract_review_response": None,
+    }
+    if chat_id:
+        data["chat_id"] = chat_id
+    if blueprint is not None:
+        data["concept_blueprint"] = blueprint
+    return StructuredOutputOverlay(ContextVariablesBridge(data), output)
+
+
+def _live_designer_context_with(extra: dict, **kwargs):  # noqa: ANN001, ANN003
+    """Same as _live_designer_context, with extra declared state seeded."""
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+    from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+
+    context = _live_designer_context(**kwargs)
+    base = ContextVariablesBridge({**context._base.snapshot(), **extra})  # noqa: SLF001
+    return StructuredOutputOverlay(base, kwargs["output"])
+
+
+@pytest.mark.asyncio
+async def test_a_brownfield_path_is_not_forced_to_a_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The existing app may already own billing; the prompt asks for the reason instead."""
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    async def _fake_persist(**kwargs):
+        return SimpleNamespace(id="av_brownfield")
+
+    async def _fake_review(*args, **kwargs):
+        return {"action": "confirm", "approved": True, "status": "approved"}
+
+    monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist)
+    monkeypatch.setattr(module, "use_ui_tool", _fake_review)
+    context = _live_designer_context_with(
+        {"brownfield_build_path": "full_migration"},
+        blueprint=_monetized_blueprint(), monetization_enabled=True, output=_no_contract_output(),
+    )
+
+    result = await module.save_subscription_contract(context)
+
+    assert result["success"] is True
+    assert result["contract_required"] is False
+
+
+def _refuse_review_and_persistence(monkeypatch: pytest.MonkeyPatch, module) -> None:  # noqa: ANN001
+    async def _no_review(*args, **kwargs):
+        raise AssertionError("the guard must fire before the review UI is shown")
+
+    async def _no_persist(**kwargs):
+        raise AssertionError("a contradicted no-contract must not be persisted")
+
+    monkeypatch.setattr(module, "use_ui_tool", _no_review)
+    monkeypatch.setattr(module, "persist_summary_artifact", _no_persist)
+
+
+def test_the_live_context_is_frozen_all_the_way_down() -> None:
+    """Pin the premise: a bridge read is a mapping proxy, and so is the nested intent."""
+    from types import MappingProxyType
+
+    context = _live_designer_context(blueprint=_monetized_blueprint(), monetization_enabled=True, output=_no_contract_output())
+    blueprint = context.get("concept_blueprint")
+    assert isinstance(blueprint, MappingProxyType) and not isinstance(blueprint, dict)
+    assert isinstance(blueprint["monetization_intent"], MappingProxyType)
+    assert blueprint["monetization_intent"]["subscription_contract_likely"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_contradicted_no_contract_is_returned_to_the_designer(monkeypatch: pytest.MonkeyPatch) -> None:
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    _refuse_review_and_persistence(monkeypatch, module)
+    context = _live_designer_context(blueprint=_monetized_blueprint(), monetization_enabled=True, output=_no_contract_output())
+
+    result = await module.save_subscription_contract(context)
+
+    assert result["success"] is False
+    assert result["review_status"] == "changes_requested"
+    assert "subscription_contract_likely=true" in result["requested_changes"]
+    assert "Pro subscription" in result["requested_changes"], "quote the concept's own words back"
+    # Outcome validation logs a rejection only when the payload carries `error`;
+    # a refusal the log never records is invisible to the next acceptance run.
+    assert result["error"] == result["requested_changes"]
+    # The next turn reads the reason from context, not from this return value.
+    assert context.get("subscription_contract_review_status") == "changes_requested"
+    response = context.get("subscription_contract_review_response")
+    assert response["source"] == "concept_monetization_intent"
+    assert "subscription_contract_likely" in response["requested_changes"]
+    assert context.get("subscription_contract") is None
+    assert list(context.get("subscription_contract_files") or []) == []
+
+
+@pytest.mark.asyncio
+async def test_the_guard_fires_headless_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No chat means no review card; the contradiction is still refused."""
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    _refuse_review_and_persistence(monkeypatch, module)
+    context = _live_designer_context(
+        blueprint=_monetized_blueprint(), monetization_enabled=True, output=_no_contract_output(), chat_id=None,
+    )
+
+    result = await module.save_subscription_contract(context)
+
+    assert result["review_status"] == "changes_requested"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "blueprint, monetization_enabled",
+    [
+        (_monetized_blueprint(likely=False), True),   # the concept did not ask for a subscription
+        (_monetized_blueprint(), False),               # the operator disabled monetization for this build
+        ({"app_name": "TaskTracker Pro"}, True),      # the concept never answered
+        (None, True),                                  # no concept in scope
+    ],
+)
+async def test_no_contract_stands_when_the_concept_did_not_decide(
+    monkeypatch: pytest.MonkeyPatch, blueprint, monetization_enabled,
+) -> None:
+    """The guard binds the designer only to a decision the concept actually made."""
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    async def _fake_persist(**kwargs):
+        return SimpleNamespace(id="av_noop")
+
+    async def _fake_review(*args, **kwargs):
+        return {"action": "confirm", "approved": True, "status": "approved"}
+
+    monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist)
+    monkeypatch.setattr(module, "use_ui_tool", _fake_review)
+    context = _live_designer_context(blueprint=blueprint, monetization_enabled=monetization_enabled, output=_no_contract_output())
+
+    result = await module.save_subscription_contract(context)
+
+    assert result["success"] is True
+    assert result["contract_required"] is False
+    assert result["review_status"] == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_a_required_contract_is_not_second_guessed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    async def _fake_persist(**kwargs):
+        return SimpleNamespace(id="av_required")
+
+    async def _fake_review(*args, **kwargs):
+        return {"action": "confirm", "approved": True, "status": "approved"}
+
+    monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist)
+    monkeypatch.setattr(module, "use_ui_tool", _fake_review)
+    context = _live_designer_context(blueprint=_monetized_blueprint(), monetization_enabled=True, output=_sample_contract())
+
+    result = await module.save_subscription_contract(context)
+
+    assert result["success"] is True
+    assert result["contract_required"] is True
+
+
+def _review_outcome_spec():
+    from mozaiksai.core.workflow.declarative.contracts import ToolOutcomeSpec
+
+    tools = _read_yaml(SUBSCRIPTION_WORKFLOW / "tools.yaml")["tools"]
+    entry = next(t for t in tools if t.get("function") == "save_subscription_contract")
+    return ToolOutcomeSpec.model_validate(entry["outcome"])
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_survives_outcome_validation_and_permits_a_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """changes_requested is the declared retryable value, so the designer gets the turn back."""
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+    from mozaiksai.core.workflow.validation.tool_outcomes import wrap_tool_outcome
+
+    _refuse_review_and_persistence(monkeypatch, module)
+    spec = _review_outcome_spec()
+    assert "changes_requested" in spec.retry_on and spec.max_attempts > 1
+    context = _live_designer_context(blueprint=_monetized_blueprint(), monetization_enabled=True, output=_no_contract_output())
+    wrapped = wrap_tool_outcome(module.save_subscription_contract, spec)
+
+    result = await wrapped(context_variables=context)
+
+    assert result.get("outcome_error") is None, "the payload must not be replaced"
+    assert result["review_status"] == "changes_requested"
+    assert context.get(spec.context_key) == "changes_requested"
+    assert context.get(spec.attempts_key) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_contract_reaches_the_designer_with_the_validator_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rejection with no declared outcome used to be discarded as invalid_tool_outcome."""
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+    from mozaiksai.core.workflow.validation.tool_outcomes import wrap_tool_outcome
+
+    _refuse_review_and_persistence(monkeypatch, module)
+    output = _sample_contract()
+    output["subscription_config_file"] = "not an object"
+    context = _live_designer_context(blueprint=_monetized_blueprint(), monetization_enabled=True, output=output)
+    wrapped = wrap_tool_outcome(module.save_subscription_contract, _review_outcome_spec())
+
+    result = await wrapped(context_variables=context)
+
+    assert result.get("outcome_error") is None
+    assert result["review_status"] == "changes_requested"
+    assert result["error"].startswith("invalid_subscription_contract")
+    assert "subscription_config_file must be an object" in result["details"]
+    assert "subscription_config_file must be an object" in context.get("subscription_contract_review_response")["requested_changes"]
+
+
+def test_the_prompt_names_the_concept_signal_and_its_precedence() -> None:
+    agents_text = (SUBSCRIPTION_WORKFLOW / "agents.yaml").read_text(encoding="utf-8")
+    assert "concept_blueprint.monetization_intent" in agents_text, "name where the signal lives"
+    assert "subscription_contract_likely" in agents_text
+    assert "a\n               subscription contract is required" in agents_text.replace("\n", "\\n") or (
+        "subscription contract is required" in agents_text
+    ), "state that the concept's answer binds the decision"
+    assert "monetized alone is a broad signal" in agents_text
+    assert "changes_requested" in agents_text, "tell the designer what a refusal looks like"
+
+    context_vars = _read_yaml(SUBSCRIPTION_WORKFLOW / "context_variables.yaml")["definitions"]
+    assert "monetization_intent" in context_vars["concept_blueprint"]["description"]
+    assert "subscription_contract_likely" in context_vars["concept_blueprint"]["description"]
+    assert "Operator switch" in context_vars["monetization_enabled"]["description"]

@@ -46,8 +46,13 @@ OSS subscription runtime.
    hint.
 2. `AppGenerator.AppPlanAgent` resolves the final core `revenue_model` and optional
    `monetization_plan`.
-3. `SubscriptionContractDesigner` independently decides whether
-   `contract_required=true`.
+3. `SubscriptionContractDesigner` decides whether `contract_required=true`.
+   The concept's answer has precedence where it is specific: when monetization
+   is enabled and `concept_blueprint.monetization_intent` records
+   `monetized=true` and `subscription_contract_likely=true`, the contract is
+   required. The save tool refuses a contradicting `contract_required=false`
+   and returns it to the designer as `changes_requested` with the reason;
+   `monetized` alone remains a broad signal that requires design judgment.
 4. If `contract_required=true`, AppGenerator emits exactly one
    `config/subscriptions.yaml` task and gates module actions with declared
    capability ids.

@@ -9,6 +9,7 @@ ledger entries.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 import yaml
@@ -66,6 +67,80 @@ def _extract_output(context_variables: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     return raw
+
+
+def _is_enabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _concept_requires_contract(context_variables: Any) -> str | None:
+    """Why the approved concept already answered the contract question, or None.
+
+    Reads the frozen context the way it arrives: every live container returns
+    a read-only mapping, so this tests Mapping, never dict, and detaches first.
+    A `dict` test here would silently disarm the guard on every real build,
+    which is exactly how DesignDocs' surface guard was dead until #708.
+    """
+    if not _is_enabled(_cv_get(context_variables, "monetization_enabled")):
+        return None
+    if str(_cv_get(context_variables, "brownfield_build_path") or "").strip():
+        # The existing app may already own billing; the prompt asks the designer
+        # to name that surface in rationale instead of being forced here.
+        return None
+    blueprint = detach(_cv_get(context_variables, "concept_blueprint"))
+    if not isinstance(blueprint, Mapping):
+        return None
+    intent = blueprint.get("monetization_intent")
+    if not isinstance(intent, Mapping):
+        return None
+    if intent.get("monetized") is not True or intent.get("subscription_contract_likely") is not True:
+        return None
+    summary = str(intent.get("money_flow_summary") or "").strip()
+    return (
+        "The approved concept records monetization_intent.monetized=true and "
+        "monetization_intent.subscription_contract_likely=true"
+        + (f" ({summary})" if summary else "")
+        + ", and monetization is enabled for this build. That is the concept's own "
+        "determination that the app sells recurring access, gated features, quotas, "
+        "or credits, so contract_required must be true. Design the plan ladder from "
+        "money_flow_summary, likely_revenue_models, and the gated surfaces; the "
+        "absence of an explicit plan list upstream is not a reason to refuse."
+    )
+
+
+def _request_changes(context_variables: Any, requested_changes: str | None, *, source: str) -> dict[str, Any]:
+    """Return the turn to the designer with the reason where it can read it.
+
+    Mirrors the review UI's request_changes path so the transition graph, the
+    attempt budget, and the agent's next turn all see one shape. The reason is
+    also returned as `error`: tool-outcome validation logs a rejection only when
+    the payload carries one, and a refusal the log never records is how the
+    DesignDocs guard stayed dead until #708.
+    """
+    requested_changes = (requested_changes or "").strip() or "Revise the subscription contract."
+    review_response = {
+        "action": "request_changes",
+        "approved": False,
+        "status": "changes_requested",
+        "requested_changes": requested_changes,
+        "source": source,
+    }
+    _cv_set(context_variables, "subscription_contract", None)
+    _cv_set(context_variables, "subscription_contract_files", [])
+    _cv_set(context_variables, "subscription_contract_review_status", "changes_requested")
+    _cv_set(context_variables, "subscription_contract_review_response", review_response)
+    return {
+        "success": False,
+        "review_status": "changes_requested",
+        "requested_changes": requested_changes,
+        "error": requested_changes,
+        "message": (
+            "Subscription contract changes were requested. Revise the "
+            "structured output before downstream generation."
+        ),
+    }
 
 
 def _contains_proprietary_term(value: Any) -> str | None:
@@ -303,7 +378,13 @@ async def save_subscription_contract(
 ) -> dict[str, Any]:
     output = _extract_output(context_variables)
     if not isinstance(output, dict):
-        return {"success": False, "error": "No SubscriptionContractOutput structured output found"}
+        # Without a declared review_status the outcome validator discards the
+        # payload as unrecognised and the reason is lost.
+        return {
+            "success": False,
+            "review_status": "blocked",
+            "error": "No SubscriptionContractOutput structured output found",
+        }
 
     from factory_app.workflows._shared.platform.build_target import require_build_binding
 
@@ -315,12 +396,25 @@ async def save_subscription_contract(
     workflow_name = _cv_get(context_variables, "workflow_name") or "SubscriptionContractDesigner"
 
     if not app_id:
-        return {"success": False, "error": "app_id required in context or output"}
+        return {"success": False, "review_status": "blocked", "error": "app_id required in context or output"}
 
     try:
         normalized = normalize_subscription_contract(output)
     except Exception as exc:
-        return {"success": False, "error": "invalid_subscription_contract", "details": str(exc)}
+        # The designer can fix a malformed contract; give it the turn back with
+        # the validator's message instead of a generic invalid_tool_outcome.
+        result = _request_changes(context_variables, str(exc), source="contract_validation")
+        return {**result, "error": f"invalid_subscription_contract: {exc}", "details": str(exc)}
+
+    if not bool(normalized.get("contract_required")):
+        contradiction = _concept_requires_contract(context_variables)
+        if contradiction:
+            logger.warning(
+                "[SubscriptionContractDesigner] contract_required=false contradicts the approved "
+                "concept's monetization_intent for app=%s; returning the turn to the designer",
+                app_id,
+            )
+            return _request_changes(context_variables, contradiction, source="concept_monetization_intent")
 
     review_status = "not_requested_headless"
     review_response: dict[str, Any] | None = None
@@ -344,20 +438,12 @@ async def save_subscription_contract(
         else:
             review_response = dict(response) if isinstance(response, dict) else {"response": response}
             if not _approved_review_response(response):
-                requested_changes = _review_change_request(response)
-                _cv_set(context_variables, "subscription_contract", None)
-                _cv_set(context_variables, "subscription_contract_files", [])
-                _cv_set(context_variables, "subscription_contract_review_status", "changes_requested")
+                result = _request_changes(
+                    context_variables, _review_change_request(response), source="review_ui",
+                )
+                # Keep the user's full response, not only the extracted request.
                 _cv_set(context_variables, "subscription_contract_review_response", review_response)
-                return {
-                    "success": False,
-                    "review_status": "changes_requested",
-                    "requested_changes": requested_changes,
-                    "message": (
-                        "Subscription contract changes were requested. Revise the "
-                        "structured output before downstream generation."
-                    ),
-                }
+                return result
             review_status = "confirmed"
 
     normalized["review_status"] = review_status

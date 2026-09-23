@@ -175,7 +175,12 @@ The bridge is explicit:
 
 Build-context values remain tool-only and non-persisted under the ordinary
 context replay policy. Callers, context bridges, agent outputs, prompt text, and
-generic configuration cannot write them. Do not set `persisted: true` or make
+generic configuration cannot write them. Neither can a launch-context provider
+or a hosted strategy overlay: `admit_launch_context` revalidates every protected
+key a provider returns against the registry and refuses any difference, and a
+decorated copy of a trusted descriptor is a difference. A hosted overlay that
+needs operator bindings on a pack projects them through `capability_registry`,
+itself a protected registry projection, and reads them from there. Do not set `persisted: true` or make
 them model-visible to bridge launch and execution. Missing or stale historical
 values cannot authorize anything: only a fresh valid projection can restore
 them. With no configured registry, protected values remain absent; an invalid

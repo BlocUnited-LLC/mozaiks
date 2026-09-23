@@ -121,10 +121,13 @@ models:
   MonetizationIntentHint:
     type: model
     description: >
-      Advisory concept-level monetization hint. This is not a final build
-      contract; AppGenerator resolves the final core OSS revenue_model and
-      SubscriptionContractDesigner decides whether config/subscriptions.yaml is
-      required.
+      Concept-level monetization hint. This is not a build contract; AppGenerator
+      resolves the final core OSS revenue_model and SubscriptionContractDesigner
+      designs config/subscriptions.yaml. One field binds: when monetization is
+      enabled for the build and both monetized and subscription_contract_likely
+      are true, the designer must emit a contract (greenfield paths). Set
+      subscription_contract_likely only when the concept sells recurring access,
+      seats, gated features, quotas, credits, or token allowances.
     fields:
       monetized:
         type: bool

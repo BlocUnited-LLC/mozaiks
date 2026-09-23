@@ -465,3 +465,43 @@ def test_materialization_rejects_invalid_rendered_format(tmp_path: Path, filenam
         resolve_templates_for_pack(pack_root, "example_pack")
     assert filename in str(error.value)
 
+
+
+def test_a_launch_provider_cannot_decorate_a_protected_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exact rejection a live AppGenerator handoff hit.
+
+    A hosted launch-context provider re-emitted the trusted `capability_packs`
+    descriptor with operator bindings merged onto it. Admission compares the
+    provider's value against a fresh registry projection and refuses any
+    difference; a decorated copy is a difference. The unmodified projection is
+    admitted, which is what a provider must return for protected keys.
+    """
+    from mozaiksai.core.data.persistence.persistence_manager import (
+        _context_authority_policy_for_workflow,
+    )
+    from mozaiksai.core.session.build_context import load_trusted_build_context
+    from mozaiksai.core.session.launcher import admit_launch_context
+
+    root = _build_context_root(tmp_path)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
+    policy = _context_authority_policy_for_workflow("AppGenerator")
+    trusted = load_trusted_build_context(policy, build_context_root=root)
+    assert policy.build_context_keys.intersection(trusted), "fixture must project a protected key"
+
+    admitted = admit_launch_context("AppGenerator", dict(trusted))
+    for key in policy.build_context_keys.intersection(trusted):
+        assert admitted[key] == trusted[key]
+
+    key = "capability_packs" if isinstance(trusted.get("capability_packs"), list) and trusted["capability_packs"] else next(
+        iter(sorted(policy.build_context_keys.intersection(trusted)))
+    )
+    value = trusted[key]
+    if isinstance(value, list):
+        decorated = [{**value[0], "monetization_provider": "mozaiks_pay"}, *value[1:]]
+    else:
+        decorated = {**value, "decorated": True}
+
+    with pytest.raises(BuildContextError, match=key):
+        admit_launch_context("AppGenerator", {**trusted, key: decorated})

@@ -441,12 +441,6 @@ definitions:
     source:
       type: computed
       default: null
-  capability_packs:
-    type: array
-    description: Canonical capability packs currently selected for the concept.
-    source:
-      type: computed
-      default: []
   surface_candidate_hints:
     type: array
     description: Coarse realization hints carried from the approved concept into downstream planning.

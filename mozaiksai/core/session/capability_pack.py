@@ -1,14 +1,18 @@
 """Typed CapabilityPack model — the OSS factory's operator extension point.
 
-Any operator (hosted platform, enterprise self-hosted, OSS power user) injects
-capability packs at workflow launch via context_variables["capability_packs"].
-The factory workflows are capability-pack-aware: when the list is non-empty the
-planning agents receive a rendered capabilities block; when it is empty the
-factory behaves identically to a vanilla OSS run.
+Any operator (hosted platform, enterprise self-hosted, OSS power user) selects
+capability packs through a build-context registry. The factory workflows are
+capability-pack-aware: when the projected list is non-empty the planning agents
+receive a rendered capabilities block; when it is empty the factory behaves
+identically to a vanilla OSS run.
 
 Pack data flows:
-  1. Operator builds a list of CapabilityPack objects from their pack registry.
-  2. The list is passed as context_variables["capability_packs"] at launch.
+  1. A pack declares itself in `build_context/{pack}/context.yaml` with a `pack:`
+     descriptor and projects `capability_packs`.
+  2. A workspace registry selects packs through `operator_capabilities`. The
+     trusted launch projection resolves those selections against installed,
+     active packs and admits `capability_packs` as a protected value. Callers
+     and launch-context providers cannot supply or alter it.
   3. The hook in AppGenerator reads the typed list and renders the context block.
   4. Assembly reads pack_source_path per selected pack and materializes every
      file under that pack's templates/ tree.
