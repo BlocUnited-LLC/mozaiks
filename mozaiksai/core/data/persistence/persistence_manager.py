@@ -146,6 +146,55 @@ SERVER_OWNED_SESSION_FIELDS = frozenset({
 })
 
 
+def bson_safe_keys(value: Any, *, _path: str = "") -> Any:
+    """Return ``value`` with every nested mapping key coerced to ``str``.
+
+    BSON documents may only have string keys, at every level. Session extra
+    fields carry agent-authored structures, and a non-string key is trivial to
+    produce -- unquoted ``401:`` in generated YAML parses as an int -- so one
+    nested integer fails the whole insert and, on a journey handoff, the whole
+    build:
+
+        Failed to create chat session ...: Invalid document: documents must
+        have only string keys, key was 401
+        [JOURNEY] handle_run_complete failed: ... key was 401
+
+    Coercing rather than dropping is what the data already means. These
+    structures originate as JSON structured outputs, where keys are strings by
+    definition, and they are serialized back to JSON over the transport, which
+    stringifies keys anyway. Dropping would silently lose generated content;
+    coercing preserves it in the only shape the store accepts.
+
+    ``_path`` is threaded so a caller can report *where* a bad key was, which
+    the raw driver error does not say -- with a hundred context keys carrying
+    whole workflow bundles, "key was 401" alone is not findable.
+    """
+    if isinstance(value, dict):
+        coerced: dict[str, Any] = {}
+        for key, item in value.items():
+            safe_key = key if isinstance(key, str) else str(key)
+            coerced[safe_key] = bson_safe_keys(item, _path=f"{_path}.{safe_key}" if _path else safe_key)
+        return coerced
+    if isinstance(value, (list, tuple)):
+        return [bson_safe_keys(item, _path=f"{_path}[{index}]") for index, item in enumerate(value)]
+    return value
+
+
+def find_non_string_keys(value: Any, *, _path: str = "") -> list[str]:
+    """Report dotted paths holding a non-string mapping key, for diagnostics."""
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            here = f"{_path}.{key}" if _path else str(key)
+            if not isinstance(key, str):
+                found.append(f"{here} (key {key!r} is {type(key).__name__})")
+            found.extend(find_non_string_keys(item, _path=here))
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            found.extend(find_non_string_keys(item, _path=f"{_path}[{index}]"))
+    return found
+
+
 class ChatSessionTerminalError(RuntimeError):
     """A settled workflow session cannot accept more execution."""
 
@@ -494,7 +543,17 @@ class AG2PersistenceManager:
                         continue
                     if k in protected:
                         continue
-                    session_doc[k] = v
+                    # This guard was top-level only, so a nested non-string key
+                    # reached the driver and failed the whole insert -- on a
+                    # journey handoff, that ends the build.
+                    offenders = find_non_string_keys(v, _path=k)
+                    if offenders:
+                        logger.warning(
+                            "Coerced non-string document keys in session field %r "
+                            "(chat_id=%s): %s",
+                            k, chat_id, ", ".join(offenders[:5]),
+                        )
+                    session_doc[k] = bson_safe_keys(v, _path=k)
 
             session_doc = dual_write_app_scope(session_doc, resolved_app_id)
             result = await coll.insert_one(session_doc)
