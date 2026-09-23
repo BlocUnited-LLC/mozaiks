@@ -14,6 +14,20 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- A monetized concept now gets its subscription contract. The contract designer
+  was told that "monetized" is only a broad signal and was never told where the
+  concept's own answer lives, so a concept whose `monetization_intent` recorded
+  `subscription_contract_likely=true` still produced `contract_required=false`.
+  The prompt now names `concept_blueprint.monetization_intent` and its
+  precedence, and the save tool refuses a contradicting `contract_required=false`
+  when monetization is enabled, returning the turn to the designer with the
+  reason. Every save rejection now reports a declared review outcome, so a
+  malformed contract's validation message reaches the designer instead of being
+  discarded. Guard refusals and validation refusals draw on the same three review
+  attempts as a user's own "Request Changes"; the guard is off when the
+  operator's `MONETIZATION_ENABLED` switch is off and on brownfield paths, where
+  the existing app may already own billing.
+
 - DesignDocs now actually refuses a surface map that declares an AI workflow the
   approved concept never asked for. The check existed but never ran: it tested
   `isinstance(..., dict)` against a value that every live context container

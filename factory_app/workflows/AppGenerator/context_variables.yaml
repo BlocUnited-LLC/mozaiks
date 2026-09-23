@@ -1195,12 +1195,14 @@ definitions:
   capability_registry:
     type: object
     description: >
-      Build-context deterministic capability routing rules. Maps capability
-      identifiers to their implementation strategy (capability_pack_id,
-      implementation_mode, surface_kind). AppPlanAgent consults this before
-      LLM reasoning to route known operator capabilities deterministically.
-      Empty dict in OSS mode. Projected from build_context/{context_name}/context.yaml
-      at launch time.
+      Trusted registry projection of operator capability bindings. Maps
+      capability identifiers to their implementation strategy
+      (capability_pack_id, capability_source, implementation_mode, surface_kind,
+      monetization_provider). Tool-only and never rendered to an agent, like
+      every build-context value: launch-time validation and planning tools read
+      it, and a launch-context provider must read bindings from here rather than
+      merge them onto capability_packs, which admission would refuse. Empty dict
+      in OSS mode. Projected from build_context/{context_name}/context.yaml.
     source:
       type: build_context
       default: {}

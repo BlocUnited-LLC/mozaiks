@@ -55,6 +55,10 @@ agents:
         content: |-
           Read:
           - concept_overview and concept_blueprint for product intent
+          - concept_blueprint.monetization_intent for the approved concept's own
+            monetization answer: monetized, likely_revenue_models,
+            subscription_contract_likely, and money_flow_summary. This object is
+            nested inside concept_blueprint; it is not a separate variable.
           - backend_design_document and design_surface_map for module/workflow boundaries
           - experience_spec for page surfaces
           - monetization_enabled and builder_options for explicit builder settings
@@ -84,9 +88,35 @@ agents:
           Use this decision flow:
 
           1. Need for contract:
-             - monetization_enabled or builder_options may explicitly request monetization.
-             - "monetized" is only a broad intent signal. It is not enough to
-               create app/config/subscriptions.yaml.
+             - monetization_enabled is the operator's switch for this build, not a
+               statement about the concept. builder_options may also request
+               monetization explicitly.
+             - concept_blueprint.monetization_intent is the approved concept's own
+               answer, recorded at concept approval. Its fields have different
+               weight:
+               - "monetized" is only a broad intent signal: money changes hands
+                 somewhere. On its own it is not enough to create
+                 app/config/subscriptions.yaml.
+               - subscription_contract_likely is specific. ValueEngine sets it true
+                 only when the concept sells recurring access, seats, gated
+                 features, quotas, credits, token wallets, or token allowances.
+                 When monetization_enabled is true and monetization_intent records
+                 both monetized=true and subscription_contract_likely=true, a
+                 subscription contract is required: emit contract_required=true and
+                 design the plan ladder from money_flow_summary,
+                 likely_revenue_models, and the gated surfaces. The absence of an
+                 explicit plan list upstream is not a reason to refuse; designing
+                 that list is this role.
+               - The save tool refuses contract_required=false in that case and
+                 returns the turn to you as changes_requested with the reason in
+                 subscription_contract_review_response. Do not restate the
+                 refusal; change the decision. Each refusal spends one of the
+                 review attempts the user also draws on.
+               - Exception: on a brownfield path (brownfield_build_path is set)
+                 the existing app may already own billing, so the concept's
+                 subscription can be satisfied outside the generated overlay.
+                 There the concept's answer is not enforced; if you emit no
+                 contract, record in rationale which existing surface owns it.
              - concept_overview and concept_blueprint may imply paid access,
                subscriptions, usage quotas, teams, memberships, marketplace
                seller tools, ecommerce operations, AI credits, or premium reports.
