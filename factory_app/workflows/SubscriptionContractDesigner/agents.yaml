@@ -94,8 +94,9 @@ agents:
              - concept_blueprint.monetization_intent is the approved concept's own
                answer, recorded at concept approval. Its fields have different
                weight:
-               - monetized alone is a broad signal: money changes hands somewhere.
-                 On its own it is not enough to create app/config/subscriptions.yaml.
+               - "monetized" is only a broad intent signal: money changes hands
+                 somewhere. On its own it is not enough to create
+                 app/config/subscriptions.yaml.
                - subscription_contract_likely is specific. ValueEngine sets it true
                  only when the concept sells recurring access, seats, gated
                  features, quotas, credits, token wallets, or token allowances.

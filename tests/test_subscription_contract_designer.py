@@ -1182,7 +1182,7 @@ def test_the_prompt_names_the_concept_signal_and_its_precedence() -> None:
     assert "a\n               subscription contract is required" in agents_text.replace("\n", "\\n") or (
         "subscription contract is required" in agents_text
     ), "state that the concept's answer binds the decision"
-    assert "monetized alone is a broad signal" in agents_text
+    assert '"monetized" is only a broad intent signal' in agents_text, "the broad signal stays broad"
     assert "changes_requested" in agents_text, "tell the designer what a refusal looks like"
 
     context_vars = _read_yaml(SUBSCRIPTION_WORKFLOW / "context_variables.yaml")["definitions"]
