@@ -705,6 +705,9 @@ agents:
            `service_scope` as existing external capabilities instead.
 
       4. **Set app_kind to reflect the brownfield path.**
+         - These two values require `brownfield_build_path` to be set. On a greenfield
+           build they are wrong, and [OUTPUT FORMAT] governs instead: classify the
+           product, not the build path.
          - For `brownfield_build_path: "light_integration"`: set `app_kind: "brownfield_overlay"`.
          - For `brownfield_build_path: "full_migration"`: set `app_kind: "brownfield_migration"`.
 
@@ -720,6 +723,14 @@ agents:
       generated source files, or separate workflows/child-spec collection.
 
       Keep architecture and task ownership explicit; leave implementation to the task workers.
+      - `app_kind` classifies the PRODUCT, not the build path: `saas`, `marketplace`,
+        `social`, `internal_tool`, or a similar short domain label. The
+        `brownfield_overlay` and `brownfield_migration` values belong to
+        [BROWNFIELD ADOPTION SCOPE] and are correct ONLY when `brownfield_build_path`
+        is set. With `app_type: greenfield_app` and no `brownfield_build_path`, never
+        emit a `brownfield_*` kind: it reframes the whole plan as a delta over an
+        existing app, and the page and module rules below then read as "add what is
+        new" instead of "own the complete inventory".
       - Preserve the approved page inventory, entity fields, ownership rules, and action names.
       - Use null only for nullable fields; use [] for out-of-scope optional collections.
       - Keep task initial_message to task-specific decisions and exact required interfaces.
