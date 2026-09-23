@@ -83,20 +83,26 @@ def _resolve_generated_artifacts_root() -> Path:
 
 
 def _context_get(context_variables: Any | None, key: str) -> Any | None:
+    """Read a context value as plain data.
+
+    Every live container freezes on read, so without detach() this returns a
+    MappingProxyType and every `isinstance(..., dict)` on the result is False.
+    That is silent: the caller takes the else branch and derives nothing.
+    """
     if context_variables is None:
         return None
     if hasattr(context_variables, "get"):
         try:
             value = context_variables.get(key)
             if value is not None:
-                return value
+                return detach(value)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key)
+        return detach(data.get(key))
     if isinstance(context_variables, dict):
-        return context_variables.get(key)
+        return detach(context_variables.get(key))
     return None
 
 

@@ -75,16 +75,24 @@ async def _mark_design_docs_status(
 
 
 def _cv_get(context_variables: Any, key: str) -> Any | None:
+    """Read a context value as plain data.
+
+    Every live container freezes on read, so without detach() this returns a
+    MappingProxyType and every `isinstance(..., dict)` on the result is False.
+    #671's workflow-surface guard was dead in production for exactly that
+    reason until #708 detached at its one call site; detaching here is what
+    keeps the next reader from rediscovering it.
+    """
     if context_variables is None:
         return None
     if hasattr(context_variables, "get"):
         try:
-            return context_variables.get(key)
+            return detach(context_variables.get(key))
         except Exception:
             return None
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key)
+        return detach(data.get(key))
     return None
 
 

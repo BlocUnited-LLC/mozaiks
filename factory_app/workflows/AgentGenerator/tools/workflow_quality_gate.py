@@ -18,6 +18,7 @@ from typing import Any
 import yaml
 
 from factory_app.workflows._shared.workflow_integration import workflow_name_to_capability_id
+from mozaiksai.core.workflow.context.frozen import detach
 
 from .outcome_materialization import materialize_workflow_outcomes
 
@@ -39,19 +40,25 @@ WORKFLOW_BUNDLE_BUILDER_PROMPT_SURFACE = (
 
 
 def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
+    """Read a context value as plain data.
+
+    Every live container freezes on read, so without detach() this returns a
+    MappingProxyType and every `isinstance(..., dict)` on the result is False.
+    That is silent: the caller takes the else branch and checks nothing.
+    """
     if context_variables is None:
         return default
     if hasattr(context_variables, "get"):
         try:
             value = context_variables.get(key)
-            return default if value is None else value
+            return default if value is None else detach(value)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key, default)
+        return detach(data.get(key, default))
     if isinstance(context_variables, dict):
-        return context_variables.get(key, default)
+        return detach(context_variables.get(key, default))
     return default
 
 
