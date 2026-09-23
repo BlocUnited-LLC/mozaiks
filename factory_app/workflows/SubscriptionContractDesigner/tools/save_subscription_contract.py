@@ -177,6 +177,88 @@ def _restore_explicit_nulls(validated: Any, normalized: dict[str, Any]) -> None:
             normalized["assignment_store"][field] = None
 
 
+def _degraded_pricing_catalog(config: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Reduce an optional pricing catalog to the part that is actually valid.
+
+    `pricing_catalog` is display metadata for pricing tabs. The runtime never
+    reads it to decide entitlement -- `ConfiguredEntitlementAdapter` answers
+    from `plans[].capabilities`. But `PricingCatalogDef` and the config-level
+    validators reject ten distinct malformations in it, and each one fails the
+    whole contract, so a monetized build dies over which tab opens first.
+
+    Two live runs, two different malformations, same optional field:
+
+        82f87eb3  {"default_group_id": null, "groups": []}
+        (#711)    -> "pricing_catalog.groups must be non-empty"
+
+        82f87eb3  {"default_group_id": "default", "groups": [{"group_id": "basic"}]}
+        +main349  -> "default_group_id 'default' must reference a declared
+                      pricing_catalog group_id; known group_ids: ['basic']"
+
+    #711 fixed the first and deliberately kept the second fatal. That line was
+    wrong: it sorted by "empty vs malformed" when the question is whether the
+    field carries app meaning. Dropping an unresolvable tab preference loses
+    nothing a user can observe; failing the build loses the whole contract.
+
+    So the catalog degrades to a valid subset rather than failing:
+      - a group's plan_ids/add_on_ids that name nothing declared are dropped
+      - a group with no renderable label, or left with neither, is dropped
+      - duplicate group_ids keep the first
+      - a default_group_id naming no surviving group is dropped
+      - no surviving groups means no catalog
+
+    Anything that carries contract meaning -- plans, capabilities, wallets,
+    assignment_store -- stays strict and is untouched here.
+    """
+    catalog = config.get("pricing_catalog")
+    if not isinstance(catalog, Mapping):
+        return None
+
+    known_plans = {
+        plan.get("plan_id")
+        for plan in config.get("plans") or []
+        if isinstance(plan, Mapping) and plan.get("plan_id")
+    }
+    known_add_ons = {
+        product.get("add_on_id")
+        for product in config.get("add_on_products") or []
+        if isinstance(product, Mapping) and product.get("add_on_id")
+    }
+
+    kept: list[dict[str, Any]] = []
+    seen_group_ids: set[str] = set()
+    for group in catalog.get("groups") or []:
+        if not isinstance(group, Mapping):
+            continue
+        group_id = group.get("group_id")
+        if not isinstance(group_id, str) or not group_id.strip() or group_id in seen_group_ids:
+            continue
+        label = group.get("label")
+        if not isinstance(label, str) or not label.strip():
+            # A tab with no label cannot be rendered. Dropping it keeps this a
+            # subset of what the agent sent; deriving a label from group_id
+            # would be inventing display copy, which is a different act.
+            continue
+        resolved = dict(group)
+        plan_ids = [pid for pid in group.get("plan_ids") or [] if pid in known_plans]
+        add_on_ids = [aid for aid in group.get("add_on_ids") or [] if aid in known_add_ons]
+        if not plan_ids and not add_on_ids:
+            # A tab that lists nothing declared has nothing to render.
+            continue
+        resolved["plan_ids"] = plan_ids
+        resolved["add_on_ids"] = add_on_ids
+        seen_group_ids.add(group_id)
+        kept.append(resolved)
+
+    if not kept:
+        return None
+
+    default_group_id = catalog.get("default_group_id")
+    if default_group_id not in seen_group_ids:
+        default_group_id = None
+    return {"default_group_id": default_group_id, "groups": kept}
+
+
 def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("subscription_config_file must be an object when contract_required=true")
@@ -186,17 +268,7 @@ def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
     config.setdefault("token_wallets", [])
     config.setdefault("add_on_products", [])
     config.setdefault("plans", [])
-    # An empty catalog is an absent catalog. The prompt already says to send
-    # null for one simple subscription ladder, and the agent answers that
-    # correctly -- as {"default_group_id": null, "groups": []}, because a
-    # nullable object under strict-mode decoding is easier to fill than to
-    # omit. PricingCatalogDef refuses empty groups, which is right for a
-    # hand-written config and fatal here: pricing_catalog is optional display
-    # metadata, and the retry re-asks a question the model has already
-    # answered the same way, until the attempt budget kills the build.
-    catalog = config.get("pricing_catalog")
-    if isinstance(catalog, Mapping) and not (catalog.get("groups") or []):
-        config["pricing_catalog"] = None
+    config["pricing_catalog"] = _degraded_pricing_catalog(config)
     validated = SubscriptionsConfig.model_validate(config)
     normalized = validated.model_dump(mode="python", exclude_none=True)
     _restore_explicit_nulls(validated, normalized)
