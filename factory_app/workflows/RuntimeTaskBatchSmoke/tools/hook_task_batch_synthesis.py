@@ -3,24 +3,32 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from mozaiksai.core.workflow.context.frozen import detach
+
 _HEADER = "[DETERMINISTIC TASK BATCH SYNTHESIS]"
 
 
 def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
+    """Read a context value as plain data.
+
+    Every live container freezes on read, so without detach() this returns a
+    MappingProxyType and every `isinstance(..., dict)` on the result is False.
+    That is silent: the caller takes the else branch and reports nothing.
+    """
     if context_variables is None:
         return default
     getter = getattr(context_variables, "get", None)
     if callable(getter):
         try:
-            return getter(key, default)
+            return detach(getter(key, default))
         except TypeError:
             value = getter(key)
-            return default if value is None else value
+            return default if value is None else detach(value)
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key, default)
+        return detach(data.get(key, default))
     if isinstance(context_variables, dict):
-        return context_variables.get(key, default)
+        return detach(context_variables.get(key, default))
     return default
 
 

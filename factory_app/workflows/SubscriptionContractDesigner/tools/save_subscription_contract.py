@@ -30,18 +30,26 @@ _PROPRIETARY_TERMS = (
 
 
 def _cv_get(context_variables: Any, key: str) -> Any:
+    """Read a context value as plain data.
+
+    Every live container freezes on read, so without detach() this returns a
+    MappingProxyType and every `isinstance(..., dict)` on the result is False.
+    #709's monetization guard detaches at its own call site for that reason;
+    detaching here makes that the default rather than something each new
+    reader has to remember.
+    """
     if context_variables is None:
         return None
     if hasattr(context_variables, "get"):
         try:
-            return context_variables.get(key)
+            return detach(context_variables.get(key))
         except Exception:
             return None
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
-        return data.get(key)
+        return detach(data.get(key))
     if isinstance(context_variables, dict):
-        return context_variables.get(key)
+        return detach(context_variables.get(key))
     return None
 
 
