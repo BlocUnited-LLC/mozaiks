@@ -178,6 +178,17 @@ def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
     config.setdefault("token_wallets", [])
     config.setdefault("add_on_products", [])
     config.setdefault("plans", [])
+    # An empty catalog is an absent catalog. The prompt already says to send
+    # null for one simple subscription ladder, and the agent answers that
+    # correctly -- as {"default_group_id": null, "groups": []}, because a
+    # nullable object under strict-mode decoding is easier to fill than to
+    # omit. PricingCatalogDef refuses empty groups, which is right for a
+    # hand-written config and fatal here: pricing_catalog is optional display
+    # metadata, and the retry re-asks a question the model has already
+    # answered the same way, until the attempt budget kills the build.
+    catalog = config.get("pricing_catalog")
+    if isinstance(catalog, Mapping) and not (catalog.get("groups") or []):
+        config["pricing_catalog"] = None
     validated = SubscriptionsConfig.model_validate(config)
     normalized = validated.model_dump(mode="python", exclude_none=True)
     _restore_explicit_nulls(validated, normalized)
