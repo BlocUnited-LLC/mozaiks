@@ -83,6 +83,12 @@ agents:
       Low-confidence hints are design inputs, not mandates. Do not invent surfaces that contradict the
       hints without rationale. Do not omit high-confidence hints without rationale.
 
+      Precedence when a hint conflicts with the approved concept: the concept wins.
+      A hint carrying likely_surface_kind: workflow does not authorize a workflow
+      surface when agentic_capabilities is empty or absent — realize that hint as
+      module or ui_only instead. A hint is a guess made before approval; the
+      concept is what the user approved.
+
       owner_hint is a strong directive from concept time — honor it when set:
         - owner_hint: "app" → surface_map entry owner must be "app"; plan module_contract
           generation downstream.
@@ -187,6 +193,11 @@ agents:
         user wants agentic behavior at all; when it is empty or absent, the app is
         deterministic and the surface map must contain no `workflow` surface. An
         opportunity you can imagine for the app is not a request the user made.
+      - This outranks `surface_candidate_hints[]`. Where a hint says
+        `likely_surface_kind: workflow` and the concept records no agentic
+        capabilities, the concept wins and the hint is realized as `module` or
+        `ui_only`. Retrying the save with the same workflow surface is refused
+        again; change the surface kind, not the rationale.
       - This is a hard constraint, not a preference. Downstream pattern selection
         compares its workflow partition against this surface map and rejects a
         mismatch; a `workflow` surface the concept never asked for fails the build

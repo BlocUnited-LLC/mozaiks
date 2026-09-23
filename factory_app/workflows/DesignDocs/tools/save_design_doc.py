@@ -1,4 +1,5 @@
 import re
+from collections.abc import Mapping
 from typing import Any
 
 import yaml
@@ -102,6 +103,30 @@ def _cv_set(context_variables: Any, key: str, value: Any) -> None:
         data[key] = value
 
 
+def _refused(
+    context_variables: Any,
+    reason: str,
+    detail: str,
+    *,
+    outcome: str = "revise",
+) -> dict[str, Any]:
+    """Report a rejection the agent can act on.
+
+    The declared `outcome` is what keeps it intact: a payload without one is
+    unrecognised by tool-outcome validation, which discards it for
+    `invalid_tool_outcome` and loses the text naming what was wrong. The same
+    text is written to `design_docs_save_feedback`, because the retry turn reads
+    the reason from context rather than from this return value.
+
+    `revise` means the agent can fix it and the transition graph gives it another
+    turn; `blocked` is terminal and reserved for what a retry cannot change, such
+    as no bound target app. The outcome contract forbids retrying on the error
+    value, so these have to be two different words.
+    """
+    _cv_set(context_variables, "design_docs_save_feedback", detail)
+    return {"ok": False, "outcome": outcome, "reason": reason, "error": detail}
+
+
 def _normalize_kind(kind: str) -> str | None:
     if not isinstance(kind, str):
         return None
@@ -150,8 +175,14 @@ def _reject_undeclared_workflow_surfaces(
     compared the partition against the map and refused it -- terminal, no feedback
     path, no way back to the user. Refusing it at the boundary where it is written
     turns that into a rejection DesignDocs can act on, in the run that produced it.
+
+    Accept any mapping, not only `dict`. Every live container freezes on read, so
+    the caller receives a `MappingProxyType`; an `isinstance(..., dict)` test made
+    this whole guard a no-op in production while its tests passed on plain dicts.
+    The caller detaches as well -- this is the second lock on that door, because a
+    silent skip here is indistinguishable from an approved concept.
     """
-    if not isinstance(concept_blueprint, dict):
+    if not isinstance(concept_blueprint, Mapping):
         return  # no approved concept in scope; nothing to judge against
     if "agentic_capabilities" not in concept_blueprint:
         return
@@ -410,11 +441,21 @@ async def save_design_docs_bundle(
     build_mode = "revision" if binding.phase == "refinement" else "genesis"
 
     if not app_id or not isinstance(app_id, str):
-        return {"ok": False, "reason": "missing_app_id"}
+        # Nothing the agent writes can bind a target app, so this is terminal.
+        return _refused(
+            context_variables,
+            "missing_app_id",
+            "No target app is bound to this run.",
+            outcome="blocked",
+        )
 
     bundle = _extract_bundle(context_variables)
     if not isinstance(bundle, dict):
-        return {"ok": False, "reason": "missing_design_docs_bundle"}
+        return _refused(
+            context_variables,
+            "missing_design_docs_bundle",
+            "No DesignDocsBundle was produced for this turn.",
+        )
 
     try:
         frontend_markdown = str(bundle.get("frontend_markdown") or "").strip()
@@ -423,7 +464,7 @@ async def save_design_docs_bundle(
         surface_map = _canonical_surface_map(bundle.get("surface_map"))
         _reject_undeclared_workflow_surfaces(
             surface_map,
-            _cv_get(context_variables, "concept_blueprint"),
+            detach(_cv_get(context_variables, "concept_blueprint")),
         )
         experience_spec = _canonical_experience_spec(
             bundle.get("experience_spec"),
@@ -441,7 +482,7 @@ async def save_design_docs_bundle(
         # Generate human-readable YAML for agents that consume ui_schema as a string
         ui_schema_content = _experience_spec_to_yaml(experience_spec, surface_map)
     except Exception as err:
-        return {"ok": False, "reason": "invalid_design_docs_bundle", "error": str(err)}
+        return _refused(context_variables, "invalid_design_docs_bundle", str(err))
 
     pm = AG2PersistenceManager()
     store = BuilderArtifactStore(pm=pm)

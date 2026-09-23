@@ -8,6 +8,18 @@ transition_rules:
   transition_target: TerminateTarget
   termination_reason: workflow_complete
 
+# A save refused for something the agent can fix returns to the agent. The retry
+# converges without a turn counter here: `revise` is the only retryable outcome,
+# so once the attempt budget is spent the outcome validator settles the run on
+# `blocked` and the terminal rule below fires.
+- source_agent: DesignDocsAgent
+  target_agent: DesignDocsAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: design_docs_save_outcome
+  condition_value: revise
+  transition_target: AgentTarget
+
 - source_agent: DesignDocsAgent
   target_agent: terminate
   transition_type: condition
