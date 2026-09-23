@@ -11,6 +11,14 @@ definitions:
     writer_ids: [deterministic_tool]
     persisted: true
     source: {type: state, default: 0}
+  design_docs_save_feedback:
+    type: string
+    description: >
+      Why the last save was refused, written by the save tool so the retry turn
+      can read it. Set whenever the outcome is `revise` or `blocked`. Never save
+      authority: a rejection reaching the agent does not make the agent's next
+      bundle valid.
+    source: {type: state, default: ""}
   run_build_binding:
     type: object
     description: Server-verified target and build lineage. Execution app_id remains the host identity.
@@ -380,6 +388,7 @@ definitions:
 agents:
   DesignDocsAgent:
     variables:
+    - design_docs_save_feedback
     - build_mode
     - workflow_sequence
     - revision_scope

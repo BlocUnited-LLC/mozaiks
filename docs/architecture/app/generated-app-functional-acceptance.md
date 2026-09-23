@@ -287,8 +287,12 @@ or workflow-completion messages. Runtime `structured_output` is a read-only,
 turn-local projection. Factory tools use `detach()` before dictionary validation,
 serialization, or persistence; they do not mutate the runtime projection.
 
-ThemeCapture and DesignDocs declare one save attempt and `saved`/`blocked`
-outcomes. SubscriptionContractDesigner declares three review attempts, retries
+ThemeCapture declares one save attempt and `saved`/`blocked` outcomes. DesignDocs
+declares `saved`, `revise`, and `blocked` over three attempts, retrying only after
+`revise`: a refused surface map returns to the agent with the reason in
+`design_docs_save_feedback`, while `blocked` stays terminal for what a retry
+cannot change. Retrying on the error value is not permitted, so a retryable
+rejection needs its own outcome word. SubscriptionContractDesigner declares three review attempts, retries
 only after `changes_requested`, and distinguishes `confirmed`,
 `not_requested_headless`, and `blocked`. A connected review that becomes
 unavailable is not headless approval. Existing tool-outcome validation and AG2

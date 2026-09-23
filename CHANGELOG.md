@@ -14,6 +14,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs now actually refuses a surface map that declares an AI workflow the
+  approved concept never asked for. The check existed but never ran: it tested
+  `isinstance(..., dict)` against a value that every live context container
+  freezes into a read-only mapping on read, so it returned early on every real
+  build while its tests passed on plain dictionaries. A refused save now returns
+  to the agent with the reason in `design_docs_save_feedback`, over three
+  attempts, instead of terminating the build three stages later at pattern
+  selection with no path back to the user. DesignDocs saves now report a third
+  outcome, `revise`, for a rejection the agent can fix; `blocked` remains
+  terminal.
+- A DesignDocs save rejection now reaches the agent with its reason intact.
+  Rejections returned no declared outcome, so tool-outcome validation discarded
+  the payload as unrecognised and replaced it with a generic failure, losing the
+  message naming the offending surface.
+
 - A module with no events, settings, or admin panels can now complete its
   contract task. Those companion manifests were required whenever a task owned
   their path, yet the same files were refused as raw output when their typed

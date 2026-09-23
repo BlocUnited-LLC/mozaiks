@@ -10,10 +10,10 @@ tools:
     context_key: design_docs_save_outcome
     attempts_key: design_docs_save_attempts
     result_field: outcome
-    values: [saved, blocked]
+    values: [saved, revise, blocked]
     error_value: blocked
-    max_attempts: 1
-    retry_on: []
+    max_attempts: 3
+    retry_on: [revise]
 lifecycle_tools:
 - trigger: on_start
   agent: null
