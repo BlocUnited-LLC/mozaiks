@@ -25,6 +25,7 @@ from typing import Any
 import yaml
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +52,10 @@ def _load_archetypes() -> dict[str, Any]:
 
 def _detect_archetype_name(context_variables: Any) -> str | None:
     """Return the archetype name for the current task if it is an AI-native workflow."""
-    ctx: dict[str, Any] = {}
-    if hasattr(context_variables, "data"):
-        ctx = context_variables.data
-    elif isinstance(context_variables, dict):
-        ctx = context_variables
-
-    current_task = ctx.get("current_task") or {}
+    # No live container exposes `.data` (#300 renamed the bridge's store), and
+    # every one freezes reads, so read through `get` and detach before type-testing.
+    getter = getattr(context_variables, "get", None)
+    current_task = detach(getter("current_task")) if callable(getter) else None
     if not isinstance(current_task, dict):
         return None
 

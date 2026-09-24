@@ -17,6 +17,7 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
 )
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
@@ -75,7 +76,8 @@ async def _resolve_files(
         if context_variables is not None and hasattr(context_variables, "get"):
             chat_id = context_variables.get("chat_id")
             app_id = context_variables.get("app_id")
-            ctx_files = context_variables.get("generated_files")
+            # Live containers freeze reads; a mapping proxy skipped this branch.
+            ctx_files = detach(context_variables.get("generated_files"))
             if isinstance(ctx_files, dict) and ctx_files:
                 safe_ctx: dict[str, str] = {}
                 for raw_path, content in ctx_files.items():

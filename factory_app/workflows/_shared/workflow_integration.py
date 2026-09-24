@@ -28,7 +28,9 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
     if hasattr(context_variables, "get"):
         try:
             value = context_variables.get(key)
-            return default if value is None else value
+            # Live containers freeze reads; a frozen trigger list fails the
+            # `isinstance(..., list)` below and was written back as [].
+            return default if value is None else detach(value)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)

@@ -27,6 +27,7 @@ from factory_app.workflows.AppGenerator.tools.audit_module_contracts import (
     audit_admin_panel_page_refs,
     audit_module_contracts,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,9 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
     if hasattr(context_variables, "get"):
         try:
             value = context_variables.get(key)
-            return default if value is None else value
+            # Live containers freeze reads; `code_files` arrived as a tuple,
+            # failed the list test below, and the gate audited nothing.
+            return default if value is None else detach(value)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)

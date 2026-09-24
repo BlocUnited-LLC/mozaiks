@@ -82,9 +82,17 @@ _REQUIRED_REPORT_KEYS = {
 
 
 def test_generate_and_download_reads_carry_forward_report_from_context() -> None:
-    """[1] _register_app_bundle_artifact_version reads "carry_forward_report" from context."""
-    assert 'context_variables.get("carry_forward_report")' in _GENERATE_AND_DOWNLOAD_SRC, (
-        '_register_app_bundle_artifact_version must read "carry_forward_report" from context'
+    """[1] _register_app_bundle_artifact_version reads "carry_forward_report" through the detaching helper.
+
+    A raw ``context_variables.get(...)`` is frozen on every live container, so the
+    ``isinstance(cf_report, dict)`` guard below it never passed in production and the
+    report was never persisted. The read must go through ``_context_get``, which detaches.
+    """
+    assert '_context_get(context_variables, "carry_forward_report")' in _GENERATE_AND_DOWNLOAD_SRC, (
+        '_register_app_bundle_artifact_version must read "carry_forward_report" through _context_get'
+    )
+    assert 'context_variables.get("carry_forward_report")' not in _GENERATE_AND_DOWNLOAD_SRC, (
+        "a raw context_variables.get() read is frozen on the live container; use _context_get"
     )
 
 
@@ -101,12 +109,12 @@ def test_generate_and_download_has_try_except_for_report_read() -> None:
     # Verify the source has both the read and a surrounding except block.
     # The exact block reads the key and catches any exception from context.get().
     src = _GENERATE_AND_DOWNLOAD_SRC
-    assert 'cf_report = context_variables.get("carry_forward_report")' in src, (
-        'Source must contain: cf_report = context_variables.get("carry_forward_report")'
+    assert 'cf_report = _context_get(context_variables, "carry_forward_report")' in src, (
+        'Source must contain: cf_report = _context_get(context_variables, "carry_forward_report")'
     )
     # The carry_forward_report section must be inside a try-except.
     # Find the index of the read and check an except clause follows it.
-    read_idx = src.index('context_variables.get("carry_forward_report")')
+    read_idx = src.index('_context_get(context_variables, "carry_forward_report")')
     # Look for 'except Exception' within the 400 characters after the read.
     nearby = src[read_idx: read_idx + 400]
     assert "except Exception" in nearby, (
@@ -347,7 +355,7 @@ def test_artifact_metadata_key_is_carry_forward_report_not_additions() -> None:
     """
     src = _GENERATE_AND_DOWNLOAD_SRC
     # The persistence key must be carry_forward_report
-    assert 'cf_report = context_variables.get("carry_forward_report")' in src, (
+    assert 'cf_report = _context_get(context_variables, "carry_forward_report")' in src, (
         'generate_and_download must read "carry_forward_report" for artifact metadata'
     )
     # carry_forward_additions is only used as the file-merge key (merged into files_map),

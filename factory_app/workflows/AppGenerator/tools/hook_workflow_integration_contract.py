@@ -30,6 +30,7 @@ from factory_app.workflows._shared.workflow_integration import (
     apply_workflow_integration_context,
     workflow_integration_metadata_from_context,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,8 @@ def inject_workflow_integration_contract(agent, messages: list[dict[str, Any]]) 
 
         workflow_name: str = context_variables.get("generated_workflow_name") or capability_id
         startup_mode: str = context_variables.get("generated_workflow_startup_mode") or "UserDriven"
-        trigger_events: list = context_variables.get("generated_workflow_trigger_events") or []
+        # Live containers freeze reads: the block builders type-test each event as a dict.
+        trigger_events: list = detach(context_variables.get("generated_workflow_trigger_events")) or []
 
         if agent.name == "AppPlanAgent":
             content = _build_app_plan_block(workflow_name, capability_id, startup_mode, trigger_events)

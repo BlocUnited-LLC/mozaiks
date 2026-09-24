@@ -19,6 +19,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bundle_integrity
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,9 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
     if hasattr(context_variables, "get"):
         try:
             value = context_variables.get(key)
-            return default if value is None else value
+            # Live containers freeze reads; a tuple of code files failed the
+            # list test below and every earlier file was dropped from the merge.
+            return default if value is None else detach(value)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)
