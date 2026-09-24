@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from mozaiksai.core.workflow.context.frozen import detach
+
 
 def inject_context_graph_context(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Inject preloaded Context Graph pack data into an agent system prompt.
@@ -44,7 +46,8 @@ def _context_data(context_variables: Any) -> dict[str, Any]:
             except Exception:
                 value = None
             if value is not None:
-                out[key] = value
+                # Live containers freeze reads; the formatter type-tests a dict.
+                out[key] = detach(value)
         return out
     return {}
 

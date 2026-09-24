@@ -23,6 +23,7 @@ import logging
 from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
 
@@ -423,9 +424,13 @@ def inject_managed_capabilities_context(
         return
 
     try:
-        context_variables: dict[str, Any] = getattr(agent, "context_variables", {}) or {}
-        capability_packs = context_variables.get("capability_packs")
-        operator_contracts = context_variables.get("operator_contracts") or []
+        context_variables: Any = getattr(agent, "context_variables", None)
+        if context_variables is None:
+            return
+        # Live containers freeze reads (tuples and mapping proxies); every
+        # formatter below type-tests plain lists and dicts.
+        capability_packs = detach(context_variables.get("capability_packs"))
+        operator_contracts = detach(context_variables.get("operator_contracts")) or []
 
         # No-op in OSS mode — no capability packs provided by the operator.
         if _is_empty(capability_packs):

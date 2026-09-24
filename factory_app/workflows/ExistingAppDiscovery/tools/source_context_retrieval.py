@@ -14,6 +14,7 @@ from mozaiksai.core.app_context.source_corpus import (
     read_source_file_from_bundle,
     search_source_corpus,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 
 
 async def search_preloaded_source_context(
@@ -134,8 +135,9 @@ def _ctx_get(context_variables: Any | None, key: str) -> Any:
         return data.get(key)
     getter = getattr(context_variables, "get", None)
     if callable(getter):
+        # Live containers freeze reads; the callers type-test a dict.
         try:
-            return getter(key)
+            return detach(getter(key))
         except Exception:
             return None
     return None

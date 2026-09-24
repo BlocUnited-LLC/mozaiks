@@ -14,6 +14,31 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Every prompt hook, shared helper and runtime reader that type-tested a live
+  context read now reads plain data. Live containers freeze on read (a dict
+  becomes a mapping proxy, a list a tuple) and none exposes `.data`, so a
+  reader that tested `isinstance(x, dict)` or `isinstance(x, list)` on the raw
+  read silently took the other branch. An audit that called each reader both
+  ways found: the context-graph hook injected a `str(mappingproxy)` dump into
+  every AgentGenerator, AppGenerator and ExistingAppDiscovery prompt; the
+  managed-capabilities hook rendered every pack as a raw repr, dropped the
+  facade and surface guidance, and leaked local pack paths; AppGenerator's
+  before_chat hydration erased `generated_workflow_trigger_events`, so
+  ConfigMiddlewareAgent was told no reactions were needed and the integration
+  validator checked nothing; the module-contract quality gate audited zero
+  files and passed every build; the AI-pack workflow, archetype and surface
+  hooks and the workflow-archetype hook never injected; domain scoring ignored
+  the concept; `collect_integration_needs` found nothing, so
+  `config/integrations.yaml` came out empty and recorded needs were dropped;
+  the admin-registry save dropped every earlier code file; the discovery
+  tools ignored the preloaded source bundle and intelligence snapshot; the
+  download tool skipped the pending schema migration and the validation and
+  carry-forward records; the integration-test runner skipped in-context files;
+  and the runtime's `context_get` dropped accumulated media assets. Each read
+  now detaches, and the detach guard test also checks `list` tests, `... or {}`
+  reads, direct `context_variables.get` reads, `_shared/` and the runtime
+  helpers.
+
 - A monetized app now gets `config/subscriptions.yaml` planned even when the
   subscription contract does not survive into AppGenerator's state. The contract
   designer's output is carried forward in two places — `subscription_contract`

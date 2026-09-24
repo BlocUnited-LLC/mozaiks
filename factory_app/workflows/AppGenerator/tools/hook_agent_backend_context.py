@@ -11,6 +11,8 @@ explicitly naming agents in the conversation.
 import logging
 from typing import Any
 
+from mozaiksai.core.workflow.context.frozen import detach
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +27,8 @@ def inject_agent_backend_context(agent, messages: list[dict[str, Any]]) -> None:
         context_variables = getattr(agent, "context_variables", {})
         
         # Extract agent backend context
-        websocket_config = context_variables.get("websocket_config")
+        # Live containers freeze reads; the endpoints branch type-tests a dict.
+        websocket_config = detach(context_variables.get("websocket_config"))
         agent_websocket_url = context_variables.get("agent_websocket_url")
         agent_api_url = context_variables.get("agent_api_url")
         agent_names = context_variables.get("agent_names", [])

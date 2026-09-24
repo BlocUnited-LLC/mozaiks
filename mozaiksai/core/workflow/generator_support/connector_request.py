@@ -17,6 +17,7 @@ from typing import Any
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.data.persistence import ConnectorStore
 from mozaiksai.core.session.build_binding import BuildIdentity
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.connector_service import (
     get_connector_inventory,
     save_connector,
@@ -43,11 +44,13 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
         return default
     getter = getattr(context_variables, "get", None)
     if callable(getter):
+        # Live containers freeze reads; the need extractors type-test dicts and
+        # lists, so a frozen plan yielded no integration needs at all.
         try:
-            return getter(key, default)
+            return detach(getter(key, default))
         except TypeError:
             value = getter(key)
-            return default if value is None else value
+            return default if value is None else detach(value)
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
         return data.get(key, default)

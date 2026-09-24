@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +84,13 @@ def _load_catalog() -> dict[str, Any] | None:
         return None
 
 
-def _collect_concept_text(context_variables: dict[str, Any], messages: list[dict[str, Any]]) -> str:
+def _collect_concept_text(context_variables: Any, messages: list[dict[str, Any]]) -> str:
     """Collect all available concept signal text for domain scoring."""
     parts: list[str] = []
 
     for key in _CONCEPT_SIGNAL_KEYS:
-        val = context_variables.get(key)
+        # Live containers freeze reads; a mapping proxy matched neither branch below.
+        val = detach(context_variables.get(key))
         if val:
             if isinstance(val, dict):
                 parts.append(str(val))

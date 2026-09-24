@@ -8,6 +8,7 @@ from typing import Any
 from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
 from factory_app.workflows.AppGenerator.tools.ui_quality import review_ui_quality
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,8 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
     if hasattr(context_variables, "get"):
         try:
             value = context_variables.get(key)
-            return default if value is None else value
+            # Live containers freeze reads; `_append_warning` type-tests a list.
+            return default if value is None else detach(value)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)

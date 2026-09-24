@@ -28,6 +28,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from mozaiksai.core.workflow.context.frozen import detach
+
 logger = logging.getLogger(__name__)
 
 _REVIEW_SUFFIX = "-review-workflow"
@@ -71,11 +73,12 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
         return default
     getter = getattr(context_variables, "get", None)
     if callable(getter):
+        # Live containers freeze reads; callers type-test the result as a dict.
         try:
-            return getter(key, default)
+            return detach(getter(key, default))
         except TypeError:
             value = getter(key)
-            return default if value is None else value
+            return default if value is None else detach(value)
     if isinstance(context_variables, dict):
         return context_variables.get(key, default)
     return default

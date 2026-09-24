@@ -579,7 +579,7 @@ async def _register_app_bundle_artifact_version(
             # instead of buried in the commit_metadata blob.
             app_validation_status = context_variables.get("app_validation_status")
             app_validation_strategy = context_variables.get("app_validation_strategy_used")
-            validation_result = context_variables.get("app_validation_result")
+            validation_result = _context_get(context_variables, "app_validation_result")
             if isinstance(validation_result, dict):
                 sandbox_session_id = validation_result.get("sandbox_session_id")
                 sandbox_provider = validation_result.get("sandbox_provider")
@@ -648,7 +648,7 @@ async def _register_app_bundle_artifact_version(
     cf_report = None
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
-            cf_report = context_variables.get("carry_forward_report")
+            cf_report = _context_get(context_variables, "carry_forward_report")
         except Exception:
             pass
     if isinstance(cf_report, dict):
@@ -828,7 +828,7 @@ async def generate_and_download(
     pending_migration: dict[str, Any] | None = None
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
-            pending_migration = context_variables.get("pending_schema_migration")
+            pending_migration = _context_get(context_variables, "pending_schema_migration")
         except Exception:
             pending_migration = None
     if isinstance(pending_migration, dict) and pending_migration.get("migration_id"):
