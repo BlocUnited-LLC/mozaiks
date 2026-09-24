@@ -753,12 +753,33 @@ def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
         surface_id = surface["surface_id"]
         matching = [pack for pack in packs if pack.get("surface_id") == surface_id]
         if len(matching) != 1 or matching[0].get("surface_kind") != "module" or matching[0].get("capability_source") not in {"generated_module", "framework_pack", "operator_pack"}:
-            errors.append(f"{surface_id}: the approved app-owned module requires exactly one module capability, normally generated_module; preserve its surface_id (found {len(matching)})")
+            # "found 0" alone does not say what to emit. The usual cause is a
+            # product category used as an identity: upstream hints and
+            # source_capability_packs are full of names like crud_pack, so a plan
+            # declares those as capabilities and no pack carries the surface_id.
+            detail = (
+                f"{surface_id}: the approved app-owned module requires exactly one module "
+                f"capability, normally generated_module; preserve its surface_id "
+                f"(found {len(matching)})"
+            )
+            if not matching:
+                declared = sorted({str(_pack_id_from_descriptor(pack)) for pack in packs})
+                detail += (
+                    f". Emit a generated_module capability with surface_id={surface_id!r} and "
+                    f"capability_pack_id={surface_id!r}. Declared capabilities are {declared}; "
+                    "a product category such as crud_pack or billing_pack belongs in pack_type, "
+                    "never in capability_pack_id or surface_id"
+                )
+            errors.append(detail)
             continue
         pack = matching[0]
         if pack.get("capability_source") == "generated_module":
             if _pack_id_from_descriptor(pack) != surface_id:
-                errors.append(f"{surface_id}: generated module capability_pack_id must match its approved surface_id, not the source product category")
+                errors.append(
+                    f"{surface_id}: generated module capability_pack_id must match its approved "
+                    f"surface_id, not the source product category. Set it to {surface_id!r} "
+                    f"(currently {_pack_id_from_descriptor(pack)!r}); the category belongs in pack_type"
+                )
             if set(pack.get("primary_entities") or []) != set(surface.get("primary_entities") or []):
                 errors.append(f"{surface_id}: preserve the approved primary_entities: {surface.get('primary_entities') or []}")
 
@@ -778,12 +799,28 @@ def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
                 f"{task_id}: capability_pack_id={pack_id!r} matches "
                 f"{len(matching)} declared capabilities; it must name exactly one of {declared}"
             )
-        elif module_ids != {pack_id}:
+        elif len(module_ids) > 1:
+            # Two faults shared one message. With several module directories,
+            # "set it to sorted(module_ids)[0]" names whichever sorts first --
+            # frequently the value already declared, so the instruction is a
+            # no-op and the revision attempts re-emit the same plan. A live
+            # build spent all three that way on
+            # owned_paths spanning modules/crud_pack/ and modules/tasks/.
             errors.append(
-                f"{task_id}: this task owns {sorted(module_ids)} under modules/ and declares "
+                f"{task_id}: this task owns paths in {len(module_ids)} module directories "
+                f"{sorted(module_ids)} under modules/. A module task writes exactly one module. "
+                f"Split it into one task per module, each with capability_pack_id equal to the "
+                f"module directory it writes. If {sorted(module_ids)} are meant to be the same "
+                "module, a product category is being used as a directory name: the module "
+                "directory is the surface_id, and the category belongs in pack_type."
+            )
+        elif module_ids != {pack_id}:
+            owned = sorted(module_ids)[0]
+            errors.append(
+                f"{task_id}: this task owns modules/{owned}/ and declares "
                 f"surface_id={task.get('surface_id')!r}, but claims capability_pack_id={pack_id!r}. "
                 "A module task's capability_pack_id is the module directory it writes. Set it to "
-                f"{sorted(module_ids)[0]!r}, or move the files to the module that capability owns."
+                f"{owned!r}, or move the files to the module that capability owns."
             )
         elif task.get("surface_id") != matching[0].get("surface_id"):
             errors.append(
