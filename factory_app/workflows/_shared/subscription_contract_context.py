@@ -23,14 +23,35 @@ _TARGET_AGENTS = {
 
 
 def _context_data(agent: Any) -> dict[str, Any]:
+    """Read the whole context as plain data.
+
+    `.data` was the only path here, and #300 renamed the bridge's backing store
+    to `__data` precisely to stop callers reaching past the authority policy. So
+    on every live run this returned `{}`, `_find_contract` saw nothing, and the
+    hook injected no [SUBSCRIPTION CONTRACT CONTEXT] at all -- silently, because
+    an empty context is indistinguishable from an app with no contract. The
+    prompts that tell agents to read that section have been pointing at nothing.
+
+    `snapshot()` is the bridge's own detached read, the same accessor
+    `auto_tool_handler._container_snapshot` uses.
+    """
     context = getattr(agent, "context_variables", None) or getattr(agent, "_context_variables", None)
     if context is None:
         return {}
+    if isinstance(context, dict):
+        return context
+    for method_name in ("snapshot", "to_dict"):
+        method = getattr(context, method_name, None)
+        if callable(method):
+            try:
+                data = method()
+            except Exception:  # pragma: no cover - defensive
+                continue
+            if isinstance(data, dict):
+                return data
     data = getattr(context, "data", None)
     if isinstance(data, dict):
         return data
-    if isinstance(context, dict):
-        return context
     return {}
 
 
