@@ -14,6 +14,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- A monetized app now gets `config/subscriptions.yaml` planned even when the
+  subscription contract does not survive into AppGenerator's state. The contract
+  designer's output is carried forward in two places — `subscription_contract`
+  and, as a declared fallback, `subscription_contract_artifact` — and the build
+  tools read both. The planning rules named only the first and treated a null
+  value as "no contract", so a build with `contract_required: true` planned no
+  `subscription_config` task, still declared a `monetization_provider`, and was
+  rejected for naming a provider it had no task for. The rules now resolve the
+  contract from either source and state that a provider and its task must be
+  planned together.
+
 - A monetized concept now gets its subscription contract. The contract designer
   was told that "monetized" is only a broad signal and was never told where the
   concept's own answer lives, so a concept whose `monetization_intent` recorded
