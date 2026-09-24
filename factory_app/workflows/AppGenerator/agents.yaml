@@ -421,7 +421,15 @@ agents:
           `config/data.json` is a removed path and must never appear in owned_paths, initial_message, data_contract, database_files, code_files, or task output.
           Each module-local task must set `capability_pack_id` to the module id. For a projects/tasks app, this means separate task trios with literal owned paths under `modules/projects/` and `modules/tasks/`; do not collapse them into one `project_management` module or rename them to `projects_core` / `tasks_core`.
         - **Resource-scoped user class modules**: when the product needs durable user classes, app-local roles, membership, collaborators, invite/accept flows, route access by ownership/membership, current-user resource inventory, review authority, app-owned decision inputs, or custom classification/weight rules, plan a dedicated membership-style module using the injected `membership` module archetype. Do not represent those classes only as JWT claims, app.json admins, frontend route metadata, or fields scattered across unrelated resource modules. The module contract task must include `contracts/relationships.yaml` when the current user's resources should appear in `/api/me/relationships`, include `contracts/policy_hooks.yaml` only when another module, route guard, admin panel, or app-owned process needs to ask the membership module for deterministic policy input, include `contracts/settings.yaml` when class labels/categories/default weights should be configurable, include an `authorize_<resource>_route` action when scoped private routes need `meta.routeAuth`, and include `backend/account_data_handler.py` when `module.user_data_scope=true`.
-        - If `subscription_contract.contract_required` is true, include exactly one
+        - Read the contract from `subscription_contract`, or, when that is null,
+          from `subscription_contract_artifact.metadata.summary_payload`. The
+          designer's contract does not always survive into this workflow's state,
+          which is what the artifact fallback exists for; a null
+          `subscription_contract` beside an artifact that says
+          `contract_required: true` means the contract exists, not that there is
+          none. `assemble_app_tasks` and `materialize_app_config_contracts`
+          already read both keys.
+        - If the resolved contract's `contract_required` is true, include exactly one
           app-level build task with `task_type: subscription_config`,
           `capability_pack_id: null`, `surface_id: "subscription_contract"`,
           `surface_kind: "app_policy"`, `initial_agent: "ConfigMiddlewareAgent"`,
@@ -473,8 +481,14 @@ agents:
             `app_id` so `ConfiguredEntitlementAdapter` can scope queries by app.
           The bundle scanner rejects the app bundle when `assignment_store` is
           present without either this module or a managed assignment writer.
-        - If `subscription_contract.contract_required` is false or absent, do not
-          plan a `subscription_config` task and do not emit config/subscriptions.yaml.
+        - If the resolved contract's `contract_required` is false, or neither
+          `subscription_contract` nor `subscription_contract_artifact` carries a
+          contract at all, do not plan a `subscription_config` task and do not emit
+          config/subscriptions.yaml. A null `subscription_contract` on its own is
+          not "absent": check the artifact before concluding there is no contract.
+        - Never set `monetization_provider` without planning that task. The two are
+          validated against each other, and a plan that names a provider it has no
+          task for is rejected outright.
       11a. Treat persistent application UI as schema-first:
         - `AppBuildPlan.pages[]` is the authoritative persistent page inventory. The page_bundle task enriches and materializes that inventory through the schema lane.
         - Ordinary app pages must compile into `app.json` + `ui/pages/*.yaml`, with visual deltas in `theme_config_patch`, shell content in `shell_config`, and media inventory in `asset_manifest` when non-default assets are required.
@@ -1814,8 +1828,13 @@ agents:
 
       **If `current_build_task_type == "subscription_config"` (Mode S)**:
 
-      1. Read `subscription_contract.subscription_config_file` from context or the injected [SUBSCRIPTION CONTRACT CONTEXT].
-      2. If `subscription_contract.contract_required` is not true, fail clearly; do not emit an empty or placeholder config.
+      1. Read `subscription_contract.subscription_config_file` from context, or, when
+         `subscription_contract` is null, from
+         `subscription_contract_artifact.metadata.summary_payload.subscription_config_file`,
+         or the injected [SUBSCRIPTION CONTRACT CONTEXT].
+      2. If neither source reports `contract_required: true`, fail clearly; do not emit an
+         empty or placeholder config. A null `subscription_contract` alone is not a
+         missing contract — check the artifact first.
       3. Emit `mode: "subscription_config"`.
       4. Emit `subscription_config_bundle.files` with exactly one file:
          - `filename: "config/subscriptions.yaml"`
