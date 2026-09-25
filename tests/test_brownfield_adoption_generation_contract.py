@@ -277,11 +277,10 @@ def test_brownfield_adoption_context_hook_file_exists() -> None:
 
 def test_brownfield_hook_returns_empty_for_greenfield() -> None:
     from factory_app.workflows._shared.brownfield_adoption_context import (
-        inject_brownfield_adoption_context,
+        render_brownfield_adoption_context,
     )
 
-    result = inject_brownfield_adoption_context(
-        agent_name="PatternAgent",
+    result = render_brownfield_adoption_context(
         context_variables={"brownfield_build_path": None},
     )
     assert result == ""
@@ -289,11 +288,10 @@ def test_brownfield_hook_returns_empty_for_greenfield() -> None:
 
 def test_brownfield_hook_returns_empty_when_no_context() -> None:
     from factory_app.workflows._shared.brownfield_adoption_context import (
-        inject_brownfield_adoption_context,
+        render_brownfield_adoption_context,
     )
 
-    result = inject_brownfield_adoption_context(
-        agent_name="AppPlanAgent",
+    result = render_brownfield_adoption_context(
         context_variables={},
     )
     assert result == ""
@@ -301,7 +299,7 @@ def test_brownfield_hook_returns_empty_when_no_context() -> None:
 
 def test_brownfield_hook_returns_block_for_light_integration() -> None:
     from factory_app.workflows._shared.brownfield_adoption_context import (
-        inject_brownfield_adoption_context,
+        render_brownfield_adoption_context,
     )
 
     ctx = {
@@ -338,8 +336,7 @@ def test_brownfield_hook_returns_block_for_light_integration() -> None:
         },
     }
 
-    result = inject_brownfield_adoption_context(
-        agent_name="PatternAgent",
+    result = render_brownfield_adoption_context(
         context_variables=ctx,
     )
 
@@ -368,7 +365,7 @@ def test_brownfield_hook_returns_block_for_light_integration() -> None:
 
 def test_brownfield_hook_returns_block_for_full_migration() -> None:
     from factory_app.workflows._shared.brownfield_adoption_context import (
-        inject_brownfield_adoption_context,
+        render_brownfield_adoption_context,
     )
 
     ctx = {
@@ -390,8 +387,7 @@ def test_brownfield_hook_returns_block_for_full_migration() -> None:
         },
     }
 
-    result = inject_brownfield_adoption_context(
-        agent_name="AppPlanAgent",
+    result = render_brownfield_adoption_context(
         context_variables=ctx,
     )
 
@@ -598,3 +594,59 @@ def test_design_docs_brownfield_context_vars_are_state_type() -> None:
         assert source.get("type") == "state", (
             f"DesignDocs {var} must be type: state"
         )
+
+
+# ---------------------------------------------------------------------------
+# The hook, called the way the runner calls it (#723)
+# ---------------------------------------------------------------------------
+
+
+class _Capture:
+    """What execution/middleware._run_prompt_middleware hands every hook."""
+
+    def __init__(self, name: str, context_variables) -> None:  # noqa: ANN001
+        self.name = name
+        self.context_variables = context_variables
+        self.system_message = "BASE PROMPT"
+        self._system_message = "BASE PROMPT"
+
+    def update_system_message(self, message: str) -> None:
+        self.system_message = message
+        self._system_message = message
+
+
+def test_brownfield_hook_injects_through_the_runner_call_shape() -> None:
+    """Six registrations, zero executions since #144: the runner passes (capture, history) positionally."""
+    from factory_app.workflows._shared.brownfield_adoption_context import (
+        inject_brownfield_adoption_context,
+    )
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+
+    bridge = ContextVariablesBridge({
+        "brownfield_build_path": "add_ai_workflows",
+        "adoption_plan": {"recommended_path": "ai_workflow_extension", "candidate_overlays": ["modules/support"]},
+        "ownership_boundary": {"app_id": "my_existing_app", "ownership_boundaries": [
+            {"ownership": "read_only_discovered", "path_or_artifact": "src/core"}]},
+        "brownfield_registration": {"app_id": "my_existing_app", "status": "pending"},
+    })
+    capture = _Capture("AppPlanAgent", bridge)
+
+    inject_brownfield_adoption_context(capture, [{"role": "user", "content": "hi"}])
+
+    assert "[EXISTING APP ENHANCEMENT]" in capture.system_message
+    assert "Connected App: my_existing_app" in capture.system_message
+    assert "Protected Existing App: 1 surface(s)" in capture.system_message
+    assert capture.system_message.startswith("BASE PROMPT")
+
+
+def test_brownfield_hook_leaves_a_greenfield_prompt_alone() -> None:
+    from factory_app.workflows._shared.brownfield_adoption_context import (
+        inject_brownfield_adoption_context,
+    )
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+
+    capture = _Capture("PatternAgent", ContextVariablesBridge({"brownfield_build_path": None}))
+
+    inject_brownfield_adoption_context(capture, [])
+
+    assert capture.system_message == "BASE PROMPT"

@@ -73,6 +73,23 @@ class LifecycleTool:
     accepts_context: bool
 
 
+def _context_value(context_variables: Any, key: str) -> Any:
+    """Read one scalar for log correlation from any context container.
+
+    No live container exposes `.data`: the runtime container and the bridge
+    keep their store private, and a plain dict has no such attribute. Reading
+    `getattr(ctx, "data", {})` therefore returned {} on every path, and no
+    lifecycle log line ever carried its chat or app id (#723).
+    """
+    getter = getattr(context_variables, "get", None)
+    if not callable(getter):
+        return None
+    try:
+        return getter(key)
+    except Exception:
+        return None
+
+
 class LifecycleToolManager:
     """Manages loading and execution of lifecycle tools for workflows."""
 
@@ -330,7 +347,7 @@ class LifecycleToolManager:
 
         wf_logger = get_workflow_logger(
             workflow_name=self.workflow_name,
-            chat_id=getattr(context_variables, 'data', {}).get('chat_id') if context_variables else None,
+            chat_id=_context_value(context_variables, 'chat_id'),
         )
 
         wf_logger.debug(
@@ -377,8 +394,8 @@ class LifecycleToolManager:
             try:
                 tool_logger = get_tool_logger(
                     tool_name="lifecycle_tool",
-                    chat_id=getattr(context_variables, 'data', {}).get('chat_id') if context_variables else None,
-                    app_id=getattr(context_variables, 'data', {}).get('app_id') if context_variables else None,
+                    chat_id=_context_value(context_variables, 'chat_id'),
+                    app_id=_context_value(context_variables, 'app_id'),
                     workflow_name=self.workflow_name,
                 )
                 log_tool_event(

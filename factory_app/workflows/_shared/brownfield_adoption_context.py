@@ -18,6 +18,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from factory_app.workflows._shared.hook_utils import update_agent_section
+from mozaiksai.core.workflow.context.frozen import detach
+
 logger = logging.getLogger(__name__)
 
 _HEADER = "[EXISTING APP ENHANCEMENT]"
@@ -81,7 +84,9 @@ def _get(context_variables: Any, key: str, default: Any = None) -> Any:
         return default
     try:
         if hasattr(context_variables, "get"):
-            return context_variables.get(key, default)
+            # Live containers freeze reads; the formatters below iterate and
+            # index plain dicts and lists.
+            return detach(context_variables.get(key, default))
         return context_variables[key]
     except (KeyError, TypeError):
         return default
@@ -183,15 +188,8 @@ def _format_ownership_summary(boundary_artifact: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def inject_brownfield_adoption_context(
-    agent_name: str | None = None,
-    context_variables: Any = None,
-    **_kwargs: Any,
-) -> str:
-    """Return an existing app enhancement prompt block for planning agents.
-
-    Returns empty string for greenfield builds so there is no prompt noise.
-    """
+def render_brownfield_adoption_context(context_variables: Any = None) -> str:
+    """Return the existing app enhancement prompt block, or "" for a greenfield build."""
     build_path = _get(context_variables, "brownfield_build_path")
     if not build_path:
         return ""
@@ -250,3 +248,37 @@ def inject_brownfield_adoption_context(
     )
 
     return "\n".join(sections)
+
+
+def inject_brownfield_adoption_context(agent: Any, messages: list[dict[str, Any]]) -> None:
+    """Prompt middleware: inject the existing app enhancement block into the agent prompt.
+
+    The runner (mozaiksai/core/workflow/execution/middleware.py) calls every
+    prompt hook as ``fn(capture, history)`` and reads the prompt back from
+    ``capture.update_system_message``; return values are ignored. This hook was
+    wired on six workflow/agent pairs with a ``(agent_name, context_variables)``
+    signature, so the runner handed it the message history as the context and
+    it returned a string nobody read. It never ran (#723). Like #720's
+    injector, it now says whether it acted, because a hook that never speaks
+    cannot be verified from a live run.
+    """
+    del messages
+    agent_name = str(getattr(agent, "name", "") or "").strip()
+    context_variables = getattr(agent, "context_variables", None)
+    body = render_brownfield_adoption_context(context_variables)
+    if not body:
+        logger.info(
+            "BROWNFIELD_ADOPTION_CONTEXT skipped agent=%s reason=greenfield brownfield_build_path=%s",
+            agent_name,
+            _get(context_variables, "brownfield_build_path"),
+        )
+        return
+    # render_* starts the block with the header; update_agent_section adds it.
+    section_body = body.split("\n", 1)[1] if body.startswith(_HEADER) else body
+    update_agent_section(agent, _HEADER, section_body)
+    logger.info(
+        "BROWNFIELD_ADOPTION_CONTEXT injected agent=%s build_path=%s chars=%d",
+        agent_name,
+        _get(context_variables, "brownfield_build_path"),
+        len(body),
+    )

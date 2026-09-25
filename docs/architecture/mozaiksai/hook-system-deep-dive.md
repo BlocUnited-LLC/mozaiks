@@ -45,6 +45,28 @@ Fields are required per entry:
 5. If middleware calls `agent.update_system_message(...)`, that message becomes the
    prompt for the current model call.
 
+## Call Shape Contract
+
+The runner calls every prompt middleware function positionally, as
+`fn(agent, messages)`:
+
+- `agent` is a capture object exposing `name`, `context_variables` (the live
+  `ContextVariablesBridge`, whose reads are frozen), `system_message`, and
+  `update_system_message(message)`.
+- `messages` is the conversation history.
+- The return value is ignored. The only effect that reaches the model is a
+  call to `agent.update_system_message(...)`.
+- Exceptions are swallowed and logged at DEBUG.
+
+So a hook must name its first two parameters `agent` and `messages`. A hook
+written as `(agent_name, context_variables)` binds without error, receives the
+capture and the history in the wrong slots, and never injects anything; that is
+how the brownfield hook stayed inert on six registrations (#723).
+`tests/test_registered_hooks_match_their_runners.py` pins this contract for
+every entry in every `middleware.yaml` and calls each hook once the way the
+runner does. A hook should also log whether it acted (see #720), because a
+registration that fails silently cannot be verified from a live run.
+
 ## Execution Timing
 
 Prompt middleware runs before the beta model call for an agent turn. It is

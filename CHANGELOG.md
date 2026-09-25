@@ -14,6 +14,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Registered hooks that could never fire now fire. An audit resolved every
+  `middleware.yaml` entry and every `lifecycle_tools` entry with the runtime's
+  own resolvers and called each one the way its runner does, on the production
+  context container. The brownfield adoption hook, registered on six
+  workflow/agent pairs, had a `(agent_name, context_variables)` signature while
+  the runner calls every hook as `fn(agent, messages)`, and it returned text the
+  runner ignores; it never ran (#723). The workflow-archetype hook keyed on a
+  `capability_id` field that `WorkflowInPack` forbids, so it never injected; it
+  now resolves the archetype from the declared workflow surface its task
+  implements. Four `before_chat` tools read the frozen runtime container through
+  wrappers that reject frozen values: the App Intelligence recovery card never
+  emitted, the overview card ignored the catalog, the discovery collector
+  dropped `discovery_inputs` and never emitted a progress card, and the theme
+  collector ignored `parent_theme_config`. AppGenerator's
+  `generated_workflow_trigger_events` read `trigger_events` from the workflow
+  export, which stores `workflow_trigger_events`, so every run saw no trigger
+  events and ConfigMiddlewareAgent was told no reactions were needed. A prompt
+  hook that raises is now reported at WARNING rather than DEBUG, and lifecycle
+  log lines now carry their chat and app ids. The detach guard now requires
+  every context-reading helper to return plain data, and a new contract test
+  pins each runner's call shape and checks every registration against it.
+
 - Every prompt hook, shared helper and runtime reader that type-tested a live
   context read now reads plain data. Live containers freeze on read (a dict
   becomes a mapping proxy, a list a tuple) and none exposes `.data`, so a

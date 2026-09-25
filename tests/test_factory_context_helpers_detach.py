@@ -25,12 +25,19 @@ was found by a live run rather than by CI:
         `collect_integration_needs` found nothing so `config/integrations.yaml`
         came out empty, and the runtime's `context_get` dropped media assets.
 
-The rule enforced here is the harm condition, not a style preference: a helper
-may return a frozen value only while nothing type-tests its result. Adding an
-`isinstance(..., dict)` or `isinstance(..., list)` on an undetached read fails
-this test, so the next instance is caught when it is written instead of on a
-live build. Reads made straight through `context_variables.get(...)` are held
-to the same rule, because the bridge freezes those too.
+  #723  four before_chat lifecycle tools (the ExistingAppDiscovery collector,
+        overview card and recovery card, and the ThemeCapture collector)
+        passed frozen reads through `_coerce_mapping`/`_dict_value` wrappers.
+        The #719 version of this guard only looked for an `isinstance` on the
+        read itself, so a type test one call away was invisible to it: the
+        recovery card never emitted, the discovery launch inputs were dropped,
+        and the theme collector ignored the parent theme.
+
+So the rule is now universal: every context-reading helper returns plain data.
+Where the result goes afterwards cannot be traced statically, and a detached
+copy costs no more than the frozen view it replaces. Reads made straight
+through `context_variables.get(...)` and then type-tested are held to the same
+rule, because every live container freezes those too.
 
 `detach()` before dictionary validation is the documented convention --
 docs/architecture/app/generated-app-functional-acceptance.md.
@@ -57,7 +64,7 @@ FILES = sorted(
     + list((ROOT / "mozaiksai/core/workflow/generator_support").glob("*.py"))
     + [ROOT / "mozaiksai/core/utils/context_vars.py", ROOT / "mozaiksai/core/media/middleware.py"]
 )
-HELPER_NAMES = {"_context_get", "_cv_get", "_ctx_get", "context_get"}
+HELPER_NAMES = {"_context_get", "_cv_get", "_ctx_get", "context_get", "_get"}
 CONTAINER_NAMES = {"context_variables"}
 TYPE_NAMES = {"dict", "list"}
 
@@ -67,10 +74,14 @@ def _module_path(path: pathlib.Path) -> str:
 
 
 def _helper_names(tree: ast.AST) -> set[str]:
+    """Context-reading helpers: a known name whose first parameter is the context container."""
     return {
         node.name
         for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in HELPER_NAMES
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in HELPER_NAMES
+        and node.args.args
+        and node.args.args[0].arg in {"context_variables", "context", "ctx", "cv"}
     }
 
 
@@ -166,20 +177,18 @@ DIRECT_CASES = [path for path in FILES if any(source == "direct" for _, source, 
     HELPER_CASES,
     ids=[f"{p.parent.parent.name}/{p.name}::{n}" for p, n in HELPER_CASES],
 )
-def test_a_type_tested_read_returns_plain_data(path: pathlib.Path, name: str) -> None:
-    """The harm condition: frozen result + isinstance(..., dict | list) = a branch that never runs."""
-    sites = [site for site in _type_tested_reads(_parsed(path)) if site[1] == name]
-    if not sites:
-        pytest.skip("no isinstance(..., dict | list) on this helper's results")
+def test_a_context_helper_returns_plain_data(path: pathlib.Path, name: str) -> None:
+    """Frozen result + a type test anywhere downstream = a branch that never runs."""
     plain = _returns_plain_data(path, name)
-    if plain is None:
-        pytest.skip("helper not callable in isolation")
-    listed = ", ".join(f"{fn}() key={key!r} line {line}" for fn, _, key, line in sites)
+    assert plain is not None, f"{path.relative_to(ROOT).as_posix()}::{name} is not callable as (context, key)"
+    sites = [site for site in _type_tested_reads(_parsed(path)) if site[1] == name]
+    listed = ", ".join(f"{fn}() key={key!r} line {line}" for fn, _, key, line in sites) or "none visible here"
     assert plain, (
-        f"{path.relative_to(ROOT).as_posix()}::{name} returns a frozen value, and these "
-        f"sites type-test its result: {listed}. Live containers freeze on read, so each "
-        "of those branches is dead in production -- the caller silently derives nothing. "
-        "Wrap the helper's returned reads in detach()."
+        f"{path.relative_to(ROOT).as_posix()}::{name} returns a frozen value. Live containers "
+        "freeze on read, so any isinstance(..., dict | list) on its result -- directly "
+        f"(sites: {listed}) or inside a wrapper such as _coerce_mapping or _dict_value -- is "
+        "dead in production and the caller silently derives nothing. Wrap the helper's "
+        "returned reads in detach()."
     )
 
 
