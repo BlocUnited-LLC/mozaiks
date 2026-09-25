@@ -151,6 +151,25 @@ def _request_changes(context_variables: Any, requested_changes: str | None, *, s
     }
 
 
+def _page_inventory_conflict(output: dict[str, Any], context_variables: Any) -> str | None:
+    """Keep greenfield subscription requirements within the approved design."""
+    if _cv_get(context_variables, "brownfield_build_path"):
+        return None
+    experience = _cv_get(context_variables, "experience_spec") or {}
+    approved_routes = {page["route"] for page in experience.get("pages") or []}
+    if not approved_routes:
+        return None
+    requested_routes = {page["route"] for page in output.get("page_surface_requirements") or []}
+    unapproved = requested_routes - approved_routes
+    if not unapproved:
+        return None
+    return (
+        f"page_surface_requirements includes routes outside approved experience_spec.pages: {sorted(unapproved)}. "
+        f"Use only approved routes {sorted(approved_routes)} and put subscription requirements on those pages; "
+        "do not add a separate page inventory."
+    )
+
+
 def _contains_proprietary_term(value: Any) -> str | None:
     text = yaml.safe_dump(value, sort_keys=False, allow_unicode=False).lower()
     for term in _PROPRIETARY_TERMS:
@@ -491,11 +510,17 @@ async def save_subscription_contract(
 
     try:
         normalized = normalize_subscription_contract(output)
+        page_conflict = (
+            _page_inventory_conflict(normalized, context_variables) if binding.phase == "genesis" else None
+        )
     except Exception as exc:
         # The designer can fix a malformed contract; give it the turn back with
         # the validator's message instead of a generic invalid_tool_outcome.
         result = _request_changes(context_variables, str(exc), source="contract_validation")
         return {**result, "error": f"invalid_subscription_contract: {exc}", "details": str(exc)}
+
+    if page_conflict:
+        return _request_changes(context_variables, page_conflict, source="approved_page_inventory")
 
     if not bool(normalized.get("contract_required")):
         contradiction = _concept_requires_contract(context_variables)

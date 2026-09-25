@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Monetized greenfield designs include pricing and required subscription facade
+  pages before their inventory is approved. Subscription design stays within
+  that inventory and uses the existing billing facade's local plan catalog.
+
 - Registered hooks that could never fire now fire. An audit resolved every
   `middleware.yaml` entry and every `lifecycle_tools` entry with the runtime's
   own resolvers and called each one the way its runner does, on the production

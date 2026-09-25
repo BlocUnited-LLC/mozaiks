@@ -4,6 +4,7 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
@@ -349,6 +350,61 @@ def _canonical_experience_spec(raw: Any, *, surface_map: dict[str, Any]) -> dict
     }
 
 
+def _validate_monetization_pages(
+    experience_spec: dict[str, Any],
+    surface_map: dict[str, Any],
+    context_variables: Any,
+) -> None:
+    """Require monetization designs before their inventory becomes authoritative."""
+    if _cv_get(context_variables, "brownfield_build_path"):
+        return
+    enabled = _cv_get(context_variables, "monetization_enabled")
+    pages = experience_spec["pages"]
+    if enabled is not True:
+        if enabled is False and any(page["route"] == "/pricing" for page in pages):
+            raise ValueError(
+                "monetization_enabled is false: remove the /pricing monetization page "
+                "and its surface ownership from this free app's design."
+            )
+        return
+
+    required_routes = {"/pricing"}
+    blueprint = _cv_get(context_variables, "concept_blueprint") or {}
+    intent = blueprint.get("monetization_intent") or {}
+    if intent.get("monetized") is True and intent.get("subscription_contract_likely") is True:
+        # The default subscription provider already declares its facade pages.
+        # Validate them here, before AppGenerator materializes that same pack.
+        contract = yaml.safe_load(
+            workflow_context_path("mozaikspay", "contract.yaml").read_text(encoding="utf-8")
+        )
+        required_routes.update(
+            page["route"] for facade in contract["facades"] for page in facade["pages"]
+        )
+
+    missing = required_routes - {page["route"] for page in pages}
+    if missing:
+        raise ValueError(
+            f"Monetized design is missing required pages {sorted(missing)}. "
+            "Design them in experience_spec.pages and the frontend document, and "
+            "assign each one primary surface_map owner before saving. Subscription "
+            "design and app planning must preserve this approved page inventory."
+        )
+    for route in sorted(required_routes):
+        matches = [page for page in pages if page["route"] == route]
+        if len(matches) != 1:
+            raise ValueError(f"Monetization page {route} must appear exactly once in experience_spec.pages.")
+        name = matches[0]["name"]
+        owners = [
+            surface for surface in surface_map["surfaces"]
+            if name in (surface.get("owned_pages") or [])
+        ]
+        if len(owners) != 1:
+            raise ValueError(
+                f"Monetization page {name!r} ({route}) requires exactly one primary "
+                "surface_map owner whose owned_pages includes the page name."
+            )
+
+
 def _experience_spec_to_yaml(experience_spec: dict[str, Any], surface_map: dict[str, Any]) -> str:
     """Generate a human-readable YAML representation of the typed ExperienceSpec.
 
@@ -478,6 +534,8 @@ async def save_design_docs_bundle(
             bundle.get("experience_spec"),
             surface_map=surface_map,
         )
+        if binding.phase == "genesis":
+            _validate_monetization_pages(experience_spec, surface_map, context_variables)
         data_contract = _canonical_data_contract(
             bundle.get("data_contract"),
             app_id=app_id,

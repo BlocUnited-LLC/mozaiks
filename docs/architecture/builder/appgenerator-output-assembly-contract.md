@@ -25,6 +25,24 @@ closure does not prove that generated backend behavior implements the query.
 
 ## File Creation and Formats
 
+DesignDocs owns monetization pages before subscription design. For a monetized
+greenfield build it includes Pricing at `/pricing` in `experience_spec.pages`.
+When the approved concept records `monetized: true` and
+`subscription_contract_likely: true`, it also designs the default subscription
+pack's Billing and Usage pages. The DesignDocs save boundary checks those routes
+against the existing pack contract and requires one primary surface owner per
+page before persistence. Missing pages return through its existing `revise`
+outcome; the save tool does not synthesize designs. Free apps acquire no pricing
+page, and brownfield/revision scope remains authoritative.
+
+Subscription page requirements refine the approved inventory rather than add
+routes. AppGenerator's exact name/route equality check remains unchanged.
+Pricing reads the local `config/subscriptions.yaml` catalog through the existing
+public-readonly `billing_portal.list_plans` facade action. The facade delegates
+checkout to the managed provider; `/api/me/usage` and token endpoints supply
+runtime usage and balances, not the app's public plan catalog. No additional
+billing module or platform catalog endpoint is needed.
+
 Agents return structured JSON responses. This transport format does not determine
 the format of generated files. App schemas, module contracts, and build plans
 feed the existing deterministic materializers; bounded implementation tasks
