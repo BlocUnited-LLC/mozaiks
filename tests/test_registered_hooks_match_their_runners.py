@@ -1,15 +1,16 @@
 """Every registered hook is resolved by its real resolver, named on a real agent, shaped for the
 call its runner actually makes, and fires at least once when called that way.
 
-Three mechanisms were registered, wired, and inert:
+Two prompt-rendering mechanisms were registered, wired, and inert:
 
   #718  the subscription contract injector read an attribute no live container
         exposes -- registered three times, never ran
-  #721  run_app_ui_quality_gate writes are refused by the authority policy and
-        swallowed -- registered, never lands its handoff keys
   #723  the brownfield hook had the signature (agent_name, context_variables)
         while the runner calls every hook as fn(capture, history) -- registered
         six times, never called since #144
+
+The #721 quality-state writes now run through an authorized auto tool and are
+covered by test_appgenerator_ui_quality_writer_authority.py.
 
 A dead hook emits nothing: no error, no warning, no log line. The runner swallows
 prompt-hook exceptions at DEBUG, drops a registration that fails to resolve after

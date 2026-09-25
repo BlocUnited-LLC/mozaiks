@@ -1497,7 +1497,7 @@ definitions:
   app_ui_quality_status:
     type: string
     description: >
-      UI schema quality gate outcome set by validate_app_ui_quality. One of
+      UI schema quality gate outcome set by the review_ui_quality auto tool. One of
       passed | needs_revision | blocked. Drives AG2 transition routing after
       AppUIQualityAgent.
     source:

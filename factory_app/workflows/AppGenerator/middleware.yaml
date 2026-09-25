@@ -5,9 +5,6 @@ prompt_middleware:
 - agent: AppSchemaAgent
   filename: hook_primitive_catalog.py
   function: inject_primitive_catalog
-- agent: AppUIQualityAgent
-  filename: hook_app_ui_quality_gate.py
-  function: run_app_ui_quality_gate
 - agent: ModuleContractQualityAgent
   filename: hook_module_contract_quality_gate.py
   function: run_module_contract_quality_gate

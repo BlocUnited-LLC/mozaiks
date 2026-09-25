@@ -215,7 +215,7 @@ def test_the_known_good_helpers_have_not_regressed() -> None:
         ("factory_app/workflows/_shared/workflow_integration.py", "_context_get"),
         ("factory_app/workflows/AppGenerator/tools/review_module_contract_quality.py", "_context_get"),
         ("factory_app/workflows/AppGenerator/tools/hook_ai_pack_workflow_context.py", "_context_get"),
-        ("factory_app/workflows/AppGenerator/tools/hook_app_ui_quality_gate.py", "_context_get"),
+        ("factory_app/workflows/AppGenerator/tools/ui_quality.py", "_context_get"),
         ("factory_app/workflows/AppGenerator/tools/save_admin_registry.py", "_context_get"),
         ("factory_app/workflows/AppGenerator/tools/generate_and_download.py", "_context_get"),
         ("factory_app/workflows/AgentGenerator/tools/hook_ai_pack_archetype_context.py", "_context_get"),

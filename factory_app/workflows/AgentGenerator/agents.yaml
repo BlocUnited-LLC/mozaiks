@@ -1094,6 +1094,26 @@ agents:
   max_consecutive_auto_reply: 3
   structured_outputs_required: true
 
+- name: WorkflowBundleMergeAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: Request the deterministic merge after a workflow repair task batch completes.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      Read workflow_bundle_repair_count and workflow_bundle_repair_failed_workflows
+      for the completed repair pass. Emit WorkflowBundleMergeRequest with a brief
+      agent_message requesting the full pack merge. The auto-invoked tool restores
+      preserved passing workflows alongside repaired outputs in workflow_bundle_results
+      and restores the approved workflows_spec. Do not claim the merge succeeded;
+      the tool owns its result and the workflow routes only after status is merged.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: 'Output only JSON: {"agent_message": "Merge repaired workflow bundles into the complete pack."}'
+  max_consecutive_auto_reply: 1
+  structured_outputs_required: true
+
 - name: PackMetadataAgent
   prompt_sections:
   - id: role

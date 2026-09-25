@@ -40,11 +40,8 @@ def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None:
         return
     if hasattr(context_variables, "set"):
-        try:
-            context_variables.set(key, value)
-            return
-        except Exception:
-            pass
+        context_variables.set(key, value)
+        return
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
         data[key] = value
@@ -98,7 +95,7 @@ def review_ui_quality(
 
     Returns:
         A deterministic status payload:
-        - passed: no warnings remain; AssemblyAgent may continue.
+        - passed: no warnings remain; AdminRegistryAgent may continue.
         - needs_revision: warnings remain and another AppSchemaAgent pass is allowed.
         - blocked: warnings remain after the allowed revision attempts.
     """
@@ -141,11 +138,8 @@ def review_ui_quality(
         )
     warnings = dedupe(warnings)
 
-    # This gate is invoked once per AppUIQualityAgent turn, from the prompt
-    # middleware, and each invocation that asks for a revision spends one of
-    # the configured attempts. It ran twice per turn once -- the middleware
-    # before the reply and an auto tool after it -- so a budget of two was
-    # gone after a single turn and the agent got one revision, not two.
+    # The auto tool runs once per validated AppUIQualityAgent reply, before
+    # AG2 routes the packet. Only needs_revision spends an attempt.
     prior_attempts = _as_int(
         _context_get(context_variables, "app_ui_quality_revision_count", 0), 0
     )
@@ -180,11 +174,11 @@ def review_ui_quality(
         "revision_request": revision_request,
     }
 
-    _context_set(context_variables, "app_ui_quality_status", status)
     _context_set(context_variables, "app_ui_quality_warnings", warnings)
     _context_set(context_variables, "app_ui_quality_revision_count", revision_count)
     _context_set(context_variables, "app_ui_quality_revision_request", revision_request)
     _context_set(context_variables, "app_ui_quality_result", result)
+    _context_set(context_variables, "app_ui_quality_status", status)
 
     return result
 

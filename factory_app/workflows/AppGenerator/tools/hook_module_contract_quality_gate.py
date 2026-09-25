@@ -7,7 +7,6 @@ Runs the deterministic module contract audit before the agent speaks so that
 AG2 handoff conditions (``module_contract_quality_status == "passed"`` /
 ``"blocked"``) are already set when the agent reply is evaluated.
 
-Pattern mirrors hook_app_ui_quality_gate.py.
 """
 
 from __future__ import annotations

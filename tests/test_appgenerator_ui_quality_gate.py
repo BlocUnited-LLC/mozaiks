@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
-from importlib import import_module
 from pathlib import Path
 
 import pytest
@@ -11,10 +9,6 @@ import yaml
 from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assemble_module
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from tests.factory_context import factory_context
-
-hook_quality_module = import_module(
-    "factory_app.workflows.AppGenerator.tools.hook_app_ui_quality_gate"
-)
 
 
 def _load_ui_quality_module():
@@ -45,20 +39,12 @@ def _read_yaml(relative_path: str):
     return yaml.safe_load((workspace / relative_path).read_text(encoding="utf-8"))
 
 
-class _Context:
-    def __init__(self, initial=None) -> None:
-        self.data = factory_context(initial)
-
-    def set(self, key, value) -> None:
-        self.data[key] = value
-
-    def get(self, key, default=None):
-        return self.data.get(key, default)
+def _context(initial=None) -> ContextVariablesBridge:
+    return ContextVariablesBridge(factory_context(initial))
 
 
-@pytest.mark.parametrize("frozen", [False, True])
-def test_review_ui_quality_passes_without_warnings(frozen: bool) -> None:
-    context = _Context(
+def test_review_ui_quality_passes_without_warnings() -> None:
+    context = _context(
         {
             "app_ui_quality_warnings": [],
             "app_schema_ready": True,
@@ -83,8 +69,6 @@ def test_review_ui_quality_passes_without_warnings(frozen: bool) -> None:
         }
     )
 
-    if frozen:
-        context = ContextVariablesBridge(context.data)
     result = ui_quality_module.review_ui_quality(context_variables=context)
 
     assert result["status"] == "passed"
@@ -93,7 +77,7 @@ def test_review_ui_quality_passes_without_warnings(frozen: bool) -> None:
 
 
 def test_review_ui_quality_requires_persisted_schema_before_passing() -> None:
-    context = _Context({"app_ui_quality_warnings": []})
+    context = _context({"app_ui_quality_warnings": []})
 
     result = ui_quality_module.review_ui_quality(context_variables=context)
 
@@ -104,7 +88,7 @@ def test_review_ui_quality_requires_persisted_schema_before_passing() -> None:
 
 
 def test_review_ui_quality_routes_warnings_to_schema_revision() -> None:
-    context = _Context(
+    context = _context(
         {
             "app_ui_quality_warnings": [
                 "Dashboard has 8 top-level sections; keep collection pages scan-first."
@@ -117,14 +101,14 @@ def test_review_ui_quality_routes_warnings_to_schema_revision() -> None:
 
     assert result["status"] == "needs_revision"
     assert result["revision_count"] == 1
-    assert context.data["app_ui_quality_status"] == "needs_revision"
-    assert "Dashboard has 8 top-level sections" in context.data[
+    assert context.snapshot()["app_ui_quality_status"] == "needs_revision"
+    assert "Dashboard has 8 top-level sections" in context.snapshot()[
         "app_ui_quality_revision_request"
     ]
 
 
 def test_review_ui_quality_routes_lane_mismatch_warnings_to_schema_revision() -> None:
-    context = _Context(
+    context = _context(
         {
             "app_ui_quality_warnings": [
                 "Notifications: build plan marked /notifications as custom_react_page, but schema emitted a declarative page. Honor the planned UI lane or revise the upstream plan before assembly."
@@ -136,11 +120,11 @@ def test_review_ui_quality_routes_lane_mismatch_warnings_to_schema_revision() ->
     result = ui_quality_module.review_ui_quality(context_variables=context)
 
     assert result["status"] == "needs_revision"
-    assert "Honor the planned UI lane" in context.data["app_ui_quality_revision_request"]
+    assert "Honor the planned UI lane" in context.snapshot()["app_ui_quality_revision_request"]
 
 
 def test_review_ui_quality_audits_persisted_page_schemas() -> None:
-    context = _Context(
+    context = _context(
         {
             "app_ui_quality_warnings": [],
             "app_schema_ready": True,
@@ -175,7 +159,7 @@ def test_review_ui_quality_audits_persisted_page_schemas() -> None:
 
 
 def test_review_ui_quality_audits_custom_route_react() -> None:
-    context = _Context(
+    context = _context(
         {
             "app_ui_quality_warnings": [],
             "app_schema_ready": True,
@@ -204,7 +188,7 @@ def test_review_ui_quality_audits_custom_route_react() -> None:
 
 
 def test_review_ui_quality_blocks_custom_route_theme_contract_violations() -> None:
-    context = _Context(
+    context = _context(
         {
             "app_ui_quality_warnings": [],
             "app_schema_ready": True,
@@ -269,7 +253,7 @@ def test_review_ui_quality_blocks_custom_route_theme_contract_violations() -> No
 
 
 def test_review_ui_quality_requires_custom_route_component_registration() -> None:
-    context = _Context(
+    context = _context(
         {
             "app_ui_quality_warnings": [],
             "app_schema_ready": True,
@@ -322,7 +306,7 @@ def test_review_ui_quality_requires_custom_route_component_registration() -> Non
 
 
 def test_review_ui_quality_requires_page_file_for_each_custom_route() -> None:
-    context = _Context(
+    context = _context(
         {
             "app_ui_quality_warnings": [],
             "app_schema_ready": True,
@@ -362,7 +346,7 @@ def test_review_ui_quality_requires_page_file_for_each_custom_route() -> None:
 
 
 def test_review_ui_quality_blocks_after_revision_budget() -> None:
-    context = _Context(
+    context = _context(
         {
             "app_ui_quality_warnings": ["Page uses nested cards."],
             "app_ui_quality_revision_count": 2,
@@ -376,13 +360,13 @@ def test_review_ui_quality_blocks_after_revision_budget() -> None:
 
     assert result["status"] == "blocked"
     assert result["revision_count"] == 2
-    assert context.data["app_ui_quality_status"] == "blocked"
-    assert "operator review" in context.data["app_ui_quality_revision_request"]
+    assert context.snapshot()["app_ui_quality_status"] == "blocked"
+    assert "operator review" in context.snapshot()["app_ui_quality_revision_request"]
 
 
 @pytest.mark.asyncio
 async def test_assemble_app_tasks_requires_passed_ui_quality_gate() -> None:
-    context = _Context(
+    context = _context(
         {
             "app_id": "ops-portal",
             "app_schema_ready": True,
@@ -406,7 +390,7 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
         encoding="utf-8",
     )
 
-    context = _Context(
+    context = _context(
         {
             "app_id": "support",
             "app_ui_quality_status": "passed",
@@ -435,18 +419,17 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
         "ui/pages/Tickets.yaml",
         "modules/tickets/module.yaml",
     }
-    assert context.data["assembled_source"] == "schema_and_task_batch_outputs"
-    assert context.data["generated_files"]["app.json"] == '{"appName":"Support"}\n'
-    assert context.data["app_task_batch_results"]["tickets_module"]["code_files"] == [
+    assert context.snapshot()["assembled_source"] == "schema_and_task_batch_outputs"
+    assert context.snapshot()["generated_files"]["app.json"] == '{"appName":"Support"}\n'
+    assert context.snapshot()["app_task_batch_results"]["tickets_module"]["code_files"] == [
         {"filename": "modules/tickets/module.yaml", "content": "id: tickets\n"}
     ]
-    assert context.data["app_task_batch_results_summary"]["result_keys"] == ["tickets_module"]
+    assert context.snapshot()["app_task_batch_results_summary"]["result_keys"] == ["tickets_module"]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("frozen", [False, True])
-async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_quality_gate(frozen: bool) -> None:
-    context = _Context(
+async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_quality_gate() -> None:
+    context = _context(
         {
             "app_id": "support",
             "app_task_batch_status": "completed",
@@ -469,8 +452,6 @@ async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_qual
         }
     )
 
-    if frozen:
-        context = ContextVariablesBridge(context.data)
     result = await assemble_module.assemble_app_tasks(context_variables=context)
 
     filenames = {item["filename"] for item in result["code_files"]}
@@ -523,15 +504,12 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_key"] == "app_ui_quality_status"
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_value"] == "blocked"
 
-    # The gate is not an auto tool. It advances the revision counter, and an
-    # auto tool runs after the reply the handoff has already been routed on --
-    # so binding it here only spent a second attempt on the same turn.
-    assert ("AppUIQualityAgent", "review_ui_quality") not in tool_entries
+    binding = tool_entries[("AppUIQualityAgent", "review_ui_quality")]
+    assert binding["auto_tool_call"] is True
+    assert binding["bind_to_agent"] is False
     assert ("AppUIQualityAgent", "review_ui_acceptance") not in tool_entries
-
-    assert any(
+    assert not any(
         entry["agent"] == "AppUIQualityAgent"
-        and entry["function"] == "run_app_ui_quality_gate"
         for entry in hooks["prompt_middleware"]
     )
 
@@ -547,83 +525,9 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert "raw primary-styled `<button" in agents
 
 
-def test_app_ui_quality_hook_persists_previous_schema_before_handoff(
-    monkeypatch, tmp_path: Path
-) -> None:
-    generated_root = tmp_path / "generated"
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
-
-    context = _Context({"app_id": "support-ops", "build_id": "build-1"})
-
-    class _Agent:
-        name = "AppUIQualityAgent"
-
-        def __init__(self) -> None:
-            self.context_variables = context
-            self.system_message = "Quality agent"
-
-        def update_system_message(self, message: str) -> None:
-            self.system_message = message
-
-    messages = [
-        {
-            "name": "AppSchemaAgent",
-            "content": json.dumps(
-                {
-                    "manifest": {
-                        "app_name": "Support Operations",
-                        "version": "1.0.0",
-                        "default_route": "/tickets",
-                        "pages": ["Tickets"],
-                        "custom_routes": [],
-                    },
-                    "pages": [
-                        {
-                            "schema_version": "mozaiks.app_page.v1",
-                            "name": "Tickets",
-                            "route": "/tickets",
-                            "title": "Tickets",
-                            "page_type": "record_list",
-                            "layout": "full-width",
-                            "sections": [
-                                {
-                                    "id": "tickets-header",
-                                    "primitive": "PageHeader",
-                                    "config": {"title": "Tickets"},
-                                },
-                                {
-                                    "id": "tickets-table",
-                                    "primitive": "ResourceTable",
-                                    "config": {
-                                        "columns": [
-                                            {"key": "subject", "label": "Ticket"}
-                                        ],
-                                    },
-                                },
-                            ],
-                        }
-                    ],
-                    "custom_route_bundle": None,
-                    "theme_config_patch": None,
-                    "shell_config": None,
-                    "asset_manifest": None,
-                }
-            ),
-        }
-    ]
-
-    hook_quality_module.run_app_ui_quality_gate(_Agent(), messages)
-
-    assert context.data["app_schema_ready"] is True
-    assert context.data["app_ui_quality_status"] == "passed"
-    assert context.data["app_pages"][0]["route"] == "/tickets"
-
-
-
-
-def _revising_context() -> _Context:
+def _revising_context() -> ContextVariablesBridge:
     """A context whose warnings always ask for another revision."""
-    return _Context(
+    return _context(
         {
             "app_ui_quality_warnings": [
                 "Dashboard has 8 top-level sections; keep collection pages scan-first."
@@ -660,41 +564,30 @@ def test_each_gate_run_spends_exactly_one_attempt() -> None:
     context = _revising_context()
 
     for expected in (1, 2):
-        before = context.data.get("app_ui_quality_revision_count", 0)
+        before = context.snapshot().get("app_ui_quality_revision_count", 0)
         ui_quality_module.review_ui_quality(context_variables=context, max_revision_attempts=5)
-        after = context.data["app_ui_quality_revision_count"]
+        after = context.snapshot()["app_ui_quality_revision_count"]
         assert after == before + 1 == expected, f"one run moved the count {before} -> {after}"
 
 
 def test_the_quality_gate_has_exactly_one_caller() -> None:
-    """Two callers is the defect: the count advances per call, not per turn.
+    """Only the authorized auto tool spends revision attempts, once per turn."""
+    tools = _read_yaml("factory_app/workflows/AppGenerator/tools.yaml")
+    bindings = [entry for entry in tools["tools"] if entry.get("function") == "review_ui_quality"]
+    assert len(bindings) == 1
+    assert bindings[0]["agent"] == "AppUIQualityAgent"
+    assert bindings[0]["auto_tool_call"] is True
 
-    The prompt middleware owns the gate because AG2 evaluates handoff
-    conditions immediately after the agent reply, and routing reads the status
-    this gate writes. An auto tool runs after that point, so it cannot serve
-    the handoff -- it could only re-run the gate and spend a second attempt.
-    """
-    root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows" / "AppGenerator"
-    tools = yaml.safe_load((root / "tools.yaml").read_text(encoding="utf-8"))
-    rows = tools if isinstance(tools, list) else tools.get("tools", tools)
-    bindings = [
-        entry for entry in rows
-        if isinstance(entry, dict) and entry.get("function") == "review_ui_quality"
-    ]
-    assert bindings == [], f"the gate must not also be an auto tool: {bindings}"
-
-    middleware = yaml.safe_load((root / "middleware.yaml").read_text(encoding="utf-8"))
-    hooks = middleware if isinstance(middleware, list) else middleware.get("prompt_middleware", [])
-    assert any(
-        hook.get("agent") == "AppUIQualityAgent"
-        and hook.get("function") == "run_app_ui_quality_gate"
-        for hook in hooks
-    ), "the prompt middleware hook is the gate's only caller and must stay registered"
+    middleware = _read_yaml("factory_app/workflows/AppGenerator/middleware.yaml")
+    assert not any(
+        hook.get("function") == "run_app_ui_quality_gate"
+        for hook in middleware["prompt_middleware"]
+    )
 
 
 def test_a_passing_run_never_spends_an_attempt() -> None:
     """The gate re-audits the persisted schema, so a clean page is the pass case."""
-    context = _Context(
+    context = _context(
         {
             "app_ui_quality_warnings": [],
             "app_ui_quality_revision_count": 1,

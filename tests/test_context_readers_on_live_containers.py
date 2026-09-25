@@ -272,13 +272,14 @@ def test_domain_scoring_reads_the_concept_from_a_live_container() -> None:
     assert "invoicing and payments" in text
 
 
-def test_ui_quality_warning_append_keeps_earlier_warnings() -> None:
-    from factory_app.workflows.AppGenerator.tools.hook_app_ui_quality_gate import _append_warning
+def test_ui_quality_review_keeps_earlier_warnings() -> None:
+    from factory_app.workflows.AppGenerator.tools.ui_quality import review_ui_quality
 
     context = _bridge({"app_ui_quality_warnings": ["w1"]})
-    _append_warning(context, "w2")
+    result = review_ui_quality(context_variables=context)
 
-    assert detach(context.get("app_ui_quality_warnings")) == ["w1", "w2"]
+    assert "w1" in result["warnings"]
+    assert detach(context.get("app_ui_quality_warnings")) == result["warnings"]
 
 
 def test_agent_backend_hook_renders_the_websocket_endpoints() -> None:

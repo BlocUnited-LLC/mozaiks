@@ -1078,6 +1078,13 @@ def merge_workflow_bundle_repair_results(context_variables: Any | None = None) -
         for value in repair_entries.values()
         if str(value.get("workflow_name") or "").strip()
     }
+    expected_names = {
+        str(spec.get("name") or "").strip()
+        for spec in expected_workflows_from_context(context_variables)
+        if str(spec.get("name") or "").strip()
+    }
+    if not repair_names or not expected_names.issubset(repair_names):
+        raise ValueError("workflow bundle repair results must include every requested workflow")
     merged: dict[str, Any] = {}
     for key, value in base_results.items():
         if not isinstance(key, str) or key.startswith("_"):
@@ -1099,19 +1106,20 @@ def merge_workflow_bundle_repair_results(context_variables: Any | None = None) -
         },
     }
 
+    # The protected bundle write must land before restoring topology or claiming
+    # success. Authority refusals must propagate, never become a partial export.
+    context_variables.set("workflow_bundle_results", merged)
     original_specs = _context_get(context_variables, "workflow_bundle_repair_original_workflows_spec")
     if isinstance(original_specs, list):
-        _context_set(context_variables, "workflows_spec", original_specs)
-    _context_set(context_variables, "workflow_bundle_results", merged)
-    _context_set(context_variables, "workflow_bundle_repair_active", False)
-    _context_set(context_variables, "workflow_bundle_repair_status", "merged")
-    _context_set(context_variables, "workflow_bundle_repair_merged", True)
+        context_variables.set("workflows_spec", original_specs)
+    context_variables.set("workflow_bundle_repair_active", False)
     result = {
         "status": "merged",
         "merged_workflow_count": len([key for key in merged if not key.startswith("_")]),
         "repaired_workflows": sorted(repair_names),
     }
-    _context_set(context_variables, "workflow_bundle_repair_merge_result", result)
+    context_variables.set("workflow_bundle_repair_merge_result", result)
+    context_variables.set("workflow_bundle_repair_status", "merged")
     return result
 
 
