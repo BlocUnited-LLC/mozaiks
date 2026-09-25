@@ -8,10 +8,13 @@ app should be monetized.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 _TARGET_AGENTS = {
     "AppPlanAgent",
@@ -158,6 +161,21 @@ def inject_subscription_contract_context(agent: Any, messages: list[dict[str, An
     data = _context_data(agent)
     contract = _find_contract(data)
     if not contract:
+        # Say which source was consulted and what was there. This hook read an
+        # attribute the live context container does not expose and so injected
+        # nothing on every build until #718 -- silently, because it logged
+        # neither its success nor its no-op. Two acceptance runs afterwards
+        # still could not answer "did it fire?", because agent system messages
+        # are not logged either. A hook that never speaks cannot be verified
+        # from a live run, only from a test.
+        logger.info(
+            "SUBSCRIPTION_CONTRACT_CONTEXT skipped agent=%s reason=no_contract "
+            "context_keys=%d subscription_contract=%s artifact=%s",
+            agent_name,
+            len(data),
+            "set" if data.get("subscription_contract") is not None else "null",
+            "set" if data.get("subscription_contract_artifact") is not None else "null",
+        )
         # A cleared contract with a changes_requested review status means the
         # reviewer rejected the last submission and no approved contract exists.
         # Downstream generation must not silently proceed as a non-SaaS build;
@@ -170,7 +188,16 @@ def inject_subscription_contract_context(agent: Any, messages: list[dict[str, An
                 "revise and approve the contract before downstream generation."
             )
         return
-    _apply_text(agent, _render_contract(contract))
+    rendered = _render_contract(contract)
+    _apply_text(agent, rendered)
+    logger.info(
+        "SUBSCRIPTION_CONTRACT_CONTEXT injected agent=%s contract_required=%s "
+        "plans=%d chars=%d",
+        agent_name,
+        contract.get("contract_required"),
+        len((contract.get("subscription_config_file") or {}).get("plans") or []),
+        len(rendered),
+    )
 
 
 __all__ = ["inject_subscription_contract_context"]
