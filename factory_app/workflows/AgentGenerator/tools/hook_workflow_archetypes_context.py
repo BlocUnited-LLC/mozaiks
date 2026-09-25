@@ -9,9 +9,14 @@ higher-level workflow archetypes that define:
   - Per-archetype hard constraints (workflow_startup_mode, result action contract, forbidden operations)
   - Orchestrator defaults (human_in_the_loop, max_turns, workflow_startup_mode)
 
-When the worker's current_task has a capability_id ending in a known AI-native
-suffix, this hook injects the matching archetype from workflow_archetypes.yaml as
-[WORKFLOW ARCHETYPE: <name>] so the agent has the full agent sequence and
+The worker's current_task is a WorkflowInPack item. That model forbids extra
+fields, so it never carries a capability_id; the capability id lives on the
+design surface the workflow implements. PatternAgent names each AI-native pack
+workflow `_to_pascal(capability_id)` (hook_ai_pack_archetype_context), and the
+worker receives design_surface_map through its task-batch context fields, so
+this hook finds the declared workflow surface whose trigger maps to the task's
+name and injects the matching archetype from workflow_archetypes.yaml as
+[WORKFLOW ARCHETYPE: <name>], so the agent has the full agent sequence and
 behavioral constraints, not just the AG2 pattern topology.
 
 No-ops for non-AI-native workflows.
@@ -50,25 +55,46 @@ def _load_archetypes() -> dict[str, Any]:
         return {}
 
 
+def _to_pascal(capability_id: str) -> str:
+    """The workflow name PatternAgent is told to use for an AI-native capability id.
+
+    Mirrors hook_ai_pack_archetype_context._to_pascal, which instructs PatternAgent
+    `workflow_name={_to_pascal(cap_id)}` for exactly these workflows.
+    """
+    return "".join(part.capitalize() for part in capability_id.split("-"))
+
+
+def _declared_workflow_triggers(design_surface_map: Any) -> list[str]:
+    if not isinstance(design_surface_map, dict):
+        return []
+    triggers: list[str] = []
+    for surface in design_surface_map.get("surfaces") or []:
+        if not isinstance(surface, dict) or surface.get("surface_kind") != "workflow":
+            continue
+        triggers.extend(str(t or "").strip() for t in surface.get("workflow_triggers") or [])
+    return [t for t in triggers if t]
+
+
 def _detect_archetype_name(context_variables: Any) -> str | None:
-    """Return the archetype name for the current task if it is an AI-native workflow."""
+    """Return the archetype for the current task when it implements a declared AI-native surface."""
     # No live container exposes `.data` (#300 renamed the bridge's store), and
     # every one freezes reads, so read through `get` and detach before type-testing.
     getter = getattr(context_variables, "get", None)
-    current_task = detach(getter("current_task")) if callable(getter) else None
+    if not callable(getter):
+        return None
+    current_task = detach(getter("current_task"))
     if not isinstance(current_task, dict):
         return None
-
-    capability_id = str(current_task.get("capability_id") or "").strip()
-    if not capability_id:
-        # Fall back to workflow name
-        capability_id = str(current_task.get("name") or "").strip()
-    if not capability_id:
+    workflow_name = str(current_task.get("name") or "").strip()
+    if not workflow_name:
         return None
 
-    for suffix, archetype_name in _SUFFIX_TO_ARCHETYPE.items():
-        if capability_id.endswith(suffix):
-            return archetype_name
+    for capability_id in _declared_workflow_triggers(detach(getter("design_surface_map"))):
+        if _to_pascal(capability_id) != workflow_name:
+            continue
+        for suffix, archetype_name in _SUFFIX_TO_ARCHETYPE.items():
+            if capability_id.endswith(suffix):
+                return archetype_name
     return None
 
 
@@ -175,10 +201,11 @@ def inject_workflow_archetypes_context(
     prompt middleware function for WorkflowBundleBuilderAgent.
 
     Injects [WORKFLOW ARCHETYPE: <name>] from workflow_archetypes.yaml when the
-    current task is an AI-native pack workflow (capability_id ending in
-    -review-workflow, -analysis-workflow, or -extraction-workflow).
+    current task implements a declared AI-native workflow surface (capability id
+    ending in -review-workflow, -analysis-workflow, or -extraction-workflow).
 
-    No-ops for all other workflows and all other agents.
+    No-ops for all other workflows and all other agents. Until #723 it keyed on
+    current_task.capability_id, a field WorkflowInPack forbids, so it never fired.
     """
     if getattr(agent, "name", "") != "WorkflowBundleBuilderAgent":
         return
@@ -186,6 +213,13 @@ def inject_workflow_archetypes_context(
     context_variables = getattr(agent, "context_variables", None)
     archetype_name = _detect_archetype_name(context_variables)
     if not archetype_name:
+        getter = getattr(context_variables, "get", None)
+        task = detach(getter("current_task")) if callable(getter) else None
+        logger.info(
+            "WORKFLOW_ARCHETYPE_CONTEXT skipped agent=WorkflowBundleBuilderAgent reason=no_declared_ai_surface "
+            "workflow_name=%s",
+            (task or {}).get("name") if isinstance(task, dict) else None,
+        )
         return
 
     archetypes = _load_archetypes()

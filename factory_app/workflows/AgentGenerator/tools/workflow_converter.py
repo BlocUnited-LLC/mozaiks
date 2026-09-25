@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.workflow_ui_catalog import (
     get_workflow_shipped_component_map,
     infer_workflow_ui_realization,
@@ -44,7 +45,7 @@ def _context_get(context_variables: Any | None, key: str) -> Any | None:
         try:
             value = context_variables.get(key)
             if value is not None:
-                return value
+                return detach(value)
         except Exception:
             pass
     data = getattr(context_variables, "data", None)

@@ -19,6 +19,7 @@ import os
 import re
 from typing import Any
 
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
 logger = logging.getLogger(__name__)
@@ -148,12 +149,16 @@ def _ctx_get(context_variables: Any, key: str, default: Any = None) -> Any:
         return data.get(key, default)
     getter = getattr(context_variables, "get", None)
     if callable(getter):
+        # before_chat runs on the canonical _RuntimeContextVariables, whose reads
+        # are frozen. _dict_value/_list_value reject frozen values, so the
+        # overview card ignored the catalog the collector had just written and
+        # the recovery card never emitted (#723).
         try:
-            return getter(key, default)
+            return detach(getter(key, default))
         except TypeError:
             try:
                 value = getter(key)
-                return default if value is None else value
+                return default if value is None else detach(value)
             except Exception:
                 return default
         except Exception:

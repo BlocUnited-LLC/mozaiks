@@ -36,6 +36,7 @@ from mozaiksai.core.app_context.models import (
     SurfaceRef,
     UnknownItem,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 
 APP_CONTEXT_ARTIFACT_KINDS = (
     "application_inventory",
@@ -192,7 +193,7 @@ def _context_get(context_variables: Mapping[str, Any] | Any | None, key: str) ->
         return None
     try:
         if hasattr(context_variables, "get"):
-            return context_variables.get(key)
+            return detach(context_variables.get(key))
     except Exception:
         return None
     return None

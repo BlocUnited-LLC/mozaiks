@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from mozaiksai.core.workflow.context.frozen import detach
 
 _VALIDATION_STATUSES = {"passed", "failed", "skipped", "pending"}
 _LIFECYCLE_STATES = {
@@ -24,7 +25,7 @@ def _context_get(context_variables: Any | None, key: str) -> Any | None:
         return context_variables.get(key)
     if hasattr(context_variables, "get"):
         try:
-            return context_variables.get(key)
+            return detach(context_variables.get(key))
         except Exception:
             return None
     data = getattr(context_variables, "data", None)

@@ -418,6 +418,19 @@ Rules:
 - `UI_Surface` is one-way and requires `ui.component` and `ui.mode`.
 - `ui_contract` belongs only on `UI_Tool`.
 - Tool references use `file` and `function`.
+- Lifecycle tools are called with keyword arguments only, and two runners
+  dispatch them. `before_chat` and `after_chat` (and `on_fail` raised inside
+  orchestration) go through `LifecycleToolManager`, which passes
+  `context_variables` when the signature declares it plus any of `app_id`,
+  `execution_id`, `chat_id`, `user_id`, `workflow_name`, `error` the signature
+  accepts. `on_start`, `on_complete` and the transport-level `on_fail` go
+  through `get_workflow_lifecycle_hooks` from `workflow_bridge`, which passes
+  `app_id`, `execution_id`, `chat_id`, `user_id`, `workflow_name` (plus
+  `message`, `details` on failure) and never `context_variables`. Declare
+  `**_: Any` and keyword-only parameters, and do not rely on
+  `context_variables` in an `on_start`/`on_complete` tool.
+  `tests/test_registered_hooks_match_their_runners.py` resolves every entry
+  with both runners' resolvers and binds each runner's arguments.
 
 #### Operation Outcomes
 
@@ -589,6 +602,10 @@ prompt_middleware:
 
 Rules:
 - Prompt middleware declarations are compiled to AG2 1.0 middleware.
+- The runner calls each function positionally as `fn(agent, messages)` and
+  ignores the return value; the hook changes the prompt only through
+  `agent.update_system_message(...)`. Name the first two parameters `agent` and
+  `messages`. See [Call Shape Contract](../mozaiksai/hook-system-deep-dive.md#call-shape-contract).
 - Use lifecycle tools for side effects and structured outputs/runtime
   validators for output validation.
 

@@ -19,6 +19,7 @@ from factory_app.app.modules.workspace_integrations.backend.schemas import (
     INTEGRATIONS_CATALOG,
 )
 from mozaiksai.core.data.persistence import ConnectorStore
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.connector_service import get_connector_inventory
 
 
@@ -28,10 +29,10 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
     getter = getattr(context_variables, "get", None)
     if callable(getter):
         try:
-            return getter(key, default)
+            return detach(getter(key, default))
         except TypeError:
             value = getter(key)
-            return default if value is None else value
+            return default if value is None else detach(value)
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
         return data.get(key, default)

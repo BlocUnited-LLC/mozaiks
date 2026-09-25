@@ -7,6 +7,7 @@ from typing import Any
 
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.data.persistence.connector_store import ConnectorStore
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +53,10 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
     getter = getattr(context_variables, "get", None)
     if callable(getter):
         try:
-            return getter(key, default)
+            return detach(getter(key, default))
         except TypeError:
             value = getter(key)
-            return default if value is None else value
+            return default if value is None else detach(value)
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
         return data.get(key, default)

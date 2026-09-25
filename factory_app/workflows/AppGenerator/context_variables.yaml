@@ -942,7 +942,7 @@ definitions:
         app_id: '{{run_build_binding.target_app_id}}'
         workflow_type: agent-generator
       fields:
-      - trigger_events
+      - workflow_trigger_events
       default: []
   bundle_repair_status:
     type: string

@@ -19,6 +19,7 @@ from factory_app.app.modules.workspace_integrations.backend.service import (
     WorkspaceIntegrationsService,
 )
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
     if context_variables is None:
         return default
     if hasattr(context_variables, "get"):
-        return context_variables.get(key, default)
+        return detach(context_variables.get(key, default))
     return default
 
 

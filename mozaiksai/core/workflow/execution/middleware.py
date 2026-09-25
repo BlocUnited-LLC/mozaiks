@@ -98,9 +98,16 @@ class MozaiksPromptMiddleware(BaseMiddleware):
                 if hasattr(result, "__await__"):
                     await result
             except Exception as exc:
-                logger.debug(
-                    "[MIDDLEWARE] Prompt middleware failed for %s: %s",
+                # A hook that raises contributes nothing to the prompt and the
+                # turn continues. At DEBUG that was invisible: the subscription
+                # contract injector's fail-closed refusal disappeared this way
+                # (#723), so the failure is reported where a run log shows it.
+                logger.warning(
+                    "[MIDDLEWARE] Prompt middleware failed for %s: %s.%s raised %s: %s",
                     self._agent_name,
+                    getattr(middleware_fn, "__module__", "?"),
+                    getattr(middleware_fn, "__qualname__", repr(middleware_fn)),
+                    type(exc).__name__,
                     exc,
                 )
 

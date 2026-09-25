@@ -34,6 +34,26 @@ _APPGEN_CATALOG_DIR = (
 _WORKFLOW_ARCHETYPES_YAML = _APPGEN_CATALOG_DIR / "workflow_archetypes.yaml"
 
 
+def _worker_context(capability_id: str | None, *, name: str | None = None) -> dict[str, Any]:
+    """The context a WorkflowBundleBuilderAgent task worker actually has.
+
+    current_task is a WorkflowInPack item (extra="forbid", no capability_id); the
+    capability id is on the declared workflow surface in design_surface_map, and
+    PatternAgent names the workflow `_to_pascal(capability_id)`.
+    """
+    workflow_name = name or "".join(part.capitalize() for part in str(capability_id).split("-"))
+    surfaces = []
+    if capability_id:
+        surfaces.append({"surface_id": capability_id.replace("-", "_"), "surface_kind": "workflow",
+                         "workflow_triggers": [capability_id]})
+    return {
+        "current_task": {"name": workflow_name, "role": "primary", "description": "d", "pattern_id": 3,
+                         "pattern_name": "Feedback Loop", "initial_agent": "WorkflowBundleBuilderAgent",
+                         "initial_message": f"workflow_name={workflow_name}"},
+        "design_surface_map": {"surfaces": surfaces},
+    }
+
+
 class _FakeAgent:
     def __init__(self, name: str, context_variables: dict[str, Any] | None = None):
         self.name = name
@@ -93,7 +113,7 @@ class TestInjectWorkflowArchetypesContext:
     def test_injects_for_review_workflow(self):
         agent = _FakeAgent(
             "WorkflowBundleBuilderAgent",
-            {"current_task": {"capability_id": "proposals-review-workflow"}},
+            _worker_context("proposals-review-workflow"),
         )
         _run_hook(agent)
         assert "[WORKFLOW ARCHETYPE]" in agent.system_message
@@ -102,7 +122,7 @@ class TestInjectWorkflowArchetypesContext:
     def test_injects_for_analysis_workflow(self):
         agent = _FakeAgent(
             "WorkflowBundleBuilderAgent",
-            {"current_task": {"capability_id": "documents-analysis-workflow"}},
+            _worker_context("documents-analysis-workflow"),
         )
         _run_hook(agent)
         assert "[WORKFLOW ARCHETYPE]" in agent.system_message
@@ -111,7 +131,7 @@ class TestInjectWorkflowArchetypesContext:
     def test_injects_for_extraction_workflow(self):
         agent = _FakeAgent(
             "WorkflowBundleBuilderAgent",
-            {"current_task": {"capability_id": "invoices-extraction-workflow"}},
+            _worker_context("invoices-extraction-workflow"),
         )
         _run_hook(agent)
         assert "[WORKFLOW ARCHETYPE]" in agent.system_message
@@ -120,7 +140,7 @@ class TestInjectWorkflowArchetypesContext:
     def test_injected_content_includes_canonical_agent_sequence(self):
         agent = _FakeAgent(
             "WorkflowBundleBuilderAgent",
-            {"current_task": {"capability_id": "proposals-review-workflow"}},
+            _worker_context("proposals-review-workflow"),
         )
         _run_hook(agent)
         msg = agent.system_message
@@ -132,7 +152,7 @@ class TestInjectWorkflowArchetypesContext:
     def test_injected_content_includes_hard_constraints(self):
         agent = _FakeAgent(
             "WorkflowBundleBuilderAgent",
-            {"current_task": {"capability_id": "proposals-review-workflow"}},
+            _worker_context("proposals-review-workflow"),
         )
         _run_hook(agent)
         assert "HARD CONSTRAINTS" in agent.system_message
@@ -141,7 +161,7 @@ class TestInjectWorkflowArchetypesContext:
     def test_noop_for_non_ai_native_workflow(self):
         agent = _FakeAgent(
             "WorkflowBundleBuilderAgent",
-            {"current_task": {"capability_id": "RecommendationEngine"}},
+            _worker_context(None, name="RecommendationEngine"),
         )
         _run_hook(agent)
         assert "[WORKFLOW ARCHETYPE]" not in agent.system_message
@@ -149,7 +169,7 @@ class TestInjectWorkflowArchetypesContext:
     def test_noop_for_other_agent(self):
         agent = _FakeAgent(
             "PatternAgent",
-            {"current_task": {"capability_id": "proposals-review-workflow"}},
+            _worker_context("proposals-review-workflow"),
         )
         _run_hook(agent)
         assert "[WORKFLOW ARCHETYPE]" not in agent.system_message
@@ -162,7 +182,7 @@ class TestInjectWorkflowArchetypesContext:
     def test_preserves_existing_system_message(self):
         agent = _FakeAgent(
             "WorkflowBundleBuilderAgent",
-            {"current_task": {"capability_id": "docs-analysis-workflow"}},
+            _worker_context("docs-analysis-workflow"),
         )
         _run_hook(agent)
         assert "Base prompt." in agent.system_message

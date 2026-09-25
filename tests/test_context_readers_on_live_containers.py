@@ -19,6 +19,7 @@ it actually reads; the cases here are the ones whose behaviour differed.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -228,7 +229,7 @@ def test_ai_pack_archetype_hook_detects_workflow_surfaces() -> None:
 
 
 def test_workflow_archetype_hook_reads_the_task_worker_context() -> None:
-    """WorkflowBundleBuilderAgent is the task worker; `_build_task_context` sets `current_task` on its bridge."""
+    """The task worker's real shape: a WorkflowInPack item (no capability_id) plus design_surface_map (#723)."""
     from factory_app.workflows.AgentGenerator.tools.hook_workflow_archetypes_context import (
         inject_workflow_archetypes_context,
     )
@@ -236,7 +237,11 @@ def test_workflow_archetype_hook_reads_the_task_worker_context() -> None:
     prompt = _run_hook(
         inject_workflow_archetypes_context,
         "WorkflowBundleBuilderAgent",
-        {"current_task": {"task_id": "t1", "capability_id": "proposals-review-workflow"}},
+        {"current_task": {"name": "ProposalsReviewWorkflow", "role": "primary", "description": "d",
+                          "pattern_id": 3, "pattern_name": "Feedback Loop",
+                          "initial_agent": "WorkflowBundleBuilderAgent", "initial_message": "m"},
+         "design_surface_map": {"surfaces": [{"surface_id": "proposals_review_workflow", "surface_kind": "workflow",
+                                              "workflow_triggers": ["proposals-review-workflow"]}]}},
     )
 
     assert "[WORKFLOW ARCHETYPE]: ai_review" in prompt
@@ -411,3 +416,185 @@ async def test_integration_tests_resolve_the_in_context_generated_files() -> Non
     )
 
     assert files == {"app/a.py": "print(1)"}
+
+
+# ---------------------------------------------------------------------------
+# before_chat lifecycle tools, run by the real LifecycleToolManager on the
+# production container: create_context_container() with the workflow's real
+# authority policy and the runtime-system writer (context/variables.py).
+# ---------------------------------------------------------------------------
+
+_WORKFLOWS = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+_BASE = {"chat_id": "chat_1", "app_id": "app_1", "user_id": "u_1", "run_build_binding": BINDING}
+
+
+def _production_container(workflow: str, seed: dict[str, Any]) -> Any:
+    from mozaiksai.core.workflow.context.adapter import create_context_container
+    from mozaiksai.core.workflow.context.authority import (
+        RUNTIME_SYSTEM_WRITER,
+        build_context_authority_policy,
+    )
+    from mozaiksai.core.workflow.context.variables import (
+        _load_workflow_plan,
+        _task_batch_context_keys,
+    )
+    from mozaiksai.core.workflow.workflow_manager import get_workflow_manager
+
+    plan, _ = _load_workflow_plan(workflow)
+    config = get_workflow_manager().get_config(workflow) or {}
+    rules = (config.get("transition_graph") or {}).get("transition_rules") or []
+    context = create_context_container(dict(seed))
+    context._mozaiks_context_authority_policy = build_context_authority_policy(
+        workflow_name=workflow, definitions=plan.definitions or {}, transition_rules=rules,
+        task_batch_context_keys=_task_batch_context_keys(workflow),
+    )
+    context._mozaiks_context_writer_id = RUNTIME_SYSTEM_WRITER
+    return context
+
+
+def _run_before_chat_tool(
+    monkeypatch: pytest.MonkeyPatch, workflow: str, function: str, context: Any,
+) -> list[tuple[str, Any]]:
+    """Load the workflow's lifecycle tools the way the runner does and run one; return the UI surfaces it emitted."""
+    import asyncio
+
+    import mozaiksai.core.workflow.ui_tools as ui_tools
+    from mozaiksai.core.workflow.execution.lifecycle import LifecycleToolManager, LifecycleTrigger
+
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(_WORKFLOWS))
+    emitted: list[tuple[str, Any]] = []
+
+    async def _emit(tool_id: str, payload: Any = None, **_: Any) -> str:
+        emitted.append((tool_id, payload))
+        return f"evt_{len(emitted)}"
+
+    # Tool files are exec'd per load and bind emit_ui_surface at import, so patch before loading.
+    monkeypatch.setattr(ui_tools, "emit_ui_surface", _emit)
+    manager = LifecycleToolManager(workflow)
+    manager.load_lifecycle_tools()
+    tool = next(t for t in manager.tools[LifecycleTrigger.BEFORE_CHAT] if t.function == function)
+    asyncio.run(tool.callable(context_variables=context))
+    return emitted
+
+
+def test_the_repo_access_recovery_card_emits_on_the_production_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    """It read repo_access_recovery frozen, _dict_value rejected it, and the card never showed (#723)."""
+    context = _production_container("ExistingAppDiscovery", {
+        **_BASE, "workflow_name": "ExistingAppDiscovery", "github_repo": "acme/ledger",
+        "repo_access_recovery": {"provider": "github", "code": "github_repo_access_required",
+                                 "github_repo": "acme/ledger", "http_status": 404,
+                                 "recovery_actions": [{"id": "connect_github"}]},
+    })
+
+    emitted = _run_before_chat_tool(monkeypatch, "ExistingAppDiscovery", "emit_repo_access_recovery_card", context)
+
+    assert [tool_id for tool_id, _ in emitted] == ["RepoAccessRecoveryCard"]
+    assert emitted[0][1]["http_status"] == 404
+    assert emitted[0][1]["recovery_actions"] == [{"id": "connect_github"}]
+
+
+def test_the_overview_card_uses_the_catalog_on_the_production_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The collector writes app_intelligence_catalog; the card read it back frozen and showed the fallback."""
+    catalog = {"schema_version": "mozaiks.app_intelligence.catalog.v1", "app_name": "Ledger"}
+    context = _production_container("ExistingAppDiscovery", {
+        **_BASE, "workflow_name": "ExistingAppDiscovery", "github_repo": "acme/ledger",
+        "app_intelligence_catalog": catalog,
+    })
+
+    emitted = _run_before_chat_tool(monkeypatch, "ExistingAppDiscovery", "emit_app_intelligence_overview_card", context)
+
+    assert [tool_id for tool_id, _ in emitted] == ["AppIntelligenceOverviewCard"]
+    assert emitted[0][1]["app_intelligence_catalog"]["app_name"] == "Ledger"
+
+
+def test_the_theme_collector_reads_the_parent_theme_on_the_production_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _production_container("ThemeCapture", {
+        **_BASE, "workflow_name": "ThemeCapture",
+        "parent_theme_config": {"identity": {"app_name": "Ledger"}, "theme": {"appearance": "light"},
+                                "colors": {"primary": {"main": "#1144aa"}},
+                                "fonts": {"body": {"family": "Inter"}}},
+    })
+
+    _run_before_chat_tool(monkeypatch, "ThemeCapture", "collect_prechat_theme_context", context)
+
+    assert context.get("preload_status") == "ready", "the parent theme was ignored"
+    evidence = detach(context.get("theme_capture_evidence"))
+    assert evidence["sources"] == ["parent_theme_config"]
+    assert "#1144aa" in evidence["colors"]
+
+
+def test_the_discovery_collector_keeps_its_launch_inputs_on_the_production_container(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """discovery_inputs was read frozen and dropped, so a launch that passed its repo there indexed nothing."""
+    (tmp_path / "package.json").write_text('{"name": "ledger", "dependencies": {"react": "18.0.0"}}', encoding="utf-8")
+    context = _production_container("ExistingAppDiscovery", {
+        **_BASE, "workflow_name": "ExistingAppDiscovery",
+        "discovery_inputs": {"repo_path": str(tmp_path), "discovery_mode": "guided"},
+    })
+
+    emitted = _run_before_chat_tool(monkeypatch, "ExistingAppDiscovery", "collect_prechat_discovery_context", context)
+
+    assert context.get("repo_path") == str(tmp_path)
+    assert detach(context.get("repo_summary")).get("success") is True
+    assert emitted, "the progress card read app_intelligence_progress back frozen and skipped every emission"
+    assert all(tool_id == "AppIntelligenceProgressCard" for tool_id, _ in emitted)
+
+
+# ---------------------------------------------------------------------------
+# Data references read the fields their writer stores
+# ---------------------------------------------------------------------------
+
+
+def test_every_workflow_exports_reference_reads_a_field_the_export_writes() -> None:
+    """generated_workflow_trigger_events projected `trigger_events`; the export stores `workflow_trigger_events`.
+
+    _load_data_reference_value returns None when the document exists but lacks the field (the declared
+    default applies only when there is no document), so every live AppGenerator run saw no trigger events,
+    and the before_chat hydration then wrote [] and told ConfigMiddlewareAgent no reactions were needed.
+    """
+    import ast
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    written = {"app_id", "appId", "user_id", "userId", "workflow_type", "workflowType", "repo_url", "repoUrl",
+               "job_id", "jobId", "meta", "created_at_utc", "createdAt", "updated_at_utc", "updatedAt"}
+    for path in (root / "factory_app").rglob("*.py"):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # build-context templates carry {{PLACEHOLDER}} tokens
+            continue
+        for node in ast.walk(tree):
+            name = getattr(node, "func", None)
+            name = getattr(name, "id", getattr(name, "attr", None))
+            if isinstance(node, ast.Call) and name == "record_workflow_export":
+                for keyword in node.keywords:
+                    if keyword.arg == "extra_fields" and isinstance(keyword.value, ast.Dict):
+                        written.update(k.value for k in keyword.value.keys if isinstance(k, ast.Constant))
+    projected = []
+    for path in sorted(_WORKFLOWS.glob("*/context_variables.yaml")):
+        definitions = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("definitions") or {}
+        for name, definition in definitions.items():
+            source = (definition or {}).get("source") or {}
+            if source.get("type") == "data_reference" and source.get("collection") == "WorkflowExports":
+                projected.extend((path.parent.name, name, field) for field in source.get("fields") or [])
+    assert projected, "no WorkflowExports references found; the scan is broken"
+    missing = [f"{wf}.{name} <- {field}" for wf, name, field in projected if field not in written]
+    assert not missing, f"these read a field no record_workflow_export call writes: {missing}"
+
+
+def test_the_archetype_worker_fixture_is_a_real_workflow_in_pack_item() -> None:
+    """The archetype tests seed current_task; it must be the shape PatternAgent can actually emit."""
+    from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+
+    models, _ = load_workflow_structured_outputs("AgentGenerator")
+    workflow_in_pack = models["WorkflowInPack"]
+    item = {"name": "ProposalsReviewWorkflow", "role": "primary", "description": "d", "pattern_id": 3,
+            "pattern_name": "Feedback Loop", "initial_agent": "WorkflowBundleBuilderAgent", "initial_message": "m"}
+
+    workflow_in_pack.model_validate(item)
+    with pytest.raises(Exception, match="extra_forbidden|Extra inputs"):
+        workflow_in_pack.model_validate({**item, "capability_id": "proposals-review-workflow"})

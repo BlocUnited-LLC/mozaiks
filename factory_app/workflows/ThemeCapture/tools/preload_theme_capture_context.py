@@ -12,6 +12,8 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from mozaiksai.core.workflow.context.frozen import detach
+
 logger = logging.getLogger(__name__)
 
 _COLOR_RE = re.compile(r"#(?:[0-9a-fA-F]{3,8})\b|rgba?\([^)]*\)|hsla?\([^)]*\)")
@@ -47,8 +49,13 @@ def _ctx_get(context_variables: Any, key: str, default: Any = None) -> Any:
         return store.get(key, default)
     getter = getattr(store, "get", None)
     if callable(getter):
+        # before_chat runs on the canonical _RuntimeContextVariables, whose reads
+        # are frozen (mapping proxies, tuples). Callers pass the result through
+        # _coerce_mapping and list checks, which reject frozen values, so without
+        # detach() every launch input and every value written earlier in this
+        # run was silently discarded (#723).
         try:
-            return getter(key, default)
+            return detach(getter(key, default))
         except Exception:
             return default
     return default
