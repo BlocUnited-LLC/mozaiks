@@ -37,8 +37,46 @@ agents:
       - If database_setup_mode is atlas or existing_uri, treat database connectivity as secret-managed configuration and do not hardcode connection strings.
       - If database_setup_mode is skip, still design a MongoDB-ready schema and note that connection setup is intentionally deferred.
       - Do not call save tools manually. The runtime auto-invokes the save tool after your structured output validates.
-      - Include monetization/paywall/billing integration points ONLY if MONETIZATION_ENABLED is true; never implement payment logic in the runtime.
+      - Include monetization/paywall/billing surfaces ONLY if monetization_enabled is true; follow [MONETIZATION SURFACES] before finalizing the page inventory. Never implement payment-provider internals.
       - Treat third-party credentials, connector secrets, and workspace integration records as platform-owned integration state. They must not be modeled as app/business collections inside `data_contract`.
+  - id: monetization_surfaces
+    heading: '[MONETIZATION SURFACES]'
+    content: |-
+      Design the monetization experience before the page inventory is approved.
+      experience_spec.pages is the complete, authoritative name/route inventory;
+      downstream subscription design supplies plan details within those pages.
+      App planning must preserve that inventory exactly.
+
+      For a greenfield initial build with monetization_enabled: true:
+      - Include Pricing at /pricing in experience_spec.pages, with explicit
+        layout, navigation, and primitive sections for plan comparison and
+        subscription selection. Use concept_blueprint.monetization_intent's
+        money_flow_summary and likely_revenue_models to describe the intent;
+        plan names, prices, and quotas are designed downstream, not invented here.
+      - When monetization_intent records both monetized: true and
+        subscription_contract_likely: true, also design Billing at /billing
+        for subscription status/management and Usage at /usage for measured
+        usage. These are required facade pages of the default subscription
+        capability, not extra pages for downstream planning to invent.
+      - Give each page exactly one primary owner in surface_map. For subscription
+        billing use the existing app-owned billing_portal module facade, with
+        owned_pages naming Pricing, Billing, and Usage. It owns no provider
+        records, subscription assignment storage, or token ledger. The managed
+        provider remains a separate hosted external_integration surface.
+      - Describe public plan browsing through billing_portal.list_plans, which
+        reads config/subscriptions.yaml. Checkout and billing management use
+        the managed provider client behind that facade. Usage and token reads
+        may use the existing /api/me/usage, /api/me/tokens, and
+        /api/me/tokens/ledger endpoints; do not design duplicate ledgers.
+
+      When monetization_enabled is false, do not add Pricing, Billing, Usage,
+      or a billing facade for monetization. Keep the free app's product pages.
+      For brownfield adoption or a revision, preserve the approved adoption or
+      revision scope; existing billing may already be owned outside that scope.
+      A greenfield save with missing required pages or page ownership is refused
+      with design_docs_save_feedback. Revise the design, including its frontend
+      document and surface_map, before retrying; no downstream stage adds pages
+      to make an incomplete design valid.
   - id: theme_identity
     heading: '[THEME IDENTITY]'
     content: |-

@@ -352,7 +352,7 @@ models:
       pages:
         type: list
         items: UIPage
-        description: Complete ordered list of persistent pages for the app.
+        description: Complete approved inventory of persistent pages. Greenfield monetization requires Pricing at /pricing; subscription concepts also include the default capability's Billing and Usage facade pages. Free apps do not acquire monetization pages. Every page has one primary surface_map owner.
 
   DesignDocsBundle:
     type: model

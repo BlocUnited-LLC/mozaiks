@@ -481,7 +481,7 @@ models:
         description: Stable page id.
       route:
         type: str
-        description: Suggested route.
+        description: Exact approved route from experience_spec.pages; enrich that page without adding a new route.
       purpose:
         type: str
         description: What this page exposes.

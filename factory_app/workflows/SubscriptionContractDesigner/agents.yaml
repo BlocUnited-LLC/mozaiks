@@ -124,6 +124,13 @@ agents:
                module actions and workflows that can be gated or metered.
              - experience_spec identifies the pricing, billing, account, usage,
                plan-management, upgrade, or admin surfaces the UI expects.
+               Its experience_spec.pages inventory is approved: preserve those
+               exact names and routes. page_surface_requirements must enrich
+               approved routes, never introduce new /billing or /usage pages.
+               Put plan comparison, account billing, and usage requirements on
+               the approved pricing/subscription surface unless separate pages
+               already exist in that inventory. If a required surface is absent,
+               report the missing design input instead of inventing a route.
              - Require a subscription contract only when the app sells recurring
                access, paid feature gates, seats, account-level quotas, prepaid
                usage/credits, token allowances, or usage budgets.
@@ -206,7 +213,7 @@ agents:
                describe which semantic pricing surface is needed.
              - Page schema materialization may choose different pricing primitive variants
                based on experience_spec and design_surface_map, but the data source
-               remains the billing module's get_plans action reading
+               remains the app-owned billing_portal facade's list_plans action reading
                config/subscriptions.yaml.
       - id: contract_rules
         heading: '[CONTRACT RULES]'
@@ -275,11 +282,12 @@ agents:
               billing admin actions, payment-provider product ids, price ids,
               API keys, secrets, invoices, or settlement.
           14. When contract_required is true, include an app_generator_instruction
-              for app planning that says: the billing module must expose a
-              public_readonly get_plans action (no permissions, no entitlement_gate)
-              that reads config/subscriptions.yaml using load_subscriptions_config
-              and returns the plan catalog. This is the canonical data source for
-              the /pricing page — never hardcode plan data in JSX or YAML.
+              for app planning that says: reuse the app-owned billing_portal
+              facade's public_readonly list_plans action (no permissions, no
+              entitlement_gate), which reads config/subscriptions.yaml and
+              returns the plan catalog. Bind the approved pricing page to
+              /api/modules/billing_portal/list_plans; do not create another billing
+              module or a get-plans alias. Never hardcode plan data in JSX or YAML.
           15. Do not use subscription_config_file to define managed
               infrastructure provisioning, BYOK fulfillment, or provider
               deployment steps. Those belong in the owning module's

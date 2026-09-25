@@ -149,8 +149,12 @@ the contract.
 
 `AppGenerator` and `AgentGenerator` consume the saved contract. They may choose
 different UI primitive variants for the pricing surface, but the data source
-must remain the generated app billing module's `get_plans` action reading
-`config/subscriptions.yaml`.
+must remain the existing app-owned `billing_portal.list_plans` facade action
+reading `config/subscriptions.yaml`. It is public-readonly, without permissions
+or an entitlement gate; managed checkout stays behind the provider client.
+Subscription page requirements use routes already approved in
+`experience_spec.pages`, including the pricing surface designed before the
+subscription contract.
 
 ## Boundary
 
