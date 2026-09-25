@@ -667,6 +667,94 @@ def validate_plan_dependencies(plan: dict[str, Any], context: Any) -> None:
 
 
 
+def _resolved_subscription_contract(context: Any) -> dict[str, Any] | None:
+    """The approved contract, from state or the artifact fallback.
+
+    Delegates to the shared resolver so this cannot drift from what the
+    injector shows the agent and what the build tools serialize.
+    """
+    from factory_app.workflows._shared.subscription_contract_context import (
+        _extract_summary_payload,
+    )
+
+    for key in ("subscription_contract", "subscription_contract_artifact"):
+        payload = _extract_summary_payload(detach(context.get(key)))
+        if payload is not None:
+            return payload
+    return None
+
+
+def _repair_subscription_config_task(plan: dict[str, Any], context: Any) -> list[str]:
+    """Add the subscription_config task when the contract requires one.
+
+    Every field of this task is dictated by the contract. There is no planning
+    decision in it:
+
+        task_type  subscription_config     capability_pack_id  null
+        surface_id subscription_contract   surface_kind        app_policy
+        initial_agent ConfigMiddlewareAgent
+        owned_paths   ['config/subscriptions.yaml']
+
+    The planner is told to emit it, in its own prompt and again in the injected
+    [SUBSCRIPTION CONTRACT CONTEXT]. On the 2026-09-25 acceptance run at OSS
+    27ebdedc the injection is logged, three times, against the agent that
+    needed it:
+
+        SUBSCRIPTION_CONTRACT_CONTEXT injected agent=AppPlanAgent
+          contract_required=True plans=2 chars=5510
+
+    The plan omitted the task anyway, on all three attempts, and was rejected
+    each time for declaring a monetization_provider with no task to justify it.
+    Four earlier runs failed the same way for four different reasons; this is
+    the first where the instruction is provably in front of the agent.
+
+    A structure with no degrees of freedom is not a reasoning task. Asking a
+    model to reproduce one and failing the build when it does not is a
+    templating job dressed as planning, so the repair lane materializes it --
+    the same thing _repair_coverage and _repair_contract_task_operations
+    already do for tasks the planner should have emitted and did not.
+
+    The contract is read from `subscription_contract`, falling back to
+    `subscription_contract_artifact`, matching the injector and the build
+    tools. Nothing is synthesized when no contract requires it.
+    """
+    contract = _resolved_subscription_contract(context)
+    if not contract or contract.get("contract_required") is not True:
+        return []
+
+    tasks = plan.get("build_tasks") or []
+    if any(str(task.get("task_type") or "").strip() == "subscription_config" for task in tasks):
+        return []
+
+    plan["build_tasks"] = [
+        *tasks,
+        {
+            "task_id": "subscription_config",
+            "task_type": "subscription_config",
+            "capability_pack_id": None,
+            "surface_id": "subscription_contract",
+            "surface_kind": "app_policy",
+            "initial_agent": "ConfigMiddlewareAgent",
+            "execution_target": "ConfigMiddlewareAgent",
+            "description": "Serialize the approved subscription contract to config/subscriptions.yaml.",
+            "initial_message": (
+                "Serialize subscription_contract.subscription_config_file to "
+                "config/subscriptions.yaml exactly as approved. Emit no module, service, "
+                "payment-provider, host-owned billing, or token ledger code."
+            ),
+            "owned_paths": ["config/subscriptions.yaml"],
+            "depends_on": [],
+            "context_variables": [],
+            "integration_needs": [],
+            "domain_context": None,
+        },
+    ]
+    return [
+        "added the subscription_config task the approved contract requires "
+        "(owned_paths=['config/subscriptions.yaml'])"
+    ]
+
+
 def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list[str]:
     """Name the planner's operations in the task the contract agent reads.
 
@@ -910,6 +998,7 @@ def review_app_build_plan(
             *_repair_plan(plan, context_variables),
             *_repair_missing_read_operation(plan, context_variables),
             *_repair_coverage(plan, context_variables),
+            *_repair_subscription_config_task(plan, context_variables),
             *_repair_contract_task_operations(plan, context_variables),
             *_repair_page_contract_dependencies(plan, context_variables),
         ):
