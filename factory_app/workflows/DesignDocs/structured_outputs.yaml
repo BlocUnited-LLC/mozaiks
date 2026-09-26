@@ -352,7 +352,7 @@ models:
       pages:
         type: list
         items: UIPage
-        description: Complete approved inventory of persistent pages. Greenfield monetization requires Pricing at /pricing; subscription concepts also include the default capability's Billing and Usage facade pages. Free apps do not acquire monetization pages. Every page has one primary surface_map owner.
+        description: App-owned persistent page designs. For enabled greenfield subscription concepts, the save boundary completes the approved inventory from the MozaiksPay facade page declarations and assigns billing_portal ownership, preserving designs already on those routes. Other enabled monetization requires a designed Pricing page at /pricing. Free apps do not acquire monetization pages. Every saved page has one primary surface_map owner.
 
   DesignDocsBundle:
     type: model

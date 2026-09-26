@@ -19,9 +19,11 @@ This project follows a practical pre-1.0 changelog format:
   repairs likewise merge through a tool before metadata and export, preserving
   workflows that already passed (#721, #727).
 
-- Monetized greenfield designs include pricing and required subscription facade
-  pages before their inventory is approved. Subscription design stays within
-  that inventory and uses the existing billing facade's local plan catalog.
+- Monetized greenfield subscription designs materialize missing Pricing,
+  Billing, and Usage pages from the MozaiksPay pack before inventory approval,
+  instead of rejecting the save when the model omits them. Existing page designs
+  are preserved and assigned to the billing facade; subscription design and app
+  planning keep the completed inventory unchanged.
 
 - Registered hooks that could never fire now fire. An audit resolved every
   `middleware.yaml` entry and every `lifecycle_tools` entry with the runtime's

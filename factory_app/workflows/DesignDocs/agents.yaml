@@ -42,27 +42,26 @@ agents:
   - id: monetization_surfaces
     heading: '[MONETIZATION SURFACES]'
     content: |-
-      Design the monetization experience before the page inventory is approved.
-      experience_spec.pages is the complete, authoritative name/route inventory;
-      downstream subscription design supplies plan details within those pages.
-      App planning must preserve that inventory exactly.
+      Design app-owned pages and the monetization decisions that require product
+      judgment. The saved experience_spec.pages is the complete, authoritative
+      name/route inventory; downstream subscription design supplies plan details
+      within those pages. App planning must preserve that inventory exactly.
 
       For a greenfield initial build with monetization_enabled: true:
-      - Include Pricing at /pricing in experience_spec.pages, with explicit
-        layout, navigation, and primitive sections for plan comparison and
-        subscription selection. Use concept_blueprint.monetization_intent's
-        money_flow_summary and likely_revenue_models to describe the intent;
-        plan names, prices, and quotas are designed downstream, not invented here.
-      - When monetization_intent records both monetized: true and
-        subscription_contract_likely: true, also design Billing at /billing
-        for subscription status/management and Usage at /usage for measured
-        usage. These are required facade pages of the default subscription
-        capability, not extra pages for downstream planning to invent.
-      - Give each page exactly one primary owner in surface_map. For subscription
-        billing use the existing app-owned billing_portal module facade, with
-        owned_pages naming Pricing, Billing, and Usage. It owns no provider
-        records, subscription assignment storage, or token ledger. The managed
-        provider remains a separate hosted external_integration surface.
+      - When concept_blueprint.monetization_intent records both monetized: true
+        and subscription_contract_likely: true, the save boundary materializes
+        the MozaiksPay pack's declared Pricing (/pricing), Billing (/billing),
+        and Usage (/usage) facade pages and assigns them to billing_portal in
+        surface_map. You do not need to reproduce these pack-declared designs.
+        A page you already designed at the same route is preserved, not duplicated.
+      - Otherwise, include Pricing at /pricing in experience_spec.pages, with
+        explicit layout, navigation, primitive sections, and one primary
+        surface_map owner. Use concept_blueprint.monetization_intent's
+        money_flow_summary and likely_revenue_models to describe the intent.
+      - Plan names, prices, and quotas are designed downstream, not invented here.
+        The app-owned billing_portal facade owns no provider records,
+        subscription assignment storage, or token ledger. The managed provider
+        remains a separate hosted external_integration surface.
       - Describe public plan browsing through billing_portal.list_plans, which
         reads config/subscriptions.yaml. Checkout and billing management use
         the managed provider client behind that facade. Usage and token reads
@@ -73,10 +72,9 @@ agents:
       or a billing facade for monetization. Keep the free app's product pages.
       For brownfield adoption or a revision, preserve the approved adoption or
       revision scope; existing billing may already be owned outside that scope.
-      A greenfield save with missing required pages or page ownership is refused
-      with design_docs_save_feedback. Revise the design, including its frontend
-      document and surface_map, before retrying; no downstream stage adds pages
-      to make an incomplete design valid.
+      For design_docs_save_feedback, repair the indicated app-owned design or
+      ownership error before retrying. Pack-declared pages are completed at this
+      save boundary before downstream stages consume the approved inventory.
   - id: theme_identity
     heading: '[THEME IDENTITY]'
     content: |-
