@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator repairs drifted module task capability labels when the approved
+  surface and owned paths agree, preserving the planner's tasks and preventing
+  coverage repair from assigning their files to duplicate tasks.
+
 - AppGenerator repairs repeated task IDs across modules before plan validation,
   preserving each module's own contract dependencies. Monetized builds can plan
   both their app modules and the billing facade without duplicate-ID failures.

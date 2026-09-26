@@ -141,6 +141,18 @@ Two candidates in the same module/type slot or an ambiguous cross-module
 reference still require planner revision. No tasks are discarded to resolve an
 identity collision, and the dependency graph still rejects duplicate IDs.
 
+Immediately after task identity repair, AppGenerator repairs a module-local
+task's `capability_pack_id` only when its `surface_id` names an approved
+app-owned module and every owned path lies safely under `modules/{surface_id}/`.
+This applies to `module_contract`, `data_models`, and `business_services`;
+persistence contracts and migrations own `data/*` and keep their separate
+contract. Empty ownership, unapproved surfaces, and surface/path disagreements
+remain validation errors; label spelling is never used to guess a module.
+The repair preserves the planner's tasks before coverage and dependency repair.
+Module coverage repair refuses to synthesize a task or extend its paths when
+another task already owns any of the missing files, regardless of its label
+or task type. Origin validation remains the acceptance boundary.
+
 After approval, task IDs are opaque, stable execution identities. Task batches,
 result assembly, and repair re-entry carry `task_id` separately from `task_type`;
 they do not derive a worker type from an ID or rename completed task evidence.

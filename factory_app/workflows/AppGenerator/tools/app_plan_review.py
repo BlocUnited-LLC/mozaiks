@@ -11,12 +11,14 @@ import yaml
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _CANONICAL_INITIAL_AGENTS,
+    _MODULE_LOCAL_TASK_TYPES,
     _context_available_pack_map,
     _facade_pack_descriptor,
     _normalized_owned_paths,
     _pack_id_from_descriptor,
     app_build_plan,
 )
+from mozaiksai.core.runtime.app.paths import is_safe_app_path
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.dependency_graph import deterministic_topological_order
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
@@ -140,6 +142,34 @@ def _repair_task_identities(plan: dict[str, Any], context: Any) -> list[str]:
                     seen.add(identities[index])
         repaired["generation_order"] = order
     plan.update(repaired)
+    return repairs
+
+
+def _repair_module_task_capabilities(plan: dict[str, Any], context: Any) -> list[str]:
+    """Use approved surface/path agreement before label-based coverage repair."""
+    design = detach(context.get("design_surface_map")) or {}
+    approved = {
+        surface["surface_id"]
+        for surface in design.get("surfaces") or []
+        if surface.get("owner") == "app" and surface.get("surface_kind") == "module"
+    }
+    repairs: list[str] = []
+    for task in plan.get("build_tasks") or []:
+        surface_id = task.get("surface_id")
+        if task.get("task_type") not in _MODULE_LOCAL_TASK_TYPES or surface_id not in approved:
+            continue
+        paths = _normalized_owned_paths(task)
+        if not paths or not all(is_safe_app_path(path) for path in task.get("owned_paths") or []):
+            continue
+        if not all(path.startswith(f"modules/{surface_id}/") for path in paths):
+            continue  # Disagreement still belongs to origin validation.
+        previous = task.get("capability_pack_id")
+        if previous != surface_id:
+            task["capability_pack_id"] = surface_id
+            repairs.append(
+                f"{task.get('task_id')}: capability_pack_id {previous!r} -> {surface_id!r} "
+                "from approved surface_id and owned_paths"
+            )
     return repairs
 
 
@@ -425,6 +455,10 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
 
     # 3. Every generated module needs its required files owned by a task of the
     #    right type. The required set is derived exactly as the validator does.
+    path_owners: dict[str, list[str]] = {}
+    for task in tasks:
+        for path in _normalized_owned_paths(task):
+            path_owners.setdefault(path, []).append(str(task.get("task_id")))
     for pack in plan.get("capability_packs") or []:
         if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
             continue
@@ -448,6 +482,12 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             missing = sorted(paths - owned)
             if not missing:
                 continue
+            conflicts = {path: path_owners[path] for path in missing if path in path_owners}
+            if conflicts:
+                raise ValueError(
+                    f"{module_id}/{kind}: cannot repair coverage; required paths already owned "
+                    f"by other tasks: {conflicts}. Correct the existing task's module/type ownership."
+                )
             if typed:
                 target = typed[0]
                 target["owned_paths"] = list(target.get("owned_paths") or []) + missing
@@ -471,6 +511,9 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                 tasks.append(synthesized)
                 module_tasks.append(synthesized)
                 repairs.append(f"synthesized {synthesized['task_id']!r} owning {missing}")
+                target = synthesized
+            for path in missing:
+                path_owners[path] = [str(target["task_id"])]
 
     plan["build_tasks"] = tasks
     repairs.extend(_repair_module_task_dependencies(plan))
@@ -1216,6 +1259,7 @@ def review_app_build_plan(
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
         for repair in (
             *_repair_task_identities(plan, context_variables),
+            *_repair_module_task_capabilities(plan, context_variables),
             *_repair_managed_facade_capabilities(plan, context_variables),
             *_repair_plan(plan, context_variables),
             *_repair_missing_read_operation(plan, context_variables),
