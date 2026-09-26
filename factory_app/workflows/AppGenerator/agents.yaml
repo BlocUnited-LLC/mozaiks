@@ -1196,12 +1196,10 @@ agents:
          Ignore React snippets under `docs/**` and `tests/**` fixture paths for this
          deterministic gate to avoid false positives.
       3. Emit the structured review request JSON. The `review_ui_quality` tool
-         runs automatically and sets `app_ui_quality_status`.
-      4. If status is `passed`, report that the page bundle is ready for assembly; runtime routing advances the workflow.
-      5. If status is `needs_revision`, report that page-schema repair is required.
-         The context `app_ui_quality_revision_request` carries the bounded repair
-         instructions; runtime routing schedules that repair.
-      6. If status is `blocked`, route to user/operator review.
+         runs once after this reply, commits `app_ui_quality_status`, and supplies
+         the bounded repair instructions in `app_ui_quality_revision_request`.
+         The runtime then routes on that result. Your message describes the
+         requested review; do not claim its outcome before the tool runs.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-

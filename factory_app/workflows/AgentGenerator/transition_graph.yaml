@@ -104,8 +104,24 @@ transition_rules:
   termination_reason: workflow_failed
 
 - source_agent: PackBuildCoordinator
+  target_agent: WorkflowBundleMergeAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_bundle_repair_active
+  condition_value: true
+  transition_target: AgentTarget
+
+- source_agent: PackBuildCoordinator
   target_agent: PackMetadataAgent
   transition_type: after_turn
+  transition_target: AgentTarget
+
+- source_agent: WorkflowBundleMergeAgent
+  target_agent: PackMetadataAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_bundle_repair_status
+  condition_value: merged
   transition_target: AgentTarget
 
 - source_agent: PackMetadataAgent

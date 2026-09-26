@@ -256,10 +256,14 @@ schedules a bounded repair pass instead of broad regeneration. It writes
 `workflow_bundle_results`, narrows `workflows_spec` to the failed workflow
 specs, and routes back to `PackBuildCoordinator`. Each repaired worker receives
 the exact quality-gate failures in its scoped `initial_message`. After the
-repair task batch completes, `PackMetadataAgent` merges repaired workflow
-outputs back into the preserved successful bundle outputs before metadata and
-packaging run again. After the configured attempt limit, the status becomes
-`blocked` and the workflow returns to the user.
+repair task batch completes, `WorkflowBundleMergeAgent` invokes the deterministic
+`merge_workflow_bundle_repair_results` auto tool. It commits repaired workflow
+outputs together with the preserved successful outputs and restores the complete
+`workflows_spec` before `PackMetadataAgent` generates metadata and packaging runs
+again. The merge is not a prompt hook: `workflow_bundle_results` requires an
+authorized writer. Only a committed `merged` status advances to metadata; a
+refused write cannot report success. After the configured attempt limit, the
+status becomes `blocked` and the workflow returns to the user.
 
 The live AgentGenerator pack smoke also emits the same `semantic_drift` report.
 That report is intentionally prompt-oriented: it flags generated workflow YAML
@@ -336,6 +340,7 @@ AgentGenerator's runtime path is a compact task-batch workflow:
 - `ProjectOverviewAgent` presents the generated-workflow plan for review.
 - `PackBuildCoordinator` triggers `workflow_generation_tasks`.
 - `WorkflowBundleBuilderAgent` workers generate complete workflow bundles in parallel.
+- `WorkflowBundleMergeAgent` restores the full workflow set after a repair batch.
 - `PackMetadataAgent` generates pack-level routing metadata.
 - `DownloadAgent` packages the generated artifacts.
 

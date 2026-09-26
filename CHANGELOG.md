@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator's UI review now commits its quality status through an authorized
+  tool before routing, preserving the configured revision budget. Workflow pack
+  repairs likewise merge through a tool before metadata and export, preserving
+  workflows that already passed (#721, #727).
+
 - Monetized greenfield designs include pricing and required subscription facade
   pages before their inventory is approved. Subscription design stays within
   that inventory and uses the existing billing facade's local plan catalog.

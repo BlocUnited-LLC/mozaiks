@@ -83,6 +83,16 @@ Exhaustion leaves the plan unready and the worker queue empty, then terminates
 as a workflow failure. Graph outcome operations remain separate from task-batch
 triggers; this gate does not change that runtime contract. Scoped revision and
 brownfield plans do not have to regenerate the entire genesis inventory.
+
+UI review follows the same authorized tool boundary. After validated
+`AppUIQualityReviewRequest` output, the `review_ui_quality` auto tool audits
+the artifacts persisted by `save_app_schema` and commits `app_ui_quality_status`
+before the AG2 packet selects the next speaker. One invocation spends at most
+one revision attempt. `passed` routes to AdminRegistryAgent, `needs_revision`
+to AppSchemaAgent, and `blocked` to the user. An unset status still fails with
+`no_transition_matched`; prompt middleware does not write this closed-writer
+quality state or recover schema artifacts from chat history.
+
 Partial revisions preload the selected target-owned app-bundle archive into
 `generated_files`. The Factory reader verifies the committed archive digest;
 foreign ownership, retired records, missing content, and incomplete text-file

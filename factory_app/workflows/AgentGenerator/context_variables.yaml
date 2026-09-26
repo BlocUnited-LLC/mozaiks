@@ -936,6 +936,10 @@ agents:
     - adoption_plan
     - ownership_boundary
     - brownfield_registration
+  WorkflowBundleMergeAgent:
+    variables:
+    - workflow_bundle_repair_count
+    - workflow_bundle_repair_failed_workflows
   PackMetadataAgent:
     variables:
     - build_mode

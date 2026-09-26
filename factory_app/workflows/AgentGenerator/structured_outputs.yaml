@@ -2392,11 +2392,20 @@ models:
         type: int
         description: Number of workflow bundles that will be generated in parallel.
 
+  WorkflowBundleMergeRequest:
+    type: model
+    description: Request the deterministic merge of repaired workflows into the complete pack.
+    fields:
+      agent_message:
+        type: str
+        description: Brief request to restore the full pack; the tool determines merge success.
+
 registry:
   InterviewAgent: WorkflowInterviewResult
   PatternAgent: PatternSelectionOutput
   ProjectOverviewAgent: MermaidSequenceDiagramOutput
   PackBuildCoordinator: PackBuildCoordinatorOutput
+  WorkflowBundleMergeAgent: WorkflowBundleMergeRequest
   WorkflowBundleBuilderAgent: WorkflowBundleBuilderOutput
   PackMetadataAgent: PackMetadataOutput
   DownloadAgent: DownloadRequestOutput
