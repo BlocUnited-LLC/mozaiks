@@ -39,7 +39,7 @@ from __future__ import annotations
 from typing import Any
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
-    _apply_default_monetization_provider,
+    _resolve_monetization_provider,
     _validate_monetization_provider_selection,
 )
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
@@ -122,7 +122,7 @@ def test_the_repaired_plan_clears_the_live_rejection() -> None:
     """End to end in the order app_build_plan uses: apply provider, then validate."""
     plan = _plan()
 
-    packs, provider = _apply_default_monetization_provider(
+    packs, provider = _resolve_monetization_provider(
         plan["capability_packs"], plan["build_tasks"],
         monetization_provider=plan["monetization_provider"], context_variables=_ctx(),
     )
@@ -134,7 +134,7 @@ def test_the_repaired_plan_clears_the_live_rejection() -> None:
 
     _repair_subscription_config_task(plan, _ctx())
 
-    packs, provider = _apply_default_monetization_provider(
+    packs, provider = _resolve_monetization_provider(
         plan["capability_packs"], plan["build_tasks"],
         monetization_provider=plan["monetization_provider"], context_variables=_ctx(),
     )

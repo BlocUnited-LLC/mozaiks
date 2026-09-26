@@ -14,6 +14,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator constructs omitted page bundles and module task structure from
+  approved inputs, including empty task plans, and shares required file and
+  worker rules with validation. Unapproved scope and unresolved judgment still
+  receive bounded feedback; read actions and unselected subscription providers
+  are no longer guessed. Facade dependencies use registered provider bindings.
+
 - AppGenerator rejects capabilities and tasks for unapproved surfaces before
   plan repairs or capability-ID checks, with feedback to remove invented work
   and keep authentication in the platform.

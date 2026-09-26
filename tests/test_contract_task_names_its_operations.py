@@ -132,43 +132,26 @@ def test_the_repair_is_idempotent() -> None:
     assert _repair_contract_task_operations(plan, None) == []
 
 
-def test_it_composes_with_the_missing_read_repair() -> None:
-    """#634 appends a synthesized read; both repairs must agree on the result.
-
-    #634 names its synthesized action in its own note, so this repair sees it as
-    already named. The planner's other operations are not, so the authoritative
-    list is still emitted - and it lists every operation including the
-    synthesized one, which is the point of calling it authoritative. One
-    complete list beats a list that omits the action the other repair just
-    added.
-    """
+def test_public_review_renders_explicit_approved_operations_without_guessing() -> None:
     from factory_app.workflows.AppGenerator.tools.app_plan_review import (
-        _repair_missing_read_operation,
+        review_app_build_plan,
     )
+    from mozaiksai.core.workflow.context.frozen import detach
+    from tests.test_continuous_deterministic_materialization import _load_models
+    from tests.test_plan_read_operation import _approved_plan
 
-    class _Ctx:
-        def get(self, key: str, default: Any = None) -> Any:
-            return {
-                "design_surface_map": {
-                    "surfaces": [
-                        {
-                            "surface_id": "habits_module",
-                            "owner": "app",
-                            "surface_kind": "module",
-                            "primary_entities": ["Habit"],
-                        }
-                    ]
-                }
-            }.get(key, default)
+    _load_models()
+    plan, context = _approved_plan(["list_reports"])
+    design = detach(context.get("design_surface_map"))
+    design["surfaces"][0]["owned_mutations"] = ["create_report", "archive_report"]
+    context.set("design_surface_map", design)
 
-        def set(self, key: str, value: Any) -> None:
-            pass
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
 
-    plan = _plan(operations=["create_habit"])
-    _repair_missing_read_operation(plan, _Ctx())
-    _repair_contract_task_operations(plan, None)
-
-    message = _message(plan)
-    # Exactly one authoritative list, and it is complete.
+    assert result["outcome"] == "ready", result
+    cached = detach(context.get("app_build_plan"))
+    contract = next(task for task in cached["build_tasks"] if task["task_type"] == "module_contract")
+    message = contract["initial_message"]
     assert message.count("Actions for this module (authoritative") == 1
-    assert "`create_habit`" in message and "`list_habits`" in message
+    assert all(f"`{operation}`" in message for operation in ["list_reports", "create_report", "archive_report"])
+    assert cached["capability_packs"][0]["operations"] == ["list_reports", "create_report", "archive_report"]
