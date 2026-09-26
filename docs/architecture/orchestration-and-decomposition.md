@@ -116,7 +116,7 @@ Every task-batch item needs a harness-visible base contract:
 
 | Field | Purpose |
 | --- | --- |
-| `task_id` | Stable id used for dependency tracking and result identity. |
+| `task_id` | Stable, unique id within the plan, used for dependency tracking and result identity. |
 | `initial_agent` | Worker agent that executes this item. |
 | `initial_message` | Seed prompt passed to the worker. |
 | `owned_paths` or equivalent ownership field | Output surface this task exclusively owns. |
@@ -129,6 +129,21 @@ Domain-specific task metadata belongs in a typed pass-through object or task
 model fields consumed by the worker agent. The runtime should not infer product
 meaning from fields such as `task_type`; it should use only the harness-visible
 fields needed to schedule, scope, and validate execution.
+
+AppGenerator reviews task identity before any other plan repair. When draft IDs
+collide across modules, it qualifies the colliding IDs with the capability or
+surface ID and task type, preserving existing unique IDs. Dependencies resolve
+to the task in the same module; page tasks retain visibility of all module
+contracts. Module dependency repairs select prerequisites by module and task
+type before writing the resolved task ID. Typed task references in integration
+needs, carry-forward decisions, and generation order follow the repaired IDs.
+Two candidates in the same module/type slot or an ambiguous cross-module
+reference still require planner revision. No tasks are discarded to resolve an
+identity collision, and the dependency graph still rejects duplicate IDs.
+
+After approval, task IDs are opaque, stable execution identities. Task batches,
+result assembly, and repair re-entry carry `task_id` separately from `task_type`;
+they do not derive a worker type from an ID or rename completed task evidence.
 
 ### 4. Refinement Engine Routing
 

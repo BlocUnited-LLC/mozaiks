@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator repairs repeated task IDs across modules before plan validation,
+  preserving each module's own contract dependencies. Monetized builds can plan
+  both their app modules and the billing facade without duplicate-ID failures.
+
 - AppGenerator repairs approved MozaiksPay facade capabilities before plan
   validation, keeping the managed provider separate from `billing_portal` and
   preserving approved data ownership through plan normalization.

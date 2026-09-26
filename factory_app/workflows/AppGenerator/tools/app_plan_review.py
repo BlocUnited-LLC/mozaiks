@@ -32,6 +32,117 @@ def _clear_plan(context: Any) -> None:
     context.set("app_task_batch_status", None)
 
 
+def _task_scope(task: dict[str, Any]) -> str:
+    return str(task.get("capability_pack_id") or task.get("surface_id") or "").strip()
+
+
+def _tasks_by_scope_and_type(tasks: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    indexed: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for task in tasks:
+        key = (_task_scope(task), str(task.get("task_type") or ""))
+        indexed.setdefault(key, []).append(task)
+    return indexed
+
+
+def _available_task_id(preferred: str, reserved: set[str]) -> str:
+    candidate = preferred
+    suffix = 2
+    while candidate in reserved:
+        candidate = f"{preferred}.{suffix}"
+        suffix += 1
+    reserved.add(candidate)
+    return candidate
+
+
+def _repair_task_identities(plan: dict[str, Any], context: Any) -> list[str]:
+    """Qualify colliding draft IDs before any repair writes dependency edges.
+
+    Task type selects a worker contract; task ID identifies one build unit.
+    Repeated type names are resolvable across modules, but two candidates in
+    the same scope or an unscoped cross-module edge still require judgment.
+    """
+    tasks = plan.get("build_tasks") or []
+    by_id: dict[str, list[int]] = {}
+    for index, task in enumerate(tasks):
+        by_id.setdefault(str(task.get("task_id") or "").strip(), []).append(index)
+    collisions = {identifier for identifier, indexes in by_id.items() if len(indexes) > 1}
+    if not collisions:
+        return []
+
+    by_scope_and_type = _tasks_by_scope_and_type(tasks)
+    reserved = set(by_id) - collisions
+    identities = [str(task.get("task_id") or "") for task in tasks]
+    repairs: list[str] = []
+    for index, task in enumerate(tasks):
+        old_id = identities[index].strip()
+        if old_id not in collisions:
+            continue
+        scope, kind = _task_scope(task), str(task.get("task_type") or "")
+        if not old_id or not scope or not kind or len(by_scope_and_type[(scope, kind)]) != 1:
+            raise ValueError(
+                f"Cannot qualify duplicate task_id {old_id!r}: expected one task for "
+                f"scope={scope!r}, task_type={kind!r}. Declare distinct build units and explicit dependencies."
+            )
+        identities[index] = _available_task_id(f"{scope}.{kind}", reserved)
+        repairs.append(f"task_id {old_id!r} ({scope}) -> {identities[index]!r}")
+
+    def resolve(reference: str, scope: str, *, page_bundle: bool = False) -> list[str]:
+        indexes = by_id.get(str(reference).strip(), [])
+        if len(indexes) <= 1:
+            return [identities[indexes[0]]] if indexes else [reference]
+        local = [index for index in indexes if _task_scope(tasks[index]) == scope]
+        if len(local) == 1:
+            return [identities[local[0]]]
+        # Page work already requires visibility of every module contract. A
+        # shared page dependency on a repeated module phase means all owners.
+        if not local and page_bundle and all(
+            tasks[index].get("task_type") in {"module_contract", "data_models", "business_services"}
+            for index in indexes
+        ):
+            return [identities[index] for index in indexes]
+        raise ValueError(
+            f"Ambiguous task reference {reference!r} from scope {scope!r}; "
+            f"choose an explicit task from {[identities[index] for index in indexes]}"
+        )
+
+    # Resolve every typed reference before changing the caller's draft. A
+    # rejected ambiguity must not leave half-renamed task identities behind.
+    repaired = detach(plan)
+    for index, task in enumerate(repaired["build_tasks"]):
+        task["task_id"] = identities[index]
+        task["depends_on"] = list(dict.fromkeys(
+            resolved
+            for dependency in task.get("depends_on") or []
+            for resolved in resolve(dependency, _task_scope(task), page_bundle=task.get("task_type") == "page_bundle")
+        ))
+        for need in task.get("integration_needs") or []:
+            required_by = need.get("required_by") or {}
+            if required_by.get("kind") == "task" and required_by.get("id"):
+                required_by["id"] = resolve(required_by["id"], _task_scope(task))[0]
+    for decision in repaired.get("carry_forward_decisions") or []:
+        if decision.get("affected_build_tasks"):
+            decision["affected_build_tasks"] = list(dict.fromkeys(
+                resolved
+                for reference in decision["affected_build_tasks"]
+                for resolved in resolve(reference, str(decision.get("module_id") or ""))
+            ))
+    if repaired.get("generation_order"):
+        order: list[str] = []
+        seen: set[str] = set()
+        for reference in repaired["generation_order"]:
+            indexes = by_id.get(str(reference).strip())
+            if indexes is None:
+                order.append(reference)  # Advisory phase labels are not task IDs.
+                continue
+            for index in indexes:
+                if identities[index] not in seen:
+                    order.append(identities[index])
+                    seen.add(identities[index])
+        repaired["generation_order"] = order
+    plan.update(repaired)
+    return repairs
+
+
 def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
     """Fix plan fields whose correct value the validator already knows.
 
@@ -343,7 +454,9 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                 repairs.append(f"{target.get('task_id')}: {kind} gained {missing}")
             else:
                 synthesized = {
-                    "task_id": f"task_{module_id}_{kind}",
+                    "task_id": _available_task_id(
+                        f"task_{module_id}_{kind}", {str(task.get("task_id")) for task in tasks},
+                    ),
                     "task_type": kind,
                     "capability_pack_id": module_id,
                     "surface_id": pack.get("surface_id"),
@@ -368,6 +481,7 @@ def _repair_module_task_dependencies(plan: dict[str, Any]) -> list[str]:
     """Supply direct contract inputs after every module task has been synthesized."""
     repairs: list[str] = []
     tasks = plan.get("build_tasks") or []
+    by_scope_and_type = _tasks_by_scope_and_type(tasks)
     persistence_tasks = [
         str(task["task_id"])
         for task in tasks
@@ -385,8 +499,8 @@ def _repair_module_task_dependencies(plan: dict[str, Any]) -> list[str]:
             ("data_models", f"modules/{module_id}/backend/schemas.py"),
         ):
             owners = [
-                task for task in module_tasks
-                if task.get("task_type") == kind and path in _normalized_owned_paths(task)
+                task for task in by_scope_and_type.get((module_id, kind), [])
+                if path in _normalized_owned_paths(task)
             ]
             if len(owners) != 1:
                 raise ValueError(
@@ -593,10 +707,11 @@ def _repair_page_contract_dependencies(plan: dict[str, Any], context: Any) -> li
     """
     repairs: list[str] = []
     tasks = plan.get("build_tasks") or []
+    by_scope_and_type = _tasks_by_scope_and_type(tasks)
     contracts = [
         str(task.get("task_id"))
-        for task in tasks
-        if task.get("task_type") == "module_contract" and str(task.get("task_id") or "").strip()
+        for (_, kind), owners in by_scope_and_type.items() if kind == "module_contract"
+        for task in owners if str(task.get("task_id") or "").strip()
     ]
     if not contracts:
         return repairs
@@ -834,7 +949,7 @@ def _repair_subscription_config_task(plan: dict[str, Any], context: Any) -> list
     plan["build_tasks"] = [
         *tasks,
         {
-            "task_id": "subscription_config",
+            "task_id": _available_task_id("subscription_config", {str(task.get("task_id")) for task in tasks}),
             "task_type": "subscription_config",
             "capability_pack_id": None,
             "surface_id": "subscription_contract",
@@ -1100,6 +1215,7 @@ def review_app_build_plan(
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
         for repair in (
+            *_repair_task_identities(plan, context_variables),
             *_repair_managed_facade_capabilities(plan, context_variables),
             *_repair_plan(plan, context_variables),
             *_repair_missing_read_operation(plan, context_variables),

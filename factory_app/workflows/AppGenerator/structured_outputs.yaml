@@ -879,7 +879,9 @@ models:
     fields:
       task_id:
         type: str
-        description: Stable task identifier for the build unit.
+        description: >
+          Stable identifier unique across all build_tasks. Task identity is
+          separate from task_type, which can repeat for different modules.
       task_type:
         type: literal
         values:
@@ -972,7 +974,7 @@ models:
       depends_on:
         type: optional_list
         items: str
-        description: Task ids that must complete before this task runs.
+        description: Exact task_id references that must complete before this task runs; module prerequisites refer to that module's tasks.
       acceptance_criteria:
         type: optional_list
         items: str
