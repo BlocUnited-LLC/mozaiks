@@ -81,7 +81,10 @@ def test_only_an_explicit_choice_can_suppress_a_human_turn() -> None:
     assert chosen == {"autonomous": "autonomous", "guided": "guided"}
 
     rules = yaml.safe_load((APP_GENERATOR_DIR / "transition_graph.yaml").read_text(encoding="utf-8"))
-    bypass = [r for r in rules["transition_rules"] if r["source_agent"] == "user"][0]
+    bypass = next(
+        r for r in rules["transition_rules"]
+        if r["source_agent"] == "user" and r["target_agent"] == "AppPlanAgent"
+    )
     assert bypass["condition_value"] == "autonomous"
 
     # The bypass value and the default must differ, or an absent answer bypasses.

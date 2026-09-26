@@ -1,4 +1,12 @@
 transition_rules:
+# A user reply after task execution returns to the existing recovery policy.
+# Retained evidence and budgets must be checked before planning can run again.
+- source_agent: user
+  target_agent: AppValidationAgent
+  transition_type: condition
+  condition_type: context_expression
+  context_expression: "${app_task_batch_results}"
+  transition_target: AgentTarget
 # "Build it for me" has to be enforced by routing, not requested in a prompt.
 # interview_complete only flips when InterviewAgent emits the literal token
 # NEXT, so skipping the interview meant asking the model to volunteer its own
