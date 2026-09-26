@@ -93,9 +93,10 @@ Selected pack and subscription contracts retain their existing provider/facade
 and subscription authority. Verified revision/adoption inputs own baseline and
 change scope. These are proposed extensions of those owners, not fields already
 present today. Migration step 1 must settle the exact typed fields, producer,
-approval point, and immutable artifact reference for each missing decision
-before step 2 can centralize its construction rule. No free-form ledger supplies
-missing facts behind that boundary.
+approval point, and immutable artifact reference for each missing greenfield
+decision before step 2 can centralize its construction rule. Revision/adoption
+baseline decisions close in their later enablement slices, before those modes
+are admitted. No free-form ledger supplies missing facts behind that boundary.
 
 ### Construction rules to make explicit
 
@@ -459,6 +460,10 @@ a global prose-to-ID naming algorithm is out of scope.
 
 ### Consumers and modes
 
+This table describes the eventual consumer contract. Initial mode availability
+and the later enablement gates are specified below; consumer coverage does not
+require enabling every mode at the first producer cutover.
+
 | Consumer | Required change and preserved boundary |
 | --- | --- |
 | `AppGenerator/agents.yaml`, `structured_outputs.yaml`, `tools.yaml`, `context_variables.yaml`, middleware and transition bindings | Replace full-plan model authoring with keyed judgment candidates and the sole construction/review tool. Preserve bounded failure routing; no success on unresolved input. |
@@ -475,6 +480,68 @@ Generated runtime contracts, security enforcement, provider isolation, and
 promotion gates remain intact. Changes to planner structured-output contracts,
 artifact input provenance, and resume compatibility are real migration costs.
 
+### Greenfield export before brownfield: one producer, staged availability
+
+Choose **option (a)**: greenfield genesis reaches verified export before
+brownfield implementation is admitted. Replace the producer once for the entire
+Factory, while initially admitting only fresh greenfield genesis and recovery
+within its compiled, frozen plan. Revision and adoption remain explicitly
+unavailable until the same constructor supports their approved inputs. This
+supersedes the all-mode parity prerequisite for step 3; it accepts a temporary
+reduction in mode availability, not a claim that those modes already work.
+
+The no-dual-path rule is unchanged. At cutover, delete the previous full-plan
+authoring schemas, prompts, tools, repairs and alternate handoff producers for
+**every** mode, including modes still blocked. No dormant producer, mode switch
+to the previous planner, historical-plan conversion, or fallback is retained.
+An unsupported request stops with an explicit blocking result before planning,
+task dispatch or writes. Later mode support adds input closure and selection
+rules to this same constructor; it does not restore a second author.
+
+| Request at the initial cutover | Admission and required evidence |
+| --- | --- |
+| Fresh greenfield genesis, free or monetized | Admit after approved input closure. Require plan review, task execution, assembly, existing acceptance gates, canonical artifact persistence and verified export. |
+| Retry, repair or restart within that new genesis build | Admit only for the exact frozen plan, input revisions, constructor contract and original AG2 channel, retaining successful outputs and consumed budgets. Prove task recovery and owned artifact repair without recompiling the plan. |
+| Refinement/revision, including an existing lineage's full rebuild | Block until revision support is verified. A new build ID or `build_mode=initial` does not turn an existing lineage into fresh greenfield genesis. |
+| Brownfield discovery handoff, overlay or module generation | Block generation until adoption support is verified, even when it would create the app's first canonical artifact lineage. Read-only discovery may continue. |
+| Pre-cutover, foreign, unproven or stale plan/task cache and resume | Block execution. A self-consistent inventory or digest is insufficient; never stamp new construction provenance onto an old plan. |
+| Existing exported apps and read-only artifact inspection | Continue under their existing contracts; this restriction concerns Factory generation and mutation. |
+
+Admission must use trusted owner/target and lineage evidence, including
+`run_build_binding.phase` and adoption provenance, rather than a model-supplied
+mode label. Brownfield can itself be genesis, so the phase alone is insufficient.
+Same-plan worker repair can use a `needs_revision` quality outcome without
+becoming a new refinement plan. Conversely, changed requirements or ownership,
+including a post-export change request, cannot be relabeled as recovery to get
+through the greenfield gate.
+
+Enforce one Factory admission decision through the existing authority seams at
+all execution and write entrances: app-producing launch/refinement routes;
+review and construction; preloaded-plan hydration, including cached task items;
+batch dispatch/recovery and direct repair entry; save, assembly, acceptance and
+export; and both cold resume before pending-turn replay and live continuation.
+Current [before-chat lifecycle errors are logged and execution continues](https://github.com/BlocUnited-LLC/mozaiks/blob/ca5c1a5c/mozaiksai/core/workflow/orchestration_patterns.py#L801),
+and [plan hydration can skip when task items already exist](https://github.com/BlocUnited-LLC/mozaiks/blob/ca5c1a5c/factory_app/workflows/AppGenerator/tools/hydrate_app_build_plan_context.py#L33).
+Raising only in a hydration hook therefore does not establish this boundary.
+The implementation must prove rejection before execution or writes through
+every bypass, without adding a parallel scheduler or mode-routing subsystem.
+
+Drain or stop affected in-flight Factory runs before cutover and replace their
+loaded workflow/tool contracts together. Do not leave old in-memory runners or
+mixed producer versions serving other modes. Old saved artifacts remain
+inspectable, but old executions do not resume under the new contract. Rollback
+reverts the complete deployment; it never runs both producers together.
+
+The **initial acceptance/export gate** is a live monetized greenfield build
+through exported artifact, a free greenfield counterpart, same-plan failure and
+restart recovery, and rejection proofs for every unavailable entrypoint. Use
+the exact OSS/product commit pair and record plan/input and export digests.
+Passing review alone does not satisfy this gate. Brownfield success is not a
+prerequisite. After greenfield export passes, revision and then adoption gain
+their own live enablement gates. Until each passes, its admission remains
+blocked. Full mode parity is required to claim those modes supported, not to
+accept the first greenfield export; this does not authorize a public release.
+
 ### Migration and live verification order
 
 No implementation or live model spend is authorized by this proposed ADR.
@@ -485,17 +552,19 @@ acceptance evidence. Never count an old cached plan as proof of the new path.
 
 | Step | Bounded change and deletion boundary | Live verification |
 | --- | --- | --- |
-| 1. Close and pin inputs | Establish exact approved revision/pack selection reads, within-lineage ID preservation, auth disposition, and a finite list of unresolved realization choices. Reconcile data-contract projection before using it. Include mode/baseline authority. Keep the existing planner as the sole producer during this preparatory slice; do not add a second runnable plan path. | Repeat a monetized design through handoff/reload and verify identical accepted identities. Missing facts yield specific feedback. This step alone does not remove the current planner's ability to invent `user_auth`. |
-| 2. Centralize construction rules | Extract the existing mandatory task/path/worker/dependency/pack rules into their canonical catalogs/helpers, used by the incumbent path only. Add construction proofs for the closed inputs and explicit optional output declarations. No shadow production compiler or new semantic store. Prepare input-to-task and baseline selection mappings; do not activate the offline generalized compiler. | Run the same monetized case and compare selected identities/owners and revision scope at the existing review boundary. A live rejection can still occur; this slice proves rule extraction without claiming the incident fixed. |
-| 3. Replace the producer atomically | Switch model output to keyed judgments, construct the AppBuildPlan once, and delete all structural repair/normalization/full-plan authoring paths listed above. Update review, hydration, task projection, assembly and recovery consumers in the same slice. Retain the operational AppBuildPlan result shape to bound consumer change, not its old model-authoring contract. Require parity for supported genesis, revision and brownfield modes; if a mode lacks closed inputs, do not merge this cutover with a fallback to the previous producer. | **First step expected to pass review for the reported monetized traversal**, provided approved inputs and bounded judgments are complete: exactly the approved `tasks`, selected managed provider and `billing_portal`, no `user_auth`, one task owner per path, correct subscription task and DAG. Repeat with varied model wording and attempted unauthorized fields; inject invalid candidates to prove rejection, then supply valid judgments and prove `ready`. Run free, revision, adoption and recovery counterparts before accepting the slice. |
-| 4. Prove lifecycle stability | Complete live restart, refinement and adoption acceptance against the single producer. Verify that step 3 deleted obsolete paths, fixtures and guidance, and assert retired authoring/repair entrypoints cannot execute. Cleanup is required in step 3, not deferred here. No additional compiler or fallback is introduced. | Recover a failed worker without changing the frozen plan or replaying successful work; make a scoped revision, preserve unaffected files, exercise an adopted app, and run generated-app functional acceptance. Record failures separately from plan-review success. |
+| 1. Close and pin greenfield inputs | Establish exact approved artifact/pack reads, within-lineage ID preservation, auth disposition, and unresolved realization choices for greenfield. Reconcile its data-contract projection. Identify trusted lineage/adoption evidence needed to reject other modes; defer their baseline compilation semantics. Keep the existing planner as the sole producer in this preparatory slice. | Repeat a monetized design through handoff/reload and verify identical accepted identities. Missing facts yield specific feedback. This step alone does not remove the current planner's ability to invent `user_auth`. |
+| 2. Centralize construction rules | Extract mandatory task/path/worker/dependency/pack rules into canonical catalogs/helpers used by the incumbent path only. Prove greenfield construction and explicit optional outputs; prepare its frozen-plan consumers, recovery and export, plus rejection coverage for deferred modes. No shadow production compiler or new semantic store; do not activate the offline generalized compiler. | Run the same monetized case and compare selected identities/owners at the existing review boundary. A live rejection can still occur; this proves rule extraction without claiming the incident fixed. |
+| 3. Replace the producer atomically; export greenfield | Switch model output to keyed judgments and construct AppBuildPlan once. Delete all previous structural repair/normalization/full-plan producers for every mode. Update admission, review, hydration, task projection, assembly, recovery and export together. Retain the internal result shape, not its model-authoring contract. Admit only the greenfield cases above; deferred modes block with no fallback. | **First step expected to pass review for the reported monetized traversal**, given complete approved inputs and judgments: exactly approved `tasks`, selected provider and `billing_portal`, no `user_auth`, unique path ownership, subscription task and DAG. Prove invalid-candidate rejection, then valid `ready`. Continue through the initial acceptance/export gate above, including free genesis and same-plan recovery; brownfield is not a prerequisite. |
+| 4. Enable revision/refinement | After greenfield export, add verified baseline/change-scope inputs and delta selection to the same constructor. Require preserved ownership, explicit deletions and carry-forward decisions. Enable these routes only when their live acceptance passes; adoption stays blocked. Verify step 3 already removed obsolete paths, fixtures and guidance. | Make a scoped revision of the exported greenfield app, preserve unaffected files and successful outputs, exercise revision recovery, and export the accepted result. Re-run greenfield acceptance for shared contract changes. |
+| 5. Enable brownfield | Add adopted inventory, external ownership and preservation/adaptation decisions to the same constructor. Enable adoption routes only after their input and live acceptance gates pass. No previous handoff producer or fallback returns. | Discover an existing app, approve its adoption scope, generate only selected owned outputs, preserve external files, recover and export. Record this evidence separately from earlier greenfield success. |
 
-Steps 1 and 2 may be split into data, integration, and baseline contract PRs
-when needed, each with one source of authority per field. Step 3 is the smallest
+Steps 1 and 2 may be split into greenfield data and integration contract PRs
+when needed, each with one source of authority per field. Baseline compilation
+belongs to steps 4 and 5 and does not delay greenfield export. Step 3 is the smallest
 safe producer flip: splitting its schema/prompt/entrypoint deletion across
-deployments would leave two authors. Its prerequisite parity matrix limits
-scope; it is not permission to rebuild the generalized compiler or ignore a
-supported mode. Broader SemanticGraph authority/persistence migration remains
+deployments would leave two authors. Its admission matrix makes unavailable
+modes explicit; it does not quietly route them to another author. Broader
+SemanticGraph authority/persistence migration remains
 the separately governed ADR 0007 cutover.
 
 "Pass plan review" does not promise successful generated code, authentication,
@@ -545,10 +614,13 @@ cloud provisioning, or release action.
 
 Before accepting this ADR: review the field inventory against the cited base,
 confirm the ADR 0007 sequencing amendment and the no-ledger boundary, review
-all ten repair dispositions and downstream mutations, and agree on input closure
-and mode parity. Acceptance of this document alone does not prove implementation.
+all ten repair dispositions and downstream mutations, and agree on input closure,
+the temporary mode restrictions and later enablement gates. Acceptance of this
+document alone does not prove implementation.
 
-Before merging each implementation slice:
+Apply the following checks to each slice's affected contract. Step 3 must prove
+the complete initial admission/export matrix; deferred modes must prove blocking
+until their own enablement slice:
 
 - Use real `ContextVariablesBridge` tests for copied approval state, closure,
   unknown-field/reference rejection, and exact cache/queue projection.
@@ -561,9 +633,11 @@ Before merging each implementation slice:
 - Prove incomplete operations, `user_data_scope`, integrations, optional files,
   data-contract conversion and baseline authority fail with explicit gaps.
   Approved field/section/operation semantics must survive without loss.
-- Cover all preloaded/resume entrypoints, retained pages and capabilities in
-  revisions, brownfield ownership, carry-forward, task retry fingerprints,
-  successful-output reuse, and stale/foreign input rejection.
+- Cover all preloaded/resume entrypoints, task retry fingerprints,
+  successful-output reuse and stale/foreign input rejection at cutover. Prove
+  blocking for revision/adoption, including attempts to relabel them as genesis.
+  Before each later mode is enabled, cover retained pages/capabilities,
+  baseline ownership, carry-forward and its own recovery and export.
 - Verify retired repair, normalizer and full-plan authoring paths are absent;
   run affected contract/acceptance tests, Ruff, mypy and the required full suite.
 - Record the live evidence specified for that slice, then generated-app
