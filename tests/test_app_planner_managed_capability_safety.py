@@ -20,6 +20,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
+
 WORKSPACE = Path(__file__).resolve().parents[1]
 _TOOLS_DIR = WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
 _build_context_projection = importlib.import_module("mozaiksai.core.workflow.context.projection")
@@ -332,7 +335,13 @@ class TestAppBuildPlanManagedCapabilityNormalization:
 
     def test_multi_managed_facades_depend_on_their_matching_adapters(self):
         """Multiple managed capabilities must wire each facade to its own adapter task."""
-        ctx = _Context()
+        ctx = ContextVariablesBridge({"capability_packs": [
+            {
+                "id": provider, "capability_source": "managed_capability",
+                "facades": [{"module_id": facade, "provider_module": provider}],
+            }
+            for provider, facade in (("wallet", "wallet_dashboard"), ("notifications", "notification_center"))
+        ]})
         notifications_pack = {
             **_MANAGED_CAPABILITY,
             "capability_pack_id": "notifications",
@@ -398,7 +407,7 @@ class TestAppBuildPlanManagedCapabilityNormalization:
         )
         tasks = {
             task["task_id"]: task
-            for task in ctx.data["app_build_plan"]["build_tasks"]
+            for task in detach(ctx.get("app_build_plan"))["build_tasks"]
         }
         assert tasks["task_wallet_dashboard_contract"]["depends_on"] == ["task_wallet_adapter"]
         assert tasks["task_notification_center_contract"]["depends_on"] == [

@@ -1,0 +1,1018 @@
+{
+  "source": {
+    "description": "Three identical AppPlanAgent responses from the 2026-09-26 monetized traversal at 7211107d. Plan is unchanged; context contains only approved build inputs. The local provider path and subscription app identity were removed; the loader supplies the local provider path.",
+    "base_sha": "7211107d",
+    "response_count": 3,
+    "plan_sha256": "835e3a3ff02025f63d6c7bdd713985661a2fb56a1351216802e8f6ea1a10d661"
+  },
+  "plan": {
+    "agent_message": "This build plan outlines the structure and tasks for creating the TaskTracker Pro application, which focuses on personal task management for authenticated users.",
+    "app_kind": "saas",
+    "pages": [
+      {
+        "name": "Dashboard",
+        "route": "/dashboard",
+        "purpose": "Provides an overview of user tasks including completion metrics.",
+        "design_intent": "Provides an overview of user tasks including completion metrics.",
+        "primary_entities": [
+          "Task"
+        ],
+        "primary_actions": [
+          "get_dashboard_insights"
+        ],
+        "ui_layout": "grid",
+        "shell_mode_hint": "standard",
+        "ui_surface": "declarative_page",
+        "page_type_hint": "analytics_dashboard",
+        "sections_hint": [
+          {
+            "primitive": "SummaryStrip",
+            "config_hint": "{\"items\": [{\"label\": \"Total Tasks\", \"value_key\": \"total_tasks\"}, {\"label\": \"Completed Tasks\", \"value_key\": \"completed_tasks\"}]}",
+            "section_id_hint": "summary",
+            "title_hint": "Summary of total and completed tasks",
+            "intent": "Summary of total and completed tasks"
+          },
+          {
+            "primitive": "DataTable",
+            "config_hint": "{\"columns\": [\"task_id\", \"title\", \"status\"], \"api_endpoint\": \"/api/tasks\", \"selection\": \"none\"}",
+            "section_id_hint": "tasks-overview",
+            "title_hint": "Overview of recent tasks",
+            "intent": "Overview of recent tasks"
+          }
+        ]
+      },
+      {
+        "name": "Task Management",
+        "route": "/tasks",
+        "purpose": "Allows users to manage tasks.",
+        "design_intent": "Allows users to create, edit, and delete tasks.",
+        "primary_entities": [
+          "Task"
+        ],
+        "primary_actions": [
+          "create_task",
+          "update_task",
+          "delete_task"
+        ],
+        "ui_layout": "full-width",
+        "shell_mode_hint": "standard",
+        "ui_surface": "declarative_page",
+        "page_type_hint": "workflow_board",
+        "sections_hint": [
+          {
+            "primitive": "DataTable",
+            "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"api_endpoint\": \"/api/tasks\", \"selection\": \"single\"}",
+            "section_id_hint": "task-list",
+            "title_hint": "Display list of tasks",
+            "intent": "Display list of tasks"
+          },
+          {
+            "primitive": "Modal",
+            "config_hint": "{\"title\": \"Task Editor\", \"size\": \"medium\"}",
+            "section_id_hint": "create-task-modal",
+            "title_hint": "Form for creating and editing tasks",
+            "intent": "Form for creating and editing tasks"
+          }
+        ]
+      },
+      {
+        "name": "User Authentication",
+        "route": "/auth",
+        "purpose": "Facilitates user sign-in.",
+        "design_intent": "User authentication requires a login form with username and password.",
+        "primary_entities": [
+          "User"
+        ],
+        "primary_actions": [
+          "login_user"
+        ],
+        "ui_layout": "full-width",
+        "shell_mode_hint": "standard",
+        "ui_surface": "declarative_page",
+        "page_type_hint": "settings",
+        "sections_hint": [
+          {
+            "primitive": "Form",
+            "config_hint": "{\"fields\": [{\"label\": \"Email\", \"name\": \"email\"}, {\"label\": \"Password\", \"name\": \"password\"}]}",
+            "section_id_hint": "login-form",
+            "title_hint": "User login form",
+            "intent": "User login form"
+          }
+        ]
+      },
+      {
+        "name": "Pricing",
+        "route": "/pricing",
+        "purpose": "Display available subscription plans and pricing options.",
+        "design_intent": "Display subscription plans",
+        "primary_entities": [],
+        "primary_actions": [],
+        "ui_layout": "full-width",
+        "shell_mode_hint": "standard",
+        "ui_surface": "declarative_page",
+        "page_type_hint": "landing",
+        "sections_hint": [
+          {
+            "primitive": "PageHeader",
+            "config_hint": "{\"title\": \"Pricing\"}",
+            "section_id_hint": "page-header",
+            "title_hint": "Pricing Overview",
+            "intent": "Display available subscription plans and pricing options."
+          }
+        ]
+      }
+    ],
+    "entities": [
+      {
+        "name": "Task",
+        "operations": [
+          "create_task",
+          "update_task",
+          "delete_task"
+        ],
+        "notes": "This entity represents the tasks managed in the app."
+      },
+      {
+        "name": "User",
+        "operations": [
+          "login_user"
+        ],
+        "notes": "This entity represents the authenticated users of the application."
+      }
+    ],
+    "roles": [
+      "admin",
+      "user"
+    ],
+    "auth_strategy": "basic-login",
+    "service_scope": [],
+    "frontend_scope": [],
+    "theme_preferences": null,
+    "brand_intent": {
+      "style_summary": "Modern and clean interface emphasizing productivity.",
+      "brand_keywords": [
+        "efficient",
+        "intuitive",
+        "user-friendly"
+      ],
+      "experience_goals": [
+        "maximize individual productivity",
+        "reduce task management friction"
+      ],
+      "appearance_hint": "light"
+    },
+    "shell_preset_hint": "product_app",
+    "profile_layout": "sidebar_left",
+    "surface_map": {
+      "surfaces": [
+        {
+          "surface_id": "tasks",
+          "surface_kind": "module",
+          "owner": "app",
+          "source_capability_packs": [
+            "crud_pack"
+          ],
+          "label": "Task Management",
+          "summary": "This surface allows users to manage tasks.",
+          "primary_entities": [
+            "Task"
+          ],
+          "owned_pages": [],
+          "owned_mutations": [
+            "create_task",
+            "update_task",
+            "delete_task"
+          ],
+          "events_emitted": [
+            "domain.tasks.task_created",
+            "domain.tasks.task_updated",
+            "domain.tasks.task_deleted"
+          ],
+          "workflow_triggers": [],
+          "dependencies": []
+        },
+        {
+          "surface_id": "auth",
+          "surface_kind": "module",
+          "owner": "app",
+          "source_capability_packs": [
+            "authentication_pack"
+          ],
+          "label": "User Authentication",
+          "summary": "This surface secures the user experience for signing in.",
+          "primary_entities": [
+            "User"
+          ],
+          "owned_pages": [],
+          "owned_mutations": [
+            "login_user"
+          ],
+          "events_emitted": [
+            "domain.auth.user_logged_in"
+          ],
+          "workflow_triggers": [],
+          "dependencies": []
+        },
+        {
+          "surface_id": "billing_portal",
+          "surface_kind": "module",
+          "owner": "app",
+          "source_capability_packs": [
+            "mozaikspay"
+          ],
+          "label": "Billing Portal",
+          "summary": "This surface manages billing and subscription options for the application.",
+          "primary_entities": [],
+          "owned_pages": [
+            "Pricing",
+            "Billing",
+            "Usage"
+          ],
+          "owned_mutations": [
+            "list_plans",
+            "open_billing_portal",
+            "get_subscription_status",
+            "start_subscription_checkout",
+            "get_usage_status",
+            "get_token_status",
+            "start_token_top_up"
+          ],
+          "events_emitted": [],
+          "workflow_triggers": [],
+          "dependencies": []
+        }
+      ]
+    },
+    "capability_packs": [
+      {
+        "capability_pack_id": "mozaikspay",
+        "surface_id": "billing_portal",
+        "surface_kind": "module",
+        "pack_type": "billing_pack",
+        "label": "MozaiksPay",
+        "summary": "Handles subscription plans and entitlement checks for users.",
+        "implementation_mode": "external_integration",
+        "primary_entities": [],
+        "user_data_scope": false,
+        "primary_pages": [
+          "Pricing",
+          "Billing",
+          "Usage"
+        ],
+        "operations": [],
+        "required_integrations": [],
+        "agentic_extensions": [],
+        "capability_source": "managed_capability"
+      }
+    ],
+    "readiness_profile": "none",
+    "revenue_model": "subscriptions",
+    "monetization_plan": {
+      "monetized": true,
+      "revenue_model": "subscriptions",
+      "subscription_contract_requirement": "required",
+      "monetization_provider": "mozaiks_pay",
+      "primary_payer": "User",
+      "primary_payee": "TaskTracker Pro",
+      "money_flow_summary": "Subscribing to Pro Plan allows unlimited tasks and advanced features.",
+      "required_capability_routes": [
+        "/api/modules/billing_portal/list_plans",
+        "/api/modules/billing_portal/get_subscription_status",
+        "/api/modules/billing_portal/start_subscription_checkout"
+      ],
+      "rationale": "The app has a clear monetization strategy tied to user subscriptions for advanced features."
+    },
+    "monetization_provider": "mozaiks_pay",
+    "external_integrations": [],
+    "workspace_integration_status": [],
+    "event_flows": [],
+    "workflow_touchpoints": [],
+    "demo_fixture_sets": [],
+    "agent_backend_required": true,
+    "build_tasks": [
+      {
+        "task_id": "get_dashboard_insights",
+        "task_type": "api_surface",
+        "capability_pack_id": "mozaikspay",
+        "surface_id": "billing_portal",
+        "surface_kind": "external_integration",
+        "execution_target": "ControllerAgent",
+        "initial_agent": "ControllerAgent",
+        "description": "API surface task for Billing Portal actions related to dashboard insights.",
+        "initial_message": "Collect dashboard insights for authenticated users.",
+        "owned_paths": [
+          "services/integrations/mozaikspay_client.py"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [
+          "API returns dashboard details correctly for authenticated users."
+        ],
+        "context_variables": [],
+        "integration_needs": [],
+        "domain_context": null
+      },
+      {
+        "task_id": "user_authentication",
+        "task_type": "business_services",
+        "capability_pack_id": "auth",
+        "surface_id": "auth",
+        "surface_kind": "module",
+        "execution_target": "ServiceAgent",
+        "initial_agent": "ServiceAgent",
+        "description": "Business service task for the user authentication module.",
+        "initial_message": "Handle user login requests.",
+        "owned_paths": [
+          "modules/auth/backend/handler.py",
+          "modules/auth/backend/service.py",
+          "modules/auth/backend/repo.py"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [],
+        "context_variables": [],
+        "integration_needs": [],
+        "domain_context": null
+      },
+      {
+        "task_id": "task_management",
+        "task_type": "module_contract",
+        "capability_pack_id": "tasks",
+        "surface_id": "tasks",
+        "surface_kind": "module",
+        "execution_target": "ConfigMiddlewareAgent",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "description": "Create the module contract for task management actions.",
+        "initial_message": "Define the actions required for task management.",
+        "owned_paths": [
+          "modules/tasks/module.yaml"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [],
+        "context_variables": [],
+        "integration_needs": [],
+        "domain_context": null
+      },
+      {
+        "task_id": "billing_portal_tasks",
+        "task_type": "module_contract",
+        "capability_pack_id": "billing_portal",
+        "surface_id": "billing_portal",
+        "surface_kind": "module",
+        "execution_target": "ConfigMiddlewareAgent",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "description": "Module contract for the billing portal facade.",
+        "initial_message": "Define the billing portal actions for user subscription management.",
+        "owned_paths": [
+          "modules/billing_portal/module.yaml"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [],
+        "context_variables": [],
+        "integration_needs": [],
+        "domain_context": null
+      }
+    ],
+    "data_contract": null,
+    "pending_schema_migration": null,
+    "deployment_targets": [],
+    "deployment_template_manifest": null,
+    "carry_forward_decisions": [],
+    "generation_order": []
+  },
+  "context": {
+    "build_mode": "initial",
+    "brownfield_build_path": null,
+    "design_surface_map": {
+      "surfaces": [
+        {
+          "surface_id": "tasks",
+          "label": "Task Management",
+          "surface_kind": "module",
+          "owner": "app",
+          "source_capability_packs": [
+            "crud_pack"
+          ],
+          "primary_entities": [
+            "Task"
+          ],
+          "owned_pages": [
+            "Task Management"
+          ],
+          "owned_mutations": [
+            "create_task",
+            "update_task",
+            "delete_task"
+          ],
+          "events_emitted": [
+            "domain.tasks.task_created",
+            "domain.tasks.task_updated",
+            "domain.tasks.task_deleted"
+          ],
+          "workflow_triggers": [],
+          "integrations": [],
+          "notes": null
+        },
+        {
+          "surface_id": "auth",
+          "label": "User Authentication",
+          "surface_kind": "module",
+          "owner": "app",
+          "source_capability_packs": [
+            "authentication_pack"
+          ],
+          "primary_entities": [
+            "User"
+          ],
+          "owned_pages": [
+            "User Authentication"
+          ],
+          "owned_mutations": [
+            "login_user"
+          ],
+          "events_emitted": [
+            "domain.auth.user_logged_in"
+          ],
+          "workflow_triggers": [],
+          "integrations": [],
+          "notes": null
+        },
+        {
+          "surface_id": "billing_portal",
+          "label": "Billing Portal",
+          "surface_kind": "module",
+          "owner": "app",
+          "source_capability_packs": [
+            "mozaikspay"
+          ],
+          "primary_entities": [],
+          "owned_pages": [
+            "Pricing",
+            "Billing",
+            "Usage"
+          ],
+          "owned_mutations": [
+            "list_plans",
+            "open_billing_portal",
+            "get_subscription_status",
+            "start_subscription_checkout",
+            "get_usage_status",
+            "get_token_status",
+            "start_token_top_up"
+          ],
+          "integrations": [
+            "mozaikspay"
+          ],
+          "notes": "App-owned facade; provider records and usage ledgers remain provider/runtime-owned."
+        }
+      ]
+    },
+    "experience_spec": {
+      "navigation_model": "top-level routes with shell navigation",
+      "brand_direction": "Efficient Task Management with a modern and clean approach",
+      "pages": [
+        {
+          "name": "Dashboard",
+          "route": "/dashboard",
+          "layout": "grid",
+          "intent": "Provides an overview of user tasks including completion metrics.",
+          "sections": [
+            {
+              "id": "summary",
+              "primitive": "SummaryStrip",
+              "intent": "Summary of total and completed tasks",
+              "config_hint": "{\"items\": [{\"label\": \"Total Tasks\", \"value_key\": \"total_tasks\"}, {\"label\": \"Completed Tasks\", \"value_key\": \"completed_tasks\"}]}"
+            },
+            {
+              "id": "tasks-overview",
+              "primitive": "DataTable",
+              "intent": "Overview of recent tasks",
+              "config_hint": "{\"columns\": [\"task_id\", \"title\", \"status\"], \"api_endpoint\": \"/api/tasks\", \"selection\": \"none\"}"
+            }
+          ]
+        },
+        {
+          "name": "Task Management",
+          "route": "/tasks",
+          "layout": "full-width",
+          "intent": "Allows users to manage tasks.",
+          "sections": [
+            {
+              "id": "task-list",
+              "primitive": "DataTable",
+              "intent": "Display list of tasks",
+              "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"api_endpoint\": \"/api/tasks\", \"selection\": \"single\"}"
+            },
+            {
+              "id": "create-task-modal",
+              "primitive": "Modal",
+              "intent": "Form for creating and editing tasks",
+              "config_hint": "{\"title\": \"Task Editor\", \"size\": \"medium\"}"
+            }
+          ]
+        },
+        {
+          "name": "User Authentication",
+          "route": "/auth",
+          "layout": "full-width",
+          "intent": "Allows users to log into the application.",
+          "sections": [
+            {
+              "id": "login-form",
+              "primitive": "Form",
+              "intent": "User login form",
+              "config_hint": "{\"fields\": [{\"label\": \"Email\", \"name\": \"email\"}, {\"label\": \"Password\", \"name\": \"password\"}]}"
+            }
+          ]
+        },
+        {
+          "name": "Pricing",
+          "route": "/pricing",
+          "layout": "full-width",
+          "intent": "Use billing_portal for list_plans, open_billing_portal.",
+          "sections": [
+            {
+              "id": "page-header",
+              "primitive": "PageHeader",
+              "intent": "Use billing_portal for list_plans, open_billing_portal.",
+              "config_hint": "{\"title\": \"Pricing\"}"
+            }
+          ]
+        },
+        {
+          "name": "Billing",
+          "route": "/billing",
+          "layout": "full-width",
+          "intent": "Use billing_portal for get_subscription_status, list_plans, start_subscription_checkout, open_billing_portal.",
+          "sections": [
+            {
+              "id": "page-header",
+              "primitive": "PageHeader",
+              "intent": "Use billing_portal for get_subscription_status, list_plans, start_subscription_checkout, open_billing_portal.",
+              "config_hint": "{\"title\": \"Billing\"}"
+            }
+          ]
+        },
+        {
+          "name": "Usage",
+          "route": "/usage",
+          "layout": "full-width",
+          "intent": "Use billing_portal for get_usage_status, get_token_status, start_token_top_up.",
+          "sections": [
+            {
+              "id": "page-header",
+              "primitive": "PageHeader",
+              "intent": "Use billing_portal for get_usage_status, get_token_status, start_token_top_up.",
+              "config_hint": "{\"title\": \"Usage\"}"
+            }
+          ]
+        }
+      ]
+    },
+    "capability_packs": [
+      {
+        "id": "mozaikspay",
+        "version": "0.1.11",
+        "status": "active",
+        "capability_source": "managed_capability",
+        "required_integrations": [
+          {
+            "service": "mozaikspay",
+            "provider": "mozaiks_pay",
+            "display_name": "MozaiksPay",
+            "kind": "api_key",
+            "purpose": "Connect this generated SaaS app to the managed MozaiksPay subscription provider.",
+            "required_at": "runtime",
+            "required_fields": [
+              {
+                "name": "api_base",
+                "label": "MozaiksPay API Base URL",
+                "type": "url",
+                "required": true,
+                "frontend_safe": true
+              },
+              {
+                "name": "api_key",
+                "label": "MozaiksPay API Key",
+                "type": "secret",
+                "required": true,
+                "frontend_safe": false
+              }
+            ],
+            "optional_fields": [
+              {
+                "name": "client_id",
+                "label": "Client ID",
+                "type": "text",
+                "required": false,
+                "frontend_safe": true
+              },
+              {
+                "name": "client_secret",
+                "label": "Client Secret",
+                "type": "secret",
+                "required": false,
+                "frontend_safe": false
+              }
+            ]
+          }
+        ],
+        "deployment_env": {
+          "optional": [
+            "MOZAIKS_APP_URL",
+            "MOZAIKSPAY_API_BASE",
+            "MOZAIKSPAY_CLIENT_ID",
+            "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY"
+          ],
+          "secret": [
+            "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY"
+          ]
+        },
+        "capabilities": [
+          {
+            "capability_id": "mozaikspay.billing_portal",
+            "facade_recommended": "billing_portal"
+          },
+          {
+            "capability_id": "mozaikspay.subscription_status",
+            "facade_recommended": "billing_portal"
+          },
+          {
+            "capability_id": "mozaikspay.subscription_checkout",
+            "facade_recommended": "billing_portal"
+          },
+          {
+            "capability_id": "mozaikspay.usage_status",
+            "facade_recommended": "billing_portal"
+          },
+          {
+            "capability_id": "mozaikspay.token_status",
+            "facade_recommended": "billing_portal"
+          },
+          {
+            "capability_id": "mozaikspay.token_top_up",
+            "facade_recommended": "billing_portal"
+          }
+        ],
+        "facades": [
+          {
+            "module_id": "billing_portal",
+            "provider_module": "mozaikspay",
+            "provider_actions": [
+              "billing_portal",
+              "create_billing_portal_session",
+              "subscription_status",
+              "get_subscription_status",
+              "subscription_checkout",
+              "create_subscription_checkout_session",
+              "start_subscription_checkout",
+              "usage_status",
+              "get_usage_status",
+              "token_status",
+              "get_token_status",
+              "token_top_up",
+              "create_token_top_up_session",
+              "start_token_top_up"
+            ],
+            "pages": [
+              {
+                "name": "Billing",
+                "route": "/billing",
+                "page_type_hint": "analytics_dashboard"
+              },
+              {
+                "name": "Usage",
+                "route": "/usage",
+                "page_type_hint": "analytics_dashboard"
+              }
+            ]
+          }
+        ],
+        "pack_id": "mozaikspay"
+      }
+    ],
+    "subscription_contract": {
+      "agent_message": "Contract required to define subscription plans and gated features.",
+      "contract_required": true,
+      "rationale": "The app 'TaskTracker Pro' records monetization_intent.monetized=true and subscription_contract_likely=true. This indicates that it will sell recurring access, gated features, or require token allowances. A subscription contract is essential to outline these offerings.",
+      "plan_design_rationale": [
+        {
+          "source_context": "concept_blueprint",
+          "signal": "monetization_intent.subscription_contract_likely",
+          "decision": "Subscription contract must be created to reflect the paid Pro features and the free tier offering.",
+          "affected_plan_ids": [
+            "free",
+            "pro"
+          ],
+          "affected_pricing_group_ids": [
+            "basic_access"
+          ]
+        },
+        {
+          "source_context": "concept_blueprint",
+          "signal": "money_flow_summary",
+          "decision": "The free tier provides limited tasks while the Pro subscription enables unlimited tasks and advanced functionality.",
+          "affected_plan_ids": [
+            "pro"
+          ],
+          "affected_pricing_group_ids": [
+            "advanced_features"
+          ]
+        }
+      ],
+      "app_name": "TaskTracker Pro",
+      "subscription_config_file": {
+        "schema_version": "mozaiks.subscriptions.v1",
+        "label": "TaskTracker Pro Subscription Plans",
+        "default_plan_id": "free",
+        "assignment_store": {
+          "data_alias": "billing.subscriptions",
+          "app_id_field": "app_id",
+          "tenant_id_field": "tenant_id",
+          "user_id_field": "user_id",
+          "plan_id_field": "plan_id",
+          "status_field": "status",
+          "capabilities_field": "granted_capabilities",
+          "plan_snapshot_field": "plan_snapshot",
+          "revision_field": "billing_revision",
+          "active_statuses": [
+            "active",
+            "trial"
+          ]
+        },
+        "products": [],
+        "pricing_catalog": {
+          "default_group_id": "basic_access",
+          "groups": [
+            {
+              "group_id": "basic_access",
+              "label": "Basic Access",
+              "description": "Access to free and Pro subscription plans.",
+              "kind": "subscription",
+              "plan_ids": [
+                "free",
+                "pro"
+              ],
+              "capability_groups": [],
+              "add_on_ids": []
+            }
+          ]
+        },
+        "plans": [
+          {
+            "plan_id": "free",
+            "label": "Free Plan",
+            "description": "Limited tasks and features for personal use.",
+            "capabilities": [
+              "task.management.view",
+              "task.management.create"
+            ]
+          },
+          {
+            "plan_id": "pro",
+            "label": "Pro Plan",
+            "description": "Unlimited tasks and advanced analytics features.",
+            "capabilities": [
+              "task.management.view",
+              "task.management.create",
+              "task.management.analytics"
+            ]
+          }
+        ]
+      },
+      "metering_declarations": [],
+      "module_contract_updates": [
+        {
+          "module_id": "billing_portal",
+          "action_id": "list_plans",
+          "entitlement_gate": null,
+          "metering": null
+        },
+        {
+          "module_id": "billing_portal",
+          "action_id": "open_billing_portal",
+          "entitlement_gate": null,
+          "metering": null
+        },
+        {
+          "module_id": "billing_portal",
+          "action_id": "start_subscription_checkout",
+          "entitlement_gate": null,
+          "metering": null
+        }
+      ],
+      "workflow_contract_updates": [],
+      "page_surface_requirements": [
+        {
+          "page_id": "pricing",
+          "route": "/pricing",
+          "purpose": "Display available subscription plans and pricing options.",
+          "required_runtime_endpoints": [
+            "/api/modules/billing_portal/list_plans"
+          ]
+        },
+        {
+          "page_id": "billing",
+          "route": "/billing",
+          "purpose": "Manage subscription status and payment details.",
+          "required_runtime_endpoints": [
+            "/api/modules/billing_portal/get_subscription_status",
+            "/api/modules/billing_portal/open_billing_portal"
+          ]
+        },
+        {
+          "page_id": "usage",
+          "route": "/usage",
+          "purpose": "Show usage metrics for Pro users.",
+          "required_runtime_endpoints": [
+            "/api/modules/billing_portal/get_usage_status"
+          ]
+        }
+      ],
+      "app_generator_instructions": [
+        {
+          "target": "AppPlanAgent",
+          "instruction": "Generate app/config/subscriptions.yaml using the defined subscription structure."
+        },
+        {
+          "target": "AppPlanAgent",
+          "instruction": "Bind the pricing page to /api/modules/billing_portal/list_plans."
+        }
+      ],
+      "validation_notes": [
+        "Assuming a minimal viable plan structure based on concept overview and monetization intent."
+      ],
+      "forbidden_outputs": [
+        "contracts/subscriptions.yaml",
+        "custom token ledger",
+        "custom usage ledger",
+        "payment-provider price ids in config/subscriptions.yaml",
+        "payment-provider product ids in config/subscriptions.yaml"
+      ],
+      "code_files": [
+        {
+          "filename": "config/subscriptions.yaml",
+          "content": "schema_version: mozaiks.subscriptions.v1\nlabel: TaskTracker Pro Subscription Plans\ndefault_plan_id: free\nassignment_store:\n  data_alias: billing.subscriptions\n  app_id_field: app_id\n  tenant_id_field: tenant_id\n  user_id_field: user_id\n  plan_id_field: plan_id\n  status_field: status\n  capabilities_field: granted_capabilities\n  plan_snapshot_field: plan_snapshot\n  revision_field: billing_revision\n  active_statuses:\n  - active\n  - trial\nproducts: []\npricing_catalog:\n  default_group_id: basic_access\n  groups:\n  - group_id: basic_access\n    label: Basic Access\n    description: Access to free and Pro subscription plans.\n    kind: subscription\n    plan_ids:\n    - free\n    - pro\n    capability_groups: []\n    add_on_ids: []\nplans:\n- plan_id: free\n  label: Free Plan\n  description: Limited tasks and features for personal use.\n  capabilities:\n  - task.management.view\n  - task.management.create\n- plan_id: pro\n  label: Pro Plan\n  description: Unlimited tasks and advanced analytics features.\n  capabilities:\n  - task.management.view\n  - task.management.create\n  - task.management.analytics\n"
+        }
+      ],
+      "review_status": "confirmed",
+      "user_confirmed": true,
+      "review_response": {
+        "action": "approve",
+        "approved": true,
+        "rationale": "Approved for acceptance run.",
+        "ui_event_id": "save_subscription_contract_d94ad269"
+      }
+    },
+    "revenue_model": "free",
+    "data_contract": {
+      "version": "1",
+      "app_id": "release-greenfield-value-target",
+      "artifact_version_id": null,
+      "surfaces": [
+        {
+          "surface_id": "tasks",
+          "surface_kind": "module",
+          "collections": [
+            {
+              "name": "tasks",
+              "scope": "app",
+              "ownership": {
+                "surface_id": "tasks",
+                "surface_kind": "module"
+              },
+              "fields": [
+                {
+                  "name": "task_id",
+                  "type": "string",
+                  "required": true,
+                  "default": null,
+                  "enum": null,
+                  "nullable": false
+                },
+                {
+                  "name": "user_id",
+                  "type": "string",
+                  "required": true,
+                  "default": null,
+                  "enum": null,
+                  "nullable": false
+                },
+                {
+                  "name": "title",
+                  "type": "string",
+                  "required": true,
+                  "default": null,
+                  "enum": null,
+                  "nullable": false
+                },
+                {
+                  "name": "completed",
+                  "type": "boolean",
+                  "required": false,
+                  "default": "false",
+                  "enum": null,
+                  "nullable": false
+                },
+                {
+                  "name": "created_at",
+                  "type": "datetime",
+                  "required": false,
+                  "default": null,
+                  "enum": null,
+                  "nullable": true
+                }
+              ],
+              "indexes": [
+                {
+                  "keys": [
+                    {
+                      "field": "user_id",
+                      "order": 1
+                    },
+                    {
+                      "field": "completed",
+                      "order": 1
+                    }
+                  ],
+                  "unique": false,
+                  "sparse": null,
+                  "name": null
+                }
+              ],
+              "search_by": "task_id",
+              "lifecycle": {
+                "write_mode": "module_action",
+                "migration_policy": "additive_only"
+              }
+            }
+          ]
+        },
+        {
+          "surface_id": "auth",
+          "surface_kind": "module",
+          "collections": [
+            {
+              "name": "users",
+              "scope": "app",
+              "ownership": {
+                "surface_id": "auth",
+                "surface_kind": "module"
+              },
+              "fields": [
+                {
+                  "name": "user_id",
+                  "type": "string",
+                  "required": true,
+                  "default": null,
+                  "enum": null,
+                  "nullable": false
+                },
+                {
+                  "name": "email",
+                  "type": "string",
+                  "required": true,
+                  "default": null,
+                  "enum": null,
+                  "nullable": false
+                },
+                {
+                  "name": "password_hash",
+                  "type": "string",
+                  "required": true,
+                  "default": null,
+                  "enum": null,
+                  "nullable": false
+                }
+              ],
+              "indexes": [
+                {
+                  "keys": [
+                    {
+                      "field": "email",
+                      "order": 1
+                    }
+                  ],
+                  "unique": true,
+                  "sparse": null,
+                  "name": null
+                }
+              ],
+              "search_by": "user_id",
+              "lifecycle": {
+                "write_mode": "module_action",
+                "migration_policy": "additive_only"
+              }
+            }
+          ]
+        }
+      ],
+      "shared_collections": [],
+      "policies": {
+        "default_scope_field": "user_id",
+        "allow_destructive_migrations": false
+      }
+    },
+    "readiness_profile": null
+  }
+}

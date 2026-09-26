@@ -399,7 +399,7 @@ def test_invalid_plan_clears_prior_work_and_repairs_within_declared_budget():
     context.set("app_plan_ready", True)
     context.set("app_task_batch_items", [{"task_id": "stale"}])
     invalid = deepcopy(_plan())
-    invalid["build_tasks"] = []
+    invalid["build_tasks"][0]["depends_on"] = ["unresolved_judgment_task"]
     result = review(AppBuildPlan=invalid, context_variables=context)
     assert result["outcome"] == "needs_revision"
     assert context.get("app_plan_ready") is False

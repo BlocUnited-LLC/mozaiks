@@ -3,17 +3,8 @@ from __future__ import annotations
 import pytest
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
-
-
-class _Context:
-    def __init__(self) -> None:
-        self.values: dict[str, object] = {}
-
-    def get(self, key: str, default: object = None) -> object:
-        return self.values.get(key, default)
-
-    def set(self, key: str, value: object) -> None:
-        self.values[key] = value
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
 
 
 def _subscription_task() -> dict[str, object]:
@@ -44,7 +35,7 @@ def _mozaikspay_pack() -> dict[str, object]:
     return {
         "capability_pack_id": "mozaikspay",
         "capability_source": "managed_capability",
-        "pack_type": "managed_capability",
+        "pack_type": "mozaikspay",
         "provides_capabilities": ["subscription_write_path"],
     }
 
@@ -53,23 +44,19 @@ def _entitlement_dispatch_pack() -> dict[str, object]:
     return {
         "capability_pack_id": "entitlement_dispatch",
         "capability_source": "generated_module",
-        "pack_type": "generated_module",
+        "pack_type": "custom_domain",
     }
 
 
-def _run_plan(plan: dict[str, object]) -> _Context:
-    context = _Context()
+def _run_plan(plan: dict[str, object]) -> ContextVariablesBridge:
+    context = ContextVariablesBridge({})
     app_build_plan(AppBuildPlan=plan, context_variables=context)
     return context
 
 
-def test_subscription_config_defaults_to_mozaikspay() -> None:
-    context = _run_plan(_base_plan())
-
-    normalized = context.values["app_build_plan"]
-    assert isinstance(normalized, dict)
-    assert normalized["monetization_provider"] == "mozaiks_pay"
-    assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"mozaikspay"}
+def test_subscription_config_requires_an_explicit_or_selected_provider() -> None:
+    with pytest.raises(ValueError, match="monetization_provider is required"):
+        _run_plan(_base_plan())
 
 
 def test_unknown_monetization_provider_fails_before_materialization() -> None:
@@ -80,7 +67,7 @@ def test_unknown_monetization_provider_fails_before_materialization() -> None:
 def test_explicit_mozaiks_pay_provider_includes_public_pack_contract() -> None:
     context = _run_plan(_base_plan(monetization_provider="mozaiks_pay"))
 
-    normalized = context.values["app_build_plan"]
+    normalized = detach(context.get("app_build_plan"))
     assert isinstance(normalized, dict)
     assert normalized["monetization_provider"] == "mozaiks_pay"
     assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"mozaikspay"}
@@ -104,7 +91,7 @@ def test_explicit_mozaiks_pay_selection_is_cached_without_auto_account_activatio
         )
     )
 
-    normalized = context.values["app_build_plan"]
+    normalized = detach(context.get("app_build_plan"))
     assert isinstance(normalized, dict)
     assert normalized["monetization_provider"] == "mozaiks_pay"
     assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"mozaikspay"}
@@ -118,16 +105,16 @@ def test_explicit_self_managed_selection_uses_entitlement_dispatch_only() -> Non
         )
     )
 
-    normalized = context.values["app_build_plan"]
+    normalized = detach(context.get("app_build_plan"))
     assert isinstance(normalized, dict)
     assert normalized["monetization_provider"] == "entitlement_dispatch"
     assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"entitlement_dispatch"}
 
 
-def test_selected_self_managed_pack_is_an_explicit_default_override() -> None:
+def test_selected_self_managed_pack_resolves_the_provider() -> None:
     context = _run_plan(_base_plan(capability_packs=[_entitlement_dispatch_pack()]))
 
-    normalized = context.values["app_build_plan"]
+    normalized = detach(context.get("app_build_plan"))
     assert isinstance(normalized, dict)
     assert normalized["monetization_provider"] == "entitlement_dispatch"
     assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"entitlement_dispatch"}
@@ -141,6 +128,6 @@ def test_monetization_provider_in_nested_monetization_plan_is_accepted_as_fallba
         monetization_plan={"monetization_provider": "mozaiks_pay"},
     )
     context = _run_plan(plan)
-    normalized = context.values["app_build_plan"]
+    normalized = detach(context.get("app_build_plan"))
     assert isinstance(normalized, dict)
     assert normalized["monetization_provider"] == "mozaiks_pay"

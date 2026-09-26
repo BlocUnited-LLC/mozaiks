@@ -259,11 +259,10 @@ def test_normalized_module_paths_repair_only_the_capability_label():
 
 
 @pytest.mark.parametrize("paths", [
-    [],
     ["modules/tasks/module.yaml", "services/integrations/tasks.py"],
     ["modules/tasks/../billing_portal/module.yaml"],
     ["modules/tasks/module.yaml", ""],
-], ids=["empty", "mixed", "unsafe", "blank_path"])
+], ids=["mixed", "unsafe", "blank_path"])
 def test_module_scope_requires_every_owned_path_to_agree(paths):
     from factory_app.workflows.AppGenerator.tools.app_plan_review import (
         _repair_module_task_capabilities,

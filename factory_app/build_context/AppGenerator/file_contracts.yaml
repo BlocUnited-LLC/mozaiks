@@ -43,6 +43,7 @@ task_contracts:
       - Emit exactly the current task's owned_paths. Required page outputs apply only to pages in that scope; a manifest-only task may emit pages as an empty list.
       - AppSchemaOutput.manifest is AppManifest or explicit null. A task owning app.json must emit AppManifest; otherwise emit null, which materializes neither app.json nor provenance.yaml. Do not emit a placeholder manifest or silently discard out-of-scope files.
       - New-app page_bundle tasks collectively own app.json and every planned page, with one manifest owner. Page-only revisions preserve app.json and unchanged pages from the verified baseline; full-bundle acceptance still requires a complete valid app. Standalone save_app_schema requires a non-null manifest.
+      - Review constructs an omitted new-app page_bundle from the approved page inventory, including app.json. Its aggregate structural scope is surface_id=page_bundle, surface_kind=ui_only, capability_pack_id=null; it does not authorize a generated module or capability.
       - provenance.yaml is app-root metadata emitted by the scaffold/generator path. It records creation/refinement/validation lineage and declared contract refs; it must not contain secrets, absolute local paths, or provider execution state.
       - "Workflow launches from pages use action_type: workflow."
       - Prefer compact config/shell.json shortcuts for common shell chrome instead of repeating full header/profile/mobile/footer arrays.

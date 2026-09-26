@@ -88,8 +88,10 @@ or a descriptive catalog. Selected managed providers retain the surface IDs used
 by existing materializers: the pack ID, its declared `surface_id`, and
 `{pack_id}_managed`. Facades use their declared module IDs. The required approved
 subscription contract (including the artifact fallback) additionally permits
-`subscription_contract` for its `subscription_config` task only. Page tasks must
-reference an approved surface; aggregating pages does not authorize another one.
+`subscription_contract` for its `subscription_config` task only. An aggregate
+page task may use the structural scope `page_bundle` with type `page_bundle`,
+kind `ui_only`, and a null capability ID when approved ExperienceSpec pages
+exist. This scope never authorizes a capability or module task.
 Unapproved surfaces reject the plan without dropping or relabeling work. The
 normal `app_plan_feedback` revision loop names each surface and instructs the
 planner to remove its capability and tasks. Authentication feedback also states
@@ -97,8 +99,18 @@ that auth is platform-provided and needs no generated module.
 The planner receives exact case-sensitive page paths projected from the approved
 ExperienceSpec through the materializer's existing page-stem helper. Display
 names do not become filenames: `Books` at `/books` owns `ui/pages/books.yaml`.
-Review rejects differently cased paths and returns the required and received
-paths as repair feedback; it never silently renames planned files.
+Review constructs omitted genesis page and module tasks even when the proposed
+task list is empty. Construction and validation share required page/module path
+computations, including route-derived casing. Existing correct ownership is
+preserved; missing required paths are filled and conflicting non-page owners
+still fail. Selected pack inventory is resolved before coverage construction.
+Canonical worker mapping and selected subscription, refinement, and split-admin
+task file requirements are also shared with validation. Explicit approved action
+names reach module workers; review does not invent read actions from entity names.
+Subscription providers must be explicit or already selected, and facade/client
+dependencies follow registered bindings rather than task prose.
+See the [construction requirement inventory](app-build-plan-construction.md) for
+the construction/judgment boundary and downstream requirements.
 The existing plan cache preserves all typed plan fields. Frozen context values
 are detached before catalog lookup and validation.
 

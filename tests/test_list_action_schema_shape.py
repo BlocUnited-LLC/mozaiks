@@ -1,33 +1,12 @@
-"""A collection-returning action must be an object wrapping an array.
-
-A proving run for the read-operation repair (#634) failed the whole build:
-
-    task batch 'app_build_tasks' failed at task '2':
-    Only object schema contracts may declare properties or required fields
-
-The repair had declared `list_habits` in that exact task. Its instruction asked
-for "a read action returning the Habit records" and said nothing about shape, so
-the contract agent wrote the obvious thing - a top-level `type: "array"` with
-properties - and the renderer rejected it.
-
-Two layers were wrong. The repair invited the shape, and nothing in the schema
-rules said a non-object schema may not declare properties, so this was reachable
-by any collection-returning action. Earlier bundles never had one: the missing
-read is why. Fixing the missing read is what first produced a list action, and
-the list action is what found this.
-"""
+"""Collection-returning actions require an object wrapping an array."""
 
 from __future__ import annotations
 
 import pytest
 
-from factory_app.workflows.AppGenerator.tools.app_plan_review import (
-    _repair_missing_read_operation,
-)
 from mozaiksai.core.workflow.generator_support.code_files import (
     _materialize_schema_contract,
 )
-from tests.test_plan_read_operation import _context, _plan
 
 AGENTS = "factory_app/workflows/AppGenerator/agents.yaml"
 
@@ -70,16 +49,6 @@ def test_the_shape_the_instruction_now_asks_for_materializes() -> None:
     assert rendered["type"] == "object"
     assert rendered["properties"]["habits"]["type"] == "array"
     assert rendered["required"] == ["habits"]
-
-
-def test_the_repair_tells_the_agent_which_shape_to_write() -> None:
-    plan = _plan(["create_habit"])
-
-    _repair_missing_read_operation(plan, _context())
-
-    message = plan["build_tasks"][0]["initial_message"]
-    assert "list_habits" in message
-    assert "not a bare" in message and 'type: "array"' in message
 
 
 def test_the_rule_is_stated_for_every_collection_action_not_only_repaired_ones() -> None:

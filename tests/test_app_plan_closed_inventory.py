@@ -209,7 +209,7 @@ def test_cache_normalization_cannot_introduce_an_unselected_provider_surface():
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
 
     assert result["outcome"] == "needs_revision", result
-    assert "unapproved surface 'mozaikspay_managed'" in result["error"]
+    assert "monetization_provider is required" in result["error"]
     assert context.get("app_plan_feedback") == result["error"]
     assert context.get("app_plan_ready") is False
     assert context.get("app_build_plan") is None

@@ -10,6 +10,7 @@ from mozaiksai.core.runtime.app.paths import (
     APP_PROVENANCE_PATH,
     APP_SECURITY_SECRETS_PATH,
     disallowed_legacy_app_paths,
+    is_safe_app_path,
     noncanonical_app_config_paths,
     noncanonical_app_root_paths,
     normalize_app_path,
@@ -99,6 +100,70 @@ _SHARED_OWNED_PATHS = frozenset({"app.json"})
 _WORKFLOW_SURFACE_KIND = "workflow"
 _MODULE_LOCAL_TASK_TYPES = frozenset({"module_contract", "data_models", "business_services"})
 _DATA_MIGRATIONS_PREFIX = "data/migrations/"
+_REFINEMENT_REQUIRED_PATHS = frozenset({
+    "config/refinement_policy.yaml",
+    "refinement_harness/config/harness.yaml",
+})
+_REFINEMENT_CONFIG_PATHS = _REFINEMENT_REQUIRED_PATHS | {
+    "refinement_harness/config/tools.yaml",
+    "refinement_harness/config/policies.yaml",
+}
+
+
+def _required_selected_task_paths(task: dict[str, Any]) -> frozenset[str]:
+    """Required file closure once the planner has selected an optional task."""
+    task_type = task.get("task_type")
+    if task_type == "subscription_config":
+        return frozenset({"config/subscriptions.yaml"})
+    if task_type == "refinement_harness":
+        return _REFINEMENT_REQUIRED_PATHS
+    if task_type == "api_surface" and _APP_SERVICE_ADMIN_PATHS.intersection(_normalized_owned_paths(task)):
+        return frozenset(_APP_SERVICE_ADMIN_PATHS)
+    return frozenset()
+
+
+def _construct_task_requirements(plan: dict[str, Any], context_variables: Any) -> list[str]:
+    """Close fixed worker and file requirements without choosing optional work."""
+    repairs: list[str] = []
+    registered = _context_available_pack_map(context_variables)
+    managed_ids = {
+        _pack_id_from_descriptor(pack)
+        for pack in plan.get("capability_packs") or []
+        if pack.get("capability_source") == "managed_capability"
+        and (registered.get(_pack_id_from_descriptor(pack)) or {}).get("capability_source") == "managed_capability"
+    }
+    for task in plan.get("build_tasks") or []:
+        task_type = task.get("task_type")
+        task_id = task.get("task_id")
+        worker = _CANONICAL_INITIAL_AGENTS.get(task_type)
+        if worker and task.get("initial_agent") != worker:
+            task["initial_agent"] = worker
+            repairs.append(f"{task_id}: initial_agent -> {worker}")
+        if not all(is_safe_app_path(path) for path in task.get("owned_paths") or []):
+            continue  # Preserve unsafe proposals for origin/path validation.
+        paths = _normalized_owned_paths(task)
+        fixed: dict[str, Any] = {}
+        if task_type == "subscription_config" and set(paths) <= _required_selected_task_paths(task):
+            fixed = {"capability_pack_id": None, "surface_kind": "app_policy"}
+        elif task_type == "refinement_harness" and all(
+            path in _REFINEMENT_CONFIG_PATHS
+            or (path.startswith("refinement_harness/prompts/") and PurePosixPath(path).suffix == ".yaml")
+            for path in paths
+        ):
+            fixed = {"capability_pack_id": None, "surface_kind": "refinement"}
+        elif task_type == "api_surface" and task.get("capability_pack_id") in managed_ids:
+            fixed = {"surface_kind": "external_integration"}
+        elif task_type == "api_surface" and _APP_SERVICE_ADMIN_PATHS.intersection(paths):
+            fixed = {"capability_pack_id": None}
+        for key, value in fixed.items():
+            if task.get(key) != value:
+                task[key] = value
+                repairs.append(f"{task_id}: {key} -> {value!r}")
+        missing = _required_selected_task_paths(task).difference(paths)
+        if missing:
+            task["owned_paths"] = [*(task.get("owned_paths") or []), *sorted(missing)]
+            repairs.append(f"{task_id}: added required paths {sorted(missing)}")
+    return repairs
 
 
 def _normalize_string_list(value: Any) -> list[str]:
@@ -607,7 +672,7 @@ def _ensure_managed_capability_entries(
                 "capability_pack_id": pack_id,
                 "surface_id": f"{pack_id}_managed",
                 "surface_kind": "external_integration",
-                "pack_type": "managed_capability",
+                "pack_type": "custom_domain",
                 "label": available.get("display_name") or available.get("label") or pack_id,
                 "summary": available.get("description") or f"Managed {pack_id} capability.",
                 "implementation_mode": "external_integration",
@@ -636,8 +701,12 @@ def _ensure_context_selected_capability_packs(
     context_variables: Any | None,
 ) -> list[dict[str, Any]]:
     """Include packs projected by selected build_context even if the LLM omitted them."""
-    available_packs = _context_available_pack_map(context_variables)
-    if not available_packs:
+    selected_packs = {
+        _pack_id_from_descriptor(pack): pack
+        for pack in _normalize_object_list(_context_get(context_variables, "capability_packs", []))
+        if _pack_id_from_descriptor(pack)
+    }
+    if not selected_packs:
         return capability_packs
 
     existing = {
@@ -646,19 +715,21 @@ def _ensure_context_selected_capability_packs(
         if isinstance(pack, dict)
     } - {""}
     result = [dict(pack) for pack in capability_packs]
-    for pack_id, descriptor in sorted(available_packs.items()):
+    for pack_id, descriptor in sorted(selected_packs.items()):
         if pack_id in existing:
             continue
-        if str(descriptor.get("capability_source") or "").strip() != "managed_capability":
+        source = str(descriptor.get("capability_source") or "").strip()
+        if source not in {"managed_capability", "framework_pack", "operator_pack"}:
             continue
+        managed = source == "managed_capability"
         item = dict(descriptor)
         item.setdefault("capability_pack_id", pack_id)
         item.setdefault("surface_id", str(item.get("surface_id") or pack_id))
-        item.setdefault("surface_kind", str(item.get("surface_kind") or "external_integration"))
-        item.setdefault("implementation_mode", str(item.get("implementation_mode") or "external_integration"))
-        item.setdefault("pack_type", str(item.get("pack_type") or "managed_capability"))
+        item.setdefault("surface_kind", "external_integration" if managed else "module")
+        item.setdefault("implementation_mode", "external_integration" if managed else "declarative_module")
+        item.setdefault("pack_type", "custom_domain")
         item.setdefault("label", item.get("display_name") or pack_id)
-        item.setdefault("summary", item.get("description") or f"Managed {pack_id} capability.")
+        item.setdefault("summary", item.get("description") or f"Selected {pack_id} capability.")
         result.append(item)
         existing.add(pack_id)
     return result
@@ -691,7 +762,7 @@ def _default_mozaikspay_descriptor(context_variables: Any | None) -> dict[str, A
     descriptor.setdefault("surface_id", "mozaikspay_managed")
     descriptor.setdefault("surface_kind", "external_integration")
     descriptor.setdefault("implementation_mode", "external_integration")
-    descriptor.setdefault("pack_type", "managed_capability")
+    descriptor.setdefault("pack_type", "mozaikspay")
     descriptor.setdefault("label", descriptor.get("display_name") or "MozaiksPay")
     descriptor.setdefault(
         "summary",
@@ -700,21 +771,14 @@ def _default_mozaikspay_descriptor(context_variables: Any | None) -> dict[str, A
     return descriptor
 
 
-def _apply_default_monetization_provider(
+def _resolve_monetization_provider(
     capability_packs: list[dict[str, Any]],
     build_tasks: list[dict[str, Any]],
     *,
     monetization_provider: str | None,
     context_variables: Any | None,
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """Default subscription builds to MozaiksPay while preserving explicit overrides.
-
-    A subscription_config task is the deterministic signal that the generated
-    app needs a subscription assignment write path. An explicit provider value
-    always wins. Selecting entitlement_dispatch without a provider value is also
-    treated as an explicit self-managed choice. Otherwise MozaiksPay is selected
-    and its public, replaceable managed-capability descriptor is added.
-    """
+    """Resolve the provider from an explicit choice or selected provider pack."""
     has_subscription_config = any(
         isinstance(task, dict) and str(task.get("task_type") or "").strip() == "subscription_config"
         for task in build_tasks
@@ -736,11 +800,9 @@ def _apply_default_monetization_provider(
     if MOZAIKSPAY_PACK_ID in selected_ids:
         return capability_packs, MOZAIKS_PAY_PROVIDER_ID
 
-    _logger.info(
-        "[app_build_plan] defaulting SaaS subscription provider to MozaiksPay; "
-        "set monetization_provider='entitlement_dispatch' to use the self-managed OSS path"
-    )
-    return [*capability_packs, _default_mozaikspay_descriptor(context_variables)], MOZAIKS_PAY_PROVIDER_ID
+    # Needing a subscription contract does not choose its assignment provider.
+    # The validator returns bounded feedback when this judgment is still absent.
+    return capability_packs, None
 
 
 def _validate_monetization_provider_selection(
@@ -1172,10 +1234,12 @@ def _normalize_page_task_dependencies(build_tasks: list[dict[str, Any]]) -> list
 def _normalize_facade_task_dependencies(
     build_tasks: list[dict[str, Any]],
     *,
+    capability_packs: list[dict[str, Any]],
     managed_capability_ids: frozenset[str],
+    context_variables: Any | None,
 ) -> list[dict[str, Any]]:
-    """Ensure generated facades depend on the managed capability adapter task they call."""
-    adapter_task_by_pack: dict[str, str] = {}
+    """Connect only facade/provider bindings declared by registered contracts."""
+    adapter_tasks_by_pack: dict[str, list[str]] = {}
     for task in build_tasks:
         if not isinstance(task, dict):
             continue
@@ -1183,12 +1247,22 @@ def _normalize_facade_task_dependencies(
             continue
         pack_id = str(task.get("capability_pack_id") or "").strip()
         task_id = str(task.get("task_id") or "").strip()
-        if task_id and (pack_id in managed_capability_ids or str(task.get("surface_kind") or "").strip() == "external_integration"):
-            if pack_id:
-                adapter_task_by_pack.setdefault(pack_id, task_id)
+        if task_id and pack_id in managed_capability_ids:
+            adapter_tasks_by_pack.setdefault(pack_id, []).append(task_id)
 
-    if not adapter_task_by_pack:
+    if not adapter_tasks_by_pack:
         return build_tasks
+
+    registered = _context_available_pack_map(context_variables)
+    facade_providers: dict[str, set[str]] = {}
+    for pack in capability_packs:
+        pack_id = _pack_id_from_descriptor(pack)
+        if pack_id not in managed_capability_ids:
+            continue
+        for facade in _pack_facades(registered.get(pack_id) or {}):
+            facade_id = str(facade.get("module_id") or facade.get("facade_id") or "").strip()
+            if facade_id:
+                facade_providers.setdefault(facade_id, set()).add(pack_id)
 
     normalized: list[dict[str, Any]] = []
     for task in build_tasks:
@@ -1198,46 +1272,25 @@ def _normalize_facade_task_dependencies(
         if str(item.get("task_type") or "").strip() == "module_contract":
             pack_id = str(item.get("capability_pack_id") or "").strip()
             if pack_id and pack_id not in managed_capability_ids:
-                adapter_task_id = _facade_adapter_dependency(item, adapter_task_by_pack)
                 deps = _normalize_string_list(item.get("depends_on"))
-                if adapter_task_id and adapter_task_id not in deps:
-                    deps.insert(0, adapter_task_id)
+                providers = facade_providers.get(pack_id, set())
+                if len(providers) > 1:
+                    raise ValueError(
+                        f"Facade '{pack_id}' has competing registered providers {sorted(providers)}; "
+                        "resolve the facade/provider ownership before planning dependencies."
+                    )
+                for provider in providers:
+                    candidates = adapter_tasks_by_pack.get(provider, [])
+                    if len(candidates) > 1 and not set(candidates).intersection(deps):
+                        raise ValueError(
+                            f"Facade '{pack_id}' has multiple adapter tasks for '{provider}': {candidates}; "
+                            "declare the required adapter task dependency explicitly."
+                        )
+                    if len(candidates) == 1 and candidates[0] not in deps:
+                        deps.insert(0, candidates[0])
                 item["depends_on"] = deps
         normalized.append(item)
     return normalized
-
-
-def _facade_adapter_dependency(
-    task: dict[str, Any],
-    adapter_task_by_pack: dict[str, str],
-) -> str | None:
-    """Return the managed capability adapter task a facade module explicitly references."""
-    text_parts = [
-        str(task.get("description") or ""),
-        str(task.get("initial_message") or ""),
-        " ".join(str(item) for item in task.get("acceptance_criteria") or []),
-    ]
-    integration_needs = task.get("integration_needs")
-    if isinstance(integration_needs, list):
-        for need in integration_needs:
-            if isinstance(need, dict):
-                text_parts.append(" ".join(str(value) for value in need.values()))
-            else:
-                text_parts.append(str(need))
-    haystack = "\n".join(text_parts).lower()
-    matches = [
-        adapter_task_id
-        for pack_id, adapter_task_id in adapter_task_by_pack.items()
-        if pack_id.lower() in haystack
-        or f"{pack_id.lower()}_client" in haystack
-        or f"{pack_id.lower()}client" in haystack
-    ]
-    unique_matches = sorted(set(matches))
-    if len(unique_matches) == 1:
-        return unique_matches[0]
-    if len(adapter_task_by_pack) == 1:
-        return next(iter(adapter_task_by_pack.values()))
-    return None
 
 
 def _managed_capability_backing_module_ids(
@@ -1639,7 +1692,7 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                     "Build task "
                     f"'{task_id}' must keep capability_pack_id null for app-level split admin APIs."
                 )
-            if _APP_SERVICE_ADMIN_PATHS.difference(owned_paths):
+            if _required_selected_task_paths(task).difference(owned_paths):
                 raise ValueError(
                     "Build task "
                     f"'{task_id}' must own both services/admin_config.py and services/routes/admin.py together."
@@ -1708,7 +1761,7 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                     f"'{task_id}' uses task_type 'subscription_config' but surface_kind is "
                     f"'{surface_kind_raw}'. Use surface_kind='app_policy'."
                 )
-            if owned_paths != ["config/subscriptions.yaml"]:
+            if owned_paths != sorted(_required_selected_task_paths(task)):
                 raise ValueError(
                     "Build task "
                     f"'{task_id}' uses task_type 'subscription_config' but owns {owned_paths}. "
@@ -1716,12 +1769,6 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 )
 
         if task_type == "refinement_harness":
-            allowed_config_paths = {
-                "config/refinement_policy.yaml",
-                "refinement_harness/config/harness.yaml",
-                "refinement_harness/config/tools.yaml",
-                "refinement_harness/config/policies.yaml",
-            }
             if normalized_capability_pack_id:
                 raise ValueError(
                     "Build task "
@@ -1737,7 +1784,7 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
             invalid = [
                 path
                 for path in owned_paths
-                if path not in allowed_config_paths
+                if path not in _REFINEMENT_CONFIG_PATHS
                 and not (
                     path.startswith("refinement_harness/prompts/")
                     and PurePosixPath(path).suffix == ".yaml"
@@ -1750,11 +1797,7 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                     "Refinement harness tasks may only own config/refinement_policy.yaml, "
                     "refinement_harness/config/*, and refinement_harness/prompts/*.yaml."
                 )
-            required = {
-                "config/refinement_policy.yaml",
-                "refinement_harness/config/harness.yaml",
-            }
-            missing = sorted(required.difference(owned_paths))
+            missing = sorted(_required_selected_task_paths(task).difference(owned_paths))
             if missing:
                 raise ValueError(
                     "Build task "
@@ -1948,7 +1991,7 @@ def app_build_plan(
         ],
         key=_task_sort_key,
     ))
-    capability_packs, monetization_provider = _apply_default_monetization_provider(
+    capability_packs, monetization_provider = _resolve_monetization_provider(
         capability_packs,
         build_tasks,
         monetization_provider=monetization_provider,
@@ -2011,7 +2054,9 @@ def app_build_plan(
     build_tasks = _normalize_page_task_dependencies(build_tasks)
     build_tasks = _normalize_facade_task_dependencies(
         build_tasks,
+        capability_packs=capability_packs,
         managed_capability_ids=managed_capability_ids,
+        context_variables=context_variables,
     )
     managed_capability_backing_module_ids = _managed_capability_backing_module_ids(
         capability_packs,

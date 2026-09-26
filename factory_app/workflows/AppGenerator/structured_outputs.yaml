@@ -944,7 +944,11 @@ models:
         description: Capability pack this task belongs to. Null only for truly cross-cutting setup work.
       surface_id:
         type: str
-        description: Realization surface this task belongs to.
+        description: >
+          Approved realization surface this task belongs to. Aggregate page work
+          may use page_bundle only with task_type=page_bundle, surface_kind=ui_only,
+          and capability_pack_id=null, scoped to approved experience_spec pages.
+          This structural scope cannot identify a capability or module task.
       surface_kind:
         type: literal
         values:
