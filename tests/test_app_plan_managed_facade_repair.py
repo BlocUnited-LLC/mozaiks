@@ -94,7 +94,7 @@ def _plan_and_context(*, monetized=True, collapsed=True):
             **_task("1", "page_bundle", "AppSchemaAgent", None, [
                 "app.json", "brand/theme_config.json", *[f"ui/pages/{page['route'][1:]}.yaml" for page in pages],
             ]),
-            "surface_id": "app_pages", "surface_kind": "ui_only",
+            "surface_id": "task_management", "surface_kind": "module",
         },
     ]
     surfaces = [{
@@ -181,8 +181,7 @@ def _assert_reviewed_facade(plan, context):
     return cached
 
 
-def test_reported_collapsed_provider_facade_plan_passes_public_review():
-    """Preserve the reported identities; infer the duplicate's facade-only scope."""
+def test_unapproved_duplicate_facade_is_rejected_before_review_can_drop_it():
     plan, context = _plan_and_context()
     duplicate = _capability("billing_module")
     duplicate.update(
@@ -190,9 +189,16 @@ def test_reported_collapsed_provider_facade_plan_passes_public_review():
         operations=["list_plans", "get_subscription_status", "get_usage_status"],
     )
     plan["capability_packs"].append(duplicate)
-    cached = _assert_reviewed_facade(plan, context)
-    assert not any(pack["capability_pack_id"] == "billing_module" for pack in cached["capability_packs"])
-    assert not any("modules/billing_module/" in path for task in cached["build_tasks"] for path in task["owned_paths"])
+    before = deepcopy(plan)
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "needs_revision", result
+    assert "billing_module" in result["error"]
+    assert "unapproved" in result["error"].lower()
+    assert "relabel" in result["error"].lower()
+    assert not context.get("app_task_batch_items")
+    assert plan == before
 
 
 def test_correct_provider_and_facade_survive_public_review():

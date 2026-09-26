@@ -44,6 +44,7 @@ pytest.importorskip("factory_app.workflows.AppGenerator.tools.app_plan_review")
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (  # noqa: E402
     validate_plan_origins,
 )
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge  # noqa: E402
 
 GENERATED = "generated_module"
 
@@ -70,7 +71,7 @@ def _surface(surface_id: str) -> dict:
 def _errors(plan: dict, surfaces: list[dict]) -> list[str]:
     """The individual findings, without the 'Plan ownership errors:' header."""
     try:
-        validate_plan_origins(plan, {"design_surface_map": {"surfaces": surfaces}})
+        validate_plan_origins(plan, ContextVariablesBridge({"design_surface_map": {"surfaces": surfaces}}))
     except Exception as exc:  # the validator raises with the joined message
         return [
             line.lstrip("- ").strip()
@@ -119,20 +120,17 @@ def test_a_single_wrong_module_id_still_gets_the_rename() -> None:
     assert "Set it to 'tasks'" in joined, "a single differing directory is a rename, not a split"
 
 
-def test_a_missing_module_capability_says_what_to_emit() -> None:
-    """'found 0' alone cannot teach the agent out of using a product category."""
+def test_unapproved_module_capabilities_must_be_removed_before_ownership_review() -> None:
     plan = {
         "capability_packs": [_pack("crud_pack", "crud_pack"), _pack("analytics_pack", "analytics_pack")],
         "build_tasks": [],
     }
     joined = "\n".join(_errors(plan, [_surface("tasks")]))
-    assert "capability_pack_id='tasks'" in joined or "capability_pack_id=\'tasks\'" in joined, (
-        "name the identity to emit, not just that one is missing"
-    )
-    assert "pack_type" in joined, (
-        "say where a product category does belong; the upstream hints are full of them"
-    )
-    assert "crud_pack" in joined, "list what was actually declared so the gap is visible"
+    assert "crud_pack" in joined
+    assert "analytics_pack" in joined
+    assert "unapproved" in joined
+    assert "remove its capability and tasks" in joined
+    assert "relabel" in joined
 
 
 def test_a_correct_plan_raises_nothing() -> None:
@@ -170,7 +168,7 @@ def test_every_ownership_message_prescribes_an_action() -> None:
         ),
         ({"capability_packs": [_pack("crud_pack", "crud_pack")], "build_tasks": []}, [_surface("tasks")]),
     ]
-    verbs = ("Split", "Set it to", "Emit a", "Use the", "move the files")
+    verbs = ("Split", "Set it to", "Emit a", "Use the", "move the files", "remove its capability and tasks")
     for plan, surfaces in cases:
         for line in _errors(plan, surfaces):
             assert any(verb in line for verb in verbs), (

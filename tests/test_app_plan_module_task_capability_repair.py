@@ -14,7 +14,7 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
-from tests.test_app_plan_managed_facade_repair import _capability, _task
+from tests.test_app_plan_managed_facade_repair import _task
 from tests.test_app_plan_task_identity_repair import _live_plan
 from tests.test_continuous_deterministic_materialization import _load_models
 
@@ -31,16 +31,15 @@ def _reported_plan(label="task_registry"):
     for pack in plan["capability_packs"]:
         if pack["capability_pack_id"] == "task_management":
             pack.update(capability_pack_id="tasks", surface_id="tasks")
-    plan["capability_packs"].append({
-        **_capability("auth"), "surface_kind": "app_policy", "capability_source": "config_file",
-    })
     design = detach(context.get("design_surface_map"))
     design["surfaces"][0]["surface_id"] = "tasks"
     context.set("design_surface_map", design)
     ids = {"6": "module_contract", "7": "data_models", "8": "business_services"}
     for task in plan["build_tasks"]:
+        if task["surface_id"] == "task_management":
+            task["surface_id"] = "tasks"
         if task["capability_pack_id"] == "task_management":
-            task.update(capability_pack_id="tasks", surface_id="tasks")
+            task["capability_pack_id"] = "tasks"
             task["owned_paths"] = [path.replace("modules/task_management/", "modules/tasks/") for path in task["owned_paths"]]
         task["task_id"] = ids.get(task["task_id"], task["task_id"])
         task["depends_on"] = [ids.get(dependency, dependency) for dependency in task["depends_on"]]
@@ -64,7 +63,7 @@ def test_reported_drift_keeps_model_tasks_and_one_trio_per_module(label):
     plan, context = _reported_plan(label)
     before = _ownership(plan)
     assert sorted(pack["capability_pack_id"] for pack in plan["capability_packs"]) == [
-        "auth", "billing_portal", "mozaikspay", "tasks",
+        "billing_portal", "mozaikspay", "tasks",
     ]
 
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)

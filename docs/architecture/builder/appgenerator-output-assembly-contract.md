@@ -81,6 +81,19 @@ model, registered pack origins, approved app-owned module identities, page
 inventory, and complete genesis task ownership. Capability sources use the
 build-context registry vocabulary plus `host_universal` for built-in host
 surfaces. A product category is not a registered managed service.
+Before repairs or capability-ID checks, every capability and task must reference
+an approved surface. The inventory comes from `design_surface_map` and trusted
+selected `capability_packs` provider/facade descriptors, never the proposed plan
+or a descriptive catalog. Selected managed providers retain the surface IDs used
+by existing materializers: the pack ID, its declared `surface_id`, and
+`{pack_id}_managed`. Facades use their declared module IDs. The required approved
+subscription contract (including the artifact fallback) additionally permits
+`subscription_contract` for its `subscription_config` task only. Page tasks must
+reference an approved surface; aggregating pages does not authorize another one.
+Unapproved surfaces reject the plan without dropping or relabeling work. The
+normal `app_plan_feedback` revision loop names each surface and instructs the
+planner to remove its capability and tasks. Authentication feedback also states
+that auth is platform-provided and needs no generated module.
 The planner receives exact case-sensitive page paths projected from the approved
 ExperienceSpec through the materializer's existing page-stem helper. Display
 names do not become filenames: `Books` at `/books` owns `ui/pages/books.yaml`.

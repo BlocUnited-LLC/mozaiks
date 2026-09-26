@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator rejects capabilities and tasks for unapproved surfaces before
+  plan repairs or capability-ID checks, with feedback to remove invented work
+  and keep authentication in the platform.
+
 - AppGenerator repairs drifted module task capability labels when the approved
   surface and owned paths agree, preserving the planner's tasks and preventing
   coverage repair from assigning their files to duplicate tasks.
