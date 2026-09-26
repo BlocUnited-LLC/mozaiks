@@ -15,6 +15,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _context_available_pack_map,
     _facade_pack_descriptor,
     _normalized_owned_paths,
+    _pack_facades,
     _pack_id_from_descriptor,
     app_build_plan,
 )
@@ -1082,7 +1083,62 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
     return repairs
 
 
+def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
+    """Reject invented scope before repairs or identity advice can obscure it."""
+    design = detach(context.get("design_surface_map")) or {}
+    approved = {
+        surface["surface_id"] for surface in design.get("surfaces") or []
+        if surface.get("surface_id")
+    }
+    # This protected projection contains selected registry declarations. Neither
+    # the proposed plan nor an available-capability catalog grants approval.
+    for pack in detach(context.get("capability_packs")) or []:
+        pack_id = _pack_id_from_descriptor(pack)
+        if pack_id:
+            approved.add(pack_id)
+            if pack.get("capability_source") == "managed_capability":
+                approved.add(f"{pack_id}_managed")
+        if pack.get("surface_id"):
+            approved.add(pack["surface_id"])
+        for facade in _pack_facades(pack):
+            for key in ("module_id", "provider_module"):
+                if facade.get(key):
+                    approved.add(facade[key])
+
+    subscription = _resolved_subscription_contract(context) or {}
+    unapproved: set[str] = set()
+    for entries, is_task in (
+        (plan.get("capability_packs") or [], False),
+        (plan.get("build_tasks") or [], True),
+    ):
+        for entry in entries:
+            surface_id = str(entry.get("surface_id") or "")
+            if surface_id in approved:
+                continue
+            if (
+                is_task and surface_id == "subscription_contract"
+                and entry.get("task_type") == "subscription_config"
+                and subscription.get("contract_required") is True
+            ):
+                continue
+            unapproved.add(surface_id)
+    if unapproved:
+        errors = []
+        for surface_id in sorted(unapproved):
+            message = (
+                f"unapproved surface {surface_id!r}: remove its capability and tasks "
+                "rather than relabel them. Use only surfaces from design_surface_map, "
+                "selected pack provider/facade contracts, or the required subscription "
+                "contract for subscription_config."
+            )
+            if re.search(r"(?:^|[_-])(?:auth|authentication|login|signin)(?:$|[_-])", surface_id.lower()):
+                message += " Authentication is platform-provided and needs no generated module."
+            errors.append(message)
+        raise ValueError("Plan surface inventory errors:\n- " + "\n- ".join(errors))
+
+
 def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
+    _validate_plan_surface_inventory(plan, context)
     available = _context_available_pack_map(context)
     packs = plan.get("capability_packs") or []
     errors: list[str] = []
@@ -1257,6 +1313,7 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
+        _validate_plan_surface_inventory(plan, context_variables)
         for repair in (
             *_repair_task_identities(plan, context_variables),
             *_repair_module_task_capabilities(plan, context_variables),
@@ -1276,6 +1333,7 @@ def review_app_build_plan(
         cached = detach(context_variables.get("app_build_plan"))
         if not context_variables.get("app_plan_ready") or not isinstance(cached, dict):
             raise RuntimeError("Validated plan was not cached")
+        _validate_plan_surface_inventory(cached, context_variables)
         validate_plan_dependencies(cached, context_variables)
         validate_plan_coverage(cached, context_variables)
     except ValueError as error:

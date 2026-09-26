@@ -36,6 +36,8 @@ def _plan():
     }]
     service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services")
     service["owned_paths"] += ["modules/reports/backend/repo.py", "modules/reports/backend/policy.py"]
+    page = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    page.update(surface_id="reports", surface_kind="module")
     return plan
 
 

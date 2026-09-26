@@ -99,11 +99,17 @@ def test_identity_repair_leaves_unique_ids_untouched():
 
 def test_page_dependencies_expand_all_owners_without_losing_explicit_foreign_edges():
     plan, context = _live_plan()
+    design = detach(context.get("design_surface_map"))
+    design["surfaces"].append({
+        "surface_id": "app_pages", "surface_kind": "ui_only", "owner": "app",
+    })
+    context.set("design_surface_map", design)
     billing_service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services" and task["capability_pack_id"] == "billing_portal")
     billing_service["task_id"] = "billing.services"
     task_service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services" and task["capability_pack_id"] == "task_management")
     task_service["depends_on"].append("billing.services")
     page = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    page.update(surface_id="app_pages", surface_kind="ui_only")
     page["depends_on"] = ["module_contract", "data_models", "business_services", "billing.services"]
 
     cached = _review(plan, context)
@@ -136,6 +142,11 @@ def test_ambiguous_task_identity_is_rejected_without_queuing_workers(ambiguity):
 
 def test_qualified_name_collision_preserves_existing_task_and_scoped_dependencies():
     plan, context = _live_plan()
+    design = detach(context.get("design_surface_map"))
+    design["surfaces"].append({
+        "surface_id": "audit_service", "surface_kind": "external_integration", "owner": "app",
+    })
+    context.set("design_surface_map", design)
     plan["build_tasks"].append({
         **_task("task_management.module_contract", "service_foundation", "ConfigMiddlewareAgent", None, ["services/integrations/audit_client.py"]),
         "surface_id": "audit_service", "surface_kind": "external_integration",
@@ -152,6 +163,11 @@ def test_qualified_name_collision_preserves_existing_task_and_scoped_dependencie
 
 def test_synthesized_coverage_task_cannot_reintroduce_an_existing_identity():
     plan, context = _live_plan(repeated_ids=False)
+    design = detach(context.get("design_surface_map"))
+    design["surfaces"].append({
+        "surface_id": "audit_service", "surface_kind": "external_integration", "owner": "app",
+    })
+    context.set("design_surface_map", design)
     plan["build_tasks"] = [task for task in plan["build_tasks"] if task["task_id"] != "7"]
     for task in plan["build_tasks"]:
         task["depends_on"] = [dependency for dependency in task["depends_on"] if dependency != "7"]
