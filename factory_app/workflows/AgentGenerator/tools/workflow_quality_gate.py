@@ -1061,6 +1061,8 @@ def prepare_workflow_bundle_repair(
 def merge_workflow_bundle_repair_results(context_variables: Any | None = None) -> dict[str, Any]:
     """Merge repaired task-batch outputs back into the pre-repair bundle set."""
 
+    if context_variables is None:
+        return {"status": "skipped", "reason": "no_context"}
     if _context_get(context_variables, "workflow_bundle_repair_active") is not True:
         return {"status": "skipped", "reason": "repair_not_active"}
     base_results = _context_get(context_variables, "workflow_bundle_repair_base_results")
