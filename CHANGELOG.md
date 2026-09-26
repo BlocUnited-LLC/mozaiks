@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator repairs approved MozaiksPay facade capabilities before plan
+  validation, keeping the managed provider separate from `billing_portal` and
+  preserving approved data ownership through plan normalization.
+
 - AppGenerator's UI review now commits its quality status through an authorized
   tool before routing, preserving the configured revision budget. Workflow pack
   repairs likewise merge through a tool before metadata and export, preserving

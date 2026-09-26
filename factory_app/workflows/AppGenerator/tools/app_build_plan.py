@@ -830,7 +830,11 @@ def _pack_facades(descriptor: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def _facade_pack_descriptor(facade: dict[str, Any]) -> dict[str, Any] | None:
+def _facade_pack_descriptor(
+    facade: dict[str, Any],
+    *,
+    approved_surface: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     facade_id = str(facade.get("module_id") or facade.get("facade_id") or "").strip()
     if not facade_id:
         return None
@@ -844,12 +848,13 @@ def _facade_pack_descriptor(facade: dict[str, Any]) -> dict[str, Any] | None:
         "capability_pack_id": facade_id,
         "surface_id": facade_id,
         "surface_kind": "module",
-        "pack_type": "managed_facade",
+        "pack_type": "custom_domain",
         "label": facade.get("label") or facade_id.replace("_", " ").title(),
         "summary": facade.get("summary") or f"App-owned facade for {facade_id}.",
         "implementation_mode": "declarative_module",
         "capability_source": "generated_module",
-        "primary_entities": _dedupe_preserving_order(
+        "primary_entities": _normalize_string_list(approved_surface.get("primary_entities"))
+        if approved_surface is not None else _dedupe_preserving_order(
             entity
             for page in pages
             for entity in _normalize_string_list(page.get("primary_entities"))
@@ -860,7 +865,8 @@ def _facade_pack_descriptor(facade: dict[str, Any]) -> dict[str, Any] | None:
             if str(page.get("name") or page.get("page_id") or "").strip()
         ],
         "operations": operations,
-        "required_integrations": _dedupe_preserving_order([facade.get("provider_module")]),
+        # Connector setup belongs to the separate managed capability.
+        "required_integrations": [],
     }
 
 
@@ -926,12 +932,20 @@ def _apply_selected_pack_files(
     } - {""}
 
     result_tasks = [dict(task) for task in build_tasks]
+    design = _context_get(context_variables, "design_surface_map", {}) or {}
+    approved_surfaces = {
+        surface["surface_id"]: surface
+        for surface in design.get("surfaces") or []
+        if surface.get("owner") == "app" and surface.get("surface_kind") == "module"
+    }
 
     for pack_id in sorted(selected_managed_capability_ids):
         descriptor = available_packs.get(pack_id) or {}
         facades = _pack_facades(descriptor)
         for facade in facades:
-            facade_pack = _facade_pack_descriptor(facade)
+            facade_id = str(facade.get("module_id") or facade.get("facade_id") or "").strip()
+            approved_surface = approved_surfaces.get(facade_id)
+            facade_pack = _facade_pack_descriptor(facade, approved_surface=approved_surface)
             if facade_pack:
                 facade_pack_id = _pack_id_from_descriptor(facade_pack)
                 if facade_pack_id not in existing_pack_ids:
@@ -940,7 +954,22 @@ def _apply_selected_pack_files(
                 else:
                     for index, existing_pack in enumerate(result_packs):
                         if _pack_id_from_descriptor(existing_pack) == facade_pack_id:
-                            result_packs[index] = {**existing_pack, **facade_pack}
+                            merged = {**existing_pack, **facade_pack}
+                            # The registry may project less page detail than the
+                            # contract already applied during plan review.
+                            merged["operations"] = _dedupe_preserving_order([
+                                *_normalize_string_list(existing_pack.get("operations")),
+                                *_normalize_string_list(facade_pack.get("operations")),
+                            ])
+                            existing_pages = _normalize_string_list(existing_pack.get("primary_pages"))
+                            page_ids = {page.lower().replace(" ", "_") for page in existing_pages}
+                            merged["primary_pages"] = existing_pages + [
+                                page for page in facade_pack["primary_pages"]
+                                if page.lower().replace(" ", "_") not in page_ids
+                            ]
+                            if approved_surface is None and "primary_entities" in existing_pack:
+                                merged["primary_entities"] = existing_pack["primary_entities"]
+                            result_packs[index] = merged
                             break
 
             for page in _normalize_object_list(facade.get("pages")):

@@ -6,9 +6,13 @@ import logging
 import re
 from typing import Annotated, Any
 
+import yaml
+
+from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _CANONICAL_INITIAL_AGENTS,
     _context_available_pack_map,
+    _facade_pack_descriptor,
     _normalized_owned_paths,
     _pack_id_from_descriptor,
     app_build_plan,
@@ -684,6 +688,107 @@ def _resolved_subscription_contract(context: Any) -> dict[str, Any] | None:
     return None
 
 
+def _repair_managed_facade_capabilities(plan: dict[str, Any], context: Any) -> list[str]:
+    """Separate the approved MozaiksPay facade from its managed provider.
+
+    The pack contract fixes the facade's identity, pages and actions. The
+    approved design fixes its data ownership. Repair these before the generic
+    module repair interprets a provider claiming the facade as its owner.
+    """
+    design = detach(context.get("design_surface_map")) or {}
+    surfaces = {surface["surface_id"]: surface for surface in design.get("surfaces") or []}
+    approved = {
+        surface_id: surface for surface_id, surface in surfaces.items()
+        if surface.get("owner") == "app" and surface.get("surface_kind") == "module"
+        and "mozaikspay" in (surface.get("source_capability_packs") or [])
+    }
+    if not approved or context.get("monetization_enabled") is False:
+        return []
+    available = _context_available_pack_map(context)
+    if (available.get("mozaikspay") or {}).get("capability_source") != "managed_capability":
+        return []  # Origin validation still requires a registered provider.
+    contract = yaml.safe_load(workflow_context_path("mozaikspay", "contract.yaml").read_text(encoding="utf-8"))
+    repairs: list[str] = []
+    packs = plan.get("capability_packs") or []
+    for facade in contract["facades"]:
+        facade_id = facade["module_id"]
+        surface = approved.get(facade_id)
+        if surface is None:
+            continue
+        descriptor = _facade_pack_descriptor(facade, approved_surface=surface)
+        if descriptor is None:
+            continue
+        providers = [pack for pack in packs if _pack_id_from_descriptor(pack) == "mozaikspay"]
+        if len(providers) != 1:
+            continue  # Provider selection and competing declarations keep their existing validation path.
+        provider = providers[0]
+        if provider.get("surface_id") in approved or provider.get("surface_kind") == "module":
+            provider.update(
+                surface_id="mozaikspay_managed", surface_kind="external_integration",
+                implementation_mode="external_integration", capability_source="managed_capability",
+            )
+            repairs.append("mozaikspay: separated managed provider from the app-owned facade surface")
+
+        # A second name is a duplicate only when its scope proves it is this
+        # facade. Never consume an independently approved module or app data.
+        page_names = set(descriptor["primary_pages"])
+        actions = set(descriptor["operations"])
+        duplicates = []
+        for pack in packs:
+            pack_id = _pack_id_from_descriptor(pack)
+            if pack_id in {"mozaikspay", facade_id} or pack_id in available or pack_id in surfaces:
+                continue
+            if pack.get("capability_source") != "generated_module" or pack.get("surface_kind") != "module":
+                continue
+            if pack.get("primary_entities") or pack.get("user_data_scope"):
+                continue
+            owned_pages = {str(page).lower().replace(" ", "_") for page in pack.get("primary_pages") or []}
+            if not owned_pages <= page_names or not set(pack.get("operations") or []) <= actions:
+                continue
+            same_surface = pack.get("surface_id") == facade_id
+            facade_only = pack.get("surface_id") not in surfaces and bool(owned_pages)
+            if same_surface or facade_only:
+                duplicates.append(pack)
+        renamed = {_pack_id_from_descriptor(pack) for pack in duplicates}
+        if renamed:
+            packs = [pack for pack in packs if pack not in duplicates]
+            repairs.append(f"{facade_id}: consolidated duplicate facade capabilities {sorted(renamed)}")
+
+        existing = [pack for pack in packs if _pack_id_from_descriptor(pack) == facade_id]
+        if not existing:
+            packs.append(descriptor)
+            repairs.append(f"{facade_id}: added generated_module capability from the pack contract")
+        elif len(existing) == 1:
+            target = existing[0]
+            fixed = {key: descriptor[key] for key in ("surface_id", "surface_kind", "capability_source", "primary_entities")}
+            fixed["operations"] = list(dict.fromkeys([*(target.get("operations") or []), *descriptor["operations"]]))
+            existing_pages = list(target.get("primary_pages") or [])
+            named_pages = {str(page).lower().replace(" ", "_") for page in existing_pages}
+            fixed["primary_pages"] = existing_pages + [page for page in descriptor["primary_pages"] if page not in named_pages]
+            if any(target.get(key) != value for key, value in fixed.items()):
+                target.update(fixed)
+                repairs.append(f"{facade_id}: restored contract scope and approved entity ownership")
+
+        for task in plan.get("build_tasks") or []:
+            pack_id = task.get("capability_pack_id")
+            if pack_id == "mozaikspay" and task.get("task_type") == "api_surface":
+                fixed = {"surface_id": provider["surface_id"], "surface_kind": "external_integration"}
+                if any(task.get(key) != value for key, value in fixed.items()):
+                    task.update(fixed)
+                    repairs.append(f"{task.get('task_id')}: adapter uses the managed provider surface")
+            elif pack_id in renamed:
+                task.update(capability_pack_id=facade_id, surface_id=facade_id, surface_kind="module")
+                task["owned_paths"] = [
+                    "/".join(["modules", facade_id, *path.split("/")[2:]])
+                    if path.startswith("modules/") and path.split("/")[1] in renamed else path
+                    for path in _normalized_owned_paths(task)
+                ]
+                repairs.append(f"{task.get('task_id')}: duplicate facade task now owns {facade_id}")
+    if repairs:
+        plan["capability_packs"] = packs
+    return repairs
+
+
 def _repair_subscription_config_task(plan: dict[str, Any], context: Any) -> list[str]:
     """Add the subscription_config task when the contract requires one.
 
@@ -995,6 +1100,7 @@ def review_app_build_plan(
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
         for repair in (
+            *_repair_managed_facade_capabilities(plan, context_variables),
             *_repair_plan(plan, context_variables),
             *_repair_missing_read_operation(plan, context_variables),
             *_repair_coverage(plan, context_variables),
