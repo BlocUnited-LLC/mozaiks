@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -350,12 +351,96 @@ def _canonical_experience_spec(raw: Any, *, surface_map: dict[str, Any]) -> dict
     }
 
 
-def _validate_monetization_pages(
+def _materialize_facade_pages(
+    experience_spec: dict[str, Any],
+    surface_map: dict[str, Any],
+    *,
+    pack_id: str,
+    contract: dict[str, Any],
+) -> set[str]:
+    """Project pack-owned page intent before the design inventory is persisted.
+
+    ExperienceSpec requires sections. A header carries the declared identity and
+    actions without redesigning the pack UI; AppGenerator's assembly applies the
+    pack's full page templates after page_bundle generation.
+    """
+    pages = experience_spec["pages"]
+    surfaces = surface_map["surfaces"]
+    required_routes: set[str] = set()
+    for facade in contract["facades"]:
+        module_id = facade["module_id"]
+        owners = [surface for surface in surfaces if surface.get("surface_id") == module_id]
+        if len(owners) > 1:
+            raise ValueError(f"surface_map must declare facade {module_id!r} at most once.")
+        if owners:
+            owner = owners[0]
+        else:
+            owner = {
+                "surface_id": module_id,
+                "label": module_id.replace("_", " ").title(),
+                "surface_kind": "module",
+                "owner": "app",
+                "source_capability_packs": [pack_id],
+                "primary_entities": [],
+                "owned_pages": [],
+                "owned_mutations": list(dict.fromkeys(
+                    action for page in facade["pages"] for action in page["primary_actions"]
+                )),
+                "integrations": [facade["provider_module"]],
+                "notes": "App-owned facade; provider records and usage ledgers remain provider/runtime-owned.",
+            }
+            surfaces.append(owner)
+        owner.update(surface_kind="module", owner="app")
+        owner["source_capability_packs"] = list(dict.fromkeys([
+            *(owner.get("source_capability_packs") or []), pack_id,
+        ]))
+        for declared_page in facade["pages"]:
+            route = declared_page["route"]
+            required_routes.add(route)
+            matches = [page for page in pages if page["route"] == route]
+            if len(matches) > 1:
+                raise ValueError(f"Monetization page {route} must appear exactly once in experience_spec.pages.")
+            name = matches[0]["name"] if matches else declared_page["name"]
+            conflicting_routes = [page["route"] for page in pages if page["name"] == name and page["route"] != route]
+            if conflicting_routes:
+                raise ValueError(
+                    f"Facade page {name!r} requires route {route}; rename the app-owned "
+                    f"pages on {conflicting_routes} so surface_map ownership is unambiguous."
+                )
+            if matches:
+                page = matches[0]
+            else:
+                intent = f"Use {module_id} for {', '.join(declared_page['primary_actions'])}."
+                page = {
+                    "name": name,
+                    "route": route,
+                    "layout": "full-width",
+                    "intent": intent,
+                    "sections": [{
+                        "id": "page-header",
+                        "primitive": "PageHeader",
+                        "intent": intent,
+                        "config_hint": json.dumps({"title": name}),
+                    }],
+                }
+                pages.append(page)
+            # Ownership follows the facade contract even when the model already
+            # designed this route under a different page name or surface.
+            name = page["name"]
+            for surface in surfaces:
+                owned_pages = surface.get("owned_pages") or []
+                if name in owned_pages:
+                    surface["owned_pages"] = [owned for owned in owned_pages if owned != name]
+            owner["owned_pages"] = [*(owner.get("owned_pages") or []), name]
+    return required_routes
+
+
+def _complete_monetization_pages(
     experience_spec: dict[str, Any],
     surface_map: dict[str, Any],
     context_variables: Any,
 ) -> None:
-    """Require monetization designs before their inventory becomes authoritative."""
+    """Materialize declared facades; require design only for app-owned pricing."""
     if _cv_get(context_variables, "brownfield_build_path"):
         return
     enabled = _cv_get(context_variables, "monetization_enabled")
@@ -372,14 +457,12 @@ def _validate_monetization_pages(
     blueprint = _cv_get(context_variables, "concept_blueprint") or {}
     intent = blueprint.get("monetization_intent") or {}
     if intent.get("monetized") is True and intent.get("subscription_contract_likely") is True:
-        # The default subscription provider already declares its facade pages.
-        # Validate them here, before AppGenerator materializes that same pack.
         contract = yaml.safe_load(
             workflow_context_path("mozaikspay", "contract.yaml").read_text(encoding="utf-8")
         )
-        required_routes.update(
-            page["route"] for facade in contract["facades"] for page in facade["pages"]
-        )
+        required_routes.update(_materialize_facade_pages(
+            experience_spec, surface_map, pack_id="mozaikspay", contract=contract,
+        ))
 
     missing = required_routes - {page["route"] for page in pages}
     if missing:
@@ -535,7 +618,7 @@ async def save_design_docs_bundle(
             surface_map=surface_map,
         )
         if binding.phase == "genesis":
-            _validate_monetization_pages(experience_spec, surface_map, context_variables)
+            _complete_monetization_pages(experience_spec, surface_map, context_variables)
         data_contract = _canonical_data_contract(
             bundle.get("data_contract"),
             app_id=app_id,

@@ -25,15 +25,27 @@ closure does not prove that generated backend behavior implements the query.
 
 ## File Creation and Formats
 
-DesignDocs owns monetization pages before subscription design. For a monetized
-greenfield build it includes Pricing at `/pricing` in `experience_spec.pages`.
-When the approved concept records `monetized: true` and
-`subscription_contract_likely: true`, it also designs the default subscription
-pack's Billing and Usage pages. The DesignDocs save boundary checks those routes
-against the existing pack contract and requires one primary surface owner per
-page before persistence. Missing pages return through its existing `revise`
-outcome; the save tool does not synthesize designs. Free apps acquire no pricing
-page, and brownfield/revision scope remains authoritative.
+DesignDocs completes the monetization page inventory before subscription design.
+For a greenfield build with `monetization_enabled: true` and an approved concept
+recording both `monetized: true` and `subscription_contract_likely: true`, its
+save boundary materializes the MozaiksPay pack's facade pages from
+`factory_app/build_context/mozaikspay/contract.yaml`: Pricing at `/pricing`,
+Billing at `/billing`, and Usage at `/usage`. Each has the app-owned
+`billing_portal` facade as its primary `surface_map` owner. A design already on
+the same route keeps its name and contents without duplication. App-owned
+product pages still require design judgment; the model need not reproduce
+pack-declared pages before saving.
+
+`ExperienceSpec` requires a layout, intent, and nonempty primitive sections, so
+name and route alone are insufficient. Materialized pages use the pack's
+full-width layout, intent derived from the facade's declared actions, and one
+`PageHeader` section whose title is the declared page name. This is the minimum
+valid design scaffold for the page-bundle/AppSchema path. Final assembly applies
+the pack's existing page templates, which own the complete facade UI.
+
+Other enabled monetization still requires DesignDocs to author `/pricing` with
+one primary surface owner. Disabled monetization adds no facade pages, and
+brownfield/revision scope remains authoritative.
 
 Subscription page requirements refine the approved inventory rather than add
 routes. AppGenerator's exact name/route equality check remains unchanged.

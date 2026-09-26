@@ -1,8 +1,9 @@
-"""DesignDocs must approve monetization pages before the planner freezes scope."""
+"""Materialize declared facade pages before the planner freezes approved scope."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
@@ -132,7 +133,7 @@ def persistence(monkeypatch):
     return store, store_factory, summary
 
 
-def test_design_prompt_requires_pricing_using_projected_monetization_signals():
+def test_design_prompt_delegates_facades_using_projected_monetization_signals():
     workflow = ROOT / "factory_app/workflows/DesignDocs"
     context = yaml.safe_load((workflow / "context_variables.yaml").read_text(encoding="utf-8"))
     agent = yaml.safe_load((workflow / "agents.yaml").read_text(encoding="utf-8"))["agents"][0]
@@ -140,12 +141,15 @@ def test_design_prompt_requires_pricing_using_projected_monetization_signals():
     assert {"monetization_enabled", "concept_blueprint"} <= set(variables)
     assert context["definitions"]["monetization_enabled"]["source"]["default"] is False
     sections = {section["id"]: section["content"] for section in agent["prompt_sections"]}
-    guidance = sections["monetization_surfaces"]
+    guidance = " ".join(sections["monetization_surfaces"].split())
     assert "monetization_enabled: true" in guidance
-    assert "Pricing at /pricing in experience_spec.pages" in guidance
+    assert "Otherwise, include Pricing at /pricing in experience_spec.pages" in guidance
     assert "concept_blueprint.monetization_intent" in guidance
     assert "monetization_enabled is false, do not add" in guidance
-    assert "exactly one primary owner in surface_map" in guidance
+    assert "one primary surface_map owner" in guidance
+    assert "the save boundary materializes" in guidance
+    assert "You do not need to reproduce these pack-declared designs" in guidance
+    assert "same route is preserved, not duplicated" in guidance
 
 
 def test_monetized_approved_inventory_persists_pricing_through_real_bridge(persistence):
@@ -216,8 +220,9 @@ def test_pricing_requires_one_surface_owner_by_page_name(persistence, owners):
     store_factory.assert_not_called()
 
 
-def test_free_app_saves_unchanged_inventory_without_pricing(persistence):
-    context = _context(monetized=False)
+@pytest.mark.parametrize("subscription", [False, True])
+def test_free_app_saves_unchanged_inventory_without_pricing(persistence, subscription):
+    context = _context(monetized=False, subscription=subscription)
     bundle = _bundle(pricing=False)
     expected = deepcopy(bundle["experience_spec"])
 
@@ -225,7 +230,9 @@ def test_free_app_saves_unchanged_inventory_without_pricing(persistence):
 
     assert result["outcome"] == "saved", result
     assert detach(context.get("experience_spec")) == expected
-    assert all(page["route"] != "/pricing" for page in context.get("experience_spec")["pages"])
+    assert {page["route"] for page in context.get("experience_spec")["pages"]}.isdisjoint(
+        {"/pricing", "/billing", "/usage"},
+    )
     assert detach(context.get("design_surface_map")) == bundle["surface_map"]
 
 
@@ -241,9 +248,24 @@ def test_free_app_cannot_acquire_a_pricing_page(persistence):
     store_factory.assert_not_called()
 
 
+def test_disabled_monetization_ignores_stale_subscription_intent(persistence, monkeypatch):
+    context = _context(monetized=True, subscription=True)
+    context.set("monetization_enabled", False)
+    bundle = _bundle(pricing=False)
+    pack_path = Mock(side_effect=AssertionError("Disabled monetization must not load a pack"))
+    monkeypatch.setattr(save_design_doc, "workflow_context_path", pack_path)
+
+    result = _save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert detach(context.get("experience_spec")) == bundle["experience_spec"]
+    assert detach(context.get("design_surface_map")) == bundle["surface_map"]
+    pack_path.assert_not_called()
+
+
 @pytest.mark.parametrize("monetized,pricing", [(True, False), (False, True)])
 def test_existing_app_inventory_is_preserved_for_brownfield(persistence, monetized, pricing):
-    context = _context(monetized=monetized, brownfield="extend")
+    context = _context(monetized=monetized, brownfield="extend", subscription=True)
     bundle = _bundle(pricing=pricing)
 
     result = _save(context, bundle)
@@ -253,7 +275,7 @@ def test_existing_app_inventory_is_preserved_for_brownfield(persistence, monetiz
 
 
 def test_refinement_preserves_existing_inventory_without_synthesizing_pages(persistence):
-    context = _context(monetized=True)
+    context = _context(monetized=True, subscription=True)
     binding = detach(context.get("run_build_binding"))
     binding["phase"] = "refinement"
     context.set("run_build_binding", binding)
@@ -265,19 +287,123 @@ def test_refinement_preserves_existing_inventory_without_synthesizing_pages(pers
     assert detach(context.get("experience_spec")) == bundle["experience_spec"]
 
 
-@pytest.mark.parametrize("missing", ["/billing", "/usage"])
-def test_subscription_design_must_include_managed_facade_pages(persistence, missing):
+def test_subscription_design_materializes_omitted_facade_pages(persistence):
+    store, _, summary = persistence
+    _load_models()
+    context = _context(monetized=True, subscription=True)
+    bundle = _bundle(pricing=False)
+    app_page = deepcopy(bundle["experience_spec"]["pages"][0])
+
+    result = _save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    experience = detach(context.get("experience_spec"))
+    assert experience["pages"][0] == app_page
+    assert {(page["name"], page["route"]) for page in experience["pages"]} == {
+        ("Reports", "/reports"), ("Pricing", "/pricing"),
+        ("Billing", "/billing"), ("Usage", "/usage"),
+    }
+    assert result["page_count"] == len(experience["pages"]) == 4
+    models, _ = load_workflow_structured_outputs("DesignDocs")
+    models["ExperienceSpec"].model_validate(experience)
+    surface_map = detach(context.get("design_surface_map"))
+    models["DesignSurfaceMap"].model_validate(surface_map)
+    facade = next(surface for surface in surface_map["surfaces"] if surface["surface_id"] == "billing_portal")
+    assert facade["surface_kind"] == "module"
+    assert facade["owner"] == "app"
+    assert facade["primary_entities"] == []
+    contract = yaml.safe_load(
+        (ROOT / "factory_app/build_context/mozaikspay/contract.yaml").read_text(encoding="utf-8"),
+    )
+    declared_pages = {page["route"]: page for page in contract["facades"][0]["pages"]}
+    for page in experience["pages"][1:]:
+        assert page["sections"]
+        header = next(section for section in page["sections"] if section["primitive"] == "PageHeader")
+        assert json.loads(header["config_hint"])["title"] == declared_pages[page["route"]]["name"]
+        assert all(action in page["intent"] for action in declared_pages[page["route"]]["primary_actions"])
+        owners = [
+            surface["surface_id"] for surface in context.get("design_surface_map")["surfaces"]
+            if page["name"] in surface["owned_pages"]
+        ]
+        assert owners == ["billing_portal"]
+    ui_document = next(
+        call.kwargs for call in store.upsert_design_doc.await_args_list
+        if call.kwargs["kind"] == "ui_schema"
+    )
+    assert ui_document["extra_fields"]["experience_spec"] == experience
+    assert yaml.safe_load(ui_document["content"])["pages"] == experience["pages"]
+    assert summary.await_args.kwargs["summary_payload"]["experience_spec"] == experience
+
+
+@pytest.mark.parametrize("route,name", [
+    ("/pricing", "Subscriptions"), ("/billing", "Account"), ("/usage", "Consumption"),
+])
+def test_subscription_design_keeps_existing_page_by_route_without_duplication(persistence, route, name):
+    context = _context(monetized=True, subscription=True)
+    bundle = _bundle(pricing=True)
+    bundle["experience_spec"]["pages"][1].update(name=name, route=route)
+    bundle["surface_map"]["surfaces"][1]["owned_pages"] = [name]
+    designed_page = deepcopy(bundle["experience_spec"]["pages"][1])
+
+    result = _save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    experience = detach(context.get("experience_spec"))
+    assert [page for page in experience["pages"] if page["route"] == route] == [designed_page]
+    assert len(experience["pages"]) == 4
+    owners = [
+        surface["surface_id"] for surface in context.get("design_surface_map")["surfaces"]
+        if designed_page["name"] in surface["owned_pages"]
+    ]
+    assert owners == ["billing_portal"]
+
+
+def test_subscription_design_materialization_is_idempotent_on_resave(persistence):
+    context = _context(monetized=True, subscription=True)
+    bundle = _bundle(pricing=False)
+    assert _save(context, bundle)["outcome"] == "saved"
+    experience = detach(context.get("experience_spec"))
+    surface_map = detach(context.get("design_surface_map"))
+    bundle["experience_spec"] = deepcopy(experience)
+    bundle["surface_map"] = deepcopy(surface_map)
+
+    next_context = _context(monetized=True, subscription=True)
+    result = _save(next_context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert detach(next_context.get("experience_spec")) == experience
+    assert detach(next_context.get("design_surface_map")) == surface_map
+
+
+def test_subscription_design_rejects_ambiguous_duplicate_routes(persistence):
     _, store_factory, _ = persistence
     context = _context(monetized=True, subscription=True)
-    bundle = _bundle(pricing=True, subscription=True)
-    bundle["experience_spec"]["pages"] = [
-        page for page in bundle["experience_spec"]["pages"] if page["route"] != missing
-    ]
+    bundle = _bundle(pricing=True)
+    duplicate = deepcopy(bundle["experience_spec"]["pages"][1])
+    duplicate["name"] = "Other pricing design"
+    bundle["experience_spec"]["pages"].append(duplicate)
 
     result = _save(context, bundle)
 
     assert result["outcome"] == "revise", result
-    assert missing in result["error"]
+    assert "/pricing must appear exactly once" in result["error"]
+    store_factory.assert_not_called()
+
+
+def test_subscription_design_rejects_page_name_collision_across_routes(persistence):
+    _, store_factory, _ = persistence
+    context = _context(monetized=True, subscription=True)
+    bundle = _bundle(pricing=False)
+    bundle["experience_spec"]["pages"][0]["name"] = "Billing"
+    bundle["surface_map"]["surfaces"][0]["owned_pages"] = ["Billing"]
+
+    result = _save(context, bundle)
+
+    assert result["outcome"] == "revise", result
+    assert "Billing" in result["error"]
+    assert "/billing" in result["error"]
+    assert "rename" in result["error"]
+    assert context.get("experience_spec") is None
     store_factory.assert_not_called()
 
 
@@ -349,13 +475,20 @@ def _monetized_plan(context: ContextVariablesBridge, *, subscription: bool = Fal
     return plan
 
 
-def test_saved_pricing_inventory_passes_planner_coverage_and_full_review(persistence):
+@pytest.mark.parametrize("pricing,subscription", [
+    (False, False), (True, False), (True, True),
+], ids=["omitted", "partial", "complete"])
+def test_saved_pricing_inventory_passes_planner_coverage_and_full_review(persistence, pricing, subscription):
     _load_models()
     context = _context(monetized=True, subscription=True)
     models, _ = load_workflow_structured_outputs("DesignDocs")
-    bundle = models["DesignDocsBundle"].model_validate(_bundle(pricing=True, subscription=True))
+    bundle = models["DesignDocsBundle"].model_validate(
+        _bundle(pricing=pricing, subscription=subscription),
+    )
     assert _save(context, bundle.model_dump(mode="json"))["outcome"] == "saved"
     plan = _monetized_plan(context, subscription=True)
+    pricing_name = "Subscriptions" if pricing else "Pricing"
+    next(page for page in plan["pages"] if page["route"] == "/pricing")["name"] = pricing_name
 
     validate_plan_coverage(plan, context)
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
@@ -363,7 +496,7 @@ def test_saved_pricing_inventory_passes_planner_coverage_and_full_review(persist
     assert result["outcome"] == "ready", result
     cached = detach(context.get("app_build_plan"))
     assert {(page["name"], page["route"]) for page in cached["pages"]} == {
-        ("Reports", "/reports"), ("Subscriptions", "/pricing"),
+        ("Reports", "/reports"), (pricing_name, "/pricing"),
         ("Billing", "/billing"), ("Usage", "/usage"),
     }
     assert any(task["task_type"] == "subscription_config" for task in cached["build_tasks"])
