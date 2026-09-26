@@ -21,7 +21,7 @@ from mozaiksai.core.workflow.outputs.structured import build_models_from_config
 
 def _typed_schema():
     return {
-        "type": "object", "description": None, "required": ["name"], "items_type": None,
+        "type": "object", "description": None, "items_type": None,
         "properties": [
             {"name": "name", "type": "string", "description": "Customer name", "required": True,
              "enum_values": ["Alice", "Bob"], "items_type": None},
@@ -38,28 +38,38 @@ def test_typed_schema_materialization_matches_runtime_validation_without_mutatin
         "module_yaml": {"actions": [{"input_schema": schema, "output_schema": schema}],
                         "capabilities": [{"input_schema": schema}]},
         "events_yaml": {"events": [{"payload_schema": schema}]},
+        "policy_hooks_yaml": {"hooks": [{"input_schema": schema, "output_schema": schema}]},
     }}
     files = extract_code_file_map_from_payload(payload)
     manifest = yaml.safe_load(files["modules/customers/module.yaml"])
     event_schema = yaml.safe_load(files["modules/customers/contracts/events.yaml"])["events"][0]["payload_schema"]
+    hook = yaml.safe_load(files["modules/customers/contracts/policy_hooks.yaml"])["hooks"][0]
     request = manifest["actions"][0]["input_schema"]
     assert request == manifest["capabilities"][0]["input_schema"]
     import_closed_contract_schema(request)
-    for compiled in (request, manifest["actions"][0]["output_schema"], event_schema):
+    for compiled in (
+        request, manifest["actions"][0]["output_schema"], event_schema,
+        hook["input_schema"], hook["output_schema"],
+    ):
+        assert compiled["required"] == ["name"]
+        assert "required" not in compiled["properties"]["name"]
         assert validate_json_schema({"name": "Alice", "tags": ["staff"]}, compiled) is None
         assert validate_json_schema({"name": "Unknown"}, compiled).category == "value_invalid"
         assert validate_json_schema({}, compiled).category == "value_invalid"
         assert validate_json_schema({"name": "Alice", "tags": [2]}, compiled).category == "value_invalid"
     assert validate_json_schema({"name": "Alice", "extra": True}, request).category == "value_invalid"
+    for hook_schema in (hook["input_schema"], hook["output_schema"]):
+        assert hook_schema["properties"]["name"]["description"] == "Customer name"
+        assert validate_json_schema({"name": "Alice", "extra": True}, hook_schema) is None
     assert schema == _typed_schema()
 
 
-@pytest.mark.parametrize("invalid", ["duplicate", "required", "array_type", "nested_object"])
+@pytest.mark.parametrize("invalid", ["duplicate", "retired_required", "array_type", "nested_object"])
 def test_typed_schema_materialization_rejects_unrepresentable_contracts(invalid):
     schema = _typed_schema()
     if invalid == "duplicate":
         schema["properties"].append(dict(schema["properties"][0]))
-    elif invalid == "required":
+    elif invalid == "retired_required":
         schema["required"] = []
     elif invalid == "array_type":
         schema["properties"][1]["items_type"] = "imaginary"

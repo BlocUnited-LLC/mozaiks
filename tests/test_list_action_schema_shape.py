@@ -20,7 +20,6 @@ def _array_with_properties() -> dict:
             {"name": "habit_id", "type": "string", "description": "id",
              "required": True, "enum_values": [], "items_type": None}
         ],
-        "required": ["habit_id"],
     }
 
 
@@ -33,7 +32,6 @@ def _object_wrapping_an_array() -> dict:
             {"name": "habits", "type": "array", "description": "records",
              "required": True, "enum_values": [], "items_type": "object"}
         ],
-        "required": ["habits"],
     }
 
 

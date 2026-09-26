@@ -183,11 +183,18 @@ code implements the instructions. Generated-app acceptance must still probe
 later-page records, literal matching, and foreign/no-op mutations with event
 observation.
 
-Module action/capability schemas and event payload schemas are compiled from
-`JsonSchemaContract` lists into runtime JSON Schema maps. Null annotations are
+Module action/capability schemas, event payload schemas, and policy-hook schemas
+are compiled from `JsonSchemaContract` lists into runtime JSON Schema maps. Null annotations are
 omitted; enums and array item types are rendered under their JSON Schema keys.
-Required-name lists must agree with property flags. Action/capability requests
-use the existing closed-contract importer: unknown keys are rejected, and
+Each `JsonSchemaProperty.required` boolean is the sole authored source of
+requiredness. `JsonSchemaContract` has no top-level `required` field: the renderer
+derives the runtime required-name list from the flags, in property order, and
+omits it when no properties are required. The retired typed required-name list
+is rejected, including when it agrees with the flags; there is no precedence
+rule or compatibility normalization. Runtime JSON Schema maps retain their
+standard `required` lists, including schemas shipped in pack templates.
+Action/capability requests use the existing closed-contract importer: unknown
+keys are rejected, and
 unrepresentable nested/open request objects fail instead of being weakened.
 
 Workflow/module/page contracts use `.yaml`. Browser manifests, app identity,

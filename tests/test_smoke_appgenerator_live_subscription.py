@@ -96,14 +96,12 @@ def test_config_middleware_schema_defaults_omitted_module_optional_fields() -> N
     actions[0]["input_schema"] = {
         "type": "object",
         "description": "Request to list reports.",
-        "required": [],
         "properties": [],
         "items_type": None,
     }
     actions[0]["output_schema"] = {
         "type": "object",
         "description": "Response containing reports.",
-        "required": ["reports"],
         "properties": [
             {
                 "name": "reports",
@@ -119,7 +117,6 @@ def test_config_middleware_schema_defaults_omitted_module_optional_fields() -> N
     actions[1]["input_schema"] = {
         "type": "object",
         "description": "Report generation request.",
-        "required": ["topic"],
         "properties": [
             {
                 "name": "topic",
@@ -135,7 +132,6 @@ def test_config_middleware_schema_defaults_omitted_module_optional_fields() -> N
     actions[1]["output_schema"] = {
         "type": "object",
         "description": "Generated report response.",
-        "required": ["report_id", "topic"],
         "properties": [
             {
                 "name": "report_id",

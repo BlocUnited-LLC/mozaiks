@@ -170,15 +170,19 @@ def _materialize_schema_contract(schema: dict[str, Any], *, closed_request: bool
     """Compile the finite generator schema into the runtime's JSON Schema shape."""
     if "items_type" not in schema and not isinstance(schema.get("properties"), list):
         return schema
+    if "required" in schema:
+        raise ValueError(
+            "Typed schema contracts must not declare a top-level required list; "
+            "set each property's required flag instead"
+        )
     result: dict[str, Any] = {"type": schema["type"]}
     if not closed_request and schema.get("description") is not None:
         result["description"] = schema["description"]
     if schema["type"] == "array" and schema.get("items_type") is not None:
         result["items"] = {"type": schema["items_type"]}
     properties = schema.get("properties") or []
-    required = schema.get("required")
-    if schema["type"] != "object" and (properties or required):
-        raise ValueError("Only object schema contracts may declare properties or required fields")
+    if schema["type"] != "object" and properties:
+        raise ValueError("Only object schema contracts may declare properties")
     if schema["type"] == "object":
         result["properties"] = {}
         if closed_request:
@@ -198,10 +202,6 @@ def _materialize_schema_contract(schema: dict[str, Any], *, closed_request: bool
             result["properties"][name] = rendered
             if prop.get("required") is True:
                 required_names.append(name)
-        if required is not None and (
-            len(required) != len(set(required)) or set(required) != set(required_names)
-        ):
-            raise ValueError("Schema contract required names must match property required flags")
         if required_names:
             result["required"] = required_names
     try:
@@ -246,6 +246,11 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
                 for event in value.get("events") or []:
                     if isinstance(event.get("payload_schema"), dict):
                         event["payload_schema"] = _materialize_schema_contract(event["payload_schema"])
+            elif key == "policy_hooks_yaml" and isinstance(value, dict):
+                for hook in value.get("hooks") or []:
+                    for schema_key in ("input_schema", "output_schema"):
+                        if isinstance(hook.get(schema_key), dict):
+                            hook[schema_key] = _materialize_schema_contract(hook[schema_key])
             file_map[str(path)] = yaml.safe_dump(
                 value,
                 allow_unicode=True,
