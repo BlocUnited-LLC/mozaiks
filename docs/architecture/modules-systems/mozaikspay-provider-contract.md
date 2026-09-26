@@ -25,6 +25,21 @@ Pages call the app-owned `billing_portal` module. The module calls the generated
 payment-provider SDKs, wallet internals, payout internals, or settlement systems
 directly.
 
+When the approved design assigns `billing_portal` to the MozaiksPay facade,
+AppGenerator's plan-review repair derives its `generated_module` capability
+from the pack contract before origin validation. The `mozaikspay` managed
+capability and its `api_surface` client task use a separate external-integration
+surface. The facade's actions and pages come from `contract.yaml`; its owned
+entities come from the approved design. Displaying subscriptions, runtime usage,
+or token balances does not make the facade their persistence owner.
+
+A planner-created second facade name is consolidated only when its pages and
+actions are confined to the declared facade, it owns no entities, and it has no
+separately approved identity. It must also claim the facade surface or name
+facade pages without a separately approved surface. Task references and module
+paths then use `billing_portal`. Conflicting file owners still fail validation.
+Origin validation and the build journey order are unchanged.
+
 ```text
 generated page
   -> billing_portal module action

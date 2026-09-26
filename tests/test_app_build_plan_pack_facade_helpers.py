@@ -40,10 +40,10 @@ Covers helpers not in test_app_build_plan_helpers.py or test_app_build_plan_help
     - missing module_id and facade_id → None
     - valid facade with pages → descriptor built
     - pages with primary_actions → operations populated
-    - pages with primary_entities → primary_entities populated
+    - approved module ownership takes precedence over page entities
     - label/summary from facade → used
     - label/summary missing → auto-generated from facade_id
-    - provider_module → included in required_integrations
+    - connector requirements stay on the separate managed capability
 
   _iter_page_api_endpoints:
     - flat dict with api_endpoint → yields it
@@ -107,14 +107,15 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _validate_page_bindings,
     _validate_user_facing_managed_capability_tasks,
 )
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _ctx(data: dict):
-    """Return a simple dict-based context_variables."""
-    return data
+def _ctx(data: dict) -> ContextVariablesBridge:
+    return ContextVariablesBridge(data)
 
 
 # ---------------------------------------------------------------------------
@@ -369,9 +370,15 @@ class TestFacadePackDescriptor:
         result = _facade_pack_descriptor(self._base_facade())
         assert result["surface_kind"] == "module"
 
-    def test_pack_type_is_managed_facade(self):
+    def test_pack_type_is_canonical_custom_domain(self):
         result = _facade_pack_descriptor(self._base_facade())
-        assert result["pack_type"] == "managed_facade"
+        assert result["pack_type"] == "custom_domain"
+
+    def test_descriptor_satisfies_capability_schema(self):
+        models, _ = load_workflow_structured_outputs("AppGenerator")
+        descriptor = _facade_pack_descriptor(self._base_facade())
+        capability = models["AppCapabilityPack"].model_validate(descriptor)
+        assert capability.model_dump(mode="json")["capability_source"] == "generated_module"
 
     def test_label_from_facade(self):
         result = _facade_pack_descriptor(self._base_facade())
@@ -399,6 +406,14 @@ class TestFacadePackDescriptor:
         result = _facade_pack_descriptor(facade)
         assert "Subscription" in result["primary_entities"]
 
+    def test_approved_module_entities_override_page_entities(self):
+        facade = {
+            "module_id": "billing_portal",
+            "pages": [{"name": "Billing", "primary_entities": ["subscription"]}],
+        }
+        result = _facade_pack_descriptor(facade, approved_surface={"primary_entities": []})
+        assert result["primary_entities"] == []
+
     def test_primary_pages_from_page_names(self):
         facade = {
             "module_id": "billing_portal",
@@ -408,9 +423,9 @@ class TestFacadePackDescriptor:
         assert "billing_dashboard" in result["primary_pages"]
         assert "invoice_list" in result["primary_pages"]
 
-    def test_provider_module_in_required_integrations(self):
+    def test_provider_owns_connector_requirements(self):
         result = _facade_pack_descriptor(self._base_facade())
-        assert "mozaikspay" in result["required_integrations"]
+        assert result["required_integrations"] == []
 
     def test_implementation_mode_is_declarative_module(self):
         result = _facade_pack_descriptor(self._base_facade())
@@ -608,9 +623,66 @@ class TestApplySelectedPackFiles:
 
         by_id = {pack["capability_pack_id"]: pack for pack in packs}
         assert by_id["billing_portal"]["capability_source"] == "generated_module"
-        assert by_id["billing_portal"]["pack_type"] == "managed_facade"
+        assert by_id["billing_portal"]["pack_type"] == "custom_domain"
         assert pages == []
         assert tasks == []
+
+    def test_sparse_registry_preserves_reviewed_facade_and_approved_ownership(self):
+        facade = {
+            "module_id": "billing_portal",
+            "provider_module": "mozaikspay",
+            "pages": [{
+                "name": "Billing",
+                "route": "/billing",
+                "primary_entities": ["subscription"],
+            }],
+        }
+        reviewed = _facade_pack_descriptor(facade, approved_surface={"primary_entities": []})
+        reviewed["primary_pages"] = ["Pricing", "Billing", "Usage"]
+        reviewed["operations"] = ["list_plans", "get_subscription_status", "get_usage_status"]
+        ctx = _ctx({
+            "available_managed_capabilities": [{
+                "id": "mozaikspay",
+                "capability_source": "managed_capability",
+                "facades": [facade],
+            }],
+            "design_surface_map": {"surfaces": [{
+                "surface_id": "billing_portal",
+                "surface_kind": "module",
+                "owner": "app",
+                "primary_entities": [],
+            }]},
+        })
+        packs, _, _ = _apply_selected_pack_files(
+            capability_packs=[
+                {"capability_pack_id": "mozaikspay", "capability_source": "managed_capability"},
+                reviewed,
+            ],
+            pages=[],
+            build_tasks=[],
+            context_variables=ctx,
+        )
+        assert packs[1] == reviewed
+
+    def test_existing_facade_ownership_survives_without_design_context(self):
+        ctx = _ctx({"available_managed_capabilities": [{
+            "id": "mozaikspay",
+            "capability_source": "managed_capability",
+            "facades": [{
+                "module_id": "billing_portal",
+                "pages": [{"name": "Billing", "primary_entities": ["subscription"]}],
+            }],
+        }]})
+        packs, _, _ = _apply_selected_pack_files(
+            capability_packs=[
+                {"capability_pack_id": "mozaikspay", "capability_source": "managed_capability"},
+                {"capability_pack_id": "billing_portal", "primary_entities": []},
+            ],
+            pages=[],
+            build_tasks=[],
+            context_variables=ctx,
+        )
+        assert packs[1]["primary_entities"] == []
 
     def test_managed_capability_in_available_packs_returns_available_descriptor(self):
         ctx = _ctx({"available_managed_capabilities": [{
