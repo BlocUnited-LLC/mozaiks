@@ -5,8 +5,11 @@ from typing import Any
 
 import yaml
 
-from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from factory_app.workflows._shared.surface_ownership import (
+    default_subscription_contract,
+    validate_surface_ownership,
+)
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
@@ -454,12 +457,8 @@ def _complete_monetization_pages(
         return
 
     required_routes = {"/pricing"}
-    blueprint = _cv_get(context_variables, "concept_blueprint") or {}
-    intent = blueprint.get("monetization_intent") or {}
-    if intent.get("monetized") is True and intent.get("subscription_contract_likely") is True:
-        contract = yaml.safe_load(
-            workflow_context_path("mozaikspay", "contract.yaml").read_text(encoding="utf-8")
-        )
+    contract = default_subscription_contract(context_variables)
+    if contract is not None:
         required_routes.update(_materialize_facade_pages(
             experience_spec, surface_map, pack_id="mozaikspay", contract=contract,
         ))
@@ -624,6 +623,12 @@ async def save_design_docs_bundle(
             app_id=app_id,
             artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
             surface_map=surface_map,
+        )
+        validate_surface_ownership(
+            surface_map,
+            context_variables=context_variables,
+            data_contract=data_contract,
+            include_default_subscription=True,
         )
         if not frontend_markdown or not backend_markdown or not database_markdown:
             raise ValueError("DesignDocsBundle must include all three Markdown documents")

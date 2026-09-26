@@ -28,7 +28,7 @@ models:
         - app
         - hosted
         - platform
-        description: Runtime owner responsible for this surface.
+        description: Runtime owner responsible for this surface. Platform auth/sessions cannot be app modules. Selected managed pack facades own the app UI boundary, never provider state; owner hints cannot override these constraints.
       source_capability_packs:
         type: optional_list
         items: str
@@ -36,7 +36,7 @@ models:
       primary_entities:
         type: optional_list
         items: str
-        description: Durable entities or records owned by the surface.
+        description: Durable entities or records owned by the surface. Managed facade modules do not own provider records or platform state; use an empty list for these facades.
       owned_pages:
         type: optional_list
         items: str
@@ -226,7 +226,7 @@ models:
       collections:
         type: list
         items: DataContractCollection
-        description: Collection intents owned by the surface.
+        description: Collection intents owned by the surface. Platform auth/session state and selected managed-provider state cannot be declared here; managed facade surfaces have no local collections.
 
   DataContractPolicies:
     type: model

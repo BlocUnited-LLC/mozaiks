@@ -9,6 +9,12 @@ description: >
 layers:
 
   runtime_provided:
+    surface_ownership:
+      - owner: Mozaiks platform authentication and sessions
+        surface_ids: [auth, authentication, user_authentication, session_management, user_sessions]
+        entity_names: [AuthIdentity, AuthSession, UserSession, auth_identity, auth_session, user_session]
+        action_ids: [login, logout, authenticate_user, create_auth_session, refresh_auth_session]
+        collection_names: [auth_identities, auth_sessions, user_sessions, credentials]
     description: >
       Built into mozaiksai. Always present in every deployed app. Never generate
       these as modules, capability packs, or build tasks — reference them as

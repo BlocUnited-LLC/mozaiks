@@ -26,6 +26,16 @@ canonical_provider:
 provides_capabilities:
   - subscription_write_path
 
+# Finite ownership identifiers checked at DesignDocs save and before plan repair.
+# These are invalid duplicate app-state claims, not alternative module names.
+surface_ownership:
+  - owner: MozaiksPay billing state (OSS runtime owns fulfilled entitlements and token wallets)
+    facade_module: billing_portal
+    surface_ids: [subscription_management, subscriptions, billing_management]
+    entity_names: [Subscription, subscriptions, SubscriptionAssignment, subscription_assignment, TokenWallet, token_wallet]
+    action_ids: [update_subscription, create_subscription, cancel_subscription, assign_subscription]
+    collection_names: [subscriptions, subscription_assignments, token_wallets]
+
 selection_rules:
   - id: select_for_token_wallets
     when:

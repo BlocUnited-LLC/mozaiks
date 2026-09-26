@@ -1,4 +1,16 @@
 definitions:
+  operator_capabilities:
+    type: array
+    description: Trusted operator-selected pack identifiers resolved against installed public build-context declarations.
+    source: {type: build_context, default: []}
+  capability_packs:
+    type: array
+    description: Trusted selected pack descriptors used to enforce facade ownership before saving design surfaces.
+    source: {type: build_context, default: []}
+  operator_contracts:
+    type: array
+    description: Declared contracts of selected packs, including exact surface ownership boundaries.
+    source: {type: build_context, default: []}
   design_docs_save_outcome:
     type: string
     authority_class: closed_writer_routing_state

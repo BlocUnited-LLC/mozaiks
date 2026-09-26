@@ -9,6 +9,7 @@ from typing import Annotated, Any
 import yaml
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.surface_ownership import validate_surface_ownership
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _CANONICAL_INITIAL_AGENTS,
     _MODULE_LOCAL_TASK_TYPES,
@@ -198,6 +199,9 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
     """
     repairs: list[str] = []
     design = detach(context.get("design_surface_map")) or {}
+    validate_surface_ownership(
+        design, context_variables=context, data_contract=detach(context.get("data_contract")),
+    )
     packs = plan.get("capability_packs") or []
 
     approved = {
@@ -255,8 +259,8 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
             continue
         source = pack.get("capability_source")
         if source not in {"generated_module", None, ""}:
-            # A provider source with no installed provider, on a surface the
-            # design approved as app-owned, is app code mislabelled. The
+            # After ownership validation, an unregistered provider source on
+            # an approved app domain surface is app code mislabelled. The
             # validator says so outright: "For app-owned code use
             # generated_module with capability_pack_id=surface_id=...". Seen live
             # as operator_pack, and previously as managed_capability.
@@ -1052,6 +1056,9 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
 def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
     """Reject invented scope before repairs or identity advice can obscure it."""
     design = detach(context.get("design_surface_map")) or {}
+    validate_surface_ownership(
+        design, context_variables=context, data_contract=detach(context.get("data_contract")),
+    )
     approved = {
         surface["surface_id"] for surface in design.get("surfaces") or []
         if surface.get("surface_id")

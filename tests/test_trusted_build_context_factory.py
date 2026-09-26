@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from factory_app.workflows._shared.surface_ownership import validate_surface_ownership
 from factory_app.workflows.AppGenerator.tools.app_plan_review import validate_plan_origins
 from mozaiksai.core.session.build_context import load_trusted_build_context
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
@@ -151,11 +152,14 @@ def test_plan_cannot_change_registered_provider_source(registered_payments_root:
         validate_plan_origins(plan, ContextVariablesBridge(context))
 
 
-def test_trusted_selection_resolves_only_the_selected_registered_pack(tmp_path: Path) -> None:
+@pytest.mark.parametrize("workflow_name", ["AppGenerator", "DesignDocs"])
+def test_trusted_selection_resolves_only_the_selected_registered_pack(
+    tmp_path: Path, workflow_name: str,
+) -> None:
     root = tmp_path / "build_context"
     _write_context(root, "SelectedCapabilities", {
         "context_id": "selected_capabilities",
-        "applies_to_workflows": ["AppGenerator"],
+        "applies_to_workflows": [workflow_name],
         "assets": [],
         "values": {"operator_capabilities": ["mozaikspay"]},
         "projections": {"context_variables": {
@@ -163,12 +167,20 @@ def test_trusted_selection_resolves_only_the_selected_registered_pack(tmp_path: 
         }},
     })
 
-    context = load_trusted_build_context(_policy(), build_context_root=root)
+    context = load_trusted_build_context(_policy(workflow_name), build_context_root=root)
 
     assert context["operator_capabilities"] == ["mozaikspay"]
     assert [pack["id"] for pack in context["capability_packs"]] == ["mozaikspay"]
     assert context["capability_packs"][0]["pack_source_path"] == str(PAYMENTS_CONTEXT)
     validate_plan_origins(_provider_plan(), ContextVariablesBridge(context))
+    with pytest.raises(ValueError, match="MozaiksPay"):
+        validate_surface_ownership(
+            {"surfaces": [{
+                "surface_id": "subscription_management", "surface_kind": "module",
+                "owner": "app", "primary_entities": ["Subscription"],
+            }]},
+            context_variables=ContextVariablesBridge(context),
+        )
 
 
 def test_trusted_selection_does_not_register_unknown_provider_alias(tmp_path: Path) -> None:

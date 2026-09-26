@@ -278,7 +278,7 @@ def test_missing_approved_modules_are_repaired_to_surface_bound_generated_capabi
     context = _context()
     context.set("design_surface_map", {
         "surfaces": [
-            {"surface_id": "user_authentication", "surface_kind": "module", "owner": "app"},
+            {"surface_id": "project_management", "surface_kind": "module", "owner": "app"},
             {"surface_id": "task_management", "surface_kind": "module", "owner": "app"},
         ]
     })
@@ -289,7 +289,7 @@ def test_missing_approved_modules_are_repaired_to_surface_bound_generated_capabi
         pack["capability_pack_id"]: pack
         for pack in plan["capability_packs"]
     }
-    assert set(capabilities) == {"user_authentication", "task_management"}
+    assert set(capabilities) == {"project_management", "task_management"}
     assert all(pack["capability_source"] == "generated_module" for pack in capabilities.values())
     assert all(pack["surface_id"] == pack_id for pack_id, pack in capabilities.items())
 
@@ -305,6 +305,49 @@ def test_missing_approved_modules_are_repaired_to_surface_bound_generated_capabi
         for module_id in sorted(capabilities)
     ]
     validate_plan_origins(plan, context)
+
+
+@pytest.mark.parametrize(
+    ("surface_id", "entities", "operations", "expected_owner"),
+    [
+        ("user_authentication", ["UserSession"], ["login"], "platform"),
+        ("subscription_management", ["Subscription"], ["update_subscription"], "MozaiksPay"),
+    ],
+)
+def test_review_rejects_approved_modules_owned_elsewhere_before_queuing_workers(
+    surface_id, entities, operations, expected_owner,
+):
+    plan = _plan()
+    plan["capability_packs"][0].update(
+        capability_pack_id=surface_id,
+        surface_id=surface_id,
+        capability_source="managed_capability",
+        primary_entities=entities,
+        operations=operations,
+    )
+    plan["build_tasks"] = []
+    context = _context()
+    design = {"surfaces": [{
+        "surface_id": surface_id, "surface_kind": "module", "owner": "app",
+        "primary_entities": entities, "owned_mutations": operations,
+    }]}
+    context.set("design_surface_map", design)
+    context.set("capability_packs", [{
+        "id": "mozaikspay", "capability_source": "managed_capability",
+        "pack_source_path": str(ROOT / "factory_app/build_context/mozaikspay"),
+    }] if expected_owner == "MozaiksPay" else [])
+    original_plan = deepcopy(plan)
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "needs_revision", result
+    assert expected_owner in result["error"], result
+    assert surface_id in result["error"], result
+    assert context.get("app_plan_ready") is False
+    assert context.get("app_build_plan") is None
+    assert not context.get("app_task_batch_items")
+    assert detach(context.get("design_surface_map")) == design
+    assert plan == original_plan
 
 
 def test_invalid_provider_blocks_after_budget_and_never_queues_a_batch():
