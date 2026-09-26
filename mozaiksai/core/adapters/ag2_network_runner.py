@@ -49,6 +49,7 @@ from mozaiksai.core.workflow.context.authority import (
     ContextWriterId,
     resolve_declared_context_writer,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
 
@@ -74,7 +75,7 @@ def _json_safe_key(value: Any) -> str:
     return str(value)
 
 
-def _json_safe(value: Any) -> Any:
+def _json_safe(value: Any, *, reject_key_collisions: bool = False) -> Any:
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, datetime | date):
@@ -85,17 +86,20 @@ def _json_safe(value: Any) -> Any:
         except UnicodeDecodeError:
             return value.hex()
     if isinstance(value, Mapping):
-        return {
-            _json_safe_key(key): _json_safe(item)
-            for key, item in value.items()
-        }
+        serialized: dict[str, Any] = {}
+        for key, item in value.items():
+            safe_key = _json_safe_key(key)
+            if reject_key_collisions and safe_key in serialized:
+                raise ValueError("context mapping keys collide after JSON serialization")
+            serialized[safe_key] = _json_safe(item, reject_key_collisions=reject_key_collisions)
+        return serialized
     if isinstance(value, list | tuple | set):
-        return [_json_safe(item) for item in value]
+        return [_json_safe(item, reject_key_collisions=reject_key_collisions) for item in value]
     if hasattr(value, "model_dump") and callable(value.model_dump):
         try:
-            return _json_safe(value.model_dump(mode="json"))
+            return _json_safe(value.model_dump(mode="json"), reject_key_collisions=reject_key_collisions)
         except TypeError:
-            return _json_safe(value.model_dump())
+            return _json_safe(value.model_dump(), reject_key_collisions=reject_key_collisions)
     return str(value)
 
 
@@ -251,6 +255,17 @@ def _closed_reason_from_wal(wal: Sequence[Any]) -> tuple[bool, str | None]:
     return True, reason or None
 
 
+def _canonical_build_context_value(value: Any) -> str:
+    """Compare immutable views and stored values in the channel's JSON form."""
+    return json.dumps(
+        _json_safe(detach(value), reject_key_collisions=True),
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
 def _require_current_build_context(
     *,
     saved: Mapping[str, Any],
@@ -263,10 +278,16 @@ def _require_current_build_context(
 
     current = load_trusted_build_context(policy)
     for key in sorted(policy.build_context_keys):
-        if saved.get(key) != current.get(key):
-            raise ContextAuthorityError(
-                f"context_authority.stale_build_context workflow={policy.workflow_name} key={key}"
+        error = f"context_authority.stale_build_context workflow={policy.workflow_name} key={key}"
+        try:
+            matches = (
+                _canonical_build_context_value(saved.get(key))
+                == _canonical_build_context_value(current.get(key))
             )
+        except (TypeError, ValueError) as exc:
+            raise ContextAuthorityError(error) from exc
+        if not matches:
+            raise ContextAuthorityError(error)
 
 
 @dataclass(slots=True)

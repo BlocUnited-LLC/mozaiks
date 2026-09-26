@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Paused and durable AG2 workflows resume with unchanged build-context contracts
+  after JSON serialization of YAML keys and immutable context views. Changed or
+  revoked protected content still blocks resume.
+
 - AppGenerator constructs omitted page bundles and module task structure from
   approved inputs, including empty task plans, and shares required file and
   worker rules with validation. Unapproved scope and unresolved judgment still

@@ -197,7 +197,12 @@ after bootstrap.
 No database migration or provenance store is required: historical chat values
 are revalidated through the same registry projection as new launches. Durable
 AG2 channels and paused live runs must match the current protected projection
-before any pending worker turn resumes. A changed or revoked projection blocks
+before any pending worker turn resumes. This comparison detaches immutable
+context views and uses canonical JSON with the channel's serialization rules:
+mapping order is irrelevant, tuple/list views compare equally, and YAML mapping
+keys such as HTTP status integers compare with their persisted string keys.
+Sequence order and scalar values remain significant. Ambiguous keys that collide
+when converted to strings fail closed. A changed or revoked projection blocks
 that channel with `ag2_network_stale_build_context`; start a fresh run to use the
 new registry. Existing channel state is never reconstructed or rewritten to
 fabricate an accepted handoff. Rolling back the code leaves stored evidence
