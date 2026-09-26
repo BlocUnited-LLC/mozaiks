@@ -1,0 +1,52 @@
+{
+  "source": "Monetized traversal at OSS f870d668; billing_portal_module_contract rejected output; exact get_usage_status action slice.",
+  "module_id": "billing_portal",
+  "action": {
+    "id": "get_usage_status",
+    "description": "Get current usage status for a user's subscription.",
+    "handler_method": "get_usage_status",
+    "api_surface": null,
+    "input_schema": {
+      "type": "object",
+      "description": "User ID to retrieve usage status.",
+      "required": [
+        "user_id"
+      ],
+      "properties": [
+        {
+          "name": "user_id",
+          "type": "string",
+          "description": "The ID of the user to check usage status.",
+          "required": true,
+          "enum_values": [],
+          "items_type": null
+        }
+      ],
+      "items_type": null
+    },
+    "output_schema": {
+      "type": "object",
+      "description": "Current usage status details.",
+      "required": [
+        "usage_data"
+      ],
+      "properties": [
+        {
+          "name": "usage_data",
+          "type": "object",
+          "description": "Detailed usage data for user's subscription.",
+          "required": false,
+          "enum_values": [],
+          "items_type": null
+        }
+      ],
+      "items_type": null
+    },
+    "permissions": [],
+    "emits": [
+      "domain.billing.usage.updated"
+    ],
+    "entitlement_gate": null,
+    "ask_context_safe": true
+  }
+}

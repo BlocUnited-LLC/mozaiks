@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator derives required schema fields from property flags, eliminating
+  conflicting required-name lists that blocked module-contract build tasks.
+  Typed policy-hook schemas now use the same JSON Schema materialization.
+
 - Paused and durable AG2 workflows resume with unchanged build-context contracts
   after JSON serialization of YAML keys and immutable context views. Changed or
   revoked protected content still blocks resume.

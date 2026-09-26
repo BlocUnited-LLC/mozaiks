@@ -1,15 +1,8 @@
 """A task being told exactly what is wrong deserves more than one retry.
 
-A live build failed the whole batch at the module contract task:
-
-    Schema contract required names must match property required flags
-
-That rule is already stated in ConfigMiddlewareAgent's prompt, the validator
-message is fed back verbatim on retry together with the rejected candidate, and
-the task still failed after both attempts.
-
-The feedback loop is sound - task_batches.py appends [TASK VALIDATION FEEDBACK]
-and [REJECTED TASK OUTPUT] to the retry prompt. What was short was the budget.
+Task validation errors and rejected candidates are fed back on retry through
+task_batches.py's [TASK VALIDATION FEEDBACK] and [REJECTED TASK OUTPUT] sections.
+The budget gives an agent multiple attempts to correct an invalid candidate.
 
 The original justification here was fail_batch: one task giving up discarded
 every completed task in the run. That is no longer true - the batch now runs

@@ -2219,7 +2219,7 @@ models:
         description: Optional field description.
       required:
         type: bool
-        description: Whether this property is required.
+        description: Sole source of requiredness; the renderer derives the runtime required-name list from these flags.
       enum_values:
         type: optional_list
         items: str
@@ -2251,10 +2251,6 @@ models:
         - str
         - 'null'
         description: Optional contract description.
-      required:
-        type: optional_list
-        items: str
-        description: Required property names for object contracts; must match the properties whose required flag is true.
       properties:
         type: optional_list
         items: JsonSchemaProperty
