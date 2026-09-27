@@ -473,7 +473,7 @@ def test_appgenerator_guidance_still_targets_persistent_module_contract() -> Non
     hard_constraints = "\n".join(persistence_contract["hard_constraints"])
     database_output_fields = structured_outputs["models"]["DatabaseOutput"]["fields"]
 
-    assert "context.persistence.collection(module_id, entity_name)" in service_agent
+    assert "context.persistence.collection(module_id, collection_name)" in service_agent
     assert "data/contract.json" in persistence_contract["required_outputs"]
     assert "data/migrations/{migration_id}.json" in persistence_contract["optional_outputs"]
     assert "must not use ctx.db" in hard_constraints

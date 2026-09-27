@@ -38,9 +38,11 @@ backend:
   module_class_convention: "PascalCase(module_id) + 'Handler'"
 
   persistence:
-    api: "ctx.persistence.collection(module_id, entity_name)"
+    api: "ctx.persistence.collection(module_id, collection_name)"
     note: >
       Injected at runtime into ModuleContext as ctx.persistence.
+      Use the declared collection name; a declared entity resolves to the same
+      collection and ownership policy. Unknown references fail closed.
       Generated repo.py must use this API. Must not use ctx.db or
       import get_mongo_client().
 
@@ -57,7 +59,7 @@ backend:
     - handler.py stays thin dispatch — no business logic, no persistence.
     - service.py owns business logic and event emission.
     - repo.py owns persistence operations only — no product policy.
-    - policy.py owns tenant/app/user scope query helpers.
+    - Runtime persistence enforces declared collection ownership; policy.py provides optional principal-based preflight helpers.
     - schemas.py owns typed DTO/document shapes and pure helpers.
     - Do not emit backend/models.py or backend/models/*.py.
     - Do not emit backend/database/schema.json or backend/database/seed.json.
@@ -98,7 +100,7 @@ database:
   type: mongodb
   schema_format: document_model
 
-  collection_api: "ctx.persistence.collection(module_id, entity_name)"
+  collection_api: "ctx.persistence.collection(module_id, collection_name)"
 
   index_format:
     description: >
@@ -119,7 +121,7 @@ database:
 
   hard_constraints:
     - Never hardcode database names in generated code.
-    - Collection names derive from module_id and entity_name via ctx.persistence.
+    - ctx.persistence resolves the declared collection name or entity to the canonical physical collection and ownership policy.
     - Indexes are declared in data/contract.json, not in repo.py directly.
     - Destructive migrations are not allowed in generated output.
 

@@ -267,7 +267,7 @@ class {Name}Repo:
         persistence = getattr(ctx, "persistence", None)
         if persistence is None:
             raise RuntimeError("Persistence is not available for this app context.")
-        return persistence.collection("{module_id}", "{entity_name}")
+        return persistence.collection("{module_id}", "{collection_name}")
 
     async def get(self, ctx, *, query: dict) -> dict | None: ...
     async def insert(self, ctx, *, record: dict) -> None: ...

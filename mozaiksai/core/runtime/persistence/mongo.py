@@ -264,14 +264,16 @@ class MongoPersistenceContext:
         return self._collections[key]
 
     def literal_collection(self, collection_name: str) -> Any:
-        """Return a raw app-data collection by its literal Mongo collection name.
+        """Resolve a host-owned app-data alias target by its Mongo collection name.
 
-        Generated module repos should use ``collection(module_id, entity_name)``.
+        Generated module repos should use ``collection(module_id, collection_name)``.
         App-data alias helpers use this method for explicit contract-declared
         collections such as hosted product records, shared aggregates, and
         migration/index targets that already own their own scope fields.
-        Raw access to a declared owned collection is forbidden. Other aliases
-        retain their explicit app-data contract, including assignment stores.
+        Access to a declared owned collection is forbidden. Other aliases use
+        a bounded Mongo facade when this app has ownership contracts, retaining
+        their explicit app-data semantics, including assignment stores. Apps
+        without owned collections retain raw alias handles.
         """
 
         name = str(collection_name or "").strip()
