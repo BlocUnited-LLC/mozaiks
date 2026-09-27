@@ -15,6 +15,13 @@ WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
 SUBSCRIPTION_WORKFLOW = WORKFLOWS_ROOT / "SubscriptionContractDesigner"
 
 
+def _sample_design_surface_map() -> dict:
+    return {"surfaces": [{
+        "surface_id": "reports", "surface_kind": "module", "owner": "app",
+        "owned_mutations": ["generate_report"],
+    }]}
+
+
 def _read_yaml(path: Path) -> dict:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     assert isinstance(data, dict)
@@ -550,6 +557,7 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
     context = {
         **factory_context({"app_id": "app_test"}),
+        "design_surface_map": _sample_design_surface_map(),
         "chat_id": "chat_1",
         "user_id": "user_1",
         "structured_output": _sample_contract(),
@@ -614,6 +622,7 @@ async def test_save_subscription_contract_blocks_downstream_context_when_review_
 
     context = {
         **factory_context({"app_id": "app_test"}),
+        "design_surface_map": _sample_design_surface_map(),
         "chat_id": "chat_1",
         "user_id": "user_1",
         "structured_output": _sample_contract(),
@@ -691,7 +700,10 @@ async def test_subscription_save_does_not_publish_success_after_dependency_failu
 
     monkeypatch.setattr(module, "use_ui_tool", review)
     monkeypatch.setattr(module, "persist_summary_artifact", persist)
-    context = {**factory_context({"app_id": "app_test"}), "chat_id": "chat", "structured_output": _sample_contract()}
+    context = {
+        **factory_context({"app_id": "app_test"}), "design_surface_map": _sample_design_surface_map(),
+        "chat_id": "chat", "structured_output": _sample_contract(),
+    }
     with pytest.raises((module.UIToolError, RuntimeError), match="unavailable"):
         await module.save_subscription_contract(context)
     assert not context.get("subscription_contract")
@@ -882,7 +894,7 @@ def test_null_revision_field_survives_the_full_generator_roundtrip() -> None:
     normalized = _normalize(contract["subscription_config_file"])
 
     rendered = _materialize_subscriptions_yaml(
-        context_variables={"subscription_contract": {"subscription_config_file": normalized}}
+        context_variables={"subscription_contract": {**contract, "subscription_config_file": normalized}}
     )
     assert "revision_field: null" in rendered
 
@@ -947,6 +959,7 @@ def _live_designer_context(*, blueprint: dict | None, monetization_enabled: bool
 
     data = {
         **factory_context({"app_id": "app_test"}),
+        "design_surface_map": _sample_design_surface_map(),
         "user_id": "user_1",
         "workflow_name": "SubscriptionContractDesigner",
         "monetization_enabled": monetization_enabled,

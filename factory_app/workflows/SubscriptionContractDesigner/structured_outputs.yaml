@@ -444,14 +444,14 @@ models:
     fields:
       module_id:
         type: str
-        description: Generated app module id.
+        description: Exact app-owned module surface_id from the injected approved DesignDocs action inventory; never an invented module name. AppGenerator preserves this id.
       action_id:
         type: str
-        description: Module action id.
+        description: Exact owned_mutations action id belonging to module_id in the injected approved DesignDocs action inventory; no free-text action descriptions.
       entitlement_gate:
         type: union
         variants: [str, 'null']
-        description: Capability id to put on actions[].entitlement_gate.
+        description: Exact capability id granted by subscription_config_file.plans, or null for a metering-only update. This is the product decision; AppGenerator deterministically writes actions[].entitlement_gate. One action may select only one capability.
       metering:
         type: union
         variants: [MeteringDeclaration, 'null']
@@ -577,7 +577,7 @@ models:
       module_contract_updates:
         type: list
         items: ModuleContractUpdate
-        description: Module action entitlement/metering updates.
+        description: Closed capability-to-approved-action mapping and optional metering. Every capability differing between plans must gate at least one approved action. Nonempty plan capability grants require at least one gate even if all plans grant identical capabilities.
       workflow_contract_updates:
         type: list
         items: WorkflowContractUpdate

@@ -1668,6 +1668,10 @@ agents:
         entitlement-gate updates for module actions. Copy matching
         `entitlement_gate` values to the exact `actions[].id`; never derive a
         new capability id from plan labels, route labels, or pricing language.
+        `module_id` is the approved DesignDocs `surface_id`, preserved as the
+        module folder/id. Assembly deterministically applies this mapping after
+        template merging, replacing conflicting gates and clearing unmapped
+        gates on approved modules. Do not make new gating decisions here.
 
       **Mode B inputs**:
       - `app_build_plan`: backend scope, auth strategy, and integration requirements.

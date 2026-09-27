@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.subscription_contract_context import _find_contract
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.connector_request import (
@@ -60,14 +61,14 @@ def _safe_dict(value: Any) -> dict[str, Any]:
 
 
 def _subscriptions_config_file(context_variables: Any) -> dict[str, Any] | None:
-    """Return subscription_config_file from context, trying both the live contract and artifact."""
-    for key in ("subscription_contract", "subscription_contract_artifact"):
-        raw = _context_get(context_variables, key)
-        if isinstance(raw, dict):
-            cfg = raw.get("subscription_config_file")
-            if isinstance(cfg, dict):
-                return cfg
-    return None
+    """Resolve the same approved contract used for prompts and action gates."""
+    contract = _find_contract({
+        key: _context_get(context_variables, key)
+        for key in ("subscription_contract", "subscription_contract_artifact")
+    })
+    if contract is None or not contract.get("contract_required"):
+        return None
+    return contract.get("subscription_config_file")
 
 
 def _materialize_subscriptions_yaml(*, context_variables: Any) -> str | None:

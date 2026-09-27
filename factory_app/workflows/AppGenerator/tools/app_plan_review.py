@@ -1114,7 +1114,8 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
                 f"unapproved surface {surface_id!r}: remove its capability and tasks "
                 "rather than relabel them. Use only surfaces from design_surface_map, "
                 "selected pack provider/facade contracts, or the required subscription "
-                "contract for subscription_config."
+                "contract for subscription_config. "
+                f"Valid approved surface_ids: {sorted(approved)}."
             )
             if re.search(r"(?:^|[_-])(?:auth|authentication|login|signin)(?:$|[_-])", surface_id.lower()):
                 message += " Authentication is platform-provided and needs no generated module."

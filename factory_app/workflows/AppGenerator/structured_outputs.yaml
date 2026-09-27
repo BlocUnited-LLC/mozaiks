@@ -2312,6 +2312,9 @@ models:
         type: optional_str
         description: >
            Capability id to check via EntitlementPort before dispatching this action.
+           For an approved subscription contract, copy only the exact
+           module_contract_updates decision for this module/action; assembly
+           deterministically applies it and removes unapproved gates.
            Set only on actions that require an active end-user SaaS plan grant in
            the generated app (e.g. "analytics.dashboard"). Null/absent for actions
            with no generated-app entitlement requirement — the no-op adapter grants

@@ -55,6 +55,25 @@ checkout to the managed provider; `/api/me/usage` and token endpoints supply
 runtime usage and balances, not the app's public plan catalog. No additional
 billing module or platform catalog endpoint is needed.
 
+Subscription action gates follow the same closed inventory. Before subscription
+design, the factory injects approved app-owned module `surface_id` values and
+their `owned_mutations` action IDs from `design_surface_map`. The designer makes
+the product decision in typed `module_contract_updates` entries (`module_id`,
+`action_id`, `entitlement_gate`, optional `metering`); `module_id` is exactly the
+approved `surface_id`. Every capability whose grants differ between plans must
+gate at least one approved action. Any nonempty plan capability catalog requires
+at least one gate. Unknown references, conflicting choices for one action, or
+missing product decisions return revision feedback with the valid IDs.
+
+AppGenerator preserves these surface IDs as module IDs and stamps `module.id`
+from the approved module path when the file writer drifts. After merging generated
+files and managed templates, assembly writes the approved `entitlement_gate`
+values into `actions[]`, replacing conflicting model-written values and clearing
+unmapped gates on approved modules. Missing module/action implementations require
+repair; assembly does not invent their behavior. Subscription configuration and
+gate mappings remain authoritative across real immutable context reads. The
+bundle scanner's entitlement closure rule is unchanged.
+
 Agents return structured JSON responses. This transport format does not determine
 the format of generated files. App schemas, module contracts, and build plans
 feed the existing deterministic materializers; bounded implementation tasks

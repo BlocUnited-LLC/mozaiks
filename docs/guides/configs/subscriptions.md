@@ -24,6 +24,12 @@ Payment providers, invoices, taxes, payouts, and settlement stay behind app or
 managed-capability integrations. The subscriptions file defines the app's
 provider-neutral access contract.
 
+For generated apps, SubscriptionContractDesigner chooses which approved module
+actions each capability gates in `module_contract_updates`. It selects exact
+DesignDocs surface and action IDs; capabilities that differ between plans must
+each gate an action. AppGenerator writes those decisions into `module.yaml`
+deterministically, even when generated files omit or contradict them.
+
 ## Multi-Product Catalog
 
 Use the product catalog shape when the app has more than one paid line, such as

@@ -1,9 +1,9 @@
-"""Prompt injection for generated-app subscription/token contracts.
+"""Subscription contract context and approved action reference closure.
 
 The SubscriptionContractDesigner workflow persists a provider-neutral contract
-artifact. AppGenerator and AgentGenerator consume that contract as context; this
-hook only renders the already-produced contract. It does not infer whether an
-app should be monetized.
+artifact. The designer selects gates from approved DesignDocs actions;
+AppGenerator and AgentGenerator consume that contract as context. These helpers
+validate and project decisions, without deciding which actions should be paid.
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.workflow.context.frozen import detach
+
 logger = logging.getLogger(__name__)
 
 _TARGET_AGENTS = {
@@ -23,6 +25,88 @@ _TARGET_AGENTS = {
     "PatternAgent",
     "WorkflowBundleBuilderAgent",
 }
+
+
+def approved_module_actions(context_variables: Any) -> dict[str, list[str]]:
+    """Project the approved DesignDocs module/action identifiers, without aliases."""
+    surface_map = detach(context_variables.get("design_surface_map")) if context_variables is not None else None
+    if not isinstance(surface_map, Mapping):
+        return {}
+    inventory: dict[str, list[str]] = {}
+    for surface in surface_map.get("surfaces") or []:
+        if surface.get("surface_kind") != "module" or surface.get("owner") != "app":
+            continue
+        surface_id = surface["surface_id"]
+        inventory[surface_id] = sorted(set(surface.get("owned_mutations") or []))
+    return inventory
+
+
+def validate_module_contract_updates(
+    contract: Mapping[str, Any], context_variables: Any,
+) -> dict[str, dict[str, str]]:
+    """Close model-owned gate decisions over approved actions and plan grants.
+
+    No action is selected here: choosing which feature an action implements is
+    a product decision. Once references close, downstream materialization can
+    apply the returned gates without interpreting a generated module file.
+    """
+    contract = detach(contract)
+    if not contract.get("contract_required"):
+        return {}
+    inventory = approved_module_actions(context_variables)
+    valid_ids = f"Valid approved module/action ids: {inventory!r}."
+    config = contract.get("subscription_config_file") or {}
+    plan_groups = [config.get("plans") or []]
+    plan_groups.extend(product.get("plans") or [] for product in config.get("products") or [])
+    capabilities: set[str] = set()
+    differing: set[str] = set()
+    for plans in plan_groups:
+        plan_capabilities = [set(plan.get("capabilities") or []) for plan in plans]
+        grants = set().union(*plan_capabilities)
+        common = set.intersection(*plan_capabilities) if plan_capabilities else set()
+        capabilities.update(grants)
+        differing.update(grants - common)
+    gates: dict[str, dict[str, str]] = {}
+    decisions: dict[tuple[str, str], str | None] = {}
+    for update in contract.get("module_contract_updates") or []:
+        module_id = update.get("module_id")
+        action_id = update.get("action_id")
+        gate = update.get("entitlement_gate")
+        if module_id not in inventory or action_id not in inventory[module_id]:
+            raise ValueError(
+                f"module_contract_updates references unapproved action {module_id!r}.{action_id!r}. "
+                f"Choose module_id from design_surface_map.surfaces[].surface_id and action_id "
+                f"from that module's owned_mutations. {valid_ids}"
+            )
+        if gate is not None and gate not in capabilities:
+            raise ValueError(
+                f"module_contract_updates entitlement_gate {gate!r} is not granted by any plan. "
+                f"Valid capability ids: {sorted(capabilities)!r}. {valid_ids}"
+            )
+        action = (module_id, action_id)
+        if action in decisions and decisions[action] != gate:
+            raise ValueError(
+                f"Conflicting entitlement_gate decisions for {module_id}.{action_id}: "
+                f"{decisions[action]!r} and {gate!r}. Choose one capability for this action. "
+                f"Valid capability ids: {sorted(capabilities)!r}. {valid_ids}"
+            )
+        decisions[action] = gate
+        if gate is not None:
+            gates.setdefault(module_id, {})[action_id] = gate
+    mapped = {gate for actions in gates.values() for gate in actions.values()}
+    missing = differing - mapped
+    if missing:
+        raise ValueError(
+            f"module_contract_updates must map every capability that differs between plans "
+            f"to at least one approved action. Unmapped capability ids: {sorted(missing)!r}. "
+            f"Choose the product mapping; the materializer cannot infer it. {valid_ids}"
+        )
+    if capabilities and not mapped:
+        raise ValueError(
+            f"Plans grant capabilities {sorted(capabilities)!r} but module_contract_updates "
+            f"does not select any action entitlement_gate. Choose at least one approved action. {valid_ids}"
+        )
+    return gates
 
 
 def _context_data(agent: Any) -> dict[str, Any]:
@@ -152,6 +236,28 @@ def _apply_text(agent: Any, text: str) -> None:
     agent._mozaiks_base_system_message = updated
 
 
+def inject_subscription_action_inventory(agent: Any, messages: list[dict[str, Any]]) -> None:
+    """Give the designer the finite action choices its save validator accepts."""
+    if getattr(agent, "name", None) != "ContractDesignerAgent":
+        return
+    inventory = approved_module_actions(_context_data(agent))
+    rendered = yaml.safe_dump(inventory, sort_keys=True).strip()
+    _apply_text(agent, "\n".join([
+        "[APPROVED ENTITLEMENT ACTION INVENTORY]",
+        "These are the only permitted module_id -> action_id choices for module_contract_updates.",
+        "They project app-owned module surface_id and owned_mutations from approved design_surface_map.",
+        "Copy identifiers exactly. Select entitlement_gate from your plans' capabilities.",
+        "Map every capability that differs between plans to at least one action. If any plan grants",
+        "capabilities, select at least one gate even when all plans grant the same capabilities.",
+        "Each action has at most one entitlement_gate. AppGenerator writes selected gates deterministically.",
+        "If no approved action represents a required capability, report the missing design input",
+        "in validation_notes; do not invent an action or silently leave the capability unmapped.",
+        rendered,
+    ]))
+    logger.info("SUBSCRIPTION_ACTION_INVENTORY injected modules=%d actions=%d",
+                len(inventory), sum(len(actions) for actions in inventory.values()))
+
+
 def inject_subscription_contract_context(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Inject provider-neutral subscription contract context into generator agents."""
 
@@ -200,4 +306,9 @@ def inject_subscription_contract_context(agent: Any, messages: list[dict[str, An
     )
 
 
-__all__ = ["inject_subscription_contract_context"]
+__all__ = [
+    "approved_module_actions",
+    "inject_subscription_action_inventory",
+    "inject_subscription_contract_context",
+    "validate_module_contract_updates",
+]
