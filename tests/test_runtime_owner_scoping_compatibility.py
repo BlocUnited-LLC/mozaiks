@@ -23,6 +23,7 @@ from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence import (
+    AppData,
     MongoPersistenceContext,
     PersistenceScopeError,
     app_data_from_context,
@@ -259,6 +260,34 @@ async def test_existing_unowned_literal_alias_retains_same_collection_crud():
     assert database["ownerless_assignments"].rows == [{
         "app_id": "mixed-ownership-app", "user_id": "recipient", "status": "active",
     }]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("from_context", [False, True])
+async def test_app_data_alias_binding_cannot_be_retargeted(from_context):
+    database = defaultdict(_AssignmentCollection)
+    context = MongoPersistenceContext(
+        app_id="mixed-ownership-app", data_contract=_mixed_contract("app_wide"),
+        client=defaultdict(lambda: database),
+    )
+    aliases = {"billing.subscriptions": "entitlement_dispatch_subscriptions"}
+    contract = {"aliases": [{"alias": "billing.subscriptions", "collection": aliases["billing.subscriptions"]}]}
+    app_data = (
+        app_data_from_context(SimpleNamespace(persistence=context), contract=contract)
+        if from_context else AppData(aliases=aliases, collection_resolver=context.literal_collection)
+    )
+    with pytest.raises(TypeError):
+        app_data.aliases["billing.subscriptions"] = "other_app_owned_tasks"
+    with pytest.raises(AttributeError):
+        app_data.aliases = {"billing.subscriptions": "other_app_owned_tasks"}
+    aliases["billing.subscriptions"] = "other_app_owned_tasks"
+    contract["aliases"][0]["collection"] = "other_app_owned_tasks"
+    assert dict(app_data.aliases) == {"billing.subscriptions": "entitlement_dispatch_subscriptions"}
+    await app_data.collection("billing.subscriptions").update_one(
+        {"user_id": "recipient"}, {"$set": {"status": "active"}}, upsert=True,
+    )
+    assert database["entitlement_dispatch_subscriptions"].rows == [{"user_id": "recipient", "status": "active"}]
+    assert "other_app_owned_tasks" not in database
 
 
 @pytest.mark.asyncio

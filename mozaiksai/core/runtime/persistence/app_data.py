@@ -11,6 +11,7 @@ import json
 import os
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from mozaiksai.core.core_config import get_mongo_client
@@ -206,8 +207,13 @@ class AppData:
         collection_resolver: Callable[[str], Any] | None = None,
     ) -> None:
         self.db = db
-        self.aliases = dict(aliases or aliases_from_data_contract(contract) or DATA_COLLECTIONS)
+        self._aliases: DataAliasMap = MappingProxyType(dict(aliases or aliases_from_data_contract(contract) or DATA_COLLECTIONS))
         self._collection_resolver = collection_resolver
+
+    @property
+    def aliases(self) -> DataAliasMap:
+        """The immutable alias snapshot bound when this persistence view was created."""
+        return self._aliases
 
     def collection_name_for_alias(self, alias: str) -> str:
         return collection_name_for_alias(alias, aliases=self.aliases)
