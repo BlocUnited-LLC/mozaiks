@@ -316,14 +316,29 @@ Normalization works on detached data and does not modify the model's turn-local
 structured output.
 
 Ambiguous ownership still returns `revise` with feedback before any design is
-saved. This includes collections with unknown or mixed app/provider fields,
+saved. This includes mixed provider fields without an app-data split contract,
 unknown state under reserved surfaces, app-specific entities or actions that
 cannot be assigned to the canonical owner, unrelated facade integrations,
 conflicting grouped collection owners, and competing owner declarations.
 Selected managed ownership rules without a declared `facade_module` also reject:
 the tool cannot infer a provider's canonical app boundary from its display name.
-The tool does not split mixed collections or invent an app module to hold their
-remaining fields. AppGenerator's `validate_surface_ownership` check remains
+For mixed auth collections, the tool strips declared identity fields and moves
+the residual fields to the collection's existing app-module owner when declared,
+otherwise to the sole eligible app module. Platform surfaces, selected facades,
+and other reserved surfaces are not eligible. Zero or multiple candidates require
+revision, with candidate IDs in feedback; no app module is invented. The retained
+collection has a required string `user_id`, `search_by: user_id`, and a unique
+user index (including `app_id` when declared). Indexes referencing removed fields
+are removed. A globally reserved collection name gains `_app_data`; a conflicting
+destination collection requires revision instead of merging unrelated data.
+Splits are recorded with destination, removed fields, and retained fields in
+`ownership_normalizations` and the saved design prose.
+
+This is deterministic coverage, not a measured production rejection rate:
+auth-only tables do not need an app owner; mixed tables with one determined app
+owner normalize; mixed tables with zero or multiple unresolved owners revise.
+There is no traversal telemetry establishing how frequently the last case occurs.
+AppGenerator's `validate_surface_ownership` check remains
 strict before module repairs: an invalid already-approved design must be revised,
 and cannot be silently dropped or converted into generated app code.
 
@@ -333,13 +348,23 @@ contract assets. `SurfaceOwnershipRule` validates `owner`, optional
 `facade_module`, and lists of `surface_ids`, `entity_names`, `action_ids`, and
 `collection_names`. Bounded normalization also declares `state_field_names`,
 `surface_collection_names`, `surface_entity_names`, and `surface_action_ids`.
+The auth field inventory cites [OIDC Core standard claims](https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims),
+the platform account profile, `UserClaims`, provider claim mapping, and input
+aliases in the catalog itself. `role`/`roles` on an identified auth table are
+platform identity: the Keycloak adapter maps realm/client roles into
+`UserClaims.roles`, persisted by the platform account profile. This does not
+classify resource-scoped memberships or unrelated app profile collections as
+identity; see [user classes and resource relationships](user-classes-and-resource-relationships.md).
+
 The three surface-scoped lists identify state and behavior only within a declared
 reserved surface, so `users` and `create_session` do not globally classify app
 identity or appointment behavior as platform auth. A removable collection must
 contain only declared state fields, including at least one field beyond identity
 keys and timestamps; a collection with no such evidence requires revision.
-Fields must use bounded scalar types; nested objects, arrays, and unknown types
-remain ambiguous even when their field names match the state allowlist.
+Identity fields use scalar types or the exact composite types declared in
+`structured_state_field_types` (for example OIDC `address: [object]` and token
+`roles: [array]`). An object named `email` remains invalid; arbitrary nested
+app fields in a mixed auth table are retained in the residual collection.
 The tool compares exact identifiers without classifying free-form
 labels or prose. Facade actions come from the contract's page `primary_actions`;
 facade modules own no local entities or collections. Grouped and shared

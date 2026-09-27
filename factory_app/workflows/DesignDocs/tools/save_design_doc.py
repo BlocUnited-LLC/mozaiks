@@ -635,6 +635,12 @@ async def save_design_docs_bundle(
         normalization_messages = [
             f"DESIGN_OWNERSHIP_NORMALIZED surface={entry['surface_id']} owner={entry['owner']} "
             f"removed=[{','.join(entry['removed_collections'])}]"
+            + "".join(
+                f" split={split['name']}->{split['target_surface_id']}/{split['target_collection']}"
+                f" retained=[{','.join(split['retained_fields'])}]"
+                f" stripped=[{','.join(split['removed_fields'])}]"
+                for split in entry.get("split_collections", [])
+            )
             for entry in ownership_normalizations
         ]
         if normalization_messages:
