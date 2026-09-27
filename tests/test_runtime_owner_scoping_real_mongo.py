@@ -109,7 +109,7 @@ def test_signed_owners_are_isolated_over_tcp_and_real_mongo(
                 assert response.json() == {"rows": [{"_id": None, "count": 1}]}
 
             response = client.get(url + "get_tasks?id=a", headers=user_b)
-            assert response.status_code >= 400
+            assert response.status_code == 404, response.text
             assert "Owner a" not in response.text
             assert client.get(url + "custom_read?task_id=a", headers=user_b).json() == {"item": None}
             assert client.post(url + "update_task", headers=user_b, json={

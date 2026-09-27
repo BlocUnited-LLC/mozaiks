@@ -251,7 +251,7 @@ def test_two_authenticated_owners_are_isolated_for_model_and_code_actions(http_r
     assert own.status_code == 200, own.text
     assert own.json()["item"]["task_id"] == "a"
     other = client.get(url + "get_tasks?id=a", headers=user_b)
-    assert other.status_code >= 400
+    assert other.status_code == 404, other.text
     assert "A task" not in other.text
     assert client.get(url + "custom_read?task_id=a", headers=user_b).json() == {"item": None}
     assert client.get(url + "task_summary", headers=user_b).json() == {"rows": []}

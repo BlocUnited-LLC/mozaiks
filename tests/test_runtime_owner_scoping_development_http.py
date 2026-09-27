@@ -10,9 +10,11 @@ from uuid import uuid4
 import httpx
 import pytest
 import uvicorn
+from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient
 
+from mozaiksai.core.auth.adapters import AuthError
 from mozaiksai.core.auth.adapters.no_auth import NoAuthAdapter
 from tests import test_runtime_owner_scoping_http as ownership_http
 
@@ -44,6 +46,14 @@ def test_development_ownership_over_tcp_and_real_mongo(http_runtime, monkeypatch
 
     monkeypatch.setattr("mozaiksai.core.runtime.persistence.mongo.get_mongo_client", mongo_client)
     app = http_runtime.client(tenancy).app
+
+    @app.exception_handler(AuthError)
+    async def auth_configuration_error(_request, exc):
+        # An unhandled ASGI error sends 500 then closes the socket; Windows
+        # can reset it before HTTPX receives that response. Handle this known
+        # configuration rejection so the actual status and reason are tested.
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     port = listener.getsockname()[1]
@@ -65,6 +75,9 @@ def test_development_ownership_over_tcp_and_real_mongo(http_runtime, monkeypatch
             })
             if environment == "production":
                 assert created.status_code == 500, created.text
+                assert created.json()["detail"].startswith(
+                    "Authentication-disabled operation is not permitted in the 'production' environment."
+                )
                 with MongoClient(uri, serverSelectionTimeoutMS=3000) as verify:
                     assert verify[database_name].list_collection_names() == []
                 return
