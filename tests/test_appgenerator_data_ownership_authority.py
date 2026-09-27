@@ -119,7 +119,7 @@ def test_page_inventory_requires_both_approved_and_implemented_actions():
         "generated_files": {"modules/tasks/module.yaml": yaml.safe_dump(manifest)},
     })
     assert module_action_index_from_context(context) == {
-        "tasks": {"create_task", "task_summary", "list_tasks"},
+        "tasks": {action: {"id": action} for action in ("create_task", "task_summary", "list_tasks")},
     }
 
 

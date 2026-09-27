@@ -896,7 +896,16 @@ async def test_page_bundle_task_preserves_valid_worker_sections_and_plan_identit
             )
 
     context = {
-        "generated_files": {"modules/tickets/module.yaml": "module:\n  id: tickets\nactions:\n- id: list_tickets\n"},
+        "generated_files": {"modules/tickets/module.yaml": yaml.safe_dump({
+            "module": {"id": "tickets"}, "actions": [{"id": "list_tickets", "output_schema": {
+                "type": "object", "properties": {
+                    "items": {"type": "array", "items": {
+                        "type": "object", "properties": {"subject": {"type": "string"}},
+                    }},
+                    "total": {"type": "integer"},
+                },
+            }}],
+        })},
         "build_timestamp": "2026-09-12T00:00:00Z",
         "app_build_plan": {
             "pages": [
@@ -960,6 +969,7 @@ async def test_page_bundle_task_preserves_valid_worker_sections_and_plan_identit
     assert tickets_page["sections"][0]["primitive"] == "DataTable"
     assert tickets_page["sections"][0]["id"] == "worker-table"
     assert tickets_page["sections"][0]["config"]["search"] is True
+    assert tickets_page["sections"][0]["config"]["data_key"] == "items"
     assert tickets_page["sections"][0]["config"]["api_endpoint"] == "/api/modules/tickets/list_tickets"
     assert yaml.safe_load(file_map["ui/pages/settings.yaml"])["route"] == "/settings"
 

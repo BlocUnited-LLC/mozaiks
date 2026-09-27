@@ -234,7 +234,7 @@ def test_the_live_defect_stays_fixed() -> None:
 
     files = {"modules/tasks/module.yaml": "module:\n  id: tasks\nactions:\n- id: list_tasks\n"}
     live = StructuredOutputOverlay(ContextVariablesBridge({"generated_files": files}), {})
-    assert module_action_index_from_context(live) == {"tasks": {"list_tasks"}}
+    assert module_action_index_from_context(live) == {"tasks": {"list_tasks": {"id": "list_tasks"}}}
 
 
 def test_the_premise_still_holds() -> None:

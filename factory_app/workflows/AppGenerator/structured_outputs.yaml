@@ -3922,7 +3922,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Response path containing row data. Required in server mode; use an explicit key such as items, not an inferred response shape.
+        description: Array response path declared by the bound action output_schema. Code fills items for a canonical items/total list envelope; other paths must match the contract. Columns must use declared item property keys.
       selection:
         type: union
         variants:
@@ -4345,7 +4345,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional response key containing row data.
+        description: Array response path declared by the bound action output_schema. Code fills items for a canonical items/total list envelope; columns must use declared item property keys.
       selection:
         type: union
         variants:

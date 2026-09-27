@@ -248,7 +248,15 @@ def _validation_pages(plan: Mapping[str, Any], files: Mapping[str, str]) -> list
         if stem is None:
             route = str(page.get("route") or "").strip()
             stem = route.strip("/").split("/")[-1] if route and route != "/" else str(page.get("name") or "page")
-        pages.append(_page_from_plan(dict(page), stem=stem))
+        document = _page_from_plan(dict(page), stem=stem)
+        for section, hint in zip(document["sections"], page.get("sections_hint") or [], strict=False):
+            config = section["config"]
+            source = config.get("data_source") or {}
+            if section["primitive"] in {"DataTable", "ResourceTable"}:
+                if not hint.get("config_hint"):
+                    config["columns"] = ["id", "name", "status"]
+                config["data_key"] = "reports" if source.get("action_id") == "view_report" else "items"
+        pages.append(document)
     return pages
 
 
@@ -272,6 +280,14 @@ def _module_contract(module_id: str, actions: list[tuple[str, str]]) -> str:
         }
         entry["permissions"] = []
         entry["api_surface"] = None
+        if action_id.startswith("list_") or action_id == "view_report":
+            rows_key = "reports" if action_id == "view_report" else "items"
+            entry["output_schema"] = {"type": "object", "properties": {
+                rows_key: {"type": "array", "items": {"type": "object", "properties": {
+                    name: {"type": "string"} for name in ("id", "name", "title", "status", "created_at", "project_id")
+                }}},
+                "count": {"type": "integer"},
+            }}
         action_entries.append(entry)
     return yaml.safe_dump(
         {
@@ -305,6 +321,8 @@ def _simple_backend(module_id: str, actions: list[str]) -> dict[str, str]:
     for action in actions:
         if action.startswith("list_"):
             payload = '{"items": [], "count": 0}'
+        elif action == "view_report":
+            payload = '{"reports": [{"id": "report-1", "title": "Matrix Report", "created_at": "2026-08-01"}], "count": 1}'
         elif action.startswith("create_"):
             payload = '{"created": True, "payload": params}'
         elif action.startswith("export_"):
@@ -785,6 +803,9 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
         ag2_task_batch_runner.AG2TaskBatchRunner.run = original_run
 
     assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"] == {}
+    assert ctx.get("app_task_batch_status") == "completed", {
+        task: failure.get("error") for task, failure in (ctx.get("app_task_batch_results").get("_failed") or {}).items()
+    }
 
     assembled = await assemble_app_tasks(context_variables=ctx)
     files = _file_map(assembled)

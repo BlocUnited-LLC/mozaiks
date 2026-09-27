@@ -52,6 +52,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     relayable_action_reasons,
     resolve_modal_action_targets,
     resource_table_only_fields,
+    workflow_names_from_context,
 )
 from mozaiksai.core.workflow.ui_primitives import (
     validate_page_ui_primitives,
@@ -1612,8 +1613,9 @@ def save_app_schema(
                 raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
         page_list = [_normalize_page_schema(page) for page in raw_page_list]
         modules = module_action_index_from_context(context_variables)
+        workflows = workflow_names_from_context(context_variables)
         for page in page_list:
-            compile_page_data_sources(page, modules, reject_api_endpoints=True)
+            compile_page_data_sources(page, modules, reject_api_endpoints=True, workflow_names=workflows)
         baseline_files = detach(_context_get(context_variables, "generated_files")) or {}
         code_files = extract_code_file_map_from_payload(
             {"code_files": detach(_context_get(context_variables, "code_files")) or []}

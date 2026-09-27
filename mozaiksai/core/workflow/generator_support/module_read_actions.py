@@ -33,9 +33,34 @@ def _schema(properties: list[dict[str, Any]]) -> dict[str, Any]:
     return {"type": "object", "properties": properties, "description": None, "items_type": None}
 
 
-def _read_action(collection_name: str, operation: str) -> dict[str, Any]:
+def _record_response_schema(collection: dict[str, Any]) -> dict[str, Any]:
+    """Declare exactly the fields projected by the canonical read service."""
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    for field in collection.get("fields") or []:
+        name = field["name"]
+        kind = "string" if name == "_id" else field.get("type")
+        declaration: dict[str, Any] = {}
+        if kind in {"string", "number", "integer", "boolean", "object", "array", "null"}:
+            declaration["type"] = [kind, "null"] if field.get("nullable") and kind != "null" else kind
+        # Logical storage types outside JSON Schema keep their declared names;
+        # the page compiler needs field identity, not an invented wire encoding.
+        if field.get("enum"):
+            declaration["enum"] = [*field["enum"], *([None] if field.get("nullable") else [])]
+        properties[name] = declaration
+        if field.get("required"):
+            required.append(name)
+    result: dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        result["required"] = required
+    return result
+
+
+def _read_action(collection: dict[str, Any], operation: str) -> dict[str, Any]:
+    collection_name = collection["name"]
     action_id = canonical_read_action_id(collection_name, operation)
     is_list = operation == "list"
+    record = _record_response_schema(collection)
     return {
         "id": action_id,
         "description": (
@@ -50,10 +75,12 @@ def _read_action(collection_name: str, operation: str) -> dict[str, Any]:
             [_property("page", "integer"), _property("page_size", "integer"), _property("search", "string")]
             if is_list else [_property("id", "string", required=True)]
         ),
-        "output_schema": _schema(
-            [_property("items", "array", required=True), _property("total", "integer", required=True)]
-            if is_list else [_property("item", "object", required=True)]
-        ),
+        "output_schema": {
+            "type": "object",
+            "properties": {"items": {"type": "array", "items": record}, "total": {"type": "integer"}}
+            if is_list else {"item": record},
+            "required": ["items", "total"] if is_list else ["item"],
+        },
         "permissions": [],
         "emits": [],
         "entitlement_gate": None,
@@ -134,7 +161,7 @@ def _close_manifest(
     )
     for collection in collections:
         for operation in ("get", "list"):
-            action = _read_action(collection["name"], operation)
+            action = _read_action(collection, operation)
             prior = existing.get(action["id"])
             if collection["tenancy"] == "app_wide" and protected:
                 if prior is None or not {

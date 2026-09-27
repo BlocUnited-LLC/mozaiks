@@ -30,7 +30,36 @@ Repositories use the deterministically rendered collection policy described in
 [the data contract](data-contract-and-revision-contract.md#deterministic-generated-module-policies).
 Wiring and runtime-quality validators remain the acceptance backstop.
 
-## Server Table Binding Acceptance
+## Page Output and Action Binding Acceptance
+
+AppSchemaAgent receives accepted module actions with their declared input and
+output schemas and entitlement gates. A metric's `value_key` selects a declared
+output field. A table's `data_key` selects a declared array, and its columns
+select fields declared on that array's items. These checks apply to client and
+server pagination. Compilation fills canonical `items`/`total` list bindings
+when the action contract determines them; it does not guess semantic metric
+renames or invent row fields. Invalid selections identify the bound action and
+list the valid fields so the page worker can revise them.
+
+Canonical list/get response schemas declare the collection fields their existing
+read implementations project. This enriches the response declaration without
+changing persistence or the data contract. Managed pack templates replace their
+page and module artifacts together before final page compilation, so acceptance
+checks the actual emitted contracts. Worker inventories still come from their
+accepted prerequisite outputs.
+
+Page workflow actions must resolve to workflows in the supplied workflow bundle
+or its artifact-backed integration metadata. A proposed workflow name alone
+cannot authorize a button. CRUD actions use typed module references, including
+submit actions in create/edit forms, instead of invented workflow names.
+
+Every gated HTTP action must be reachable from a page. Internal actions remain
+outside this requirement, and ordinary ungated unused actions remain advisory.
+These checks cover declarative app pages under `ui/pages/` and run through the
+existing wiring acceptance gate and page repair
+path; they do not introduce a new runtime dispatcher or authorization policy.
+
+### Server Table Query Acceptance
 
 Opt-in server-paged DataTable sections must close against the actual generated
 module action contract during the existing `validate_wiring` acceptance gate.
@@ -44,7 +73,8 @@ by this fixed query contract. Internal-only actions are not browser endpoints.
 an array of explicitly typed objects and an integer respectively. Schema references are not supported in this
 bounded binding contract and are never fetched. Missing or incompatible bindings
 fail the existing wiring check; they do not create another routing or retry
-system. Client-paged tables retain their current input contract. At runtime,
+system. Client-paged tables retain their current input contract and also check
+declared output fields. At runtime,
 the data-fetch owner separately validates actual rows and counts; declaration
 closure does not prove that generated backend behavior implements the query.
 

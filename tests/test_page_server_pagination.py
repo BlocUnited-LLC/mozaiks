@@ -46,7 +46,14 @@ def _generated_page(**overrides):
 
 def _generation_context():
     return factory_context({"generated_files": {"modules/books/module.yaml": yaml.safe_dump({
-        "module": {"id": "books"}, "actions": [{"id": "list"}],
+        "module": {"id": "books"}, "actions": [{"id": "list", "output_schema": {
+            "type": "object", "required": ["items", "total"], "properties": {
+                "items": {"type": "array", "items": {
+                    "type": "object", "properties": {"title": {"type": "string"}},
+                }},
+                "total": {"type": "integer"},
+            },
+        }}],
     })}})
 
 
@@ -78,7 +85,7 @@ def test_server_paging_preserves_known_module_and_action_gates():
 
 
 @pytest.mark.parametrize("primitive,overrides", [
-    ("DataTable", {"total_key": None}), ("DataTable", {"page_size": 0}), ("ResourceTable", {}),
+    ("DataTable", {"page_size": 0}), ("ResourceTable", {}),
 ])
 def test_materializer_rejects_invalid_server_contract_before_writing(primitive, overrides, tmp_path, monkeypatch):
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
@@ -92,10 +99,11 @@ def test_materializer_rejects_invalid_server_contract_before_writing(primitive, 
     assert not list(tmp_path.rglob("*"))
 
 
-def test_typed_server_page_materializes_and_keeps_client_defaults(tmp_path, monkeypatch):
+@pytest.mark.parametrize("total_key", [None, "total"])
+def test_typed_server_page_materializes_and_keeps_client_defaults(tmp_path, monkeypatch, total_key):
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
     models, _ = load_workflow_structured_outputs("AppGenerator")
-    typed = models["AppPageSchema"].model_validate(_generated_page())
+    typed = models["AppPageSchema"].model_validate(_generated_page(total_key=total_key))
     save_app_schema(manifest={"app_name": "Books", "pages": ["books"], "default_route": "/books"},
                     pages=[typed], context_variables=_generation_context())
     output = tmp_path / "apps/generated-app/build-test/app/ui/pages/books.yaml"

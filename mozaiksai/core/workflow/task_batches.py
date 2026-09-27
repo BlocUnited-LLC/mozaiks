@@ -46,6 +46,7 @@ from .generator_support.page_plan_utils import (
     module_action_index_from_context,
     normalize_planned_page_content,
     validate_planned_page,
+    workflow_names_from_context,
 )
 from .path_ownership import detect_owned_path_collisions, normalize_owned_paths
 from .paths import resolve_workflow_path
@@ -1299,6 +1300,7 @@ def _normalize_owned_page_files_from_plan(
             planned_by_stem.setdefault(stem, page)
 
     modules = module_action_index_from_context(base_context)
+    workflows = workflow_names_from_context(base_context)
     for path in owned_page_paths:
         stem = _page_stem_from_path(path)  # type: ignore[assignment]
         if not stem:
@@ -1310,6 +1312,7 @@ def _normalize_owned_page_files_from_plan(
             raise ValueError(f"{path}: page worker did not materialize its owned page")
         file_map[path] = normalize_planned_page_content(
             file_map[path], path=path, modules=modules, reject_api_endpoints=reject_api_endpoints,
+            workflow_names=workflows,
         )
         validate_planned_page(file_map[path], planned, path)
     return [

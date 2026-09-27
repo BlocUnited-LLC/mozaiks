@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+import yaml
+
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     _wiring_repair_errors,
 )
@@ -126,3 +129,21 @@ def test_an_orphan_without_a_page_is_skipped_not_mislabelled() -> None:
     errors = _wiring_repair_errors(_wiring(("", "section", "/api/habits")), FILES)
 
     assert errors == []
+
+
+@pytest.mark.parametrize("kind", ["wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action"])
+def test_page_contract_failures_reach_the_page_bundle_without_changing_module_gates(kind) -> None:
+    files = {**FILES, "ui/pages/habits.yaml": yaml.safe_dump({"name": "Habits"})}
+    wiring = {"passed": False, "failed_tests": [{
+        "test": kind, "page": "Habits", "error": "Invalid binding. Valid fields: items, total.",
+        "fix_suggestion": "Repair the page using the declared action.",
+    }]}
+    errors = _wiring_repair_errors(wiring, files)
+    result = prepare_bundle_repair({"passed": False, "errors": errors}, _repair_context())
+
+    assert len(errors) == 1
+    assert errors[0].startswith("ui/pages/habits.yaml:")
+    assert "Valid fields: items, total" in result["repair_request"]
+    assert result["status"] == "needs_revision"
+    assert result["target_agent"] == "AppSchemaAgent"
+    assert result["active"]["allowed_paths"] == ["ui/pages/habits.yaml"]

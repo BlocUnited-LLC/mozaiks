@@ -14,22 +14,21 @@ navigation:
   visible: true
 sections:
   - id: usage-status
-    primitive: DataTable
+    primitive: SummaryStrip
     title: Usage
     config:
       api_endpoint: /api/modules/billing_portal/get_usage_status
-      columns:
-        - key: runtime_ai_usage.totals.total_tokens
-          label: Total Tokens
-        - key: runtime_ai_usage.totals.llm_calls
-          label: LLM Calls
-  - id: token-status
-    primitive: SummaryStrip
-    title: Token Balance
-    config:
       items:
-        - label: Wallets
-          value_key: token_wallets
-        - label: Top Ups
-          value_key: top_up_products
+        - label: Total Tokens
+          value_key: runtime_ai_usage.totals.total_tokens
+          format: number
+        - label: Prompt Tokens
+          value_key: runtime_ai_usage.totals.prompt_tokens
+          format: number
+        - label: Completion Tokens
+          value_key: runtime_ai_usage.totals.completion_tokens
+          format: number
+        - label: LLM Calls
+          value_key: runtime_ai_usage.totals.llm_calls
+          format: number
 roles: null

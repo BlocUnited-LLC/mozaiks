@@ -47,7 +47,11 @@ class _Context:
 def _module_context():
     return _Context({"generated_files": {
         f"modules/{module_id}/module.yaml": yaml.safe_dump({
-            "module": {"id": module_id}, "actions": [{"id": action} for action in actions],
+            "module": {"id": module_id}, "actions": [{"id": action, "output_schema": {
+                "type": "array", "items": {"type": "object", "properties": {
+                    "name": {"type": "string"}, "email": {"type": "string"},
+                }},
+            }} for action in actions],
         })
         for module_id, actions in {"users": ["list_users", "create_user"], "tickets": ["save_settings"]}.items()
     }})
@@ -445,7 +449,9 @@ def test_save_app_schema_accepts_empty_primitive(monkeypatch, tmp_path: Path) ->
 
 def test_save_app_schema_accepts_workflow_action(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
-    context = _Context()
+    context = _Context({"generated_files": {
+        "workflows/CustomerSupport/orchestrator.yaml": "workflow_name: CustomerSupport\n",
+    }})
     page = _base_page()
     page["sections"] = [
         {

@@ -1760,7 +1760,7 @@ def validate_workflow_integration_contract(
 def _wiring_repair_errors(
     wiring_result: dict[str, Any], generated_files: dict[str, str]
 ) -> list[str]:
-    """Phrase orphaned endpoints as repairable per-page errors.
+    """Route unresolved endpoints and page contracts to their existing page owner.
 
     A wiring failure already blocks acceptance, but it was never handed to
     _prepare_bundle_repair, so the build failed without attempting a fix. The
@@ -1779,8 +1779,16 @@ def _wiring_repair_errors(
     if wiring_result.get("passed"):
         return []
     orphaned = wiring_result.get("orphaned_pages") or []
-    if not orphaned:
-        return []
+
+    page_paths: dict[str, str] = {}
+    for path, content in sorted(generated_files.items()):
+        if path.startswith("ui/pages/") and path.endswith((".yaml", ".yml")):
+            try:
+                page = yaml.safe_load(content)
+            except yaml.YAMLError:
+                continue  # The bundle scanner owns malformed page diagnostics.
+            if isinstance(page, dict):
+                page_paths[str(page.get("name") or Path(path).stem)] = path
 
     index = module_action_index(generated_files)
     declared = sorted(
@@ -1798,11 +1806,23 @@ def _wiring_repair_errors(
         section = str(item.get("section") or "").strip()
         where = f" section {section!r}" if section else ""
         errors.append(
-            f"ui/pages/{page}.yaml:{where} endpoint {item.get('endpoint')!r} "
+            f"{page_paths.get(page, f'ui/pages/{page}.yaml')}:{where} endpoint {item.get('endpoint')!r} "
             f"references no declared module action. Declared actions: {available}. "
             "Bind the section to one of them, or remove the section if the app "
             "does not need it. Do not invent an action id."
         )
+    for failure in wiring_result.get("failed_tests") or []:
+        kind = failure.get("test")
+        if kind not in {"wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action"}:
+            continue
+        if kind == "wiring_unreachable_gated_action":
+            # The page bundle owns placement across its pages; do not route this
+            # to the module owner or remove the gate to silence the diagnostic.
+            path = "ui/route_manifest.json" if "ui/route_manifest.json" in generated_files else next(iter(page_paths.values()), None)
+        else:
+            path = page_paths.get(str(failure.get("page") or ""))
+        if path:
+            errors.append(f"{path}: {failure['error']} {failure.get('fix_suggestion', '')}")
     return errors
 
 
@@ -1914,7 +1934,10 @@ async def run_app_bundle_acceptance_gate(
 
     agent_integration_result = await _agent_backend_integration_result(context_variables)
     # Wiring must inspect the accepted snapshot, not stale pages or a context write-back.
-    wiring_result = await validate_wiring(context_variables={"generated_files": generated_files})
+    wiring_result = await validate_wiring(context_variables={
+        "generated_files": generated_files,
+        "workflow_integration_metadata": _context_get(context_variables, "workflow_integration_metadata"),
+    })
     _context_set(context_variables, "wiring_validation_passed", wiring_result["passed"])
     _context_set(context_variables, "wiring_validation_result", wiring_result)
     module_implementation_result = validate_module_implementation_contract(generated_files)

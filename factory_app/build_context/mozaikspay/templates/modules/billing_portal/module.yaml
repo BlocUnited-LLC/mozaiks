@@ -57,7 +57,16 @@ actions:
       required: [success]
       properties:
         success: {type: boolean}
-        runtime_ai_usage: {type: object}
+        runtime_ai_usage:
+          type: object
+          properties:
+            totals:
+              type: object
+              properties:
+                total_tokens: {type: integer}
+                prompt_tokens: {type: integer}
+                completion_tokens: {type: integer}
+                llm_calls: {type: integer}
         source: {type: string}
     permissions: [billing_portal.read]
 

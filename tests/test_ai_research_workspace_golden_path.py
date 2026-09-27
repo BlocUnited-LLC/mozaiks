@@ -292,7 +292,13 @@ def _research_files() -> dict[str, str]:
               type: object
               required: [results]
               properties:
-                results: {type: array}
+                results:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      research_id: {type: string}
+                      status: {type: string}
             permissions: [research.read]
           - id: execute_research
             description: Save a research request and start the AI research workflow.
@@ -388,6 +394,7 @@ def _research_files() -> dict[str, str]:
                   data_source:
                     module_id: research
                     action_id: list_results
+                  data_key: results
                   columns:
                     - key: research_id
                       label: Research

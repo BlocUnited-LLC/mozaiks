@@ -139,6 +139,7 @@ def _source(*, column_label: str = "Order") -> dict:
                         "config": {
                             "columns": [{"key": "order_id", "label": column_label}],
                             "api_endpoint": "/api/modules/orders/list_orders",
+                            "data_key": "orders",
                         },
                     },
                     {
@@ -337,7 +338,15 @@ def _authored_skeleton() -> dict[str, str]:
             "    description: List orders.\n"
             "    handler_method: list_orders\n"
             "    input_schema: {type: object, properties: {}}\n"
-            "    output_schema: {type: object}\n"
+            "    output_schema:\n"
+            "      type: object\n"
+            "      properties:\n"
+            "        orders:\n"
+            "          type: array\n"
+            "          items:\n"
+            "            type: object\n"
+            "            properties:\n"
+            "              order_id: {type: string}\n"
             "  - id: create_order\n"
             "    description: Create an order.\n"
             "    handler_method: create_order\n"
