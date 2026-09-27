@@ -1,5 +1,15 @@
 schema_version: mozaiks.structured_outputs.v1
 models:
+  AppPageDataSource:
+    type: model
+    fields:
+      module_id:
+        type: str
+        description: Exact app-owned module id from the supplied module-action inventory.
+      action_id:
+        type: str
+        description: Exact action id declared by that module. Never infer ids from URLs or display labels.
+
   PrimitiveSectionHint:
     type: model
     fields:
@@ -35,6 +45,12 @@ models:
         description: >
           Primitive type name from the shipped chat-ui primitive registry.
           Must match exactly — AppSchemaAgent validates against this list.
+      data_source:
+        type: union
+        variants:
+        - AppPageDataSource
+        - 'null'
+        description: Explicit module-action choice for this section. Null for static sections. Code compiles this pair into the runtime endpoint; never put endpoint strings in config_hint.
       config_hint:
         type: optional_str
         description: >
@@ -45,7 +61,7 @@ models:
           decodes this JSON string and merges it with additional context — do
           not omit required fields here. Null only when config is entirely
           context-dependent and cannot be scaffolded at planning time.
-          Example: "{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/modules/tasks/list_tasks\"}"
+          Data bindings belong in data_source, never api_endpoint strings.
       section_id_hint:
         type: union
         variants:
@@ -1336,8 +1352,9 @@ models:
           Canonical generated data planning object for persistent app modules,
           cross-module aggregate ownership, or explicit existing database
           integration. It is written to data/contract.json by DatabaseAgent.
-          Ordinary generated apps may set this to null when generated-scoped
-          ctx.persistence is sufficient.
+          Persistent generated modules require collection ownership, scope,
+          scope_field, and field declarations for deterministic policy and read
+          action construction. Null only when no generated module persists data.
       pending_schema_migration:
         type: union
         variants:
@@ -2439,7 +2456,7 @@ models:
       sections:
         type: optional_list
         items: AppPageSection
-        description: Declarative primitive sections rendered inside the admin panel when renderer=schema. Reuse the same section contract as ui/pages/*.yaml and bind data with config.api_endpoint.
+        description: Declarative primitive sections rendered inside the admin panel when renderer=schema. Reuse the same section contract as ui/pages/*.yaml and bind data with config.data_source.
       component:
         type: union
         variants:
@@ -3613,9 +3630,9 @@ models:
         values:
         - submit
         description: Sends form or selection data to one module action endpoint.
-      href:
-        type: str
-        description: One fixed /api/modules/{module_id}/{action_id} endpoint. Never a conditional create/update URL -- keep separate create/edit forms, each with its own fixed href. Required.
+      data_source:
+        type: AppPageDataSource
+        description: Required fixed module-action pair from the closed inventory. Code renders href; separate create/edit forms select their own action.
       payload:
         type: optional_list
         items: AppPrimitiveKeyValue
@@ -3651,9 +3668,9 @@ models:
         values:
         - delete
         description: Removes the selected record through one module action endpoint.
-      href:
-        type: str
-        description: One fixed /api/modules/{module_id}/{action_id} endpoint for the delete command. Required.
+      data_source:
+        type: AppPageDataSource
+        description: Required fixed module-action pair from the closed inventory. Code renders href; separate create/edit forms select their own action.
       payload:
         type: optional_list
         items: AppPrimitiveKeyValue
@@ -3941,12 +3958,12 @@ models:
         type: list
         items: AppTableColumn
         description: Table columns. Required for DataTable.
-      api_endpoint:
+      data_source:
         type: union
         variants:
-        - str
+        - AppPageDataSource
         - 'null'
-        description: Canonical module endpoint for row data. Use /api/modules/{module_id}/{action_id} without query strings or fragments. Server mode sends page/page_size/search; declare those action inputs and implement bounded paging in the module. Client mode sends no query inputs.
+        description: Module-action pair from the closed inventory. Code renders the API endpoint; use null for static content.
       data_key:
         type: union
         variants:
@@ -3966,7 +3983,7 @@ models:
       pagination_mode:
         type: AppPaginationMode
         default: client
-        description: Select server when the list endpoint returns a bounded page. Omitted input defaults to client; explicit null is invalid. Server requires pagination=true, page_size (1-100), api_endpoint, data_key, and total_key; requests canonical page/page_size/search inputs. Client operates only on loaded rows. Server owns search and stable ordering; column sorting is disabled.
+        description: Select server when the list endpoint returns a bounded page. Omitted input defaults to client; explicit null is invalid. Server requires pagination=true, page_size (1-100), data_source, data_key, and total_key; requests canonical page/page_size/search inputs. Client operates only on loaded rows. Server owns search and stable ordering; column sorting is disabled.
       total_key:
         type: optional_str
         description: Required response path to a nonnegative integer total in server mode; null in client mode. Count all rows matching the same owner scope and literal search, before paging.
@@ -4036,7 +4053,7 @@ models:
         variants:
         - AppPageAction
         - 'null'
-        description: Submit action. action_type submit requires its own fixed module endpoint in href; payload and the table endpoint cannot supply it. Use separate create/edit forms or modals when their module action IDs differ. Workflow submissions use action_type workflow with workflow_id instead.
+        description: Submit action. action_type submit requires its own typed data_source pair; payload and the table source cannot supply it. Use separate create/edit forms or modals when their module action IDs differ. Workflow submissions use action_type workflow with workflow_id instead.
       cancel_label:
         type: union
         variants:
@@ -4364,12 +4381,12 @@ models:
         type: list
         items: AppTableColumn
         description: Resource table columns.
-      api_endpoint:
+      data_source:
         type: union
         variants:
-        - str
+        - AppPageDataSource
         - 'null'
-        description: Optional canonical module endpoint for row data. Use /api/modules/{module_id}/{action_id}; do not include query strings or fragments. Put limits in page_size and filters in payload/input config.
+        description: Module-action pair from the closed inventory. Code renders the API endpoint; use null for static content.
       data_key:
         type: union
         variants:
@@ -4455,13 +4472,13 @@ models:
         description: Metric label.
       value:
         type: AppPrimitiveValue
-        description: Metric value. Use null when value_key binds to an api_endpoint response.
+        description: Metric value. Use null when value_key binds to a data_source action response.
       value_key:
         type: union
         variants:
         - str
         - 'null'
-        description: Dot-path into the section api_endpoint response, such as metrics.total.value.
+        description: Dot-path into the section data_source action response, such as metrics.total.value.
       detail:
         type: union
         variants:
@@ -4473,13 +4490,13 @@ models:
         variants:
         - str
         - 'null'
-        description: Dot-path into the section api_endpoint response for detail text.
+        description: Dot-path into the section data_source action response for detail text.
       trend_key:
         type: union
         variants:
         - str
         - 'null'
-        description: Dot-path into the section api_endpoint response for trend detail. Use only when the bound module action computes a real historical comparison; otherwise keep null.
+        description: Dot-path into the section data_source action response for trend detail. Use only when the bound module action computes a real historical comparison; otherwise keep null.
       format:
         type: union
         variants:
@@ -4502,12 +4519,12 @@ models:
   AppSummaryStripConfig:
     type: model
     fields:
-      api_endpoint:
+      data_source:
         type: union
         variants:
-        - str
+        - AppPageDataSource
         - 'null'
-        description: Canonical module read endpoint providing live summary values. Use value_key to select response fields.
+        description: Module-action pair from the closed inventory. Code renders the API endpoint; use null for static content.
       items:
         type: list
         items: AppSummaryItem
@@ -4643,24 +4660,24 @@ models:
   AppMetricConfig:
     type: model
     fields:
-      api_endpoint:
+      data_source:
         type: union
         variants:
-        - str
+        - AppPageDataSource
         - 'null'
-        description: Canonical module read endpoint providing the metric value selected by value_key.
+        description: Module-action pair from the closed inventory. Code renders the API endpoint; use null for static content.
       label:
         type: str
         description: Metric label.
       value:
         type: AppPrimitiveValue
-        description: Metric value. Use null when value_key binds to an api_endpoint response.
+        description: Metric value. Use null when value_key binds to a data_source action response.
       value_key:
         type: union
         variants:
         - str
         - 'null'
-        description: Dot-path into the section api_endpoint response, such as metrics.total.value.
+        description: Dot-path into the section data_source action response, such as metrics.total.value.
       detail:
         type: union
         variants:
@@ -4672,13 +4689,13 @@ models:
         variants:
         - str
         - 'null'
-        description: Dot-path into the section api_endpoint response for detail text.
+        description: Dot-path into the section data_source action response for detail text.
       trend_key:
         type: union
         variants:
         - str
         - 'null'
-        description: Dot-path into the section api_endpoint response for trend detail. Use only when the bound module action computes a real historical comparison; otherwise keep null.
+        description: Dot-path into the section data_source action response for trend detail. Use only when the bound module action computes a real historical comparison; otherwise keep null.
       format:
         type: union
         variants:
@@ -6403,8 +6420,22 @@ models:
         type: str
         description: Canonical collection name used in ctx.persistence.collection(module_id, name).
       scope:
+        type: literal
+        values:
+        - app
+        - user
+        - tenant
+        - workspace
+        description: Runtime identity used by the deterministic policy renderer, in addition to mandatory app isolation.
+      scope_field:
         type: str
-        description: Isolation scope — typically "app".
+        description: >
+          Declared collection field that stores the scope identity. Code derives its
+          value from ctx.app_id, ctx.user_id, ctx.tenant_id, or ctx.workspace_id;
+          never from caller input. Reserved fields app_id, user_id, tenant_id, and
+          workspace_id must match scope. For app scope on app_id, policy queries
+          omit that field because ctx.persistence injects the mandatory app filter;
+          app scope on a custom field still filters that field.
       ownership:
         type: DataContractOwnership
         description: >
@@ -6517,13 +6548,12 @@ models:
         - handler
         - service
         - repo
-        - policy
         - schemas
         - settings_hook
         - notifications_hook
         - admin_hook
         - helper
-        description: Stub family. Must match the declared module_contract.python_stubs entry.
+        description: Stub family. Must match the declared module_contract.python_stubs entry. policy.py is rendered deterministically from data_contract and must not be emitted as model source.
       purpose:
         type: str
         description: Why this implemented Python stub exists.

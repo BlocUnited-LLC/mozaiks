@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated pages select typed module/action data sources; code builds their
+  endpoints and missing entity read contracts. Persistent module policies now
+  come from declared collection scope, preventing invented routes and unfinished
+  policy code while retaining wiring and runtime-quality checks.
+
 - AppGenerator keeps runtime-only connector setup as deployment requirements
   while continuing to block on required build-time and validation-time setup.
   Integration declarations persist automatically after the readiness check.

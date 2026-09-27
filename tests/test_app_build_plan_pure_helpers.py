@@ -62,25 +62,6 @@ Covers helpers NOT already tested in test_appgenerator_managed_capability_smoke.
     - missing key → default returned
     - non-dict/non-None without .get → default returned
 
-  _route_page_api_endpoint_to_facade:
-    - endpoint not starting with /api/modules/ → unchanged
-    - matching rule → module replaced
-    - no matching rule → unchanged
-    - less than 2 parts after prefix → unchanged
-
-  _route_page_api_endpoints_to_facades:
-    - dict with api_endpoint key → endpoint routed
-    - nested dict → recursed
-    - list → all items processed
-    - non-endpoint string key → unchanged
-    - non-string api_endpoint → unchanged
-
-  _iter_page_api_endpoints:
-    - dict with api_endpoint → yielded
-    - nested dict → recursed
-    - list → recursed
-    - non-dict non-list → nothing yielded
-    - whitespace-only endpoint → not yielded
 """
 from __future__ import annotations
 
@@ -88,14 +69,13 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _context_get,
     _dedupe_preserving_order,
     _infer_pack_id_from_integration_path,
-    _iter_page_api_endpoints,
+    _iter_page_data_sources,
     _join_unique_text,
     _normalize_context_variables,
     _normalize_object_list,
     _normalize_string_list,
     _pack_id_from_descriptor,
-    _route_page_api_endpoint_to_facade,
-    _route_page_api_endpoints_to_facades,
+    _route_page_data_sources_to_facades,
     _task_sort_key,
 )
 
@@ -408,121 +388,50 @@ class TestContextGet:
 
 
 # ---------------------------------------------------------------------------
-# 10. _route_page_api_endpoint_to_facade
-# ---------------------------------------------------------------------------
+# Typed page bindings replace URL rewriting.
 
-class TestRoutePageApiEndpointToFacade:
-    def test_non_api_modules_endpoint_unchanged(self):
-        rules = {}
-        endpoint = "/api/auth/login"
-        assert _route_page_api_endpoint_to_facade(endpoint, rules) == endpoint
+class TestTypedPageBindings:
+    def test_registered_facade_mapping_preserves_action(self):
+        source = {"module_id": "provider", "action_id": "charge"}
+        data = {"sections_hint": [{"data_source": source}]}
+        result = _route_page_data_sources_to_facades(data, {("provider", "charge"): "facade"})
+        assert result["sections_hint"][0]["data_source"] == {"module_id": "facade", "action_id": "charge"}
+        assert source["module_id"] == "provider"
 
-    def test_matching_rule_replaces_module(self):
-        rules = {("payment_provider_module", "charge"): "payment_facade"}
-        result = _route_page_api_endpoint_to_facade("/api/modules/payment_provider_module/charge", rules)
-        assert result == "/api/modules/payment_facade/charge"
+    def test_no_registered_mapping_does_not_guess(self):
+        data = {"data_source": {"module_id": "unknown", "action_id": "charge"}}
+        assert _route_page_data_sources_to_facades(data, {("provider", "charge"): "facade"}) == data
 
-    def test_no_matching_rule_unchanged(self):
-        rules = {("other_module", "action"): "facade"}
-        result = _route_page_api_endpoint_to_facade("/api/modules/payment_provider_module/charge", rules)
-        assert result == "/api/modules/payment_provider_module/charge"
+    def test_config_hint_urls_are_rejected(self):
+        import pytest
 
-    def test_less_than_two_parts_unchanged(self):
-        # /api/modules/only_one_segment
-        result = _route_page_api_endpoint_to_facade("/api/modules/single", {})
-        assert result == "/api/modules/single"
+        with pytest.raises(ValueError, match="endpoint URLs are rendered by code"):
+            list(_iter_page_data_sources({"config_hint": '{"api_endpoint": "/api/tasks"}'}))
 
-    def test_extra_path_segments_preserved(self):
-        rules = {("payment_provider", "charge"): "pay_facade"}
-        result = _route_page_api_endpoint_to_facade("/api/modules/payment_provider/charge/extra", rules)
-        assert result == "/api/modules/pay_facade/charge/extra"
+    def test_config_hint_mutation_urls_are_rejected(self):
+        import json
 
-    def test_backslash_normalized(self):
-        rules = {("mod", "act"): "facade"}
-        result = _route_page_api_endpoint_to_facade("\\api\\modules\\mod\\act", rules)
-        assert "facade" in result
+        import pytest
 
+        for action_type in ("submit", "delete"):
+            hint = {"config_hint": json.dumps({"actions": [{
+                "action_type": action_type, "href": "/api/modules/tasks/update_task",
+            }]})}
+            with pytest.raises(ValueError, match="Page mutations must select data_source"):
+                list(_iter_page_data_sources(hint))
 
-# ---------------------------------------------------------------------------
-# 11. _route_page_api_endpoints_to_facades
-# ---------------------------------------------------------------------------
+    def test_config_hint_navigation_route_and_typed_mutation_are_preserved(self):
+        import json
 
-class TestRoutePageApiEndpointsToFacades:
-    def test_dict_api_endpoint_rewritten(self):
-        rules = {("mod", "action"): "facade"}
-        data = {"api_endpoint": "/api/modules/mod/action"}
-        result = _route_page_api_endpoints_to_facades(data, rules)
-        assert result["api_endpoint"] == "/api/modules/facade/action"
+        source = {"module_id": "tasks", "action_id": "update_task"}
+        hint = {"config_hint": json.dumps({"actions": [
+            {"action_type": "navigate", "href": "/tasks/{task_id}"},
+            {"action_type": "submit", "data_source": source},
+        ]})}
+        assert list(_iter_page_data_sources(hint)) == [source]
 
-    def test_nested_dict_recursed(self):
-        rules = {("mod", "act"): "facade"}
-        data = {"section": {"api_endpoint": "/api/modules/mod/act"}}
-        result = _route_page_api_endpoints_to_facades(data, rules)
-        assert result["section"]["api_endpoint"] == "/api/modules/facade/act"
+    def test_typed_pair_shape_is_closed(self):
+        import pytest
 
-    def test_list_items_processed(self):
-        rules = {("mod", "act"): "facade"}
-        data = [{"api_endpoint": "/api/modules/mod/act"}]
-        result = _route_page_api_endpoints_to_facades(data, rules)
-        assert result[0]["api_endpoint"] == "/api/modules/facade/act"
-
-    def test_non_endpoint_key_unchanged(self):
-        rules = {("mod", "act"): "facade"}
-        data = {"name": "unchanged"}
-        result = _route_page_api_endpoints_to_facades(data, rules)
-        assert result["name"] == "unchanged"
-
-    def test_non_string_api_endpoint_unchanged(self):
-        rules = {("mod", "act"): "facade"}
-        data = {"api_endpoint": 42}
-        result = _route_page_api_endpoints_to_facades(data, rules)
-        assert result["api_endpoint"] == 42
-
-    def test_non_dict_non_list_returned_as_is(self):
-        result = _route_page_api_endpoints_to_facades("string", {})
-        assert result == "string"
-
-    def test_empty_rules_all_unchanged(self):
-        data = {"api_endpoint": "/api/modules/mod/act"}
-        result = _route_page_api_endpoints_to_facades(data, {})
-        assert result["api_endpoint"] == "/api/modules/mod/act"
-
-
-# ---------------------------------------------------------------------------
-# 12. _iter_page_api_endpoints
-# ---------------------------------------------------------------------------
-
-class TestIterPageApiEndpoints:
-    def test_dict_with_api_endpoint_yielded(self):
-        result = list(_iter_page_api_endpoints({"api_endpoint": "/api/modules/orders/list"}))
-        assert "/api/modules/orders/list" in result
-
-    def test_nested_dict_recursed(self):
-        data = {"section": {"api_endpoint": "/api/modules/orders/get"}}
-        result = list(_iter_page_api_endpoints(data))
-        assert "/api/modules/orders/get" in result
-
-    def test_list_recursed(self):
-        data = [{"api_endpoint": "/api/modules/a/b"}, {"api_endpoint": "/api/modules/c/d"}]
-        result = list(_iter_page_api_endpoints(data))
-        assert "/api/modules/a/b" in result
-        assert "/api/modules/c/d" in result
-
-    def test_non_dict_non_list_yields_nothing(self):
-        assert list(_iter_page_api_endpoints("string")) == []
-        assert list(_iter_page_api_endpoints(42)) == []
-
-    def test_whitespace_only_endpoint_not_yielded(self):
-        result = list(_iter_page_api_endpoints({"api_endpoint": "   "}))
-        assert result == []
-
-    def test_non_string_api_endpoint_not_yielded(self):
-        result = list(_iter_page_api_endpoints({"api_endpoint": None}))
-        assert result == []
-
-    def test_non_endpoint_key_not_yielded(self):
-        result = list(_iter_page_api_endpoints({"name": "/api/modules/mod/act"}))
-        assert result == []
-
-    def test_empty_dict_yields_nothing(self):
-        assert list(_iter_page_api_endpoints({})) == []
+        with pytest.raises(ValueError, match="exactly module_id and action_id"):
+            list(_iter_page_data_sources({"data_source": {"module_id": "tasks"}}))

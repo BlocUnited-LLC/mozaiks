@@ -874,7 +874,7 @@ async def test_page_bundle_task_preserves_valid_worker_sections_and_plan_identit
                                     {
                                         "id": "worker-table",
                                         "primitive": "DataTable",
-                                        "config": {"columns": ["subject"], "api_endpoint": "/api/modules/tickets/list_tickets", "search": True},
+                                        "config": {"columns": ["subject"], "data_source": {"module_id": "tickets", "action_id": "list_tickets"}, "search": True},
                                     }
                                 ],
                             },
@@ -886,6 +886,7 @@ async def test_page_bundle_task_preserves_valid_worker_sections_and_plan_identit
             )
 
     context = {
+        "generated_files": {"modules/tickets/module.yaml": "module:\n  id: tickets\nactions:\n- id: list_tickets\n"},
         "build_timestamp": "2026-09-12T00:00:00Z",
         "app_build_plan": {
             "pages": [
@@ -897,7 +898,7 @@ async def test_page_bundle_task_preserves_valid_worker_sections_and_plan_identit
                         {
                             "primitive": "ResourceTable",
                             "section_id_hint": "tickets-table",
-                            "config_hint": "{\"api_endpoint\": \"/api/modules/tickets/list_tickets\"}",
+                            "data_source": {"module_id": "tickets", "action_id": "list_tickets"},
                         }
                     ],
                 },
@@ -1094,7 +1095,7 @@ async def test_execute_task_batches_rejects_worker_output_outside_owned_paths() 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("repair", [False, True])
-@pytest.mark.parametrize("failure_kind", ["ownership", "null_manifest", "task_identity", "form_payload", "submit_href"])
+@pytest.mark.parametrize("failure_kind", ["ownership", "null_manifest", "task_identity", "form_payload", "submit_source"])
 async def test_task_output_validation_uses_the_declared_retry_budget(repair: bool, failure_kind: str) -> None:
     payload = _valid_payload()
     batch = payload["batches"][0]
@@ -1122,7 +1123,7 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
                 "fields": [{"name": "name", "label": "Name", "type": "text"},
                            {"name": "notes", "label": "Notes", "type": "textarea"}],
                 "submit_action": {"label": "Save", "action_type": "submit",
-                                  "href": "/api/modules/profiles/update",
+                                  "data_source": {"module_id": "profiles", "action_id": "update"},
                                   "payload": {"record_id": "{selected_row.id}"}},
             },
         }])
@@ -1132,10 +1133,10 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
         })
         valid = {"code_files": [{"filename": "ui/pages/home.yaml", "content": yaml.safe_dump(page)}]}
         error = "page_schema.incomplete_form_payload"
-        if failure_kind == "submit_href":
-            page["sections"][0]["config"]["submit_action"]["href"] = None
+        if failure_kind == "submit_source":
+            page["sections"][0]["config"]["submit_action"]["data_source"] = None
             invalid = {"code_files": [{"filename": "ui/pages/home.yaml", "content": yaml.safe_dump(page)}]}
-            error = "submit actions require href"
+            error = "submit actions require data_source"
 
     class RepairAgent(_RunnerAgent):
         async def ask(self, message, **kwargs):
@@ -1147,11 +1148,14 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
         "task_id": "profiles", "initial_agent": "WorkerAgent", "initial_message": "Build profiles.",
         "owned_paths": ["modules/profiles/module.yaml"],
     }]}}
-    if failure_kind in {"form_payload", "submit_href"}:
+    if failure_kind in {"form_payload", "submit_source"}:
         context["review_plan"]["tasks"][0].update({
             "task_type": "page_bundle", "owned_paths": ["ui/pages/home.yaml"],
         })
         context["app_build_plan"] = {"pages": [{"name": "home", "route": "/home"}]}
+        context["generated_files"] = {
+            "modules/profiles/module.yaml": "module:\n  id: profiles\nactions:\n- id: update\n",
+        }
 
     async def execute():
         return await execute_task_batches_for_trigger(
@@ -1162,7 +1166,15 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
     if repair:
         await execute()
         assert context["document_review_status"] == "completed"
-        assert context["document_review_results"]["profiles"]["code_files"] == valid["code_files"]
+        actual = context["document_review_results"]["profiles"]["code_files"]
+        if failure_kind in {"form_payload", "submit_source"}:
+            saved = yaml.safe_load(actual[0]["content"])
+            action = saved["sections"][0]["config"]["submit_action"]
+            assert action["href"] == "/api/modules/profiles/update"
+            assert action["payload"] == {"record_id": "{selected_row.id}", "name": "{form.name}", "notes": "{form.notes}"}
+            assert "data_source" not in action
+        else:
+            assert actual == valid["code_files"]
     else:
         with pytest.raises(RuntimeError, match=error):
             await execute()

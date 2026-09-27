@@ -38,8 +38,12 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
 )
 from mozaiksai.core.workflow.generator_support.code_files import (
+    extract_deleted_file_paths_from_payload,
     safe_relpath,
 )
+from mozaiksai.core.workflow.generator_support.module_policy import materialize_task_module_policies
+from mozaiksai.core.workflow.generator_support.module_read_actions import close_module_read_actions
+from mozaiksai.core.workflow.generator_support.page_plan_utils import compile_authored_page_files
 
 
 def compose_bundle_auth_routes(files_map: dict[str, str]) -> None:
@@ -111,46 +115,31 @@ def extract_code_file_entries_from_payload(
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 
-def extract_deleted_file_paths_from_payload(payload: Any) -> list[str]:
-    """Resolve deleted generated file paths from a structured output payload."""
-
-    if isinstance(payload, dict) and len(payload) == 1:
-        key, value = next(iter(payload.items()))
-        if isinstance(key, str) and key.endswith("Output") and isinstance(value, dict):
-            payload = value
-
-    if not isinstance(payload, dict):
-        return []
-
-    raw_deleted = payload.get("deleted_files")
-    if not isinstance(raw_deleted, list):
-        return []
-
-    paths: list[str] = []
-    seen: set[str] = set()
-    for item in raw_deleted:
-        if isinstance(item, str):
-            raw_path = item
-        elif isinstance(item, dict):
-            raw_path = str(item.get("filename") or item.get("path") or "")
-        else:
-            continue
-        safe = safe_relpath(raw_path)
-        if not safe or safe in seen:
-            continue
-        seen.add(safe)
-        paths.append(safe)
-    return paths
-
-
 def save_generated_code(context_variables: Any) -> dict[str, Any]:
     """Persist the current validated output before AG2 advances to a quality gate."""
     payload = detach(context_variables.get("structured_output"))
     try:
         if not isinstance(payload, dict):
             raise ValueError("Generated code persistence requires validated structured_output.")
+        payload = close_module_read_actions(
+            payload,
+            app_build_plan=detach(context_variables.get("app_build_plan")),
+            data_contract=detach(context_variables.get("data_contract")),
+        )
         incoming = extract_code_file_map_from_payload(payload)
+        incoming = compile_authored_page_files(incoming, payload=payload, context=context_variables)
         deleted = extract_deleted_file_paths_from_payload(payload)
+        task = detach(context_variables.get("current_build_task")) or {}
+        repair = detach(context_variables.get("bundle_repair_result")) or {}
+        active = repair.get("active") or {}
+        owned_paths = active.get("allowed_paths") if active else task.get("owned_paths")
+        plan = detach(context_variables.get("app_build_plan")) or {}
+        contract = detach(context_variables.get("data_contract")) or plan.get("data_contract")
+        policies = materialize_task_module_policies(
+            incoming, task={"owned_paths": owned_paths or []}, data_contract=contract,
+        )
+        admitted = admitted_app_file_map(context_variables)
+        incoming.update({path: content for path, content in policies.items() if admitted.get(path) != content})
     except (TypeError, ValueError) as exc:
         if mark_repair_rejected(context_variables, str(exc)):
             return {"status": "rejected", "error": str(exc), "saved_files": [], "deleted_files": []}

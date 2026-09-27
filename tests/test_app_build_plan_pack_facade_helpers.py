@@ -45,14 +45,6 @@ Covers helpers not in test_app_build_plan_helpers.py or test_app_build_plan_help
     - label/summary missing → auto-generated from facade_id
     - connector requirements stay on the separate managed capability
 
-  _iter_page_api_endpoints:
-    - flat dict with api_endpoint → yields it
-    - nested dict → yields from nested
-    - list of dicts → yields from all
-    - non-string api_endpoint → skipped
-    - empty endpoint → skipped
-    - no api_endpoint keys → yields nothing
-
   _validate_page_bindings:
     - no forbidden ids → no error
     - page binds to allowed module → no error
@@ -96,7 +88,6 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _context_get,
     _context_managed_capability_ids,
     _facade_pack_descriptor,
-    _iter_page_api_endpoints,
     _managed_capability_backing_module_ids,
     _managed_facade_route_rules,
     _merge_available_pack_defaults,
@@ -437,65 +428,16 @@ class TestFacadePackDescriptor:
 
 
 # ---------------------------------------------------------------------------
-# 7. _iter_page_api_endpoints
-# ---------------------------------------------------------------------------
-
-class TestIterPageApiEndpoints:
-    def test_flat_dict_yields_endpoint(self):
-        page = {"api_endpoint": "/api/modules/tasks/list_tasks"}
-        result = list(_iter_page_api_endpoints(page))
-        assert result == ["/api/modules/tasks/list_tasks"]
-
-    def test_nested_dict_yields_from_nested(self):
-        page = {"section": {"api_endpoint": "/api/modules/tasks/create_task"}}
-        result = list(_iter_page_api_endpoints(page))
-        assert "/api/modules/tasks/create_task" in result
-
-    def test_list_of_dicts_yields_all(self):
-        data = [
-            {"api_endpoint": "/api/modules/a/action"},
-            {"api_endpoint": "/api/modules/b/action"},
-        ]
-        result = list(_iter_page_api_endpoints(data))
-        assert len(result) == 2
-
-    def test_non_string_api_endpoint_skipped(self):
-        page = {"api_endpoint": 42}
-        result = list(_iter_page_api_endpoints(page))
-        assert result == []
-
-    def test_empty_endpoint_skipped(self):
-        page = {"api_endpoint": "   "}
-        result = list(_iter_page_api_endpoints(page))
-        assert result == []
-
-    def test_no_api_endpoint_yields_nothing(self):
-        page = {"name": "Page", "title": "My Page"}
-        result = list(_iter_page_api_endpoints(page))
-        assert result == []
-
-    def test_deeply_nested(self):
-        page = {"content": {"form": {"api_endpoint": "/api/modules/x/action"}}}
-        result = list(_iter_page_api_endpoints(page))
-        assert result == ["/api/modules/x/action"]
-
-    def test_scalar_yields_nothing(self):
-        assert list(_iter_page_api_endpoints("scalar")) == []
-        assert list(_iter_page_api_endpoints(42)) == []
-        assert list(_iter_page_api_endpoints(None)) == []
-
-
-# ---------------------------------------------------------------------------
 # 8. _validate_page_bindings
 # ---------------------------------------------------------------------------
 
 class TestValidatePageBindings:
     def test_no_forbidden_ids_no_error(self):
-        pages = [{"name": "Tasks", "api_endpoint": "/api/modules/managed_capability/action"}]
+        pages = [{"name": "Tasks", "data_source": {"module_id": "managed_capability", "action_id": "action"}}]
         _validate_page_bindings(pages, managed_capability_ids=frozenset(), managed_capability_backing_module_ids=frozenset())
 
     def test_page_binds_to_allowed_module_no_error(self):
-        pages = [{"name": "Tasks", "api_endpoint": "/api/modules/tasks/list_tasks"}]
+        pages = [{"name": "Tasks", "data_source": {"module_id": "tasks", "action_id": "list_tasks"}}]
         _validate_page_bindings(
             pages,
             managed_capability_ids=frozenset({"billing"}),
@@ -503,7 +445,7 @@ class TestValidatePageBindings:
         )
 
     def test_page_binds_to_managed_capability_raises(self):
-        pages = [{"name": "Billing", "api_endpoint": "/api/modules/billing/create_checkout"}]
+        pages = [{"name": "Billing", "data_source": {"module_id": "billing", "action_id": "create_checkout"}}]
         try:
             _validate_page_bindings(
                 pages,
@@ -515,7 +457,7 @@ class TestValidatePageBindings:
             assert "billing" in str(exc)
 
     def test_page_binds_to_backing_module_raises(self):
-        pages = [{"name": "payment provider", "api_endpoint": "/api/modules/payment_provider_backend/charge"}]
+        pages = [{"name": "payment provider", "data_source": {"module_id": "payment_provider_backend", "action_id": "charge"}}]
         try:
             _validate_page_bindings(
                 pages,
@@ -527,7 +469,7 @@ class TestValidatePageBindings:
             assert "payment_provider_backend" in str(exc)
 
     def test_nested_endpoint_binding_raises(self):
-        pages = [{"name": "P", "section": {"api_endpoint": "/api/modules/billing/pay"}}]
+        pages = [{"name": "P", "section": {"data_source": {"module_id": "billing", "action_id": "pay"}}}]
         import pytest
         with pytest.raises(ValueError, match="billing"):
             _validate_page_bindings(

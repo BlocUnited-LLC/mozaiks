@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from scripts.smoke_appgenerator_live_subscription import (
@@ -197,6 +199,13 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
     assert acceptance["export_gate"]["allow_export"] is True
     assert acceptance["runtime_loader"]["subscriptions_loaded"] is True
     assert acceptance["runtime_loader"]["action_entitlements"]["generate_report"] == "reports.generate"
+
+    generated = acceptance["context"]["generated_files"]
+    report_collection = json.loads(generated["data/contract.json"])["surfaces"][0]["collections"][0]
+    assert (report_collection["scope"], report_collection["scope_field"]) == ("app", "app_id")
+    policy = generated["modules/reports/backend/policy.py"]
+    assert "Ownership policy compiled from data/contract.json" in policy
+    assert "ReportsPolicy" not in policy
 
     details = acceptance["wiring"]["checks"][0]["details"]
     assert details["platform_endpoint_count"] == 3

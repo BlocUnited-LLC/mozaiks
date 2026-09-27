@@ -693,6 +693,22 @@ def test_existing_recorded_saas_fixture_projects_with_explicit_gaps() -> None:
     assert all(row.source_file != "unknown" for row in result.coverage)
 
 
+def test_data_contract_scope_field_has_known_deferred_coverage() -> None:
+    source = _corpus_source()
+    source["app_build_plan"]["data_contract"]["surfaces"][0]["collections"][0]["scope_field"] = "owner_id"
+
+    result = _project(source)
+
+    path = "app_build_plan.data_contract.surfaces[0].collections[0].scope_field"
+    gap = next(gap for gap in result.gaps if gap.source_path == path)
+    row = next(row for row in result.coverage if row.source_path == path)
+    assert gap.kind is ProjectionGapKind.UNSUPPORTED
+    assert row.disposition is ProjectionDisposition.DEFERRED
+    assert row.fully_representable is False
+    assert row.target_node_kind is None
+    assert row.target_edge_kind is None
+
+
 def test_current_runtime_models_and_agentgenerator_bundle_shape_project() -> None:
     module = ModuleDefinition.model_validate(
         {

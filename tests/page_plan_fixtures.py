@@ -52,18 +52,8 @@ def _canonical_section_config(primitive: str, config: dict[str, Any], page: dict
     elif primitive == "SummaryStrip" and not isinstance(normalized.get("items"), list):
         normalized["items"] = [{"label": title, "value": None}]
     elif primitive == "ActionButton":
-        api_endpoint = normalized.pop("api_endpoint", None)
         if not isinstance(normalized.get("actions"), list):
-            if isinstance(api_endpoint, str) and api_endpoint.startswith("/api/"):
-                normalized["actions"] = [
-                    {
-                        "label": title,
-                        "action_type": "submit",
-                        "href": api_endpoint,
-                    }
-                ]
-            else:
-                normalized["actions"] = []
+            normalized["actions"] = []
     return normalized
 
 
@@ -78,6 +68,9 @@ def _page_from_plan(page: dict[str, Any], stem: str) -> dict[str, Any]:
                 continue
             primitive = str(hint.get("primitive") or "PageHeader").strip()
             section_id = str(hint.get("section_id_hint") or f"{stem}-{index + 1}").strip()
+            config = _decode_config_hint(hint.get("config_hint"))
+            if hint.get("data_source") is not None:
+                config = {**config, "data_source": hint["data_source"]}
             sections.append(
                 {
                     "id": section_id,
@@ -85,7 +78,7 @@ def _page_from_plan(page: dict[str, Any], stem: str) -> dict[str, Any]:
                     "title": hint.get("title_hint"),
                     "config": _canonical_section_config(
                         primitive,
-                        _decode_config_hint(hint.get("config_hint")),
+                        config,
                         page,
                         title,
                     ),

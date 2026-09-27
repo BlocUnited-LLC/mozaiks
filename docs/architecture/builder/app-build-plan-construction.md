@@ -61,7 +61,7 @@ Classification follows draft ADR 0012's construction/judgment distinction, colla
 | Refinement task null pack, refinement surface, permitted config/prompts paths (`cache._validate_build_tasks`) | C after explicit selection; selection/contents J | Validated only | Yes: canonical selected-task fields filled when owned paths are valid; forbidden paths remain feedback |
 | Selected refinement task must own config/refinement_policy.yaml and refinement_harness/config/harness.yaml (`cache._validate_build_tasks`) | C | **No mandatory-pair completion** | Yes: shared `_required_selected_task_paths` and constructor completion |
 | Owned artifact paths exclusive across tasks (`cache._validate_unique_owned_paths`) | C guard; competing semantic partition is J | Page assignment and persistence merge only; other conflict rejection | Construct only unowned required paths; preserve unrelated conflict rejection. Base expressly exempts app.json from this guard |
-| Pages bind to facade rather than managed provider/backing module endpoints (`cache._validate_page_bindings`) | C when action mapping declared by selected facade contract; J when no mapping exists | `_normalize_managed_capability_page_bindings` rewrites declared provider action mappings | Retain exact contract mapping; unmatched endpoints rejected |
+| Pages bind to facade rather than managed provider/backing module endpoints (`cache._validate_page_bindings`) | C when action mapping declared by selected facade contract; J when no mapping exists | `_normalize_managed_capability_page_bindings` rewrites declared provider action mappings | Retain exact contract mapping; unmatched typed module/action references rejected |
 | User-facing managed capability has a page task and non-provider module_contract (`cache._validate_user_facing_managed_capability_tasks`) | C for explicit primary_pages/facade contract; prose token heuristic is not approved input | No page task construction; facade capability/page expansion occurs downstream | Yes: missing page task and registered selected facade trio constructed before validation; unknown facade realization still rejected |
 | monetization_provider appears only with subscription_config; required subscription build has provider (`cache._validate_monetization_provider_selection`) | C when explicit approved subscription/provider selection exists; absent selection J | Subscription task construction; downstream guessed MozaiksPay when no provider was chosen | Subscription closure retained; `_resolve_monetization_provider` now uses explicit choice or an already selected provider pack; subscription task alone cannot choose a provider and receives bounded feedback |
 | MozaiksPay and entitlement_dispatch cannot both be selected; ≤1 managed subscription-write-path owner (`cache._validate_monetization_provider_selection`) | C guard; choosing among conflicting providers is J | Rejected | Keep rejection |
@@ -91,3 +91,11 @@ The exact base behavior is checked by running the new tests against `7211107d`: 
 ## Adjacent typed and runtime safeguards
 
 Public review validates the strict `AppBuildPlan` model before repairs, so malformed task taxonomy/field types are already bounded feedback. The runtime context and nonnegative integer attempt counter are required; there are at most three review attempts. Those execution-safety rules are not app structure to construct. `ContextVariablesBridge` detaches protected state, so regression fixtures must use the bridge and assert cached state rather than rely on ordinary dict mutation.
+
+
+Page source compilation now follows declared collection ownership: module output
+admission constructs missing canonical list/detail actions before dependency
+publication, and page tasks gain dependencies from their explicit data source
+pairs. This does not infer ownership from endpoint strings. See the
+[typed page data source contract](appgenerator-output-assembly-contract.md#typed-page-data-sources)
+for construction boundaries and protected-action handling.

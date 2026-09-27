@@ -12,8 +12,14 @@ import yaml
 from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.page_schema import PageSchemaValidationError, validate_page_schema
+from mozaiksai.core.workflow.context.frozen import detach
 
-from .code_files import safe_relpath
+from .code_files import (
+    _unwrap_output_envelope,
+    extract_code_file_map_from_payload,
+    extract_deleted_file_paths_from_payload,
+    safe_relpath,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -355,11 +361,8 @@ def declare_the_intended_modal(document: Any) -> str | None:
     return modal_id
 
 
-_MODULE_ACTION_PATH = re.compile(r"(/api/modules/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)")
-
-
 def module_action_index(file_map: dict[str, str]) -> dict[str, set[str]]:
-    """Map module id -> declared action ids, read from generated module.yaml files."""
+    """Map module id to declared HTTP actions from generated module.yaml files."""
     index: dict[str, set[str]] = {}
     for path, content in (file_map or {}).items():
         if not str(path).replace("\\", "/").endswith("/module.yaml"):
@@ -379,60 +382,126 @@ def module_action_index(file_map: dict[str, str]) -> dict[str, set[str]]:
             str(action.get("id")).strip()
             for action in (actions if isinstance(actions, list) else [])
             if isinstance(action, dict) and str(action.get("id") or "").strip()
+            and action.get("api_surface") not in {"internal", "admin_internal"}
         }
     return index
 
 
-def _retarget_one(match: re.Match[str], modules: dict[str, set[str]], seen: list[str]) -> str:
-    prefix, module_id, action_id = match.group(1), match.group(2), match.group(3)
-    if module_id in modules:
-        return match.group(0)
-    owners = sorted(owner for owner, actions in modules.items() if action_id in actions)
-    # Exactly one owner, or the rewrite would be a guess. Two modules declaring
-    # the same action id is a real ambiguity, and picking one silently would
-    # bind the page to a module the planner may not have meant - the same reason
-    # a doubly-claimed surface is left rejected rather than resolved.
-    if len(owners) != 1:
-        return match.group(0)
-    seen.append(f"{module_id}/{action_id} -> {owners[0]}/{action_id}")
-    return f"{prefix}{owners[0]}/{action_id}"
+def module_action_index_from_context(context: Any) -> dict[str, set[str]]:
+    """Read the closed inventory from admitted files and declared dependencies."""
+    if context is None:
+        return {}
+    files = detach(context.get("generated_files")) or {}
+    files.update(extract_code_file_map_from_payload({
+        "code_files": detach(context.get("code_files")),
+    }))
+    dependencies = detach(context.get("dependency_task_outputs")) or {}
+    for output in dependencies.values():
+        files.update(extract_code_file_map_from_payload(output))
+    for path in extract_deleted_file_paths_from_payload({"deleted_files": detach(context.get("deleted_files"))}):
+        files.pop(path, None)
+    return module_action_index(files)
 
 
-def retarget_page_module_ids(document: Any, modules: dict[str, set[str]]) -> list[str]:
-    """Point canonical endpoints at the module that actually declares the action.
+def compile_page_data_sources(
+    document: Any,
+    modules: dict[str, set[str]],
+    *,
+    reject_api_endpoints: bool = False,
+) -> int:
+    """Compile explicit module/action pairs; never resolve identities from URLs.
 
-    A live habit tracker emitted /api/modules/habits/create_habit against a
-    module whose id is habits_registry. The canonical FORM was right - the page
-    agent had the rule and followed it - but the identity was invented, so every
-    call 404s and acceptance reports the actions as orphaned.
-
-    Only an unknown module id is rewritten, and only when exactly one generated
-    module declares that action. A path already naming a real module is left
-    alone even if the action is missing: that is a different defect, and the
-    module.yaml is the contract, not this.
+    Authoring boundaries reject runtime endpoint fields. Assembly can also pass
+    already compiled documents through this compiler without changing bytes.
     """
-    rewrites: list[str] = []
-    if not modules:
-        return rewrites
+    count = 0
 
-    def walk(node: Any) -> Any:
-        if isinstance(node, dict):
-            return {key: walk(value) for key, value in node.items()}
+    def walk(node: Any, location: str) -> None:
+        nonlocal count
         if isinstance(node, list):
-            return [walk(item) for item in node]
-        if isinstance(node, str) and "/api/modules/" in node:
-            return _MODULE_ACTION_PATH.sub(lambda m: _retarget_one(m, modules, rewrites), node)
-        return node
+            for index, child in enumerate(node):
+                walk(child, f"{location}[{index}]")
+            return
+        if not isinstance(node, dict):
+            return
+        mutation = node.get("action_type") in {"submit", "delete"}
+        endpoint_key = "href" if mutation else "api_endpoint"
+        if reject_api_endpoints and (
+            "api_endpoint" in node or (mutation and "href" in node)
+        ):
+            raise ValueError(f"{location}: model-authored endpoint URLs are forbidden; choose data_source")
+        if "data_source" in node:
+            count += 1
+        source = node.pop("data_source", None)
+        if source is not None:
+            if not isinstance(source, dict) or set(source) != {"module_id", "action_id"}:
+                raise ValueError(f"{location}.data_source requires exactly module_id and action_id")
+            module_id, action_id = source["module_id"], source["action_id"]
+            if any(
+                not isinstance(value, str)
+                or not re.fullmatch(r"[A-Za-z0-9_.-]+", value)
+                or ".." in value
+                for value in (module_id, action_id)
+            ):
+                raise ValueError(f"{location}.data_source requires canonical identifier strings")
+            if action_id not in modules.get(module_id, set()):
+                raise ValueError(
+                    f"{location}.data_source references unknown module/action '{module_id}/{action_id}'"
+                )
+            if endpoint_key in node:
+                raise ValueError(f"{location}: data_source cannot be combined with {endpoint_key}")
+            node[endpoint_key] = f"/api/modules/{module_id}/{action_id}"
+        elif mutation and reject_api_endpoints:
+            raise ValueError(f"{location}: {node['action_type']} actions require data_source")
+        for key, child in node.items():
+            walk(child, f"{location}.{key}")
 
-    replaced = walk(document)
-    if rewrites and isinstance(document, dict) and isinstance(replaced, dict):
-        document.clear()
-        document.update(replaced)
-    return rewrites
+    walk(document, str(document.get("name") or "page") if isinstance(document, dict) else "page")
+    return count
+
+
+def compile_authored_page_files(
+    files: dict[str, str], *, payload: Any, context: Any,
+) -> dict[str, str]:
+    """Close raw page/admin candidates at authoring, preserving admitted readback."""
+    payload = _unwrap_output_envelope(detach(payload))
+    bundle = payload.get("module_contract") if isinstance(payload, dict) else None
+    typed_admin = (
+        f"modules/{bundle['module_id']}/contracts/admin.yaml"
+        if isinstance(bundle, dict) and bundle.get("module_id") and bundle.get("admin_yaml") is not None else None
+    )
+    admitted = detach(context.get("generated_files")) or {}
+    admitted.update(extract_code_file_map_from_payload({"code_files": detach(context.get("code_files"))}))
+    modules = module_action_index_from_context(context)
+    modules.update(module_action_index(files))
+    for path in extract_deleted_file_paths_from_payload(payload):
+        match = re.fullmatch(r"modules/([^/]+)/module\.yaml", path)
+        if match:
+            modules.pop(match[1], None)
+    compiled = dict(files)
+    for path, content in files.items():
+        admin = re.fullmatch(r"modules/([^/]+)/contracts/admin\.yaml", path)
+        if not _page_stem_from_path(path) and not admin:
+            continue
+        # Typed admin sections already crossed the same strict compiler during
+        # extraction. Identical admitted bytes are readback, not new authoring.
+        if path == typed_admin or admitted.get(path) == content:
+            continue
+        try:
+            document = yaml.safe_load(content)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{path}: authored page sections require valid YAML") from exc
+        if not isinstance(document, dict):
+            raise ValueError(f"{path}: authored page sections require an object")
+        inventory = {admin[1]: modules.get(admin[1], set())} if admin else modules
+        if compile_page_data_sources(document, inventory, reject_api_endpoints=True):
+            compiled[path] = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
+    return compiled
 
 
 def normalize_planned_page_content(
-    content: str, *, path: str = "", modules: dict[str, set[str]] | None = None
+    content: str, *, path: str = "", modules: dict[str, set[str]] | None = None,
+    reject_api_endpoints: bool = False,
 ) -> str:
     """Return page YAML with table primitives corrected, or the original.
 
@@ -453,9 +522,9 @@ def normalize_planned_page_content(
     if declared:
         logger.info("[pages] %s: declared the intended Modal %r", path or "page", declared)
     retargeted = resolve_modal_action_targets(document)
-    remoduled = retarget_page_module_ids(document, modules or {})
+    compiled = compile_page_data_sources(document, modules or {}, reject_api_endpoints=reject_api_endpoints)
     renamed = align_page_name_with_file(document, path)
-    if not promoted and not retargeted and renamed is None and not declared and not remoduled and not materialized:
+    if not promoted and not retargeted and renamed is None and not declared and not compiled and not materialized:
         return content
     if renamed is not None:
         logger.info("[pages] %s: name %r -> file identity", path or "page", renamed)
@@ -465,8 +534,6 @@ def normalize_planned_page_content(
         logger.info("[pages] %s: pointed %d modal action(s) at a declared Modal", path or "page", retargeted)
     if materialized:
         logger.info("[pages] %s: carried %d typed modal target(s) into the payload", path or "page", materialized)
-    for rewrite in remoduled:
-        logger.info("[pages] %s: endpoint named no such module: %s", path or "page", rewrite)
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 

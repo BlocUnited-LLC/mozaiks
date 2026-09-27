@@ -251,6 +251,12 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
                     for schema_key in ("input_schema", "output_schema"):
                         if isinstance(hook.get(schema_key), dict):
                             hook[schema_key] = _materialize_schema_contract(hook[schema_key])
+            elif key == "admin_yaml" and isinstance(value, dict):
+                # Admin panels share generated page sections and bind only to
+                # actions in the owning module's closed contract.
+                from .page_plan_utils import compile_page_data_sources, module_action_index
+
+                compile_page_data_sources(value, module_action_index(file_map), reject_api_endpoints=True)
             file_map[str(path)] = yaml.safe_dump(
                 value,
                 allow_unicode=True,
@@ -413,8 +419,34 @@ def extract_code_file_entries_from_payload(
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 
+def extract_deleted_file_paths_from_payload(payload: Any) -> list[str]:
+    """Resolve deleted generated file paths from a structured output payload."""
+    payload = _unwrap_output_envelope(payload)
+    if not isinstance(payload, dict):
+        return []
+    raw_deleted = payload.get("deleted_files")
+    if not isinstance(raw_deleted, list):
+        return []
+    paths: list[str] = []
+    seen: set[str] = set()
+    for item in raw_deleted:
+        if isinstance(item, str):
+            raw_path = item
+        elif isinstance(item, dict):
+            raw_path = str(item.get("filename") or item.get("path") or "")
+        else:
+            continue
+        safe = safe_relpath(raw_path)
+        if not safe or safe in seen:
+            continue
+        seen.add(safe)
+        paths.append(safe)
+    return paths
+
+
 __all__ = [
     "extract_code_file_entries_from_payload",
     "extract_code_file_map_from_payload",
+    "extract_deleted_file_paths_from_payload",
     "safe_relpath",
 ]

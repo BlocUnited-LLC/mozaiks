@@ -1,5 +1,29 @@
 # AppGenerator Output Assembly Contract
 
+## Typed Page Data Sources
+
+AppGenerator sections select `config.data_source: {module_id, action_id}` from
+accepted module contracts. Planning hints carry the same typed `data_source`
+separately from presentation-only `config_hint`. Submit/delete actions use their
+own pair; navigation keeps its route `href`. Code emits the runtime
+`/api/modules/{module_id}/{action_id}` into `api_endpoint` for reads and `href`
+for mutations. Model-authored endpoint strings and unresolved references fail
+before files are accepted. No module is guessed from a URL or page name.
+
+Before module output is published to dependent workers, code closes missing
+`list_{collection_name}` and `get_{collection_name}` actions for owned entities
+shown by list/detail pages or explicitly selected canonical read references.
+Collection ownership comes from `data_contract`; existing actions keep their
+contracts. A module with protected actions (permissions, entitlement gates, or internal exposure) requires an explicit read contract before construction can widen its action inventory. Summary/metric semantics still require an explicitly declared action.
+Service generation implements every accepted action, and page generation selects
+from that closed inventory. The same compilation runs in standalone save and
+detached task execution, including nested sections and admin panels. Module-owned admin panels select from their owning module contract; page bundles may reference any supplied dependency module. Deleted modules and internal-only actions are excluded from HTTP binding inventories.
+
+List actions use `page`, `page_size`, and `search`, returning `items` and `total`.
+Repositories use the deterministically rendered collection policy described in
+[the data contract](data-contract-and-revision-contract.md#deterministic-generated-module-policies).
+Wiring and runtime-quality validators remain the acceptance backstop.
+
 ## Server Table Binding Acceptance
 
 Opt-in server-paged DataTable sections must close against the actual generated
@@ -126,7 +150,7 @@ preserved; missing required paths are filled and conflicting non-page owners
 still fail. Selected pack inventory is resolved before coverage construction.
 Canonical worker mapping and selected subscription, refinement, and split-admin
 task file requirements are also shared with validation. Explicit approved action
-names reach module workers; review does not invent read actions from entity names.
+names reach module workers. Module materialization constructs page-required read actions from declared collection ownership and typed list/detail intent.
 Subscription providers must be explicit or already selected, and facade/client
 dependencies follow registered bindings rather than task prose.
 See the [construction requirement inventory](app-build-plan-construction.md) for

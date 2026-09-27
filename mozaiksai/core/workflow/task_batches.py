@@ -6,7 +6,7 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -25,10 +25,13 @@ from .generator_support.code_files import (
     extract_code_file_map_from_payload,
     safe_relpath,
 )
+from .generator_support.module_policy import materialize_task_module_policies
+from .generator_support.module_read_actions import close_module_read_actions
 from .generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
-    module_action_index,
+    compile_authored_page_files,
+    module_action_index_from_context,
     normalize_planned_page_content,
     validate_planned_page,
 )
@@ -1064,14 +1067,33 @@ async def _run_one_task(
                 # AG2 task attempts have independent streams; preserve the candidate for repair.
                 candidate_json = json.dumps(output, separators=(",", ":"), default=str)
                 _reject_task_output_identity_drift(task, output)
+                output = cast(dict[str, Any], close_module_read_actions(
+                    output, app_build_plan=task_context.get("app_build_plan"),
+                    data_contract=task_context.get("data_contract"),
+                ))
                 canonical_code_files = extract_code_file_entries_from_payload(
                     output, build_timestamp=base_context.get("build_timestamp"),
                 )
+                canonical_file_map = {entry["filename"]: entry["content"] for entry in canonical_code_files}
+                canonical_file_map = compile_authored_page_files(
+                    canonical_file_map, payload=output, context=task_context,
+                )
+                policies = materialize_task_module_policies(
+                    canonical_file_map, task=task,
+                    data_contract=task_context.get("data_contract")
+                    or (task_context.get("app_build_plan") or {}).get("data_contract"),
+                )
+                canonical_file_map.update(policies)
+                canonical_code_files = [
+                    {"filename": path, "content": content}
+                    for path, content in sorted(canonical_file_map.items())
+                ]
                 if canonical_code_files:
                     output["code_files"] = canonical_code_files
                 if str(task.get("task_type") or "").strip() == "page_bundle":
                     output["code_files"] = _normalize_owned_page_files_from_plan(
-                        output.get("code_files"), task=task, base_context=base_context,
+                        output.get("code_files"), task=task, base_context=task_context,
+                        reject_api_endpoints=False,
                     )
                     output["_page_materialization_source"] = "app_schema_output"
                     output["_page_materialized_paths"] = [
@@ -1192,6 +1214,7 @@ def _normalize_owned_page_files_from_plan(
     *,
     task: dict[str, Any],
     base_context: dict[str, Any],
+    reject_api_endpoints: bool = True,
 ) -> list[dict[str, str]]:
     file_map: dict[str, str] = {}
     if isinstance(code_files, list):
@@ -1221,7 +1244,7 @@ def _normalize_owned_page_files_from_plan(
         for stem in _page_stems(page):
             planned_by_stem.setdefault(stem, page)
 
-    modules = module_action_index(file_map)
+    modules = module_action_index_from_context(base_context)
     for path in owned_page_paths:
         stem = _page_stem_from_path(path)  # type: ignore[assignment]
         if not stem:
@@ -1231,7 +1254,9 @@ def _normalize_owned_page_files_from_plan(
             raise ValueError(f"{path}: page has no approved plan identity")
         if path not in file_map:
             raise ValueError(f"{path}: page worker did not materialize its owned page")
-        file_map[path] = normalize_planned_page_content(file_map[path], path=path, modules=modules)
+        file_map[path] = normalize_planned_page_content(
+            file_map[path], path=path, modules=modules, reject_api_endpoints=reject_api_endpoints,
+        )
         validate_planned_page(file_map[path], planned, path)
     return [
         {"filename": filename, "content": content}

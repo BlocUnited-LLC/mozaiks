@@ -129,8 +129,14 @@ async def materialize_fixture(monkeypatch: pytest.MonkeyPatch) -> tuple[dict, di
     async def run(_self, request):
         task = request.context_variables["current_build_task"]
         seen.append(task["task_id"])
+        candidates = {path: data["app_files"][path] for path in task["owned_paths"]}
+        if "ui/pages/documents.yaml" in candidates:
+            candidates["ui/pages/documents.yaml"] = candidates["ui/pages/documents.yaml"].replace(
+                "href: /api/modules/documents/summarize_document",
+                "data_source: {module_id: documents, action_id: summarize_document}",
+            )
         return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output={
-            "code_files": [{"filename": path, "content": data["app_files"][path]} for path in task["owned_paths"]],
+            "code_files": [{"filename": path, "content": content} for path, content in candidates.items()],
         })
 
     monkeypatch.setattr(AG2TaskBatchRunner, "run", run)

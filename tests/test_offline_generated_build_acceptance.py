@@ -39,6 +39,9 @@ def _generated_build_files() -> dict[str, str]:
                 "collections": [
                     {
                         "name": "orders",
+                        "scope": "app",
+                        "scope_field": "app_id",
+                        "fields": [{"name": "app_id", "type": "string", "required": True}],
                         "ownership": {
                             "surface_id": "orders",
                             "surface_kind": "module",
@@ -452,7 +455,7 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
             [f"{module_id}.contract", *prerequisites], module_id=module_id)
     add("pages", "page_bundle", "AppSchemaAgent", [
         "app.json", "config/ai.json", "config/shell.json", "ui/route_manifest.json", f"ui/pages/{page}.yaml",
-    ], [f"{module_id}.services" for module_id in module_actions], surface_kind="ui_only")
+    ], [task_id for module_id in module_actions for task_id in (f"{module_id}.contract", f"{module_id}.services")], surface_kind="ui_only")
     plan = {
         "app_kind": "saas" if saas else "internal_app", "auth_strategy": "none", "roles": [], "entities": [],
         "pages": [{"name": page.title(), "route": f"/{page}", "purpose": "Use the declared module actions."}],
@@ -464,7 +467,20 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         "agent_backend_required": False,
     }
     app_build_plan(AppBuildPlan=plan, context_variables=context)
-    accepted = await execute_file_replay(context.data, files)
+    page_files = [
+        {"filename": path, "content": files[path]}
+        for path in tasks[-1]["owned_paths"]
+    ]
+    for entry in page_files:
+        if entry["filename"] == f"ui/pages/{page}.yaml":
+            entry["content"] = entry["content"].replace(
+                f"api_endpoint: /api/modules/{page}/list_{page}",
+                f"data_source: {{module_id: {page}, action_id: list_{page}}}",
+            ).replace(
+                "href: /api/modules/orders/create_order",
+                "data_source: {module_id: orders, action_id: create_order}",
+            )
+    accepted = await execute_file_replay(context.data, files, task_outputs={"pages": {"code_files": page_files}})
     admitted_files = {file["filename"]: file["content"] for key, output in accepted.items()
                       if not key.startswith("_") for file in output["code_files"]}
     assert set(admitted_files) == set(files)

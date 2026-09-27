@@ -362,6 +362,8 @@ def _research_files() -> dict[str, str]:
                         "collections": [
                             {
                                 "name": "research_results",
+                                "scope": "user", "scope_field": "user_id",
+                                "fields": [{"name": "user_id", "type": "string", "required": True}],
                                 "ownership": {"surface_id": "research", "surface_kind": "module"},
                             }
                         ],
@@ -400,7 +402,9 @@ def _research_files() -> dict[str, str]:
                 primitive: DataTable
                 title: Saved research
                 config:
-                  api_endpoint: /api/modules/research/list_results
+                  data_source:
+                    module_id: research
+                    action_id: list_results
                   columns:
                     - key: research_id
                       label: Research
@@ -417,7 +421,9 @@ def _research_files() -> dict[str, str]:
                   submit_action:
                     label: Research
                     action_type: submit
-                    href: /api/modules/research/execute_research
+                    data_source:
+                      module_id: research
+                      action_id: execute_research
             """
         ).strip() + "\n",
         "modules/research/module.yaml": module_yaml,
@@ -693,7 +699,16 @@ async def test_ai_research_workspace_offline_golden_path(
     candidates.update({file["filename"]: file["content"] for file in materialize_app_config_contracts(
         app_id="research", app_build_plan=normalized_plan, context_variables=context,
     )})
-    accepted = await execute_file_replay(context.values, candidates)
+    context.set("data_contract", json.loads(candidates["data/contract.json"]))
+    task_outputs = {
+        task["task_id"]: {"code_files": [
+            {"filename": path, "content": candidates[path]}
+            for path in task["owned_paths"] if not path.endswith("/backend/policy.py")
+        ]}
+        for task in context["app_task_batch_items"]
+        if any(path.endswith("/backend/policy.py") for path in task["owned_paths"])
+    }
+    accepted = await execute_file_replay(context.values, candidates, task_outputs=task_outputs)
     context.set("workflow_name", "AppGenerator")
     assembled = await assemble_app_tasks(context_variables=context)
     assert context.get("app_task_batch_results") == accepted

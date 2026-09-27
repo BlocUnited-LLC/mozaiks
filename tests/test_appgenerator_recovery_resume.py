@@ -162,13 +162,14 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
          "owned_paths": ["modules/tasks/backend/schemas.py"], "depends_on": []},
         {"task_id": "services", "initial_agent": "ServiceAgent", "initial_message": "Emit service",
          "owned_paths": ["modules/tasks/backend/service.py"], "depends_on": ["models"]},
-        {"task_id": "page", "initial_agent": "FrontendStubAgent", "initial_message": "Emit page",
+        {"task_id": "page", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent", "initial_message": "Emit page",
          "owned_paths": ["ui/pages/tasks.yaml"], "depends_on": ["services"]},
     ]
     initial_context = {
         "coding_participation": "autonomous", "interview_complete": False,
         "build_task_model": "AppBuildTask", "build_timestamp": "2026-09-26T00:00:00Z",
-        "app_build_plan": {"build_tasks": tasks}, "app_task_batch_items": tasks,
+        "app_build_plan": {"build_tasks": tasks, "pages": [{"name": "tasks", "route": "/tasks"}]},
+        "app_task_batch_items": tasks,
         "app_plan_outcome": "ready", "app_task_batch_results": None,
     }
     if pause_before_artifact_repairs:
@@ -194,13 +195,23 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
                 evidence = bridge.get("app_task_batch_results")
                 assert evidence["_meta"]["in_flight"][task_id]["attempt"] == task_calls[task_id]
                 assert set(worker_context["dependency_task_outputs"]) == set(task["depends_on"])
+                if task_id == "page":
+                    return SimpleNamespace(body=json.dumps({
+                        "agent_message": "Tasks page generated.", "manifest": None,
+                        "pages": [{
+                            "schema_version": "mozaiks.app_page.v1", "name": "tasks", "route": "/tasks",
+                            "title": "Tasks", "page_type": "record_list", "layout": "full-width",
+                            "sections": [{"id": "heading", "primitive": "PageHeader", "config": {"title": "Tasks"}}],
+                        }],
+                        "custom_route_bundle": None, "theme_config_patch": None, "shell_config": None,
+                        "asset_manifest": None, "data_contract": None,
+                    }))
                 files = [{"filename": path, "content": "accepted"} for path in task["owned_paths"]]
                 if task_id == "services" and task_calls[task_id] == 1:
                     files.append({"filename": "modules/tasks/backend/schemas.py", "content": "foreign"})
                 typed_files = {
                     "models": {"model_files": []},
                     "services": {"python_files": []},
-                    "page": {"js_files": [], "registration_barrel": None},
                 }
                 return SimpleNamespace(body=json.dumps({
                     **typed_files[task_id], "code_files": files, "agent_message": None,

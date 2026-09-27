@@ -55,6 +55,13 @@ def _live_inputs():
 def _domain_inputs():
     """Correct the test's approved inputs explicitly; review must never do this."""
     plan, context = _live_inputs()
+    # Migrate authored read choices explicitly while retaining captured raw evidence.
+    for planned_page in plan["pages"]:
+        for hint in planned_page.get("sections_hint") or []:
+            config = json.loads(hint["config_hint"]) if hint.get("config_hint") else {}
+            if config.pop("api_endpoint", None) is not None:
+                hint["data_source"] = {"module_id": "tasks", "action_id": "list_tasks"}
+                hint["config_hint"] = json.dumps(config)
     section = {
         "primitive": "Form", "config_hint": '{"fields": [{"label": "Email", "name": "email"}]}',
         "section_id_hint": "invite-member", "title_hint": "Invite project member",

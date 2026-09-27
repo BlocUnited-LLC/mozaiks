@@ -109,7 +109,8 @@
         "sections_hint": [
           {
             "primitive": "DataTable",
-            "config_hint": "{\"columns\": [\"id\", \"name\", \"status\"], \"selection\": \"single\", \"search\": true, \"api_endpoint\": \"/api/modules/projects/list_projects\"}",
+            "data_source": {"module_id": "projects", "action_id": "list_projects"},
+            "config_hint": "{\"columns\": [\"id\", \"name\", \"status\"], \"selection\": \"single\", \"search\": true}",
             "section_id_hint": "project-table",
             "title_hint": "All Projects"
           },
@@ -136,7 +137,8 @@
         "sections_hint": [
           {
             "primitive": "DataTable",
-            "config_hint": "{\"columns\": [\"id\", \"name\", \"status\", \"project_id\"], \"selection\": \"single\", \"search\": true, \"api_endpoint\": \"/api/modules/tasks/list_tasks\"}",
+            "data_source": {"module_id": "tasks", "action_id": "list_tasks"},
+            "config_hint": "{\"columns\": [\"id\", \"name\", \"status\", \"project_id\"], \"selection\": \"single\", \"search\": true}",
             "section_id_hint": "task-table",
             "title_hint": "All Tasks"
           },
@@ -214,6 +216,10 @@
               "module_id": "projects",
               "name": "projects",
               "entity_name": "projects",
+              "scope": "user",
+              "scope_field": "owner_id",
+              "ownership": {"surface_id": "projects", "surface_kind": "module"},
+              "fields": [{"name": "owner_id", "type": "string", "required": true}],
               "indexes": [
                 {
                   "name": "project_owner_created_at",
@@ -240,6 +246,10 @@
               "module_id": "tasks",
               "name": "tasks",
               "entity_name": "tasks",
+              "scope": "user",
+              "scope_field": "owner_id",
+              "ownership": {"surface_id": "tasks", "surface_kind": "module"},
+              "fields": [{"name": "owner_id", "type": "string", "required": true}],
               "indexes": [
                 {
                   "name": "task_project_status",

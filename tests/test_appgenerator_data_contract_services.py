@@ -75,7 +75,7 @@ def _data_contract() -> dict:
     }
 
 
-def test_file_contracts_define_data_contract_as_opt_in_generic_lane() -> None:
+def test_file_contracts_require_data_contract_for_persistent_generated_modules() -> None:
     contract_path = (
         ROOT
         / "factory_app"
@@ -89,7 +89,10 @@ def test_file_contracts_define_data_contract_as_opt_in_generic_lane() -> None:
 
     assert "data/contract.json" in persistence_contract["required_outputs"]
     assert "data/migrations/{migration_id}.json" in persistence_contract["optional_outputs"]
-    assert "opt-in only" in text
+    assert "Generate data/contract.json for persistent generated modules" in text
+    assert "scope_field" in text
+    assert "deterministic policy/read construction" in text
+    assert "opt-in only" not in text
     assert "ctx.persistence.collection(module_id, entity_name)" in text
     assert "app/data is declarative only" in text
     assert "documented alias exclusions" in text

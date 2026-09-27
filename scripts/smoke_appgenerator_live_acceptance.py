@@ -23,6 +23,7 @@ from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bund
 from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from mozaiksai.core.runtime.app.loader import AppLoader
+from mozaiksai.core.workflow.generator_support.module_policy import render_module_policy
 from scripts.smoke_agentgenerator_live_pack import run_live_agentgenerator_pack_smoke
 
 DEFAULT_APP_ID = "support-operations-live-acceptance"
@@ -193,6 +194,9 @@ def build_appgenerator_acceptance_files(
                 "collections": [
                     {
                         "name": "tickets",
+                        "scope": "app",
+                        "scope_field": "app_id",
+                        "fields": [{"name": "app_id", "type": "string", "required": True}],
                         "ownership": {
                             "surface_id": "support_tickets",
                             "surface_kind": "module",
@@ -279,6 +283,9 @@ sections:
         href: /api/modules/support_tickets/request_batch_triage
 """,
         "data/contract.json": json.dumps(data_contract),
+        "modules/support_tickets/backend/policy.py": render_module_policy(
+            "support_tickets", data_contract["surfaces"][0]["collections"],
+        ),
         "security/secrets.yaml": """
 version: 1
 secrets:
@@ -490,6 +497,7 @@ def build_appgenerator_acceptance_task_state(files: dict[str, str]) -> dict[str,
         ("models", "data_models", "ModelAgent", [prefix + "backend/schemas.py"], ["contract", "persistence"]),
         ("services", "business_services", "ServiceAgent", [
             prefix + "backend/handler.py", prefix + "backend/service.py", prefix + "backend/repo.py",
+            prefix + "backend/policy.py",
         ], ["contract", "models", "persistence"]),
         ("pages", "page_bundle", "AppSchemaAgent", [
             "app.json", "config/ai.json", "config/shell.json", "ui/route_manifest.json", "ui/pages/support_tickets.yaml",
@@ -509,6 +517,7 @@ def build_appgenerator_acceptance_task_state(files: dict[str, str]) -> dict[str,
         "app_build_plan": {
             "app_kind": "internal_app", "auth_strategy": "none", "roles": [], "entities": [],
             "build_tasks": tasks,
+            "data_contract": json.loads(files["data/contract.json"]),
             "pages": [{"name": "SupportTickets", "route": "/support-tickets", "purpose": "Manage support tickets."}],
             "capability_packs": [{
                 "capability_pack_id": "support_tickets", "surface_id": "support_tickets",

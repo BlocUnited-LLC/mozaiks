@@ -205,12 +205,13 @@ class TestFileContractsCheckoutConstraints:
             "file_contracts must warn that post-redirect pages cannot confirm from redirect URL alone"
         )
 
-    def test_api_endpoint_is_post_only_no_query_strings(self):
-        """page_bundle must state api_endpoint has no query string support."""
+    def test_data_sources_use_typed_pairs_and_compiled_endpoints(self):
+        """Page authors choose actions; the renderer owns endpoint syntax."""
         text = self._section()
-        assert "no query strings" in text or "POST path only" in text or "POST-only" in text or "POST path" in text, (
-            "file_contracts must state api_endpoint is POST-only with no query string support"
-        )
+        assert "typed data_source pairs" in text
+        assert "model never writes endpoint URLs" in text
+        assert "Code renders api_endpoint for section reads and href for submit/delete" in text
+        assert "record identifiers must go in payload or the module action input schema" in text
 
 
 # ---------------------------------------------------------------------------

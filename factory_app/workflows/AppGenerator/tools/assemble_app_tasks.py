@@ -458,6 +458,14 @@ async def assemble_app_tasks(
             if context_variables and hasattr(context_variables, "get")
             else None
         ),
+        app_build_plan=(
+            detach(context_variables.get("app_build_plan"))
+            if context_variables and hasattr(context_variables, "get") else None
+        ),
+        data_contract=(
+            detach(context_variables.get("data_contract"))
+            if context_variables and hasattr(context_variables, "get") else None
+        ),
     )
 
     app_build_plan = (

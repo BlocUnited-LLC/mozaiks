@@ -126,10 +126,10 @@ def _page_specs(
                         "primitive": _clean(spec.get("primitive")) or "DataTable",
                         "section_id_hint": primary_module or page_name,
                         "title_hint": _clean(spec.get("title")) or _title(page_name),
-                        "config_hint": (
-                            f'{{"api_endpoint": "/api/modules/{primary_module}/{list_action}"}}'
+                        "data_source": (
+                            {"module_id": primary_module, "action_id": list_action}
                             if primary_module and list_action
-                            else "{}"
+                            else None
                         ),
                     }
                 ],

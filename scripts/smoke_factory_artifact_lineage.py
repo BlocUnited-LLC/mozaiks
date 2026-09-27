@@ -450,11 +450,25 @@ async def _run_lineage_smoke_with_store(
     context.set("generated_files", files)
     context.set("app_validation_status", "skipped")
     context.set("app_validation_strategy_used", "skip")
-    app_build_plan(
-        AppBuildPlan=build_appgenerator_acceptance_task_state(files)["app_build_plan"],
-        context_variables=context,
-    )
-    accepted = await execute_file_replay(context.data, files)
+    task_state = build_appgenerator_acceptance_task_state(files)
+    app_build_plan(AppBuildPlan=task_state["app_build_plan"], context_variables=context)
+    task_outputs = task_state["app_task_batch_results"]
+    for entry in task_outputs["support_pages"]["code_files"]:
+        if entry["filename"] == "ui/pages/support_tickets.yaml":
+            for field, action in (
+                ("api_endpoint", "list_tickets"),
+                ("href", "create_ticket"),
+                ("href", "request_batch_triage"),
+            ):
+                entry["content"] = entry["content"].replace(
+                    f"{field}: /api/modules/support_tickets/{action}",
+                    f"data_source: {{module_id: support_tickets, action_id: {action}}}",
+                )
+    task_outputs["support_services"]["code_files"] = [
+        entry for entry in task_outputs["support_services"]["code_files"]
+        if entry["filename"] != "modules/support_tickets/backend/policy.py"
+    ]
+    accepted = await execute_file_replay(context.data, files, task_outputs=task_outputs)
     files = {
         item["filename"]: item["content"]
         for task_id, output in accepted.items() if not task_id.startswith("_")

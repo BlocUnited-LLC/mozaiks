@@ -220,6 +220,12 @@ def _write_files(root: Path, files: Mapping[str, str]) -> None:
 
 
 def _validation_pages(plan: Mapping[str, Any], files: Mapping[str, str]) -> list[dict[str, Any]]:
+    if files:
+        return [
+            yaml.safe_load(content)
+            for path, content in files.items()
+            if _page_stem_from_path(path)
+        ]
     pages: list[dict[str, Any]] = []
     for page in plan.get("pages") or []:
         if not isinstance(page, Mapping):
@@ -319,7 +325,6 @@ def _simple_backend(module_id: str, actions: list[str]) -> dict[str, str]:
             "    async def list(self):\n"
             "        return []\n"
         ),
-        f"modules/{module_id}/backend/policy.py": "def scoped_query(filters):\n    return dict(filters or {})\n",
         f"modules/{module_id}/backend/service.py": (
             "class GeneratedService:\n"
             "    async def health(self):\n"
@@ -353,18 +358,22 @@ def _persistent_backend(module_id: str, singular: str, title_field: str) -> dict
         + "\n",
         f"modules/{module_id}/backend/repo.py": textwrap.dedent(
             f"""
+            from .policy import scoped_query, scope_record
+
+
             class Repo:
                 def __init__(self, entity_name):
                     self.entity_name = entity_name
 
                 async def create(self, ctx, record):
                     collection = ctx.persistence.collection("{module_id}", self.entity_name)
+                    record = scope_record(ctx, record, entity_name=self.entity_name)
                     await collection.insert_one(record)
                     return record
 
                 async def list(self, ctx, query):
                     collection = ctx.persistence.collection("{module_id}", self.entity_name)
-                    return await collection.find_many(query or {{}}, limit=50)
+                    return await collection.find_many(scoped_query(ctx, query, entity_name=self.entity_name), limit=50)
             """
         ).strip()
         + "\n",
@@ -373,28 +382,34 @@ def _persistent_backend(module_id: str, singular: str, title_field: str) -> dict
             "    async def health(self):\n"
             "        return {\"ok\": True}\n"
         ),
-        f"modules/{module_id}/backend/policy.py": "def scoped_query(filters):\n    return dict(filters or {})\n",
     }
 
 
-def _database_files(app_id: str, modules: tuple[str, ...], *, migration_path: str) -> dict[str, str]:
-    surfaces = [
+def _data_contract(modules: tuple[str, ...]) -> dict[str, Any]:
+    return {"version": "1", "surfaces": [
         {
             "surface_id": module_id,
             "surface_kind": "module",
-            "collections": [{"module_id": module_id, "name": module_id, "entity_name": module_id}],
+            "collections": [{
+                "name": module_id, "scope": "app", "scope_field": "app_id",
+                "ownership": {"surface_id": module_id, "surface_kind": "module"},
+                "fields": [{"name": "app_id", "type": "string", "required": True}],
+            }],
         }
         for module_id in modules
-    ]
+    ]}
+
+
+def _database_files(app_id: str, contract: dict[str, Any], *, migration_path: str) -> dict[str, str]:
     return {
-        "data/contract.json": json.dumps({"version": "1", "app_id": app_id, "surfaces": surfaces}, indent=2, sort_keys=True) + "\n",
+        "data/contract.json": json.dumps({**contract, "app_id": app_id}, indent=2, sort_keys=True) + "\n",
         migration_path: json.dumps(
             {
                 "migration_id": "001_indexes",
                 "version": "1",
                 "operations": [
-                    {"type": "ensure_collection", "module_id": module_id, "entity_name": module_id}
-                    for module_id in modules
+                    {"type": "ensure_collection", "module_id": surface["surface_id"], "entity_name": collection["name"]}
+                    for surface in contract["surfaces"] for collection in surface["collections"]
                 ],
             },
             indent=2,
@@ -524,6 +539,7 @@ def _base_plan(
         "capability_packs": packs,
         "external_integrations": [],
         "agent_backend_required": False,
+        "data_contract": _data_contract(tuple(modules)),
         "build_tasks": tasks,
         "generation_order": [task["task_id"] for task in tasks],
     }
@@ -537,7 +553,7 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
             (path for path in owned_paths if path.startswith("data/migrations/")),
             "data/migrations/001_indexes.json",
         )
-        return {"code_files": [{"filename": path, "content": content} for path, content in _database_files(spec.app_id, spec.modules, migration_path=migration_path).items()]}
+        return {"code_files": [{"filename": path, "content": content} for path, content in _database_files(spec.app_id, spec.plan["data_contract"], migration_path=migration_path).items()]}
     if task_type == "module_contract":
         owned_paths = [str(path) for path in task.get("owned_paths") or []]
         if module_id == "reports":
@@ -1139,7 +1155,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
                         "primitive": "DataTable",
                         "section_id_hint": "projects",
                         "title_hint": "Projects",
-                        "config_hint": json.dumps({"api_endpoint": "/api/modules/projects/list_projects"}),
+                        "data_source": {"module_id": "projects", "action_id": "list_projects"},
                     }
                 ],
             },
@@ -1153,7 +1169,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
                         "primitive": "DataTable",
                         "section_id_hint": "tasks",
                         "title_hint": "Tasks",
-                        "config_hint": json.dumps({"api_endpoint": "/api/modules/tasks/list_tasks"}),
+                        "data_source": {"module_id": "tasks", "action_id": "list_tasks"},
                     }
                 ],
             },
@@ -1174,7 +1190,11 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
                         "primitive": "ActionButton",
                         "section_id_hint": "start-research",
                         "title_hint": "Start Research",
-                        "config_hint": json.dumps({"api_endpoint": "/api/modules/research/start_research"}),
+                        "config_hint": json.dumps({"actions": [{
+                            "label": "Start Research",
+                            "action_type": "submit",
+                            "data_source": {"module_id": "research", "action_id": "start_research"},
+                        }]}),
                     }
                 ],
             }
@@ -1203,7 +1223,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
                         "primitive": "DataTable",
                         "section_id_hint": "incidents",
                         "title_hint": "Incidents",
-                        "config_hint": json.dumps({"api_endpoint": "/api/modules/incidents/list_incidents"}),
+                        "data_source": {"module_id": "incidents", "action_id": "list_incidents"},
                     }
                 ],
             }
@@ -1223,7 +1243,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
                         "primitive": "ResourceTable",
                         "section_id_hint": "posts",
                         "title_hint": "Posts",
-                        "config_hint": json.dumps({"api_endpoint": "/api/modules/posts/list_posts"}),
+                        "data_source": {"module_id": "posts", "action_id": "list_posts"},
                     }
                 ],
             },
@@ -1237,7 +1257,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
                         "primitive": "DataTable",
                         "section_id_hint": "comments",
                         "title_hint": "Comments",
-                        "config_hint": json.dumps({"api_endpoint": "/api/modules/comments/list_comments"}),
+                        "data_source": {"module_id": "comments", "action_id": "list_comments"},
                     }
                 ],
             },

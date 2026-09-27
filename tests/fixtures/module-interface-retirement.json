@@ -12,7 +12,7 @@
             "primitive": "ActionButton",
             "section_id_hint": "summarize",
             "title_hint": "Summarize",
-            "config_hint": "{\"api_endpoint\": \"/api/modules/documents/summarize_document\"}"
+            "data_source": {"module_id": "documents", "action_id": "summarize_document"}
           }
         ]
       }
@@ -99,6 +99,7 @@
           "ui/pages/documents.yaml"
         ],
         "depends_on": [
+          "module_contract",
           "business_services"
         ],
         "acceptance_criteria": [

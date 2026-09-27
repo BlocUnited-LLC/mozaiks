@@ -187,7 +187,7 @@ def _clear_primitive_caches() -> None:
     _load_primitive_schemas.cache_clear()
 
 
-def format_page_ui_primitive_guidance() -> str:
+def format_page_ui_primitive_guidance(*, generated: bool = False) -> str:
     names = ", ".join(get_page_ui_primitive_names())
     schemas = _load_primitive_schemas()
     schema_block = ""
@@ -195,7 +195,12 @@ def format_page_ui_primitive_guidance() -> str:
         lines: list[str] = []
         for name, defn in schemas.items():
             required = defn.get("required", [])
-            props = defn.get("properties", {})
+            props = dict(defn.get("properties", {}))
+            if generated and "api_endpoint" in props:
+                props.pop("api_endpoint")
+                props["data_source"] = "{module_id, action_id} from accepted module.yaml actions, or null for static data; code renders the endpoint"
+            if generated:
+                props = {key: value.replace("api_endpoint", "data_source").replace("action_type,href?", "action_type,data_source?,href? (navigation only)") if isinstance(value, str) else value for key, value in props.items()}
             req_str = f"required=[{', '.join(required)}]" if required else "no required fields"
             prop_lines = [f"      {k}: {v}" for k, v in props.items()]
             lines.append(f"  {name} — {req_str}")
@@ -211,7 +216,7 @@ def format_page_ui_primitive_guidance() -> str:
 
 def format_generated_page_ui_primitive_guidance() -> str:
     """Guidance wrapper for generated declarative page schemas."""
-    return format_page_ui_primitive_guidance()
+    return format_page_ui_primitive_guidance(generated=True)
 
 
 __all__ = [

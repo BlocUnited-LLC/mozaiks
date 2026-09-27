@@ -1,4 +1,4 @@
-"""A worker must emit every file its task owns.
+"""A worker must emit every model-owned file its task owns.
 
 A live build failed with:
 
@@ -33,7 +33,8 @@ def _agent_prompt(name: str) -> str:
 def test_service_agent_must_emit_every_owned_path() -> None:
     prompt = _agent_prompt("ServiceAgent")
 
-    assert "Emit every path listed in `current_build_task.owned_paths`" in prompt
+    assert "Emit every model-owned path listed in `current_build_task.owned_paths`" in prompt
+    assert "Code renders the owned `backend/policy.py` from data_contract" in prompt
     assert "fails the whole batch" in prompt
 
 

@@ -99,6 +99,10 @@ def _data_contract() -> dict[str, Any]:
                         "module_id": "projects",
                         "name": "projects",
                         "entity_name": "projects",
+                        "scope": "user",
+                        "scope_field": "owner_id",
+                        "ownership": {"surface_id": "projects", "surface_kind": "module"},
+                        "fields": [{"name": "owner_id", "type": "string", "required": True}],
                         "indexes": [
                             {
                                 "name": "project_owner_created_at",
@@ -119,6 +123,10 @@ def _data_contract() -> dict[str, Any]:
                         "module_id": "tasks",
                         "name": "tasks",
                         "entity_name": "tasks",
+                        "scope": "user",
+                        "scope_field": "owner_id",
+                        "ownership": {"surface_id": "tasks", "surface_kind": "module"},
+                        "fields": [{"name": "owner_id", "type": "string", "required": True}],
                         "indexes": [
                             {
                                 "name": "task_project_status",
@@ -278,7 +286,7 @@ def _backend_output(module_id: str) -> dict[str, Any]:
                     f"{{\"{id_field}\": stored[\"{id_field}\"]}})\n"
                     "        return stored\n\n"
                     f"    async def list_{module_id}(self, ctx, *, filters=None):\n"
-                    "        query = scoped_query(filters or {})\n"
+                    "        query = scoped_query(ctx, filters or {})\n"
                     "        items = await self.repo.list(ctx, query=query, limit=50)\n"
                     "        return {\"items\": items, \"count\": len(items)}\n"
                 ),
@@ -302,20 +310,6 @@ def _backend_output(module_id: str) -> dict[str, Any]:
                     "    async def list(self, ctx, *, query=None, limit=50):\n"
                     "        collection = await self._collection(ctx)\n"
                     "        return await collection.find_many(query or {}, limit=limit)\n"
-                ),
-            },
-            {
-                "path": f"modules/{module_id}/backend/policy.py",
-                "kind": "policy",
-                "purpose": "Scope filter helpers.",
-                "contract_refs": ["module_yaml.permissions[*]"],
-                "content": (
-                    "def scoped_query(filters):\n"
-                    "    query = {}\n"
-                    "    for key in (\"project_id\", \"status\", \"owner_id\"):\n"
-                    "        if filters.get(key):\n"
-                    "            query[key] = filters[key]\n"
-                    "    return query\n"
                 ),
             },
             {
@@ -405,7 +399,8 @@ def test_service_agent_style_backend_uses_ctx_persistence_boundary() -> None:
         repo = files[f"modules/{module_id}/backend/repo.py"]
         service = files[f"modules/{module_id}/backend/service.py"]
         handler = files[f"modules/{module_id}/backend/handler.py"]
-        policy = files[f"modules/{module_id}/backend/policy.py"]
+        assert f"modules/{module_id}/backend/policy.py" not in files
+        policy = _assembled_file_map()[f"modules/{module_id}/backend/policy.py"]
         schemas = files[f"modules/{module_id}/backend/schemas.py"]
 
         assert f'persistence.collection("{module_id}", "{module_id}")' in repo
