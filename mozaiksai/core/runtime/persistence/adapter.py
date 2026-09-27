@@ -66,7 +66,7 @@ class PersistencePrincipal:
             return None
         if not auth_enabled:
             return cls._development(principal.user_id)
-        if principal.provider in {"none", "unknown"}:
+        if principal.provider == "none":
             return None
         expires = principal.raw_claims.get("exp")
         if expires is not None:

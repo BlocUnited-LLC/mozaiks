@@ -458,7 +458,10 @@ def test_profile_hydration_uses_authenticated_owner(http_runtime, monkeypatch, t
 
 @pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
 @pytest.mark.parametrize("host_membership", [False, True])
-def test_page_ask_uses_authenticated_socket_ownership(http_runtime, monkeypatch, tenancy, host_membership):
+@pytest.mark.parametrize("default_provider_metadata", [False, True])
+def test_page_ask_uses_authenticated_socket_ownership(http_runtime, monkeypatch, tenancy, host_membership, default_provider_metadata):
+    from mozaiksai.core.auth import websocket_auth
+    from mozaiksai.core.auth.adapters.base import UserClaims
     from mozaiksai.core.auth.websocket_auth import authenticate_websocket_with_path_binding
     from mozaiksai.core.runtime import composition
     from mozaiksai.core.runtime.composition import platform_hooks
@@ -468,6 +471,23 @@ def test_page_ask_uses_authenticated_socket_ownership(http_runtime, monkeypatch,
     from tests.test_general_mode_ask_context import _CapturingService, _StubTransport
 
     client = http_runtime.client(tenancy)
+    if default_provider_metadata:
+        validator = websocket_auth.get_auth_adapter()
+
+        class ClaimsOnlyAdapter:
+            name = "claims-only-test-provider"
+
+            async def validate_token(self, token):
+                claims = await validator.validate_token(token)
+                # The provider label is optional adapter metadata. Its default
+                # must not revoke a successfully validated socket's identity.
+                return UserClaims(
+                    user_id=claims.user_id, app_id=claims.app_id, workspace_id=claims.workspace_id,
+                    roles=claims.roles, scopes=claims.scopes, raw_claims=claims.raw_claims,
+                )
+
+        monkeypatch.setattr("mozaiksai.core.auth.dependencies.get_auth_adapter", ClaimsOnlyAdapter)
+        monkeypatch.setattr(websocket_auth, "get_auth_adapter", ClaimsOnlyAdapter)
     if host_membership:
         http_runtime.hooks.register_bundle({"module_scope_resolver": lambda **kwargs: {
             "verified_workspace_id": "workspace-" + kwargs["principal"].user_id[-1],
