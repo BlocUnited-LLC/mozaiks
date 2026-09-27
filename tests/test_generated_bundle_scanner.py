@@ -4,11 +4,15 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     generate_deployment_artifacts,
 )
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+from mozaiksai.core.workflow.generator_support.subscription_data_contract import (
+    ensure_subscription_assignment_stores,
+)
 
 _WORKSPACE = Path(__file__).resolve().parents[1]
 _MOZAIKSPAY_PACK_ROOT = _WORKSPACE / "factory_app" / "build_context" / "mozaikspay"
@@ -273,6 +277,10 @@ sections:
       api_endpoint: /api/modules/billing_portal/list_plans
 """,
     }
+    files["data/contract.json"] = json.dumps(ensure_subscription_assignment_stores(
+        {"version": "1", "surfaces": [], "shared_collections": []},
+        {"contract_required": True, "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"])},
+    ))
     if include_deployment:
         files.update(
             generate_deployment_artifacts(

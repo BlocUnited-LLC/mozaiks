@@ -1,27 +1,7 @@
 {
   "migration_id": "entitlement_dispatch_001_collections",
-  "description": "Declare the billing.subscriptions collection used by the entitlement_dispatch module (write side) and ConfiguredEntitlementAdapter (read side).",
-  "surfaces": [
-    {
-      "surface_id": "entitlement_dispatch",
-      "collections": [
-        {
-          "mongo_collection": "entitlement_dispatch_subscriptions",
-          "data_alias": "billing.subscriptions",
-          "description": "Subscription assignment records. ConfiguredEntitlementAdapter queries status and plan_id to enforce entitlement gates on module actions.",
-          "indexes": [
-            {
-              "name": "subscriptions_by_app_user",
-              "keys": [{"field": "app_id", "order": 1}, {"field": "user_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "subscriptions_by_app_plan_status",
-              "keys": [{"field": "app_id", "order": 1}, {"field": "plan_id", "order": 1}, {"field": "status", "order": 1}]
-            }
-          ]
-        }
-      ]
-    }
-  ]
+  "version": "1",
+  "schema_version": "mozaiks.data_migration.v1",
+  "description": "Subscription assignment storage and its indexes are compiled from config/subscriptions.yaml into data/contract.json. No additional module collection migration is required.",
+  "operations": []
 }

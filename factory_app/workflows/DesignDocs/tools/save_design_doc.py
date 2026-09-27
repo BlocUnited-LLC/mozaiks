@@ -22,6 +22,9 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_actions_for_surface,
 )
+from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
+    normalize_data_contract_indexes,
+)
 
 logger = get_workflow_logger("design_docs")
 
@@ -287,7 +290,7 @@ def _canonical_data_contract(
     if not default_scope_field:
         raise ValueError("data_contract.policies.default_scope_field must be non-empty")
 
-    return {
+    return normalize_data_contract_indexes({
         "version": str(raw.get("version") or "1"),
         "app_id": str(app_id),
         "artifact_version_id": str(artifact_version_id).strip() if artifact_version_id else None,
@@ -297,7 +300,7 @@ def _canonical_data_contract(
             "default_scope_field": default_scope_field,
             "allow_destructive_migrations": bool(policies.get("allow_destructive_migrations", False)),
         },
-    }
+    })
 
 
 def _validate_design_collections(data_contract: dict[str, Any], surface_map: dict[str, Any]) -> None:

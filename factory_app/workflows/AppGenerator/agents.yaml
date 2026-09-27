@@ -1414,8 +1414,12 @@ agents:
       **data_migrations task path (current_build_task_type == "data_migrations")**:
 
       A `data_migrations` task emits a capability-pack-owned additive migration
-      file that declares new data aliases or collections needed by a capability
-      pack module. It does NOT modify `data/contract.json`.
+      with `migration_id`, `version`, `schema_version`, and an `operations` list.
+      Code stamps missing version fields. Collections and aliases are declared
+      in `data/contract.json`, never in migration `surfaces` or `aliases`.
+      Managed facades own no app collections or migration operations. Subscription
+      assignment stores are compiled into the data contract from the approved
+      subscription config; their pack migration may have an empty operations list.
 
       1. Read `initial_message` for the exact migration file path and content to
          produce. The path will be `data/migrations/{migration_id}.json`.
@@ -1424,10 +1428,10 @@ agents:
       3. Produce one `database_files` entry and one `code_files` entry, both at
          the declared migration path with kind `data_migration_json`.
       4. Set `pending_schema_migration` to a summary that identifies the
-         migration_id and what alias/collection it declares.
+         migration_id and its additive operations.
       5. Do NOT emit or modify `data/contract.json` in this task — that file is
          owned by the primary `persistence_contract` task.
-      6. Confirm in `agent_message` which alias/collection was declared and that
+      6. Confirm in `agent_message` which migration operations were emitted and that
          the file was emitted from the pack template unchanged.
 
       Example (entitlement_dispatch):
@@ -1436,9 +1440,9 @@ agents:
         "database_files": [{
           "path": "data/migrations/001_entitlement_dispatch_collections.json",
           "kind": "data_migration_json",
-          "purpose": "Declares billing.subscriptions data alias for entitlement_dispatch module.",
+          "purpose": "Records entitlement_dispatch setup; assignment storage is compiled into data/contract.json.",
           "entity_refs": ["entitlement_dispatch"],
-          "content": "{\"migration_id\": \"entitlement_dispatch_001_collections\", \"surfaces\": [{\"surface_id\": \"entitlement_dispatch\", \"collections\": [{\"mongo_collection\": \"entitlement_dispatch_subscriptions\", \"data_alias\": \"billing.subscriptions\", \"indexes\": [{\"name\": \"subscriptions_by_app_user\", \"keys\": [{\"field\": \"app_id\", \"order\": 1}, {\"field\": \"user_id\", \"order\": 1}], \"unique\": true}]}]}]}"
+          "content": "{\"migration_id\": \"entitlement_dispatch_001_collections\", \"version\": \"1\", \"schema_version\": \"mozaiks.data_migration.v1\", \"operations\": []}"
         }],
         "code_files": [{
           "filename": "data/migrations/001_entitlement_dispatch_collections.json",
@@ -1446,10 +1450,11 @@ agents:
         }],
         "pending_schema_migration": {
           "migration_id": "entitlement_dispatch_001_collections",
-          "capability_pack_id": "entitlement_dispatch",
-          "declares_alias": "billing.subscriptions"
+          "version": "1",
+          "summary": "Assignment storage is compiled into data/contract.json.",
+          "operations": []
         },
-        "agent_message": "Emitted entitlement_dispatch_001_collections migration declaring billing.subscriptions → entitlement_dispatch_subscriptions."
+        "agent_message": "Emitted entitlement_dispatch_001_collections migration; code compiles the approved assignment store into data/contract.json."
       }
       ```
 

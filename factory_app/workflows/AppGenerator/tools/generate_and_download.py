@@ -832,7 +832,7 @@ async def generate_and_download(
         except Exception:
             pending_migration = None
     if isinstance(pending_migration, dict) and pending_migration.get("migration_id"):
-        inject_migration_into_bundle(files_map, pending_migration)
+        inject_migration_into_bundle(files_map, pending_migration, context_variables=context_variables)
 
     selected_capability_packs = _selected_capability_packs(context_variables)
     deployment_env = _deployment_env_for_capability_packs(selected_capability_packs)

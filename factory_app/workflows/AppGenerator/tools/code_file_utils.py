@@ -38,12 +38,13 @@ from mozaiksai.core.runtime.app.auth_contract import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
-    extract_code_file_map_from_payload as _base_extract,
-)
-from mozaiksai.core.workflow.generator_support.code_files import (
+    compile_data_contract,
     extract_deleted_file_paths_from_payload,
     materialize_data_contract,
     safe_relpath,
+)
+from mozaiksai.core.workflow.generator_support.code_files import (
+    extract_code_file_map_from_payload as _base_extract,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -147,8 +148,13 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
         active = repair.get("active") or {}
         owned_paths = active.get("allowed_paths") if active else task.get("owned_paths")
         contract = detach(context_variables.get("data_contract"))
+        if isinstance(contract, dict):
+            contract = compile_data_contract(
+                contract, subscription_contract=subscription_contract, context_variables=context_variables,
+            )
         incoming = materialize_data_contract(
             incoming, data_contract=contract, owned_paths=owned_paths or [],
+            subscription_contract=subscription_contract, context_variables=context_variables,
         )
         policies = materialize_task_module_policies(
             incoming, task={"owned_paths": owned_paths or []}, data_contract=contract,

@@ -77,6 +77,10 @@ runtime_boundaries:
       data/contract.json. The assignment_store.data_alias in
       config/subscriptions.yaml must match this alias. Do not invent a
       separate collection or bypass the data contract alias.
+      AppGenerator compiles the configured alias, collection, and lookup index
+      into data/contract.json for both managed and self-hosted assignment
+      writers. Migrations do not declare aliases; the initial pack migration
+      has operations: [] because startup applies the contract's indexes.
   - id: app_id_required_in_document
     rule: >
       Every written document must include app_id from ctx.app_id.

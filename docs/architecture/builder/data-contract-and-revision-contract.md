@@ -327,6 +327,32 @@ collection is explicitly per-user with `owner_field: user_id` and a derived
 `*_app_data` entity registered on that surface. Other missing ownership decisions
 are rejected with valid choices before any artifact is saved.
 
+## Deterministic Runtime Artifacts
+
+DesignDocs may leave an index `name` null. Code derives a stable name from the
+ordered keys and index options before saving the design and when materializing
+recorded designs. Explicit names are preserved. Runtime index validation still
+requires a name; it does not repair generated artifacts during startup.
+
+AppGenerator stamps missing migration `version` and `schema_version` fields,
+names migration indexes, and excludes operations belonging to selected managed
+pack owners. A migration containing only managed-facade state keeps its
+`migration_id` with an empty operation list, so runtime history can record its
+application without creating app-owned provider collections. App-owned migration
+operations must use the runtime's supported additive contract.
+
+Subscription assignment stores are local entitlement policy data. For each
+`assignment_store.data_alias` declared by the approved subscription contract,
+materialization declares the alias and its literal Mongo collection in
+`data/contract.json`. Missing stores become an `app_policy` surface named
+`subscription_assignments`, with fields derived from the configured assignment
+field mappings and a unique index over the configured subject identity fields.
+Existing explicit collection mappings remain authoritative.
+This applies to managed billing and self-hosted `entitlement_dispatch`; neither
+path requires app-owned managed billing plans, invoices, or provider records.
+Assignment storage does not generate public CRUD actions or grant capabilities
+by itself. The configured entitlement adapter still checks the subject and plan.
+
 ## Persistence Collections For Database Contracts
 
 Add canonical builder metadata collections under `mozaiksai`:

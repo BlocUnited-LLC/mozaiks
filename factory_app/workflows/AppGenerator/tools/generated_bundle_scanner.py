@@ -66,6 +66,14 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     unsafe_app_paths,
 )
+from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
+    managed_data_owners,
+    materialize_data_migrations,
+)
+from mozaiksai.core.workflow.generator_support.subscription_data_contract import (
+    ensure_subscription_assignment_stores,
+)
 
 # ---------------------------------------------------------------------------
 # Patterns
@@ -1178,6 +1186,32 @@ def _capability_ids_from_subscriptions_yaml(content: str) -> set[str]:
     return _capability_ids_from_subscriptions_config(config)
 
 
+def _scan_subscription_assignment_storage(files_map: dict[str, str]) -> list[str]:
+    """Require configured assignment aliases to close even without build context."""
+    content = files_map.get("config/subscriptions.yaml")
+    if not content:
+        return []
+    config, error = _subscriptions_config_from_yaml("config/subscriptions.yaml", content)
+    if error or config is None:
+        return []  # The subscription contract scan reports parsing errors.
+    stores = [owner.assignment_store for owner in [config, *config.products] if owner.assignment_store is not None]
+    if not stores:
+        return []
+    actual, error = _load_data_contract(files_map)
+    if error or actual is None:
+        return [error or "data/contract.json: configured assignment_store requires declared aliases and collections."]
+    try:
+        compiled = ensure_subscription_assignment_stores(actual, {
+            "contract_required": True,
+            "subscription_config_file": config.model_dump(mode="json"),
+        })
+    except ValueError as exc:
+        return [f"data/contract.json: {exc}"]
+    if compiled != actual:
+        return ["data/contract.json: configured assignment_store aliases and collections must be materialized before promotion."]
+    return []
+
+
 def _scan_self_hosted_entitlement_dispatch_contract(
     files_map: dict[str, str],
     *,
@@ -2105,13 +2139,21 @@ def _scan_planned_user_data_scope(
 
 
 def _scan_planned_data_fields(
-    files_map: dict[str, str], planned: dict[str, Any] | None
+    files_map: dict[str, str], planned: dict[str, Any] | None,
+    *, subscription_contract: dict[str, Any] | None = None,
+    context_variables: Any = None,
 ) -> list[str]:
     if not planned:
         return []
     actual, error = _load_data_contract(files_map)
     if error or not actual:
         return [error or "data/contract.json: missing approved data contract."]
+    try:
+        planned = compile_data_contract(
+            planned, subscription_contract=subscription_contract, context_variables=context_variables,
+        )
+    except ValueError as exc:
+        return [f"data/contract.json: {exc}"]
     collections = {
         (surface["surface_id"], collection["name"]): collection
         for surface in actual.get("surfaces") or []
@@ -2119,7 +2161,7 @@ def _scan_planned_data_fields(
     }
     errors = []
     if actual != planned:
-        errors.append("data/contract.json: must exactly preserve the approved DesignDocs data_contract.")
+        errors.append("data/contract.json: must match the compiled approved DesignDocs and subscription contracts.")
     for surface in planned.get("surfaces") or []:
         for collection in surface.get("collections") or []:
             key = (surface["surface_id"], collection["name"])
@@ -2146,6 +2188,7 @@ def scan_generated_bundle(
     *,
     capability_packs: list[dict[str, Any]] | None = None,
     planned_data_contract: dict[str, Any] | None = None,
+    subscription_contract: dict[str, Any] | None = None,
     require_deployment_artifacts: bool = False,
 ) -> list[str]:
     """Scan files_map for forbidden patterns.
@@ -2187,7 +2230,22 @@ def scan_generated_bundle(
     )
     errors.extend(error for error in scan_app_contracts(scannable_files_map) if error not in errors)
     errors.extend(_scan_planned_user_data_scope(scannable_files_map, capability_packs))
-    errors.extend(_scan_planned_data_fields(scannable_files_map, planned_data_contract))
+    errors.extend(_scan_subscription_assignment_storage(scannable_files_map))
+    persistence_context = {"capability_packs": capability_packs or []}
+    errors.extend(_scan_planned_data_fields(
+        scannable_files_map, planned_data_contract, subscription_contract=subscription_contract,
+        context_variables=persistence_context,
+    ))
+    try:
+        compiled_migrations = materialize_data_migrations(
+            scannable_files_map, managed_owners=managed_data_owners(persistence_context),
+        )
+        for path, content in scannable_files_map.items():
+            if path.startswith("data/migrations/") and path.endswith(".json"):
+                if json.loads(content) != json.loads(compiled_migrations[path]):
+                    errors.append(f"{path}: must contain compiled migration versions, named indexes, and no managed collections.")
+    except ValueError as exc:
+        errors.append(str(exc))
     # Generation also requires the canonical frontend adapter artifact.
     auth_errors = _scan_auth_app_contract(scannable_files_map)
     errors.extend(error for error in auth_errors if error not in errors)

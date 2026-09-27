@@ -8,7 +8,7 @@ Verifies that:
 - The entitlement_dispatch module declares exactly activate_subscription and
   deactivate_subscription with no entitlement_gate, no permissions, no capabilities
 - Module type is entitlement_dispatch and visibility is private
-- Data migration declares billing.subscriptions as the only collection alias
+- Data migration loads through the runtime; assignment storage belongs to the data contract
 - Backend files compile
 - repo.py writes to the billing.subscriptions data alias, not ctx.db or raw Motor
 - service.py does not call payment providers, check entitlements, or emit billing events
@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from mozaiksai.core.runtime.persistence.migrations import load_data_migrations
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 BUILD_CONTEXT = WORKSPACE / "factory_app" / "build_context"
@@ -204,40 +206,22 @@ def test_entitlement_dispatch_module_has_no_user_data_scope() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_entitlement_dispatch_migration_declares_billing_subscriptions_alias() -> None:
-    """The migration must declare billing.subscriptions — the alias ConfiguredEntitlementAdapter reads."""
-    migration_path = (
-        TEMPLATES / "data" / "migrations" / "001_entitlement_dispatch_collections.json"
-    )
-    assert migration_path.exists()
-    migration = json.loads(migration_path.read_text(encoding="utf-8"))
-
-    aliases = {
-        collection["data_alias"]
-        for surface in migration.get("surfaces", [])
-        for collection in surface.get("collections", [])
-    }
-    assert "billing.subscriptions" in aliases, (
-        "Migration must declare billing.subscriptions — "
-        "ConfiguredEntitlementAdapter and the repo write side must resolve to the same collection"
-    )
+def test_entitlement_dispatch_migration_loads_through_runtime() -> None:
+    migration, = load_data_migrations(TEMPLATES)
+    assert migration["migration_id"] == "entitlement_dispatch_001_collections"
+    assert migration["version"] == "1"
+    assert migration["schema_version"] == "mozaiks.data_migration.v1"
 
 
-def test_entitlement_dispatch_migration_declares_only_one_alias() -> None:
-    """entitlement_dispatch owns a single collection — billing.subscriptions."""
+def test_entitlement_dispatch_migration_does_not_duplicate_assignment_storage() -> None:
+    """The data contract supplies literal alias storage and its startup indexes."""
     migration_path = (
         TEMPLATES / "data" / "migrations" / "001_entitlement_dispatch_collections.json"
     )
     migration = json.loads(migration_path.read_text(encoding="utf-8"))
 
-    aliases = [
-        collection["data_alias"]
-        for surface in migration.get("surfaces", [])
-        for collection in surface.get("collections", [])
-    ]
-    assert len(aliases) == 1, (
-        f"entitlement_dispatch migration must declare exactly 1 collection alias, got: {aliases}"
-    )
+    assert migration["operations"] == []
+    assert "surfaces" not in migration
 
 
 # ---------------------------------------------------------------------------

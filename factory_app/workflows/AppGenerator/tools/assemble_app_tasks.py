@@ -385,6 +385,7 @@ async def _assemble_app_tasks(
             if context_variables and hasattr(context_variables, "get") else None
         ),
         subscription_contract=resolve_subscription_contract(context_variables),
+        context_variables=context_variables,
     )
 
     app_build_plan = (

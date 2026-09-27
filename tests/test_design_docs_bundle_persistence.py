@@ -186,6 +186,7 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
     assert result["ok"] is True
     assert context.snapshot()["design_surface_map"]["surfaces"][0]["surface_id"] == "users"
     assert context.snapshot()["data_contract"]["app_id"] == "app_123"
+    assert context.snapshot()["data_contract"]["surfaces"][0]["collections"][0]["indexes"][0]["name"].startswith("idx_")
     # Typed ExperienceSpec must be set on context as a structured object
     assert context.snapshot()["experience_spec"]["navigation_model"] == "top-level routes with shell navigation"
     assert context.snapshot()["experience_spec"]["pages"][0]["name"] == "Users"
