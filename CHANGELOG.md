@@ -27,6 +27,11 @@ This project follows a practical pre-1.0 changelog format:
   ownership metadata. Generated module task instructions preserve custom reads,
   managed facade inventories use their complete pack contracts, and protected
   app-wide reads require an explicit access policy.
+- AppGenerator preserves the previous bundle when assembly fails and reports the
+  actual cause, routes bounded repairs to their owning task, and terminates
+  unrecoverable failures without a retry loop. Plan normalization removes obsolete
+  read and mutation endpoint hints, and undeclared-event repairs reach the module
+  contract task with permission to write its events manifest.
 
 - Generated pages select typed module/action data sources; code builds their
   endpoints and missing entity read contracts. Persistent module policies now

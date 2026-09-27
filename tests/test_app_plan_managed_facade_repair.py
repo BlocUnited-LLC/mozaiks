@@ -241,7 +241,9 @@ def test_same_surface_alias_preserves_tasks_and_retargets_owned_module_paths():
     cached = _assert_reviewed_facade(plan, context)
     assert not any(pack["capability_pack_id"] == "billing_module" for pack in cached["capability_packs"])
     tasks = {task["task_id"]: task for task in cached["build_tasks"]}
-    assert tasks["3"]["owned_paths"] == ["modules/billing_portal/module.yaml"]
+    assert tasks["3"]["owned_paths"] == [
+        "modules/billing_portal/module.yaml", "modules/billing_portal/contracts/events.yaml",
+    ]
     assert tasks["4"]["capability_pack_id"] == "billing_portal"
     assert "3" in tasks["4"]["depends_on"]
     assert {"2", "3", "4"} <= set(tasks["5"]["depends_on"])

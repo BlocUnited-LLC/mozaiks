@@ -1342,13 +1342,21 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
                     "subscriptions_loaded": loaded.subscriptions_config is not None,
                 }
                 for module_name in loaded.failed_module_names:
+                    error = (loaded.module_load_errors.get(module_name) or "AppLoader could not load module.").replace(str(app_root), "app")
+                    undeclared_event = error.startswith("module.yaml action ") and " emits undeclared event " in error
                     failed_tests.append(
                         {
                             "test": "app_runtime_module_load",
                             "module": module_name,
-                            "path": f"modules/{module_name}/backend/handler.py",
-                            "error": (loaded.module_load_errors.get(module_name) or "AppLoader could not load module.").replace(str(app_root), "app"),
+                            "path": (
+                                f"modules/{module_name}/contracts/events.yaml" if undeclared_event
+                                else f"modules/{module_name}/backend/handler.py"
+                            ),
+                            "error": error,
                             "fix_suggestion": (
+                                "Declare the approved action's event in module_contract.events_yaml, including "
+                                "its version, producer, and payload contract; preserve the approved action emits."
+                                if undeclared_event else
                                 "Fix the module contract, companion manifests, handler entrypoint, "
                                 "or app-owned service imports so AppLoader.load() can load every module."
                             ),
@@ -1795,6 +1803,37 @@ def _wiring_repair_errors(
     return errors
 
 
+def _assembly_failure(context_variables: Any | None, *, prepare_recovery: bool = False) -> dict[str, Any] | None:
+    """Reject a retained bundle until its failed assembly is repaired and rerun."""
+    if _context_get(context_variables, "app_assembly_status") != "failed":
+        return None
+    error = str(_context_get(context_variables, "app_assembly_error") or "App assembly failed.")
+    result = {
+        "contract_version": "1.0",
+        "success": False,
+        "status": "failed",
+        "passed": False,
+        "error": error,
+        "failed_tests": [{"gate": "assembly", "test": "app_assembly", "error": error}],
+        "validation_evidence": {"completed": [], "failed": ["assembly"]},
+    }
+    if prepare_recovery:
+        recovery_request = prepare_task_recovery(context_variables)
+        diagnostic = _context_get(context_variables, "app_assembly_diagnostic") or {"error": error}
+        result["bundle_repair"] = _prepare_bundle_repair(
+            {"passed": False, "diagnostics": [diagnostic]}, context_variables,
+            select_repairs=recovery_request is None,
+        )
+        result["task_recovery_request"] = recovery_request
+    _context_set(context_variables, "integration_tests_passed", False)
+    _context_set(context_variables, "integration_test_result", result)
+    _context_set(context_variables, "app_validation_status", "failed")
+    _context_set(context_variables, "app_bundle_acceptance_status", "failed")
+    _context_set(context_variables, "app_bundle_acceptance_result", result)
+    _context_set(context_variables, "app_bundle_validation_evidence", result["validation_evidence"])
+    return result
+
+
 async def run_app_bundle_acceptance_gate(
     *,
     files: dict[str, str] | None = None,
@@ -1806,6 +1845,10 @@ async def run_app_bundle_acceptance_gate(
     This is the no-live-call boundary before an app bundle can be exported,
     registered as validated, or promoted.
     """
+
+    assembly_failure = _assembly_failure(context_variables)
+    if assembly_failure is not None:
+        return assembly_failure
 
     explicit_files = _safe_files_map(files)
     if files is not None:
@@ -2201,6 +2244,18 @@ async def validate_app_bundle_from_request(
     request, then this auto tool owns the runtime checks and persists the resulting
     gate fields into context_variables for routing.
     """
+
+    if _context_get(context_variables, "app_assembly_status") == "failed":
+        active_repair = (_context_get(context_variables, "bundle_repair_result", {}) or {}).get("active") or {}
+        if active_repair.get("status") == "responded":
+            # A bounded, admitted repair changes assembly inputs. Recompile its
+            # overlay before any gate can inspect the retained previous bundle.
+            from .assemble_app_tasks import assemble_app_tasks
+
+            await assemble_app_tasks(context_variables=context_variables)
+    assembly_failure = _assembly_failure(context_variables, prepare_recovery=True)
+    if assembly_failure is not None:
+        return assembly_failure
 
     request = AppValidationRequest if isinstance(AppValidationRequest, dict) else {}
     commands = request.get("commands")

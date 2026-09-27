@@ -136,6 +136,6 @@ def test_the_call_site_supplies_the_batch_state() -> None:
 
     from factory_app.workflows.AppGenerator.tools import assemble_app_tasks
 
-    source = inspect.getsource(assemble_app_tasks.assemble_app_tasks)
+    source = inspect.getsource(assemble_app_tasks._assemble_app_tasks)
     assert "_failed_batch_task_ids" in source, "assembly must read the batch failures"
     assert "app_task_batch_results" in source

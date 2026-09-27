@@ -94,30 +94,24 @@ async def assemble_features(
             "message": str,
         }
     """
-    try:
-        merged_files = _merge_code_files(
-            feature_outputs or [],
-            build_timestamp=build_timestamp,
-            app_build_plan=app_build_plan,
-            data_contract=data_contract,
-            design_surface_map=design_surface_map,
-            subscription_contract=subscription_contract,
-        )
-        logger.info(
-            "Assembled %d feature outputs into %d files",
-            len(feature_outputs or []),
-            len(merged_files),
-        )
-        return {
-            "success": True,
-            "code_files": merged_files,
-            "message": f"Assembled {len(merged_files)} files",
-        }
-    except Exception as exc:
-        logger.error("Assembly failed: %s", exc, exc_info=True)
-        return {
-            "success": False,
-            "code_files": [],
-            "message": f"Assembly failed: {exc}",
-        }
+    # The workflow tool owns failure reporting. A failed materializer must not
+    # become an empty bundle that later checks mistake for successful assembly.
+    merged_files = _merge_code_files(
+        feature_outputs or [],
+        build_timestamp=build_timestamp,
+        app_build_plan=app_build_plan,
+        data_contract=data_contract,
+        design_surface_map=design_surface_map,
+        subscription_contract=subscription_contract,
+    )
+    logger.info(
+        "Assembled %d feature outputs into %d files",
+        len(feature_outputs or []),
+        len(merged_files),
+    )
+    return {
+        "success": True,
+        "code_files": merged_files,
+        "message": f"Assembled {len(merged_files)} files",
+    }
 

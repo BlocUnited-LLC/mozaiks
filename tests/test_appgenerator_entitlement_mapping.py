@@ -235,9 +235,16 @@ async def test_malformed_contract_cannot_authorize_gate_removal_at_any_writer(so
         )
     with pytest.raises(ValueError, match="existing entitlement gates cannot be removed"):
         save_generated_code(context)
-    with pytest.raises(ValueError, match="existing entitlement gates cannot be removed"):
-        await assembly.assemble_app_tasks(context_variables=context)
     assert context.snapshot() == before
+    result = await assembly.assemble_app_tasks(context_variables=context)
+    assert result["success"] is False
+    assert result["status"] == "failed"
+    assert result["error"].startswith("ValueError:")
+    assert "existing entitlement gates cannot be removed" in result["error"]
+    assert context.get("app_assembly_error") == result["error"]
+    assert context.get("app_assembly_status") == "failed"
+    assert context.get("generated_files") == original
+    assert {key: context.snapshot()[key] for key in before} == before
 
 
 def test_explicit_noop_contract_is_authority_to_remove_old_gates():
@@ -256,6 +263,11 @@ def test_live_noop_contract_does_not_apply_stale_artifact_mapping():
 @pytest.mark.asyncio
 async def test_unapproved_action_cannot_alias_a_gated_handler_at_any_writer():
     context = _context()
+    original = {
+        file["filename"]: file["content"]
+        for file in apply_entitlement_gates(_files(), context_variables=context)
+    }
+    context.set("generated_files", original)
     files = _files()
     manifest = yaml.safe_load(files[0]["content"])
     manifest["actions"].append({"id": "shadow_edit", "handler_method": "edit_task", "permissions": []})
@@ -272,9 +284,17 @@ async def test_unapproved_action_cannot_alias_a_gated_handler_at_any_writer():
         )
     with pytest.raises(ValueError, match="unapproved module actions.*shadow_edit"):
         save_generated_code(context)
-    with pytest.raises(ValueError, match="unapproved module actions.*shadow_edit"):
-        await assembly.assemble_app_tasks(context_variables=context)
     assert context.snapshot() == before
+    result = await assembly.assemble_app_tasks(context_variables=context)
+    assert result["success"] is False
+    assert result["status"] == "failed"
+    assert result["error"].startswith("ValueError:")
+    assert "unapproved module actions" in result["error"]
+    assert "shadow_edit" in result["error"]
+    assert context.get("app_assembly_error") == result["error"]
+    assert context.get("app_assembly_status") == "failed"
+    assert context.get("generated_files") == original
+    assert {key: context.snapshot()[key] for key in before} == before
 
 
 def test_repaired_manifest_recompiles_approved_gates_with_real_context_bridge():
@@ -312,6 +332,11 @@ def test_repair_compiles_only_supplied_manifests_and_keeps_facades_ungated():
 @pytest.mark.parametrize("gate_source", ["approved_mapping", "authored_manifest"])
 async def test_canonical_read_gate_rejected_without_mutating_any_writer(action_id, gate_source):
     context = _context()
+    original = {
+        file["filename"]: file["content"]
+        for file in apply_entitlement_gates(_files(), context_variables=context)
+    }
+    context.set("generated_files", original)
     files = _files()
     manifest = yaml.safe_load(files[0]["content"])
     manifest["actions"].append({"id": "get_tasks", "handler_method": "get_tasks", "permissions": []})
@@ -337,9 +362,16 @@ async def test_canonical_read_gate_rejected_without_mutating_any_writer(action_i
     message = "never gate targets" if gate_source == "approved_mapping" else "cannot have entitlement gates"
     with pytest.raises(ValueError, match=message):
         save_generated_code(context)
-    with pytest.raises(ValueError, match=message):
-        await assembly.assemble_app_tasks(context_variables=context)
     assert context.snapshot() == before
+    result = await assembly.assemble_app_tasks(context_variables=context)
+    assert result["success"] is False
+    assert result["status"] == "failed"
+    assert result["error"].startswith("ValueError:")
+    assert message in result["error"]
+    assert context.get("app_assembly_error") == result["error"]
+    assert context.get("app_assembly_status") == "failed"
+    assert context.get("generated_files") == original
+    assert {key: context.snapshot()[key] for key in before} == before
 
 
 def test_managed_facade_authored_gate_is_rejected_instead_of_silently_removed():

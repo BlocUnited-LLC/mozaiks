@@ -64,6 +64,8 @@ def _assert_exclusive_paths(plan):
 def test_reported_drift_keeps_model_tasks_and_one_trio_per_module(label):
     plan, context = _reported_plan(label)
     before = _ownership(plan)
+    before["module_contract"].add("modules/tasks/contracts/events.yaml")
+    before["3"].add("modules/billing_portal/contracts/events.yaml")
     assert sorted(pack["capability_pack_id"] for pack in plan["capability_packs"]) == [
         "billing_portal", "mozaikspay", "tasks",
     ]
@@ -102,6 +104,8 @@ def test_drift_repair_composes_with_task_identity_and_managed_facade_repairs():
         (task["surface_id"], task["task_type"]): set(task["owned_paths"])
         for task in plan["build_tasks"] if task["task_type"] in kinds
     }
+    original[("tasks", "module_contract")].add("modules/tasks/contracts/events.yaml")
+    original[("billing_portal", "module_contract")].add("modules/billing_portal/contracts/events.yaml")
     ids = {task["task_id"]: task["task_type"] for task in plan["build_tasks"]}
     for task in plan["build_tasks"]:
         task["task_id"] = task["task_type"]
@@ -182,7 +186,10 @@ def test_correct_plan_retains_its_task_identities_and_ownership():
     assert result["outcome"] == "ready", result
     assert plan == before
     cached = detach(context.get("app_build_plan"))
-    assert _ownership(cached) == _ownership(before)
+    expected = _ownership(before)
+    expected["module_contract"].add("modules/tasks/contracts/events.yaml")
+    expected["3"].add("modules/billing_portal/contracts/events.yaml")
+    assert _ownership(cached) == expected
     _assert_exclusive_paths(cached)
 
 

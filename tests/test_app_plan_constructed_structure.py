@@ -213,6 +213,7 @@ def test_complete_correct_plan_passes_unchanged():
     # This fixture declares no collection ownership, so it must not plan a policy.
     tasks["business_services"]["owned_paths"].remove("modules/task_management/backend/policy.py")
     tasks["module_contract"]["initial_message"] = "Define create_task and list_tasks."
+    tasks["module_contract"]["owned_paths"].append("modules/task_management/contracts/events.yaml")
     tasks["data_models"]["depends_on"] = ["6", "persistence_contract"]
     tasks["business_services"]["depends_on"] = ["6", "7", "persistence_contract"]
     tasks["page_bundle"]["depends_on"] = ["6"]
@@ -277,7 +278,7 @@ def test_selected_module_lane_constructs_missing_paths_and_labels():
     constructed = next(item for item in cached["build_tasks"] if item["task_id"] == task["task_id"])
     assert constructed["capability_pack_id"] == "tasks"
     assert constructed["surface_kind"] == "module"
-    assert constructed["owned_paths"] == ["modules/tasks/module.yaml"]
+    assert constructed["owned_paths"] == ["modules/tasks/module.yaml", "modules/tasks/contracts/events.yaml"]
 
 
 @pytest.mark.parametrize("identity", ["blank", "repeated_task_type"])

@@ -335,7 +335,7 @@ agents:
                 "id": "activity-table",
                 "primitive": "DataTable",
                 "intent": "Recent activity log, read-only, no selection needed",
-                "config_hint": "{\"columns\": [\"id\", \"action\", \"user\", \"created_at\"], \"api_endpoint\": \"/api/activity\", \"selection\": \"none\"}"
+                "config_hint": "{\"columns\": [\"id\", \"action\", \"user\", \"created_at\"], \"selection\": \"none\"}"
               }
             ]
           },
@@ -349,7 +349,7 @@ agents:
                 "id": "user-list",
                 "primitive": "DataTable",
                 "intent": "Paginated sortable user table with row actions",
-                "config_hint": "{\"columns\": [\"id\", \"name\", \"email\", \"role\", \"created_at\"], \"api_endpoint\": \"/api/users\", \"selection\": \"single\"}"
+                "config_hint": "{\"columns\": [\"id\", \"name\", \"email\", \"role\", \"created_at\"], \"selection\": \"single\"}"
               },
               {
                 "id": "create-user-modal",
@@ -369,8 +369,8 @@ agents:
       - `brand_direction` is a compact brand and experience posture summary.
       - Every page must have `name`, `route`, `layout`, `intent`, and `sections[]`.
       - Every section must declare `id`, `primitive`, `intent`, and `config_hint`.
-      - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive config scaffold including all required fields declared by the supplied primitive contract. Use null when the contract is unavailable rather than inventing required fields. Example: `"{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/users\"}"`.
-      - `api_endpoint` values in config_hint must match the Backend doc's API surface.
+      - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive presentation and response-binding scaffold using the supplied primitive contract. Use null when the contract is unavailable rather than inventing fields. Example: `"{\"columns\": [\"id\", \"name\"]}"`.
+      - Do not emit `api_endpoint` or mutation endpoint URLs in config_hint. Describe the section's data needs in `intent`; downstream planning selects typed module/action references and code renders their URLs.
       - Prefer `Modal` sections for secondary create/edit/drill-in interactions.
       - Do not describe the same editor twice as both inline form and modal unless the page truly needs side-by-side editing.
       - Do NOT invent capabilities not described in concept_overview.

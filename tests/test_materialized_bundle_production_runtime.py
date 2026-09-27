@@ -23,6 +23,7 @@ from mozaiksai.core.validation import (
     scan_functional_generated_app,
     validate_generated_app_bundle,
 )
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from tests.test_continuous_deterministic_materialization import (
     BUILD_TIMESTAMP,
     LATER_BUILD_TIMESTAMP,
@@ -291,12 +292,21 @@ async def test_materialized_broken_handler_fails_before_bootable(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_materialized_unresolved_page_action_fails_before_bootable() -> None:
+    files, context = await _assemble_from_payload()
     outputs = _typed_task_outputs(_load_models())
     page_output = next(value for value in outputs.values() if value.get("pages"))
     page_output["pages"][0]["sections"][0]["config"]["data_source"] = {"module_id": "reports", "action_id": "archive_reports"}
-    with pytest.raises(ValueError, match="unknown module/action"):
-        await _assemble_from_payload(task_outputs=outputs)
-    files, context = await _assemble_from_payload()
+    failed_context = ContextVariablesBridge(deepcopy(context.data))
+    failed_context.set("app_task_batch_results", outputs)
+    assembled = await assemble_app_tasks(context_variables=failed_context)
+    assert assembled["success"] is False
+    assert "unknown module/action 'reports/archive_reports'" in assembled["error"]
+    assert failed_context.get("app_assembly_error") == assembled["error"]
+    assert failed_context.get("generated_files") == files
+    blocked = await run_app_bundle_acceptance_gate(context_variables=failed_context)
+    assert blocked["passed"] is False
+    assert blocked["error"] == assembled["error"]
+    assert "snapshot_digest" not in blocked
     page = yaml.safe_load(files["ui/pages/reports.yaml"])
     page["sections"][0]["config"]["api_endpoint"] = "/api/modules/reports/archive_reports"
     files["ui/pages/reports.yaml"] = yaml.safe_dump(page)

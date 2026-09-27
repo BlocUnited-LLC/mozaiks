@@ -348,7 +348,7 @@ agents:
       5. Derive the minimum complete set of pages/screens required by the selected capability packs, and identify whether each route is global navigation, local/module navigation, profile/account navigation, footer/legal navigation, or direct-link only. Also classify the intended shell chrome mode for each route: standard, workspace, conversation, focused, immersive, or public.
       5a. **When `experience_spec.pages[]` is present, use the designed pages as the canonical page list** — do not invent or re-derive page structure from capability packs. For each designed page:
          - Preserve `name`, `route`, `layout`, and `intent` from the design.
-         - Map each `experience_spec.pages[i].sections[j]` to one `PrimitiveSectionHint` in `sections_hint[]`, carrying over `primitive`, `id` (as `section_id_hint`), `intent`, and `config_hint`. Preserve `config_hint` as a JSON-encoded string or null; never emit a dict in that field.
+         - Map each `experience_spec.pages[i].sections[j]` to one `PrimitiveSectionHint` in `sections_hint[]`, carrying over `primitive`, `id` (as `section_id_hint`), `intent`, and the presentation/response-binding fields from `config_hint`. Omit any `api_endpoint` hints; select `data_source` separately from the canonical module/action inventory. Preserve `config_hint` as a JSON-encoded string or null; never emit a dict in that field.
          - Extend `sections_hint[]` with additional sections only when the capability pack context reveals a clear need not covered by the design (for example a workflow launch button required by an integration).
          - Set `design_intent` on the page from `experience_spec.pages[i].intent`.
          - Only infer page structure from scratch when `experience_spec` is null.
@@ -1242,6 +1242,11 @@ agents:
       4. Do not invent, repair, or omit files.
       5. Reject any AppGenerator-managed raw frontend page/component outputs
          that are not declared by the canonical contracts.
+      6. Read `app_assembly_status` and `app_assembly_error` for assembly failures.
+         A failed attempt retains the previous bundle for inspection. The validation
+         tool selects bounded task recovery or the owning task's repair, then
+         reassembles admitted corrections before validation or export. Unrepairable
+         or repeated failures terminate with their cause.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -1695,6 +1700,7 @@ agents:
       2. Identify the named files from the scanner errors and repair only those ConfigMiddleware-owned paths.
       3. For `config/subscriptions.yaml`, emit `mode: "subscription_config"` and serialize exactly that file.
       4. For module contract YAML, emit `mode: "module_contract_bundle"` with a complete corrected module contract for the affected module.
+         When an accepted action emits an undeclared event, preserve that action's approved `emits` and declare the event through `module_contract.events_yaml` within the repair request's allowed paths. Read the accepted module and supplied event requirements to determine the exact type, producer, version, and payload contract; do not remove an approved event to silence validation.
       5. For service-foundation, env, security, or deployment contract files, emit `mode: "service_foundation"` with only the corrected file entries.
       6. If the only valid repair is removing a stale ConfigMiddleware-owned artifact, include that relative path in `deleted_files`; do not leave an empty placeholder file.
       7. Do not emit backend module Python, React/JS page code, app-owned business logic, raw payment providers, local ledgers, or hosted-product policy.
@@ -1707,6 +1713,7 @@ agents:
          - Treat the action list in `current_build_task.initial_message` as a closed contract. Preserve every named action in the final contract: emit model-owned writes, custom reads, and explicit protected app-wide read declarations; code adds the code-owned canonical reads. Do not rename or reinterpret the action set.
          - If the task lists `list_*` and mutation/generation actions for the same module, preserve both families. A list/query action is not optional just because a generation or write action is present.
          - Treat event declarations as explicit only. Use the exact event types and producing actions in `app_build_plan.event_flows` for this module, the injected manifest guard, or `current_build_task.initial_message`. Do not invent events from action verbs. If none of these inputs declares an event, set `actions[].emits: []` and `events_yaml: null`.
+         - Every approved `actions[].emits` entry requires a matching typed `events_yaml` declaration with its exact type, producer, version, and payload contract. Planning reserves `contracts/events.yaml` for this task so it can author that declaration. The reserved path stays optional when no action emits events; keep `events_yaml: null` in that case.
       3. Produce `module.yaml` and only the optional YAML companions whose typed `module_contract` fields are populated for an approved feature in `current_build_task.owned_paths`. Ownership permits an optional file but never requires inventing it, serializing an empty placeholder, or mirroring a null typed field into `code_files`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
          - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `relationships_yaml`, `policy_hooks_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
@@ -2287,6 +2294,10 @@ agents:
         - `passed` or `not_applicable`: no scanner repair pass is needed.
 
       **Downstream**:
+      - If `app_assembly_status` is `failed`, the tool evaluates the retained
+        `app_assembly_error` through bounded task recovery and exact task ownership
+        without validating the previous bundle. Admitted repairs are reassembled
+        before validation; failures with no remaining repair terminate the workflow.
       - Workflow integration errors share the same task ownership and finite artifact-repair budget as other acceptance diagnostics.
       - The runtime selects the bounded repair lane from the declared `bundle_repair_target`; this validation step does not select or invoke another worker.
       - The runtime advances to export only when validation does not fail and integration checks pass.

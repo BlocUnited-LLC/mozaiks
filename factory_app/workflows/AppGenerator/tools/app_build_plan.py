@@ -377,6 +377,24 @@ def _normalize_build_task_identity(task: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _reserve_module_event_contract_paths(build_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Reserve optional event declarations before execution freezes plan ownership."""
+    owned = {path for task in build_tasks for path in _normalized_owned_paths(task)}
+    normalized = []
+    for task in build_tasks:
+        item = dict(task)
+        if item.get("task_type") == "module_contract":
+            module_id = _infer_module_id_from_owned_paths(item)
+            event_path = f"modules/{module_id}/contracts/events.yaml"
+            if module_id and event_path not in owned:
+                # Actions are authored later. Reserving this optional companion
+                # grants one owner without inventing an event version or payload.
+                item["owned_paths"] = [*_normalized_owned_paths(item), event_path]
+                owned.add(event_path)
+        normalized.append(item)
+    return normalized
+
+
 def _dedupe_preserving_order(values: Iterable[Any]) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
@@ -1145,6 +1163,47 @@ def _route_page_data_sources_to_facades(value: Any, rules: dict[tuple[str, str],
     return value
 
 
+def _strip_endpoint_hints(value: Any) -> Any:
+    if isinstance(value, dict):
+        mutation = value.get("action_type") in {"submit", "delete"}
+        return {
+            key: nested if key == "data_source" else _strip_endpoint_hints(nested)
+            for key, nested in value.items()
+            if key != "api_endpoint" and not (mutation and key == "href")
+        }
+    if isinstance(value, list):
+        return [_strip_endpoint_hints(item) for item in value]
+    return value
+
+
+def _normalize_page_config_hints(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Discard authored endpoint hints; module/action choices remain authoritative."""
+    normalized = []
+    for page in pages:
+        item = dict(page)
+        if isinstance(page.get("sections_hint"), list):
+            hints = []
+            for index, section in enumerate(page["sections_hint"]):
+                hint = dict(section)
+                raw = hint.get("config_hint")
+                if isinstance(raw, str):
+                    try:
+                        config = json.loads(raw)
+                    except json.JSONDecodeError as exc:
+                        page_name = page.get("name") or page.get("page_id") or "<unknown>"
+                        section_name = hint.get("section_id_hint") or f"sections_hint[{index}]"
+                        raise ValueError(
+                            f"Page '{page_name}', section '{section_name}' has invalid config_hint JSON: {exc.msg}"
+                        ) from exc
+                    cleaned = _strip_endpoint_hints(config)
+                    if cleaned != config:
+                        hint["config_hint"] = json.dumps(cleaned)
+                hints.append(hint)
+            item["sections_hint"] = hints
+        normalized.append(item)
+    return normalized
+
+
 def _normalize_managed_capability_page_bindings(
     pages: list[dict[str, Any]],
     *,
@@ -1349,25 +1408,58 @@ def _managed_capability_backing_module_ids(
     return frozenset(module_ids - managed_capability_ids)
 
 
-def _iter_page_data_sources(value: Any) -> Iterable[dict[str, str]]:
+def _iter_page_data_sources(
+    value: Any,
+    *,
+    page_name: str | None = None,
+    section_name: str = "<page>",
+    forbidden_module_ids: frozenset[str] = frozenset(),
+) -> Iterable[dict[str, str]]:
     if isinstance(value, dict):
+        if page_name is None:
+            page_name = str(value.get("name") or value.get("page_id") or "<unknown>")
+        section_name = str(
+            value.get("section_id_hint")
+            or (value.get("id") if "primitive" in value else None)
+            or section_name
+        )
+        location = f"Page '{page_name}', section '{section_name}'"
         if value.get("action_type") in {"submit", "delete"} and value.get("href") is not None:
-            raise ValueError("Page mutations must select data_source {module_id, action_id}; endpoint URLs are rendered by code")
+            raise ValueError(f"{location}: mutations must select data_source {{module_id, action_id}}; endpoint URLs are rendered by code")
         for key, nested in value.items():
             if key == "api_endpoint" and nested is not None:
-                raise ValueError("Page sections must select data_source {module_id, action_id}; endpoint URLs are rendered by code")
+                raise ValueError(f"{location}: sections must select data_source {{module_id, action_id}}; endpoint URLs are rendered by code")
             if key == "data_source" and nested is not None:
                 if (not isinstance(nested, dict) or set(nested) != {"module_id", "action_id"}
                         or any(not isinstance(v, str) or not v.strip() for v in nested.values())):
-                    raise ValueError("Page data_source requires exactly module_id and action_id")
+                    raise ValueError(f"{location}: data_source requires exactly module_id and action_id")
+                if nested["module_id"] in forbidden_module_ids:
+                    raise ValueError(
+                        f"{location} binds data_source directly to managed "
+                        f"module '{nested['module_id']}'. Managed capability pages must bind to an app-owned "
+                        "facade module action instead."
+                    )
                 yield nested
-            elif key == "config_hint" and isinstance(nested, str):
-                yield from _iter_page_data_sources(json.loads(nested))
             else:
-                yield from _iter_page_data_sources(nested)
+                if key == "config_hint" and isinstance(nested, str):
+                    nested = json.loads(nested)
+                if key in {"sections", "sections_hint"} and isinstance(nested, list):
+                    for index, section in enumerate(nested):
+                        yield from _iter_page_data_sources(
+                            section, page_name=page_name, section_name=f"{key}[{index}]",
+                            forbidden_module_ids=forbidden_module_ids,
+                        )
+                else:
+                    yield from _iter_page_data_sources(
+                        nested, page_name=page_name, section_name=section_name,
+                        forbidden_module_ids=forbidden_module_ids,
+                    )
     elif isinstance(value, list):
         for item in value:
-            yield from _iter_page_data_sources(item)
+            yield from _iter_page_data_sources(
+                item, page_name=page_name, section_name=section_name,
+                forbidden_module_ids=forbidden_module_ids,
+            )
 
 
 def _validate_page_bindings(
@@ -1378,14 +1470,7 @@ def _validate_page_bindings(
 ) -> None:
     forbidden_ids = managed_capability_ids | managed_capability_backing_module_ids
     for page in pages:
-        page_name = str(page.get("name") or page.get("page_id") or "<unknown>")
-        for source in _iter_page_data_sources(page):
-            if source["module_id"] in forbidden_ids:
-                raise ValueError(
-                    f"Page '{page_name}' binds data_source directly to managed "
-                    f"module '{source['module_id']}'. Managed capability pages must bind to an app-owned "
-                    "facade module action instead."
-                )
+        list(_iter_page_data_sources(page, forbidden_module_ids=forbidden_ids))
 
 
 def _managed_capability_reference_tokens(pack: dict[str, Any]) -> frozenset[str]:
@@ -2078,6 +2163,7 @@ def app_build_plan(
         build_tasks=build_tasks,
         context_variables=context_variables,
     )
+    pages = _normalize_page_config_hints(pages)
     pages = _normalize_managed_capability_page_bindings(
         pages,
         capability_packs=capability_packs,
@@ -2095,6 +2181,7 @@ def app_build_plan(
         managed_capability_ids=managed_capability_ids,
         context_variables=context_variables,
     )
+    build_tasks = _reserve_module_event_contract_paths(build_tasks)
     managed_capability_backing_module_ids = _managed_capability_backing_module_ids(
         capability_packs,
         context_variables=context_variables,

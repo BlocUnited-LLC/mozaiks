@@ -417,7 +417,7 @@ class TestTypedPageBindings:
             hint = {"config_hint": json.dumps({"actions": [{
                 "action_type": action_type, "href": "/api/modules/tasks/update_task",
             }]})}
-            with pytest.raises(ValueError, match="Page mutations must select data_source"):
+            with pytest.raises(ValueError, match="mutations must select data_source"):
                 list(_iter_page_data_sources(hint))
 
     def test_config_hint_navigation_route_and_typed_mutation_are_preserved(self):

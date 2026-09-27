@@ -7,8 +7,14 @@ accepted module contracts. Planning hints carry the same typed `data_source`
 separately from presentation-only `config_hint`. Submit/delete actions use their
 own pair; navigation keeps its route `href`. Code emits the runtime
 `/api/modules/{module_id}/{action_id}` into `api_endpoint` for reads and `href`
-for mutations. Model-authored endpoint strings and unresolved references fail
-before files are accepted. No module is guessed from a URL or page name.
+for mutations. Plan normalization removes `api_endpoint` and submit/delete
+action `href` hints from section `config_hint` mappings, including nested
+presentation hints. Navigation `href` values remain intact. DesignDocs supplies
+presentation intent without endpoint URLs. Typed `data_source` references remain
+authoritative; invalid references identify the page and section in feedback.
+Generated files remain subject to the existing binding and wiring checks for
+endpoint strings and unresolved references. No module is guessed from a URL or
+page name.
 
 Before module output is published to dependent workers, code closes missing
 `list_{collection_name}` and `get_{collection_name}` actions for owned entities
@@ -115,8 +121,17 @@ Missing evidence, stale inputs, and uncertain interrupted attempts remain blocke
 See [ADR 0011](../../adr/0011-factory-bounded-task-recovery.md).
 
 AppPlanAgent clears stale plan/task state before validating a replacement.
-Completed or partial batches advance to assembly; incomplete assembly goes directly
-to validation for completeness diagnostics. Auth scaffolding uses an assembled
+Completed or partial batches advance to assembly; successfully assembled partial
+batches go directly to validation for completeness diagnostics. A materializer
+or assembly contract failure stops the pipeline and records its exception type
+and message in the tool outcome and `app_assembly_error`. The previous
+`generated_files` snapshot remains intact. Failed assembly cannot validate or
+export that stale snapshot. Attributable failures use the owning task's existing
+bounded repair policy, and partial batches retain their bounded task recovery.
+After a repair changes the inputs, assembly must succeed before validation.
+Unattributable failures and exhausted repairs terminate with `workflow_failed`
+and preserve the real cause; user replies cannot retry unchanged assembly inputs.
+Auth scaffolding uses an assembled
 `app.json` when present. A rejected or empty plan cannot fall through to standalone
 page generation.
 
@@ -242,6 +257,18 @@ regex intent, and unexposed-field isolation. It does not prove that generated
 code implements the instructions. Generated-app acceptance must still probe
 later-page records, literal matching, and foreign/no-op mutations with event
 observation.
+
+Each normalized `module_contract` task reserves its module's optional
+`contracts/events.yaml` alongside `module.yaml`. This reserves write authority,
+not a required output: a module with no events still emits no manifest, as with
+the other typed optional companions. Action `emits` names alone do not determine
+event versions or payload schemas, so assembly does not invent declarations.
+Runtime undeclared-event diagnostics identify `contracts/events.yaml`, allowing
+the contract worker to author the missing typed declarations. For an already
+accepted plan without that explicit path, repair uses the task's existing
+optional companion authority and adds only the diagnosed companion to its
+allowed paths. An explicit foreign owner always takes precedence; the approved
+inventory and its execution evidence are not rewritten.
 
 Module action/capability schemas, event payload schemas, and policy-hook schemas
 are compiled from `JsonSchemaContract` lists into runtime JSON Schema maps. Null annotations are
