@@ -353,7 +353,8 @@ def _read_functions(module_id: str, collection: dict[str, Any], operation: str) 
             f"    collection = ctx.persistence.collection({module_id!r}, {name!r})\n"
             "    record = await collection.find_one(query)\n"
             "    if record is None:\n"
-            "        raise LookupError('Record not found')\n"
+            "        from mozaiksai.core.runtime import ModuleRecordNotFoundError\n"
+            "        raise ModuleRecordNotFoundError('Record not found')\n"
             "    return {'item': record}\n"
         )
     return handler, service, repo

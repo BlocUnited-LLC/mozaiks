@@ -44,6 +44,7 @@ from .composition.module_event_provenance import (
 from .composition.module_executor import (
     ModuleExecutor,
     ModuleInputValidationError,
+    ModuleRecordNotFoundError,
     ModuleRequest,
     ModuleResult,
 )
@@ -102,6 +103,7 @@ __all__ = [
     "ModulePermissionCheck",
     "ModuleExecutor",
     "ModuleInputValidationError",
+    "ModuleRecordNotFoundError",
     "ModuleRequest",
     "ModuleResult",
     "EnvReader",

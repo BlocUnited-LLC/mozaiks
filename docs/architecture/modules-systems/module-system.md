@@ -176,6 +176,13 @@ callers, and are reserved for trusted runtime/event calls. Local development
 with auth disabled permits anonymous calls to non-internal actions, but those
 calls use a concrete empty permission list.
 
+Canonical get actions raise `ModuleRecordNotFoundError` (exported by
+`mozaiksai.core.runtime`) when the scoped lookup finds no record. The executor
+returns `RECORD_NOT_FOUND`, and the module HTTP routes return 404 with the same
+generic message for missing and foreign records. Other `LookupError` subclasses,
+including programming errors such as `KeyError` and `IndexError`, remain server
+errors.
+
 `internal` and `admin_internal` actions are rejected with 404 on the public
 module route, which also fails closed when the surface map was never populated
 by platform assembly. `admin_internal` actions are reachable only through the

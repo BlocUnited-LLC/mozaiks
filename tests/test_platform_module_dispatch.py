@@ -44,6 +44,38 @@ def test_service_business_validation_uses_existing_http_error_contract(monkeypat
     assert writes == []
 
 
+@pytest.mark.parametrize("method", ["get", "post"])
+@pytest.mark.parametrize("failure", ["missing", "key_error", "index_error", "lookup_error"])
+def test_record_not_found_is_404_without_masking_lookup_bugs(monkeypatch, method, failure):
+    from mozaiksai.core.runtime import ModuleRecordNotFoundError
+
+    error_type = {
+        "missing": ModuleRecordNotFoundError,
+        "key_error": KeyError,
+        "index_error": IndexError,
+        "lookup_error": LookupError,
+    }[failure]
+
+    class Handler:
+        async def get_record(self, ctx, *, id):
+            raise error_type("private foreign record identifier")
+
+    executor = ModuleExecutor()
+    executor.register("records", Handler(), action_method_map={"get_record": "get_record"})
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = _client()
+    path = "/api/modules/records/get_record"
+    response = client.get(path, params={"id": "absent"}) if method == "get" else client.post(path, json={"id": "absent"})
+    assert response.status_code == (404 if failure == "missing" else 500)
+    if failure == "missing":
+        assert response.json()["detail"]["error_code"] == "RECORD_NOT_FOUND"
+        assert response.json()["detail"]["error"] == "Record not found"
+    assert "private foreign record identifier" not in response.text
+
+
 class _OrdersHandler:
     async def list(self, ctx):
         return {"permissions": ctx.permissions}

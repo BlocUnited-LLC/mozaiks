@@ -22,6 +22,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Canonical generated get actions return HTTP 404 for records absent from the
+  caller's authorized scope, with a typed executor result that preserves server
+  errors for unrelated lookup bugs.
+
 - Existing app data contracts load without newly introduced ownership fields;
   present fields remain validated, and factory generation requires complete
   ownership metadata. Generated module task instructions preserve custom reads,
