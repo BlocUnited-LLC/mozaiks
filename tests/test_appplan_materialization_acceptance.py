@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
@@ -117,6 +118,11 @@ def _load_fixture_plan() -> dict[str, Any]:
 
 
 def _validation_pages(plan: dict[str, Any], files: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    if files:
+        return [
+            yaml.safe_load(content) for path, content in files.items()
+            if path.startswith("ui/pages/") and path.endswith(".yaml")
+        ]
     pages = []
     for page in plan.get("pages") or []:
         if not isinstance(page, dict):
@@ -189,6 +195,10 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                                             "module_id": "reports",
                                             "name": "reports",
                                             "entity_name": "reports",
+                                            "scope": "app",
+                                            "scope_field": "app_id",
+                                            "ownership": {"surface_id": "reports", "surface_kind": "module"},
+                                            "fields": [{"name": "app_id", "type": "string", "required": True}],
                                             "indexes": [
                                                 {
                                                     "name": "report_created_at",
@@ -394,13 +404,6 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "        return {\"report_id\": report_id, \"exported\": True, \"download_url\": f\"/exports/{report_id}.csv\"}\n"
                     ),
                 },
-                {
-                    "filename": "modules/reports/backend/policy.py",
-                    "content": (
-                        "def reports_scope(*, app_id=None, user_id=None):\n"
-                        "    return {\"app_id\": app_id, \"user_id\": user_id}\n"
-                    ),
-                },
             ],
         }
 
@@ -520,7 +523,7 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "      columns: [id, title, created_at]\n"
                         "      search: true\n"
                         "      selection: single\n"
-                        "      api_endpoint: /api/modules/reports/view_report\n"
+                        "      data_source: {module_id: reports, action_id: view_report}\n"
                         "  - id: export-action\n"
                         "    primitive: ActionButton\n"
                         "    title: null\n"
@@ -528,7 +531,7 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "      actions:\n"
                         "        - label: Export Report\n"
                         "          action_type: submit\n"
-                        "          href: /api/modules/reports/export_report\n"
+                        "          data_source: {module_id: reports, action_id: export_report}\n"
                     ),
                 },
             ],

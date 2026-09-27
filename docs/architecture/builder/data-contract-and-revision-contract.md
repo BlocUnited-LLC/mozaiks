@@ -205,6 +205,7 @@ Minimum shape:
         {
           "name": "projects",
           "scope": "app",
+          "scope_field": "app_id",
           "ownership": {
             "surface_id": "projects",
             "surface_kind": "module"
@@ -226,11 +227,7 @@ Minimum shape:
       ]
     }
   ],
-  "shared_collections": [],
-  "policies": {
-    "default_scope_field": "app_id",
-    "allow_destructive_migrations": false
-  }
+  "shared_collections": []
 }
 ```
 
@@ -239,7 +236,8 @@ Minimum shape:
 At minimum, each collection intent must declare:
 
 - `name`
-- `scope`
+- `scope` (`app`, `user`, `tenant`, or `workspace`)
+- `scope_field` (the declared field receiving the trusted scope identity)
 - `ownership.surface_id`
 - `ownership.surface_kind`
 - `fields`
@@ -550,7 +548,7 @@ Layer responsibilities:
 - `service.py` owns orchestration, validation, and event emission after state is
   committed; it calls repo methods for data access.
 - `repo.py` owns persistence access through `ctx.persistence`.
-- `policy.py` builds scope and domain filters.
+- `policy.py` is rendered deterministically from collection ownership, scope, and scope_field. Domain authorization stays in service.py.
 - `schemas.py` owns typed document shapes and pure normalization helpers.
 
 Runtime app loading behavior:
@@ -705,3 +703,35 @@ This document defines the missing database layer that those docs assume.
 
 
 
+
+## Deterministic Generated Module Policies
+
+Persistent generated modules declare collection ownership and an explicit
+`scope_field` in `data_contract`, including when using generated-scoped
+`ctx.persistence`. The field must appear in the collection's `fields` and its
+ownership must match the enclosing module surface. The scope maps exactly to
+`ctx.app_id`, `ctx.user_id`, `ctx.tenant_id`, or `ctx.workspace_id`; the runtime's
+app partition remains enforced independently. Missing metadata or identity fails
+closed; field names and ownership are never guessed.
+
+Code renders `modules/{module_id}/backend/policy.py` before worker output
+acceptance. ServiceAgent owns its artifact path but emits no policy source.
+Repositories import `scoped_query(context, filters, entity_name=collection_name)`
+for every read, update, and delete, and `scope_record(context, record,
+entity_name=collection_name)` for insertion. Request fields cannot replace the
+scope identity. Multiple collections require an explicit `entity_name`.
+Business authorization and lifecycle checks remain in `service.py`.
+
+For `scope: app` with `scope_field: app_id`, queries omit `app_id` because
+`ctx.persistence` injects that mandatory partition and rejects extra `app_id`
+filters. App scope on a custom field still filters that field. The runtime-owned
+fields `app_id`, `user_id`, `tenant_id`, and `workspace_id` may only be paired
+with their matching scope, since persistence also stamps those identities on
+insert.
+
+A refinement that changes collection scope, ownership, or `scope_field` must
+also include a `business_services` task owning that module's `backend/policy.py`.
+Changing only the persistence contract leaves the old policy inconsistent and
+assembly rejects it. Deterministic rendering does not expand task ownership.
+Existing policy artifacts also require their matching data contract at assembly;
+missing scope metadata cannot turn a policy into unconstrained custom code.

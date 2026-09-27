@@ -418,7 +418,7 @@ class TestListSerializerContracts:
 
     Rules under test:
     - module_contract.hard_constraints declares the list_* serializer requirement.
-    - module_contract.hard_constraints declares the explicit items.properties requirement.
+    - module_contract.hard_constraints declares the constructed items/total read response.
     - ServiceAgent instruction 20a requires allowlist serialization for list_* actions.
     - The example in ServiceAgent uses a neutral domain (not MozaiksPay/payment provider/wallet/billing).
     - The example helper name follows the _serialize_{entity}_row pattern.
@@ -427,13 +427,12 @@ class TestListSerializerContracts:
     - The rule references backend/schemas.py as the location for helpers.
     """
 
-    def test_module_contract_has_list_output_schema_items_constraint(self):
+    def test_module_contract_has_constructed_list_response_constraint(self):
         data = _load_yaml(_FILE_CONTRACTS)
         constraints = data["task_contracts"]["module_contract"]["hard_constraints"]
         constraints_str = "\n".join(str(c) for c in constraints)
-        assert "items.properties" in constraints_str, (
-            "module_contract hard_constraints must require explicit items.properties for list_* output_schema"
-        )
+        assert "items (array of objects)" in constraints_str
+        assert "total (integer)" in constraints_str
         assert "list_*" in constraints_str or "list_" in constraints_str, (
             "module_contract hard_constraints must reference list_* actions"
         )

@@ -176,8 +176,8 @@ def _wallet_replay_plan() -> dict[str, Any]:
                     {
                         "section_id_hint": "wallet-summary",
                         "primitive": "ResourceTable",
+                        "data_source": {"module_id": "wallet", "action_id": "get_wallet_summary"},
                         "config_hint": {
-                            "api_endpoint": "/api/modules/wallet/get_wallet_summary",
                         },
                     }
                 ],
@@ -370,8 +370,8 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
                     {
                         "section_id_hint": "billing-status",
                         "primitive": "SummaryStrip",
+                        "data_source": {"module_id": "mozaikspay", "action_id": "get_subscription_status"},
                         "config_hint": {
-                            "api_endpoint": "/api/modules/mozaikspay/get_subscription_status",
                             "method": "POST",
                         },
                     }
@@ -385,8 +385,8 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
                     {
                         "section_id_hint": "usage-status",
                         "primitive": "SummaryStrip",
+                        "data_source": {"module_id": "mozaikspay", "action_id": "get_usage_status"},
                         "config_hint": {
-                            "api_endpoint": "/api/modules/mozaikspay/get_usage_status",
                             "method": "POST",
                         },
                     }
@@ -681,7 +681,7 @@ async def test_managed_wallet_replay_normalizes_assembles_and_scans(tmp_path: Pa
     assert adapter_task["capability_pack_id"] == "wallet"
     assert facade_task["capability_pack_id"] == "wallet_dashboard"
     assert "wallet.adapter" in facade_task["depends_on"]
-    assert page["sections_hint"][0]["config_hint"]["api_endpoint"] == "/api/modules/wallet_dashboard/get_wallet_summary"
+    assert page["sections_hint"][0]["data_source"] == {"module_id": "wallet_dashboard", "action_id": "get_wallet_summary"}
 
     assembled = await assemble_app_tasks(context_variables=ctx)
     files = _file_map(assembled)
@@ -734,11 +734,11 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     assert facade_task["capability_pack_id"] == "billing_portal"
     assert cached_plan["pages"][0]["page_type_hint"] == "analytics_dashboard"
     assert cached_plan["pages"][1]["page_type_hint"] == "analytics_dashboard"
-    assert cached_plan["pages"][0]["sections_hint"][0]["config_hint"]["api_endpoint"] == (
-        "/api/modules/billing_portal/get_subscription_status"
+    assert cached_plan["pages"][0]["sections_hint"][0]["data_source"] == (
+        {"module_id": "billing_portal", "action_id": "get_subscription_status"}
     )
-    assert cached_plan["pages"][1]["sections_hint"][0]["config_hint"]["api_endpoint"] == (
-        "/api/modules/billing_portal/get_usage_status"
+    assert cached_plan["pages"][1]["sections_hint"][0]["data_source"] == (
+        {"module_id": "billing_portal", "action_id": "get_usage_status"}
     )
 
     candidates = {file["filename"]: file["content"] for file in resolve_managed_capability_templates(
@@ -746,6 +746,14 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     )}
     candidates.update({file["filename"]: file["content"] for output in _mozaikspay_task_outputs().values()
                        for file in output["code_files"]})
+    pricing_candidate = yaml.safe_load(candidates["ui/pages/pricing.yaml"])
+    catalog = pricing_candidate["sections"][0]["config"]
+    del catalog["api_endpoint"]
+    catalog["data_source"] = {"module_id": "billing_portal", "action_id": "list_plans"}
+    manage = pricing_candidate["sections"][1]["config"]["actions"][0]
+    del manage["href"]
+    manage["data_source"] = {"module_id": "billing_portal", "action_id": "open_billing_portal"}
+    candidates["ui/pages/pricing.yaml"] = yaml.safe_dump(pricing_candidate)
     accepted = await execute_file_replay(ctx.data, candidates)
     assembled = await assemble_app_tasks(context_variables=ctx)
     assert ctx.get("app_task_batch_results") == accepted

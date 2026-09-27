@@ -284,8 +284,8 @@ archetypes:
       - Put business logic in the service layer, persistence in the repo layer.
       - Publish only declared domain events.
       - Use public/public_readonly api_surface only for anonymous-safe read actions. Tenant, workspace, user, mutation, and admin actions require authenticated HTTP dispatch by default.
-      - Build resource scope filters from ctx.app_id, ctx.tenant_id, ctx.workspace_id, ctx.user_id, and ctx.permissions in backend/policy.py rather than trusting request payload scope fields.
-      - list_* service methods must serialize repo records through an allowlist helper defined in backend/schemas.py before returning. Never pass raw repo documents to callers. The allowlist returns only the fields declared in module.yaml output_schema items.properties; unknown or future DB fields are excluded by default.
+      - Code renders backend/policy.py from data_contract collection scope and scope_field. In repo.py use scoped_query(context, filters, entity_name=collection_name) and scope_record(context, record, entity_name=collection_name); implement additional domain authorization in service.py.
+      - list_* service methods must serialize repo records through an allowlist helper imported from accepted backend/schemas.py, or defined in owned service.py when absent, before returning. Never pass raw repo documents to callers. The allowlist returns only explicitly declared response fields or, for constructed reads, the data_contract collection fields; unknown or future DB fields are excluded by default.
       - If the module stores records that include user_id (i.e. it owns user-scoped data), set module.user_data_scope=true in module.yaml and generate backend/account_data_handler.py implementing the AccountDataHandler protocol (delete_user_data + export_user_data). The OSS loader auto-registers the handler at startup. Do not declare user_data_scope=true for modules that only reference user_id as a foreign key without owning the user's primary records (e.g. audit logs that reference but do not belong to the user).
 
   messaging:
@@ -420,7 +420,7 @@ archetypes:
       - Durable app-specific classes are module-owned records scoped to
         resource_type/resource_id plus app/tenant/workspace context; they are
         not only JWT roles or frontend state.
-      - backend/policy.py must derive access from ctx.user_id, ctx.tenant_id,
+      - Domain authorization in backend/service.py must derive access from ctx.user_id, ctx.tenant_id,
         ctx.workspace_id, ctx.permissions, and module-owned membership records.
         Do not trust request payload user_id, tenant_id, workspace_id, class,
         role, or permission fields as authorization truth.

@@ -276,49 +276,7 @@ def _load_plan() -> dict[str, Any]:
 
 
 def _canonical_data_contract() -> dict[str, Any]:
-    return {
-        "version": "1",
-        "app_id": "project_management",
-        "surfaces": [
-            {
-                "surface_id": "projects",
-                "surface_kind": "module",
-                "collections": [
-                    {
-                        "module_id": "projects",
-                        "name": "projects",
-                        "entity_name": "projects",
-                        "indexes": [
-                            {
-                                "name": "project_owner_created_at",
-                                "keys": [
-                                    {"field": "owner_id", "order": 1},
-                                    {"field": "created_at", "order": -1},
-                                ],
-                            }
-                        ],
-                    }
-                ],
-            },
-            {
-                "surface_id": "tasks",
-                "surface_kind": "module",
-                "collections": [
-                    {
-                        "module_id": "tasks",
-                        "name": "tasks",
-                        "entity_name": "tasks",
-                        "indexes": [
-                            {
-                                "name": "task_project_status",
-                                "keys": [["project_id", 1], ["status", 1]],
-                            }
-                        ],
-                    }
-                ],
-            },
-        ],
-    }
+    return {**_load_plan()["data_contract"], "app_id": "project_management"}
 
 
 def _canonical_schema_migration() -> dict[str, Any]:
@@ -474,7 +432,6 @@ def _module_output(module_id: str) -> dict[str, Any]:
                 "contract_refs": ["module_yaml.actions[*]", "events_yaml.events[*]"],
                 "content": textwrap.dedent(
                     f"""
-                    from .policy import scoped_query
                     from .repo import {class_name}Repo
                     from .schemas import build_record
 
@@ -490,7 +447,7 @@ def _module_output(module_id: str) -> dict[str, Any]:
                             return stored
 
                         async def list_{module_id}(self, ctx, *, filters=None):
-                            query = scoped_query(filters or {{}})
+                            query = {{key: value for key, value in (filters or {{}}).items() if key != "limit"}}
                             records = await self.repo.list(ctx, query=query, limit=int((filters or {{}}).get("limit") or 50))
                             return {{"items": records, "count": len(records)}}
                     """
@@ -504,6 +461,9 @@ def _module_output(module_id: str) -> dict[str, Any]:
                 "contract_refs": ["data_contract.surfaces[*].collections[*]"],
                 "content": textwrap.dedent(
                     f"""
+                    from .policy import scoped_query, scope_record
+
+
                     class {class_name}Repo:
                         async def _collection(self, ctx):
                             persistence = getattr(ctx, "persistence", None)
@@ -513,30 +473,13 @@ def _module_output(module_id: str) -> dict[str, Any]:
 
                         async def create(self, ctx, *, record):
                             collection = await self._collection(ctx)
+                            record = scope_record(ctx, record)
                             await collection.insert_one(record)
                             return record
 
                         async def list(self, ctx, *, query=None, limit=50):
                             collection = await self._collection(ctx)
-                            return await collection.find_many(query or {{}}, limit=limit)
-                    """
-                ).strip()
-                + "\n",
-            },
-            {
-                "path": f"modules/{module_id}/backend/policy.py",
-                "kind": "policy",
-                "purpose": "Scope filter helpers.",
-                "contract_refs": ["module_yaml.permissions[*]"],
-                "content": textwrap.dedent(
-                    """
-                    def scoped_query(filters):
-                        query = {}
-                        for key in ("project_id", "status", "owner_id"):
-                            value = filters.get(key)
-                            if value:
-                                query[key] = value
-                        return query
+                            return await collection.find_many(scoped_query(ctx, query), limit=limit)
                     """
                 ).strip()
                 + "\n",
@@ -860,7 +803,7 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
         )
     )
     listed_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_a", params={}, authority=trusted_framework_authority())
+        ModuleRequest(module="projects", action="list_projects", app_id="app_a", user_id="user_1", params={}, authority=trusted_framework_authority())
     )
     created_task = await executor.execute(
         ModuleRequest(
@@ -872,10 +815,10 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
         )
     )
     listed_tasks = await executor.execute(
-        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", params={"project_id": "project_1"}, authority=trusted_framework_authority())
+        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", user_id="user_1", params={"project_id": "project_1"}, authority=trusted_framework_authority())
     )
     app_b_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_b", params={}, authority=trusted_framework_authority())
+        ModuleRequest(module="projects", action="list_projects", app_id="app_b", user_id="user_1", params={}, authority=trusted_framework_authority())
     )
 
     assert created_project.success is True

@@ -354,7 +354,7 @@ agents:
          - Only infer page structure from scratch when `experience_spec` is null.
       6. Derive the canonical entities and required operations for each entity.
          - For durable CRUD entities (create/list/update/delete/status changes), plan generated module persistence explicitly:
-           - populate top-level `data_contract` with the canonical projects/tasks collection plan;
+           - populate top-level `data_contract` with collection ownership, fields, scope (app/user/tenant/workspace), and scope_field. Code binds that declared field to the matching trusted runtime identity for deterministic policy generation;
            - keep `data_contract` null only when the app has no durable app-owned persistence;
            - when `data_contract` is needed, keep it generic and emit `data/contract.json`; do not plan ad hoc shared folders or host-internal helper names;
            - populate top-level `pending_schema_migration` when indexes or additive collection setup are needed, otherwise set it to null;
@@ -520,9 +520,10 @@ agents:
         - Do not use `profile` or account wording to mean a generic settings page. User account/profile routes are platform-owned at `/me`; resource settings pages should name the managed object in the route and module contract.
         - Include one hint per expected UI section. Downstream page schema generation will refine and extend these — do not leave them empty.
         - Each hint must include `primitive` (exact registered name), `config_hint` (JSON-encoded partial config with required fields, or null), `section_id_hint` (kebab-case), and `title_hint`.
-        - `config_hint` must be a JSON-encoded string or null. JSON-encode the config object before setting it. Example: `"{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/modules/tasks/list_tasks\"}"`.
-        - The `api_endpoint` value inside config_hint must be a canonical module action path using the exact generated action id: `/api/modules/{module_id}/{action_id}`. If the module action is `list_tickets`, the endpoint is `/api/modules/tickets/list_tickets`; do not shorten it to `/api/modules/tickets/list` or `/api/tickets`.
-        - Upstream design endpoint examples are not executable contracts. Translate illustrative URLs to planned module actions in config_hint AND build_tasks.initial_message. Preserve product intent without instructing workers to call undeclared routes. A summary page needs a real data action in an owning module, not merely a ui_only page task.
+        - `config_hint` must be a JSON-encoded string or null, containing only presentation/response-binding fields. Example: `"{\"columns\": [\"id\", \"name\"]}"`.
+        - Set `data_source` to the typed `{module_id, action_id}` reference for the section's owning module action. Never write endpoint URL strings in config_hint or task instructions. Static sections use null.
+        - Preserve the exact `primary_entities` and list/detail section intent. Code constructs missing canonical `list_{collection_name}` and `get_{collection_name}` read contracts from declared collection ownership before implementation. A summary needs an explicitly declared aggregate action and matching response keys; never invent a dashboard module from the page name.
+        - Upstream design URLs are illustrative. Choose canonical module/action identities, preserve product intent, and let code render transport paths. Unknown or ambiguous ownership requires contract correction.
         - Required fields per primitive (consult [SHIPPED PAGE PRIMITIVES] if injected):
           - DataTable: `columns` (list of string column names or column objects)
           - Form: `fields` (list of {name, label, type} objects)
@@ -597,7 +598,7 @@ agents:
         - `initial_message` must pass the pack's entities, actions, capability ids, events, subscriptions/reactions, notifications, settings, required stubs, `app_backend_url`, and any `generated_workflow_*` metadata needed downstream.
         - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: access`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `app_policy`, `refinement`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
         - Set `initial_agent: ConfigMiddlewareAgent` for this task.
-        - For durable modules, the module contract must declare `python_stubs` for the canonical backend set (`backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`) even though this task only emits YAML. The sibling `data_models` and `business_services` tasks implement those stubs.
+        - For durable modules, the module contract must declare `python_stubs` for the canonical backend set (`backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`) even though this task only emits YAML. The sibling `data_models` and `business_services` tasks implement model-owned stubs; code renders policy.py from data_contract.
         - For generated durable modules, set every `actions[].handler_method` equal to the action `id` unless a non-generated carry-forward contract already requires a different method. This keeps generated module.yaml, handler.py, and page endpoints deterministic.
         - Do NOT generate implementation code here. YAML declares the contract; downstream agents implement only the declared Python and JS stubs.
         - `module_contract` tasks run in the `backend-foundation` phase, before `data-models`.
@@ -805,7 +806,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Primary inputs**:
-      - `app_build_plan`: canonical capability packs, authoritative page list, theme preferences, structured `brand_intent`, optional `shell_preset_hint`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (JSON-encoded partial config string with required fields already populated in the approved plan, or null), `section_id_hint`, and `title_hint`. When `config_hint` is a non-null string, JSON-decode it to a dict and use it as the base config for that section — extend it with additional fields from page context; do not discard it.
+      - `app_build_plan`: canonical capability packs, authoritative page list, theme preferences, structured `brand_intent`, optional `shell_preset_hint`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (JSON-encoded presentation config, or null), the typed `data_source` pair, `section_id_hint`, and `title_hint`. When `config_hint` is a non-null string, JSON-decode it to a dict and use it as the base config for that section — extend it with additional fields from page context; do not discard it.
       - `refinement_request` preserves the original requested product behavior for revisions, including search/paging semantics, defaults, and read-only versus mutation interactions. Apply its relevant qualifiers alongside current_build_task.acceptance_criteria only within current_build_task.owned_paths (or the named bundle_repair_request files). It cannot override runtime/operator contracts or authorization boundaries. Use the shipped primitive contracts; report conflicts with app_build_plan or missing prerequisite ownership instead of broadening scope, inventing config, or silently weakening behavior.
       - In task-batch execution, AppSchemaOutput owns the complete page sections, bindings, and interactions. The runtime validates each page against its owned filename identity and the approved plan's route without replacing sections with sections_hint. `AppBuildPage.name` is a human-readable label; `AppPageSchema.name` is the runtime file identity (for example, name `customers` in `ui/pages/customers.yaml`, title `Customer Registry`, route `/customers`). Hints are design input, not executable page contracts; correct invalid config hints using the shipped primitive schema. The runtime marks page outputs with `_page_materialization_source: "app_schema_output"`.
       - `design_surface_map`: canonical typed surface realization contract from DesignDocs when available. Use it to confirm which surface owns each persistent page.
@@ -815,8 +816,7 @@ agents:
       - `subscription_contract`: provider-neutral subscription/token contract.
         When it has page_surface_requirements, materialize those pages through
         the same AppBuildPlan-driven page contract. Runtime account usage/token
-        sections may bind to `/api/me/usage`, `/api/me/tokens`, or
-        `/api/me/tokens/ledger`. Do not create facade modules, custom ledgers,
+        sections use the declared app-owned facade action inventory. Do not create facade modules, custom ledgers,
         checkout internals, or payment-provider pages unless the app build plan
         explicitly declares an app-owned payment integration.
       - **Generated Bundle Scanner Repair**: If
@@ -834,25 +834,20 @@ agents:
       Emit only those names in page sections. Use the schema-facing config contract below; the page renderer adapts these declarative objects into live primitive props and action handlers.
       - An action is one of five shapes chosen by `action_type`. Emit only the fields that shape declares; a field belonging to another shape is rejected, and there are no null placeholders to fill in. Every shape carries `{ label, action_type }` and may carry `id?`, `variant?`, `requires_selection?`, `closes_modal?`.
         - `navigate` + `href`: an absolute app route. Supports `{field}` interpolation.
-        - `submit` + `href` (+ `payload?`): one module action endpoint.
-        - `delete` + `href` (+ `payload?`): one module action endpoint for the delete command.
+        - `submit` + `data_source` (+ `payload?`): a typed module/action pair.
+        - `delete` + `data_source` (+ `payload?`): a typed module/action pair for the delete command.
         - `event` + `event_type` (+ `modal_id?`, `payload?`): emits a `ui.*` reaction on this page. For `ui.modal.open` / `ui.modal.close`, name the target Modal in `modal_id`.
         - `workflow` + `workflow_id` (+ `context_variables?`): launches a runtime workflow.
-      - Every `submit` or `delete` action needs one fixed `/api/modules/{module_id}/{action_id}` in its own `href`; it cannot inherit the table endpoint or select an endpoint from payload. When create and update are different module actions, use separate create/edit forms or modals with separate action URLs. Create forms omit selected-row prefill; edit forms use `initial_values_key: selected_row` and bind the identifier in payload.
+      - Every `submit` or `delete` action needs its own typed `data_source` pair; it cannot inherit the table data source or select an action from payload. When create and update are different module actions, use separate create/edit forms or modals with separate action references. Create forms omit selected-row prefill; edit forms use `initial_values_key: selected_row` and bind the identifier in payload.
       - Page actions that mutate durable app state should submit to module actions/API endpoints.
       - Copy every module action id exactly from dependency module.yaml outputs (or generated_files in repair mode). Ownership filtering belongs in backend policy; never add `my_` prefixes to endpoint names unless that exact action is declared. Use the contract's request/response field names for form payloads, table bindings, and summary keys.
       - If design hints or task prose contain an illustrative URL that conflicts with module.yaml, use the actual module action contract. Do not preserve a nonexistent API path to match a design example. Missing backend behavior requires contract/implementation repair, not a fabricated URL or hard-coded live data.
       - Page actions that launch agent sessions must use `action_type: workflow` with `workflow_id` set to the runtime workflow registry id.
       - Page `event_type` values are for `ui.*` primitive reactions only.
-      - `DataTable`: sortable, filterable, paginated table. Config: `columns` (strings or column objects), optional `api_endpoint`, optional `data`, `selection` (none|single|multi), `pagination`, `page_size`, `search`, `actions`, `empty`.
-      - `api_endpoint` must be either a canonical module action path
-        `/api/modules/{module_id}/{action_id}` or one of the supported
-        platform-owned read endpoints `/api/me/usage`, `/api/me/tokens`, or
-        `/api/me/tokens/ledger`. Do not include query strings or fragments; put
-        limits in `page_size` and put filters/selected row values in `payload`,
-        form state, or the module action input schema.
+      - `DataTable`: sortable, filterable, paginated table. Config: `columns` (strings or column objects), optional `data_source`, optional `data`, `selection` (none|single|multi), `pagination`, `page_size`, `search`, `actions`, `empty`.
+      - `data_source` is the typed `{module_id, action_id}` pair selected from the closed module-action inventory in accepted prerequisite module.yaml files (`dependency_task_outputs`, or `generated_files` for repairs). Code renders the endpoint. Never emit api_endpoint or HTTP endpoint href strings. Unknown modules/actions fail materialization; do not guess ownership from a URL, page name, or similar action name. Put limits in `page_size` and selected row values in payload/form state.
         - `Form`: declarative form. Config: `fields` [{name, label, type (text|email|password|number|textarea|select|checkbox), required, placeholder, options}], optional `initial_values_key: selected_row` for modal edit forms, `layout`, `columns`, `submit_label`, `submit_action`, `cancel_action`, `disabled`. Use ui.modal.open with payload modal_id. Selected table records are passed into the modal and its children as selected_row. Update/delete action payloads must bind the identifier from {selected_row.<id_field>}; never ask users to enter IDs. Explicit submit payloads also include editable values as {form.<field>}. Null submit payload sends all form values.
-      - `SummaryStrip`: compact page summary. Config: `items` with 1-4 `{label, value?, value_key?, detail?, detail_key?, trend_key?, format?, trend_format?, trend_label?}` entries. Use `value_key` when the section has an `api_endpoint`; use `trend_key` only when the module action output represents a real historical comparison. Do not hard-code live metrics or fake percentage changes.
+      - `SummaryStrip`: compact page summary. Config: `items` with 1-4 `{label, value?, value_key?, detail?, detail_key?, trend_key?, format?, trend_format?, trend_label?}` entries. Use `value_key` when the section has a `data_source`; use `trend_key` only when the module action output represents a real historical comparison. Do not hard-code live metrics or fake percentage changes.
       - `Metric`: one metric inside a purposeful detail surface. Config: `label`, `value` or `value_key`, optional `detail`/`detail_key`, optional `trend_key`.
       - `StatusPill`: one compact state label. Config: `label`, optional `tone`.
       - `Grid`: responsive layout container. Config: `columns` (1-6), `gap` (sm|md|lg), `children` (inline primitive list). Use only when layout is essential.
@@ -911,11 +906,11 @@ agents:
 
       **External-redirect and post-redirect confirmation flows**:
       When an app includes an external-redirect checkout or payment flow (where the user is sent to a hosted third-party page and returned via redirect), the following page types and escape-hatch rules apply:
-      - Checkout initiation page — `page_type: wizard`, `shell_mode: focused`, `layout: full-width`. Form section whose `api_endpoint` calls the app-owned checkout module action (e.g. `initiate_checkout`). The action returns a redirect URL; the page navigates there on submit. Fully declarative.
-      - Static cancellation/return page — `page_type: landing`, `shell_mode: focused`, `layout: full-width`. No `api_endpoint` required. Panel with static copy and ActionButton back to checkout or cart route. Fully declarative.
+      - Checkout initiation page — `page_type: wizard`, `shell_mode: focused`, `layout: full-width`. Form submit_action whose `data_source` selects the app-owned checkout module action (e.g. `initiate_checkout`). The action returns a redirect URL; the page navigates there on submit. Fully declarative.
+      - Static cancellation/return page — `page_type: landing`, `shell_mode: focused`, `layout: full-width`. No `data_source` required. Panel with static copy and ActionButton back to checkout or cart route. Fully declarative.
       - Order/payment history page — `page_type: record_list`, `shell_mode: workspace`. DataTable or ResourceList binds to the app-owned checkout module list action (e.g. `list_orders`). Use StatusPill for payment status column. Declare an `empty` state. Fully declarative.
       - Post-redirect confirmation page — MUST use `custom_route_bundle` when the page requires all of: (a) reading URL query params on mount (e.g. a session token from the redirect URL), (b) polling an app-owned module action until state changes, (c) conditional rendering based on the polled response (loading → confirmed → error/timeout). Declarative AppPageSchema has no mechanism for URL query param forwarding, polling loops, or response-conditional sections. Inside the custom route: show LoadingState while polling, Panel or SummaryStrip when confirmed, ErrorState on timeout. CRITICAL: Do NOT display confirmed/success state from the redirect URL alone — wait for the app-owned module action to reflect the confirmed state after the backend has processed the event.
-      Note: `api_endpoint` is a POST path with no query string support. There is no declarative mechanism to read URL query params and forward them to a section endpoint. This is the primary reason post-redirect confirmation pages require `custom_route_bundle`.
+      Note: code renders each `data_source` as a fixed module action endpoint, without query string interpolation. There is no declarative mechanism to read URL query params and forward them to a section endpoint. This is the primary reason post-redirect confirmation pages require `custom_route_bundle`.
 
       **Scoped route authorization**:
       - Use route-level `meta.routeAuth` when a route includes a scoped resource in the route path or query string and route visibility depends on ownership, membership, tenant/workspace access, or an invitation/access state. Common examples: `/projects/:projectId/settings`, `/teams/:teamId/members`, `/workspaces/:workspaceId/billing`, or a route that reads `?project=...`.
@@ -1053,7 +1048,7 @@ agents:
           b. Choose a `layout` consistent with content: record_list, wizard, landing, and pages with a PageHeader followed by a primary table → full-width; gallery and peer dashboard sections → grid; split_view → sidebar. Do not use grid merely because the page contains several vertically ordered sections.
           c. Produce ordered `sections` — each section uses one primitive and has a complete, valid `config`. Let `page_type` guide primitive selection (see archetype rules above).
              **State coverage rules (enforced by the quality gate):**
-             - Every `DataTable` or `ResourceTable` section with an `api_endpoint` MUST declare a non-null `empty` field with meaningful copy tailored to the entity (not generic "No items found").
+             - Every `DataTable` or `ResourceTable` section with a `data_source` MUST declare a non-null `empty` field with meaningful copy tailored to the entity (not generic "No items found").
              - Every page that has at least one data-fetching section SHOULD include an `ErrorState` section (or use the table's `error_title`/`error_message` fields) so the user sees a recoverable message instead of a silent blank.
              - Use `LoadingState` as an explicit section only for pages where the entire page content is gated on a slow async operation (e.g. polling, generation). Inline skeleton behaviour is handled by the primitive runtime.
              - Use `PermissionState` as a section when the page — or a named section within it — is expected to be visible to multiple roles but its data is gated to a subset. Emit `PermissionState` after the section it guards so the guard message appears in context. Do NOT use `PermissionState` as a route-level gate; use `meta.routeAuth` for that.
@@ -1128,7 +1123,7 @@ agents:
                 "id": "recent-activity",
                 "primitive": "DataTable",
                 "title": "Recent Activity",
-                "config": { "columns": ["id", "action", "user", "created_at"], "api_endpoint": "/api/modules/activity/list_recent_activity", "selection": "none", "actions": [] },
+                "config": { "columns": ["id", "action", "user", "created_at"], "data_source": {"module_id": "activity", "action_id": "list_recent_activity"}, "selection": "none", "actions": [] },
                 "event_triggers": ["ui.datatable.refresh"],
                 "roles": null
               }
@@ -1377,7 +1372,7 @@ agents:
       - If `bundle_repair_target == "DatabaseAgent"`, repair only the data files named in bundle_repair_request using generated_files and the approved app_build_plan.data_contract. Emit the corrected database_files/code_files; do not alter the plan or other file families.
       - When app_build_plan.data_contract exists, preserve its fields and required flags exactly. Required describes the stored document, not whether the user enters a value in a form. Do not re-derive a conflicting contract from older design documents.
       - Read `data_contract` from context; it is the canonical typed database source of truth.
-      - Read `data_contract` from context when present; it is the opt-in contract for durable app-owned collections or explicit existing database integration.
+      - Read `data_contract` from context when present; it declares durable app-owned collections or explicit existing database integration. Preserve collection scope and scope_field for deterministic policy generation.
       - Validate that persistent surfaces and collections are represented in `data_contract`.
       - Stage the app artifact at `data/contract.json`.
       - Stage `data/contract.json` only when `data_contract` is non-null.
@@ -1401,7 +1396,7 @@ agents:
       - `app_build_plan`: canonical entity list, required operations, roles, and integration constraints.
       - `database_design_document`: design-time Markdown schema doc from DesignDocs.
       - `data_contract`: canonical typed database ownership, field, index, and migration intent.
-      - `data_contract`: optional app data contract. Null for ordinary generated apps.
+      - `data_contract`: required planning ownership/scoping metadata for persistent generated modules. Null only for apps without generated persistent modules.
       - **Previous Validation Errors**: If this is a retry, review chat history for `AppValidation` errors and fix them.
 
       **Downstream**:
@@ -1784,13 +1779,13 @@ agents:
          - **Provider output**: actions must return allowlisted DTOs only, such as `eligible`, `resource_type`, `resource_id`, `user_id`, `class_ids`, `capabilities`, `decision_inputs`, and policy version/source metadata. Never return raw membership records, secrets, payment fields, ledger rows, or hosted-provider details.
          - **Boundaries**: policy hooks do not execute payments, grant equity, mutate subscription state, run hosted-product provider logic, or define Mozaiks App governance/revenue/campaign behavior.
       10. **admin.yaml**: emit only when the approved task owns `contracts/admin.yaml` and requires module admin panels. Otherwise set `admin_yaml: null`. For an authorized admin manifest, use `schema_version: mozaiks.admin.v2` and derive panels from the module's declared actions:
-         - **One record panel per primary list/query action**: for each `list_*`, `search_*`, or collection-returning `get_*` action, emit one `ResourceTable` or `DataTable` panel. Bind it via `config.api_endpoint: /api/modules/{module_id}/{action_id}`. Set `layout: full-width`.
+         - **One record panel per primary list/query action**: for each `list_*`, `search_*`, or collection-returning `get_*` action, emit one `ResourceTable` or `DataTable` panel. Bind it via `config.data_source: {module_id, action_id}` from the accepted action inventory. Set `layout: full-width`.
          - **SummaryStrip panel for stats/metrics**: if the module declares a `*_stats`, `*_summary`, `*_metrics`, or `get_{entity}_count` action, add a `SummaryStrip` panel in the same section as the record panel and bind it to that action. Use `value_key` only for fields declared by the action output schema. Use `trend_key` only when the action contract explicitly describes a real historical comparison or metrics snapshot; otherwise omit trend fields so the UI renders no fake change value.
          - **Row/toolbar actions for mutations**: approval, write, and status-change actions (`approve_*`, `reject_*`, `publish_*`, `archive_*`, `update_*`) are surfaced as `config.actions[]` entries on the primary record panel — not as separate panels.
          - **Page placement from module domain**: billing/subscription/payment/invoice entities → `page: billing`; user/account/member/profile entities → `page: access`; request/queue/approval/job entities → `page: operations`; usage/quota/limit/metric entities → `page: usage`; setting/preference/config entities → `page: settings`; audit/event-log/history/timeline entities → `page: activity`; connector/webhook/OAuth/integration entities → `page: integrations`; ticket/helpdesk/support entities → `page: support`; all others → `page: overview`. The `page` value must reference a page id declared in the app's `admin/admin_registry.yaml`.
          - Do not invent admin panels for every durable module. If no admin panels are needed, use null and omit the file.
          - Every panel must set `page` (not `section`) to a page id from `admin/admin_registry.yaml`. Use `renderer: schema` unless a custom component was explicitly requested. When declaring `hooks`, use the format `module.path:function_name` (e.g. `backend.admin:resolve_metrics`); every hook must be module-local and mirrored in `python_stubs`.
-         - `renderer: schema` panels must declare `layout` plus `sections[]`, reusing the same primitive section contract as `ui/pages/*.yaml`. Bind data through section-level `config.api_endpoint` values calling `/api/modules/{module_id}/{action_id}`.
+         - `renderer: schema` panels must declare `layout` plus `sections[]`, reusing the same primitive section contract as `ui/pages/*.yaml`. Bind data through section-level `config.data_source` module/action pairs; code renders URLs.
          - Put panel actions inside section configs (e.g. `DataTable` toolbar actions, `Form` submit actions), not as ad hoc top-level panel fields.
          - If `renderer: custom_component`, emit a stable `component` registry key and add a matching `js_stubs` entry.
       11. Set `python_stubs` to typed stub objects downstream agents must create.
@@ -2425,8 +2420,8 @@ agents:
     content: |-
       - Generate the module backend implementation files declared in the supplied module contracts and assigned to current_build_task.owned_paths.
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
-      - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
-      - Emit every path listed in `current_build_task.owned_paths`. A path you own but do not write fails the whole batch, discarding every other task in the run - the batch checks emitted files against owned_paths, it does not infer intent from them.
+      - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
+      - Emit every model-owned path listed in `current_build_task.owned_paths`. Code renders the owned `backend/policy.py` from data_contract collection scope and scope_field; omit policy.py from python_files and code_files. Missing declared scope requires contract correction, never an invented policy stub.
       - That includes `backend/account_data_handler.py` whenever it appears in your owned_paths. It is required of ANY module with `user_data_scope: true`, not only membership-style modules: a habit registry owns user-scoped records and needs account lifecycle support exactly as a membership module does. Implement export and delete of this module's records by `app_id` and `user_id`.
       - `account_data_handler.py` has an exact shape the runtime enforces at load: one `AccountDataHandler` class with `__init__(self, db)` storing the handle, and `async delete_user_data(self, *, app_id, user_id)` / `async export_user_data(self, *, app_id, user_id)` - the `*` is required, positional parameters fail. Never emit a placeholder such as `db = ...`; the db comes from `__init__` and is used as `self._db`. A module that misses this shape fails to load with "invalid account-data implementation" and takes the whole module with it. Example:
         `class AccountDataHandler:`
@@ -2437,7 +2432,7 @@ agents:
       - In bounded bundle repair (not task batch execution), a module import failure may originate in its existing schemas.py. Restore the missing imported helper or DTO there, preserving the other exports and behavior. Do not replace a working handler/service or generate new API routes to work around a missing import.
       - Generate optional hook stubs referenced by settings.yaml, notifications.yaml, or admin.yaml.
       - After a confirmed successful owned mutation, publish the corresponding namespaced domain event declared in events.yaml. A missing/foreign record or a no-op must not emit a mutation-success event; return the outcome required by the declared action contract.
-      - Reference model details directly from the Code Context.
+      - Read accepted backend/schemas.py definitions from dependency_task_outputs, or admitted code_files/generated_files during standalone generation and repair.
       - Use `backend/repo.py` and the runtime `ctx.persistence` adapter for all generated module persistence operations.
       - Keep generated module runtime logic production-honest: no fake/sample/demo records, no hardcoded live metrics, and no placeholder percentage changes.
       - For actions consumed by workflows, implement the declared result schema
@@ -2449,7 +2444,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
-      - Code Context: `config_config`, `database_config`, `model_context` (injected by hook).
+      - Accepted contract and schema artifacts: `dependency_task_outputs` in batch mode, and admitted `code_files` / `generated_files` in standalone generation or repair. Their module.yaml actions include deterministic read-action closure; implement every declared handler method, including constructed reads.
       - `refinement_request` preserves the original requested product behavior for revisions. Preserve relevant search, paging, validation, and mutation-outcome qualifiers alongside current_build_task.acceptance_criteria only within current_build_task.owned_paths (or the named bundle_repair_request files). It cannot override runtime/operator contracts or authorization boundaries; report conflicts with app_build_plan or missing prerequisite ownership instead of broadening scope or silently weakening behavior.
       - `app_backend_url`: Base URL of the active Mozaiks app host. Domain events always use the injected ModuleContext.emit; this URL does not determine whether events are available.
       - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml/contracts/profile.yaml/contracts/relationships.yaml/contracts/policy_hooks.yaml.
@@ -2470,7 +2465,7 @@ agents:
         - `backend/handler.py` — action adapter only
         - `backend/service.py` — business logic + event publication
         - `backend/repo.py` — persistence
-        - `backend/policy.py` — ownership/authz/transition checks
+        - `backend/policy.py` — deterministic scope helpers rendered from collection ownership
         - `backend/schemas.py` — typed DTOs, enums, normalization helpers
         - `module_contract.module_yaml.module.type` selects the cookie-cutter backend conventions from the injected `[MODULE ARCHETYPES CONTEXT]`. Do not invent a parallel module taxonomy or restate a different set of type rules.
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
@@ -2494,14 +2489,14 @@ agents:
     content: |-
       1. Read the accepted prerequisite module.yaml handler entrypoint and every actions[].handler_method. Define that exact handler class and every required method; a class rename alone does not complete missing actions. In task batch mode, implement exactly the backend files listed in `current_build_task.owned_paths`. They must be a subset of `module_contract.python_stubs`.
       2. For durable module surfaces, make `backend/handler.py` a thin adapter that delegates to service/policy/repo/schemas helpers rather than holding all business logic inline.
-      3. Reference model details from the Code Context.
+      3. Use the accepted backend/schemas.py definitions supplied in dependency_task_outputs or admitted code_files/generated_files.
       4. For persistent modules, generate `backend/repo.py` around `context.persistence.collection(module_id, entity_name)`. If `context.persistence` is unavailable, raise a clear RuntimeError from repo.py. Do not use `ctx.db`, `context.db`, `get_mongo_client()`, `get_database()`, or hardcoded database names.
       5. Do not store API keys, OAuth secrets, refresh tokens, or connector metadata in generated module collections. Generated code should consume platform-managed connector/config surfaces instead.
       6. Implement every `handler_method` declared by module.yaml actions on the exact class named in `module.yaml.module.handler`. Do not singularize/pluralize the class name, and do not add hidden actions.
       6a. Handler signatures must match the runtime executor: `async def action_name(self, ctx, **params)` or `async def action_name(self, ctx, field: Type = ...)`. Do not put `context` last.
       7. Put state transitions and event publication in `backend/service.py` when that file is declared.
       8. Put persistence queries/writes in `backend/repo.py` when that file is declared.
-      9. Put authorization, ownership, tenant/workspace resource filters, and transition checks in `backend/policy.py` when that file is declared. The policy layer should derive scope from the runtime context, not from caller-supplied params.
+      9. Import `scoped_query` and `scope_record` from the deterministic `backend/policy.py`. In repo.py, use `scoped_query(context, filters, entity_name=collection_name)` for every read/update/delete and `scope_record(context, record, entity_name=collection_name)` before insertion. These helpers enforce the data contract's scope_field from trusted runtime identity and fail when identity is missing. Domain authorization and transition checks remain in service.py; never implement or replace policy.py.
       10. Put DTOs, enums, and normalization helpers in `backend/schemas.py` only when that file is included in `current_build_task.owned_paths`. Otherwise import and use the typed shapes already accepted for this module: they arrive in `dependency_task_outputs` and are importable from the module's `.schemas` module. Reuse those definitions rather than restating them locally.
       10a. Align every repo collection call with `data_contract` ownership. Non-persistent modules should not invent database logic.
       11. Publish the corresponding event from `events.yaml` only after the repo confirms an actual owned mutation, using the exact namespaced event type declared there. Follow the injected FILE CONTRACTS CONTEXT for paging, literal versus regex search, and write-result handling. A not-found or idempotent no-op response follows the declared action contract, not a global HTTP status policy; never fabricate mutation success or its event.
@@ -2521,7 +2516,7 @@ agents:
       17. Do not generate JS/frontend customization files here; those belong to frontend/UI generation paths.
       18. If `bundle_repair_target == "ServiceAgent"`, repair only files named by `bundle_repair_request`; do not emit config, module contract YAML, service-foundation clients, deployment files, or UI files. Use `deleted_files` for forbidden owned files that must be removed from the existing bundle.
       19. If fixing errors, ensure the fix is applied.
-      20. Produce a typed `python_files` list that mirrors the implemented `module_contract.python_stubs` entries. Those typed entries are the source of truth; `code_files` is the serialized mirror.
+      20. Produce a typed `python_files` list for the implemented `module_contract.python_stubs` entries, excluding deterministic policy.py. Those typed entries are the source of truth; `code_files` is the serialized mirror.
       21. Managed capability adapter integration rule: When generating a facade module_contract that
           wraps a managed_capability, import the adapter client generated by the api_surface task:
               from services.integrations.{pack_id}_client import {PackIdClient}
@@ -2530,7 +2525,7 @@ agents:
            Import that helper from the module's `.schemas` module, whose accepted definitions arrive
            in `dependency_task_outputs` — for example,
            `_serialize_{entity}_row(record: Mapping[str, Any]) -> dict[str, Any]` — returning
-           only the fields declared in module.yaml output_schema items.properties.
+           only the declared response fields; constructed reads use an explicit allowlist of data_contract collection fields and the accepted DTO shape.
            If the accepted schemas module does not supply one, define it in a file this task owns
            (`backend/service.py`). Never create or edit `backend/schemas.py` to add it: that file
            belongs to another task in this batch, and emitting it fails the whole batch.
@@ -2574,36 +2569,46 @@ agents:
             "path": "modules/task_manager/backend/handler.py",
             "kind": "handler",
             "purpose": "Thin action adapter that delegates to TaskManagerService.",
-            "contract_refs": ["module_yaml.module.handler", "module_yaml.actions[*].handler_method"],
+            "contract_refs": [
+              "module_yaml.module.handler",
+              "module_yaml.actions[*].handler_method"
+            ],
             "content": "from .service import TaskManagerService\n\n\nclass TaskManagerModule:\n    def __init__(self):\n        self.service = TaskManagerService()\n\n    async def create_task(self, ctx, **params):\n        return await self.service.create_task(ctx=ctx, **params)\n"
           },
           {
             "path": "modules/task_manager/backend/service.py",
             "kind": "service",
             "purpose": "Owns task manager business logic and event publication.",
-            "contract_refs": ["module_yaml.actions[*]", "events_yaml.events[*]"],
-            "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        await self.policy.require_create(ctx=ctx, payload=payload)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await ctx.emit(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n"
+            "contract_refs": [
+              "module_yaml.actions[*]",
+              "events_yaml.events[*]"
+            ],
+            "content": "from .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None):\n        self.repo = repo or TaskManagerRepo()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await ctx.emit(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n"
           },
           {
             "path": "modules/task_manager/backend/repo.py",
             "kind": "repo",
             "purpose": "Owns persistence queries and writes for task records.",
-            "contract_refs": ["module_yaml.actions[*]", "data_contract.surfaces[*].collections[*]"],
-            "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id or document.get(\"task_id\", \"\"))\n        return document\n"
-          },
-          {
-            "path": "modules/task_manager/backend/policy.py",
-            "kind": "policy",
-            "purpose": "Owns authorization and ownership checks for task actions.",
-            "contract_refs": ["module_yaml.permissions[*]", "module_yaml.actions[*].permissions"],
-            "content": "class TaskManagerPolicy:\n    async def require_create(self, *, ctx, payload):\n        user_id = getattr(ctx, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n"
+            "contract_refs": [
+              "module_yaml.actions[*]",
+              "data_contract.surfaces[*].collections[*]"
+            ],
+            "content": "from .policy import scope_record\n\n\nclass TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": context.user_id}\n        document = scope_record(context, document, entity_name=\"tasks\")\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id or document.get(\"task_id\", \"\"))\n        return document\n"
           }
         ],
         "code_files": [
-          { "filename": "modules/task_manager/backend/handler.py", "content": "from .service import TaskManagerService\n\n\nclass TaskManagerModule:\n    def __init__(self):\n        self.service = TaskManagerService()\n\n    async def create_task(self, ctx, **params):\n        return await self.service.create_task(ctx=ctx, **params)\n" },
-          { "filename": "modules/task_manager/backend/service.py", "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        await self.policy.require_create(ctx=ctx, payload=payload)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await ctx.emit(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n" },
-          { "filename": "modules/task_manager/backend/repo.py", "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id or document.get(\"task_id\", \"\"))\n        return document\n" },
-          { "filename": "modules/task_manager/backend/policy.py", "content": "class TaskManagerPolicy:\n    async def require_create(self, *, ctx, payload):\n        user_id = getattr(ctx, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n" }
+          {
+            "filename": "modules/task_manager/backend/handler.py",
+            "content": "from .service import TaskManagerService\n\n\nclass TaskManagerModule:\n    def __init__(self):\n        self.service = TaskManagerService()\n\n    async def create_task(self, ctx, **params):\n        return await self.service.create_task(ctx=ctx, **params)\n"
+          },
+          {
+            "filename": "modules/task_manager/backend/service.py",
+            "content": "from .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None):\n        self.repo = repo or TaskManagerRepo()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await ctx.emit(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n"
+          },
+          {
+            "filename": "modules/task_manager/backend/repo.py",
+            "content": "from .policy import scope_record\n\n\nclass TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": context.user_id}\n        document = scope_record(context, document, entity_name=\"tasks\")\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id or document.get(\"task_id\", \"\"))\n        return document\n"
+          }
         ],
         "agent_message": "Implemented task_manager backend stubs."
       }
@@ -2818,7 +2823,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
-      - Code Context: `config_config`, `service_context` (injected by hook).
+      - Accepted module, service, and integration artifacts in `dependency_task_outputs`, or admitted `code_files` / `generated_files` for standalone generation and repair.
       - `app_backend_url`: Base URL of the active Mozaiks app host. AI agents should invoke module capabilities/actions through the platform module API unless a custom adapter is explicitly requested.
       - `current_build_task`: contains `capability_pack_id` (the module name for module tasks, null for app-level tasks), `owned_paths`, and any task-specific instructions in `initial_message`.
       - **Previous Validation Errors**: If this is a retry, review the chat history for `AppValidation` errors and fix them.

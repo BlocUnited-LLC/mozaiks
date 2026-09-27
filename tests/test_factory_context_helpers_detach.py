@@ -10,10 +10,8 @@ was found by a live run rather than by CI:
   #708  DesignDocs `_reject_undeclared_workflow_surfaces` never fired in any
         real build; its tests passed because they used plain dicts.
   #709  the same shape in SubscriptionContractDesigner's monetization guard.
-  #712  `save_app_schema._derive_module_id_for_page` and
-        `_derive_submit_action_id` returned None in production for every page,
-        so generated pages were never bound to their owning module or submit
-        action from `app_build_plan`.
+  #712  page binding context reads returned no module/action inventory in
+        production because the live view was immutable.
   #718  the subscription contract injector reached for `.data`, which no live
         container has, and never ran.
   then  an audit that called every remaining reader both ways found thirteen
@@ -229,14 +227,14 @@ def test_the_known_good_helpers_have_not_regressed() -> None:
 
 
 def test_the_live_defect_stays_fixed() -> None:
-    """The actual production symptom: a page bound to its module through the real container."""
-    from factory_app.workflows.AppGenerator.tools.save_app_schema import _derive_module_id_for_page
-
-    plan = {"modules": [{"module_id": "tasks"}], "pages": [{"route": "/tasks"}]}
-    live = StructuredOutputOverlay(ContextVariablesBridge({"app_build_plan": plan}), {})
-    assert _derive_module_id_for_page({"route": "/tasks"}, live) == "tasks", (
-        "this returned None for every page in production while returning 'tasks' in tests"
+    """The inventory detaches real context before inspecting generated modules."""
+    from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+        module_action_index_from_context,
     )
+
+    files = {"modules/tasks/module.yaml": "module:\n  id: tasks\nactions:\n- id: list_tasks\n"}
+    live = StructuredOutputOverlay(ContextVariablesBridge({"generated_files": files}), {})
+    assert module_action_index_from_context(live) == {"tasks": {"list_tasks"}}
 
 
 def test_the_premise_still_holds() -> None:

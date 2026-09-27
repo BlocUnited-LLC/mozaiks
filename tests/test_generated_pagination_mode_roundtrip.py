@@ -1,4 +1,4 @@
-"""Generated table modes must survive ordinary JSON dumps without normalization."""
+"""Generated table modes survive JSON and data-source compilation unchanged."""
 
 from copy import deepcopy
 
@@ -7,6 +7,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.page_schema import validate_page_schema
+from mozaiksai.core.workflow.generator_support.page_plan_utils import compile_page_data_sources
 from mozaiksai.core.workflow.outputs.structured import get_provider_response_model
 from tests.test_continuous_deterministic_materialization import _load_models
 
@@ -33,7 +34,9 @@ def test_generated_table_default_survives_json_and_runtime_roundtrip(primitive):
         "title": "Reports", "page_type": "record_list", "layout": "full-width",
         "sections": [{"id": "reports", "primitive": primitive, "config": dumped}],
     })
-    runtime = validate_page_schema(page.model_dump(mode="json"))
+    document = page.model_dump(mode="json")
+    compile_page_data_sources(document, {}, reject_api_endpoints=True)
+    runtime = validate_page_schema(document)
     assert runtime.sections[0].config["pagination_mode"] == "client"
 
 
@@ -43,12 +46,15 @@ def test_generated_server_mode_survives_json_and_runtime_roundtrip():
         "schema_version": "mozaiks.app_page.v1", "name": "reports", "route": "/reports",
         "title": "Reports", "page_type": "record_list", "layout": "full-width",
         "sections": [{"id": "reports", "primitive": "DataTable", "config": {
-            "columns": [{"key": "title"}], "api_endpoint": "/api/modules/reports/list_reports",
+            "columns": [{"key": "title"}], "data_source": {"module_id": "reports", "action_id": "list_reports"},
             "pagination_mode": "server", "pagination": True, "page_size": 20,
             "data_key": "reports", "total_key": "total",
         }}],
     })
-    runtime = validate_page_schema(page.model_dump(mode="json"))
+    document = page.model_dump(mode="json")
+    compile_page_data_sources(document, {"reports": {"list_reports"}}, reject_api_endpoints=True)
+    runtime = validate_page_schema(document)
+    assert runtime.sections[0].config["api_endpoint"] == "/api/modules/reports/list_reports"
     assert runtime.sections[0].config["pagination_mode"] == "server"
     assert runtime.sections[0].config["total_key"] == "total"
 

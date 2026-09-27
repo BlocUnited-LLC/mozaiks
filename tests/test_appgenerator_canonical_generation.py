@@ -641,8 +641,6 @@ def _canonical_feature_output(
              "content": f"# {module_id} service\n"},
             {"filename": f"modules/{module_id}/backend/repo.py",
              "content": f"# {module_id} repo\n"},
-            {"filename": f"modules/{module_id}/backend/policy.py",
-             "content": f"# {module_id} policy\n"},
             {"filename": f"modules/{module_id}/backend/schemas.py",
              "content": f"# {module_id} schemas\n"},
         ]

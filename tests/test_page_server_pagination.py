@@ -36,6 +36,20 @@ def _page(**overrides):
     }
 
 
+def _generated_page(**overrides):
+    page = _page(**overrides)
+    config = page["sections"][0]["config"]
+    config.pop("api_endpoint")
+    config["data_source"] = {"module_id": "books", "action_id": "list"}
+    return page
+
+
+def _generation_context():
+    return factory_context({"generated_files": {"modules/books/module.yaml": yaml.safe_dump({
+        "module": {"id": "books"}, "actions": [{"id": "list"}],
+    })}})
+
+
 @pytest.mark.parametrize("overrides", [
     {"total_key": None}, {"total_key": ""}, {"total_key": "eval(total)"},
     {"data_key": None}, {"api_endpoint": None}, {"api_endpoint": "/api/other"},
@@ -68,22 +82,22 @@ def test_server_paging_preserves_known_module_and_action_gates():
 ])
 def test_materializer_rejects_invalid_server_contract_before_writing(primitive, overrides, tmp_path, monkeypatch):
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
-    page = _page(**overrides)
+    page = _generated_page(**overrides)
     page["sections"][0]["primitive"] = primitive
     models, _ = load_workflow_structured_outputs("AppGenerator")
     typed = models["AppPageSchema"].model_validate(page)
     with pytest.raises(ValueError):
         save_app_schema(manifest={"app_name": "Books", "pages": ["books"], "default_route": "/books"},
-                        pages=[typed], context_variables=factory_context())
+                        pages=[typed], context_variables=_generation_context())
     assert not list(tmp_path.rglob("*"))
 
 
 def test_typed_server_page_materializes_and_keeps_client_defaults(tmp_path, monkeypatch):
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
     models, _ = load_workflow_structured_outputs("AppGenerator")
-    typed = models["AppPageSchema"].model_validate(_page())
+    typed = models["AppPageSchema"].model_validate(_generated_page())
     save_app_schema(manifest={"app_name": "Books", "pages": ["books"], "default_route": "/books"},
-                    pages=[typed], context_variables=factory_context())
+                    pages=[typed], context_variables=_generation_context())
     output = tmp_path / "apps/generated-app/build-test/app/ui/pages/books.yaml"
     page = validate_page_schema(yaml.safe_load(output.read_text()))
     assert page.sections[0].config["pagination_mode"] == "server"
@@ -101,11 +115,11 @@ def test_typed_server_page_materializes_and_keeps_client_defaults(tmp_path, monk
         provider_schema = get_provider_response_model(model).model_json_schema()
         assert "pagination_mode" in provider_schema["required"]
         assert model.model_json_schema() == canonical_schema
-        client_page = _page(total_key=None)
+        client_page = _generated_page(total_key=None)
         del client_page["sections"][0]["config"]["pagination_mode"]
         client_page["sections"][0]["primitive"] = name.removeprefix("App").removesuffix("Config")
         save_app_schema(manifest={"app_name": "Books", "pages": ["books"], "default_route": "/books"},
-                        pages=[models["AppPageSchema"].model_validate(client_page)], context_variables=factory_context())
+                        pages=[models["AppPageSchema"].model_validate(client_page)], context_variables=_generation_context())
         assert validate_page_schema(yaml.safe_load(output.read_text())).sections[0].config["pagination_mode"] == "client"
     assert AppDataTableConfig(columns=["title"], page_size=200).pagination_mode == "client"
     guidance = format_generated_page_ui_primitive_guidance()

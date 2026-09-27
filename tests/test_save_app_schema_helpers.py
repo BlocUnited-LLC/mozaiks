@@ -9,14 +9,6 @@ Covers:
     - leading/trailing dots and dashes stripped
     - whitespace stripped
 
-  _safe_action_segment:
-    - empty/None → "submit" fallback
-    - valid lowercase text → returned
-    - uppercase → lowercased
-    - special chars replaced with underscores
-    - leading/trailing underscores stripped
-    - custom fallback used when empty
-
   _normalize_list:
     - non-list → []
     - list of items → same list
@@ -50,7 +42,6 @@ from pydantic import BaseModel
 from factory_app.workflows.AppGenerator.tools.save_app_schema import (
     _key_value_entries_to_dict,
     _normalize_list,
-    _safe_action_segment,
     _safe_path_segment,
     _strip_none,
     _to_plain,
@@ -92,44 +83,6 @@ class TestSafePathSegment:
     def test_whitespace_stripped(self):
         result = _safe_path_segment("  myapp  ", fallback="x")
         assert result == "myapp"
-
-
-# ---------------------------------------------------------------------------
-# 2. _safe_action_segment
-# ---------------------------------------------------------------------------
-
-class TestSafeActionSegment:
-    def test_empty_returns_submit_fallback(self):
-        assert _safe_action_segment("") == "submit"
-
-    def test_none_returns_submit_fallback(self):
-        assert _safe_action_segment(None) == "submit"
-
-    def test_valid_lowercase_returned(self):
-        assert _safe_action_segment("create_task") == "create_task"
-
-    def test_uppercase_lowercased(self):
-        result = _safe_action_segment("CreateTask")
-        assert result == result.lower()
-
-    def test_special_chars_replaced_with_underscores(self):
-        result = _safe_action_segment("create-task!")
-        assert "-" not in result
-        assert "!" not in result
-
-    def test_leading_trailing_underscores_stripped(self):
-        result = _safe_action_segment("__create_task__")
-        assert not result.startswith("_")
-        assert not result.endswith("_")
-
-    def test_custom_fallback(self):
-        assert _safe_action_segment("", fallback="action") == "action"
-
-    def test_spaces_normalized(self):
-        result = _safe_action_segment("create task")
-        assert " " not in result
-        assert "create" in result
-        assert "task" in result
 
 
 # ---------------------------------------------------------------------------

@@ -19,13 +19,14 @@
         "sections_hint": [
           {
             "primitive": "DataTable",
-            "config_hint": "{\"columns\": [\"id\", \"title\", \"created_at\"], \"selection\": \"single\", \"search\": true, \"api_endpoint\": \"/api/modules/reports/view_report\"}",
+            "config_hint": "{\"columns\": [\"id\", \"title\", \"created_at\"], \"selection\": \"single\", \"search\": true}",
+            "data_source": {"module_id": "reports", "action_id": "view_report"},
             "section_id_hint": "report-table",
             "title_hint": "All Reports"
           },
           {
             "primitive": "ActionButton",
-            "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Export Report\", \"action_type\": \"submit\", \"href\": \"/api/modules/reports/export_report\"}]}",
+            "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Export Report\", \"action_type\": \"submit\", \"data_source\": {\"module_id\": \"reports\", \"action_id\": \"export_report\"}}]}",
             "section_id_hint": "export-action",
             "title_hint": null
           }
@@ -304,6 +305,10 @@
               "module_id": "reports",
               "name": "reports",
               "entity_name": "reports",
+              "scope": "app",
+              "scope_field": "app_id",
+              "ownership": {"surface_id": "reports", "surface_kind": "module"},
+              "fields": [{"name": "app_id", "type": "string", "required": true}],
               "indexes": [
                 {
                   "name": "report_created_at",

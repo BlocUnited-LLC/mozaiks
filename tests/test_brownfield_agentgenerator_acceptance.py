@@ -35,6 +35,7 @@ from tests.test_generated_app_archetype_matrix import (
     _assert_not_missing_or_placeholder,
     _configure_platform,
     _Context,
+    _data_contract,
     _FakeMongoClient,
     _materialize_spec,
     _PersistenceContext,
@@ -370,7 +371,11 @@ def _workflow_plan() -> dict[str, Any]:
                         "primitive": "ActionButton",
                         "section_id_hint": "start-research",
                         "title_hint": "Start Research Review",
-                        "config_hint": json.dumps({"api_endpoint": "/api/modules/research/start_research"}),
+                        "config_hint": json.dumps({"actions": [{
+                            "label": "Start Research",
+                            "action_type": "submit",
+                            "data_source": {"module_id": "research", "action_id": "start_research"},
+                        }]}),
                     }
                 ],
             }
@@ -388,6 +393,21 @@ def _workflow_plan() -> dict[str, Any]:
         }
     ]
     return plan
+
+
+def test_brownfield_handoff_preserves_explicit_page_action_selection() -> None:
+    plan = build_app_build_plan_from_discovery(
+        _brownfield_discovery_artifact(),
+        module_decomposition_plan=_brownfield_module_decomposition(),
+    )
+
+    sources = [page["sections_hint"][0]["data_source"] for page in plan["pages"]]
+
+    assert sources == [
+        {"module_id": "customer_projects", "action_id": "list_projects"},
+        {"module_id": "work_items", "action_id": "list_work_items"},
+    ]
+    assert "api_endpoint" not in json.dumps(plan["pages"])
 
 
 async def _run_platform_acceptance(
@@ -473,6 +493,7 @@ async def test_brownfield_discovery_handoff_materializes_deterministically_and_b
     assert "customer_projects" in json.dumps(payloads, sort_keys=True)
 
     plan = build_app_build_plan_from_discovery(discovery, module_decomposition_plan=decomposition)
+    plan["data_contract"] = _data_contract(("customer_projects", "work_items"))
     spec = _ArchetypeSpec(
         archetype_id="brownfield_project_tracker",
         app_id="existing_project_tracker",
@@ -488,7 +509,7 @@ async def test_brownfield_discovery_handoff_materializes_deterministically_and_b
     assert "route: /projects" in files["ui/pages/projects.yaml"], "PLAN_LOSS source route /projects was dropped"
     assert "modules/customer_projects/module.yaml" in files, "MODULE_GAP source Project entity module was dropped"
     assert "update_project" in files["modules/customer_projects/module.yaml"], "MODULE_GAP source update action was dropped"
-    assert "Project" in json.loads(files["data/contract.json"])["surfaces"][0]["collections"][0]["entity_name"] or "customer_projects" in files["data/contract.json"]
+    assert json.loads(files["data/contract.json"])["surfaces"][0]["collections"][0]["name"] == "customer_projects"
 
 
 @pytest.mark.asyncio
@@ -497,6 +518,7 @@ async def test_brownfield_acceptance_fails_when_required_action_is_dropped(tmp_p
         _brownfield_discovery_artifact(),
         module_decomposition_plan=_brownfield_module_decomposition(),
     )
+    plan["data_contract"] = _data_contract(("customer_projects", "work_items"))
     spec = _ArchetypeSpec(
         archetype_id="brownfield_project_tracker_negative",
         app_id="existing_project_tracker",

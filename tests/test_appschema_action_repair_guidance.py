@@ -107,24 +107,22 @@ def test_live_primitive_hook_explains_fixed_endpoint_form_binding():
     inject_primitive_catalog(agent, [])
     inject_primitive_catalog(agent, [])
     assert agent.system_message.count("[SHIPPED PAGE PRIMITIVES]") == 1
-    assert "submit actions require href" in agent.system_message
+    assert "submit/delete actions require their own data_source" in agent.system_message
     assert "separate create/edit" in agent.system_message
-    assert "one fixed" in agent.system_message
+    assert "never emit endpoint URLs" in agent.system_message
     assert "initial_values_key: selected_row" in agent.system_message
 
 
 def test_structured_form_guidance_explains_fixed_href_and_split_forms():
     config = yaml.safe_load((ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8"))
     models = config["models"]
-    # AppPageAction is the union of the five variants; href is declared by the
-    # variants that can carry one, so the guidance lives there.
     assert models["AppPageAction"]["type"] == "union"
-    submit_href = models["AppSubmitAction"]["fields"]["href"]["description"]
+    submit_fields = models["AppSubmitAction"]["fields"]
+    assert "href" not in submit_fields
+    assert submit_fields["data_source"]["type"] == "AppPageDataSource"
     submit = models["AppFormConfig"]["fields"]["submit_action"]["description"]
-    assert "fixed" in submit_href
-    assert "separate create/edit" in submit_href
     assert "separate create/edit" in submit
-    assert "href" in submit
+    assert "data_source" in submit
 
 
 def test_appschema_prompt_does_not_imply_one_form_can_switch_endpoints():
@@ -133,4 +131,4 @@ def test_appschema_prompt_does_not_imply_one_form_can_switch_endpoints():
     agent = next(agent for agent in agents if agent["name"] == "AppSchemaAgent")
     prompt = "\n".join(section["content"] for section in agent["prompt_sections"])
     assert "separate create/edit" in prompt
-    assert "one fixed" in prompt
+    assert "own typed `data_source` pair" in prompt

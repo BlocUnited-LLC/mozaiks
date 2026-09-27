@@ -57,13 +57,13 @@ task_contracts:
       - Use layout=full-width for a PageHeader followed by a primary record table. Grid places peer top-level sections in separate columns; it does not stack a heading above a full-width table.
       - Use shell_mode=conversation for DM/chat/thread routes, workspace for dense module/profile/admin-like work surfaces, focused for setup/review flows, immersive for full-viewport experiences, public for public/legal routes, and standard for ordinary pages.
       - Use explicit shell arrays only when labels, icons, role gates, or custom paths differ from the shortcut catalog.
-      - Durable page mutations bind through declared api_endpoint values or canonical module actions.
-      - Design documents and ExperienceSpec describe approved product intent, not executable API authority. Replace illustrative endpoint hints with exact /api/modules/{module_id}/{action_id} bindings from planned and generated module contracts; never copy a placeholder URL into task initial_message or page output. Preserve the approved behavior, fields, and layout.
+      - Generated page reads and mutations select data_source module/action pairs from accepted module contracts. Code renders endpoint paths.
+      - Design documents and ExperienceSpec describe approved product intent, not executable API authority. Replace illustrative endpoint hints with exact data_source module_id/action_id pairs from planned and generated module contracts; never copy a placeholder URL into task initial_message or page output. Preserve the approved behavior, fields, and layout.
       - Every data-backed summary needs a declared backend action returning its value_key fields. A ui_only page does not create that action. Plan the owning module contract and business_services implementation before the dependent page task; do not invent an endpoint or replace live counts with constants.
       - Do not emit raw frontend source outside the bounded custom route bundle.
       - Pages that require reading URL query params on mount, polling an endpoint until state changes, or rendering conditional sections based on API response value must use custom_route_bundle; they cannot be expressed as declarative AppPageSchema.
       - A post-redirect confirmation page must not display confirmed/success state from the redirect URL alone. Confirmation must come from querying an app-owned module action after the backend has processed the event.
-      - The api_endpoint field on a page section is a POST path only — no query strings, fragments, or dynamic path segments. Page-level filters, pagination limits, and record identifiers must go in payload or the module action input schema.
+      - The model never writes endpoint URLs. Code renders api_endpoint for section reads and href for submit/delete from typed data_source pairs. Page-level filters, pagination limits, and record identifiers must go in payload or the module action input schema.
       - Custom route JSX must call module actions through moduleAction() imported from ui/lib/moduleApi.js. This file is always present in the generated bundle. Do not write raw fetch() calls to /api/modules/** directly in page components.
       - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
       - Custom routes that launch LLM-backed or token-metered actions/workflows must detect INSUFFICIENT_TOKENS with isInsufficientTokensError(err), navigate to insufficientTokensRecoveryPath(err), and return without retrying automatically.
@@ -163,7 +163,7 @@ task_contracts:
       - backend/repo.py owns persistence operations and must not contain product policy.
       - backend/schemas.py owns typed DTO/document shapes and pure helpers.
       - backend/policy.py owns scope query helpers.
-      - backend/policy.py should derive tenant/workspace/user resource filters from ctx.app_id, ctx.tenant_id, ctx.workspace_id, ctx.user_id, and ctx.permissions. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
+      - Code derives backend/policy.py from the declared scope_field and matching ctx.app_id, ctx.tenant_id, ctx.workspace_id, or ctx.user_id. Additional permission checks belong in service.py. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
       - backend/repo.py may use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
       - For offset pagination, PersistenceCollection.find_many has no skip argument and returns a list, not a cursor. In repo.py use aggregate with an ownership-scoped $match, a stable $sort including a unique tie-breaker, then the requested $skip and a bounded $limit. Validate the declared page/offset inputs and limit before querying; never compute an offset and leave it unused or fetch an unbounded collection for client slicing.
       - Pagination totals must count the same query as the page, including ownership, search, and all other active filters. Use count(query) with that matching query or a matching aggregate count; do not count unrelated or foreign records.
@@ -178,8 +178,8 @@ task_contracts:
       - Do not emit backend/database/schema.json or backend/database/seed.json.
       - Do not put DB access in backend/handler.py.
       - Do not put raw persistence logic in backend/service.py.
-      - "list_* action output_schema must declare items.properties explicitly. A bare { type: array } with no items or item properties is invalid for list_* action outputs."
-      - backend/service.py must not return raw repo records from list_* methods. Each record must be serialized through a _serialize_{entity}_row or _serialize_{entity}_record allowlist helper declared in backend/schemas.py. The allowlist ensures unknown future DB fields cannot leak into caller responses.
+      - "Constructed list_{collection_name} actions return items (array of objects) and total (integer), accepting page/page_size/search. Keep item serialization allowlisted to the declared collection fields; do not return raw documents."
+      - backend/service.py must not return raw repo records from list_* methods. Each record must be serialized through a _serialize_{entity}_row or _serialize_{entity}_record allowlist helper from the accepted schemas.py, or service.py when absent. The allowlist ensures unknown future DB fields cannot leak into caller responses.
 
   persistence_contract:
     owner_agent: DatabaseAgent
@@ -198,14 +198,14 @@ task_contracts:
       - data/migrations/{migration_id}.json is the exported additive migration artifact.
       - config/data.json is a removed path and must never appear in owned_paths, database_files, code_files, or generated bundle output.
       - config/data_migrations is a removed path and must never appear in owned_paths, database_files, code_files, or generated bundle output.
-      - data/contract.json is opt-in only. Generate it only when the app plan explicitly needs a canonical app data contract, cross-module aggregate ownership, explicit authority records with stable collection names, explicit aliases, or an external existing database contract that ordinary generated-scoped persistence cannot represent.
-      - Default generated apps must omit data/contract.json and use generated-scoped ctx.persistence.
+      - Generate data/contract.json for persistent generated modules and explicit existing database integration. The approved data_contract supplies collection ownership, fields, scope, and scope_field to deterministic policy/read construction.
+      - Persistent generated modules declare data_contract even when using generated-scoped ctx.persistence. Apps with no generated persistent modules may leave it null.
       - Data contracts are generic app infrastructure, not hosted-product special cases. Do not emit ad hoc folders or host-internal helper names for normal generated apps.
       - app/data is declarative only. Do not emit Python helper files under data/ or services/data/.
       - Cross-surface collection access must be declared before module repo code uses it. Cross-module reads, lifecycle updates, shared aggregate ownership, and documented alias exclusions must be explicit in data/contract.json.
       - backend/schemas.py replaces backend model files.
       - backend/repo.py is derived from the data contract and owns persistence operations only.
-      - backend/policy.py owns tenant/app/user scope query helpers.
+      - backend/policy.py is rendered deterministically from each collection scope (app/user/tenant/workspace) and scope_field. The field must be declared in fields and ownership must match the module. ServiceAgent must omit policy source from python_files and code_files.
       - Generated repo.py must use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
       - Generated repo.py may use data aliases only when its module/action is explicitly declared in data/contract.json.
       - module_id/entity_name in repo.py must match data_contract surfaces and collections.
@@ -285,7 +285,7 @@ task_contracts:
       - services/integrations/{pack_id}_client.py
     hard_constraints:
       - Default module access is /api/modules/{module_name}/{action_name}.
-      - Page api_endpoint values must use /api/modules/{module_name}/{action_name} without query strings or fragments. Put pagination limits in page_size and filters in payload/input schemas.
+      - Page data_source pairs must resolve to the closed module-action inventory. Code renders /api/modules/{module_id}/{action_id} without URL guessing. Put pagination limits in page_size and filters in payload/input schemas.
       - Auth for /api/modules/** is platform-owned. Custom API adapters must not bypass module action auth, permissions, entitlement checks, or module_scope_resolver scope validation.
       - Emit bespoke REST adapters only when explicitly requested.
       - Delegate behavior to backend/handler.py instead of duplicating business logic.
@@ -308,9 +308,9 @@ backend_helper_files:
   canonical_layers:
     - backend/base_handler.py  # OSS-generated dispatch base — regenerated on upgrades, never edited
     - backend/handler.py       # workspace subclass — preserved on regen; add app extensions here
-    - backend/service.py       # business logic and event publication
+    - backend/service.py       # business logic, authorization, transitions, and event publication
     - backend/repo.py          # persistence queries and writes
-    - backend/policy.py        # authorization, ownership, transition checks
+    - backend/policy.py        # deterministic collection scope helpers
     - backend/schemas.py       # typed DTOs, enums, normalization helpers
 
   workspace_handler_split:
@@ -344,7 +344,7 @@ backend_helper_files:
     prohibited_for:
       - generic business logic that belongs in service.py
       - persistence or database access that belongs in repo.py
-      - authorization or scoping that belongs in policy.py
+      - domain authorization that belongs in service.py or collection scoping provided by deterministic policy.py
       - typed shapes or DTOs that belong in schemas.py
       - transport or WebSocket infrastructure (use runtime_extensions.yaml startup_service instead)
       - workflow or agent orchestration logic

@@ -64,14 +64,18 @@ def test_action_surface_null_is_not_a_string_literal():
     with pytest.raises(ValidationError):
         models["ModuleAction"].model_validate({**action, "api_surface": "null"})
     assert _scan_action_api_surface({
-        "modules/records/module.yaml": yaml.safe_dump({"actions": [{**action, "api_surface": "null"}]}),
+        "modules/records/module.yaml": yaml.safe_dump({
+            "module": {"id": "records"}, "actions": [{**action, "api_surface": "null"}],
+        }),
     })
 
 
 @pytest.mark.parametrize("surface", ["internal", "admin_internal", None])
 def test_page_http_binding_rejects_internal_actions_and_routes_to_contract_owner(surface):
     files = {
-        "modules/contacts/module.yaml": yaml.safe_dump({"actions": [{"id": "create", "api_surface": surface}]}),
+        "modules/contacts/module.yaml": yaml.safe_dump({
+            "module": {"id": "contacts"}, "actions": [{"id": "create", "api_surface": surface}],
+        }),
         "ui/pages/contacts.yaml": yaml.safe_dump({"sections": [{"config": {"children": [{
             "primitive": "Form", "config": {"submit_action": {
                 "href": "/api/modules/contacts/create",
@@ -170,7 +174,7 @@ def test_generated_repair_can_delete_an_owned_optional_companion():
     optional_path = "modules/contacts/contracts/notifications.yaml"
     foreign = "modules/contacts/backend/repo.py"
     owned_files = {
-        module_path: "module_id: contacts\nactions: []\n",
+        module_path: "module:\n  id: contacts\nactions: []\n",
         optional_path: "notifications: []\n",
     }
     context = _repair_context("module_contract", "ConfigMiddlewareAgent", owned_files)

@@ -140,7 +140,9 @@ class TestInjectCookieCutterContractsContext:
         agent = _FakeAgent(name=name)
         self.mod.inject_cookie_cutter_contracts_context(agent, [])
         assert "not executable API authority" in agent.system_message
-        assert "/api/modules/{module_id}/{action_id}" in agent.system_message
+        assert "data_source" in agent.system_message
+        assert "module_id" in agent.system_message
+        assert "action_id" in agent.system_message
         assert "A ui_only page does not create that action" in agent.system_message
 
     def test_config_middleware_agent_gets_module_contract_and_archetypes(self):

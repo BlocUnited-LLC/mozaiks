@@ -42,7 +42,9 @@ from mozaiksai.core.runtime.app.provenance import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    compile_page_data_sources,
     materialize_modal_targets,
+    module_action_index_from_context,
     promote_table_primitive,
     relayable_action_reasons,
     resolve_modal_action_targets,
@@ -119,14 +121,6 @@ def _safe_path_segment(value: Any, *, fallback: str) -> str:
     if not text:
         text = fallback
     text = re.sub(r"[^A-Za-z0-9_.-]+", "-", text).strip(".-")
-    return text or fallback
-
-
-def _safe_action_segment(value: Any, *, fallback: str = "submit") -> str:
-    text = str(value or "").strip().lower()
-    if not text:
-        text = fallback
-    text = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
     return text or fallback
 
 
@@ -258,100 +252,6 @@ def _normalize_page_section(section: Any) -> Any:
             sorted(resource_table_only_fields() & set(section.get("config") or {})),
         )
     return _strip_none(section)
-
-
-def _derive_module_id_for_page(
-    page: dict[str, Any],
-    context_variables: Any | None,
-) -> str | None:
-    app_build_plan = _context_get(context_variables, "app_build_plan")
-    modules = []  # type: ignore[var-annotated]
-    if isinstance(app_build_plan, dict):
-        modules = app_build_plan.get("modules") or []
-    if isinstance(modules, list) and len(modules) == 1 and isinstance(modules[0], dict):
-        module_id = modules[0].get("module_id")
-        if _is_non_empty_string(module_id):
-            return str(module_id)
-
-    route = page.get("route")
-    if isinstance(app_build_plan, dict) and _is_non_empty_string(route):
-        for planned_page in app_build_plan.get("pages") or []:
-            if not isinstance(planned_page, dict) or planned_page.get("route") != route:
-                continue
-            primary_entities = planned_page.get("primary_entities") or []
-            if isinstance(primary_entities, list) and len(primary_entities) == 1:
-                candidate = primary_entities[0]
-                if _is_non_empty_string(candidate):
-                    return str(candidate)
-    return None
-
-
-def _derive_submit_action_id(
-    section: dict[str, Any],
-    page: dict[str, Any],
-    context_variables: Any | None,
-) -> str | None:
-    config = section.get("config")
-    if not isinstance(config, dict):
-        return None
-    submit_action = config.get("submit_action")
-    if not isinstance(submit_action, dict):
-        return None
-
-    for candidate in (
-        submit_action.get("id"),
-        submit_action.get("action"),
-        config.get("submit_action_id"),
-        config.get("action_id"),
-    ):
-        if _is_non_empty_string(candidate):
-            return _safe_action_segment(candidate)
-
-    route = page.get("route")
-    app_build_plan = _context_get(context_variables, "app_build_plan")
-    if isinstance(app_build_plan, dict) and _is_non_empty_string(route):
-        for planned_page in app_build_plan.get("pages") or []:
-            if not isinstance(planned_page, dict) or planned_page.get("route") != route:
-                continue
-            primary_actions = planned_page.get("primary_actions") or []
-            if isinstance(primary_actions, list) and len(primary_actions) == 1:
-                candidate = primary_actions[0]
-                if _is_non_empty_string(candidate):
-                    return _safe_action_segment(candidate)
-
-    for candidate in (config.get("submit_label"), submit_action.get("label")):
-        if _is_non_empty_string(candidate):
-            return _safe_action_segment(candidate)
-    return None
-
-
-def _repair_missing_submit_hrefs(
-    page_list: list[dict[str, Any]],
-    context_variables: Any | None,
-) -> None:
-    for page in page_list:
-        module_id = _derive_module_id_for_page(page, context_variables)
-        if not _is_non_empty_string(module_id):
-            continue
-        for section in page.get("sections") or []:
-            if not isinstance(section, dict):
-                continue
-            if section.get("primitive") != "Form":
-                continue
-            config = section.get("config")
-            if not isinstance(config, dict):
-                continue
-            submit_action = config.get("submit_action")
-            if not isinstance(submit_action, dict):
-                continue
-            if submit_action.get("action_type") != "submit":
-                continue
-            if _is_non_empty_string(submit_action.get("href")):
-                continue
-            action_id = _derive_submit_action_id(section, page, context_variables)
-            if not _is_non_empty_string(action_id):
-                continue
-            submit_action["href"] = f"/api/modules/{module_id}/{action_id}"
 
 
 def _normalize_page_schema(page: Any) -> Any:
@@ -1713,8 +1613,8 @@ def save_app_schema(
         app_asset_manifest, data_contract, app_custom_route_bundle,
         app_schema_ready
 
-    Tools are dumb — no reasoning, no transformation. AppSchemaAgent already
-    produced correct typed output; this tool just persists it.
+    Compile explicit module/action references against the closed inventory,
+    validate runtime schemas, and persist only the accepted canonical artifacts.
     """
     try:
         if manifest is None:
@@ -1729,6 +1629,9 @@ def save_app_schema(
             if isinstance(page, dict) and "extensions" in page:
                 raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
         page_list = [_normalize_page_schema(page) for page in raw_page_list]
+        modules = module_action_index_from_context(context_variables)
+        for page in page_list:
+            compile_page_data_sources(page, modules, reject_api_endpoints=True)
         baseline_files = detach(_context_get(context_variables, "generated_files")) or {}
         code_files = extract_code_file_map_from_payload(
             {"code_files": detach(_context_get(context_variables, "code_files")) or []}
@@ -1748,10 +1651,6 @@ def save_app_schema(
                 custom_route_bundle = detach(_context_get(context_variables, "app_custom_route_bundle"))
         if page_list and not isinstance(page_list, list):
             raise ValueError("save_app_schema: pages must be a list")
-        # Still earns its place: the contract makes submit.href unskippable for
-        # generated actions, but baseline pages merged above never passed through
-        # it, and those are exactly the ones that can still arrive without a route.
-        _repair_missing_submit_hrefs(page_list, context_variables)
         # The same deterministic repairs the task-batch lane runs. This lane used to
         # validate without them, so a defect the repo already knew how to fix was
         # reported to the agent instead of corrected -- and a repair budget went on

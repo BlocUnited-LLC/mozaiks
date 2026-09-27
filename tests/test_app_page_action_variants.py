@@ -34,8 +34,8 @@ VARIANTS = ("AppNavigateAction", "AppSubmitAction", "AppDeleteAction", "AppEvent
 def test_each_variant_requires_the_field_that_makes_it_work(models: dict) -> None:
     required = {name: {f for f, spec in models[name].model_fields.items() if spec.is_required()} for name in VARIANTS}
     assert "href" in required["AppNavigateAction"]
-    assert "href" in required["AppSubmitAction"]
-    assert "href" in required["AppDeleteAction"]
+    assert "data_source" in required["AppSubmitAction"]
+    assert "data_source" in required["AppDeleteAction"]
     assert "event_type" in required["AppEventAction"]
     assert "workflow_id" in required["AppWorkflowAction"]
 

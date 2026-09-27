@@ -1891,6 +1891,7 @@ agents:
     variables:
     - refinement_request
     - generated_files
+    - code_files
     - concept_overview
     - design_surface_map
     - data_contract
@@ -1940,6 +1941,7 @@ agents:
     - module_runtime_quality_warnings
     - module_runtime_quality_revision_request
     - generated_files
+    - code_files
     - bundle_repair_status
     - bundle_repair_target
     - bundle_repair_request
@@ -1949,6 +1951,7 @@ agents:
   ControllerAgent:
     variables:
     - generated_files
+    - code_files
     - app_backend_url
     - concept_overview
     - concept_api_endpoints

@@ -14,6 +14,7 @@ from mozaiksai.core.runtime.app.page_schema import (
     validate_page_schema,
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.generator_support.page_plan_utils import compile_page_data_sources
 from mozaiksai.core.workflow.outputs.structured import get_provider_response_model
 from tests.test_continuous_deterministic_materialization import _load_models
 from tests.test_page_schema_runtime_validation import _valid_page, _write_app
@@ -64,6 +65,7 @@ def test_generated_ask_context_survives_provider_json_and_runtime(primitive):
     dumped = page.model_dump(mode="json")
     provider = get_provider_response_model(models["AppPageSchema"]).model_json_schema()
     Draft202012Validator(provider).validate(dumped)
+    compile_page_data_sources(dumped, {"books": {"read"}}, reject_api_endpoints=True)
     runtime = validate_page_schema(dumped)
     assert runtime.meta.ask_context[0].action == "read"
     assert runtime.meta.ask_context[0].params[0].value == "open"

@@ -293,8 +293,13 @@ async def test_materialized_broken_handler_fails_before_bootable(tmp_path: Path)
 async def test_materialized_unresolved_page_action_fails_before_bootable() -> None:
     outputs = _typed_task_outputs(_load_models())
     page_output = next(value for value in outputs.values() if value.get("pages"))
-    page_output["pages"][0]["sections"][0]["config"]["api_endpoint"] = "/api/modules/reports/archive_reports"
-    files, context = await _assemble_from_payload(task_outputs=outputs)
+    page_output["pages"][0]["sections"][0]["config"]["data_source"] = {"module_id": "reports", "action_id": "archive_reports"}
+    with pytest.raises(ValueError, match="unknown module/action"):
+        await _assemble_from_payload(task_outputs=outputs)
+    files, context = await _assemble_from_payload()
+    page = yaml.safe_load(files["ui/pages/reports.yaml"])
+    page["sections"][0]["config"]["api_endpoint"] = "/api/modules/reports/archive_reports"
+    files["ui/pages/reports.yaml"] = yaml.safe_dump(page)
 
     scanner_errors = scan_generated_bundle(files, capability_packs=_selected_packs())
     assert any("archive_reports" in error for error in scanner_errors)

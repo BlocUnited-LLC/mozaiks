@@ -44,6 +44,15 @@ class _Context:
         return self.data.get(key, default)
 
 
+def _module_context():
+    return _Context({"generated_files": {
+        f"modules/{module_id}/module.yaml": yaml.safe_dump({
+            "module": {"id": module_id}, "actions": [{"id": action} for action in actions],
+        })
+        for module_id, actions in {"users": ["list_users", "create_user"], "tickets": ["save_settings"]}.items()
+    }})
+
+
 def _base_manifest():
     return {
         "app_name": "Ops Portal",
@@ -249,7 +258,7 @@ def _canonical_page():
                         {"key": "name", "label": "Name", "sortable": True},
                         "email",
                     ],
-                    "api_endpoint": "/api/users",
+                    "data_source": {"module_id": "users", "action_id": "list_users"},
                     "selection": "single",
                     "actions": [
                         {
@@ -288,7 +297,7 @@ def _canonical_page():
                                 "submit_action": {
                                     "label": "Submit Create User",
                                     "action_type": "submit",
-                                    "href": "/api/users",
+                                    "data_source": {"module_id": "users", "action_id": "create_user"},
                                 },
                             },
                         }
@@ -468,7 +477,7 @@ def test_save_app_schema_accepts_workflow_action(monkeypatch, tmp_path: Path) ->
 
 def test_save_app_schema_accepts_canonical_declarative_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
-    context = _Context()
+    context = _module_context()
 
     result = save_app_schema_module.save_app_schema(
         manifest=_base_manifest(),
@@ -501,7 +510,7 @@ def test_save_app_schema_writes_app_identity_metadata(monkeypatch, tmp_path: Pat
         manifest=manifest,
         pages=[_canonical_page()],
         theme_config_patch=None,
-        context_variables=_Context(),
+        context_variables=_module_context(),
     )
 
     app_json = json.loads((tmp_path / "app.json").read_text(encoding="utf-8"))
@@ -868,7 +877,7 @@ def test_save_app_schema_strips_blank_optional_form_placeholder(monkeypatch, tmp
                 "submit_action": {
                     "label": "Save",
                     "action_type": "submit",
-                    "href": "/api/modules/tickets/save_settings",
+                    "data_source": {"module_id": "tickets", "action_id": "save_settings"},
                     "event_type": "",
                 },
             },
@@ -878,7 +887,7 @@ def test_save_app_schema_strips_blank_optional_form_placeholder(monkeypatch, tmp
     save_app_schema_module.save_app_schema(
         manifest=_base_manifest(),
         pages=[page],
-        context_variables=_Context(),
+        context_variables=_module_context(),
     )
 
     dashboard_yaml = (tmp_path / "ui" / "pages" / "Dashboard.yaml").read_text(
@@ -889,7 +898,7 @@ def test_save_app_schema_strips_blank_optional_form_placeholder(monkeypatch, tmp
     assert "href: /api/modules/tickets/save_settings" in dashboard_yaml
 
 
-def test_save_app_schema_rejects_submit_action_without_resolvable_href(monkeypatch, tmp_path: Path) -> None:
+def test_save_app_schema_rejects_submit_action_without_data_source(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()
     page["sections"] = [
@@ -914,10 +923,7 @@ def test_save_app_schema_rejects_submit_action_without_resolvable_href(monkeypat
         }
     ]
 
-    # The tool no longer re-implements the per-variant requirement: the action
-    # contract owns it, and the rejection now carries the runtime's own reason
-    # rather than a second copy of the rule that could drift from it.
-    with pytest.raises(ValueError, match=r"submit actions require href"):
+    with pytest.raises(ValueError, match=r"submit actions require data_source"):
         save_app_schema_module.save_app_schema(
             manifest=_base_manifest(),
             pages=[page],
@@ -939,7 +945,7 @@ def test_save_app_schema_rejects_api_endpoint_query_strings(monkeypatch, tmp_pat
         }
     ]
 
-    with pytest.raises(ValueError, match="query strings"):
+    with pytest.raises(ValueError, match="model-authored endpoint URLs"):
         save_app_schema_module.save_app_schema(
             manifest=_base_manifest(),
             pages=[page],
@@ -947,22 +953,9 @@ def test_save_app_schema_rejects_api_endpoint_query_strings(monkeypatch, tmp_pat
         )
 
 
-def test_save_app_schema_derives_missing_submit_href_from_build_plan(monkeypatch, tmp_path: Path) -> None:
+def test_save_app_schema_compiles_explicit_submit_source(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
-    context = _Context(
-        {
-            "app_build_plan": {
-                "modules": [{"module_id": "tickets"}],
-                "pages": [
-                    {
-                        "name": "QueueSettings",
-                        "route": "/dashboard",
-                        "primary_actions": ["save_settings"],
-                    }
-                ],
-            }
-        }
-    )
+    context = _module_context()
     page = _base_page()
     page["sections"] = [
         {
@@ -980,6 +973,7 @@ def test_save_app_schema_derives_missing_submit_href_from_build_plan(monkeypatch
                 "submit_action": {
                     "label": "Save settings",
                     "action_type": "submit",
+                    "data_source": {"module_id": "tickets", "action_id": "save_settings"},
                 },
             },
         }

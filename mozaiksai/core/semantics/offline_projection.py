@@ -315,6 +315,7 @@ _KNOWN_DEFERRED = frozenset(
         "route",
         "schema_version",
         "scope",
+        "scope_field",
         "search_by",
         "section_id_hint",
         "sections",

@@ -18,6 +18,10 @@ from typing import Any
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_entries_from_payload,
 )
+from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
+from mozaiksai.core.workflow.generator_support.module_read_actions import (
+    materialize_module_read_actions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +30,8 @@ def _merge_code_files(
     feature_outputs: list[dict[str, Any]],
     *,
     build_timestamp: str | None = None,
+    app_build_plan: dict[str, Any] | None = None,
+    data_contract: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """Merge code_files from feature outputs, deduping by filename."""
     file_map: dict[str, str] = {}
@@ -39,6 +45,10 @@ def _merge_code_files(
             if not filename or content is None:
                 continue
             file_map[str(filename)] = str(content)
+    file_map.update(materialize_module_read_actions(
+        file_map, app_build_plan=app_build_plan, data_contract=data_contract,
+    ))
+    file_map.update(materialize_module_policies(file_map, data_contract))
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 
@@ -47,6 +57,8 @@ async def assemble_features(
     feature_outputs: list[dict[str, Any]],
     *,
     build_timestamp: str | None = None,
+    app_build_plan: dict[str, Any] | None = None,
+    data_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Merge feature outputs into a single workflow bundle.
@@ -66,6 +78,8 @@ async def assemble_features(
         merged_files = _merge_code_files(
             feature_outputs or [],
             build_timestamp=build_timestamp,
+            app_build_plan=app_build_plan,
+            data_contract=data_contract,
         )
         logger.info(
             "Assembled %d feature outputs into %d files",

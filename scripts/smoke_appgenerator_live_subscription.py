@@ -27,6 +27,7 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_exp
 from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from scripts.appgenerator_fixture_replay import execute_file_replay
 from scripts.smoke_appgenerator_live_acceptance import SmokeContext
 
@@ -270,6 +271,7 @@ def _build_plan(tasks: list[dict[str, Any]]) -> dict[str, Any]:
             },
         ],
         "entities": [{"name": "Report", "operations": ["read", "create"], "notes": None}],
+        "data_contract": _data_contract(),
         "roles": ["user"],
         "auth_strategy": "basic",
         "service_scope": ["reports"],
@@ -717,7 +719,7 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
                     self.repo = ReportsRepo(ctx)
 
                 async def list_reports(self, **params):
-                    return {{"reports": await self.repo.list_reports(user_id=params.get("user_id"))}}
+                    return {{"reports": await self.repo.list_reports()}}
 
                 async def generate_report(self, **params):
                     report = report_document(topic=params.get("topic"))
@@ -728,6 +730,9 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
         ).strip() + "\n",
         "modules/reports/backend/repo.py": textwrap.dedent(
             """
+            from .policy import scoped_query, scope_record
+
+
             class ReportsRepo:
                 def __init__(self, ctx):
                     self.ctx = ctx
@@ -738,29 +743,20 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
                         return None
                     return persistence.collection("reports", "reports")
 
-                async def list_reports(self, *, user_id=None):
+                async def list_reports(self):
                     collection = self._collection()
                     if collection is None:
                         return []
-                    query = {"user_id": user_id} if user_id else {}
+                    query = scoped_query(self.ctx, entity_name="reports")
                     return await collection.find_many(query, limit=100)
 
                 async def save_report(self, record):
+                    record = scope_record(self.ctx, record, entity_name="reports")
                     collection = self._collection()
                     if collection is None:
                         return record
                     result = await collection.insert_one(record)
                     return {**record, "report_id": str(result.inserted_id)}
-            """
-        ).strip() + "\n",
-        "modules/reports/backend/policy.py": textwrap.dedent(
-            """
-            class ReportsPolicy:
-                def scope_query(self, query, *, user_id=None):
-                    scoped = dict(query or {})
-                    if user_id:
-                        scoped["user_id"] = user_id
-                    return scoped
             """
         ).strip() + "\n",
         "modules/reports/backend/schemas.py": textwrap.dedent(
@@ -780,8 +776,8 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
     }
 
 
-def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str, str]:
-    data_contract = {
+def _data_contract() -> dict[str, Any]:
+    return {
         "version": "1",
         "app_id": DEFAULT_APP_ID,
         "surfaces": [
@@ -791,6 +787,14 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
                 "collections": [
                     {
                         "name": "reports",
+                        "scope": "app",
+                        "scope_field": "app_id",
+                        "fields": [
+                            {"name": "app_id", "type": "string", "required": True},
+                            {"name": "report_id", "type": "string", "required": True},
+                            {"name": "topic", "type": "string", "required": True},
+                            {"name": "status", "type": "string", "required": True},
+                        ],
                         "ownership": {
                             "surface_id": "reports",
                             "surface_kind": "module",
@@ -806,6 +810,10 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
             }
         ],
     }
+
+
+def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str, str]:
+    data_contract = _data_contract()
     files = {
         "app.json": json.dumps(
             {
@@ -972,6 +980,7 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
     }
     files.update(_backend_files(module_yaml))
     files.update(_entitlement_dispatch_backend_files())
+    files.update(materialize_module_policies(files))
     return files
 
 
@@ -1087,7 +1096,29 @@ async def validate_subscription_acceptance_handoff(
         }
     )
     app_build_plan(AppBuildPlan=_build_plan(tasks), context_variables=context)
-    accepted = await execute_file_replay(context.data, files, task_outputs=task_outputs)
+    reports_page = yaml.safe_load(files["ui/pages/reports.yaml"])
+    reports_page["sections"][0]["config"].pop("api_endpoint")
+    reports_page["sections"][0]["config"]["data_source"] = {
+        "module_id": "reports", "action_id": "list_reports",
+    }
+    submit_action = reports_page["sections"][1]["config"]["submit_action"]
+    submit_action.pop("href")
+    submit_action["data_source"] = {"module_id": "reports", "action_id": "generate_report"}
+    replay_outputs = dict(task_outputs)
+    replay_outputs["reports_services"] = {
+        "code_files": [
+            {"filename": path, "content": files[path]}
+            for path in next(task for task in tasks if task["task_id"] == "reports_services")["owned_paths"]
+            if not path.endswith("/policy.py")
+        ],
+    }
+    replay_outputs["subscription_pages"] = {
+        "code_files": [
+            {"filename": path, "content": yaml.safe_dump(reports_page) if path == "ui/pages/reports.yaml" else files[path]}
+            for path in tasks[-1]["owned_paths"]
+        ],
+    }
+    accepted = await execute_file_replay(context.data, files, task_outputs=replay_outputs)
     files.update({file["filename"]: file["content"] for task_id, output in accepted.items()
                   if not task_id.startswith("_") for file in output["code_files"]})
     context.set("generated_files", files)

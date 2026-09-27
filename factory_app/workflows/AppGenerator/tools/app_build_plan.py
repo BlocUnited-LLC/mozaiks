@@ -16,6 +16,10 @@ from mozaiksai.core.runtime.app.paths import (
     normalize_app_path,
 )
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _page_stem_from_path,
+    _page_stems,
+)
 
 try:
     from .managed_monetization_contract import (
@@ -1103,34 +1107,25 @@ def _managed_facade_route_rules(
     return rules
 
 
-def _route_page_api_endpoint_to_facade(endpoint: str, rules: dict[tuple[str, str], str]) -> str:
-    normalized = endpoint.replace("\\", "/").strip()
-    prefix = "/api/modules/"
-    if not normalized.startswith(prefix):
-        return endpoint
-    remainder = normalized[len(prefix):]
-    parts = remainder.split("/", 2)
-    if len(parts) < 2:
-        return endpoint
-    module_id, action_id = parts[0], parts[1]
-    target_module = rules.get((module_id, action_id))
-    if not target_module:
-        return endpoint
-    suffix = f"/{parts[2]}" if len(parts) > 2 and parts[2] else ""
-    return f"{prefix}{target_module}/{action_id}{suffix}"
-
-
-def _route_page_api_endpoints_to_facades(value: Any, rules: dict[tuple[str, str], str]) -> Any:
+def _route_page_data_sources_to_facades(value: Any, rules: dict[tuple[str, str], str]) -> Any:
+    """Apply only explicitly registered provider-to-facade action bindings."""
     if isinstance(value, dict):
         rewritten: dict[str, Any] = {}
         for key, nested in value.items():
-            if key == "api_endpoint" and isinstance(nested, str):
-                rewritten[key] = _route_page_api_endpoint_to_facade(nested, rules)
+            if key == "data_source" and isinstance(nested, dict):
+                source = dict(nested)
+                module_id, action_id = source.get("module_id"), source.get("action_id")
+                target = rules.get((module_id, action_id)) if isinstance(module_id, str) and isinstance(action_id, str) else None
+                if target:
+                    source["module_id"] = target
+                rewritten[key] = source
+            elif key == "config_hint" and isinstance(nested, str):
+                rewritten[key] = json.dumps(_route_page_data_sources_to_facades(json.loads(nested), rules))
             else:
-                rewritten[key] = _route_page_api_endpoints_to_facades(nested, rules)
+                rewritten[key] = _route_page_data_sources_to_facades(nested, rules)
         return rewritten
     if isinstance(value, list):
-        return [_route_page_api_endpoints_to_facades(item, rules) for item in value]
+        return [_route_page_data_sources_to_facades(item, rules) for item in value]
     return value
 
 
@@ -1147,7 +1142,7 @@ def _normalize_managed_capability_page_bindings(
     if not rules:
         return pages
     return [
-        _route_page_api_endpoints_to_facades(dict(page), rules)
+        _route_page_data_sources_to_facades(dict(page), rules)
         for page in pages
         if isinstance(page, dict)
     ]
@@ -1185,7 +1180,9 @@ def _normalize_managed_capability_adapter_task_pack_ids(
     return normalized
 
 
-def _normalize_page_task_dependencies(build_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _normalize_page_task_dependencies(
+    build_tasks: list[dict[str, Any]], *, pages: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Ensure page tasks explicitly depend on their app-owned module contract."""
     module_contract_by_pack: dict[str, str] = {}
     module_contract_task_ids: list[str] = []
@@ -1227,6 +1224,19 @@ def _normalize_page_task_dependencies(build_tasks: list[dict[str, Any]]) -> list
                 if facade_task_id not in deps:
                     deps.insert(0, facade_task_id)  # type: ignore[attr-defined]
                 item["depends_on"] = deps
+            owned_stems = {
+                stem for path in item.get("owned_paths") or []
+                if (stem := _page_stem_from_path(normalize_app_path(str(path))))
+            }
+            dependencies = _normalize_string_list(item.get("depends_on"))
+            for page in pages or []:
+                if not owned_stems.intersection(_page_stems(page)):
+                    continue
+                for source in _iter_page_data_sources(page):
+                    contract_task = module_contract_by_pack.get(source["module_id"])
+                    if contract_task and contract_task not in dependencies:
+                        dependencies.append(contract_task)
+            item["depends_on"] = dependencies
         normalized.append(item)
     return normalized
 
@@ -1323,18 +1333,25 @@ def _managed_capability_backing_module_ids(
     return frozenset(module_ids - managed_capability_ids)
 
 
-def _iter_page_api_endpoints(value: Any) -> Iterable[str]:
+def _iter_page_data_sources(value: Any) -> Iterable[dict[str, str]]:
     if isinstance(value, dict):
+        if value.get("action_type") in {"submit", "delete"} and value.get("href") is not None:
+            raise ValueError("Page mutations must select data_source {module_id, action_id}; endpoint URLs are rendered by code")
         for key, nested in value.items():
-            if key == "api_endpoint" and isinstance(nested, str):
-                endpoint = nested.strip()
-                if endpoint:
-                    yield endpoint
+            if key == "api_endpoint" and nested is not None:
+                raise ValueError("Page sections must select data_source {module_id, action_id}; endpoint URLs are rendered by code")
+            if key == "data_source" and nested is not None:
+                if (not isinstance(nested, dict) or set(nested) != {"module_id", "action_id"}
+                        or any(not isinstance(v, str) or not v.strip() for v in nested.values())):
+                    raise ValueError("Page data_source requires exactly module_id and action_id")
+                yield nested
+            elif key == "config_hint" and isinstance(nested, str):
+                yield from _iter_page_data_sources(json.loads(nested))
             else:
-                yield from _iter_page_api_endpoints(nested)
+                yield from _iter_page_data_sources(nested)
     elif isinstance(value, list):
         for item in value:
-            yield from _iter_page_api_endpoints(item)
+            yield from _iter_page_data_sources(item)
 
 
 def _validate_page_bindings(
@@ -1344,19 +1361,15 @@ def _validate_page_bindings(
     managed_capability_backing_module_ids: frozenset[str],
 ) -> None:
     forbidden_ids = managed_capability_ids | managed_capability_backing_module_ids
-    if not forbidden_ids:
-        return
     for page in pages:
         page_name = str(page.get("name") or page.get("page_id") or "<unknown>")
-        for endpoint in _iter_page_api_endpoints(page):
-            normalized = endpoint.replace("\\", "/")
-            for module_id in forbidden_ids:
-                if normalized.startswith(f"/api/modules/{module_id}/"):
-                    raise ValueError(
-                        f"Page '{page_name}' binds api_endpoint '{endpoint}' directly to managed "
-                        f"module '{module_id}'. Managed capability pages must bind to an app-owned "
-                        "facade module endpoint instead."
-                    )
+        for source in _iter_page_data_sources(page):
+            if source["module_id"] in forbidden_ids:
+                raise ValueError(
+                    f"Page '{page_name}' binds data_source directly to managed "
+                    f"module '{source['module_id']}'. Managed capability pages must bind to an app-owned "
+                    "facade module action instead."
+                )
 
 
 def _managed_capability_reference_tokens(pack: dict[str, Any]) -> frozenset[str]:
@@ -1549,6 +1562,11 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 f"'{task_id}' assigns persistent page output to a non-schema owner "
                 f"({initial_agent}). `page_bundle` must start at AppSchemaAgent and emit "
                 "declarative page artifacts only."
+            )
+        if any(_page_stem_from_path(path) for path in owned_paths) and task_type != "page_bundle":
+            raise ValueError(
+                f"Build task '{task_id}' owns declarative ui/pages/*.yaml artifacts; "
+                "these require task_type='page_bundle' and initial_agent='AppSchemaAgent'."
             )
 
         if task_type in _MODULE_LOCAL_TASK_TYPES:
@@ -2051,7 +2069,7 @@ def app_build_plan(
         for p in capability_packs
         if isinstance(p, dict) and p.get("capability_source") == "managed_capability"
     ) - {""}
-    build_tasks = _normalize_page_task_dependencies(build_tasks)
+    build_tasks = _normalize_page_task_dependencies(build_tasks, pages=pages)
     build_tasks = _normalize_facade_task_dependencies(
         build_tasks,
         capability_packs=capability_packs,

@@ -112,12 +112,12 @@ def _plan_payload() -> dict[str, Any]:
                             "config_hint": json.dumps(
                                 {
                                     "columns": ["id", "title", "status"],
-                                    "api_endpoint": "/api/modules/reports/list_reports",
                                     "search": True,
                                 },
                                 sort_keys=True,
                             ),
                             "section_id_hint": "reports-table",
+                            "data_source": {"module_id": "reports", "action_id": "list_reports"},
                             "title_hint": "Reports",
                         }
                     ],
@@ -363,7 +363,7 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
                         "id": "reports-table", "primitive": "DataTable",
                         "config": {
                             "columns": [{"key": key, "label": key.title(), "type": "text", "width": None} for key in ("id", "title", "status")],
-                            "api_endpoint": "/api/modules/reports/list_reports", "search": True,
+                            "data_source": {"module_id": "reports", "action_id": "list_reports"}, "search": True,
                         },
                     }],
                 }

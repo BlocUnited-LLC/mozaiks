@@ -214,7 +214,7 @@ def test_invalid_typed_contract_repair_settles_without_mutating_accepted_files()
     )
     before = deepcopy(context)
     context["structured_output"] = {"module_contract": {
-        "module_id": "records", "module_yaml": {"actions": [{"input_schema": {
+        "module_id": "records", "module_yaml": {"module": {"id": "records"}, "actions": [{"input_schema": {
             "type": "object", "required": [],
             "properties": [{"name": "name", "type": "string", "required": True}],
         }}]},
