@@ -250,13 +250,13 @@ async def test_existing_unowned_literal_alias_retains_same_collection_crud():
         client=defaultdict(lambda: database),
     )
     app_data = app_data_from_context(SimpleNamespace(persistence=context), contract={
-        "aliases": [{"alias": "legacy.assignments", "collection": "legacy_assignments"}],
+        "aliases": [{"alias": "ownerless.assignments", "collection": "ownerless_assignments"}],
     })
-    await app_data.collection("legacy.assignments").update_one(
+    await app_data.collection("ownerless.assignments").update_one(
         {"app_id": "mixed-ownership-app", "user_id": "recipient"},
         {"$set": {"status": "active"}}, upsert=True,
     )
-    assert database["legacy_assignments"].rows == [{
+    assert database["ownerless_assignments"].rows == [{
         "app_id": "mixed-ownership-app", "user_id": "recipient", "status": "active",
     }]
 

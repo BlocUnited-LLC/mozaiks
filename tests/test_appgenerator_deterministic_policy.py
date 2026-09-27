@@ -12,6 +12,9 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import save_genera
 from factory_app.workflows.AppGenerator.tools.hook_module_runtime_quality_gate import (
     run_module_runtime_quality_gate,
 )
+from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
+    scan_module_persistence,
+)
 from factory_app.workflows.AppGenerator.tools.module_runtime_quality import (
     audit_module_runtime_quality,
 )
@@ -57,6 +60,17 @@ def _context(app_id="app-1", user_id="user-1", workspace_id="workspace-1"):
         app_id=app_id, principal=PersistencePrincipal(user_id=user_id, workspace_id=workspace_id),
     )
     return context
+
+
+@pytest.mark.parametrize("collections", [
+    [_collection()],
+    [_collection("per_workspace", "space_id")],
+    [_collection("app_wide")],
+    [_collection(), _collection("per_workspace", "space_id", "task_groups")],
+])
+def test_rendered_policy_satisfies_generated_persistence_admission(collections):
+    source = render_module_policy("task_management", collections)
+    assert scan_module_persistence({POLICY_PATH: source}) == []
 
 
 @pytest.mark.parametrize(("tenancy", "attribute"), [("per_user", "user_id"), ("per_workspace", "workspace_id")])
@@ -220,6 +234,7 @@ def test_assembly_renders_policy_from_approved_contract_and_runtime_loads_it(tmp
     ], data_contract=contract)
     files = {item["filename"]: item["content"] for item in assembled}
     assert files[POLICY_PATH] == render_module_policy("task_management", [_collection()])
+    assert scan_module_persistence(files) == []
     assert audit_module_runtime_quality(assembled) == []
     (tmp_path / "data").mkdir()
     (tmp_path / "data/contract.json").write_text(files["data/contract.json"], encoding="utf-8")
