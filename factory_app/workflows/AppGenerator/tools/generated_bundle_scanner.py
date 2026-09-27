@@ -30,6 +30,9 @@ import yaml
 from pydantic import ValidationError as PydanticValidationError
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
+    scan_module_persistence,
+)
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
     resolve_declared_pack_output_paths,
@@ -66,7 +69,10 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     unsafe_app_paths,
 )
-from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+from mozaiksai.core.workflow.generator_support.code_files import (
+    compile_data_contract,
+    data_contract_requires_auth,
+)
 from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     managed_data_owners,
     materialize_data_migrations,
@@ -2183,6 +2189,18 @@ def _scan_planned_data_fields(
     return errors
 
 
+def _scan_owned_collection_auth(files_map: dict[str, str]) -> list[str]:
+    contract, error = _load_data_contract(files_map)
+    if error or contract is None:
+        return []  # The contract scanner reports parse errors.
+    try:
+        if data_contract_requires_auth(contract) and not _app_manifest_auth_required(files_map):
+            return ["app.json: authRequired must be true for per_user/per_workspace collections; regenerate app auth."]
+    except ValueError as exc:
+        return [str(exc)]
+    return []
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -2246,6 +2264,8 @@ def scan_generated_bundle(
                     errors.append(f"{path}: must contain compiled migration versions, named indexes, and no managed collections.")
     except ValueError as exc:
         errors.append(str(exc))
+    errors.extend(_scan_owned_collection_auth(scannable_files_map))
+    errors.extend(scan_module_persistence(scannable_files_map))
     # Generation also requires the canonical frontend adapter artifact.
     auth_errors = _scan_auth_app_contract(scannable_files_map)
     errors.extend(error for error in auth_errors if error not in errors)

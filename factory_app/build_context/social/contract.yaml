@@ -130,7 +130,7 @@ forbidden_outputs:
 
 runtime_boundaries:
   - id: persistence_layer
-    rule: All repo files must use ctx.persistence.collection(module_id, entity_name). No direct Motor clients and no app_data_from_context aliases.
+    rule: All repo files must use ctx.persistence.collection(module_id, collection_name). No direct Motor clients and no app_data_from_context aliases.
   - id: event_emission
     rule: Events emitted via ctx.emit() in service.py only. Handler and repo never emit.
   - id: bidirectional_friendship

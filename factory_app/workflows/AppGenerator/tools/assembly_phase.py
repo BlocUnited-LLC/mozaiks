@@ -18,8 +18,10 @@ from typing import Any
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_entries_from_payload,
 )
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
+    materialize_collection_auth,
     materialize_data_contract,
 )
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
@@ -71,6 +73,7 @@ def _merge_code_files(
         file_map, data_contract=data_contract, owned_paths=owned_paths,
         subscription_contract=subscription_contract, context_variables=context_variables,
     )
+    file_map = materialize_collection_auth(file_map, data_contract=data_contract)
     file_map.update(materialize_module_read_actions(
         file_map, app_build_plan=app_build_plan, data_contract=data_contract,
         design_surface_map=design_surface_map,
@@ -86,6 +89,8 @@ def _merge_code_files(
             for path in task.get("owned_paths") or []
         ],
     ))
+    if "app.json" in file_map:
+        file_map.update(materialize_auth_scaffold(file_map, data_contract=data_contract))
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 

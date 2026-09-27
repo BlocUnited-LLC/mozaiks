@@ -396,7 +396,8 @@ Add tests that prove generated membership modules:
 
 - use canonical module structure
 - read `ctx.user_id`, `ctx.tenant_id`, and `ctx.workspace_id`
-- scope queries in `backend/policy.py`
+- enforce declared collection ownership through runtime persistence and keep
+  resource membership authorization in `backend/service.py`
 - serialize list responses through allowlist helpers
 - expose relationships through `contracts/relationships.yaml`
 - expose policy hooks through `contracts/policy_hooks.yaml` when another

@@ -18,13 +18,14 @@ workspaces must use `app/data/contract.json`.
 The default module persistence model remains:
 
 ```python
-ctx.persistence.collection(module_id, entity_name)
+ctx.persistence.collection(module_id, collection_name)
 ```
 
-Use `app/data/contract.json` only when the app needs explicit durable data
-intent beyond that default, such as stable existing collection names,
-cross-module aggregate ownership, explicit authority records with stable
-collection names, or indexed collections that must be applied at startup.
+Use the declared collection `name` for `collection_name`; an explicit declared
+`entity` resolves to the same collection and ownership policy. Unknown references
+fail closed when a data contract is loaded. Generated durable data declares
+`app/data/contract.json`, including ownership, stable collection names, and
+indexes that must be applied at startup.
 
 ## Contract Shape
 

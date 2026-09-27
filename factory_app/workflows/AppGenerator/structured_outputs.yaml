@@ -2749,7 +2749,7 @@ models:
           Stub family. Keep this finite and contract-driven. Layered module backends should declare handler, service, repo, policy, and schemas when a durable module is generated. Declare account_data_handler when module.yaml sets user_data_scope: true — the file must export AccountDataHandler with async delete_user_data(*, app_id, user_id) and async export_user_data(*, app_id, user_id) methods.
       purpose:
         type: str
-        description: Why this stub exists and what contract surface it implements. For kind=repo, generated content must use ctx.persistence.collection(module_id, entity_name), must not use ctx.db, and must not import get_mongo_client.
+        description: Why this stub exists and what contract surface it implements. For kind=repo, generated content must use ctx.persistence.collection(module_id, collection_name), must not use ctx.db, and must not import get_mongo_client.
       contract_refs:
         type: optional_list
         items: str

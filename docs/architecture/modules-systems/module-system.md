@@ -66,7 +66,7 @@ app/modules/{module_id}/
     ├── handler.py           # Required: thin dispatch, one method per declared action
     ├── service.py           # Recommended: all business logic and event emission
     ├── repo.py              # Recommended: MongoDB access layer, no logic
-    ├── policy.py            # Recommended: query scoping for multi-tenancy
+    ├── policy.py            # Recommended: optional ownership preflight
     ├── schemas.py           # Recommended: typed request/response + document shapes
     ├── {helper_files}.py    # Optional: declared, justified, module-local support files
     ├── settings.py          # Optional: settings hooks
@@ -80,7 +80,7 @@ app/modules/{module_id}/
   - `handler.py` is thin dispatch only. It exposes one method per declared action and delegates immediately.
   - `service.py` owns business logic, validation, and event emission after state is committed.
   - `repo.py` owns persistence access only. It does not validate, branch on product policy, or emit events.
-  - `policy.py` owns ownership, scoping, and transition checks such as multi-tenancy filters.
+  - `policy.py` provides optional ownership preflight from the immutable persistence principal. Runtime persistence enforces declared collection tenancy; service.py owns domain authorization and transition checks.
   - `schemas.py` owns typed request/response objects, enums, and normalization helpers.
 
   Helper files are allowed, but only as explicit module-local extensions of those canonical layers. They must be declared before generation, justified by a specific purpose, imported by a canonical layer or referenced by `runtime_extensions.yaml`, and kept under the module's own `backend/` package. They should not become a catch-all for generic business logic.
@@ -611,8 +611,7 @@ Never accesses `ctx.db` directly.
 from __future__ import annotations
 from typing import Any
 from uuid import uuid4
-from .schemas import MyModuleRecord, coerce_limit, timestamp_now
-from .policy import owner_id_from_context, scoped_owner_query
+from .schemas import coerce_limit, timestamp_now
 from .repo import MyModuleRepo
 
 
@@ -622,16 +621,13 @@ class MyModuleService:
         self.repo = repo or MyModuleRepo()
 
     async def list_items(self, ctx, *, limit: int = 20) -> dict[str, Any]:
-        query = scoped_owner_query(ctx)
-        items = await self.repo.list(ctx, query=query, limit=coerce_limit(limit))
+        items = await self.repo.list(ctx, query={}, limit=coerce_limit(limit))
         return {"items": items, "count": len(items)}
 
     async def create_item(self, ctx, *, name: str) -> dict[str, Any]:
-        owner_id = owner_id_from_context(ctx)
         now = timestamp_now()
-        record: MyModuleRecord = {
+        record = {
             "item_id": str(uuid4()),
-            "owner_id": owner_id,
             "name": name.strip(),
             "status": "active",
             "created_at": now,
@@ -640,16 +636,19 @@ class MyModuleService:
         await self.repo.insert(ctx, record=record)
         await ctx.emit(
             "domain.my_module.item_created",
-            {"item_id": record["item_id"], "owner_id": owner_id},
+            {"item_id": record["item_id"]},
         )
-        return {"success": True, "record": dict(record)}
+        return {"success": True, "item_id": record["item_id"]}
 ```
+
+The persistence collection scopes the list and stamps the declared owner field
+on insert. Service code does not infer that field or require a policy call.
 
 ### `repo.py` — Persistence access only
 
 Pure data access. No business logic, no events, no validation.
 
-Generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
+Generated repo code uses `ctx.persistence.collection(module_id, collection_name)`
 with module/entity values aligned to `data_contract` and staged
 `data/contract.json`. It must not use `ctx.db`, call
 `get_mongo_client()`, or hardcode database names.
@@ -668,12 +667,28 @@ class ProjectsRepo:
 ```
 
 The collection pair must match `data/contract.json`, for example
-`module_id: projects` and `entity_name: projects`. Non-persistent modules should
+`module_id: projects` and collection `name: projects`. A declared `entity`
+reference resolves to the same collection and ownership policy; unknown
+references fail closed. Non-persistent modules should
 not invent database logic.
 
-### `policy.py` — Query scoping
+Every operation resolves the current dispatch principal, including operations
+on a cached collection handle. HTTP, socket, and Page Ask dispatch preserve the
+authenticated actor. Registered host scope hooks may assert
+`verified_workspace_id` after membership verification; plain requested
+`workspace_id` is never ownership authority. Omission preserves token scope,
+while explicit `None` revokes workspace ownership. Auth-disabled local/test
+hosts use a logged development principal with workspace `development`; deployed
+hosts cannot enable that authority. Generated owned collections require
+`app.json.authRequired=true` and the canonical auth scaffold.
 
-Pure functions that build scoped MongoDB query dicts from `ctx`. No DB access.
+### `policy.py` — Ownership preflight
+
+Deterministically rendered helpers use `ctx.persistence.principal` and declared
+collection ownership. Runtime persistence enforces the same boundary on every
+operation without requiring helper calls. Missing authenticated identity and
+conflicting inserted owner fields fail closed. Domain authorization and
+transition checks belong in `service.py`.
 
 ### `schemas.py` — Typed shapes and pure helpers
 

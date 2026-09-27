@@ -209,7 +209,7 @@ effect of handler code.
 - generated module repos use `backend/schemas.py` for typed document shapes and
   `backend/repo.py` for persistence operations
 - the runtime injects `ctx.persistence` into module actions when `app_id` exists;
-  generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
+  generated repo code uses `ctx.persistence.collection(module_id, collection_name)`
   and must not require `ctx.db`
 - the runtime loads `data/contract.json` during app load; missing
   intent is allowed for non-persistent apps, while invalid JSON or invalid shape
@@ -218,6 +218,65 @@ effect of handler code.
   readiness only after exact materialized verification, and applies only
   additive migration files from `data/migrations/*.json`
 - migration states are recorded in `mozaiksai.AppDatabaseMigrations`
+
+For collections declaring `per_user` or `per_workspace` tenancy and an
+`owner_field`, runtime persistence applies the authenticated principal's user or
+workspace identity to every read, count, update, delete, and aggregation. Inserts
+receive that exact owner field automatically; a supplied conflicting value is
+rejected. Updates cannot move a row to another owner. This boundary covers both
+generated canonical actions and model-authored repositories without relying on
+their filters or use of `policy.py`.
+
+The runtime captures the token-validated HTTP or socket principal; Page Ask
+dispatch carries the same immutable identity. A registered host
+`module_scope_resolver` can return `verified_workspace_id` only after verifying
+membership for that authenticated actor. Omission preserves the signed token's
+workspace claim; explicit `None` revokes workspace ownership. Plain
+`workspace_id`, action inputs, requested scope, and mutable context fields never
+grant ownership. The assertion is accepted only from the registered host hook.
+
+Auth-disabled local, development, and test hosts use an explicit logged
+development principal with stable workspace `development`. This authority is
+unavailable in deployed environments. Generated apps with any `per_user` or
+`per_workspace` collection deterministically set `app.json.authRequired=true`
+and receive the canonical auth scaffold, even when model-authored app intent
+omits auth or requests a public app.
+
+Module execution binds and revokes ownership authority around each dispatch.
+Each collection operation uses that active principal, so a cached handle cannot
+retain an earlier caller's ownership. Expired scopes and cached handles used
+from another app fail closed. Host-created standalone persistence contexts may
+supply an explicit principal for host operations. `app_wide` and ownerless
+collections receive no additional owner filter.
+
+Repos call `ctx.persistence.collection(module_id, collection_name)` using the
+declared collection `name`. A declared `entity` value resolves to the same
+physical collection and ownership policy; unknown references fail closed.
+
+Aggregations operate on the caller's owned rows. Foreign-collection stages and
+aggregation writes cannot bypass the boundary, and admin permissions do not
+implicitly disable it. Cross-owner behavior is unavailable through module
+persistence until an explicitly declared, auditable runtime access contract is
+implemented. Generated code must not substitute raw Mongo access.
+In mixed apps, literal access to an owned physical collection is rejected.
+Unowned aliases remain usable through a bounded Mongo-compatible facade that
+supports their existing operations and safe aggregation cursors; it prevents
+foreign-collection stages and database introspection from exposing owned rows.
+Apps with no owned collections retain raw alias behavior. Scoped shared
+collections must declare their owning surface; missing ownership fails loading.
+Index changes on owned collections remain host startup work: module calls cannot
+create collection-wide indexes, including TTL indexes that delete other owners' rows.
+
+Generated-module admission rejects private persistence attributes, raw driver
+imports, client/context constructors, and request-principal binding internals,
+including ordinary aliases. Generated modules resolve declared aliases through
+`app_data_from_context(ctx)`, without overriding its contract or app root;
+direct `literal_collection` calls and constructing `AppData` are rejected.
+Startup declarations grant no raw-driver or ownership exemption; generated
+workers follow the same module admission rules. Provider database SDK mechanics
+belong in declared `services/adapters/database/` integrations, which cannot own
+app persistence authority. Account-data handlers receive their
+database through the account-data protocol and have no raw-client exemption.
 
 The target contract is:
 
@@ -272,7 +331,7 @@ the materializer preserves its `ServiceOutput.python_files` content, rather than
 generating a deletion policy from module stubs. The existing account-data file
 contract and hook supply raw Motor API guidance and the current
 `mozaiksai.core.runtime.persistence.naming.collection_name_for` signature.
-For a repo using `ctx.persistence.collection(module_id, entity_name)`, the handler
+For a repo using `ctx.persistence.collection(module_id, collection_name)`, the handler
 must use those same IDs with `collection_name_for(app_id=app_id, ...)` and omit
 `app_slug`, matching the standard executor. Literal collections, aliases,
 external bindings, and custom contexts retain their declared storage contract;
@@ -357,8 +416,8 @@ Generated module layering for app business data:
 
 - `handler.py` dispatches only
 - `service.py` orchestrates business logic and calls repo methods
-- `repo.py` uses `ctx.persistence.collection(module_id, entity_name)`
-- `policy.py` builds scope/domain filters
+- `repo.py` uses `ctx.persistence.collection(module_id, collection_name)`
+- `policy.py` provides optional ownership preflight from the immutable persistence principal
 - `schemas.py` defines typed shapes and pure helpers
 
 Generated modules must not call `get_mongo_client()` directly, use `ctx.db`, or

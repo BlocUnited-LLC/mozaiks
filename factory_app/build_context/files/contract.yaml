@@ -76,7 +76,7 @@ runtime_boundaries:
       export_user_data.
   - id: no_direct_sdk_calls
     rule: >
-      Generated repo.py must use ctx.persistence.collection("files", entity_name).
+      Generated repo.py must use ctx.persistence.collection("files", collection_name).
       No direct cloud storage SDK calls in module backend. Storage mechanics belong
       in services/adapters/storage/{provider}.py.
   - id: event_emission

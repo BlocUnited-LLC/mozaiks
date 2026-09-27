@@ -314,10 +314,7 @@ def _read_functions(module_id: str, collection: dict[str, Any], operation: str) 
             "for field in fields if field in record}\n"
             "    return {'item': item}\n"
         )
-    repo = (
-        f"async def {method}(ctx, *, {params}):\n"
-        "    from .policy import scoped_query\n"
-    )
+    repo = f"async def {method}(ctx, *, {params}):\n"
     if operation == "list":
         searchable = [field["name"] for field in collection.get("fields") or [] if field.get("type") == "string"]
         repo += (
@@ -329,10 +326,9 @@ def _read_functions(module_id: str, collection: dict[str, Any], operation: str) 
             "    if search and search_fields:\n"
             "        filters['$or'] = [{field: {'$regex': re.escape(str(search)), '$options': 'i'}} "
             "for field in search_fields]\n"
-            f"    query = scoped_query(ctx, filters, entity_name={name!r})\n"
             f"    collection = ctx.persistence.collection({module_id!r}, {name!r})\n"
-            "    total = await collection.count(query)\n"
-            "    records = await collection.aggregate([{'$match': query}, {'$sort': {'_id': 1}}, "
+            "    total = await collection.count(filters)\n"
+            "    records = await collection.aggregate([{'$match': filters}, {'$sort': {'_id': 1}}, "
             "{'$skip': (page - 1) * page_size}, {'$limit': page_size}])\n"
             "    return {'items': records, 'total': total}\n"
         )
@@ -349,9 +345,8 @@ def _read_functions(module_id: str, collection: dict[str, Any], operation: str) 
                 "        filters = {'_id': {'$in': [id, ObjectId(id)]}}\n"
             )
         repo += (
-            f"    query = scoped_query(ctx, filters, entity_name={name!r})\n"
             f"    collection = ctx.persistence.collection({module_id!r}, {name!r})\n"
-            "    record = await collection.find_one(query)\n"
+            "    record = await collection.find_one(filters)\n"
             "    if record is None:\n"
             "        from mozaiksai.core.runtime import ModuleRecordNotFoundError\n"
             "        raise ModuleRecordNotFoundError('Record not found')\n"

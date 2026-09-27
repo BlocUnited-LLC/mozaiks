@@ -15,6 +15,7 @@ from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence import (
+    PersistencePrincipal,
     apply_data_migrations,
     apply_database_indexes,
     load_data_migrations,
@@ -145,8 +146,11 @@ class FakePersistenceContext:
         user_id: str | None = None,
         database_name: str | None = None,
         client: Any | None = None,
+        data_contract: dict[str, Any] | None = None,
+        principal: PersistencePrincipal | None = None,
     ) -> None:
         self._app_id = app_id
+        self._principal = principal
         self._scope_metadata = {"app_id": app_id}
         if tenant_id:
             self._scope_metadata["tenant_id"] = tenant_id
@@ -155,6 +159,10 @@ class FakePersistenceContext:
         if user_id:
             self._scope_metadata["user_id"] = user_id
         self.constructed.append(self)
+
+    @property
+    def principal(self):
+        return self._principal() if callable(self._principal) else self._principal
 
     @property
     def app_id(self) -> str:
@@ -801,11 +809,12 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
             app_id="app_a",
             tenant_id="tenant_1",
             user_id="user_1",
+            persistence_principal=PersistencePrincipal(user_id="user_1"),
             params={"project_id": "project_1", "name": "Launch Plan"}, authority=trusted_framework_authority(),
         )
     )
     listed_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_a", user_id="user_1", params={}, authority=trusted_framework_authority())
+        ModuleRequest(module="projects", action="list_projects", app_id="app_a", user_id="user_1", params={}, authority=trusted_framework_authority(), persistence_principal=PersistencePrincipal(user_id="user_1"))
     )
     created_task = await executor.execute(
         ModuleRequest(
@@ -813,14 +822,15 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
             action="create_task",
             app_id="app_a",
             user_id="user_1",
+            persistence_principal=PersistencePrincipal(user_id="user_1"),
             params={"task_id": "task_1", "title": "Draft scope", "project_id": "project_1"}, authority=trusted_framework_authority(),
         )
     )
     listed_tasks = await executor.execute(
-        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", user_id="user_1", params={"project_id": "project_1"}, authority=trusted_framework_authority())
+        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", user_id="user_1", params={"project_id": "project_1"}, authority=trusted_framework_authority(), persistence_principal=PersistencePrincipal(user_id="user_1"))
     )
     app_b_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_b", user_id="user_1", params={}, authority=trusted_framework_authority())
+        ModuleRequest(module="projects", action="list_projects", app_id="app_b", user_id="user_1", params={}, authority=trusted_framework_authority(), persistence_principal=PersistencePrincipal(user_id="user_1"))
     )
 
     assert created_project.success is True

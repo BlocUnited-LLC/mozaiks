@@ -163,7 +163,31 @@ class GeneralModeMixin:
 
         workspace_context: dict[str, Any] = {}
         try:
+            from starlette.websockets import WebSocketState
+
+            from mozaiksai.core.auth.websocket_auth import WebSocketUser
             from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+            from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
+
+            # Only the currently connected, server-authenticated socket may
+            # supply persistence identity. UI context and chat IDs are inputs.
+            websocket = conn.get("websocket")
+            principal = getattr(getattr(websocket, "state", None), "user", None)
+            persistence_principal = None
+            if (
+                self.connections.get(chat_id) is conn
+                and (ws_id is None or conn.get("ws_id") == ws_id)
+                and conn.get("active")
+                and getattr(websocket, "client_state", None) == WebSocketState.CONNECTED
+                and getattr(websocket, "application_state", None) == WebSocketState.CONNECTED
+                and isinstance(principal, WebSocketUser)
+                and principal.user_id == user_id
+                and principal.validate_app_id(str(app_id))
+                and principal.validate_chat_id(chat_id)
+            ):
+                persistence_principal = PersistencePrincipal.from_websocket_user(principal)
+            else:
+                principal = None
 
             page_path = None
             page_context = None
@@ -175,6 +199,8 @@ class GeneralModeMixin:
                 user_id=str(user_id) if user_id else "anonymous",
                 page_path=page_path,
                 page_context=page_context,
+                persistence_principal=persistence_principal,
+                principal=principal,
             )
         except Exception as ask_context_err:
             logger.debug("Ask host context unavailable: %s", ask_context_err)

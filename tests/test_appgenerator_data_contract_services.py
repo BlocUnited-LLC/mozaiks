@@ -85,7 +85,7 @@ def test_file_contracts_require_data_contract_for_persistent_generated_modules()
     assert "tenancy" in text
     assert "deterministic policy/read construction" in text
     assert "opt-in only" not in text
-    assert "ctx.persistence.collection(module_id, entity_name)" in text
+    assert "ctx.persistence.collection(module_id, collection_name)" in text
     assert "app/data is declarative only" in text
     assert "documented alias exclusions" in text
     assert "data/contract.json" in text
@@ -163,7 +163,7 @@ def test_data_contract_architecture_doc_exists() -> None:
         encoding="utf-8"
     )
 
-    assert "ctx.persistence.collection(module_id, entity_name)" in doc
+    assert "ctx.persistence.collection(module_id, collection_name)" in doc
     assert "app/data/contract.json" in doc
     assert "documented_alias_exclusions" in doc
     assert "strict structured outputs" in doc
