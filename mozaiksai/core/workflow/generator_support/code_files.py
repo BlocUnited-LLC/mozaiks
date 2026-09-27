@@ -183,7 +183,7 @@ def materialize_data_contract(
     if not isinstance(data_contract, dict):
         raise ValueError("The approved DesignDocs data_contract must be an object")
     if data_contract.get("entities"):
-        raise ValueError("Factory data_contract requires explicit ownership under surfaces, not legacy entities")
+        raise ValueError("Factory data_contract requires explicit collection ownership under surfaces")
     for owner, _kind, collection in iter_data_contract_collections(data_contract, require_complete_ownership=False):
         validate_collection_ownership(collection, f"data_contract collection {owner}.{collection.get('name', '')}")
     return {**files, path: json.dumps(data_contract, indent=2, ensure_ascii=False)}
