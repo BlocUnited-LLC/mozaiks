@@ -280,7 +280,7 @@ async def test_public_gated_read_is_reached_by_page_data_source():
 
 @pytest.mark.parametrize("name", ["billing", "usage"])
 def test_shipped_billing_pages_select_scalar_fields_from_declared_response(name):
-    templates = Path(__file__).resolve().parents[1] / "factory_app/build_context/MozaiksPay/templates"
+    templates = Path(__file__).resolve().parents[1] / "factory_app/build_context/mozaikspay/templates"
     module = yaml.safe_load((templates / "modules/billing_portal/module.yaml").read_text(encoding="utf-8"))
     contracts = {f"billing_portal/{action['id']}": action for action in module["actions"]}
     page = yaml.safe_load((templates / f"ui/pages/{name}.yaml").read_text(encoding="utf-8"))
