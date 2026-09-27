@@ -18,9 +18,11 @@ from typing import Any
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_entries_from_payload,
 )
+from mozaiksai.core.workflow.generator_support.code_files import materialize_data_contract
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_actions,
+    materialize_module_read_implementations,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,8 @@ def _merge_code_files(
     build_timestamp: str | None = None,
     app_build_plan: dict[str, Any] | None = None,
     data_contract: dict[str, Any] | None = None,
+    design_surface_map: dict[str, Any] | None = None,
+    subscription_contract: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """Merge code_files from feature outputs, deduping by filename."""
     file_map: dict[str, str] = {}
@@ -45,10 +49,24 @@ def _merge_code_files(
             if not filename or content is None:
                 continue
             file_map[str(filename)] = str(content)
+    file_map = materialize_data_contract(
+        file_map, data_contract=data_contract, owned_paths=list(file_map),
+    )
     file_map.update(materialize_module_read_actions(
         file_map, app_build_plan=app_build_plan, data_contract=data_contract,
+        design_surface_map=design_surface_map,
+        subscription_contract=subscription_contract,
     ))
     file_map.update(materialize_module_policies(file_map, data_contract))
+    file_map.update(materialize_module_read_implementations(
+        file_map, app_build_plan=app_build_plan, data_contract=data_contract,
+        subscription_contract=subscription_contract,
+        owned_paths=[
+            path for task in (app_build_plan or {}).get("build_tasks") or []
+            if task.get("task_type") == "business_services"
+            for path in task.get("owned_paths") or []
+        ],
+    ))
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 
@@ -59,6 +77,8 @@ async def assemble_features(
     build_timestamp: str | None = None,
     app_build_plan: dict[str, Any] | None = None,
     data_contract: dict[str, Any] | None = None,
+    design_surface_map: dict[str, Any] | None = None,
+    subscription_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Merge feature outputs into a single workflow bundle.
@@ -80,6 +100,8 @@ async def assemble_features(
             build_timestamp=build_timestamp,
             app_build_plan=app_build_plan,
             data_contract=data_contract,
+            design_surface_map=design_surface_map,
+            subscription_contract=subscription_contract,
         )
         logger.info(
             "Assembled %d feature outputs into %d files",

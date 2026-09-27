@@ -14,6 +14,9 @@ from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
+from mozaiksai.core.runtime.persistence.intent_loader import (
+    validate_complete_data_contract_ownership,
+)
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 
 _MODULE_CONTRACT_FILENAMES = {
@@ -134,7 +137,6 @@ def _materialize_app_schema_file_map(
         "theme_config_patch": "brand/theme_config.json",
         "shell_config": "config/shell.json",
         "asset_manifest": "config/asset_manifest.json",
-        "data_contract": "data/contract.json",
     }
     for key, path in optional_json_outputs.items():
         value = payload.get(key)
@@ -164,6 +166,23 @@ def _materialize_app_schema_file_map(
             file_map["ui/index.js"] = str(ui_index)
 
     return file_map
+
+
+def materialize_data_contract(
+    files: dict[str, str], *, data_contract: Any, owned_paths: list[str] | None = None,
+) -> dict[str, str]:
+    """Serialize the approved design contract within the caller's file ownership."""
+    path = "data/contract.json"
+    if owned_paths is not None and path not in owned_paths:
+        return files
+    if data_contract is None:
+        if path in files:
+            raise ValueError("data/contract.json requires the approved DesignDocs data_contract")
+        return files
+    if not isinstance(data_contract, dict):
+        raise ValueError("The approved DesignDocs data_contract must be an object")
+    validate_complete_data_contract_ownership(data_contract)
+    return {**files, path: json.dumps(data_contract, indent=2, ensure_ascii=False)}
 
 
 def _materialize_schema_contract(schema: dict[str, Any], *, closed_request: bool = False) -> dict[str, Any]:

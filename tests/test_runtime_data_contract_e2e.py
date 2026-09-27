@@ -116,8 +116,8 @@ def _bundle_intent() -> dict[str, Any]:
                 "surface_kind": "module",
                 "collections": [
                     {
-                        "name": "projects",
-                        "scope": "app",
+                        "name": "projects", "entity": "Project",
+                        "scope": "app", "tenancy": "app_wide", "owner_field": None,
                         "ownership": {"surface_id": "projects", "surface_kind": "module"},
                         "fields": [
                             {"name": "project_id", "type": "string", "required": True},
@@ -148,8 +148,8 @@ def _bundle_intent() -> dict[str, Any]:
                 "surface_kind": "module",
                 "collections": [
                     {
-                        "name": "tasks",
-                        "scope": "app",
+                        "name": "tasks", "entity": "Task",
+                        "scope": "app", "tenancy": "app_wide", "owner_field": None,
                         "ownership": {"surface_id": "tasks", "surface_kind": "module"},
                         "fields": [
                             {"name": "task_id", "type": "string", "required": True},
@@ -221,8 +221,8 @@ async def test_e2e_app_load_result_entity_index_contains_both_surfaces(tmp_path:
 
     result = await AppLoader.load(str(tmp_path))
 
-    assert ("projects", "projects") in result.data_entities_by_key
-    assert ("tasks", "tasks") in result.data_entities_by_key
+    assert ("projects", "Project") in result.data_entities_by_key
+    assert ("tasks", "Task") in result.data_entities_by_key
 
 
 @pytest.mark.asyncio
@@ -230,8 +230,8 @@ async def test_e2e_entity_index_carries_collection_metadata(tmp_path: Path) -> N
     _write_bundle(tmp_path, _bundle_intent())
 
     result = await AppLoader.load(str(tmp_path))
-    projects_entry = result.data_entities_by_key[("projects", "projects")]
-    tasks_entry = result.data_entities_by_key[("tasks", "tasks")]
+    projects_entry = result.data_entities_by_key[("projects", "Project")]
+    tasks_entry = result.data_entities_by_key[("tasks", "Task")]
 
     assert len(projects_entry["indexes"]) == 2
     assert len(tasks_entry["indexes"]) == 2
@@ -291,6 +291,39 @@ async def test_e2e_apply_indexes_creates_all_declared_indexes(tmp_path: Path) ->
 
     tasks_names = {kw.get("name") for _, kw in tasks_col.create_index_calls}
     assert tasks_names == {"tasks_app_project", "tasks_app_task_unique"}
+
+
+@pytest.mark.asyncio
+async def test_e2e_legacy_contract_keeps_declared_indexes_without_ownership_metadata(tmp_path):
+    intent = _bundle_intent()
+    for surface in intent["surfaces"]:
+        for collection in surface["collections"]:
+            for field in ("entity", "tenancy", "owner_field"):
+                collection.pop(field)
+            collection["scope"] = "workspace"
+    _write_bundle(tmp_path, intent)
+    loaded = await AppLoader.load(str(tmp_path))
+    context, client = _make_context()
+    result = await apply_database_indexes(loaded.data_contract, persistence=context)
+    assert loaded.data_contract == intent
+    assert result.created == result.verified == 4
+    assert len(_get_collection(client, module_id="projects", entity_name="projects").create_index_calls) == 2
+    assert len(_get_collection(client, module_id="tasks", entity_name="tasks").create_index_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_e2e_partial_shared_metadata_does_not_authorize_database_indexes(tmp_path):
+    intent = {"version": "1", "app_id": "app_e2e", "surfaces": [], "shared_collections": [{
+        "name": "records", "entity": "Record",
+        "indexes": [{"name": "record_id", "keys": [["id", 1]]}],
+    }]}
+    _write_bundle(tmp_path, intent)
+    loaded = await AppLoader.load(str(tmp_path))
+    context, client = _make_context()
+    result = await apply_database_indexes(loaded.data_contract, persistence=context)
+    assert loaded.data_contract == intent
+    assert result.planned == result.created == 0
+    assert client.databases == {}
 
 
 @pytest.mark.asyncio
@@ -400,8 +433,8 @@ async def test_e2e_full_load_then_apply_indexes(
 
     assert load_result.data_contract is not None, "data_contract must be populated"
     assert load_result.data_contract["version"] == "1"
-    assert ("projects", "projects") in load_result.data_entities_by_key
-    assert ("tasks", "tasks") in load_result.data_entities_by_key
+    assert ("projects", "Project") in load_result.data_entities_by_key
+    assert ("tasks", "Task") in load_result.data_entities_by_key
 
     # --- Phase 2: first application ---
     context, client = _make_context()

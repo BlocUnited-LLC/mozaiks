@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import yaml
+
 from factory_app.workflows._shared.hook_utils import update_agent_section
+from mozaiksai.core.workflow.generator_support.module_action_inventory import all_module_actions
 from mozaiksai.core.workflow.ui_primitives import format_generated_page_ui_primitive_guidance
 from mozaiksai.core.workflow.ui_surface_taxonomy import format_ui_surface_taxonomy_guidance
 
@@ -37,6 +40,14 @@ def inject_primitive_catalog(agent: Any, messages: list[dict[str, Any]]) -> None
         )
         update_agent_section(agent, _SURFACE_HEADER, format_ui_surface_taxonomy_guidance())
         update_agent_section(agent, _HEADER, body)
+        context = getattr(agent, "context_variables", None)
+        if context is not None:
+            update_agent_section(agent, "[APPROVED PAGE ACTION INVENTORY]", (
+                "Choose data_source module_id/action_id only from these approved actions and "
+                "the accepted module contracts. Match response fields to the declared output schema. "
+                "Custom summaries are declared custom_reads; a list response cannot supply KPI fields.\n"
+                + yaml.safe_dump(all_module_actions(context), sort_keys=True)
+            ))
         logger.info("[%s] Injected shipped page primitive catalog", agent_name)
     except Exception as exc:
         logger.error("[%s] Failed to inject primitive catalog: %s", agent_name, exc)

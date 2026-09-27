@@ -316,7 +316,7 @@ async def test_acceptance_repair_policy_and_code_save_use_frozen_context_and_dec
     files, _, _, generated, _ = await _materialize_plan_bundle(tmp_path=tmp_path)
     path = "modules/reports/backend/handler.py"
     broken = {**files, path: files[path].replace("class ReportsModule:", "class WrongHandler:")}
-    initial = {**generated.data, "generated_files": broken,
+    initial = {**generated.snapshot(), "generated_files": broken,
                "code_files": [{"filename": name, "content": content} for name, content in broken.items()]}
     bridge, writer, policy, run = _declared_appgenerator_bridge(initial)
     original_results = bridge.snapshot()["app_task_batch_results"]

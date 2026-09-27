@@ -45,6 +45,10 @@ models:
         type: optional_list
         items: str
         description: Deterministic mutations or actions owned by the surface.
+      custom_reads:
+        type: optional_list
+        items: str
+        description: Explicit snake_case read action ids beyond canonical entity list/get, such as summarize_tasks for dashboard KPIs. These are approved design decisions implemented by ServiceAgent; canonical list/get actions are constructed from collection entity and tenancy.
       events_emitted:
         type: optional_list
         items: str
@@ -185,7 +189,20 @@ models:
         - app
         - platform
         - hosted
-        description: Scope of the collection namespace.
+        description: Namespace owner of the collection. This does not specify row tenancy.
+      tenancy:
+        type: literal
+        values:
+        - per_user
+        - per_workspace
+        - app_wide
+        description: Row ownership chosen here once. Per-user and per-workspace records require owner_field; app-wide records require explicit read access policy when writes are protected.
+      owner_field:
+        type: optional_str
+        description: Exact declared field holding trusted user_id for per_user or workspace_id for per_workspace. Null for app_wide.
+      entity:
+        type: str
+        description: Exact entity name from the owning surface primary_entities. No pluralization or collection-name inference is permitted.
       ownership:
         type: DataContractOwnership
         description: Surface ownership for the collection.

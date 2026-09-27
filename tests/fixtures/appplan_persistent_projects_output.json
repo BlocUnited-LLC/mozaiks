@@ -8,7 +8,9 @@
           "surface_id": "projects",
           "surface_kind": "module",
           "owner": "app",
-          "source_capability_packs": ["crud_pack"],
+          "source_capability_packs": [
+            "crud_pack"
+          ],
           "label": "Projects Module",
           "summary": "Handles project creation, listing, and management.",
           "primary_entities": [
@@ -18,8 +20,15 @@
             "Project List",
             "Project Detail"
           ],
-          "owned_mutations": ["create_project", "update_project", "delete_project"],
-          "events_emitted": ["domain.projects.created", "domain.projects.updated"],
+          "owned_mutations": [
+            "create_project",
+            "update_project",
+            "delete_project"
+          ],
+          "events_emitted": [
+            "domain.projects.created",
+            "domain.projects.updated"
+          ],
           "workflow_triggers": [],
           "dependencies": []
         },
@@ -27,7 +36,9 @@
           "surface_id": "tasks",
           "surface_kind": "module",
           "owner": "app",
-          "source_capability_packs": ["crud_pack"],
+          "source_capability_packs": [
+            "crud_pack"
+          ],
           "label": "Tasks Module",
           "summary": "Handles task creation, assignment, and completion.",
           "primary_entities": [
@@ -37,8 +48,15 @@
             "Task List",
             "Task Detail"
           ],
-          "owned_mutations": ["create_task", "assign_task", "complete_task"],
-          "events_emitted": ["domain.tasks.created", "domain.tasks.completed"],
+          "owned_mutations": [
+            "create_task",
+            "assign_task",
+            "complete_task"
+          ],
+          "events_emitted": [
+            "domain.tasks.created",
+            "domain.tasks.completed"
+          ],
           "workflow_triggers": [],
           "dependencies": []
         }
@@ -109,7 +127,10 @@
         "sections_hint": [
           {
             "primitive": "DataTable",
-            "data_source": {"module_id": "projects", "action_id": "list_projects"},
+            "data_source": {
+              "module_id": "projects",
+              "action_id": "list_projects"
+            },
             "config_hint": "{\"columns\": [\"id\", \"name\", \"status\"], \"selection\": \"single\", \"search\": true}",
             "section_id_hint": "project-table",
             "title_hint": "All Projects"
@@ -137,7 +158,10 @@
         "sections_hint": [
           {
             "primitive": "DataTable",
-            "data_source": {"module_id": "tasks", "action_id": "list_tasks"},
+            "data_source": {
+              "module_id": "tasks",
+              "action_id": "list_tasks"
+            },
             "config_hint": "{\"columns\": [\"id\", \"name\", \"status\", \"project_id\"], \"selection\": \"single\", \"search\": true}",
             "section_id_hint": "task-table",
             "title_hint": "All Tasks"
@@ -205,71 +229,6 @@
     "external_integrations": [],
     "event_flows": [],
     "agent_backend_required": false,
-    "data_contract": {
-      "version": "1",
-      "surfaces": [
-        {
-          "surface_id": "projects",
-          "surface_kind": "module",
-          "collections": [
-            {
-              "module_id": "projects",
-              "name": "projects",
-              "entity_name": "projects",
-              "scope": "user",
-              "scope_field": "owner_id",
-              "ownership": {"surface_id": "projects", "surface_kind": "module"},
-              "fields": [{"name": "owner_id", "type": "string", "required": true}],
-              "indexes": [
-                {
-                  "name": "project_owner_created_at",
-                  "keys": [
-                    {
-                      "field": "owner_id",
-                      "order": 1
-                    },
-                    {
-                      "field": "created_at",
-                      "order": -1
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "surface_id": "tasks",
-          "surface_kind": "module",
-          "collections": [
-            {
-              "module_id": "tasks",
-              "name": "tasks",
-              "entity_name": "tasks",
-              "scope": "user",
-              "scope_field": "owner_id",
-              "ownership": {"surface_id": "tasks", "surface_kind": "module"},
-              "fields": [{"name": "owner_id", "type": "string", "required": true}],
-              "indexes": [
-                {
-                  "name": "task_project_status",
-                  "keys": [
-                    [
-                      "project_id",
-                      1
-                    ],
-                    [
-                      "status",
-                      1
-                    ]
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
     "pending_schema_migration": {
       "migration_id": "001_projects_tasks_indexes",
       "version": "1",
@@ -373,7 +332,7 @@
         "execution_target": "AppGenerator",
         "initial_agent": "ModelAgent",
         "description": "Generate typed data shapes for the projects module.",
-        "initial_message": "Generate modules/projects/backend/schemas.py with typed request/response and document shapes. No persistence logic — only pure shape definitions.",
+        "initial_message": "Generate modules/projects/backend/schemas.py with typed request/response and document shapes. No persistence logic \u00e2\u20ac\u201d only pure shape definitions.",
         "owned_paths": [
           "modules/projects/backend/schemas.py"
         ],
@@ -441,7 +400,7 @@
         "execution_target": "AppGenerator",
         "initial_agent": "ModelAgent",
         "description": "Generate typed data shapes for the tasks module.",
-        "initial_message": "Generate modules/tasks/backend/schemas.py with typed request/response and document shapes. No persistence logic — only pure shape definitions.",
+        "initial_message": "Generate modules/tasks/backend/schemas.py with typed request/response and document shapes. No persistence logic \u00e2\u20ac\u201d only pure shape definitions.",
         "owned_paths": [
           "modules/tasks/backend/schemas.py"
         ],
@@ -576,6 +535,92 @@
         }
       ]
     }
-  ]
+  ],
+  "context": {
+    "data_contract": {
+      "version": "1",
+      "surfaces": [
+        {
+          "surface_id": "projects",
+          "surface_kind": "module",
+          "collections": [
+            {
+              "module_id": "projects",
+              "name": "projects",
+              "scope": "app",
+              "ownership": {
+                "surface_id": "projects",
+                "surface_kind": "module"
+              },
+              "fields": [
+                {
+                  "name": "owner_id",
+                  "type": "string",
+                  "required": true
+                }
+              ],
+              "indexes": [
+                {
+                  "name": "project_owner_created_at",
+                  "keys": [
+                    {
+                      "field": "owner_id",
+                      "order": 1
+                    },
+                    {
+                      "field": "created_at",
+                      "order": -1
+                    }
+                  ]
+                }
+              ],
+              "tenancy": "per_user",
+              "owner_field": "owner_id",
+              "entity": "Project"
+            }
+          ]
+        },
+        {
+          "surface_id": "tasks",
+          "surface_kind": "module",
+          "collections": [
+            {
+              "module_id": "tasks",
+              "name": "tasks",
+              "scope": "app",
+              "ownership": {
+                "surface_id": "tasks",
+                "surface_kind": "module"
+              },
+              "fields": [
+                {
+                  "name": "owner_id",
+                  "type": "string",
+                  "required": true
+                }
+              ],
+              "indexes": [
+                {
+                  "name": "task_project_status",
+                  "keys": [
+                    [
+                      "project_id",
+                      1
+                    ],
+                    [
+                      "status",
+                      1
+                    ]
+                  ]
+                }
+              ],
+              "tenancy": "per_user",
+              "owner_field": "owner_id",
+              "entity": "Task"
+            }
+          ]
+        }
+      ]
+    }
+  }
 }
-

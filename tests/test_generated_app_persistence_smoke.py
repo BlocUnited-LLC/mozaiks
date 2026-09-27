@@ -300,7 +300,8 @@ def _write_generated_persistence_app(root: Path) -> None:
                         {
                             "module_id": "projects",
                             "name": "projects",
-                            "entity_name": "projects",
+                            "entity": "Project", "scope": "app", "tenancy": "per_user", "owner_field": "owner_id",
+                            "fields": [{"name": "owner_id", "type": "string", "required": True}],
                             "indexes": [
                                 {
                                     "name": "project_owner_created_at",
@@ -320,7 +321,8 @@ def _write_generated_persistence_app(root: Path) -> None:
                         {
                             "module_id": "tasks",
                             "name": "tasks",
-                            "entity_name": "tasks",
+                            "entity": "Task", "scope": "app", "tenancy": "per_user", "owner_field": "owner_id",
+                            "fields": [{"name": "owner_id", "type": "string", "required": True}],
                             "indexes": [
                                 {
                                     "name": "task_project_status",
@@ -563,8 +565,8 @@ async def test_app_loader_loads_data_contract_and_modules(tmp_path: Path) -> Non
     result = await AppLoader.load(str(tmp_path))
 
     assert result.data_contract is not None
-    assert ("projects", "projects") in result.data_entities_by_key
-    assert ("tasks", "tasks") in result.data_entities_by_key
+    assert ("projects", "Project") in result.data_entities_by_key
+    assert ("tasks", "Task") in result.data_entities_by_key
     assert {module.name for module in result.modules} == {"projects", "tasks"}
 
 
@@ -593,7 +595,7 @@ def test_data_contract_matches_repo_collection_calls_and_is_additive(tmp_path: P
     migrations = load_data_migrations(tmp_path)
 
     intent_keys = {
-        (collection["module_id"], collection.get("entity_name") or collection["name"])
+        (collection["module_id"], collection["name"])
         for surface in intent["surfaces"]
         for collection in surface["collections"]
     }

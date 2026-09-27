@@ -44,9 +44,11 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
 )
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     _repair_subscription_config_task,
-    _resolved_subscription_contract,
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
+)
 
 CONTRACT = {
     "contract_required": True,
@@ -89,12 +91,12 @@ def test_the_task_is_added_when_the_contract_requires_one() -> None:
 
 def test_it_resolves_the_contract_from_the_artifact_fallback() -> None:
     """State was null on every run that reached this gate."""
-    assert _resolved_subscription_contract(_ctx()) == CONTRACT
+    assert resolve_subscription_contract(_ctx()) == CONTRACT
 
 
 def test_it_resolves_the_contract_from_state_when_present() -> None:
     ctx = ContextVariablesBridge({"subscription_contract": CONTRACT, "subscription_contract_artifact": None})
-    assert _resolved_subscription_contract(ctx) == CONTRACT
+    assert resolve_subscription_contract(ctx) == CONTRACT
 
 
 def test_a_plan_that_already_has_the_task_is_untouched() -> None:

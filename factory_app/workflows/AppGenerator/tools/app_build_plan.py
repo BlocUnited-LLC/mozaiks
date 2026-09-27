@@ -15,6 +15,7 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     normalize_app_path,
 )
+from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
@@ -129,6 +130,11 @@ def _required_selected_task_paths(task: dict[str, Any]) -> frozenset[str]:
 def _construct_task_requirements(plan: dict[str, Any], context_variables: Any) -> list[str]:
     """Close fixed worker and file requirements without choosing optional work."""
     repairs: list[str] = []
+    contract = detach(context_variables.get("data_contract")) or {}
+    persistent_modules = {
+        owner for owner, kind, _collection in iter_data_contract_collections(contract)
+        if kind == "module"
+    }
     registered = _context_available_pack_map(context_variables)
     managed_ids = {
         _pack_id_from_descriptor(pack)
@@ -146,6 +152,16 @@ def _construct_task_requirements(plan: dict[str, Any], context_variables: Any) -
         if not all(is_safe_app_path(path) for path in task.get("owned_paths") or []):
             continue  # Preserve unsafe proposals for origin/path validation.
         paths = _normalized_owned_paths(task)
+        if task_type == "business_services":
+            policy_paths = {
+                path for path in paths
+                if path.startswith("modules/") and path.endswith("/backend/policy.py")
+                and path.split("/")[1] not in persistent_modules
+            }
+            if policy_paths:
+                task["owned_paths"] = [path for path in paths if path not in policy_paths]
+                paths = _normalized_owned_paths(task)
+                repairs.append(f"{task_id}: removed policies for modules without collections {sorted(policy_paths)}")
         fixed: dict[str, Any] = {}
         if task_type == "subscription_config" and set(paths) <= _required_selected_task_paths(task):
             fixed = {"capability_pack_id": None, "surface_kind": "app_policy"}
@@ -1973,6 +1989,10 @@ def app_build_plan(
     if not AppBuildPlan or not isinstance(AppBuildPlan, dict):
         raise ValueError("AppBuildPlan payload is required and must be a dictionary")
     AppBuildPlan = _unwrap_app_build_plan_payload(AppBuildPlan)
+    if "data_contract" in AppBuildPlan:
+        raise ValueError(
+            "AppBuildPlan must not author data_contract; use the approved DesignDocs data_contract from context."
+        )
 
     agent_message = str(AppBuildPlan.get("agent_message") or "").strip()
     app_kind = str(AppBuildPlan.get("app_kind") or "").strip()
@@ -2041,7 +2061,6 @@ def app_build_plan(
         capability_packs,
         context_variables=context_variables,
     )
-    data_contract = AppBuildPlan.get("data_contract")
     pending_schema_migration = AppBuildPlan.get("pending_schema_migration")
     generation_order = _normalize_string_list(AppBuildPlan.get("generation_order"))
     agent_backend_required = bool(AppBuildPlan.get("agent_backend_required", False))
@@ -2149,7 +2168,6 @@ def app_build_plan(
         "external_integrations": external_integrations,
         "agent_backend_required": agent_backend_required,
         "build_tasks": normalized_build_tasks,
-        "data_contract": data_contract if isinstance(data_contract, dict) else None,
         "pending_schema_migration": pending_schema_migration if isinstance(pending_schema_migration, dict) else None,
         "generation_order": generation_order,
         "carry_forward_decisions": carry_forward_decisions,

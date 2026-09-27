@@ -19,6 +19,16 @@ layers:
         surface_collection_names: [users, sessions]
         surface_entity_names: [User, UserCredential, Session]
         surface_action_ids: [create_session, login_user]
+        # Credential/session fields determine identity storage even if a model
+        # incorrectly groups generic users/sessions under a business module.
+        identity_evidence_fields:
+          - password
+          - password_hash
+          - hashed_password
+          - credentials
+          - access_token
+          - refresh_token
+          - id_token
         # Classification applies only to collections matched by this ownership rule.
         # These are input names to remove from generated auth storage, not claims
         # that every provider returns, or permission to persist credentials locally.

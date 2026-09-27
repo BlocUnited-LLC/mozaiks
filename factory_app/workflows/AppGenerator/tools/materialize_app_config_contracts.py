@@ -7,7 +7,6 @@ from typing import Any
 
 import yaml
 
-from factory_app.workflows._shared.subscription_contract_context import _find_contract
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.connector_request import (
@@ -16,6 +15,9 @@ from mozaiksai.core.workflow.generator_support.connector_request import (
 from mozaiksai.core.workflow.generator_support.connector_setup import (
     normalize_setup_lanes,
     safe_managed_default,
+)
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
 )
 
 
@@ -62,7 +64,7 @@ def _safe_dict(value: Any) -> dict[str, Any]:
 
 def _subscriptions_config_file(context_variables: Any) -> dict[str, Any] | None:
     """Resolve the same approved contract used for prompts and action gates."""
-    contract = _find_contract({
+    contract = resolve_subscription_contract({
         key: _context_get(context_variables, key)
         for key in ("subscription_contract", "subscription_contract_artifact")
     })

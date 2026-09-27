@@ -315,7 +315,9 @@ _KNOWN_DEFERRED = frozenset(
         "route",
         "schema_version",
         "scope",
-        "scope_field",
+        "tenancy",
+        "owner_field",
+        "entity",
         "search_by",
         "section_id_hint",
         "sections",
@@ -408,7 +410,6 @@ _APP_SCHEMA_FIELDS = frozenset(
         "theme_config_patch",
         "shell_config",
         "asset_manifest",
-        "data_contract",
     }
 )
 _AUTH_STRATEGIES = {
@@ -1097,7 +1098,6 @@ class _Builder:
                     path=f"{root}.workflow_touchpoints[{i}].workflow_id",
                     group=f"{root}.workflow_touchpoints",
                 )
-        self.project_data_contract(_mapping(plan.get("data_contract")), f"{root}.data_contract")
         for i, raw in enumerate(_as_list(plan.get("deployment_targets"))):
             item = _mapping(raw)
             identity = item.get("target_id") or item.get("deployment_profile")
@@ -1768,7 +1768,6 @@ class _Builder:
             OptionalFamilyKind.THEME: "theme_config_patch",
             OptionalFamilyKind.SHELL: "shell_config",
             OptionalFamilyKind.ASSETS: "asset_manifest",
-            OptionalFamilyKind.DATA: "data_contract",
         }
         missing.extend(sorted(set(selection_fields.values()) - set(schema)))
         if "integrations" not in self.source:
@@ -1853,6 +1852,20 @@ class _Builder:
                 )
             )
             self.mark(f"{root}.{field}", identity="closed optional-family selection evidence")
+        design_root = "design_docs" if "design_docs" in self.source else "DesignDocsBundle"
+        design = _mapping(self.source.get(design_root))
+        if "data_contract" not in design:
+            raise ProjectionError([ProjectionGap(
+                kind=ProjectionGapKind.MISSING,
+                source_path=f"{design_root}.data_contract",
+                reason="approved DesignDocs data selection evidence is required",
+            )])
+        selections.append(OptionalFamilySelection(
+            family=OptionalFamilyKind.DATA,
+            status=(OptionalFamilySelectionStatus.SELECTED if design["data_contract"] is not None
+                    else OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION),
+        ))
+        self.mark(f"{design_root}.data_contract", identity="approved DesignDocs data selection")
         integrations = _as_list(self.source.get("integrations"))
         selections.append(
             OptionalFamilySelection(
@@ -2747,9 +2760,6 @@ def project_semantic_graph(
     if schema:
         root = "app_schema" if "app_schema" in plain else "AppSchemaOutput"
         builder.project_pages(schema.get("pages", []), f"{root}.pages")
-        builder.project_data_contract(
-            _mapping(schema.get("data_contract")), f"{root}.data_contract"
-        )
         if _mapping(schema.get("custom_route_bundle")):
             builder.project_route_manifest(
                 _mapping(schema["custom_route_bundle"]), f"{root}.custom_route_bundle"
@@ -2761,11 +2771,11 @@ def project_semantic_graph(
         builder.project_plan(
             {
                 "surface_map": design.get("surface_map"),
-                "data_contract": design.get("data_contract"),
                 "pages": _mapping(design.get("experience_spec")).get("pages", []),
             },
             root,
         )
+        builder.project_data_contract(_mapping(design.get("data_contract")), f"{root}.data_contract")
     subscription = _mapping(
         plain.get("subscription_contract") or plain.get("SubscriptionContractOutput")
     )

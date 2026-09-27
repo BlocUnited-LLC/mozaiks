@@ -90,7 +90,7 @@ task_contracts:
         - Optional usage_charge_policies live at the config root and describe app-level customer charge estimates only; they may use runtime_llm_usage, provider_cost_usd markup, or a fixed token unit price.
         - Optional pricing_catalog groups are display metadata for public pricing tabs/service selectors only. They may group declared plan_ids and app/provider-owned add_on_ids, but they must not grant capabilities or carry payment-provider price IDs.
       - Use pricing_catalog when an app sells multiple service lines on one pricing surface, such as platform access, token packs, hosting, domains, marketing, or support.
-      - Generated module actions that require paid access must declare actions[].entitlement_gate with a capability_id granted by at least one plan.
+      - Code compiles approved module_contract_updates into actions[].entitlement_gate using capabilities granted by a plan. Models do not author this field. Canonical list/get and managed facade actions cannot be gated; paid views require declared custom reads.
       - Monetized AI/token apps must expose billing/top-up/usage pages through an app-owned billing_portal facade module; pages must not call hosted or provider internals directly.
       - Token wallets and token_allowances are only for apps selling AI usage, credits, quotas, token packs, or usage-charge estimates; access-only SaaS plans must omit those fields.
       - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
@@ -163,7 +163,7 @@ task_contracts:
       - backend/repo.py owns persistence operations and must not contain product policy.
       - backend/schemas.py owns typed DTO/document shapes and pure helpers.
       - backend/policy.py owns scope query helpers.
-      - Code derives backend/policy.py from the declared scope_field and matching ctx.app_id, ctx.tenant_id, ctx.workspace_id, or ctx.user_id. Additional permission checks belong in service.py. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
+      - Code derives backend/policy.py from approved tenancy and owner_field, binding per_user to ctx.user_id and per_workspace to ctx.workspace_id. Additional permission checks belong in service.py. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
       - backend/repo.py may use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
       - For offset pagination, PersistenceCollection.find_many has no skip argument and returns a list, not a cursor. In repo.py use aggregate with an ownership-scoped $match, a stable $sort including a unique tie-breaker, then the requested $skip and a bounded $limit. Validate the declared page/offset inputs and limit before querying; never compute an offset and leave it unused or fetch an unbounded collection for client slicing.
       - Pagination totals must count the same query as the page, including ownership, search, and all other active filters. Use count(query) with that matching query or a matching aggregate count; do not count unrelated or foreign records.
@@ -198,14 +198,14 @@ task_contracts:
       - data/migrations/{migration_id}.json is the exported additive migration artifact.
       - config/data.json is a removed path and must never appear in owned_paths, database_files, code_files, or generated bundle output.
       - config/data_migrations is a removed path and must never appear in owned_paths, database_files, code_files, or generated bundle output.
-      - Generate data/contract.json for persistent generated modules and explicit existing database integration. The approved data_contract supplies collection ownership, fields, scope, and scope_field to deterministic policy/read construction.
-      - Persistent generated modules declare data_contract even when using generated-scoped ctx.persistence. Apps with no generated persistent modules may leave it null.
+      - Generate data/contract.json for persistent generated modules and explicit existing database integration. The DesignDocs-approved data_contract supplies collection ownership, fields, namespace scope, tenancy, owner_field, and entity to deterministic policy/read construction.
+      - DesignDocs declares data_contract for persistent generated modules even when using generated-scoped ctx.persistence; AppGenerator consumes it without re-authoring. Apps with no generated persistent modules may leave it null.
       - Data contracts are generic app infrastructure, not hosted-product special cases. Do not emit ad hoc folders or host-internal helper names for normal generated apps.
       - app/data is declarative only. Do not emit Python helper files under data/ or services/data/.
       - Cross-surface collection access must be declared before module repo code uses it. Cross-module reads, lifecycle updates, shared aggregate ownership, and documented alias exclusions must be explicit in data/contract.json.
       - backend/schemas.py replaces backend model files.
       - backend/repo.py is derived from the data contract and owns persistence operations only.
-      - backend/policy.py is rendered deterministically from each collection scope (app/user/tenant/workspace) and scope_field. The field must be declared in fields and ownership must match the module. ServiceAgent must omit policy source from python_files and code_files.
+      - backend/policy.py is rendered deterministically from each collection tenancy (per_user/per_workspace/app_wide) and owner_field. The field must be declared in fields and ownership must match the module. ServiceAgent must omit policy source from python_files and code_files.
       - Generated repo.py must use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
       - Generated repo.py may use data aliases only when its module/action is explicitly declared in data/contract.json.
       - module_id/entity_name in repo.py must match data_contract surfaces and collections.

@@ -30,6 +30,8 @@ from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
 from scripts.appgenerator_fixture_replay import execute_file_replay
 from tests.factory_context import factory_context
@@ -44,17 +46,6 @@ from tests.test_generated_saas_subscription_runtime_acceptance import (
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "mozaikspay"
-
-
-class _Context:
-    def __init__(self, data: dict[str, Any]) -> None:
-        self.data = factory_context(data)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.data.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self.data[key] = value
 
 
 def _file_map(result: dict[str, Any]) -> dict[str, str]:
@@ -339,10 +330,10 @@ def _subscriptions_yaml() -> str:
         plans:
           - plan_id: free
             label: Free
-            capabilities: [billing_portal.read]
+            capabilities: []
           - plan_id: pro
             label: Pro
-            capabilities: [billing_portal.read, billing_portal.manage, reports.generate]
+            capabilities: [reports.generate]
             usage_limits:
               - meter_id: ai_tokens
                 label: AI tokens
@@ -493,7 +484,7 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
             **module_task, "task_id": "reports.contract", "capability_pack_id": "reports", "surface_id": "reports",
             "owned_paths": ["modules/reports/module.yaml"], "depends_on": ["subscriptions.config"],
             "description": "Declare the subscription-gated report action.",
-            "initial_message": "Emit the reports module contract with its declared entitlement gate.",
+            "initial_message": "Emit the approved reports action; code compiles its subscription gate.",
         },
         {
             **module_task, "task_id": "reports.services", "task_type": "business_services",
@@ -576,7 +567,6 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
                           - id: generate_report
                             description: Generate an AI report.
                             handler_method: generate_report
-                            entitlement_gate: reports.generate
                             input_schema:
                               type: object
                               required: [topic]
@@ -659,16 +649,16 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
 @pytest.mark.asyncio
 async def test_managed_wallet_replay_normalizes_assembles_and_scans(tmp_path: Path) -> None:
     wallet_descriptor = _write_wallet_pack(tmp_path)
-    ctx = _Context(
+    ctx = ContextVariablesBridge(factory_context(
         {
             "app_id": "managed-wallet-replay",
             "capability_packs": [wallet_descriptor],
             "app_task_batch_results": _wallet_task_outputs(),
         }
-    )
+    ))
 
     app_build_plan(AppBuildPlan=_wallet_replay_plan(), context_variables=ctx)
-    cached_plan = ctx.get("app_build_plan")
+    cached_plan = detach(ctx.get("app_build_plan"))
 
     adapter_task = next(
         task for task in cached_plan["build_tasks"] if task["task_id"] == "wallet.adapter"
@@ -709,19 +699,40 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     monkeypatch.syspath_prepend(str(prior_app))
 
     descriptor, contract = _load_mozaikspay_descriptor()
-    ctx = _Context(
+    ctx = ContextVariablesBridge(factory_context(
         {
             "app_id": "mozaikspay-replay",
             "capability_packs": [descriptor],
             "operator_contracts": [contract],
+            "design_surface_map": {"surfaces": [
+                {
+                    "surface_id": "reports", "surface_kind": "module", "owner": "app",
+                    "primary_entities": [], "owned_mutations": ["generate_report"], "custom_reads": [],
+                },
+                *[{
+                    "surface_id": facade["module_id"], "surface_kind": "module", "owner": "app",
+                    "primary_entities": [], "source_capability_packs": ["mozaikspay"],
+                    "owned_mutations": sorted({
+                        action for page in facade["pages"] for action in page["primary_actions"]
+                    }), "custom_reads": [],
+                } for facade in contract["facades"]],
+            ]},
+            "subscription_contract": {
+                "contract_required": True,
+                "subscription_config_file": yaml.safe_load(_subscriptions_yaml()),
+                "module_contract_updates": [{
+                    "module_id": "reports", "action_id": "generate_report", "entitlement_gate": "reports.generate",
+                    "metering": None,
+                }],
+            },
             # Empty package scaffolding is an assembly input; the task planner
             # permits integration files but does not own this root marker.
             "code_files": [{"filename": "services/__init__.py", "content": ""}],
         }
-    )
+    ))
 
     app_build_plan(AppBuildPlan=_mozaikspay_replay_plan(), context_variables=ctx)
-    cached_plan = ctx.get("app_build_plan")
+    cached_plan = detach(ctx.get("app_build_plan"))
 
     adapter_task = next(
         task for task in cached_plan["build_tasks"] if task["task_id"] == "mozaikspay.adapter"
@@ -742,7 +753,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     )
 
     candidates = {file["filename"]: file["content"] for file in resolve_managed_capability_templates(
-        ctx.get("capability_packs"), context_variables=ctx,
+        detach(ctx.get("capability_packs")), context_variables=ctx,
     )}
     candidates.update({file["filename"]: file["content"] for output in _mozaikspay_task_outputs().values()
                        for file in output["code_files"]})
@@ -754,11 +765,14 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     del manage["href"]
     manage["data_source"] = {"module_id": "billing_portal", "action_id": "open_billing_portal"}
     candidates["ui/pages/pricing.yaml"] = yaml.safe_dump(pricing_candidate)
-    accepted = await execute_file_replay(ctx.data, candidates)
+    replay_context = ctx.snapshot()
+    accepted = await execute_file_replay(replay_context, candidates)
+    for key, value in replay_context.items():
+        ctx.set(key, value)
     assembled = await assemble_app_tasks(context_variables=ctx)
-    assert ctx.get("app_task_batch_results") == accepted
+    assert detach(ctx.get("app_task_batch_results")) == accepted
     files = _file_map(assembled)
-    deployment_env = _deployment_env_for_capability_packs(ctx.get("capability_packs"))
+    deployment_env = _deployment_env_for_capability_packs(detach(ctx.get("capability_packs")))
     files.update(
         generate_deployment_artifacts(
             app_id="mozaikspay-replay",
@@ -779,6 +793,10 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     assert files["services/integrations/__init__.py"] == ""
     assert "modules/billing_portal/module.yaml" in files
     assert "modules/reports/module.yaml" in files
+    assert yaml.safe_load(files["modules/reports/module.yaml"])["actions"][0]["entitlement_gate"] == "reports.generate"
+    assert all(not action.get("entitlement_gate") for action in yaml.safe_load(
+        files["modules/billing_portal/module.yaml"],
+    )["actions"])
     assert "ui/pages/billing.yaml" in files
     assert "ui/pages/pricing.yaml" in files
     assert "ui/pages/usage.yaml" in files

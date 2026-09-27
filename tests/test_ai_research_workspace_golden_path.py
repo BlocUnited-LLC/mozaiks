@@ -33,28 +33,13 @@ from mozaiksai.core.session.build_context import (
     build_provider_values,
     load_build_context,
 )
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
 from scripts.appgenerator_fixture_replay import execute_file_replay
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_CONTEXT_ROOT = REPO_ROOT / "factory_app" / "build_context" / "mozaikspay"
-
-
-class _Context:
-    def __init__(self, values: dict[str, Any] | None = None) -> None:
-        self.values = dict(values or {})
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.values.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self.values[key] = value
-
-    def __getitem__(self, key: str) -> Any:
-        return self.values[key]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self.values[key] = value
 
 
 def _subscription_contract() -> dict[str, Any]:
@@ -362,16 +347,14 @@ def _research_files() -> dict[str, str]:
                         "collections": [
                             {
                                 "name": "research_results",
-                                "scope": "user", "scope_field": "user_id",
+                                "scope": "app", "entity": "ResearchResult", "tenancy": "per_user", "owner_field": "user_id",
                                 "fields": [{"name": "user_id", "type": "string", "required": True}],
                                 "ownership": {"surface_id": "research", "surface_kind": "module"},
                             }
                         ],
                     }
                 ],
-                "shared_collections": [
-                    {"name": "subscription_assignments", "data_alias": "billing.subscriptions"}
-                ],
+                "shared_collections": [],
             }
         ),
         "ui/route_manifest.json": json.dumps(
@@ -633,7 +616,7 @@ async def test_ai_research_workspace_offline_golden_path(
     assert mozaikspay_pack["id"] == "mozaikspay"
     assert mozaikspay_pack["capability_source"] == "managed_capability"
 
-    context = _Context(
+    context = ContextVariablesBridge(
         {
             "workflow_name": "SubscriptionContractDesigner",
             "app_id": "research",
@@ -647,7 +630,9 @@ async def test_ai_research_workspace_offline_golden_path(
             "design_surface_map": {"surfaces": [{
                 "surface_id": "research", "surface_kind": "module", "owner": "app",
                 "owned_mutations": ["execute_research"],
+                "primary_entities": ["ResearchResult"], "custom_reads": ["list_results"],
             }]},
+            "data_contract": json.loads(_research_files()["data/contract.json"]),
             "structured_output": _subscription_contract(),
             "capability_packs": [mozaikspay_pack],
             "available_managed_capabilities": [mozaikspay_pack],
@@ -674,7 +659,7 @@ async def test_ai_research_workspace_offline_golden_path(
     )
     assert "AI Research Workspace plan ready" in plan_result
     assert context["app_plan_ready"] is True
-    normalized_plan = context["app_build_plan"]
+    normalized_plan = detach(context["app_build_plan"])
     assert normalized_plan["monetization_provider"] == "mozaiks_pay"
     assert {
         pack.get("capability_pack_id") or pack.get("pack_id") or pack.get("id")
@@ -699,7 +684,6 @@ async def test_ai_research_workspace_offline_golden_path(
     candidates.update({file["filename"]: file["content"] for file in materialize_app_config_contracts(
         app_id="research", app_build_plan=normalized_plan, context_variables=context,
     )})
-    context.set("data_contract", json.loads(candidates["data/contract.json"]))
     task_outputs = {
         task["task_id"]: {"code_files": [
             {"filename": path, "content": candidates[path]}
@@ -708,10 +692,13 @@ async def test_ai_research_workspace_offline_golden_path(
         for task in context["app_task_batch_items"]
         if any(path.endswith("/backend/policy.py") for path in task["owned_paths"])
     }
-    accepted = await execute_file_replay(context.values, candidates, task_outputs=task_outputs)
+    replay_context = context.snapshot()
+    accepted = await execute_file_replay(replay_context, candidates, task_outputs=task_outputs)
+    for key, value in replay_context.items():
+        context.set(key, value)
     context.set("workflow_name", "AppGenerator")
     assembled = await assemble_app_tasks(context_variables=context)
-    assert context.get("app_task_batch_results") == accepted
+    assert detach(context.get("app_task_batch_results")) == accepted
     files = {entry["filename"]: entry["content"] for entry in assembled["code_files"]}
 
     subscriptions = yaml.safe_load(files["config/subscriptions.yaml"])
@@ -809,6 +796,6 @@ async def test_ai_research_workspace_offline_golden_path(
 
     # This proof deliberately stops at declared contract preservation. The OSS
     # runtime does not yet count or enforce generic monthly research executions.
-    assert context["subscription_contract"]["validation_notes"] == [
+    assert detach(context["subscription_contract"])["validation_notes"] == [
         "Execution-count enforcement is not currently implemented by the OSS runtime."
     ]

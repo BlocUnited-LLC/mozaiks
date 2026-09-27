@@ -11,7 +11,7 @@ to perform by hand.
 It has never run. `_context_data` read `getattr(context, "data", None)`, and
 #300 renamed the bridge's backing store to `__data` specifically to stop
 callers reaching past the authority policy. On every live build it returned
-`{}`, `_find_contract` saw nothing, and the hook injected nothing -- silently,
+`{}`, the contract resolver saw nothing, and the hook injected nothing -- silently,
 because an empty context is indistinguishable from an app with no contract.
 
 Two acceptance runs at OSS 95a2a584 and 6b1dd2f9 show the cost. Both had:
@@ -40,10 +40,12 @@ import yaml
 
 from factory_app.workflows._shared.subscription_contract_context import (
     _context_data,
-    _find_contract,
     inject_subscription_contract_context,
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -82,7 +84,7 @@ def test_the_injector_reads_a_real_bridge() -> None:
 def test_the_contract_resolves_from_the_artifact_through_a_bridge() -> None:
     """End to end through the container production uses, not a dict stand-in."""
     data = _context_data(_Agent(ContextVariablesBridge(dict(LIVE_CONTEXT))))
-    resolved = _find_contract(data)
+    resolved = resolve_subscription_contract(data)
     assert resolved is not None, "state is null and the artifact holds the contract"
     assert resolved["contract_required"] is True
 
@@ -90,13 +92,13 @@ def test_the_contract_resolves_from_the_artifact_through_a_bridge() -> None:
 def test_a_plain_dict_context_still_works() -> None:
     """Direct-dict callers must keep working; this widens the accessor, not narrows it."""
     data = _context_data(_Agent(dict(LIVE_CONTEXT)))
-    assert _find_contract(data) is not None
+    assert resolve_subscription_contract(data) is not None
 
 
 def test_no_contract_still_injects_nothing() -> None:
     """The fix must not start injecting an empty section for unmonetized apps."""
     bridge = ContextVariablesBridge({"subscription_contract": None, "subscription_contract_artifact": None})
-    assert _find_contract(_context_data(_Agent(bridge))) is None
+    assert resolve_subscription_contract(_context_data(_Agent(bridge))) is None
 
 
 def test_the_hook_emits_the_section_for_a_planner() -> None:

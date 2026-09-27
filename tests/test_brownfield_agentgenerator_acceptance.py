@@ -28,13 +28,14 @@ from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 from mozaiksai.core.validation import GeneratedAppValidationRequest, scan_functional_generated_app
 from mozaiksai.core.validation.generated_app import validate_generated_app_bundle
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.hosts import platform
+from tests.factory_context import factory_context
 from tests.test_generated_app_archetype_matrix import (
     WORKFLOWS_ROOT,
     _ArchetypeSpec,
     _assert_not_missing_or_placeholder,
     _configure_platform,
-    _Context,
     _data_contract,
     _FakeMongoClient,
     _materialize_spec,
@@ -167,6 +168,14 @@ def _brownfield_module_decomposition() -> dict[str, Any]:
         ],
         "required_migration_tasks": ["preserve_project_routes", "preserve_project_update_action"],
     }
+
+
+def _brownfield_data_contract() -> dict[str, Any]:
+    contract = _data_contract(("customer_projects", "work_items"))
+    entities = {"customer_projects": "Project", "work_items": "WorkItem"}
+    for surface in contract["surfaces"]:
+        surface["collections"][0]["entity"] = entities[surface["surface_id"]]
+    return contract
 
 
 def _brownfield_checks(client: TestClient, _files: dict[str, str], _loaded: Any) -> None:
@@ -472,34 +481,36 @@ async def test_brownfield_discovery_handoff_materializes_deterministically_and_b
 ) -> None:
     source_root = tmp_path / "source"
     _write_brownfield_source(source_root)
-    preload_context = _Context({"repo_path": str(source_root), "chat_id": "brownfield-chat", "app_id": "existing_project_tracker"})
+    preload_context = ContextVariablesBridge(factory_context({
+        "repo_path": str(source_root), "chat_id": "brownfield-chat", "app_id": "existing_project_tracker",
+    }))
     preload = await collect_prechat_discovery_context(preload_context)
     assert preload["preload_status"] in {"ready", "partial"}
     assert preload_context.get("repo_path") == str(source_root)
 
     discovery = _brownfield_discovery_artifact()
     decomposition = _brownfield_module_decomposition()
-    context = _Context(
+    context = ContextVariablesBridge(factory_context(
         {
             "app_id": "existing_project_tracker",
             "chat_id": "brownfield-chat",
             "module_decomposition_plan": decomposition,
             "source_refs": [{"source_ref_id": "src_existing_project_tracker", "kind": "local_directory", "uri": str(source_root)}],
         }
-    )
+    ))
     drafts = build_existing_app_context_artifacts(discovery, context)
     payloads = drafts.as_artifact_payloads()
     assert payloads["adoption_plan"]["recommended_path"] == "gradual_modernization"
     assert "customer_projects" in json.dumps(payloads, sort_keys=True)
 
     plan = build_app_build_plan_from_discovery(discovery, module_decomposition_plan=decomposition)
-    plan["data_contract"] = _data_contract(("customer_projects", "work_items"))
     spec = _ArchetypeSpec(
         archetype_id="brownfield_project_tracker",
         app_id="existing_project_tracker",
         app_name="Existing Project Tracker",
         plan=plan,
         modules=("customer_projects", "work_items"),
+        data_contract=_brownfield_data_contract(),
         pages=("projects", "work_items"),
         runtime_checks=_brownfield_checks,
         auth_enabled=True,
@@ -518,13 +529,13 @@ async def test_brownfield_acceptance_fails_when_required_action_is_dropped(tmp_p
         _brownfield_discovery_artifact(),
         module_decomposition_plan=_brownfield_module_decomposition(),
     )
-    plan["data_contract"] = _data_contract(("customer_projects", "work_items"))
     spec = _ArchetypeSpec(
         archetype_id="brownfield_project_tracker_negative",
         app_id="existing_project_tracker",
         app_name="Existing Project Tracker",
         plan=plan,
         modules=("customer_projects", "work_items"),
+        data_contract=_brownfield_data_contract(),
         pages=("projects", "work_items"),
         runtime_checks=_brownfield_checks,
         auth_enabled=True,
@@ -566,7 +577,7 @@ async def test_agentgenerator_bundle_handoff_materializes_app_and_workflow_runti
 
     metadata = extract_workflow_integration_metadata_from_bundle_entries([bundle], bundle_name="ResearchReviewPack")
     assert metadata is not None
-    context = _Context({})
+    context = ContextVariablesBridge(factory_context({}))
     apply_workflow_integration_context(context, metadata)
     assert context.get("generated_workflow_name") == "ResearchReviewWorkflow"
 
@@ -582,6 +593,7 @@ async def test_agentgenerator_bundle_handoff_materializes_app_and_workflow_runti
         app_name="AgentGenerator Handoff",
         plan=plan,
         modules=("research",),
+        data_contract=_data_contract(("research",)),
         pages=("research",),
         runtime_checks=_workflow_app_checks,
         workspace_files=workspace_files,

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
+import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import (
@@ -14,18 +14,9 @@ from factory_app.workflows.AppGenerator.tools.app_validation import (
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 from mozaiksai.core.runtime.app.loader import AppLoader
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
 from scripts.appgenerator_fixture_replay import execute_file_replay
-
-
-class _Context:
-    def __init__(self, initial: dict[str, Any]) -> None:
-        self.data = dict(initial)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.data.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self.data[key] = value
 
 
 def _generated_build_files() -> dict[str, str]:
@@ -40,7 +31,7 @@ def _generated_build_files() -> dict[str, str]:
                     {
                         "name": "orders",
                         "scope": "app",
-                        "scope_field": "app_id",
+                        "entity": "Order", "tenancy": "app_wide", "owner_field": None,
                         "fields": [{"name": "app_id", "type": "string", "required": True}],
                         "ownership": {
                             "surface_id": "orders",
@@ -466,6 +457,20 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         "build_tasks": tasks, "generation_order": [task["task_id"] for task in tasks],
         "agent_backend_required": False,
     }
+    if "data/contract.json" in files:
+        context.set("data_contract", json.loads(files["data/contract.json"]))
+    if saas:
+        context.set("design_surface_map", {"surfaces": [{
+            "surface_id": "reports", "surface_kind": "module", "owner": "app",
+            "primary_entities": [], "owned_mutations": [], "custom_reads": ["list_reports", "export_report"],
+        }]})
+        context.set("subscription_contract", {
+            "contract_required": True,
+            "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"]),
+            "module_contract_updates": [{
+                "module_id": "reports", "action_id": "export_report", "entitlement_gate": "reports.export",
+            }],
+        })
     app_build_plan(AppBuildPlan=plan, context_variables=context)
     page_files = [
         {"filename": path, "content": files[path]}
@@ -480,7 +485,10 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
                 "href: /api/modules/orders/create_order",
                 "data_source: {module_id: orders, action_id: create_order}",
             )
-    accepted = await execute_file_replay(context.data, files, task_outputs={"pages": {"code_files": page_files}})
+    replay_context = context.snapshot()
+    accepted = await execute_file_replay(replay_context, files, task_outputs={"pages": {"code_files": page_files}})
+    for key, value in replay_context.items():
+        context.set(key, value)
     admitted_files = {file["filename"]: file["content"] for key, output in accepted.items()
                       if not key.startswith("_") for file in output["code_files"]}
     assert set(admitted_files) == set(files)
@@ -498,7 +506,7 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
 
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     files = _generated_build_files()
-    context = _Context(
+    context = ContextVariablesBridge(
         {
             "workflow_name": "AppGenerator",
             "app_id": "support-operations",
@@ -522,11 +530,11 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
     )
 
     assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
-    assert context.get("app_task_batch_results") == accepted
+    assert detach(context.get("app_task_batch_results")) == accepted
     assert validation["app_bundle_acceptance_result"]["status"] == "passed"
     assert validation["integration_tests_passed"] is True
     assert context.get("app_bundle_acceptance_status") == "passed"
-    assert context.get("app_bundle_validation_evidence")["failed"] == []
+    assert not context.get("app_bundle_validation_evidence")["failed"]
     assert context.get("integration_tests_passed") is True
     assert context.get("bundle_scan_result")["passed"] is True
     assert context.get("wiring_validation_result")["passed"] is True
@@ -543,7 +551,7 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
     assert loaded.definition.name == "Support Operations"
     assert [module.name for module in loaded.modules] == ["orders"]
     assert [page.name for page in loaded.definition.pages] == ["orders"]
-    assert loaded.data_entities_by_key[("orders", "orders")]["name"] == "orders"
+    assert loaded.data_entities_by_key[("orders", "Order")]["name"] == "orders"
 
 
 @pytest.mark.asyncio
@@ -553,7 +561,7 @@ async def test_offline_generated_build_acceptance_blocks_unwired_page_endpoint()
         "/api/modules/orders/create_order",
         "/api/modules/orders/missing_action",
     )
-    context = _Context(
+    context = ContextVariablesBridge(
         {
             "app_id": "support-operations",
             "chat_id": "offline-build-acceptance",
@@ -598,7 +606,7 @@ class OrdersService:
     async def create_order(self, ctx, **params):
         return {"order": params}
 """
-    context = _Context(
+    context = ContextVariablesBridge(
         {
             "app_id": "support-operations",
             "chat_id": "offline-build-acceptance",
@@ -669,7 +677,7 @@ async def test_offline_saas_build_acceptance_gate_passes(monkeypatch) -> None:
     """Happy-path acceptance gate for a self-hosted SaaS app with entitlement gating."""
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     files = _generated_saas_build_files()
-    context = _Context(
+    context = ContextVariablesBridge(
         {
             "workflow_name": "AppGenerator",
             "app_id": "analytics-saas",
@@ -696,11 +704,11 @@ async def test_offline_saas_build_acceptance_gate_passes(monkeypatch) -> None:
     )
 
     assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
-    assert context.get("app_task_batch_results") == accepted
+    assert detach(context.get("app_task_batch_results")) == accepted
     assert validation["app_bundle_acceptance_result"]["status"] == "passed"
     assert validation["integration_tests_passed"] is True
     assert context.get("app_bundle_acceptance_status") == "passed"
-    assert context.get("app_bundle_validation_evidence")["failed"] == []
+    assert not context.get("app_bundle_validation_evidence")["failed"]
     assert context.get("bundle_scan_result")["passed"] is True
     assert context.get("wiring_validation_result")["passed"] is True
     assert context.get("module_implementation_validation_result")["passed"] is True

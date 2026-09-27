@@ -25,9 +25,13 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     app_build_plan,
 )
 from mozaiksai.core.runtime.app.paths import is_safe_app_path
+from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.dependency_graph import deterministic_topological_order
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
+)
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
 logger = logging.getLogger(__name__)
@@ -233,7 +237,9 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
             "capability_source": "generated_module",
             "capability_pack_id": surface_id,
             "primary_entities": list(surface.get("primary_entities") or []),
-            "operations": list(surface.get("owned_mutations") or []),
+            "operations": list(dict.fromkeys([
+                *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+            ])),
         })
         repairs.append(f"{surface_id}: approved module had no capability -> generated_module")
     plan["capability_packs"] = packs
@@ -279,7 +285,11 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
             pack["primary_entities"] = approved_entities
             repairs.append(f"{surface_id}: primary_entities -> approved {approved_entities}")
         operations = list(pack.get("operations") or [])
-        missing_operations = [operation for operation in surface.get("owned_mutations") or [] if operation not in operations]
+        missing_operations = [
+            operation for operation in dict.fromkeys([
+                *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+            ]) if operation not in operations
+        ]
         if missing_operations:
             pack["operations"] = [*operations, *missing_operations]
             repairs.append(f"{surface_id}: preserved approved operations {missing_operations}")
@@ -380,14 +390,16 @@ def _approved_page_inventory(context: Any) -> list[dict[str, Any]]:
     return list((detach(context.get("experience_spec")) or {}).get("pages") or [])
 
 
-def _required_module_paths(pack: dict[str, Any]) -> dict[str, set[str]]:
+def _required_module_paths(pack: dict[str, Any], context: Any) -> dict[str, set[str]]:
     module_id = _pack_id_from_descriptor(pack)
     required = {
         "module_contract": {f"modules/{module_id}/module.yaml"},
         "data_models": {f"modules/{module_id}/backend/schemas.py"},
         "business_services": {f"modules/{module_id}/backend/{name}.py" for name in ("handler", "service")},
     }
-    if pack.get("primary_entities"):
+    contract = detach(context.get("data_contract")) or {}
+    if any(owner == module_id and kind == "module"
+           for owner, kind, _collection in iter_data_contract_collections(contract)):
         required["business_services"].update(
             f"modules/{module_id}/backend/{name}.py" for name in ("repo", "policy")
         )
@@ -559,7 +571,7 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             continue
         module_id = _pack_id_from_descriptor(pack)
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
-        required = _required_module_paths(pack)
+        required = _required_module_paths(pack, context)
 
         for kind, paths in required.items():
             typed = [t for t in module_tasks if t.get("task_type") == kind]
@@ -600,12 +612,31 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             for path in missing:
                 path_owners[path] = [str(target["task_id"])]
 
+    contract = detach(context.get("data_contract"))
+    if contract and not any("data/contract.json" in _normalized_owned_paths(task) for task in tasks):
+        persistence_tasks = [task for task in tasks if task.get("task_type") == "persistence_contract"]
+        if persistence_tasks:
+            persistence_tasks[0]["owned_paths"] = [
+                *(persistence_tasks[0].get("owned_paths") or []), "data/contract.json",
+            ]
+            repairs.append(f"{persistence_tasks[0]['task_id']}: added approved data/contract.json")
+        else:
+            tasks.append({
+                "task_id": _available_task_id("data_contract", {str(task.get("task_id")) for task in tasks}),
+                "task_type": "persistence_contract", "capability_pack_id": None,
+                "surface_id": "data_contract", "surface_kind": "module",
+                "initial_agent": "DatabaseAgent", "execution_target": "AppGenerator",
+                "description": "Serialize the approved DesignDocs data contract.",
+                "initial_message": "The approved data_contract is final. Code serializes data/contract.json; emit empty database_files and code_files.",
+                "owned_paths": ["data/contract.json"], "depends_on": [],
+            })
+            repairs.append("constructed persistence_contract owner for approved data/contract.json")
     plan["build_tasks"] = tasks
-    repairs.extend(_repair_module_task_dependencies(plan))
+    repairs.extend(_repair_module_task_dependencies(plan, context))
     return repairs
 
 
-def _repair_module_task_dependencies(plan: dict[str, Any]) -> list[str]:
+def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list[str]:
     """Supply direct contract inputs after every module task has been synthesized."""
     repairs: list[str] = []
     tasks = plan.get("build_tasks") or []
@@ -622,7 +653,7 @@ def _repair_module_task_dependencies(plan: dict[str, Any]) -> list[str]:
         module_id = _pack_id_from_descriptor(pack)
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
         prerequisites: list[str] = []
-        required_paths = _required_module_paths(pack)
+        required_paths = _required_module_paths(pack, context)
         for kind in ("module_contract", "data_models"):
             path = next(iter(required_paths[kind]))
             owners = [
@@ -641,7 +672,7 @@ def _repair_module_task_dependencies(plan: dict[str, Any]) -> list[str]:
             if kind not in {"data_models", "business_services"}:
                 continue
             required = prerequisites[:1] if kind == "data_models" else list(prerequisites)
-            if pack.get("primary_entities"):
+            if f"modules/{module_id}/backend/repo.py" in required_paths["business_services"]:
                 required.extend(persistence_tasks)
             declared = list(task.get("depends_on") or [])
             missing = [task_id for task_id in required if task_id not in declared]
@@ -800,23 +831,6 @@ def validate_plan_dependencies(plan: dict[str, Any], context: Any) -> None:
 
 
 
-def _resolved_subscription_contract(context: Any) -> dict[str, Any] | None:
-    """The approved contract, from state or the artifact fallback.
-
-    Delegates to the shared resolver so this cannot drift from what the
-    injector shows the agent and what the build tools serialize.
-    """
-    from factory_app.workflows._shared.subscription_contract_context import (
-        _extract_summary_payload,
-    )
-
-    for key in ("subscription_contract", "subscription_contract_artifact"):
-        payload = _extract_summary_payload(detach(context.get(key)))
-        if payload is not None:
-            return payload
-    return None
-
-
 def _repair_managed_facade_capabilities(plan: dict[str, Any], context: Any) -> list[str]:
     """Separate the approved MozaiksPay facade from its managed provider.
 
@@ -952,7 +966,7 @@ def _repair_subscription_config_task(plan: dict[str, Any], context: Any) -> list
     `subscription_contract_artifact`, matching the injector and the build
     tools. Nothing is synthesized when no contract requires it.
     """
-    contract = _resolved_subscription_contract(context)
+    contract = resolve_subscription_contract(context)
     if not contract or contract.get("contract_required") is not True:
         return []
 
@@ -1042,7 +1056,10 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
         named = ", ".join(f"`{op}`" for op in operations)
         note = (
             f"Actions for this module (authoritative, from the approved plan): {named}. "
-            "Emit every one of them in actions[] exactly once, using these ids verbatim. "
+            "Every action must appear in the final actions[] exactly once with these ids. "
+            "Declare approved writes and custom reads; code constructs canonical list/get reads. "
+            "For app_wide collections with protected writes, explicitly declare the canonical "
+            "reads and their permissions, API exposure, and handler policy. "
             "The prose above describes the module; this list defines it."
         )
         contract["initial_message"] = "\n\n".join(part for part in (message, note) if part)
@@ -1078,7 +1095,7 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
                 if facade.get(key):
                     approved.add(facade[key])
 
-    subscription = _resolved_subscription_contract(context) or {}
+    subscription = resolve_subscription_contract(context) or {}
     unapproved: set[str] = set()
     for entries, is_task in (
         (plan.get("capability_packs") or [], False),
@@ -1104,6 +1121,15 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
                 is_task and surface_id == "subscription_contract"
                 and entry.get("task_type") == "subscription_config"
                 and subscription.get("contract_required") is True
+            ):
+                continue
+            if (
+                is_task and surface_id == "data_contract"
+                and entry.get("task_type") == "persistence_contract"
+                and entry.get("surface_kind") == "module"
+                and entry.get("capability_pack_id") is None
+                and context.get("data_contract")
+                and entry.get("owned_paths") == ["data/contract.json"]
             ):
                 continue
             unapproved.add(surface_id)
@@ -1263,7 +1289,7 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
             continue
         module_id = _pack_id_from_descriptor(pack)
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
-        required = _required_module_paths(pack)
+        required = _required_module_paths(pack, context)
         for kind, paths in required.items():
             owned = {path for task in module_tasks if task.get("task_type") == kind for path in _normalized_owned_paths(task)}
             if paths - owned:

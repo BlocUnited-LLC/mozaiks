@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import textwrap
 from collections.abc import Callable, Mapping
@@ -35,6 +36,7 @@ from mozaiksai.core.startup import validation as startup_validation
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.core.validation import GeneratedAppValidationRequest, scan_functional_generated_app
 from mozaiksai.core.validation.generated_app import validate_generated_app_bundle
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
 )
@@ -49,23 +51,6 @@ from tests.page_plan_fixtures import _page_from_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
-
-
-class _Context:
-    def __init__(self, initial: Mapping[str, Any] | None = None) -> None:
-        self.data = factory_context(initial)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.data.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self.data[key] = value
-
-    def __getitem__(self, key: str) -> Any:
-        return self.data[key]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self.data[key] = value
 
 
 class _MatrixAuthAdapter(BaseAuthAdapter):
@@ -131,6 +116,29 @@ class _PersistenceCollection:
         ]
         return rows[:limit]
 
+    async def count(self, query: Mapping[str, Any]) -> int:
+        return len(await self.find_many(query, limit=len(self.rows)))
+
+    async def find_one(self, query: Mapping[str, Any]) -> dict[str, Any] | None:
+        rows = await self.find_many(query, limit=1)
+        return rows[0] if rows else None
+
+    async def aggregate(self, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        rows = await self.find_many({}, limit=len(self.rows))
+        for stage in pipeline:
+            if "$match" in stage:
+                rows = [row for row in rows if all(row.get(key) == value for key, value in stage["$match"].items())]
+            elif "$sort" in stage:
+                for key, direction in reversed(list(stage["$sort"].items())):
+                    rows.sort(key=lambda row: str(row.get(key, "")), reverse=direction == -1)
+            elif "$skip" in stage:
+                rows = rows[stage["$skip"]:]
+            elif "$limit" in stage:
+                rows = rows[:stage["$limit"]]
+            else:
+                raise AssertionError(f"Unsupported test aggregation stage: {stage}")
+        return rows
+
 
 class _PersistenceContext:
     stores: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -192,6 +200,7 @@ class _ArchetypeSpec:
     app_name: str
     plan: dict[str, Any]
     modules: tuple[str, ...]
+    data_contract: dict[str, Any]
     pages: tuple[str, ...]
     runtime_checks: Callable[[TestClient, dict[str, str], Any], None]
     extra_files: dict[str, str] = field(default_factory=dict)
@@ -251,7 +260,7 @@ def _assert_not_missing_or_placeholder(response: Any, *, surface: str) -> None:
     assert "not_implemented" not in body, f"MATERIALIZATION_GAP surface={surface} body={response.text}"
 
 
-def _module_contract(module_id: str, actions: list[tuple[str, str]], *, entitlement: str | None = None) -> str:
+def _module_contract(module_id: str, actions: list[tuple[str, str]]) -> str:
     action_entries = []
     for action_id, description in actions:
         entry: dict[str, Any] = {
@@ -261,8 +270,8 @@ def _module_contract(module_id: str, actions: list[tuple[str, str]], *, entitlem
             "input_schema": {"type": "object"},
             "output_schema": {"type": "object"},
         }
-        if entitlement and action_id.startswith(("export_", "publish_")):
-            entry["entitlement_gate"] = entitlement
+        entry["permissions"] = []
+        entry["api_surface"] = None
         action_entries.append(entry)
     return yaml.safe_dump(
         {
@@ -391,18 +400,19 @@ def _data_contract(modules: tuple[str, ...]) -> dict[str, Any]:
             "surface_id": module_id,
             "surface_kind": "module",
             "collections": [{
-                "name": module_id, "scope": "app", "scope_field": "app_id",
+                "name": module_id, "scope": "app", "tenancy": "per_user",
+                "owner_field": "user_id", "entity": module_id.title(),
                 "ownership": {"surface_id": module_id, "surface_kind": "module"},
-                "fields": [{"name": "app_id", "type": "string", "required": True}],
+                "fields": [{"name": name, "type": "string", "required": True}
+                           for name in ("id", "user_id", "name", "title", "status", "project_id")],
             }],
         }
         for module_id in modules
     ]}
 
 
-def _database_files(app_id: str, contract: dict[str, Any], *, migration_path: str) -> dict[str, str]:
+def _database_files(contract: dict[str, Any], *, migration_path: str) -> dict[str, str]:
     return {
-        "data/contract.json": json.dumps({**contract, "app_id": app_id}, indent=2, sort_keys=True) + "\n",
         migration_path: json.dumps(
             {
                 "migration_id": "001_indexes",
@@ -539,8 +549,7 @@ def _base_plan(
         "capability_packs": packs,
         "external_integrations": [],
         "agent_backend_required": False,
-        "data_contract": _data_contract(tuple(modules)),
-        "build_tasks": tasks,
+                "build_tasks": tasks,
         "generation_order": [task["task_id"] for task in tasks],
     }
 
@@ -553,12 +562,14 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
             (path for path in owned_paths if path.startswith("data/migrations/")),
             "data/migrations/001_indexes.json",
         )
-        return {"code_files": [{"filename": path, "content": content} for path, content in _database_files(spec.app_id, spec.plan["data_contract"], migration_path=migration_path).items()]}
+        return {"code_files": [{"filename": path, "content": content} for path, content in _database_files(spec.data_contract, migration_path=migration_path).items()]}
     if task_type == "module_contract":
         owned_paths = [str(path) for path in task.get("owned_paths") or []]
         if module_id == "reports":
-            actions = [("view_report", "View reports."), ("export_report", "Export reports.")]
-            files = [{"filename": "modules/reports/module.yaml", "content": _module_contract("reports", actions, entitlement="reports.export")}]
+            actions = [("view_report", "View reports."), ("export_report", "Export reports."),
+                       ("list_reports", "List reports with explicit authenticated read access."),
+                       ("get_reports", "Get a report with explicit authenticated read access.")]
+            files = [{"filename": "modules/reports/module.yaml", "content": _module_contract("reports", actions)}]
             files.extend(
                 {"filename": path, "content": "schema_version: mozaiks.events.v1\nevents: []\n"}
                 for path in owned_paths
@@ -566,10 +577,7 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
             )
             return {"code_files": files}
         if module_id == "entitlement_dispatch":
-            actions = [
-                ("activate_subscription", "Activate subscription."),
-                ("deactivate_subscription", "Deactivate subscription."),
-            ]
+            actions = [(action, action.replace("_", " ").capitalize()) for action in _plan_actions(spec, module_id)]
             return {"code_files": [{"filename": "modules/entitlement_dispatch/module.yaml", "content": _module_contract("entitlement_dispatch", actions)}]}
         actions = {
             "projects": [("create_project", "Create project."), ("list_projects", "List projects.")],
@@ -593,7 +601,7 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
         if module_id == "entitlement_dispatch":
             backend_files = _simple_backend(
                 "entitlement_dispatch",
-                ["activate_subscription", "deactivate_subscription"],
+                _plan_actions(spec, module_id),
             )
             return {
                 "code_files": [
@@ -607,7 +615,7 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
             title_field = "name" if module_id == "projects" else "title"
             return {"code_files": [{"filename": path, "content": content} for path, content in _persistent_backend(module_id, singular, title_field).items()]}
         actions = {
-            "reports": ["view_report", "export_report"],
+            "reports": ["view_report", "export_report", "list_reports", "get_reports"],
             "research": ["summarize_source", "start_research"],
             "incidents": ["create_incident", "list_incidents"],
             "posts": ["create_post", "list_posts"],
@@ -692,7 +700,7 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
 
 
 async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[str, str], Path, Any]:
-    ctx = _Context(
+    ctx = ContextVariablesBridge(factory_context(
         {
             "app_id": spec.app_id,
             "app_name": spec.app_name,
@@ -702,8 +710,26 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
             "build_task_model": "AppBuildTask",
             "app_validation_strategy_used": "skip",
             "app_validation_status": "skipped",
+            "data_contract": spec.data_contract,
+            "design_surface_map": {"surfaces": [
+                {"surface_id": pack.get("surface_id") or pack["capability_pack_id"], "surface_kind": "module", "owner": "app",
+                 "primary_entities": pack.get("primary_entities", []), "custom_reads": [],
+                 "owned_mutations": pack.get("operations", [])}
+                for pack in spec.plan["capability_packs"]
+            ]},
         }
-    )
+    ))
+    if spec.archetype_id == "monetized_saas_reports":
+        ctx.set("subscription_contract", {
+            "contract_required": True,
+            "subscription_config_file": yaml.safe_load(
+                _app_task_output(spec, task_type="subscription_config", task={})["code_files"][0]["content"],
+            ),
+            "module_contract_updates": [
+                {"module_id": "reports", "action_id": "view_report", "entitlement_gate": "reports.view"},
+                {"module_id": "reports", "action_id": "export_report", "entitlement_gate": "reports.export"},
+            ],
+        })
     app_build_plan(AppBuildPlan=spec.plan, context_variables=ctx)
     assert ctx.get("app_plan_ready") is True, f"PLAN_LOSS archetype={spec.archetype_id}"
 
@@ -713,6 +739,8 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
 
     async def checkpoint(updates: dict[str, Any]) -> None:
         checkpoints.append(deepcopy(updates))
+        for key, value in updates.items():
+            ctx.set(key, value)
 
     async def _fake_run(self: Any, request: Any) -> AG2TaskBatchRunnerResult:  # noqa: ARG001
         assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"][request.task_id]
@@ -745,7 +773,7 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
                 "ServiceAgent": object(),
                 "AppSchemaAgent": object(),
             },
-            context_variables=ctx.data,
+            context_variables=ctx.snapshot(),
             chat_id=ctx.get("chat_id"),
             app_id=ctx.get("app_id"),
             user_id="matrix-user",
@@ -762,7 +790,7 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
     files = _file_map(assembled)
     if spec.auth_enabled:
         auth_scaffold = await save_auth_scaffold(
-            context_variables=ctx.data,
+            context_variables=ctx,
         )
         files.update(_file_map(auth_scaffold))
     files.update(spec.extra_files)
@@ -1271,6 +1299,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
             app_name="Project Management",
             plan=projects_plan,
             modules=("projects", "tasks"),
+            data_contract=_data_contract(("projects", "tasks")),
             pages=("projects", "tasks"),
             runtime_checks=_crud_checks,
             auth_enabled=True,
@@ -1281,6 +1310,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
             app_name="Generated SaaS Plan",
             plan=saas_plan,
             modules=("entitlement_dispatch", "reports"),
+            data_contract=json.loads((ROOT / "tests/fixtures/appplan_saas_entitlement_dispatch_output.json").read_text(encoding="utf-8"))["context"]["data_contract"],
             pages=("reports",),
             runtime_checks=_saas_checks,
             auth_enabled=True,
@@ -1291,6 +1321,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
             app_name="Workflow Agent Matrix",
             plan=workflow_plan,
             modules=("research",),
+            data_contract=_data_contract(("research",)),
             pages=("research",),
             runtime_checks=_workflow_checks,
             workspace_files=_workflow_files(),
@@ -1302,6 +1333,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
             app_name="Operations Dashboard",
             plan=admin_plan,
             modules=("incidents",),
+            data_contract=_data_contract(("incidents",)),
             pages=("operations",),
             runtime_checks=_admin_checks,
             extra_files=_admin_registry_file(),
@@ -1313,6 +1345,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
             app_name="Community Content",
             plan=community_plan,
             modules=("posts", "comments"),
+            data_contract=_data_contract(("posts", "comments")),
             pages=("posts", "comments"),
             runtime_checks=_community_checks,
             auth_enabled=True,
@@ -1380,10 +1413,14 @@ async def test_archetype_matrix_acceptance_fails_when_declared_surface_is_droppe
     spec = next(item for item in _matrix_specs() if item.archetype_id == "community_content")
     files, _, _ = await _materialize_spec(spec, tmp_path / "run")
     mutated = dict(files)
-    mutated["modules/comments/backend/handler.py"] = mutated["modules/comments/backend/handler.py"].replace(
-        "\n    async def list_comments(self, ctx, **params):\n        return {\"items\": [], \"count\": 0}\n",
-        "\n",
-    )
+    handler_path = "modules/comments/backend/handler.py"
+    source = mutated[handler_path]
+    handler = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GeneratedHandler")
+    method = next(node for node in handler.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "list_comments")
+    lines = source.splitlines(keepends=True)
+    del lines[method.lineno - 1:method.end_lineno]
+    mutated[handler_path] = "".join(lines)
+    assert mutated[handler_path] != source
 
     validation = validate_generated_app_bundle(
         GeneratedAppValidationRequest(
@@ -1393,7 +1430,7 @@ async def test_archetype_matrix_acceptance_fails_when_declared_surface_is_droppe
             capability_packs=spec.plan.get("capability_packs", []),
         )
     )
-    codes = {item.code for item in scan_functional_generated_app(mutated)}
+    diagnostics = scan_functional_generated_app(mutated)
 
     assert validation.passed is False
-    assert "MISSING_MODULE_HANDLER" in codes or "MISSING_MODULE_ACTION" in codes
+    assert any(item.code == "MISSING_MODULE_ACTION" and "list_comments" in item.message for item in diagnostics)

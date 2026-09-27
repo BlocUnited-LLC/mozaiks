@@ -46,6 +46,13 @@ def _context():
         "build_mode": "initial", "app_plan_attempts": 0, "app_plan_outcome": "blocked",
         "design_surface_map": {"surfaces": [{"surface_id": "reports", "surface_kind": "module", "owner": "app", "primary_entities": ["Report"]}]},
         "experience_spec": {"pages": [{"name": "Reports", "route": "/reports"}]},
+        "data_contract": {"version": "1", "surfaces": [{
+            "surface_id": "reports", "surface_kind": "module", "collections": [{
+                "name": "reports", "entity": "Report", "scope": "app", "tenancy": "per_user",
+                "owner_field": "owner_id", "ownership": {"surface_id": "reports", "surface_kind": "module"},
+                "fields": [{"name": "owner_id", "type": "string", "required": True}],
+            }],
+        }]},
     })
 
 
@@ -80,8 +87,9 @@ def test_review_queues_synthesized_module_workers_with_actual_prerequisites():
     tasks = {task["task_type"]: task for task in context.get("app_task_batch_items")}
     contract_id = tasks["module_contract"]["task_id"]
     models_id = tasks["data_models"]["task_id"]
-    assert list(tasks["data_models"]["depends_on"]) == [contract_id]
-    assert list(tasks["business_services"]["depends_on"]) == [contract_id, models_id]
+    persistence_id = tasks["persistence_contract"]["task_id"]
+    assert list(tasks["data_models"]["depends_on"]) == [contract_id, persistence_id]
+    assert list(tasks["business_services"]["depends_on"]) == [contract_id, models_id, persistence_id]
     for kind in ("data_models", "business_services"):
         assert tasks[kind]["current_build_task"]["depends_on"] == tasks[kind]["depends_on"]
     assert contract_id in tasks["page_bundle"]["depends_on"]

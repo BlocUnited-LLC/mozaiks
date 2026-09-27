@@ -14,7 +14,14 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.runtime.persistence.intent_loader import (
+    iter_data_contract_collections,
+    validate_collection_ownership,
+)
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    canonical_read_actions_for_surface,
+)
 
 logger = get_workflow_logger("design_docs")
 
@@ -291,6 +298,56 @@ def _canonical_data_contract(
             "allow_destructive_migrations": bool(policies.get("allow_destructive_migrations", False)),
         },
     }
+
+
+def _validate_design_collections(data_contract: dict[str, Any], surface_map: dict[str, Any]) -> None:
+    """Resolve explicit entity and row ownership after determined platform normalization."""
+    surfaces = {surface["surface_id"]: surface for surface in surface_map["surfaces"]}
+    collections = [
+        (group["surface_id"], collection)
+        for group in data_contract["surfaces"] for collection in group["collections"]
+    ]
+    collections.extend(("", collection) for collection in data_contract["shared_collections"])
+    for group_id, collection in collections:
+        if not isinstance(collection, dict):
+            raise ValueError(f"data_contract collection on {group_id!r} must be an object")
+        path = f"data_contract collection {collection.get('name')!r}"
+        ownership = collection.get("ownership") or {}
+        surface_id = ownership.get("surface_id")
+        surface = surfaces.get(surface_id)
+        if surface is None or (group_id and surface_id != group_id):
+            raise ValueError(
+                f"{path}.ownership.surface_id must match its surface; valid choices={sorted(surfaces)}"
+            )
+        if ownership.get("surface_kind") != surface.get("surface_kind"):
+            raise ValueError(f"{path}.ownership.surface_kind must be {surface['surface_kind']!r}")
+        entities = surface.get("primary_entities") or []
+        if collection.get("entity") not in entities:
+            raise ValueError(
+                f"{path}.entity must be an explicit primary_entities entry on {surface_id!r}; "
+                f"valid choices={entities}"
+            )
+        if collection.get("tenancy") == "app_wide":
+            collection.setdefault("owner_field", None)
+        validate_collection_ownership(collection, path)
+    # One owner/entity and owner/name must identify one collection across both locations.
+    list(iter_data_contract_collections(data_contract))
+    for surface in surfaces.values():
+        reads = surface.get("custom_reads") or []
+        if not isinstance(reads, list) or any(
+            not isinstance(action, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", action)
+            for action in reads
+        ):
+            raise ValueError(f"surface {surface['surface_id']!r}.custom_reads must be snake_case action ids")
+        overlap = set(reads) & set(surface.get("owned_mutations") or [])
+        if len(reads) != len(set(reads)) or overlap:
+            raise ValueError(f"surface {surface['surface_id']!r}.custom_reads must be unique and distinct from owned_mutations")
+        canonical = canonical_read_actions_for_surface(surface, data_contract)
+        if set(reads) & set(canonical):
+            raise ValueError(
+                f"surface {surface['surface_id']!r}.custom_reads must exclude code-owned canonical reads {canonical}; "
+                "declare only additional read action ids"
+            )
 
 
 def _surface_map_yaml_block(surface_map: dict[str, Any]) -> str:
@@ -630,6 +687,7 @@ async def save_design_docs_bundle(
             data_contract=data_contract,
             include_default_subscription=True,
         )
+        _validate_design_collections(data_contract, surface_map)
         if not frontend_markdown or not backend_markdown or not database_markdown:
             raise ValueError("DesignDocsBundle must include all three Markdown documents")
         normalization_messages = [

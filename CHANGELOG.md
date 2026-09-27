@@ -12,7 +12,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Security
+
+- Generated collection tenancy, owner fields, and entity identities are decided
+  in DesignDocs and preserved through generation and repair. Canonical reads
+  require login and owner filtering for user/workspace data, with deterministic
+  backend implementations. Subscription gates target approved writes and custom
+  reads, survive repairs, and cannot lock canonical reads or billing facades.
+
 ### Fixed
+
+- Existing app data contracts load without newly introduced ownership fields;
+  present fields remain validated, and factory generation requires complete
+  ownership metadata. Generated module task instructions preserve custom reads,
+  managed facade inventories use their complete pack contracts, and protected
+  app-wide reads require an explicit access policy.
 
 - Generated pages select typed module/action data sources; code builds their
   endpoints and missing entity read contracts. Persistent module policies now

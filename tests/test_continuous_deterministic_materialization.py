@@ -211,7 +211,6 @@ def _plan_payload() -> dict[str, Any]:
                     "acceptance_criteria": ["Page action resolves to reports.list_reports."],
                 },
             ],
-            "data_contract": None,
             "pending_schema_migration": None,
             "generation_order": [
                 "reports.contract",
@@ -389,7 +388,6 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
             },
             "shell_config": None,
             "asset_manifest": None,
-            "data_contract": None,
         }
     )
     return {

@@ -43,6 +43,8 @@ def _load_factory_contracts():
 
 def _live_inputs():
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    # Retire the old model-owned data contract field; the captured approved context is authoritative.
+    fixture["plan"].pop("data_contract", None)
     values = fixture["context"]
     values["app_plan_attempts"] = 0
     for pack in values["capability_packs"]:
@@ -109,10 +111,15 @@ def _domain_inputs():
     surface = next(surface for surface in data["surfaces"] if surface["surface_id"] == "auth")
     surface["surface_id"] = "project_members"
     collection = surface["collections"][0]
-    collection.update(name="project_members", search_by="member_id")
+    collection.update(
+        name="project_members", search_by="member_id", entity="Member",
+        tenancy="app_wide", owner_field=None,
+    )
     collection["ownership"]["surface_id"] = "project_members"
     collection["fields"] = [field for field in collection["fields"] if field["name"] != "password_hash"]
     next(field for field in collection["fields"] if field["name"] == "user_id")["name"] = "member_id"
+    task_collection = next(surface for surface in data["surfaces"] if surface["surface_id"] == "tasks")["collections"][0]
+    task_collection.update(entity="Task", tenancy="per_user", owner_field="user_id")
     context.set("data_contract", data)
     return plan, context
 
@@ -203,6 +210,8 @@ def test_complete_correct_plan_passes_unchanged():
     plan, context = _approved_plan(monetized=False)
     assert isinstance(context, ContextVariablesBridge)
     tasks = {task["task_type"]: task for task in plan["build_tasks"]}
+    # This fixture declares no collection ownership, so it must not plan a policy.
+    tasks["business_services"]["owned_paths"].remove("modules/task_management/backend/policy.py")
     tasks["module_contract"]["initial_message"] = "Define create_task and list_tasks."
     tasks["data_models"]["depends_on"] = ["6", "persistence_contract"]
     tasks["business_services"]["depends_on"] = ["6", "7", "persistence_contract"]

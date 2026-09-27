@@ -40,6 +40,9 @@ from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
+from mozaiksai.core.runtime.persistence.intent_loader import (
+    validate_complete_data_contract_ownership,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     compile_page_data_sources,
@@ -498,16 +501,7 @@ def _validate_data_contract(data_contract: Any) -> None:
     if not isinstance(surfaces, list):
         raise ValueError("data_contract.surfaces must be a list")
 
-    for index, surface in enumerate(surfaces):
-        path = f"data_contract.surfaces[{index}]"
-        if not isinstance(surface, dict):
-            raise ValueError(f"{path} must be an object")
-        if not _is_non_empty_string(surface.get("surface_id")):
-            raise ValueError(f"{path}.surface_id is required")
-        if not _is_non_empty_string(surface.get("surface_kind")):
-            raise ValueError(f"{path}.surface_kind is required")
-        if not isinstance(surface.get("collections"), list):
-            raise ValueError(f"{path}.collections must be a list")
+    validate_complete_data_contract_ownership(data_contract)
 
     aliases = data_contract.get("aliases") or []
     if not isinstance(aliases, list):
@@ -527,14 +521,6 @@ def _validate_data_contract(data_contract: Any) -> None:
             raise ValueError(f"{path}.collection is required")
         if not _is_non_empty_string(alias.get("owner_module")):
             raise ValueError(f"{path}.owner_module is required")
-
-    shared_collections = data_contract.get("shared_collections") or []
-    if not isinstance(shared_collections, list):
-        raise ValueError("data_contract.shared_collections must be a list when provided")
-    for index, collection in enumerate(shared_collections):
-        if not _is_non_empty_string(collection):
-            raise ValueError(f"data_contract.shared_collections[{index}] is required")
-
 
 def _validate_route_auth(route_auth: Any, *, field: str) -> None:
     if route_auth is None:
@@ -1581,10 +1567,6 @@ def save_app_schema(
         dict[str, Any] | None,
         Field(description="Optional asset manifest to merge into config/asset_manifest.json. None to skip."),
     ] = None,
-    data_contract: Annotated[
-        dict[str, Any] | None,
-        Field(description="Optional canonical data contract persisted to data/contract.json. None to skip."),
-    ] = None,
     custom_route_bundle: Annotated[
         dict[str, Any] | None,
         Field(description="Optional bounded custom full-page React route bundle persisted to ui/route_manifest.json and ui/pages/custom/*.jsx."),
@@ -1606,11 +1588,11 @@ def save_app_schema(
       - brand/theme_config.json (merge)  → theme_config_patch when set
       - config/shell.json (merge)        → shell_config when set
       - config/asset_manifest.json       → asset_manifest when set
-      - data/contract.json                 → data_contract when set or available in context
+      - data/contract.json                 → approved DesignDocs data_contract from context
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
-        app_asset_manifest, data_contract, app_custom_route_bundle,
+        app_asset_manifest, app_custom_route_bundle,
         app_schema_ready
 
     Compile explicit module/action references against the closed inventory,
@@ -1669,7 +1651,6 @@ def save_app_schema(
         )
         shell_config = _normalize_shell_config(shell_config)
         asset_manifest = _strip_none(_to_plain(asset_manifest))
-        data_contract = _strip_none(_to_plain(data_contract))
         custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
 
         # One rejection carries every defect it can see. Reporting the first one and
@@ -1750,9 +1731,7 @@ def save_app_schema(
         _validate_shell_navigation(shell_config)
         _validate_shell_chrome(shell_config)
         _validate_asset_manifest(asset_manifest)
-        resolved_data_contract = data_contract
-        if resolved_data_contract is None:
-            resolved_data_contract = detach(_context_get(context_variables, "data_contract"))
+        resolved_data_contract = detach(_context_get(context_variables, "data_contract"))
         _validate_data_contract(resolved_data_contract)
         app_ui_quality_warnings = dedupe(
             audit_page_schemas(page_list)
@@ -1854,7 +1833,7 @@ def save_app_schema(
             values = {
                 "app_manifest": manifest_dict, "app_pages": page_list,
                 "app_theme_config_patch": theme_config_patch, "app_shell_config": shell_config,
-                "app_asset_manifest": asset_manifest, "data_contract": resolved_data_contract,
+                "app_asset_manifest": asset_manifest,
                 "app_custom_route_bundle": custom_route_bundle, "app_schema_ready": True,
                 "app_ui_quality_warnings": app_ui_quality_warnings,
                 "generated_app_dir": str(output_dir),

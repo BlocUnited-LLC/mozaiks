@@ -265,6 +265,30 @@ definitions:
       fields:
         - surface_map
       default: null
+  capability_packs:
+    type: array
+    description: Trusted selected build-context pack descriptors used to exclude managed facade actions from subscription gate targets.
+    source:
+      type: build_context
+      default: []
+  operator_contracts:
+    type: array
+    description: Trusted selected build-context contract descriptors declaring managed facade identities.
+    source:
+      type: build_context
+      default: []
+  data_contract:
+    type: object
+    description: Approved DesignDocs collection ownership and entity contract; determines canonical list/get action identifiers.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: DataContracts
+      query_template:
+        app_id: '{{run_build_binding.target_app_id}}'
+      fields:
+        - data_contract
+      default: null
   experience_spec:
     type: object
     description: Typed ExperienceSpec from DesignDocs.
@@ -347,6 +371,7 @@ agents:
       - concept_blueprint
       - backend_design_document
       - design_surface_map
+      - data_contract
       - experience_spec
       - subscription_contract
       - subscription_contract_review_status

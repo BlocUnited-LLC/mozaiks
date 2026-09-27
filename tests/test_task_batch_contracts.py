@@ -19,6 +19,7 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
     AG2TaskBatchRunnerRequest,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.authority import (
     CONTEXT_AUTHORITY_WRITER_DEP,
     ContextAuthorityClass,
@@ -802,7 +803,9 @@ async def test_execute_task_batches_materializes_typed_worker_files_before_valid
                 )
             )
 
-    context = {
+    approved_contract = {"version": "1", "surfaces": []}
+    bridge = ContextVariablesBridge({
+        "data_contract": approved_contract,
         "app_task_batch_items": [
             {
                 "task_id": "data_contract",
@@ -811,7 +814,12 @@ async def test_execute_task_batches_materializes_typed_worker_files_before_valid
                 "owned_paths": ["data/contract.json"],
             },
         ],
-    }
+    })
+    context = bridge.snapshot()
+
+    async def checkpoint(updates):
+        for key, value in updates.items():
+            bridge.set(key, value)
 
     await execute_task_batches_for_trigger(
         workflow_name="AppGenerator",
@@ -820,12 +828,14 @@ async def test_execute_task_batches_materializes_typed_worker_files_before_valid
         agents={"WorkerAgent": _FakeAgent()},
         context_variables=context,
         fresh_agents_per_task=False,
+        checkpoint=checkpoint,
     )
 
     output = context["app_task_batch_results"]["data_contract"]
     assert output["code_files"] == [
-        {"filename": "data/contract.json", "content": "{\"surfaces\":[]}\n"}
+        {"filename": "data/contract.json", "content": json.dumps(approved_contract, indent=2)}
     ]
+    assert bridge.snapshot()["data_contract"] == approved_contract
 
 
 @pytest.mark.asyncio

@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from pathlib import Path
 from typing import Any, Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
-from mozaiksai.core.session.build_context import load_contract_descriptors
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import managed_pack_contracts
 
 
 class SurfaceOwnershipRule(BaseModel):
@@ -29,12 +28,15 @@ class SurfaceOwnershipRule(BaseModel):
     surface_entity_names: list[str] = Field(default_factory=list)
     surface_action_ids: list[str] = Field(default_factory=list)
     state_field_names: list[str] = Field(default_factory=list)
+    identity_evidence_fields: list[str] = Field(default_factory=list)
     structured_state_field_types: dict[str, list[Literal["object", "array"]]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def declared_structured_fields(self) -> Self:
         if _identifiers(self.structured_state_field_types) - _identifiers(self.state_field_names):
             raise ValueError("structured_state_field_types must reference declared state_field_names")
+        if _identifiers(self.identity_evidence_fields) - _identifiers(self.state_field_names):
+            raise ValueError("identity_evidence_fields must reference declared state_field_names")
         return self
 
 
@@ -56,29 +58,6 @@ def default_subscription_contract(context: Any) -> dict[str, Any] | None:
     return dict(yaml.safe_load(workflow_context_path("mozaikspay", "contract.yaml").read_text(encoding="utf-8")))
 
 
-def _selected_contracts(context: Any, *, include_default_subscription: bool) -> list[dict[str, Any]]:
-    contracts: list[dict[str, Any]] = []
-    for pack in _get(context, "capability_packs", []) or []:
-        if pack.get("capability_source") != "managed_capability" or pack.get("status", "active") != "active":
-            continue
-        source = pack.get("pack_source_path")
-        if source:
-            root = Path(source)
-            config = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))
-            contracts.extend(load_contract_descriptors(root, config))
-        else:
-            pack_id = pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id")
-            contracts.extend(
-                contract for contract in _get(context, "operator_contracts", []) or []
-                if contract.get("contract_id") == pack_id
-                or (contract.get("canonical_provider") or {}).get("provider_pack_id") == pack_id
-            )
-    default = default_subscription_contract(context) if include_default_subscription else None
-    if default and not any(contract.get("contract_id") == default["contract_id"] for contract in contracts):
-        contracts.append(default)
-    return contracts
-
-
 def _identifiers(values: Any) -> set[str]:
     return {str(value).strip().casefold() for value in values or []}
 
@@ -90,7 +69,10 @@ def _ownership_rules(
         workflow_context_path("AppGenerator", "capability_routing.yaml").read_text(encoding="utf-8"),
     )
     declarations = list(catalog["layers"]["runtime_provided"]["surface_ownership"])
-    contracts = _selected_contracts(context_variables, include_default_subscription=include_default_subscription)
+    contracts = managed_pack_contracts(context_variables)
+    default = default_subscription_contract(context_variables) if include_default_subscription else None
+    if default and not any(contract.get("contract_id") == default["contract_id"] for contract in contracts):
+        contracts.append(default)
     facades: dict[str, dict[str, Any]] = {}
     for contract in contracts:
         ownership = contract.get("surface_ownership", [])
@@ -129,7 +111,9 @@ def _matches_surface(surface: dict[str, Any], rule: SurfaceOwnershipRule) -> boo
         _identifiers([surface.get("surface_id")]) & _identifiers(rule.surface_ids)
         or surface.get("surface_id") == rule.facade_module
         or _identifiers(surface.get("primary_entities")) & _identifiers(rule.entity_names)
-        or _identifiers(surface.get("owned_mutations")) & _identifiers(rule.action_ids)
+        or _identifiers([
+            *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+        ]) & _identifiers(rule.action_ids)
     )
 
 
@@ -139,6 +123,11 @@ def _matches_collection(collection: dict[str, Any], group_id: str, rule: Surface
         _identifiers([collection.get("name")]) & _identifiers(rule.collection_names)
         or _identifiers([owner_id, group_id]) & _identifiers(rule.surface_ids)
         or rule.facade_module and rule.facade_module in {owner_id, group_id}
+        or (
+            _identifiers([collection.get("name")]) & _identifiers(rule.surface_collection_names)
+            and _identifiers(field.get("name") for field in collection.get("fields") or [])
+            & _identifiers(rule.identity_evidence_fields)
+        )
     )
 
 
@@ -178,7 +167,9 @@ def validate_surface_ownership(
             if surface.get("owner") != "app" or surface.get("surface_kind") != "module":
                 continue
             conflicts = _identifiers(surface.get("primary_entities")) & reserved_entities
-            actions = _identifiers(surface.get("owned_mutations"))
+            actions = _identifiers([
+                *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+            ])
             if is_facade:
                 conflicts |= _identifiers(surface.get("primary_entities"))
                 conflicts |= actions - _identifiers(facade_actions[surface_id])
@@ -259,7 +250,10 @@ def normalize_surface_ownership(
                     f"group {group_id!r} disagrees with declared owner {owner_id!r}."
                 )
             names = _identifiers(rule.collection_names)
-            if scoped:
+            identity_evidence = _identifiers(
+                field.get("name") for field in collection.get("fields") or []
+            ) & _identifiers(rule.identity_evidence_fields)
+            if scoped or identity_evidence:
                 names |= _identifiers(rule.surface_collection_names)
             declared_fields = collection.get("fields") or []
             fields = _identifiers(field.get("name") for field in declared_fields)
@@ -319,6 +313,8 @@ def normalize_surface_ownership(
                 residual.update(
                     ownership={"surface_id": target, "surface_kind": "module"},
                     scope="app", search_by="user_id", indexes=indexes,
+                    tenancy="per_user", owner_field="user_id",
+                    entity=(residual["name"] if residual["name"].endswith("_app_data") else f"{residual['name']}_app_data"),
                     lifecycle={**(residual.get("lifecycle") or {}), "write_mode": "module_action"},
                 )
                 collections.remove(collection)
@@ -355,6 +351,10 @@ def normalize_surface_ownership(
         ):
             raise ValueError(f"Ambiguous split destination {target!r}/{residual['name']!r}: collection already exists.")
         group["collections"].append(residual)
+        target_surface = next(surface for surface in normalized_map["surfaces"] if surface["surface_id"] == target)
+        target_surface["primary_entities"] = list(dict.fromkeys([
+            *(target_surface.get("primary_entities") or []), residual["entity"],
+        ]))
 
     surfaces = normalized_map["surfaces"]
     targets: dict[str, str] = {}
@@ -371,7 +371,9 @@ def normalize_surface_ownership(
             entities |= _identifiers(rule.surface_entity_names)
             allowed_actions |= _identifiers(rule.surface_action_ids)
         unknown_entities = _identifiers(surface.get("primary_entities")) - entities
-        unknown_actions = _identifiers(surface.get("owned_mutations")) - allowed_actions
+        unknown_actions = _identifiers([
+            *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+        ]) - allowed_actions
         remaining = [
             collection["name"] for group_id, collections in groups for collection in collections
             if surface_id in {group_id, (collection.get("ownership") or {}).get("surface_id")}
@@ -391,10 +393,11 @@ def normalize_surface_ownership(
             and (not facade or surface_id == rule.facade_module)
             and not surface.get("primary_entities")
             and not (_identifiers(surface.get("owned_mutations")) - _identifiers(_facade_actions(facade)))
+            and not (_identifiers(surface.get("custom_reads")) - _identifiers(_facade_actions(facade)))
         ):
             continue
         corrected = deepcopy(surface)
-        corrected.update(owner="app" if facade else "platform", primary_entities=[], owned_mutations=[])
+        corrected.update(owner="app" if facade else "platform", primary_entities=[], owned_mutations=[], custom_reads=[])
         if facade:
             corrected.update(
                 surface_id=rule.facade_module, surface_kind="module",

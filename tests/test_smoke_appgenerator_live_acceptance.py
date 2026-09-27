@@ -4,6 +4,7 @@ import asyncio
 import os
 
 import pytest
+import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
@@ -155,12 +156,13 @@ async def test_appgenerator_acceptance_blocks_workflow_trigger_capability_drift(
 async def test_appgenerator_acceptance_blocks_invented_workflow_route() -> None:
     integration = default_workflow_integration()
     files = build_appgenerator_acceptance_files(integration)
-    files["modules/support_tickets/module.yaml"] += """
-  - capability_id: wrong-ticket-workflow
-    kind: workflow
-    target: WrongTicketWorkflow
-    title: Wrong generated workflow
-"""
+    manifest_path = "modules/support_tickets/module.yaml"
+    manifest = yaml.safe_load(files[manifest_path])
+    manifest["capabilities"].append({
+        "capability_id": "wrong-ticket-workflow", "kind": "workflow",
+        "target": "WrongTicketWorkflow", "title": "Wrong generated workflow",
+    })
+    files[manifest_path] = yaml.safe_dump(manifest, sort_keys=False)
     files["modules/support_tickets/contracts/reactions.yaml"] += f"""
   - id: wrong_ticket_workflow_route
     event_type: {DEFAULT_TRIGGER_EVENT_TYPE}

@@ -194,11 +194,14 @@ async def test_partial_output_requires_complete_assembled_bundle_for_acceptance(
     assembled = {entry["filename"]: entry["content"] for entry in _merge_code_files([
         {"code_files": [{"filename": path, "content": content} for path, content in baseline.items()]},
         _output(page),
-    ])}
+    ], data_contract=json.loads(baseline["data/contract.json"]))}
     assert assembled["app.json"] == baseline["app.json"]
     assert assembled["provenance.yaml"] == baseline["provenance.yaml"]
     for path in baseline.keys() - {page_path}:
-        assert assembled[path] == baseline[path]
+        if path == "data/contract.json":
+            assert json.loads(assembled[path]) == json.loads(baseline[path])
+        else:
+            assert assembled[path] == baseline[path]
     assert yaml.safe_load(assembled[page_path])["title"] == page["title"]
     if missing_manifest:
         assembled.pop("app.json")

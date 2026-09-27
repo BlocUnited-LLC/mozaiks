@@ -61,7 +61,9 @@ agents:
             nested inside concept_blueprint; it is not a separate variable.
           - backend_design_document and design_surface_map for module/workflow boundaries
           - [APPROVED ENTITLEMENT ACTION INVENTORY], injected from app-owned module
-            surfaces in design_surface_map, for the closed module_id/action_id choices
+            writes and custom_reads in design_surface_map, for the closed
+            module_id/action_id gate choices. Canonical collection list/get and
+            managed-pack facade actions are excluded and always remain ungated.
           - experience_spec for page surfaces
           - monetization_enabled and builder_options for explicit builder settings
           - app_intelligence_summary, app_intelligence_catalog, source_context_catalog,
@@ -161,7 +163,10 @@ agents:
              - Declare the capability-to-action product decision in the typed
                module_contract_updates list. Choose module_id and action_id only
                from [APPROVED ENTITLEMENT ACTION INVENTORY]: module_id is the exact
-               approved surface_id, action_id is one of that surface's owned_mutations.
+               approved surface_id; action_id selects an owned_mutations write,
+               or declared custom_reads action. Canonical collection list/get and
+               managed-pack facade actions are never gate targets. Declare a custom
+               read for paid view behavior; never sell a dashboard by gating base reads.
                Prose in backend_design_document is context, not permission to invent ids.
              - Each capability that differs between plans must be entitlement_gate
                on at least one approved action. Shared capabilities may remain ungated,
@@ -172,16 +177,19 @@ agents:
                Use null only for metering-only updates. AppGenerator constructs
                actions[].entitlement_gate from this mapping regardless of model-written YAML.
              - Empty module_contract_updates is invalid when plans grant capabilities.
-               If no approved action can represent a required feature, record the missing
-               design input in validation_notes. Do not guess ids or silently omit the
-               decision; save validation returns valid ids for revision.
+               If no approved action can represent a required feature, the upstream
+               DesignDocs contract must first declare its custom read or write.
+               validation_notes never waive a missing mapping. Do not guess ids or
+               silently omit the decision; save validation diagnoses the missing input.
              - If `brownfield_build_path` is present, declare gates and metering only
                for generated Mozaiks-owned overlays, adapters, modules, workflows, or
                pages in the approved adoption scope. Do not gate protected existing-app
                surfaces discovered as `read_only_discovered`.
              - Do not invent capabilities just to make tiers look different.
              - Put entitlement gates only on actions that truly require paid
-               access. Public readonly plan browsing must stay ungated.
+               access. Every managed-pack facade action remains ungated, including
+               plans, checkout, upgrade, portal, usage, and tokens. Free users must
+               always be able to discover plans and upgrade.
              - Use usage_limits, token_wallets, and token_allowances only for
                AI, request, credit, or resource budgets that are visible in
                upstream workflow/module context or explicitly requested by

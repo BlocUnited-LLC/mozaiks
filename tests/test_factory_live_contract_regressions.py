@@ -28,11 +28,12 @@ from mozaiksai.core.events import auto_tool_handler
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
 from scripts.appgenerator_fixture_replay import execute_file_replay
-from scripts.smoke_appgenerator_live_acceptance import SmokeContext
 
 
-def _repair_context(task_type, agent, files):
-    context = SmokeContext({"app_id": "contract-regression", "generated_files": files})
+def _repair_context(task_type, agent, files, *, data_contract=None):
+    context = ContextVariablesBridge({
+        "app_id": "contract-regression", "generated_files": files, "data_contract": data_contract,
+    })
     task = {
         "task_id": "fixture_task", "task_type": task_type, "initial_agent": agent,
         "capability_pack_id": None if task_type == "persistence_contract" else "contacts",
@@ -45,8 +46,9 @@ def _repair_context(task_type, agent, files):
         "build_tasks": [task], "pages": [{"name": "Contacts", "route": "/contacts", "purpose": "Review contacts."}],
         "capability_packs": [],
     }, context_variables=context)
-    asyncio.run(execute_file_replay(context.data, files))
-    return context.data
+    values = context.snapshot()
+    asyncio.run(execute_file_replay(values, files))
+    return values
 
 
 def test_action_surface_null_is_not_a_string_literal():
@@ -200,7 +202,12 @@ def test_generated_repair_can_delete_an_owned_optional_companion():
 
 
 def test_data_contract_failure_has_explicit_database_repair_owner():
-    context = _repair_context("persistence_contract", "DatabaseAgent", {"data/contract.json": "{}"})
+    approved = {"version": "1.0", "surfaces": [], "shared_collections": []}
+    context = _repair_context(
+        "persistence_contract", "DatabaseAgent", {"data/contract.json": "{}"}, data_contract=approved,
+    )
+    output_files = context["app_task_batch_results"]["fixture_task"]["code_files"]
+    assert json.loads(next(item["content"] for item in output_files if item["filename"] == "data/contract.json")) == approved
     repair = prepare_bundle_repair({"passed": False, "errors": [
         "data/contract.json: approved optional field became required"
     ]}, context)
@@ -215,7 +222,8 @@ def test_data_contract_cannot_drop_fields_or_make_optional_email_required():
     actual = json.loads(json.dumps(planned))
     actual["surfaces"][0]["collections"][0]["fields"] = [{"name": "email", "type": "string", "required": True}]
     errors = _scan_planned_data_fields({"data/contract.json": json.dumps(actual)}, planned)
-    assert len(errors) == 2
+    assert len(errors) == 3
+    assert any("exactly preserve" in error for error in errors)
     assert any("email" in error for error in errors)
     assert any("notes" in error for error in errors)
     assert _scan_planned_data_fields({"data/contract.json": json.dumps(planned)}, planned) == []
