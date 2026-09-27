@@ -156,8 +156,12 @@ agents:
       references, and managed subscription surfaces use billing_portal while
       preserving their approved pages. Saved ownership_normalizations record these
       corrections. A user_id field is a reference to identity, not duplicated
-      identity: preserve app-specific preferences and profile fields. Mixed state,
-      unknown fields, or competing owners still receive revision feedback; separate
+      identity: preserve app-specific preferences and profile fields. Auth identity
+      includes OIDC standard claims and platform account/session fields, including
+      coarse token roles; resource-scoped memberships remain app-owned. A mixed auth
+      collection is split into user_id-keyed app data when its declared app owner,
+      or the sole eligible app module, determines ownership. No module is invented.
+      Unresolved or competing owners still receive revision feedback; separate
       app-owned data from platform/provider state instead of deleting it. Changing
       only the owner label cannot authorize app-owned storage. Downstream planning
       rejects invalid approved ownership before it can generate a replacement module.

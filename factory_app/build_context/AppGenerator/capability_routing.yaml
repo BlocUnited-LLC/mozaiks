@@ -19,7 +19,94 @@ layers:
         surface_collection_names: [users, sessions]
         surface_entity_names: [User, UserCredential, Session]
         surface_action_ids: [create_session, login_user]
-        state_field_names: [_id, id, app_id, user_id, email, username, name, display_name, password, password_hash, hashed_password, email_verified, session_id, access_token, refresh_token, expires_at, created_at, updated_at, last_login_at]
+        # Classification applies only to collections matched by this ownership rule.
+        # These are input names to remove from generated auth storage, not claims
+        # that every provider returns, or permission to persist credentials locally.
+        state_field_names:
+          # OpenID Connect Core 1.0, section 5.1 (complete standard-claims table):
+          # https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims
+          - sub
+          - name
+          - given_name
+          - family_name
+          - middle_name
+          - nickname
+          - preferred_username
+          - profile
+          - picture
+          - website
+          - email
+          - email_verified
+          - gender
+          - birthdate
+          - zoneinfo
+          - locale
+          - phone_number
+          - phone_number_verified
+          - address
+          - updated_at
+          # Provider-neutral UserClaims: mozaiksai/core/auth/adapters/base.py.
+          - user_id
+          - roles
+          - scopes
+          - raw_claims
+          - provider
+          - app_id
+          - chat_id
+          - tenant_id
+          - workspace_id
+          # Platform account profile: mozaiksai/hosts/platform.py,
+          # ProfileUpdateRequest and _ensure_account_profile. subscription_tier
+          # here is the account-profile projection, not subscription ownership.
+          - _id
+          - id
+          - username
+          - display_name
+          - avatar_url
+          - bio
+          - subscription_tier
+          - created_at
+          - last_login_at
+          # Keycloak token mapping: core/auth/adapters/keycloak.py:_extract_claims
+          # and _extract_roles; Supabase singular role: adapters/supabase.py.
+          # Token roles are identity claims. Resource-scoped app memberships stay
+          # module-owned (docs/architecture/app/user-classes-and-resource-relationships.md).
+          - role
+          - realm_access
+          - resource_access
+          - scope
+          # Keycloak account state and credential storage:
+          # https://www.keycloak.org/docs-api/latest/rest-api/index.html#UserRepresentation
+          - enabled
+          - credentials
+          # Session/token state: chat-ui/src/auth/authAdapter.js OIDC exchange;
+          # factory_app/app/config/auth.yaml delegates the flow to the provider.
+          - session_id
+          - session_state
+          - access_token
+          - refresh_token
+          - id_token
+          - expires_at
+          # Common input aliases for given_name/family_name/name/picture,
+          # enabled, and provider-managed credentials. They are not new claims.
+          - first_name
+          - last_name
+          - full_name
+          - is_active
+          - active
+          - password
+          - password_hash
+          - hashed_password
+        # Known structured claims retain their standard/provider shapes; this
+        # does not classify arbitrary object/array fields as platform identity.
+        structured_state_field_types:
+          address: [object]
+          roles: [array]
+          scopes: [array]
+          raw_claims: [object]
+          realm_access: [object]
+          resource_access: [object]
+          credentials: [array]
     description: >
       Built into mozaiksai. Always present in every deployed app. Never generate
       these as modules, capability packs, or build tasks — reference them as
@@ -39,6 +126,10 @@ layers:
       build_tasks. Domain-specific profile records (investor profiles, creator
       profiles, vendor profiles) are module-owned entities — they extend the
       platform identity contract; they do not replace it.
+      When an auth collection mixes platform identity with app-specific per-user
+      fields, keep only the app fields in a user_id-keyed collection under its
+      one determinable app module. If no unique app owner is declared, correct
+      the design ownership instead of guessing or discarding app data.
 
   ai_workflow:
     description: >

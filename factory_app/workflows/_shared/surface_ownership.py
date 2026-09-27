@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Self
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 from mozaiksai.core.session.build_context import load_contract_descriptors
@@ -29,6 +29,13 @@ class SurfaceOwnershipRule(BaseModel):
     surface_entity_names: list[str] = Field(default_factory=list)
     surface_action_ids: list[str] = Field(default_factory=list)
     state_field_names: list[str] = Field(default_factory=list)
+    structured_state_field_types: dict[str, list[Literal["object", "array"]]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def declared_structured_fields(self) -> Self:
+        if _identifiers(self.structured_state_field_types) - _identifiers(self.state_field_names):
+            raise ValueError("structured_state_field_types must reference declared state_field_names")
+        return self
 
 
 def _get(context: Any, key: str, default: Any = None) -> Any:
@@ -203,19 +210,21 @@ def normalize_surface_ownership(
     """Apply only contract-determined corrections, atomically, before design approval.
 
     A reserved surface name proves the owner, not the meaning of every field it
-    contains. Unknown fields or mixed app behavior require a design decision.
+    contains. Residual auth data moves only to one determined existing app module;
+    unresolved owners or mixed app behavior require a design decision.
     """
     rules, facades = _ownership_rules(context_variables, include_default_subscription=include_default_subscription)
     normalized_map, normalized_data = deepcopy(surface_map), deepcopy(data_contract)
     records: dict[tuple[str, str], dict[str, Any]] = {}
 
-    def record(surface_id: str, rule: SurfaceOwnershipRule, removed: str | None = None) -> None:
+    def record(surface_id: str, rule: SurfaceOwnershipRule, removed: str | None = None) -> dict[str, Any]:
         owner = rule.facade_module or "platform"
         entry = records.setdefault((surface_id, owner), {
             "surface_id": surface_id, "owner": owner, "removed_collections": [],
         })
         if removed is not None:
             entry["removed_collections"].append(removed)
+        return entry
 
     def choose(matches: list[SurfaceOwnershipRule], subject: str) -> SurfaceOwnershipRule:
         owners = {rule.facade_module or "platform" for rule in matches}
@@ -227,6 +236,12 @@ def normalize_surface_ownership(
 
     groups = [(group["surface_id"], group["collections"]) for group in normalized_data.get("surfaces") or []]
     groups.append(("", normalized_data.get("shared_collections") or []))
+    app_modules = {
+        surface["surface_id"] for surface in normalized_map["surfaces"]
+        if surface.get("owner") == "app" and surface.get("surface_kind") == "module"
+        and not any(_matches_surface(surface, rule) for rule in rules)
+    }
+    splits: list[tuple[str, dict[str, Any]]] = []
     for group_id, collections in groups:
         for collection in list(collections):
             matches = [rule for rule in rules if _matches_collection(collection, group_id, rule)]
@@ -244,13 +259,75 @@ def normalize_surface_ownership(
             names = _identifiers(rule.collection_names)
             if scoped:
                 names |= _identifiers(rule.surface_collection_names)
-            fields = _identifiers(field.get("name") for field in collection.get("fields") or [])
-            unknown = fields - _identifiers(rule.state_field_names)
+            declared_fields = collection.get("fields") or []
+            fields = _identifiers(field.get("name") for field in declared_fields)
+            identity_fields = _identifiers(rule.state_field_names)
+            unknown = fields - identity_fields
             state_fields = fields - {"_id", "id", "app_id", "user_id", "created_at", "updated_at"}
+            structured_types = {
+                name.casefold(): types for name, types in rule.structured_state_field_types.items()
+            }
             unbounded_fields = [
-                field.get("name") for field in collection.get("fields") or []
+                field.get("name") for field in declared_fields
+                if str(field.get("name")).casefold() in identity_fields
                 if field.get("type") not in {"string", "boolean", "number", "integer", "datetime"}
+                and field.get("type") not in structured_types.get(str(field.get("name")).casefold(), [])
             ]
+            if unknown and not rule.facade_module and "user_id" in identity_fields and not unbounded_fields:
+                candidates = app_modules & {owner_id, group_id} or app_modules
+                if len(candidates) != 1:
+                    raise ValueError(
+                        f"Ambiguous app ownership for collection {name!r} on surface {owner_id!r} "
+                        f"after separating {rule.owner}: expected one app module, "
+                        f"candidates={sorted(candidates)}, residual fields={sorted(unknown)}."
+                    )
+                target = next(iter(candidates))
+                residual = deepcopy(collection)
+                # Globally reserved names still denote platform state after a move.
+                if name.casefold() in _identifiers(r for item in rules for r in item.collection_names):
+                    residual["name"] = f"{name}_app_data"
+                retained = unknown | {"user_id", "app_id"}
+                residual["fields"] = [
+                    field for field in residual["fields"]
+                    if str(field.get("name")).casefold() in retained - {"user_id"}
+                ]
+                residual["fields"].insert(0, {
+                    "name": "user_id", "type": "string", "required": True,
+                    "default": None, "enum": None, "nullable": False,
+                })
+                keys = ["app_id", "user_id"] if "app_id" in fields else ["user_id"]
+                indexes = [
+                    index for index in residual.get("indexes") or []
+                    if index.get("keys") and all(
+                        str(key["field"]).split(".", 1)[0].casefold() in retained for key in index["keys"]
+                    )
+                    and [key["field"] for key in index["keys"]] != keys
+                ]
+                index_base = f"{residual['name']}_{'_'.join(keys)}_unique"
+                index_name = index_base
+                index_names = {index.get("name") for index in indexes}
+                suffix = 2
+                while index_name in index_names:
+                    index_name = f"{index_base}_{suffix}"
+                    suffix += 1
+                indexes.append({
+                    "keys": [{"field": key, "order": 1} for key in keys],
+                    "unique": True, "sparse": False, "name": index_name,
+                })
+                residual.update(
+                    ownership={"surface_id": target, "surface_kind": "module"},
+                    scope="app", search_by="user_id", indexes=indexes,
+                    lifecycle={**(residual.get("lifecycle") or {}), "write_mode": "module_action"},
+                )
+                collections.remove(collection)
+                splits.append((target, residual))
+                entry = record(owner_id, rule)
+                entry.setdefault("split_collections", []).append({
+                    "name": name, "target_surface_id": target, "target_collection": residual["name"],
+                    "removed_fields": sorted(fields - retained),
+                    "retained_fields": [field["name"] for field in residual["fields"]],
+                })
+                continue
             if name.casefold() not in names or not state_fields or unknown or unbounded_fields:
                 actions = _facade_actions(facades[rule.facade_module]) if rule.facade_module else []
                 raise ValueError(
@@ -262,6 +339,20 @@ def normalize_surface_ownership(
                 )
             collections.remove(collection)
             record(owner_id, rule, name)
+
+    for target, residual in splits:
+        group = next((g for g in normalized_data["surfaces"] if g["surface_id"] == target), None)
+        if group is None:
+            group = {"surface_id": target, "surface_kind": "module", "collections": []}
+            normalized_data["surfaces"].append(group)
+            groups.append((target, group["collections"]))
+        if any(
+            item["name"].casefold() == residual["name"].casefold()
+            for group_id, items in groups for item in items
+            if target in {group_id, (item.get("ownership") or {}).get("surface_id")}
+        ):
+            raise ValueError(f"Ambiguous split destination {target!r}/{residual['name']!r}: collection already exists.")
+        group["collections"].append(residual)
 
     surfaces = normalized_map["surfaces"]
     targets: dict[str, str] = {}

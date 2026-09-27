@@ -28,7 +28,7 @@ models:
         - app
         - hosted
         - platform
-        description: Runtime owner responsible for this surface. Platform auth/sessions use platform ownership. Selected managed pack facades use app ownership with the declared facade surface_id and own no provider state. Save-time normalization applies only determined corrections; ambiguous or mixed state requires revision.
+        description: Runtime owner responsible for this surface. Platform auth/sessions use platform ownership. Selected managed pack facades use app ownership with the declared facade surface_id and own no provider state. Save-time normalization splits mixed auth fields only when one existing app module determines residual ownership; ambiguous ownership requires revision.
       source_capability_packs:
         type: optional_list
         items: str
@@ -226,7 +226,7 @@ models:
       collections:
         type: list
         items: DataContractCollection
-        description: Collection intents owned by the surface. Platform auth/session state and selected managed-provider state cannot be declared here; managed facade surfaces have no local collections. Save-time normalization removes only contract-identified duplicate state with known fields, preserving app-owned user data and refusing ambiguous mixed collections.
+        description: Collection intents owned by the surface. Platform auth/session state and selected managed-provider state cannot be declared here; managed facade surfaces have no local collections. Save-time normalization removes contract-identified identity fields and preserves residual app fields in a user_id-keyed collection under a uniquely determined existing app module. Ambiguous ownership requires revision.
 
   DataContractPolicies:
     type: model

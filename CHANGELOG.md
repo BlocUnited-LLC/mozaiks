@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs recognizes standard OIDC claims and platform account/session fields
+  in generated auth tables, and preserves app-specific fields under a uniquely
+  determined app module instead of rejecting the entire table.
+
 - DesignDocs normalizes determined platform auth/session and selected managed-pack
   ownership corrections before saving, preserving approved pages and app-owned
   data while removing only identified duplicate state. Saved designs record the
