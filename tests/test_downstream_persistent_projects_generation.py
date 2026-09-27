@@ -276,7 +276,7 @@ def _load_plan() -> dict[str, Any]:
 
 
 def _canonical_data_contract() -> dict[str, Any]:
-    return {**_load_plan()["data_contract"], "app_id": "project_management"}
+    return {**json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["context"]["data_contract"], "app_id": "project_management"}
 
 
 def _canonical_schema_migration() -> dict[str, Any]:
@@ -602,7 +602,8 @@ def _assembled_file_map(plan: Mapping[str, Any] | None = None) -> dict[str, str]
             _module_output("projects"),
             _module_output("tasks"),
             _page_output(),
-        ]
+        ],
+        data_contract=_canonical_data_contract(),
     )
     return {entry["filename"]: entry["content"] for entry in merged}
 
@@ -632,7 +633,8 @@ def test_live_fixture_replay_has_downstream_persistence_tasks() -> None:
     ]
     assert len(persistence_tasks) == 1
     assert persistence_tasks[0]["initial_agent"] == "DatabaseAgent"
-    assert plan["data_contract"]
+    assert "data_contract" not in plan
+    assert _canonical_data_contract()["surfaces"]
     assert plan["pending_schema_migration"]["migration_id"] == "001_projects_tasks_indexes"
     assert any(task.get("surface_id") == "projects" for task in tasks.values())
     assert any(task.get("surface_id") == "tasks" for task in tasks.values())
@@ -731,7 +733,7 @@ def test_assembled_database_artifacts_align_with_repo_collections() -> None:
     intent = json.loads(file_map["data/contract.json"])
     migration = json.loads(file_map["data/migrations/001_projects_tasks_indexes.json"])
     intent_keys = {
-        (collection["module_id"], collection.get("entity_name") or collection["name"])
+        (collection["module_id"], collection["name"])
         for surface in intent["surfaces"]
         for collection in surface["collections"]
     }
@@ -757,8 +759,8 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
 
     load_result = await AppLoader.load(str(tmp_path))
     assert load_result.data_contract is not None
-    assert ("projects", "projects") in load_result.data_entities_by_key
-    assert ("tasks", "tasks") in load_result.data_entities_by_key
+    assert ("projects", "Project") in load_result.data_entities_by_key
+    assert ("tasks", "Task") in load_result.data_entities_by_key
 
     FakePersistenceContext.reset()
     persistence = FakePersistenceContext(app_id="app_downstream")

@@ -116,8 +116,8 @@ def _bundle_intent() -> dict[str, Any]:
                 "surface_kind": "module",
                 "collections": [
                     {
-                        "name": "projects",
-                        "scope": "app",
+                        "name": "projects", "entity": "Project",
+                        "scope": "app", "tenancy": "app_wide", "owner_field": None,
                         "ownership": {"surface_id": "projects", "surface_kind": "module"},
                         "fields": [
                             {"name": "project_id", "type": "string", "required": True},
@@ -148,8 +148,8 @@ def _bundle_intent() -> dict[str, Any]:
                 "surface_kind": "module",
                 "collections": [
                     {
-                        "name": "tasks",
-                        "scope": "app",
+                        "name": "tasks", "entity": "Task",
+                        "scope": "app", "tenancy": "app_wide", "owner_field": None,
                         "ownership": {"surface_id": "tasks", "surface_kind": "module"},
                         "fields": [
                             {"name": "task_id", "type": "string", "required": True},
@@ -221,8 +221,8 @@ async def test_e2e_app_load_result_entity_index_contains_both_surfaces(tmp_path:
 
     result = await AppLoader.load(str(tmp_path))
 
-    assert ("projects", "projects") in result.data_entities_by_key
-    assert ("tasks", "tasks") in result.data_entities_by_key
+    assert ("projects", "Project") in result.data_entities_by_key
+    assert ("tasks", "Task") in result.data_entities_by_key
 
 
 @pytest.mark.asyncio
@@ -230,8 +230,8 @@ async def test_e2e_entity_index_carries_collection_metadata(tmp_path: Path) -> N
     _write_bundle(tmp_path, _bundle_intent())
 
     result = await AppLoader.load(str(tmp_path))
-    projects_entry = result.data_entities_by_key[("projects", "projects")]
-    tasks_entry = result.data_entities_by_key[("tasks", "tasks")]
+    projects_entry = result.data_entities_by_key[("projects", "Project")]
+    tasks_entry = result.data_entities_by_key[("tasks", "Task")]
 
     assert len(projects_entry["indexes"]) == 2
     assert len(tasks_entry["indexes"]) == 2
@@ -400,8 +400,8 @@ async def test_e2e_full_load_then_apply_indexes(
 
     assert load_result.data_contract is not None, "data_contract must be populated"
     assert load_result.data_contract["version"] == "1"
-    assert ("projects", "projects") in load_result.data_entities_by_key
-    assert ("tasks", "tasks") in load_result.data_entities_by_key
+    assert ("projects", "Project") in load_result.data_entities_by_key
+    assert ("tasks", "Task") in load_result.data_entities_by_key
 
     # --- Phase 2: first application ---
     context, client = _make_context()

@@ -94,6 +94,7 @@ def _intent(indexes: list[dict[str, Any]] | None = None, *, collection_name: str
     collection: dict[str, Any] = {
         "name": collection_name,
         "scope": "app",
+        "entity": "Project", "tenancy": "app_wide", "owner_field": None,
         "ownership": {"surface_id": "projects", "surface_kind": "module"},
         "fields": [{"name": "app_id", "type": "string", "required": True}],
     }
@@ -130,6 +131,22 @@ async def test_apply_database_indexes_noops_when_intent_is_none() -> None:
 
     assert result.success is True
     assert result.verified == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_database_indexes_includes_shared_collections_with_declared_owner() -> None:
+    context, client = _context()
+    intent = _intent([{"name": "idx_app", "keys": [["app_id", 1]]}])
+    intent["shared_collections"] = intent["surfaces"][0]["collections"]
+    intent["surfaces"] = []
+
+    result = await apply_database_indexes(intent, persistence=context)
+
+    assert result.success is True
+    assert result.created == result.verified == 1
+    assert result.items[0].surface_id == "projects"
+    assert result.items[0].collection_name == "projects.projects"
+    assert _collection(client).create_index_calls[0][1]["name"] == "idx_app"
 
 
 @pytest.mark.asyncio
@@ -498,21 +515,21 @@ async def test_apply_database_indexes_fails_when_post_creation_verification_is_m
 
 
 @pytest.mark.asyncio
-async def test_apply_database_indexes_missing_module_id_fails_clearly() -> None:
+async def test_apply_database_indexes_missing_surface_id_fails_clearly() -> None:
     context, _ = _context()
     intent = _intent([{"name": "idx", "keys": [["field", 1]]}])
     intent["surfaces"][0]["surface_id"] = ""
     intent["surfaces"][0]["collections"][0]["ownership"] = {}
 
-    with pytest.raises(DatabaseIndexApplyError, match="module_id is required"):
+    with pytest.raises(DatabaseIndexApplyError, match="surface_id is required"):
         await apply_database_indexes(intent, persistence=context)
 
 
 @pytest.mark.asyncio
-async def test_apply_database_indexes_missing_entity_name_fails_clearly() -> None:
+async def test_apply_database_indexes_missing_collection_name_fails_clearly() -> None:
     context, _ = _context()
 
-    with pytest.raises(DatabaseIndexApplyError, match="entity_name is required"):
+    with pytest.raises(DatabaseIndexApplyError, match="name is required"):
         await apply_database_indexes(
             _intent([{"name": "idx", "keys": [["field", 1]]}], collection_name=""),
             persistence=context,

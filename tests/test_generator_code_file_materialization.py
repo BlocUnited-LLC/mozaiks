@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -758,6 +759,7 @@ def test_assembly_phase_merges_typed_service_and_frontend_outputs() -> None:
 
 
 def test_assembly_phase_merges_typed_database_model_and_service_foundation_outputs() -> None:
+    approved_contract = {"version": "1", "surfaces": []}
     merged = _merge_code_files(
         [
             {
@@ -767,7 +769,7 @@ def test_assembly_phase_merges_typed_database_model_and_service_foundation_outpu
                         "kind": "data_contract_json",
                         "purpose": "Data contract artifact.",
                         "entity_refs": ["project"],
-                        "content": "{\"collections\":[]}\n",
+                        "content": "{\"surfaces\":[]}\n",
                     }
                 ],
                 "code_files": [],
@@ -797,12 +799,13 @@ def test_assembly_phase_merges_typed_database_model_and_service_foundation_outpu
                 },
                 "code_files": [],
             },
-        ]
+        ],
+        data_contract=approved_contract,
     )
 
     file_map = {entry["filename"]: entry["content"] for entry in merged}
 
-    assert file_map["data/contract.json"] == "{\"collections\":[]}\n"
+    assert json.loads(file_map["data/contract.json"]) == approved_contract
     assert file_map["modules/projects/backend/schemas.py"] == "class ProjectRecord(TypedDict):\n    project_id: str\n"
     assert file_map["backend/config.py"] == "SETTINGS = {}\n"
 

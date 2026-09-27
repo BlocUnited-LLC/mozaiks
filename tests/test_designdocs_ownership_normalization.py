@@ -151,7 +151,7 @@ def test_mixed_auth_and_app_fields_split_to_only_app_module(persistence, caplog)
     assert not next(s for s in data["surfaces"] if s["surface_id"] == "auth")["collections"]
     assert next(s for s in context.get("design_surface_map")["surfaces"] if s["surface_id"] == "auth")["owner"] == "platform"
     assert store.save_data_contract.await_args.kwargs["data_contract"] == data
-    assert index_data_contract_by_entity(data) == {("reports", "users"): residual}
+    assert index_data_contract_by_entity(data) == {("reports", "users_app_data"): residual}
     indexed = _iter_indexed_collections(data)
     assert [(collection.module_id, collection.entity_name) for collection in indexed] == [("reports", "users")]
     assert indexed[0].indexes[0].keys == [("user_id", 1)]

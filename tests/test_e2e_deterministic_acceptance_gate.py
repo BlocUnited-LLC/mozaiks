@@ -224,9 +224,11 @@ def _canonical_fixture() -> dict[str, str]:
                         "surface_kind": "module",
                         "collections": [
                             {
-                                "module_id": "tasks",
                                 "name": "tasks",
-                                "entity_name": "tasks",
+                                "entity": "Task", "scope": "app",
+                                "tenancy": "per_user", "owner_field": "user_id",
+                                "ownership": {"surface_id": "tasks", "surface_kind": "module"},
+                                "fields": [{"name": "user_id", "type": "string", "required": True}],
                                 "indexes": [
                                     {
                                         "name": "task_created_at",

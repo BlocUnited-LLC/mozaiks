@@ -2116,6 +2116,8 @@ def _scan_planned_data_fields(
         for collection in surface.get("collections") or []
     }
     errors = []
+    if actual != planned:
+        errors.append("data/contract.json: must exactly preserve the approved DesignDocs data_contract.")
     for surface in planned.get("surfaces") or []:
         for collection in surface.get("collections") or []:
             key = (surface["surface_id"], collection["name"])

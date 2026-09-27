@@ -43,6 +43,9 @@ and additive migration application.
 Current truth:
 
 - `data_contract` is the canonical generated database planning object.
+- DesignDocs approves that object once. Task generation, repair, policy rendering,
+  and assembly consume the same approved context artifact; AppBuildPlan does not
+  carry another editable data contract.
 - `AppGenerator` writes that object to `data/contract.json` when it is
   present.
 - additive refinement plans may be staged under
@@ -205,7 +208,9 @@ Minimum shape:
         {
           "name": "projects",
           "scope": "app",
-          "scope_field": "app_id",
+          "tenancy": "per_workspace",
+          "owner_field": "workspace_id",
+          "entity": "Project",
           "ownership": {
             "surface_id": "projects",
             "surface_kind": "module"
@@ -213,6 +218,7 @@ Minimum shape:
           "fields": [
             {"name": "project_id", "type": "string", "required": true},
             {"name": "app_id", "type": "string", "required": true},
+            {"name": "workspace_id", "type": "string", "required": true},
             {"name": "status", "type": "string", "required": true}
           ],
           "indexes": [
@@ -236,8 +242,11 @@ Minimum shape:
 At minimum, each collection intent must declare:
 
 - `name`
-- `scope` (`app`, `user`, `tenant`, or `workspace`)
-- `scope_field` (the declared field receiving the trusted scope identity)
+- `scope` (`app`, `platform`, or `hosted`: the namespace owner)
+- `tenancy` (`per_user`, `per_workspace`, or `app_wide`: row ownership)
+- `owner_field` (a declared field receiving trusted `user_id` or `workspace_id`,
+  respectively; null for `app_wide`)
+- `entity` (an exact entry in the owning surface's `primary_entities`)
 - `ownership.surface_id`
 - `ownership.surface_kind`
 - `fields`
@@ -269,6 +278,14 @@ Instead, module-level collections should be declared inside
 That keeps one canonical database source of truth while still expressing module
 ownership clearly.
 
+The same collection contract applies to `shared_collections`. Each shared entry
+declares `ownership.surface_id` and `ownership.surface_kind`; its placement does
+not erase module ownership or row tenancy. Runtime metadata, read inventories,
+and policy compilation enumerate both locations through the same owner resolver.
+An owner/entity pair and an owner/collection-name pair must each be unique across
+the entire contract. An entry inside a surface cannot override that surface's
+owner or kind.
+
 Generated module files such as:
 
 - `backend/repo.py`
@@ -276,6 +293,27 @@ Generated module files such as:
 - `backend/schemas.py`
 
 should be derived from this artifact, not act as the schema source of truth.
+
+Only modules owning collections receive a generated `policy.py`. Entity mapping
+uses the declared `entity`; it never guesses singular/plural names or assumes the
+only collection is the right one. Runtime metadata indexes the declared entity;
+repository code resolves that entry's collection `name` before calling
+`ctx.persistence.collection(module_id, collection_name)`.
+
+Design surfaces declare `custom_reads` beside `owned_mutations` for actions such
+as dashboard summaries. Code supplies canonical entity list/get reads; custom
+reads remain declared design work implemented by ServiceAgent. Per-user and
+per-workspace canonical reads require login and owner filtering, without a role
+permission, and retain subscription gates from the approved feature mapping.
+Protected app-wide collections require explicit read access decisions. Page data
+bindings and subscription gate targets come from the same approved inventory;
+managed billing facade actions are excluded from subscription gate targets.
+
+The DesignDocs save boundary first removes contract-identified platform state.
+When identity data contains app fields with one determined app owner, its retained
+collection is explicitly per-user with `owner_field: user_id` and a derived
+`*_app_data` entity registered on that surface. Other missing ownership decisions
+are rejected with valid choices before any artifact is saved.
 
 ## Persistence Collections For Database Contracts
 
@@ -548,7 +586,7 @@ Layer responsibilities:
 - `service.py` owns orchestration, validation, and event emission after state is
   committed; it calls repo methods for data access.
 - `repo.py` owns persistence access through `ctx.persistence`.
-- `policy.py` is rendered deterministically from collection ownership, scope, and scope_field. Domain authorization stays in service.py.
+- `policy.py` is rendered deterministically from collection ownership, tenancy, and owner_field. Domain authorization stays in service.py.
 - `schemas.py` owns typed document shapes and pure normalization helpers.
 
 Runtime app loading behavior:
@@ -578,9 +616,13 @@ Compact neutral example:
       "surface_kind": "module",
       "collections": [
         {
-          "module_id": "projects",
           "name": "projects",
-          "entity_name": "projects",
+          "entity": "Project",
+          "scope": "app",
+          "tenancy": "per_user",
+          "owner_field": "owner_id",
+          "ownership": {"surface_id": "projects", "surface_kind": "module"},
+          "fields": [{"name": "owner_id", "type": "string", "required": true}],
           "indexes": [
             {
               "name": "project_owner_created_at",
@@ -706,13 +748,14 @@ This document defines the missing database layer that those docs assume.
 
 ## Deterministic Generated Module Policies
 
-Persistent generated modules declare collection ownership and an explicit
-`scope_field` in `data_contract`, including when using generated-scoped
-`ctx.persistence`. The field must appear in the collection's `fields` and its
-ownership must match the enclosing module surface. The scope maps exactly to
-`ctx.app_id`, `ctx.user_id`, `ctx.tenant_id`, or `ctx.workspace_id`; the runtime's
-app partition remains enforced independently. Missing metadata or identity fails
-closed; field names and ownership are never guessed.
+Persistent generated modules use the DesignDocs-approved collection `tenancy`,
+`owner_field`, and `entity` from `data_contract`. `per_user` maps to trusted
+`ctx.user_id`; `per_workspace` maps to trusted `ctx.workspace_id`; `app_wide`
+has no additional owner field. The runtime's app partition remains enforced
+independently. `scope` describes namespace ownership (`app`, `platform`, or
+`hosted`) and never determines tenancy. Missing metadata or scoped identity
+fails closed; field names and ownership are never guessed. AppBuildPlan has no
+second editable copy of this contract.
 
 Code renders `modules/{module_id}/backend/policy.py` before worker output
 acceptance. ServiceAgent owns its artifact path but emits no policy source.
@@ -722,14 +765,14 @@ entity_name=collection_name)` for insertion. Request fields cannot replace the
 scope identity. Multiple collections require an explicit `entity_name`.
 Business authorization and lifecycle checks remain in `service.py`.
 
-For `scope: app` with `scope_field: app_id`, queries omit `app_id` because
-`ctx.persistence` injects that mandatory partition and rejects extra `app_id`
-filters. App scope on a custom field still filters that field. The runtime-owned
-fields `app_id`, `user_id`, `tenant_id`, and `workspace_id` may only be paired
-with their matching scope, since persistence also stamps those identities on
-insert.
+Queries omit `app_id` because `ctx.persistence` injects that mandatory partition
+and rejects extra `app_id` filters. App-wide policies add no other row filter.
+Scoped policies overwrite request-supplied owner fields with trusted identity.
+The runtime-owned fields `user_id` and `workspace_id` can only serve as the owner
+field for their corresponding tenancy; `app_id` and `tenant_id` are not valid
+per-user or per-workspace owner fields.
 
-A refinement that changes collection scope, ownership, or `scope_field` must
+A refinement that changes collection tenancy, ownership, or `owner_field` must
 also include a `business_services` task owning that module's `backend/policy.py`.
 Changing only the persistence contract leaves the old policy inconsistent and
 assembly rejects it. Deterministic rendering does not expand task ownership.

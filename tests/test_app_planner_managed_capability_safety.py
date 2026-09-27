@@ -468,11 +468,10 @@ class TestAppBuildPlanManagedCapabilityNormalization:
         ]
 
     def test_duplicate_persistence_contract_tasks_are_merged(self):
-        ctx = _Context()
+        ctx = ContextVariablesBridge({"data_contract": {"version": "1", "surfaces": []}})
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "data_contract": {"version": "1", "surfaces": []},
                 "build_tasks": [
                     {
                         "task_id": "task_projects_persistence",
@@ -517,7 +516,7 @@ class TestAppBuildPlanManagedCapabilityNormalization:
             },
             context_variables=ctx,
         )
-        tasks = ctx.data["app_build_plan"]["build_tasks"]
+        tasks = ctx.snapshot()["app_build_plan"]["build_tasks"]
         persistence_tasks = [task for task in tasks if task["task_type"] == "persistence_contract"]
         module_task = next(task for task in tasks if task["task_id"] == "task_billing_module")
 

@@ -32,7 +32,7 @@ def _context(*, managed: bool):
 
 def _collection(surface_id: str, name: str) -> dict:
     return {
-        "name": name, "scope": "app",
+        "name": name, "scope": "app", "entity": name, "tenancy": "app_wide", "owner_field": None,
         "ownership": {"surface_id": surface_id, "surface_kind": "module"},
         "fields": [{
             "name": "status", "type": "string", "required": True,
@@ -64,7 +64,7 @@ def _add_surface(
     })
     bundle["data_contract"]["surfaces"].append({
         "surface_id": surface_id, "surface_kind": "module",
-        "collections": [_collection(surface_id, collection)] if collection else [],
+        "collections": [{**_collection(surface_id, collection), "entity": entities[0] if entities else collection}] if collection else [],
     })
 
 

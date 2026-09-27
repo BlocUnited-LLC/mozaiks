@@ -362,6 +362,7 @@ def _data_contract():
                     {
                         "name": "users",
                         "scope": "app",
+                        "entity": "User", "tenancy": "per_user", "owner_field": "user_id",
                         "ownership": {"surface_id": "users", "surface_kind": "module"},
                         "fields": [
                             {"name": "app_id", "type": "string", "required": True},
@@ -1244,7 +1245,8 @@ def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path:
     assert "config/asset_manifest.json" in result
 
 
-def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("shared", [False, True])
+def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path: Path, shared: bool) -> None:
     from mozaiksai.core.workflow.agents.factory import _workflow_tool_invocation
     from mozaiksai.core.workflow.context.authority import build_context_authority_policy
     from mozaiksai.core.workflow.context.schema import load_context_variables_config
@@ -1255,7 +1257,11 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
         (root / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"),
     ))
     policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=config.definitions)
-    context = ContextVariablesBridge(factory_context({"data_contract": _data_contract()}), authority_policy=policy)
+    approved = _data_contract()
+    if shared:
+        approved["shared_collections"] = approved["surfaces"][0]["collections"]
+        approved["surfaces"] = []
+    context = ContextVariablesBridge(factory_context({"data_contract": approved}), authority_policy=policy)
     context._bind_run(("AppGenerator", "test-app", "test-chat"), policy)
     with _workflow_tool_invocation(context):
         result = save_app_schema_module.save_app_schema(
@@ -1265,11 +1271,25 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
         )
 
     data_contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
-    assert data_contract["surfaces"][0]["surface_id"] == "users"
+    assert data_contract == approved
     assert context.get("data_contract")["policies"]["default_scope_field"] == "app_id"
     assert context.get("app_data_contract") is None
     assert context.get("app_schema_ready") is True
     assert "data/contract.json" in result
+
+
+def test_save_app_schema_rejects_shared_collection_with_undeclared_owner_field(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    approved = _data_contract()
+    approved["shared_collections"] = approved["surfaces"][0]["collections"]
+    approved["surfaces"] = []
+    approved["shared_collections"][0]["owner_field"] = "undeclared_owner"
+    context = ContextVariablesBridge(factory_context({"data_contract": approved}))
+    with pytest.raises(ValueError, match="declared fields"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(), pages=[_base_page()], context_variables=context,
+        )
+    assert not (tmp_path / "data" / "contract.json").exists()
 
 
 def test_save_app_schema_rejects_invalid_asset_manifest(monkeypatch, tmp_path: Path) -> None:

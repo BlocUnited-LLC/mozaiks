@@ -61,12 +61,11 @@ def _minimal_contract(**kw) -> dict:
     return {
         "version": kw.get("version", "1.0.0"),
         "surfaces": kw.get("surfaces", []),
-        "entities": kw.get("entities", None),
     }
 
 
 def _module_surface(
-    surface_id: str = "s1",
+    surface_id: str = "my_module",
     collections: list | None = None,
 ) -> dict:
     return {
@@ -77,7 +76,10 @@ def _module_surface(
 
 
 def _collection(name: str = "records", module_id: str = "my_module") -> dict:
-    return {"name": name, "module_id": module_id}
+    return {
+        "name": name, "module_id": module_id, "entity": name,
+        "scope": "app", "tenancy": "app_wide", "owner_field": None, "fields": [],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -229,64 +231,56 @@ class TestIndexDataContractByEntity:
     def test_returns_empty_for_none_contract(self):
         assert index_data_contract_by_entity(None) == {}
 
-    def test_indexes_entities_by_module_entity(self):
+    def test_indexes_declared_entity_independently_of_collection_name(self):
         contract = {
             "version": "1.0",
-            "surfaces": [],
-            "entities": [
-                {"module_id": "wallet", "entity_name": "transaction", "schema": {}}
-            ],
+            "surfaces": [_module_surface("wallet", [{**_collection("transactions", "wallet"), "entity": "Transaction"}])],
         }
         index = index_data_contract_by_entity(contract)
-        assert ("wallet", "transaction") in index
+        assert index[("wallet", "Transaction")]["name"] == "transactions"
 
     def test_raises_for_entity_missing_module_id(self):
         contract = {
             "version": "1.0",
-            "surfaces": [],
-            "entities": [{"entity_name": "tx"}],
+            "surfaces": [_module_surface("", [{"entity": "Transaction"}])],
         }
-        with pytest.raises(DataContractLoadError, match="module_id"):
+        with pytest.raises(DataContractLoadError, match="surface_id"):
             index_data_contract_by_entity(contract)
 
-    def test_raises_for_entity_missing_entity_name(self):
+    def test_raises_for_missing_declared_entity(self):
         contract = {
             "version": "1.0",
-            "surfaces": [],
-            "entities": [{"module_id": "wallet"}],
+            "surfaces": [_module_surface("wallet", [{"name": "transactions"}])],
         }
-        with pytest.raises(DataContractLoadError, match="entity_name"):
+        with pytest.raises(DataContractLoadError, match="entity"):
             index_data_contract_by_entity(contract)
 
     def test_indexes_surface_module_collections(self):
         contract = _minimal_contract()
         contract["surfaces"] = [
-            _module_surface(surface_id="mod_surface", collections=[_collection("users", "auth")])
+            _module_surface(surface_id="auth", collections=[_collection("users", "auth")])
         ]
         index = index_data_contract_by_entity(contract)
         assert ("auth", "users") in index
 
-    def test_skips_non_module_surface_collection_without_explicit_module_id(self):
-        # surface_kind != "module" and no module_id on collection → skipped
+    def test_indexes_non_module_surface_collection_by_declared_entity(self):
         contract = {
             "version": "1.0",
             "surfaces": [
                 {
                     "surface_id": "ext",
                     "surface_kind": "external",
-                    "collections": [{"name": "logs"}],  # no module_id
+                    "collections": [{"name": "logs", "entity": "Log"}],
                 }
             ],
         }
         index = index_data_contract_by_entity(contract)
-        # should not raise; collection skipped or indexed without module_id
-        assert isinstance(index, dict)
+        assert index[("ext", "Log")]["name"] == "logs"
 
-    def test_entity_name_fallback_to_name_field(self):
+    def test_duplicate_entity_mapping_fails(self):
         contract = {
             "version": "1.0",
-            "surfaces": [],
-            "entities": [{"module_id": "mod", "name": "record"}],
+            "surfaces": [_module_surface("mod", [_collection("records", "mod"), _collection("records", "mod")])],
         }
-        index = index_data_contract_by_entity(contract)
-        assert ("mod", "record") in index
+        with pytest.raises(DataContractLoadError, match="duplicates"):
+            index_data_contract_by_entity(contract)

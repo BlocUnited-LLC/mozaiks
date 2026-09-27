@@ -204,7 +204,7 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
                             "sections": [{"id": "heading", "primitive": "PageHeader", "config": {"title": "Tasks"}}],
                         }],
                         "custom_route_bundle": None, "theme_config_patch": None, "shell_config": None,
-                        "asset_manifest": None, "data_contract": None,
+                        "asset_manifest": None,
                     }))
                 files = [{"filename": path, "content": "accepted"} for path in task["owned_paths"]]
                 if task_id == "services" and task_calls[task_id] == 1:

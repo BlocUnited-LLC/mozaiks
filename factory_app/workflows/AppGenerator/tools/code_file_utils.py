@@ -19,6 +19,9 @@ import yaml
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
     build_app_backend_admin_code_files,
 )
+from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
+    apply_entitlement_gates,
+)
 from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import (
     build_refinement_harness_code_files,
 )
@@ -39,10 +42,17 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 )
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_deleted_file_paths_from_payload,
+    materialize_data_contract,
     safe_relpath,
 )
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
+)
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_task_module_policies
-from mozaiksai.core.workflow.generator_support.module_read_actions import close_module_read_actions
+from mozaiksai.core.workflow.generator_support.module_read_actions import (
+    close_module_read_actions,
+    materialize_module_read_implementations,
+)
 from mozaiksai.core.workflow.generator_support.page_plan_utils import compile_authored_page_files
 
 
@@ -121,10 +131,13 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
     try:
         if not isinstance(payload, dict):
             raise ValueError("Generated code persistence requires validated structured_output.")
+        subscription_contract = resolve_subscription_contract(context_variables)
         payload = close_module_read_actions(
             payload,
             app_build_plan=detach(context_variables.get("app_build_plan")),
             data_contract=detach(context_variables.get("data_contract")),
+            design_surface_map=detach(context_variables.get("design_surface_map")),
+            subscription_contract=subscription_contract,
         )
         incoming = extract_code_file_map_from_payload(payload)
         incoming = compile_authored_page_files(incoming, payload=payload, context=context_variables)
@@ -133,13 +146,27 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
         repair = detach(context_variables.get("bundle_repair_result")) or {}
         active = repair.get("active") or {}
         owned_paths = active.get("allowed_paths") if active else task.get("owned_paths")
-        plan = detach(context_variables.get("app_build_plan")) or {}
-        contract = detach(context_variables.get("data_contract")) or plan.get("data_contract")
+        contract = detach(context_variables.get("data_contract"))
+        incoming = materialize_data_contract(
+            incoming, data_contract=contract, owned_paths=owned_paths or [],
+        )
         policies = materialize_task_module_policies(
             incoming, task={"owned_paths": owned_paths or []}, data_contract=contract,
         )
         admitted = admitted_app_file_map(context_variables)
+        incoming.update(materialize_module_read_implementations(
+            {**admitted, **incoming}, app_build_plan=detach(context_variables.get("app_build_plan")),
+            data_contract=contract, owned_paths=owned_paths or [],
+            subscription_contract=subscription_contract,
+        ))
         incoming.update({path: content for path, content in policies.items() if admitted.get(path) != content})
+        incoming = {
+            entry["filename"]: entry["content"]
+            for entry in apply_entitlement_gates(
+                [{"filename": path, "content": content} for path, content in incoming.items()],
+                context_variables=context_variables, require_all_modules=False,
+            )
+        }
     except (TypeError, ValueError) as exc:
         if mark_repair_rejected(context_variables, str(exc)):
             return {"status": "rejected", "error": str(exc), "saved_files": [], "deleted_files": []}

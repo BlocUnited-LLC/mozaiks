@@ -2,7 +2,43 @@
   "version": "1",
   "app_id": "research-ops",
   "surfaces": [
-    { "surface_id": "research", "surface_kind": "module", "collections": [{ "module_id": "research", "name": "summaries", "entity_name": "summaries" }] },
-    { "surface_id": "incidents", "surface_kind": "module", "collections": [{ "module_id": "incidents", "name": "incidents", "entity_name": "incidents" }] }
+    {
+      "surface_id": "research",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "module_id": "research",
+          "name": "summaries",
+          "entity": "Summary",
+          "scope": "app",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [],
+          "ownership": {
+            "surface_id": "research",
+            "surface_kind": "module"
+          }
+        }
+      ]
+    },
+    {
+      "surface_id": "incidents",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "module_id": "incidents",
+          "name": "incidents",
+          "entity": "Incident",
+          "scope": "app",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [],
+          "ownership": {
+            "surface_id": "incidents",
+            "surface_kind": "module"
+          }
+        }
+      ]
+    }
   ]
 }

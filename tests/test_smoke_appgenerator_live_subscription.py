@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
+import yaml
 
 from scripts.smoke_appgenerator_live_subscription import (
     WORKFLOWS_ROOT,
@@ -43,17 +44,17 @@ def test_subscription_output_validator_rejects_provider_specific_drift() -> None
     assert any("payment_provider" in error for error in errors)
 
 
-def test_module_contract_validator_requires_exact_entitlement_gate() -> None:
+def test_module_contract_validator_compiles_the_exact_approved_entitlement_gate() -> None:
     output = deterministic_module_contract_output()
-    output["code_files"][0]["content"] = output["code_files"][0]["content"].replace(
-        "entitlement_gate: reports.generate",
-        "entitlement_gate: reports.pro",
-    )
+    manifest = yaml.safe_load(output["code_files"][0]["content"])
+    manifest["actions"][1]["entitlement_gate"] = "reports.pro"
+    output["code_files"][0]["content"] = yaml.safe_dump(manifest)
 
-    _content, errors = validate_module_contract_output(output)
+    content, errors = validate_module_contract_output(output)
 
-    assert errors
-    assert any("reports.generate" in error for error in errors)
+    assert not errors
+    assert yaml.safe_load(content)["actions"][1]["entitlement_gate"] == "reports.generate"
+    assert "entitlement_gate" not in output["module_contract"]["module_yaml"]["actions"][1]
 
 
 def test_module_contract_validator_rejects_structured_output_schema_drift() -> None:
@@ -156,6 +157,8 @@ def test_config_middleware_schema_defaults_omitted_module_optional_fields() -> N
     }
 
     assert "user_data_scope" not in module
+    for action in actions:
+        action.pop("api_surface", None)
     assert all("api_surface" not in action for action in actions)
 
     validated = registry["ConfigMiddlewareAgent"].model_validate(output).model_dump(mode="json")
@@ -169,8 +172,8 @@ def test_config_middleware_schema_defaults_omitted_module_optional_fields() -> N
 def test_module_contract_validator_rejects_action_field_indentation_drift() -> None:
     output = deterministic_module_contract_output()
     output["code_files"][0]["content"] = output["code_files"][0]["content"].replace(
-        "    entitlement_gate: reports.generate",
-        "entitlement_gate: reports.generate",
+        "  handler_method: generate_report",
+        "handler_method: generate_report",
     )
 
     _content, errors = validate_module_contract_output(output)
@@ -202,7 +205,7 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
 
     generated = acceptance["context"]["generated_files"]
     report_collection = json.loads(generated["data/contract.json"])["surfaces"][0]["collections"][0]
-    assert (report_collection["scope"], report_collection["scope_field"]) == ("app", "app_id")
+    assert (report_collection["scope"], report_collection["tenancy"], report_collection["owner_field"]) == ("app", "app_wide", None)
     policy = generated["modules/reports/backend/policy.py"]
     assert "Ownership policy compiled from data/contract.json" in policy
     assert "ReportsPolicy" not in policy

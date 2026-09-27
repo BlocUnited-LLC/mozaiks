@@ -20,7 +20,10 @@
           {
             "primitive": "DataTable",
             "config_hint": "{\"columns\": [\"id\", \"title\", \"created_at\"], \"selection\": \"single\", \"search\": true}",
-            "data_source": {"module_id": "reports", "action_id": "view_report"},
+            "data_source": {
+              "module_id": "reports",
+              "action_id": "view_report"
+            },
             "section_id_hint": "report-table",
             "title_hint": "All Reports"
           },
@@ -106,8 +109,8 @@
         ],
         "primary_pages": [],
         "operations": [
-          "assign_subscription",
-          "get_entitlements"
+          "activate_subscription",
+          "deactivate_subscription"
         ],
         "required_integrations": [],
         "agentic_extensions": []
@@ -294,37 +297,6 @@
         ]
       }
     ],
-    "data_contract": {
-      "version": "1",
-      "surfaces": [
-        {
-          "surface_id": "reports",
-          "surface_kind": "module",
-          "collections": [
-            {
-              "module_id": "reports",
-              "name": "reports",
-              "entity_name": "reports",
-              "scope": "app",
-              "scope_field": "app_id",
-              "ownership": {"surface_id": "reports", "surface_kind": "module"},
-              "fields": [{"name": "app_id", "type": "string", "required": true}],
-              "indexes": [
-                {
-                  "name": "report_created_at",
-                  "keys": [
-                    {
-                      "field": "created_at",
-                      "order": -1
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    },
     "pending_schema_migration": {
       "migration_id": "001_reports_indexes",
       "version": "1",
@@ -361,5 +333,47 @@
       "task_entitlement_dispatch_services"
     ],
     "carry_forward_decisions": []
+  },
+  "context": {
+    "data_contract": {
+      "version": "1",
+      "surfaces": [
+        {
+          "surface_id": "reports",
+          "surface_kind": "module",
+          "collections": [
+            {
+              "name": "reports",
+              "scope": "app",
+              "ownership": {
+                "surface_id": "reports",
+                "surface_kind": "module"
+              },
+              "fields": [
+                {
+                  "name": "app_id",
+                  "type": "string",
+                  "required": true
+                }
+              ],
+              "indexes": [
+                {
+                  "name": "report_created_at",
+                  "keys": [
+                    {
+                      "field": "created_at",
+                      "order": -1
+                    }
+                  ]
+                }
+              ],
+              "entity": "Report",
+              "tenancy": "app_wide",
+              "owner_field": null
+            }
+          ]
+        }
+      ]
+    }
   }
 }

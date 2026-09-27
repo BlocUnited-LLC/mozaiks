@@ -438,7 +438,8 @@ def test_appgenerator_declares_subscription_config_task_contract() -> None:
     assert "add_on_products" in agents_text
     assert "depleted_balance" in agents_text
     assert "module_contract_updates" in agents_text
-    assert "set that action's `entitlement_gate` to the exact" in agents_text
+    assert "Omit `entitlement_gate`; deterministic code applies approved subscription decisions." in agents_text
+    assert "entitlement_gate" not in structured_outputs["models"]["ModuleAction"]["fields"]
     assert "Treat the action list in `current_build_task.initial_message` as a closed contract" in agents_text
     assert "Use `generate_report`, not `backend.handler:generate_report`" in agents_text
     assert "Do not invent events from action verbs" in agents_text

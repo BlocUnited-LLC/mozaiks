@@ -19,9 +19,8 @@ AppGenerator chat:
 The contract does not always survive into this workflow's state, which is
 precisely what `subscription_contract_artifact` is declared for -- "used as a
 fallback when the current sequence did not carry subscription_contract in
-state". The tools honour that: `assemble_app_tasks.py` and
-`materialize_app_config_contracts.py` both iterate
-`("subscription_contract", "subscription_contract_artifact")`.
+state". Assembly, config materialization, planning, and repairs all use the
+same canonical subscription resolver for that precedence.
 
 The planning rules did not. They named only `subscription_contract`, and one
 said "false **or absent** -> do not plan the task". With state null, the agent
@@ -98,15 +97,30 @@ def test_the_provider_and_task_are_tied_together(appgen_prompts: str) -> None:
 
 
 def test_the_tools_still_read_both_keys() -> None:
-    """Guard the dependency: the prompt now points at behaviour the tools implement."""
-    for rel in (
-        "tools/assemble_app_tasks.py",
-        "tools/materialize_app_config_contracts.py",
-    ):
-        source = (APPGEN / rel).read_text(encoding="utf-8")
-        assert '"subscription_contract", "subscription_contract_artifact"' in source, (
-            f"{rel} no longer reads both keys; the prompt guidance added here assumes it does"
-        )
+    """Every consumer shares artifact fallback and explicit live-decision precedence."""
+    from factory_app.workflows.AppGenerator.tools import (
+        app_plan_review,
+        assemble_app_tasks,
+        code_file_utils,
+        materialize_app_config_contracts,
+        module_entitlement_gates,
+    )
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+    from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+        resolve_subscription_contract,
+    )
+
+    approved = {"contract_required": True, "module_contract_updates": []}
+    context = ContextVariablesBridge({
+        "subscription_contract": None,
+        "subscription_contract_artifact": {"metadata": {"summary_payload": approved}},
+    })
+    for consumer in (app_plan_review, assemble_app_tasks, code_file_utils,
+                     materialize_app_config_contracts, module_entitlement_gates):
+        assert consumer.resolve_subscription_contract is resolve_subscription_contract
+        assert consumer.resolve_subscription_contract(context) == approved
+    context.set("subscription_contract", {"contract_required": False})
+    assert resolve_subscription_contract(context) == {"contract_required": False}
 
 
 def test_the_fallback_is_declared_for_exactly_this_case() -> None:

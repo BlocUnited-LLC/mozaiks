@@ -17,16 +17,27 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
 )
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import ContextAuthorityPolicy
+from mozaiksai.core.workflow.context.frozen import detach
 
 from .dependency_graph import deterministic_topological_order
 from .generator_support.code_files import (
     _MODULE_CONTRACT_OUTPUT_PATHS,
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
+    materialize_data_contract,
     safe_relpath,
 )
+from .generator_support.module_action_inventory import all_module_actions
+from .generator_support.module_entitlement_gates import (
+    approved_subscription_gates,
+    compile_module_entitlement_gates,
+    resolve_subscription_contract,
+)
 from .generator_support.module_policy import materialize_task_module_policies
-from .generator_support.module_read_actions import close_module_read_actions
+from .generator_support.module_read_actions import (
+    close_module_read_actions,
+    materialize_module_read_implementations,
+)
 from .generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
@@ -1067,23 +1078,58 @@ async def _run_one_task(
                 # AG2 task attempts have independent streams; preserve the candidate for repair.
                 candidate_json = json.dumps(output, separators=(",", ":"), default=str)
                 _reject_task_output_identity_drift(task, output)
+                subscription_contract = resolve_subscription_contract(task_context)
                 output = cast(dict[str, Any], close_module_read_actions(
                     output, app_build_plan=task_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"),
+                    design_surface_map=task_context.get("design_surface_map"),
+                    subscription_contract=subscription_contract,
                 ))
                 canonical_code_files = extract_code_file_entries_from_payload(
                     output, build_timestamp=base_context.get("build_timestamp"),
                 )
                 canonical_file_map = {entry["filename"]: entry["content"] for entry in canonical_code_files}
+                canonical_file_map = materialize_data_contract(
+                    canonical_file_map, data_contract=detach(task_context.get("data_contract")),
+                    owned_paths=task.get("owned_paths") or [],
+                )
                 canonical_file_map = compile_authored_page_files(
                     canonical_file_map, payload=output, context=task_context,
                 )
                 policies = materialize_task_module_policies(
                     canonical_file_map, task=task,
-                    data_contract=task_context.get("data_contract")
-                    or (task_context.get("app_build_plan") or {}).get("data_contract"),
+                    data_contract=task_context.get("data_contract"),
                 )
                 canonical_file_map.update(policies)
+                read_sources = dict(task_context.get("generated_files") or {})
+                for dependency in (task_context.get("dependency_task_outputs") or {}).values():
+                    read_sources.update(extract_code_file_map_from_payload(dependency))
+                read_sources.update(canonical_file_map)
+                canonical_file_map.update(materialize_module_read_implementations(
+                    read_sources, app_build_plan=task_context.get("app_build_plan"),
+                    data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
+                    subscription_contract=subscription_contract,
+                ))
+                canonical_file_map = compile_module_entitlement_gates(
+                    canonical_file_map,
+                    gates_by_module=approved_subscription_gates(subscription_contract),
+                    approved_actions=all_module_actions(task_context),
+                    existing_files=task_context.get("generated_files") or {},
+                )
+                module_contract = output.get("module_contract")
+                if isinstance(module_contract, dict) and isinstance(module_contract.get("module_yaml"), dict):
+                    manifest_path = f"modules/{module_contract.get('module_id')}/module.yaml"
+                    if manifest_path in canonical_file_map:
+                        compiled_actions = {
+                            action["id"]: action
+                            for action in yaml.safe_load(canonical_file_map[manifest_path]).get("actions") or []
+                        }
+                        for action in module_contract["module_yaml"].get("actions") or []:
+                            gate = compiled_actions.get(action.get("id"), {}).get("entitlement_gate")
+                            if gate is None:
+                                action.pop("entitlement_gate", None)
+                            else:
+                                action["entitlement_gate"] = gate
                 canonical_code_files = [
                     {"filename": path, "content": content}
                     for path, content in sorted(canonical_file_map.items())

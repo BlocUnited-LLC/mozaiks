@@ -24,6 +24,7 @@ from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistr
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
 from mozaiksai.core.validation import GeneratedAppValidationRequest, scan_functional_generated_app
 from mozaiksai.core.validation.generated_app import validate_generated_app_bundle
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
 )
@@ -38,23 +39,6 @@ from tests.page_plan_fixtures import _page_from_plan
 WORKSPACE = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = WORKSPACE / "tests" / "fixtures" / "appplan_saas_entitlement_dispatch_output.json"
 WORKFLOWS_ROOT = WORKSPACE / "factory_app" / "workflows"
-
-
-class _Context:
-    def __init__(self, initial: dict[str, Any] | None = None) -> None:
-        self.data: dict[str, Any] = factory_context(initial)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.data.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self.data[key] = value
-
-    def __getitem__(self, key: str) -> Any:
-        return self.data[key]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self.data[key] = value
 
 
 class _Collection:
@@ -194,9 +178,8 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                                         {
                                             "module_id": "reports",
                                             "name": "reports",
-                                            "entity_name": "reports",
-                                            "scope": "app",
-                                            "scope_field": "app_id",
+                                            "entity": "Report", "scope": "app",
+                                            "tenancy": "app_wide", "owner_field": None,
                                             "ownership": {"surface_id": "reports", "surface_kind": "module"},
                                             "fields": [{"name": "app_id", "type": "string", "required": True}],
                                             "indexes": [
@@ -291,6 +274,20 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "  version: 1.0.0\n"
                         "  handler: backend.handler:ReportsModule\n"
                         "actions:\n"
+                        "  - id: list_reports\n"
+                        "    description: List reports visible to signed-in users.\n"
+                        "    handler_method: list_reports\n"
+                        "    permissions: []\n"
+                        "    api_surface: null\n"
+                        "    input_schema: {type: object, properties: {}}\n"
+                        "    output_schema: {type: object}\n"
+                        "  - id: get_reports\n"
+                        "    description: Read one report by its id.\n"
+                        "    handler_method: get_reports\n"
+                        "    permissions: []\n"
+                        "    api_surface: null\n"
+                        "    input_schema: {type: object, properties: {report_id: {type: string}}, required: [report_id]}\n"
+                        "    output_schema: {type: object}\n"
                         "  - id: view_report\n"
                         "    description: View reports.\n"
                         "    handler_method: view_report\n"
@@ -302,7 +299,6 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "  - id: export_report\n"
                         "    description: Export a report.\n"
                         "    handler_method: export_report\n"
-                        "    entitlement_gate: reports.export\n"
                         "    input_schema:\n"
                         "      type: object\n"
                         "      properties: {}\n"
@@ -366,6 +362,12 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "    def __init__(self):\n"
                         "        self.service = ReportsService()\n"
                         "\n"
+                        "    async def list_reports(self, ctx, **params):\n"
+                        "        return await self.service.list_reports(ctx, **params)\n"
+                        "\n"
+                        "    async def get_reports(self, ctx, **params):\n"
+                        "        return await self.service.get_reports(ctx, **params)\n"
+                        "\n"
                         "    async def view_report(self, ctx, **params):\n"
                         "        return await self.service.view_report(ctx, **params)\n"
                         "\n"
@@ -380,6 +382,14 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "\n"
                         "\n"
                         "class ReportsService:\n"
+                        "    async def list_reports(self, ctx, **params):\n"
+                        "        items = await ReportsRepo(ctx).list_reports()\n"
+                        "        return {\"items\": items, \"total\": len(items)}\n"
+                        "\n"
+                        "    async def get_reports(self, ctx, **params):\n"
+                        "        items = await ReportsRepo(ctx).list_reports()\n"
+                        "        return {\"item\": next((item for item in items if item[\"id\"] == params[\"report_id\"]), None)}\n"
+                        "\n"
                         "    async def view_report(self, ctx, **params):\n"
                         "        return {\"reports\": await ReportsRepo(ctx).list_reports()}\n"
                         "\n"
@@ -564,21 +574,39 @@ def _assignment_docs(app_id: str) -> list[dict[str, Any]]:
     ]
 
 
-async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], Path, Any, _Context, _Collection]:
-    plan = _load_fixture_plan()
-    ctx = _Context(
-        {
-            "app_id": "generated-saas-plan",
-            "app_name": "Generated SaaS Plan",
-            "app_slug": "generated-saas-plan",
-            "landing_spot": "/reports",
-            "chat_id": "generated-saas-plan-chat",
-            "build_task_model": "AppBuildTask",
-            "app_validation_strategy_used": "skip",
-            "app_validation_status": "skipped",
-        }
-    )
+def _approved_context_values() -> dict[str, Any]:
+    persistence_fixture = _task_output(task_id="persistence", task_type="persistence_contract", task={})
+    subscription_fixture = _task_output(task_id="subscription", task_type="subscription_config", task={})
+    return {
+        "data_contract": json.loads(persistence_fixture["code_files"][0]["content"]),
+        "design_surface_map": {"surfaces": [{
+            "surface_id": "reports", "surface_kind": "module", "owner": "app",
+            "primary_entities": ["Report"], "owned_mutations": [],
+            "custom_reads": ["view_report", "export_report"],
+        }]},
+        "subscription_contract": {
+            "contract_required": True,
+            "subscription_config_file": yaml.safe_load(subscription_fixture["code_files"][0]["content"]),
+            "module_contract_updates": [{
+                "module_id": "reports", "action_id": "export_report", "entitlement_gate": "reports.export",
+            }],
+        },
+    }
 
+
+async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], Path, Any, ContextVariablesBridge, _Collection]:
+    plan = _load_fixture_plan()
+    ctx = ContextVariablesBridge(factory_context({
+        **_approved_context_values(),
+        "app_id": "generated-saas-plan",
+        "app_name": "Generated SaaS Plan",
+        "app_slug": "generated-saas-plan",
+        "landing_spot": "/reports",
+        "chat_id": "generated-saas-plan-chat",
+        "build_task_model": "AppBuildTask",
+        "app_validation_strategy_used": "skip",
+        "app_validation_status": "skipped",
+    }))
     app_build_plan(AppBuildPlan=plan, context_variables=ctx)
     assert ctx.get("app_plan_ready") is True
     assert len(ctx.get("app_task_batch_items") or []) == len(plan["build_tasks"])
@@ -595,6 +623,7 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
     async def checkpoint(updates: dict[str, Any]) -> None:
         checkpoints.append(deepcopy(updates))
 
+    replay_context = ctx.snapshot()
     try:
         await execute_task_batches_for_trigger(
             workflow_name="AppGenerator",
@@ -607,7 +636,7 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
                 "ServiceAgent": object(),
                 "AppSchemaAgent": object(),
             },
-            context_variables=ctx.data,
+            context_variables=replay_context,
             chat_id=ctx.get("chat_id"),
             app_id=ctx.get("app_id"),
             user_id="user-1",
@@ -617,6 +646,8 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
         )
     finally:
         ag2_task_batch_runner.AG2TaskBatchRunner.run = original_run
+    for key, value in replay_context.items():
+        ctx.set(key, value)
 
     assert checkpoints[-1]["app_task_batch_status"] == "completed"
     assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"] == {}
@@ -627,7 +658,7 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
     assembled = await assemble_app_tasks(context_variables=ctx)
     files = _file_map(assembled)
     scaffold = await save_auth_scaffold(
-        context_variables=ctx.data,
+        context_variables=ctx,
     )
     files.update(_file_map(scaffold))
 

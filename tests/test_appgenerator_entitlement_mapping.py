@@ -6,10 +6,20 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assembly
+from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
+    apply_entitlement_gates,
+)
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.generator_support.module_action_inventory import all_module_actions
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    approved_subscription_gates,
+    compile_module_entitlement_gates,
+    resolve_subscription_contract,
+)
 
 MODULE_PATH = "modules/task_management/module.yaml"
 GATES = {
@@ -48,7 +58,15 @@ def _context(source="subscription_contract"):
         source: contract,
         "design_surface_map": {"surfaces": [{
             "surface_id": "task_management", "surface_kind": "module", "owner": "app",
-            "owned_mutations": [*GATES, "health"],
+            "primary_entities": ["Task"], "owned_mutations": ["create_task", "edit_task"],
+            "custom_reads": ["view_dashboard", "health"],
+        }]},
+        "data_contract": {"version": "1", "surfaces": [{
+            "surface_id": "task_management", "surface_kind": "module", "collections": [{
+                "name": "tasks", "entity": "Task", "tenancy": "per_user", "owner_field": "owner_id",
+                "scope": "app", "ownership": {"surface_id": "task_management", "surface_kind": "module"},
+                "fields": [{"name": "owner_id", "type": "string", "required": True}],
+            }],
         }]},
     })
 
@@ -124,8 +142,8 @@ def test_contract_overrides_are_idempotent_and_do_not_mutate_frozen_context():
     before = context.snapshot()
     original = _files("wrong.model.gate")
     files = deepcopy(original)
-    result = assembly._apply_entitlement_gates(files, context_variables=context)
-    assert assembly._apply_entitlement_gates(result, context_variables=context) == result
+    result = apply_entitlement_gates(files, context_variables=context)
+    assert apply_entitlement_gates(result, context_variables=context) == result
     assert files == original
     assert context.snapshot() == before
 
@@ -135,7 +153,7 @@ def test_approved_surface_id_overrides_writer_module_identity():
     data = yaml.safe_load(files[0]["content"])
     data["module"]["id"] = "tasks"
     files[0]["content"] = yaml.safe_dump(data)
-    result = assembly._apply_entitlement_gates(files, context_variables=_context())
+    result = apply_entitlement_gates(files, context_variables=_context())
     assert yaml.safe_load(result[0]["content"])["module"]["id"] == "task_management"
     assert {action: _actions(result)[action]["entitlement_gate"] for action in GATES} == GATES
 
@@ -157,7 +175,7 @@ def test_unresolved_implementation_lists_valid_targets(fault, expected):
             data["actions"].append(next(action for action in data["actions"] if action["id"] == "edit_task"))
         files[0]["content"] = yaml.safe_dump(data)
     with pytest.raises(ValueError) as exc:
-        assembly._apply_entitlement_gates(files, context_variables=_context())
+        apply_entitlement_gates(files, context_variables=_context())
     assert expected in str(exc.value)
     assert "Valid approved" in str(exc.value)
     assert "task_management" in str(exc.value)
@@ -165,17 +183,121 @@ def test_unresolved_implementation_lists_valid_targets(fault, expected):
 
 def test_unrelated_files_are_preserved():
     files = [*_files(), {"filename": "services/config.py", "content": "TIMEOUT = 10\n"}]
-    result = assembly._apply_entitlement_gates(files, context_variables=_context())
+    result = apply_entitlement_gates(files, context_variables=_context())
     assert files[-1] in result
 
 
-def test_no_contract_leaves_module_files_unchanged():
+def test_no_contract_rejects_gated_manifests_without_mutating_files():
     files = _files("existing.gate")
-    assert assembly._apply_entitlement_gates(files, context_variables=ContextVariablesBridge({})) == files
+    with pytest.raises(ValueError, match="approved subscription contract is required"):
+        apply_entitlement_gates(files, context_variables=ContextVariablesBridge({}))
+    assert all(action["entitlement_gate"] == "existing.gate" for action in _actions(files).values())
+
+
+def test_no_contract_rejects_repair_that_removes_an_existing_gate():
+    original = _files("existing.gate")
+    context = ContextVariablesBridge({
+        "generated_files": {f["filename"]: f["content"] for f in original},
+        "structured_output": {"code_files": _files()},
+    })
+    before = context.snapshot()
+    with pytest.raises(ValueError, match="existing entitlement gates cannot be removed"):
+        save_generated_code(context)
+    assert context.snapshot() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["direct", "artifact", "commit_artifact"])
+@pytest.mark.parametrize("decision", [{"unrelated": True}, {"contract_required": None}, {"contract_required": 0}])
+async def test_malformed_contract_cannot_authorize_gate_removal_at_any_writer(source, decision):
+    context = _context()
+    original = {file["filename"]: file["content"] for file in _files("existing.gate")}
+    context.set("generated_files", original)
+    context.set("structured_output", {"code_files": _files()})
+    context.set("app_task_batch_results", {"task_contract": {"code_files": _files()}})
+    context.set("subscription_contract", decision if source == "direct" else None)
+    if source != "direct":
+        artifact = {"metadata": {"summary_payload": decision}}
+        context.set("subscription_contract_artifact", {"commit_metadata": artifact} if source == "commit_artifact" else artifact)
+    before = context.snapshot()
+    assert resolve_subscription_contract(context) is None
+    # The task boundary and the Factory save/assembly boundary share the same
+    # absence-of-authority meaning, including replacement by an ungated manifest.
+    assert approved_subscription_gates(decision) is None
+    with pytest.raises(ValueError, match="existing entitlement gates cannot be removed"):
+        compile_module_entitlement_gates(
+            {file["filename"]: file["content"] for file in _files()},
+            gates_by_module=approved_subscription_gates(resolve_subscription_contract(context)),
+            approved_actions={}, existing_files=original,
+        )
+    with pytest.raises(ValueError, match="existing entitlement gates cannot be removed"):
+        save_generated_code(context)
+    with pytest.raises(ValueError, match="existing entitlement gates cannot be removed"):
+        await assembly.assemble_app_tasks(context_variables=context)
+    assert context.snapshot() == before
+
+
+def test_explicit_noop_contract_is_authority_to_remove_old_gates():
+    context = ContextVariablesBridge({"subscription_contract": {"contract_required": False}})
+    result = apply_entitlement_gates(_files("old.gate"), context_variables=context)
+    assert all("entitlement_gate" not in action for action in _actions(result).values())
 
 
 def test_live_noop_contract_does_not_apply_stale_artifact_mapping():
     context = _context("subscription_contract_artifact")
     context.set("subscription_contract", {"contract_required": False, "module_contract_updates": []})
     files = _files()
-    assert assembly._apply_entitlement_gates(files, context_variables=context) == files
+    assert apply_entitlement_gates(files, context_variables=context) == files
+
+
+@pytest.mark.asyncio
+async def test_unapproved_action_cannot_alias_a_gated_handler_at_any_writer():
+    context = _context()
+    files = _files()
+    manifest = yaml.safe_load(files[0]["content"])
+    manifest["actions"].append({"id": "shadow_edit", "handler_method": "edit_task", "permissions": []})
+    files[0]["content"] = yaml.safe_dump(manifest)
+    context.set("structured_output", {"code_files": files})
+    context.set("app_task_batch_results", {"task_contract": {"code_files": files}})
+    before = context.snapshot()
+    with pytest.raises(ValueError, match="unapproved module actions.*shadow_edit"):
+        compile_module_entitlement_gates(
+            {file["filename"]: file["content"] for file in files},
+            gates_by_module=approved_subscription_gates(resolve_subscription_contract(context)),
+            approved_actions=all_module_actions(context),
+        )
+    with pytest.raises(ValueError, match="unapproved module actions.*shadow_edit"):
+        save_generated_code(context)
+    with pytest.raises(ValueError, match="unapproved module actions.*shadow_edit"):
+        await assembly.assemble_app_tasks(context_variables=context)
+    assert context.snapshot() == before
+
+
+def test_repaired_manifest_recompiles_approved_gates_with_real_context_bridge():
+    context = _context()
+    before = context.snapshot()
+    context.set("structured_output", {"code_files": _files()})
+    result = save_generated_code(context)
+    assert MODULE_PATH in result["saved_files"]
+    actions = _actions(context.get("code_files"))
+    assert {action: actions[action]["entitlement_gate"] for action in GATES} == GATES
+    assert context.snapshot()["subscription_contract"] == before["subscription_contract"]
+    assert context.snapshot()["data_contract"] == before["data_contract"]
+
+
+def test_repair_compiles_only_supplied_manifests_and_keeps_facades_ungated():
+    context = _context()
+    surfaces = deepcopy(context.snapshot()["design_surface_map"])
+    surfaces["surfaces"].append({
+        "surface_id": "billing_portal", "surface_kind": "module", "owner": "app",
+        "source_capability_packs": ["mozaikspay"], "custom_reads": ["list_plans"],
+    })
+    context.set("design_surface_map", surfaces)
+    content = yaml.safe_dump({"module": {"id": "billing_portal"}, "actions": [
+        {"id": "list_plans", "entitlement_gate": "dashboard.view"},
+    ]})
+    result = apply_entitlement_gates(
+        [{"filename": "modules/billing_portal/module.yaml", "content": content}],
+        context_variables=context, require_all_modules=False,
+    )
+    assert "entitlement_gate" not in yaml.safe_load(result[0]["content"])["actions"][0]

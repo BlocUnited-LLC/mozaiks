@@ -371,6 +371,18 @@ def test_coverage_repair_is_idempotent() -> None:
 
 def test_synthesized_module_lanes_receive_their_direct_contract_dependencies() -> None:
     plan = _plan_missing_coverage()
+    approved = _coverage_context()
+    context = ContextVariablesBridge({
+        key: approved.get(key) for key in ("design_surface_map", "capability_packs", "experience_spec")
+    })
+    context.set("data_contract", {"version": "1", "surfaces": [{
+        "surface_id": "habits_module", "surface_kind": "module",
+        "collections": [{
+            "name": name, "entity": entity, "scope": "app", "tenancy": "per_user", "owner_field": "owner_id",
+            "ownership": {"surface_id": "habits_module", "surface_kind": "module"},
+            "fields": [{"name": "owner_id", "type": "string", "required": True}],
+        } for name, entity in (("habits", "Habit"), ("habit_checkins", "HabitCheckIn"))],
+    }]})
     plan["build_tasks"] = [
         task for task in plan["build_tasks"] if task["task_type"] == "page_bundle"
     ]
@@ -380,7 +392,7 @@ def test_synthesized_module_lanes_receive_their_direct_contract_dependencies() -
         "owned_paths": ["data/contract.json"],
     })
 
-    _repair_coverage(plan, _coverage_context())
+    _repair_coverage(plan, context)
 
     by_kind = {task["task_type"]: task for task in plan["build_tasks"]}
     contract = by_kind["module_contract"]["task_id"]
@@ -388,8 +400,8 @@ def test_synthesized_module_lanes_receive_their_direct_contract_dependencies() -
     assert by_kind["module_contract"]["depends_on"] == []
     assert by_kind["data_models"]["depends_on"] == [contract, "app_persistence"]
     assert by_kind["business_services"]["depends_on"] == [contract, models, "app_persistence"]
-    validate_plan_dependencies(plan, _coverage_context())
-    validate_plan_coverage(plan, _coverage_context())
+    validate_plan_dependencies(plan, context)
+    validate_plan_coverage(plan, context)
 
 
 def test_module_dependency_normalization_preserves_existing_edges() -> None:

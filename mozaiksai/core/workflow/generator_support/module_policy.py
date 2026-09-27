@@ -1,50 +1,39 @@
-"""Render generated module ownership policies from the canonical data contract."""
-
+"""Render generated ownership policies from the approved data contract."""
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from typing import Any
 
+from mozaiksai.core.runtime.persistence.intent_loader import (
+    iter_data_contract_collections,
+    validate_collection_ownership,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 
-_SCOPE_ATTRIBUTES = {
-    "app": "app_id",
-    "user": "user_id",
-    "tenant": "tenant_id",
-    "workspace": "workspace_id",
-}
-_FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_TENANCY_ATTRIBUTES = {"per_user": "user_id", "per_workspace": "workspace_id"}
 
 
 def render_module_policy(module_id: str, collections: list[dict[str, Any]]) -> str:
-    """Compile explicit collection scopes into a complete, fail-closed policy."""
-    scopes: dict[str, tuple[str, str]] = {}
+    """Compile explicit collection tenancy into a complete, fail-closed policy."""
+    scopes: dict[str, tuple[str | None, str | None]] = {}
     for collection in collections:
         name = str(collection.get("name") or "")
-        scope = collection.get("scope")
-        field = collection.get("scope_field")
+        field = collection.get("owner_field")
         location = f"data_contract module {module_id!r} collection {name!r}"
         if not name or name in scopes:
             raise ValueError(f"{location}: collection names must be nonempty and unique")
-        if scope not in _SCOPE_ATTRIBUTES:
-            raise ValueError(f"{location}: scope must be app, user, tenant, or workspace")
-        if not isinstance(field, str) or not _FIELD.fullmatch(field):
-            raise ValueError(f"{location}: scope_field must be an explicit document field name")
-        if field not in {item.get("name") for item in collection.get("fields") or [] if isinstance(item, dict)}:
-            raise ValueError(f"{location}: scope_field {field!r} must be declared in fields")
-        if field in _SCOPE_ATTRIBUTES.values() and field != _SCOPE_ATTRIBUTES[scope]:
-            raise ValueError(f"{location}: reserved scope_field {field!r} must match scope {scope!r}")
+        validate_collection_ownership(collection, location)
+        attribute = _TENANCY_ATTRIBUTES.get(collection["tenancy"])
         ownership = collection.get("ownership") or {}
         if ownership.get("surface_id") != module_id or ownership.get("surface_kind") != "module":
             raise ValueError(f"{location}: ownership must match its module surface")
-        scopes[name] = (field, _SCOPE_ATTRIBUTES[scope])
+        scopes[name] = (field, attribute)
     if not scopes:
         raise ValueError(f"data_contract module {module_id!r} requires at least one collection")
 
     return (
-        '"""Ownership policy compiled from data/contract.json."""\n\n'
+        '\"\"\"Ownership policy compiled from data/contract.json.\"\"\"\n\n'
         f"_SCOPES = {dict(sorted(scopes.items()))!r}\n\n\n"
         "def _scope(context, entity_name):\n"
         "    if entity_name is None:\n"
@@ -53,7 +42,15 @@ def render_module_policy(module_id: str, collections: list[dict[str, Any]]) -> s
         "        entity_name = next(iter(_SCOPES))\n"
         "    if entity_name not in _SCOPES:\n"
         "        raise ValueError(f'Undeclared policy collection: {entity_name!r}')\n"
+        "    app_id = getattr(context, 'app_id', None)\n"
+        "    if not isinstance(app_id, str) or not app_id.strip():\n"
+        "        raise PermissionError('Missing required scope identity: app_id')\n"
         "    field, attribute = _SCOPES[entity_name]\n"
+        "    if attribute is None:\n"
+        "        return None, None\n"
+        "    user_id = getattr(context, 'user_id', None)\n"
+        "    if not isinstance(user_id, str) or not user_id.strip():\n"
+        "        raise PermissionError('Missing required scope identity: user_id')\n"
         "    identity = getattr(context, attribute, None)\n"
         "    if not isinstance(identity, str) or not identity.strip():\n"
         "        raise PermissionError(f'Missing required scope identity: {attribute}')\n"
@@ -61,14 +58,16 @@ def render_module_policy(module_id: str, collections: list[dict[str, Any]]) -> s
         "def scoped_query(context, filters=None, *, entity_name=None):\n"
         "    field, identity = _scope(context, entity_name)\n"
         "    query = dict(filters or {})\n"
-        "    if field == 'app_id':\n"
-        "        query.pop('app_id', None)\n"
-        "    else:\n"
+        "    query.pop('app_id', None)\n"
+        "    if field is not None:\n"
         "        query[field] = identity\n"
         "    return query\n\n\n"
         "def scope_record(context, record, *, entity_name=None):\n"
         "    field, identity = _scope(context, entity_name)\n"
-        "    return {**dict(record), field: identity}\n"
+        "    scoped = {**dict(record), 'app_id': context.app_id}\n"
+        "    if field is not None:\n"
+        "        scoped[field] = identity\n"
+        "    return scoped\n"
     )
 
 
@@ -78,10 +77,10 @@ def materialize_module_policies(
     *,
     module_ids: set[str] | None = None,
 ) -> dict[str, str]:
-    """Return policies for persistent modules present in a bundle or owned task.
+    """Render policies only for modules owning approved collection surfaces.
 
-    The serialized data contract wins when available. A task can supply its
-    approved contract before the DatabaseAgent's artifact has been assembled.
+    The supplied DesignDocs contract is authoritative; its serialized artifact
+    must agree and cannot act as a second input authority.
     """
     existing_policy_modules = {
         parts[1] for path in files
@@ -89,7 +88,9 @@ def materialize_module_policies(
         and parts[0] == "modules" and parts[2:] == ["backend", "policy.py"]
     }
     if "data/contract.json" in files:
-        data_contract = json.loads(files["data/contract.json"])
+        serialized = json.loads(files["data/contract.json"])
+        if serialized != data_contract:
+            raise ValueError("data/contract.json must match the approved data_contract")
     if not isinstance(data_contract, dict):
         if module_ids or existing_policy_modules:
             raise ValueError("Persistent module policies require data_contract")
@@ -97,25 +98,20 @@ def materialize_module_policies(
     selected = module_ids
     if selected is None:
         selected = {
-            parts[1]
-            for path in files
-            if len(parts := path.split("/")) == 4
-            and parts[0] == "modules" and parts[2] == "backend"
+            parts[1] for path in files
+            if len(parts := path.split("/")) >= 3 and parts[0] == "modules"
         }
+    collections_by_module: dict[str, list[dict[str, Any]]] = {}
+    for module_id, surface_kind, collection in iter_data_contract_collections(data_contract):
+        if surface_kind == "module" and module_id in selected:
+            collections_by_module.setdefault(module_id, []).append(collection)
     result: dict[str, str] = {}
-    for surface in data_contract.get("surfaces") or []:
-        if not isinstance(surface, dict) or surface.get("surface_kind") != "module":
-            continue
-        module_id = str(surface.get("surface_id") or "")
-        if module_id not in selected:
-            continue
+    for module_id, collections in collections_by_module.items():
         path = f"modules/{module_id}/backend/policy.py"
-        if path in result:
-            raise ValueError(f"data_contract has duplicate module surface {module_id!r}")
-        result[path] = render_module_policy(module_id, surface.get("collections") or [])
+        result[path] = render_module_policy(module_id, collections)
         if path in files and files[path] != result[path]:
             raise ValueError(f"{path}: policy.py is rendered from data_contract; omit model-authored policy source")
-    missing = sorted((module_ids or existing_policy_modules) - {path.split("/")[1] for path in result})
+    missing = sorted(existing_policy_modules - {path.split("/")[1] for path in result})
     if missing:
         raise ValueError(f"Persistent module policy has no data_contract surface: {missing}")
     return result
@@ -126,18 +122,15 @@ def materialize_task_module_policies(
 ) -> dict[str, str]:
     """Render owned policy artifacts before batch output ownership validation."""
     selected = {
-        parts[1]
-        for path in task.get("owned_paths") or []
+        parts[1] for path in task.get("owned_paths") or []
         if len(parts := str(path).split("/")) == 4
         and parts[0] == "modules" and parts[2:] == ["backend", "policy.py"]
     }
-    emitted = {
-        path
-        for path in files
+    selected.update(
+        parts[1] for path in files
         if len(parts := path.split("/")) == 4
         and parts[0] == "modules" and parts[2:] == ["backend", "policy.py"]
-    }
-    selected.update(path.split("/")[1] for path in emitted)
+    )
     if not selected:
         return {}
     return materialize_module_policies(files, detach(data_contract), module_ids=selected)

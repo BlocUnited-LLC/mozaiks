@@ -12,7 +12,7 @@ from .app_data import (
     collection_name_for_alias,
     load_app_data_contract,
 )
-from .intent_loader import DataContract
+from .intent_loader import DataContract, DataContractLoadError, iter_data_contract_collections
 from .mongo import MongoPersistenceContext
 
 
@@ -161,49 +161,30 @@ def _normalize_index_spec(raw_spec: Any, path: str) -> _NormalizedIndexSpec:
 
 def _iter_indexed_collections(contract: DataContract) -> list[_IndexedCollection]:
     indexed: list[_IndexedCollection] = []
-    surfaces = contract.get("surfaces") or []
-    for surface_index, surface in enumerate(surfaces):
-        surface_path = f"data_contract.surfaces[{surface_index}]"
-        if not isinstance(surface, dict):
-            raise DatabaseIndexApplyError(f"{surface_path} must be an object")
-        surface_id = str(surface.get("surface_id") or "").strip()
-        surface_kind = str(surface.get("surface_kind") or "").strip()
-        collections = surface.get("collections") or []
-        for collection_index, collection in enumerate(collections):
-            collection_path = f"{surface_path}.collections[{collection_index}]"
-            if not isinstance(collection, dict):
-                raise DatabaseIndexApplyError(f"{collection_path} must be an object")
-            indexes = collection.get("indexes") or []
-            if not indexes:
-                continue
-
-            ownership = collection.get("ownership") if isinstance(collection.get("ownership"), dict) else {}
-            module_id = str(collection.get("module_id") or ownership.get("surface_id") or surface_id).strip()  # type: ignore[union-attr]
-            entity_name = str(collection.get("entity_name") or collection.get("name") or "").strip()
-            if surface_kind == "module" and not module_id:
-                raise DatabaseIndexApplyError(f"{collection_path}.module_id is required")
-            if surface_kind == "module" and not entity_name:
-                raise DatabaseIndexApplyError(f"{collection_path}.entity_name is required")
-            if not isinstance(indexes, list):
-                raise DatabaseIndexApplyError(f"{collection_path}.indexes must be a list")
-            collection_name = str(collection.get("mongo_collection") or collection.get("collection") or "").strip()
-            alias = str(collection.get("data_alias") or "").strip()
-            indexed.append(
-                _IndexedCollection(
-                    surface_id=surface_id,
-                    module_id=module_id,
-                    entity_name=entity_name,
-                    alias=alias,
-                    collection_name=collection_name,
-                    indexes=[
-                        _normalize_index_spec(
-                            index_spec,
-                            f"{collection_path}.indexes[{index}]",
-                        )
-                        for index, index_spec in enumerate(indexes)
-                    ],
-                )
+    try:
+        collections = list(iter_data_contract_collections(contract))
+    except DataContractLoadError as exc:
+        raise DatabaseIndexApplyError(str(exc)) from exc
+    for owner_id, _owner_kind, collection in collections:
+        collection_path = f"data_contract collection {owner_id}.{collection['name']}"
+        indexes = collection.get("indexes") or []
+        if not indexes:
+            continue
+        if not isinstance(indexes, list):
+            raise DatabaseIndexApplyError(f"{collection_path}.indexes must be a list")
+        indexed.append(
+            _IndexedCollection(
+                surface_id=owner_id,
+                module_id=owner_id,
+                entity_name=collection["name"],
+                alias=str(collection.get("data_alias") or "").strip(),
+                collection_name=str(collection.get("mongo_collection") or collection.get("collection") or "").strip(),
+                indexes=[
+                    _normalize_index_spec(index_spec, f"{collection_path}.indexes[{index}]")
+                    for index, index_spec in enumerate(indexes)
+                ],
             )
+        )
     return indexed
 
 

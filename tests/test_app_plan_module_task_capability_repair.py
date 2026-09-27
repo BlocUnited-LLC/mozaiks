@@ -36,6 +36,8 @@ def _reported_plan(label="task_registry"):
     context.set("design_surface_map", design)
     ids = {"6": "module_contract", "7": "data_models", "8": "business_services"}
     for task in plan["build_tasks"]:
+        # This identity-only fixture declares no collection ownership.
+        task["owned_paths"] = [path for path in task["owned_paths"] if not path.endswith("/backend/policy.py")]
         if task["surface_id"] == "task_management":
             task["surface_id"] = "tasks"
         if task["capability_pack_id"] == "task_management":

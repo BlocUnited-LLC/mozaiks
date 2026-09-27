@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from tests.factory_context import factory_context
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,16 +25,6 @@ def _load_save_app_schema_module():
 
 save_app_schema_module = _load_save_app_schema_module()
 
-
-class _Context:
-    def __init__(self, initial=None) -> None:
-        self.data = factory_context(initial)
-
-    def set(self, key, value) -> None:
-        self.data[key] = value
-
-    def get(self, key, default=None):
-        return self.data.get(key, default)
 
 
 def _base_manifest() -> dict:
@@ -90,7 +81,8 @@ def test_file_contracts_require_data_contract_for_persistent_generated_modules()
     assert "data/contract.json" in persistence_contract["required_outputs"]
     assert "data/migrations/{migration_id}.json" in persistence_contract["optional_outputs"]
     assert "Generate data/contract.json for persistent generated modules" in text
-    assert "scope_field" in text
+    assert "owner_field" in text
+    assert "tenancy" in text
     assert "deterministic policy/read construction" in text
     assert "opt-in only" not in text
     assert "ctx.persistence.collection(module_id, entity_name)" in text
@@ -105,7 +97,7 @@ def test_save_app_schema_omits_data_contract_by_default(monkeypatch, tmp_path: P
     result = save_app_schema_module.save_app_schema(
         manifest=_base_manifest(),
         pages=[_base_page()],
-        context_variables=_Context(),
+        context_variables=ContextVariablesBridge(factory_context()),
     )
 
     assert not (tmp_path / "config" / "data.json").exists()
@@ -114,7 +106,7 @@ def test_save_app_schema_omits_data_contract_by_default(monkeypatch, tmp_path: P
 
 def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
-    context = _Context({"data_contract": _data_contract()})
+    context = ContextVariablesBridge(factory_context({"data_contract": _data_contract()}))
 
     result = save_app_schema_module.save_app_schema(
         manifest=_base_manifest(),
@@ -125,7 +117,7 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
     contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
     assert contract["mode"] == "app_data_contract"
     assert contract["aliases"][0]["alias"] == "orders.lifecycle"
-    assert context.data["data_contract"]["aliases"][0]["collection"] == "orders"
+    assert context.get("data_contract")["aliases"][0]["collection"] == "orders"
     assert "data/contract.json" in result
     assert "Data contract: yes" in result
 
@@ -144,16 +136,13 @@ def test_data_contract_validation_rejects_invalid_shapes(contract: dict, match: 
         save_app_schema_module._validate_data_contract(contract)
 
 
-def test_structured_outputs_expose_data_contract() -> None:
-    structured_outputs = (
-        ROOT / "factory_app" / "workflows" / "AppGenerator" / "structured_outputs.yaml"
-    ).read_text(encoding="utf-8")
-
-    assert "data_contract" in structured_outputs
-    assert "shared_collections" in structured_outputs
-    assert "data/contract.json" in structured_outputs
-    assert "data_contract_json" in structured_outputs
-    assert "Do not emit helper code under services/data/" in structured_outputs
+def test_only_design_docs_exposes_data_contract_model() -> None:
+    app_models = yaml.safe_load((ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8"))["models"]
+    design_models = yaml.safe_load((ROOT / "factory_app/workflows/DesignDocs/structured_outputs.yaml").read_text(encoding="utf-8"))["models"]
+    assert "DataContractCollection" in design_models
+    assert "DataContractCollection" not in app_models
+    assert "data_contract" not in app_models["AppBuildPlan"]["fields"]
+    assert "data_contract" not in app_models["AppSchemaOutput"]["fields"]
 
 
 def test_config_is_the_promotable_data_contract_entry() -> None:

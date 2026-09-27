@@ -315,7 +315,11 @@ def _authored_skeleton() -> dict[str, str]:
                     {
                         "surface_id": "orders",
                         "surface_kind": "module",
-                        "collections": [{"name": "orders"}],
+                        "collections": [{
+                            "name": "orders", "entity": "Order", "scope": "app",
+                            "tenancy": "app_wide", "owner_field": None, "fields": [],
+                            "ownership": {"surface_id": "orders", "surface_kind": "module"},
+                        }],
                     }
                 ],
             }

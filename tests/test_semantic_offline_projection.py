@@ -141,29 +141,6 @@ def _corpus_source() -> dict:
                     "placement": "page",
                 }
             ],
-            "data_contract": {
-                "version": "1",
-                "surfaces": [
-                    {
-                        "surface_id": "reports",
-                        "surface_kind": "module",
-                        "collections": [
-                            {
-                                "name": "reports",
-                                "scope": "app",
-                                "fields": [{"name": "status", "type": "string"}],
-                            }
-                        ],
-                    }
-                ],
-                "aliases": [
-                    {
-                        "alias": "reports.current",
-                        "collection": "reports",
-                        "owner_module": "reports",
-                    }
-                ],
-            },
             "deployment_targets": [
                 {
                     "target_id": "local_container",
@@ -210,9 +187,31 @@ def _corpus_source() -> dict:
             "theme_config_patch": {"theme": {"mode": "dark"}},
             "shell_config": None,
             "asset_manifest": None,
-            "data_contract": None,
         },
         "design_docs": {
+            "data_contract": {
+                "version": "1",
+                "surfaces": [
+                    {
+                        "surface_id": "reports",
+                        "surface_kind": "module",
+                        "collections": [
+                            {
+                                "name": "reports",
+                                "scope": "app",
+                                "fields": [{"name": "status", "type": "string"}],
+                            }
+                        ],
+                    }
+                ],
+                "aliases": [
+                    {
+                        "alias": "reports.current",
+                        "collection": "reports",
+                        "owner_module": "reports",
+                    }
+                ],
+            },
             "agent_message": "Design corpus",
             "experience_spec": {
                 "navigation_model": "sidebar",
@@ -668,6 +667,7 @@ def test_recorded_appbuildplan_unknown_semantics_are_not_silently_omitted() -> N
             encoding="utf-8"
         )
     )
+    recorded["design_docs"] = {"data_contract": recorded.pop("context")["data_contract"]}
     with pytest.raises(ProjectionError) as exc_info:
         project_semantic_graph(
             recorded, graph_id="recorded-projects", version=1, scope=SCOPE,
@@ -683,6 +683,7 @@ def test_existing_recorded_saas_fixture_projects_with_explicit_gaps() -> None:
             encoding="utf-8"
         )
     )
+    recorded["design_docs"] = {"data_contract": recorded.pop("context")["data_contract"]}
     result = project_semantic_graph(
         recorded, graph_id="recorded-saas", version=1, scope=SCOPE,
         taxonomy_registry=_pinned_registry(),
@@ -693,13 +694,13 @@ def test_existing_recorded_saas_fixture_projects_with_explicit_gaps() -> None:
     assert all(row.source_file != "unknown" for row in result.coverage)
 
 
-def test_data_contract_scope_field_has_known_deferred_coverage() -> None:
+def test_data_contract_owner_field_has_known_deferred_coverage() -> None:
     source = _corpus_source()
-    source["app_build_plan"]["data_contract"]["surfaces"][0]["collections"][0]["scope_field"] = "owner_id"
+    source["design_docs"]["data_contract"]["surfaces"][0]["collections"][0]["owner_field"] = "owner_id"
 
     result = _project(source)
 
-    path = "app_build_plan.data_contract.surfaces[0].collections[0].scope_field"
+    path = "design_docs.data_contract.surfaces[0].collections[0].owner_field"
     gap = next(gap for gap in result.gaps if gap.source_path == path)
     row = next(row for row in result.coverage if row.source_path == path)
     assert gap.kind is ProjectionGapKind.UNSUPPORTED
@@ -887,10 +888,9 @@ def test_projection_field_access_is_pinned_to_current_structured_outputs() -> No
         "entities",
         "event_flows",
         "workflow_touchpoints",
-        "data_contract",
         "deployment_targets",
     } <= set(app["AppBuildPlan"]["fields"])
-    assert {"pages", "data_contract", "custom_route_bundle"} <= set(
+    assert {"pages", "custom_route_bundle"} <= set(
         app["AppSchemaOutput"]["fields"]
     )
 
@@ -1099,7 +1099,7 @@ def test_semantic_descriptions_pricing_and_data_shapes_are_typed_gaps() -> None:
     result = _project()
     gap_paths = {gap.source_path for gap in result.gaps}
     assert "subscription_contract.rationale" in gap_paths
-    assert "app_build_plan.data_contract.surfaces[0].collections[0].fields[0].type" in gap_paths
+    assert "design_docs.data_contract.surfaces[0].collections[0].fields[0].type" in gap_paths
     assert "subscriptions.plans[0].usage_limits[0].monthly_limit" not in gap_paths
     deferred = {
         row.source_path

@@ -14,7 +14,12 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.surface_ownership import managed_facade_module_ids
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import all_module_actions
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +33,10 @@ _TARGET_AGENTS = {
 
 
 def approved_module_actions(context_variables: Any) -> dict[str, list[str]]:
-    """Project the approved DesignDocs module/action identifiers, without aliases."""
-    surface_map = detach(context_variables.get("design_surface_map")) if context_variables is not None else None
-    if not isinstance(surface_map, Mapping):
-        return {}
-    inventory: dict[str, list[str]] = {}
-    for surface in surface_map.get("surfaces") or []:
-        if surface.get("surface_kind") != "module" or surface.get("owner") != "app":
-            continue
-        surface_id = surface["surface_id"]
-        inventory[surface_id] = sorted(set(surface.get("owned_mutations") or []))
-    return inventory
+    """Project gate targets while keeping managed plan/upgrade/usage facades open."""
+    inventory = all_module_actions(context_variables)
+    facades = managed_facade_module_ids(context_variables)
+    return {module_id: actions for module_id, actions in inventory.items() if module_id not in facades}
 
 
 def validate_module_contract_updates(
@@ -76,7 +74,8 @@ def validate_module_contract_updates(
             raise ValueError(
                 f"module_contract_updates references unapproved action {module_id!r}.{action_id!r}. "
                 f"Choose module_id from design_surface_map.surfaces[].surface_id and action_id "
-                f"from that module's owned_mutations. {valid_ids}"
+                f"from that module's approved writes, custom_reads, or canonical collection reads. "
+                f"Managed-pack facade actions are never gate targets. {valid_ids}"
             )
         if gate is not None and gate not in capabilities:
             raise ValueError(
@@ -99,7 +98,10 @@ def validate_module_contract_updates(
         raise ValueError(
             f"module_contract_updates must map every capability that differs between plans "
             f"to at least one approved action. Unmapped capability ids: {sorted(missing)!r}. "
-            f"Choose the product mapping; the materializer cannot infer it. {valid_ids}"
+            f"Choose the product mapping; the materializer cannot infer it. "
+            f"If no listed action implements the feature, DesignDocs must declare the missing "
+            f"custom_reads action or owned_mutations action before subscription design can pass. "
+            f"validation_notes do not waive this required design decision. {valid_ids}"
         )
     if capabilities and not mapped:
         raise ValueError(
@@ -114,7 +116,7 @@ def _context_data(agent: Any) -> dict[str, Any]:
 
     `.data` was the only path here, and #300 renamed the bridge's backing store
     to `__data` precisely to stop callers reaching past the authority policy. So
-    on every live run this returned `{}`, `_find_contract` saw nothing, and the
+    on every live run this returned `{}`, `resolve_subscription_contract` saw nothing, and the
     hook injected no [SUBSCRIPTION CONTRACT CONTEXT] at all -- silently, because
     an empty context is indistinguishable from an app with no contract. The
     prompts that tell agents to read that section have been pointing at nothing.
@@ -140,33 +142,6 @@ def _context_data(agent: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         return data
     return {}
-
-
-def _extract_summary_payload(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, Mapping):
-        return None
-    if "contract_required" in value:
-        return dict(value)
-
-    commit_metadata = value.get("commit_metadata")
-    if isinstance(commit_metadata, Mapping):
-        metadata = commit_metadata.get("metadata")
-        if isinstance(metadata, Mapping) and isinstance(metadata.get("summary_payload"), Mapping):
-            return dict(metadata["summary_payload"])
-
-    metadata = value.get("metadata")
-    if isinstance(metadata, Mapping) and isinstance(metadata.get("summary_payload"), Mapping):
-        return dict(metadata["summary_payload"])
-
-    return None
-
-
-def _find_contract(data: Mapping[str, Any]) -> dict[str, Any] | None:
-    for key in ("subscription_contract", "subscription_contract_artifact"):
-        payload = _extract_summary_payload(data.get(key))
-        if payload is not None:
-            return payload
-    return None
 
 
 def _trim_contract(contract: Mapping[str, Any]) -> dict[str, Any]:
@@ -245,13 +220,14 @@ def inject_subscription_action_inventory(agent: Any, messages: list[dict[str, An
     _apply_text(agent, "\n".join([
         "[APPROVED ENTITLEMENT ACTION INVENTORY]",
         "These are the only permitted module_id -> action_id choices for module_contract_updates.",
-        "They project app-owned module surface_id and owned_mutations from approved design_surface_map.",
+        "They project approved app-owned writes, custom_reads, and canonical list/get actions from data_contract collection entities.",
+        "Managed-pack facade actions are excluded: plans, upgrade, checkout, portal, usage, and token access stay ungated.",
         "Copy identifiers exactly. Select entitlement_gate from your plans' capabilities.",
         "Map every capability that differs between plans to at least one action. If any plan grants",
         "capabilities, select at least one gate even when all plans grant the same capabilities.",
         "Each action has at most one entitlement_gate. AppGenerator writes selected gates deterministically.",
-        "If no approved action represents a required capability, report the missing design input",
-        "in validation_notes; do not invent an action or silently leave the capability unmapped.",
+        "Every differing capability must select a real feature action. If its action is missing,",
+        "DesignDocs must first declare that custom read or write. validation_notes cannot waive this closure.",
         rendered,
     ]))
     logger.info("SUBSCRIPTION_ACTION_INVENTORY injected modules=%d actions=%d",
@@ -265,7 +241,7 @@ def inject_subscription_contract_context(agent: Any, messages: list[dict[str, An
     if agent_name not in _TARGET_AGENTS:
         return
     data = _context_data(agent)
-    contract = _find_contract(data)
+    contract = resolve_subscription_contract(data)
     if not contract:
         # Say which source was consulted and what was there. This hook read an
         # attribute the live context container does not expose and so injected

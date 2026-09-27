@@ -34,10 +34,11 @@ from mozaiksai.core.artifacts import (
     persist_summary_artifact,
 )
 from mozaiksai.core.runtime.app.loader import AppLoader
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
 from scripts.appgenerator_fixture_replay import execute_file_replay
 from scripts.smoke_agentgenerator_live_pack import run_live_agentgenerator_pack_smoke
 from scripts.smoke_appgenerator_live_acceptance import (
-    SmokeContext,
     build_appgenerator_acceptance_files,
     build_appgenerator_acceptance_task_state,
     default_workflow_integration,
@@ -428,7 +429,7 @@ async def _run_lineage_smoke_with_store(
             "canonical_inputs_version": dict(workflow_bundle.canonical_inputs_version),
         },
     )
-    context = SmokeContext(
+    context = ContextVariablesBridge(
         {
             "workflow_name": "AppGenerator",
             "app_id": app_id,
@@ -441,7 +442,7 @@ async def _run_lineage_smoke_with_store(
         context,
         artifact_store=store,
     )
-    fixture_workflow_integration = _primary_workflow_integration(context.get("workflow_integration_metadata"))
+    fixture_workflow_integration = _primary_workflow_integration(detach(context.get("workflow_integration_metadata")))
     integration_errors: list[str] = []
     if fixture_workflow_integration is None:
         fixture_workflow_integration = default_workflow_integration()
@@ -451,6 +452,7 @@ async def _run_lineage_smoke_with_store(
     context.set("app_validation_status", "skipped")
     context.set("app_validation_strategy_used", "skip")
     task_state = build_appgenerator_acceptance_task_state(files)
+    context.set("data_contract", task_state["data_contract"])
     app_build_plan(AppBuildPlan=task_state["app_build_plan"], context_variables=context)
     task_outputs = task_state["app_task_batch_results"]
     for entry in task_outputs["support_pages"]["code_files"]:
@@ -468,7 +470,10 @@ async def _run_lineage_smoke_with_store(
         entry for entry in task_outputs["support_services"]["code_files"]
         if entry["filename"] != "modules/support_tickets/backend/policy.py"
     ]
-    accepted = await execute_file_replay(context.data, files, task_outputs=task_outputs)
+    replay_context = context.snapshot()
+    accepted = await execute_file_replay(replay_context, files, task_outputs=task_outputs)
+    for key, value in replay_context.items():
+        context.set(key, value)
     files = {
         item["filename"]: item["content"]
         for task_id, output in accepted.items() if not task_id.startswith("_")
@@ -595,7 +600,7 @@ async def _run_lineage_smoke_with_store(
                 "current_refs": current_refs,
             },
             "hydration": hydration,
-            "workflow_integration_metadata": context.get("workflow_integration_metadata"),
+            "workflow_integration_metadata": detach(context.get("workflow_integration_metadata")),
             "appgenerator_acceptance": {
                 "status": acceptance.get("status"),
                 "validation_evidence": acceptance.get("validation_evidence"),

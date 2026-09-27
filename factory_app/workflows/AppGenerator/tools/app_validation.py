@@ -1836,7 +1836,7 @@ async def run_app_bundle_acceptance_gate(
     scanner_errors = scan_generated_bundle(
         generated_files,
         capability_packs=selected_capability_packs,
-        planned_data_contract=(_context_get(context_variables, "app_build_plan", {}) or {}).get("data_contract"),
+        planned_data_contract=_context_get(context_variables, "data_contract"),
         require_deployment_artifacts=_requires_deployment_artifacts(
             generated_files,
             context_variables,

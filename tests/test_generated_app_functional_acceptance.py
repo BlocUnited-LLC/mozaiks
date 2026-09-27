@@ -83,7 +83,11 @@ sections:
                     {
                         "surface_id": "orders",
                         "surface_kind": "module",
-                        "collections": [{"name": "orders"}],
+                        "collections": [{
+                            "name": "orders", "entity": "Order", "scope": "app",
+                            "tenancy": "app_wide", "owner_field": None, "fields": [],
+                            "ownership": {"surface_id": "orders", "surface_kind": "module"},
+                        }],
                     }
                 ],
             }
@@ -229,7 +233,12 @@ def _generated_monetized_saas_files() -> dict[str, str]:
                     {
                         "surface_id": "billing",
                         "surface_kind": "module",
-                        "collections": [{"name": "subscriptions", "data_alias": "billing.subscriptions"}],
+                        "collections": [{
+                            "name": "subscriptions", "data_alias": "billing.subscriptions",
+                            "entity": "Subscription", "scope": "app", "tenancy": "per_user",
+                            "owner_field": "user_id", "fields": [{"name": "user_id", "type": "string"}],
+                            "ownership": {"surface_id": "billing", "surface_kind": "module"},
+                        }],
                     }
                 ],
             }

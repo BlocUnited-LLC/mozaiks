@@ -354,8 +354,8 @@ agents:
          - Only infer page structure from scratch when `experience_spec` is null.
       6. Derive the canonical entities and required operations for each entity.
          - For durable CRUD entities (create/list/update/delete/status changes), plan generated module persistence explicitly:
-           - populate top-level `data_contract` with collection ownership, fields, scope (app/user/tenant/workspace), and scope_field. Code binds that declared field to the matching trusted runtime identity for deterministic policy generation;
-           - keep `data_contract` null only when the app has no durable app-owned persistence;
+           - read the approved DesignDocs `data_contract` from context. Collection namespace `scope`, `tenancy`, `owner_field`, and `entity` are already decided. Do not emit a second data contract in the plan;
+           - plan persistent module files only for surfaces with collections in the approved data contract;
            - when `data_contract` is needed, keep it generic and emit `data/contract.json`; do not plan ad hoc shared folders or host-internal helper names;
            - populate top-level `pending_schema_migration` when indexes or additive collection setup are needed, otherwise set it to null;
            - include a `persistence_contract` build task with `initial_agent: DatabaseAgent`;
@@ -992,7 +992,7 @@ agents:
 
       **Output contract**:
       - In task-batch execution, set `manifest` to null unless `current_build_task.owned_paths` includes `app.json`. A null manifest emits neither app.json nor provenance.yaml and preserves the existing manifest at assembly. If app.json is owned, a non-null manifest is required. Never widen owned_paths or emit a placeholder manifest for a page-only task.
-      - Emit only pages whose materialized ui/pages/*.yaml paths are owned by the task. Set unowned `custom_route_bundle`, `theme_config_patch`, `shell_config`, `asset_manifest`, and `data_contract` to null. Custom routes require ownership of the route manifest, page files, and registry barrel together.
+      - Emit only pages whose materialized ui/pages/*.yaml paths are owned by the task. Set unowned `custom_route_bundle`, `theme_config_patch`, `shell_config`, `asset_manifest`, to null. Custom routes require ownership of the route manifest, page files, and registry barrel together.
       - When manifest is non-null, manifest.pages must list every `app_build_plan.pages[].name` materialized as AppPageSchema across the full assembled app, including baseline pages outside the current task.
       - When manifest is non-null, manifest.custom_routes must list every AppCustomRouteEntry.id in the full assembled custom route manifest, or be null/empty when no custom routes exist.
       - Each persistent route must have exactly one owner: either an AppPageSchema.route or an AppCustomRouteEntry.path, never both.
@@ -1067,7 +1067,7 @@ agents:
       7. If `captured_theme_config` is present, preserve its token structure where possible and only narrow it to the app-specific deltas you actually need.
       8. Set `asset_manifest` to null when shipped/default assets are sufficient. Emit it only when the app requires non-default image/icon/media inventory that should be cataloged.
       9. Set `custom_route_bundle` to null unless a persistent route truly requires custom full-page React.
-      10. Set `data_contract` to null unless the build plan explicitly includes an opt-in app data contract for durable app-owned collections or explicit existing database integration. Do not invent data contract from page needs alone.
+      10. The approved DesignDocs `data_contract` is supplied in context. Do not emit, replace, or reinterpret it from page needs.
       11. If `custom_route_bundle` is not null:
          a. Emit one route_manifest entry per custom page route.
          b. Emit one page_files entry per custom page implementation with complete React source in `content`.
@@ -1133,8 +1133,7 @@ agents:
         "custom_route_bundle": null,
         "theme_config_patch": null,
         "shell_config": null,
-        "asset_manifest": null,
-        "data_contract": null
+        "asset_manifest": null
       }
       ```
 
@@ -1369,10 +1368,10 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       **Greenfield (build_mode != revision)**:
-      - If `bundle_repair_target == "DatabaseAgent"`, repair only the data files named in bundle_repair_request using generated_files and the approved app_build_plan.data_contract. Emit the corrected database_files/code_files; do not alter the plan or other file families.
-      - When app_build_plan.data_contract exists, preserve its fields and required flags exactly. Required describes the stored document, not whether the user enters a value in a form. Do not re-derive a conflicting contract from older design documents.
+      - If `bundle_repair_target == "DatabaseAgent"`, repair only the data files named in bundle_repair_request using generated_files and the approved DesignDocs data_contract. Emit the corrected database_files/code_files; do not alter the plan or other file families.
+      - Preserve the approved DesignDocs data contract exactly. Required describes the stored document, not whether the user enters a value in a form. Code serializes data/contract.json from context; omit that file from model-authored output.
       - Read `data_contract` from context; it is the canonical typed database source of truth.
-      - Read `data_contract` from context when present; it declares durable app-owned collections or explicit existing database integration. Preserve collection scope and scope_field for deterministic policy generation.
+      - Read `data_contract` from context when present; it declares durable app-owned collections or explicit existing database integration. Preserve collection namespace scope, tenancy, owner_field, and entity for deterministic policy generation.
       - Validate that persistent surfaces and collections are represented in `data_contract`.
       - Stage the app artifact at `data/contract.json`.
       - Stage `data/contract.json` only when `data_contract` is non-null.
@@ -1453,7 +1452,7 @@ agents:
       1. Read `data_contract` from context.
       2. Reconcile it with `app_build_plan.entities` and `database_design_document`.
       3. If it is missing or incomplete for a persistent module, describe the gap in `agent_message`.
-      4. If `data_contract` is non-null, produce one `database_files` entry for `data/contract.json` with kind `data_contract_json`. Keep names generic; do not use non-canonical app-level backend or shared-persistence paths.
+      4. Code writes `data/contract.json` from the approved DesignDocs context when the task owns that path. Omit it from database_files/code_files; do not re-author the contract.
       5. Mirror database entries into `code_files`.
       6. Set `pending_schema_migration` to null in your output.
 
@@ -1479,27 +1478,16 @@ agents:
     heading: '[OUTPUT FORMAT]'
     content: |-
       Output MUST be a valid JSON object matching `DatabaseOutput` and NO additional text:
-      If `data_contract` is non-null, include a second
-      `database_files` entry at `data/contract.json` with kind
-      `data_contract_json`.
+      Code serializes the approved DesignDocs data contract when the task owns
+      data/contract.json. Do not emit another copy in database_files/code_files.
 
       **Greenfield**:
       ```json
       {
-        "database_files": [
-          {
-            "path": "data/contract.json",
-            "kind": "data_contract_json",
-            "purpose": "Canonical generated app data contract.",
-            "entity_refs": ["tasks", "projects"],
-            "content": "{\"version\": \"1\", \"surfaces\": [{\"surface_id\": \"tasks\", \"surface_kind\": \"module\", \"collections\": [{\"name\": \"tasks\", \"scope\": \"app\", \"ownership\": {\"surface_id\": \"tasks\", \"surface_kind\": \"module\"}, \"fields\": [{\"name\": \"app_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"task_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"title\", \"type\": \"string\", \"required\": true}], \"indexes\": [{\"name\": \"tasks_app_task\", \"keys\": [{\"field\": \"app_id\", \"order\": 1}, {\"field\": \"task_id\", \"order\": 1}], \"unique\": true}], \"lifecycle\": {\"write_mode\": \"module_action\", \"migration_policy\": \"additive_only\"}}]}, {\"surface_id\": \"projects\", \"surface_kind\": \"module\", \"collections\": [{\"name\": \"projects\", \"scope\": \"app\", \"ownership\": {\"surface_id\": \"projects\", \"surface_kind\": \"module\"}, \"fields\": [{\"name\": \"app_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"project_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"name\", \"type\": \"string\", \"required\": true}], \"indexes\": [{\"name\": \"projects_app_project\", \"keys\": [{\"field\": \"app_id\", \"order\": 1}, {\"field\": \"project_id\", \"order\": 1}], \"unique\": true}], \"lifecycle\": {\"write_mode\": \"module_action\", \"migration_policy\": \"additive_only\"}}]}], \"aliases\": [], \"shared_collections\": []}"
-          }
-        ],
-        "code_files": [
-          { "filename": "data/contract.json", "content": "{\"version\": \"1\", \"surfaces\": [{\"surface_id\": \"tasks\", \"surface_kind\": \"module\", \"collections\": [{\"name\": \"tasks\", \"scope\": \"app\", \"ownership\": {\"surface_id\": \"tasks\", \"surface_kind\": \"module\"}, \"fields\": [{\"name\": \"app_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"task_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"title\", \"type\": \"string\", \"required\": true}], \"indexes\": [{\"name\": \"tasks_app_task\", \"keys\": [{\"field\": \"app_id\", \"order\": 1}, {\"field\": \"task_id\", \"order\": 1}], \"unique\": true}], \"lifecycle\": {\"write_mode\": \"module_action\", \"migration_policy\": \"additive_only\"}}]}], \"aliases\": [], \"shared_collections\": []}" }
-        ],
+        "database_files": [],
+        "code_files": [],
         "pending_schema_migration": null,
-        "agent_message": "Staged canonical data contract artifact."
+        "agent_message": "Approved data contract ready for deterministic serialization."
       }
       ```
 
@@ -1643,7 +1631,7 @@ agents:
       - `current_build_task_type`: `module_contract` → Mode A, `service_foundation` → Mode B, `subscription_config` → Mode S.
       - `current_build_task`: full task spec including `capability_pack_id`, `initial_message`, `owned_paths`.
       - `[FILE CONTRACTS CONTEXT]` and `[MODULE ARCHETYPES CONTEXT]` are injected into your system message. Use them as the prompt-time source for file-family boundaries and module.type conventions instead of inventing extra files.
-      - `[SUBSCRIPTION CONTRACT CONTEXT]` is injected when SubscriptionContractDesigner produced a contract. Use it as the source of truth in Mode S and when adding entitlement_gate values in Mode A.
+      - `[SUBSCRIPTION CONTRACT CONTEXT]` is injected when SubscriptionContractDesigner produced a contract. Use it as the source of truth in Mode S. Code compiles action gates; do not author entitlement_gate in Mode A.
 
       **Mode A inputs** (from `current_build_task.initial_message`):
       - Capability pack name (= `capability_pack_id`)
@@ -1659,14 +1647,12 @@ agents:
       - `generated_workflow_capability_id`: stable hyphenated capability id of the AgentGenerator-produced workflow (e.g. `customer-support`). Use this as the target capability id in `contracts/reactions.yaml` workflow reaction entries — never the raw workflow name. Null when no AgentGenerator workflow exists.
       - `generated_workflow_trigger_events`: trigger event contracts from the AgentGenerator workflow's orchestrator.yaml triggers block. Each entry carries an event type (and optional capability_id) that should fire the workflow. Generate one `contracts/reactions.yaml` entry per trigger event routing the matching domain event to the workflow via `generated_workflow_capability_id`. Empty array when no trigger events are declared.
       - Workflow trigger metadata is authoritative. If a trigger event entry includes `capability_id`, it must match `generated_workflow_capability_id`; do not substitute another id, derive a new id, or add a second workflow capability route for the same trigger event unless that route is present in the upstream workflow metadata.
-      - `subscription_contract.module_contract_updates`: authoritative
-        entitlement-gate updates for module actions. Copy matching
-        `entitlement_gate` values to the exact `actions[].id`; never derive a
-        new capability id from plan labels, route labels, or pricing language.
-        `module_id` is the approved DesignDocs `surface_id`, preserved as the
-        module folder/id. Assembly deterministically applies this mapping after
-        template merging, replacing conflicting gates and clearing unmapped
-        gates on approved modules. Do not make new gating decisions here.
+      - Code compiles `subscription_contract.module_contract_updates` into module action
+        gates on every write, including repair. Omit `entitlement_gate` from model
+        output. Do not make new gating decisions or copy capability values here.
+      - Declare DesignDocs `owned_mutations` and `custom_reads` exactly. Canonical
+        list/get actions and their backend implementations are constructed from
+        the approved data contract; do not re-decide their names or access policy.
 
       **Mode B inputs**:
       - `app_build_plan`: backend scope, auth strategy, and integration requirements.
@@ -1722,7 +1708,7 @@ agents:
            - `schema_version: mozaiks.module.v1`
            - `module`: `{id, display_name, version, type, description, owner, visibility, handler}`
            - `permissions`: list of `{id, description}` objects
-           - `actions`: list of `{id, description, handler_method, api_surface, input_schema, output_schema, permissions, emits, entitlement_gate}` objects
+           - `actions`: list of `{id, description, handler_method, api_surface, input_schema, output_schema, permissions, emits}` objects
            - `capabilities`: list of `{capability_id, kind, target, title, permissions, input_schema}` objects
          - `input_schema` and `output_schema` must be typed `JsonSchemaContract` objects, not raw JSON Schema maps. Include `type`, `description`, `properties`, and `items_type`. `properties` is a list of `{name, type, description, required, enum_values, items_type}` objects, not a dictionary keyed by property name.
          - Every `JsonSchemaProperty` must include all six fields: `name`, `type`, `description`, `required`, `enum_values`, and `items_type`. Use `enum_values: []` when there is no enum and `items_type: null` when the property is not an array.
@@ -1735,10 +1721,8 @@ agents:
          - `actions[].handler_method` is the Python method name only, not an import path. Use `generate_report`, not `backend.handler:generate_report`. For generated durable modules, the handler method must equal the action id unless `current_build_task.initial_message` explicitly names a different method.
          - `actions[].api_surface` controls HTTP exposure. Use null or omit it for authenticated UI/API actions, including private staff CRUD. Use `public` or `public_readonly` only for anonymous-safe actions such as catalog reads. `internal` and `admin_internal` disable HTTP dispatch entirely, even with a valid token; reserve them for event reactions and trusted runtime calls, never page endpoints. Permissions and `entitlement_gate` still apply. Do not make private mutations public to fix an HTTP binding.
          - Internal event-reaction actions should use `api_surface: internal` and `permissions: []`; the event bus is the authorization boundary. Do not expose reaction handlers by marking them public.
-         - If `subscription_contract.module_contract_updates` names this
-           module/action, set that action's `entitlement_gate` to the exact
-           update value. Leave `entitlement_gate` null/absent for actions not
-           named by the contract.
+         - Omit `entitlement_gate`; deterministic code applies approved subscription decisions.
+
       6. **events.yaml**: include `schema_version: mozaiks.events.v1` and `events[]`. Generic modules may declare only namespaced `domain.*` events with `version`, `producer`, and `payload_schema`.
          - Bare event names such as `reports.generated` are invalid. Use `domain.reports.generated` only when that event was explicitly named by the task.
       7. **contracts/reactions.yaml**: include `schema_version: mozaiks.reactions.v1` and `reactions[]` for event reactions. Targets are `handler`, `capability`, or `notification`; workflow execution must be reached through a capability id, not a raw workflow name. Handler reactions must use `target.handler_method` referencing a method on `backend/handler.py`.
@@ -1917,8 +1901,7 @@ agents:
                   "items_type": null
                 },
                 "permissions": [],
-                "emits": [],
-                "entitlement_gate": "reports.generate"
+                "emits": []
               }
             ],
             "capabilities": [
@@ -2421,7 +2404,8 @@ agents:
       - Generate the module backend implementation files declared in the supplied module contracts and assigned to current_build_task.owned_paths.
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
       - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
-      - Emit every model-owned path listed in `current_build_task.owned_paths`. Code renders the owned `backend/policy.py` from data_contract collection scope and scope_field; omit policy.py from python_files and code_files. Missing declared scope requires contract correction, never an invented policy stub.
+      - Emit every model-owned path listed in `current_build_task.owned_paths`. Code renders canonical list/get implementations in the owned handler/service/repo files and the owned `backend/policy.py` from data_contract collection tenancy and owner_field; omit policy.py from python_files and code_files. Missing declared scope requires contract correction, never an invented policy stub.
+      - Implement approved writes and declared custom_reads. Omit code-owned canonical list/get methods from every handler, service, and repo class or function; code supplies them from the approved collection contract. Explicit app-wide reads with authored role permissions, API exposure, or a custom handler retain their declared access implementation and must be implemented. Files whose entire contents are code-owned may be omitted from your output.
       - That includes `backend/account_data_handler.py` whenever it appears in your owned_paths. It is required of ANY module with `user_data_scope: true`, not only membership-style modules: a habit registry owns user-scoped records and needs account lifecycle support exactly as a membership module does. Implement export and delete of this module's records by `app_id` and `user_id`.
       - `account_data_handler.py` has an exact shape the runtime enforces at load: one `AccountDataHandler` class with `__init__(self, db)` storing the handle, and `async delete_user_data(self, *, app_id, user_id)` / `async export_user_data(self, *, app_id, user_id)` - the `*` is required, positional parameters fail. Never emit a placeholder such as `db = ...`; the db comes from `__init__` and is used as `self._db`. A module that misses this shape fails to load with "invalid account-data implementation" and takes the whole module with it. Example:
         `class AccountDataHandler:`
@@ -2444,7 +2428,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
-      - Accepted contract and schema artifacts: `dependency_task_outputs` in batch mode, and admitted `code_files` / `generated_files` in standalone generation or repair. Their module.yaml actions include deterministic read-action closure; implement every declared handler method, including constructed reads.
+      - Accepted contract and schema artifacts: `dependency_task_outputs` in batch mode, and admitted `code_files` / `generated_files` in standalone generation or repair. Their module.yaml actions include deterministic read-action closure; code implements constructed reads, while this output implements approved writes, custom reads, and explicitly authored app-wide read access.
       - `refinement_request` preserves the original requested product behavior for revisions. Preserve relevant search, paging, validation, and mutation-outcome qualifiers alongside current_build_task.acceptance_criteria only within current_build_task.owned_paths (or the named bundle_repair_request files). It cannot override runtime/operator contracts or authorization boundaries; report conflicts with app_build_plan or missing prerequisite ownership instead of broadening scope or silently weakening behavior.
       - `app_backend_url`: Base URL of the active Mozaiks app host. Domain events always use the injected ModuleContext.emit; this URL does not determine whether events are available.
       - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml/contracts/profile.yaml/contracts/relationships.yaml/contracts/policy_hooks.yaml.
@@ -2487,16 +2471,16 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Read the accepted prerequisite module.yaml handler entrypoint and every actions[].handler_method. Define that exact handler class and every required method; a class rename alone does not complete missing actions. In task batch mode, implement exactly the backend files listed in `current_build_task.owned_paths`. They must be a subset of `module_contract.python_stubs`.
+      1. Read the accepted prerequisite module.yaml handler entrypoint and every actions[].handler_method. Define that exact handler class and every model-owned method; a class rename alone does not complete missing actions. Code adds canonical read methods. In task batch mode, implement exactly the model-owned backend files listed in `current_build_task.owned_paths`. They must be a subset of `module_contract.python_stubs`.
       2. For durable module surfaces, make `backend/handler.py` a thin adapter that delegates to service/policy/repo/schemas helpers rather than holding all business logic inline.
       3. Use the accepted backend/schemas.py definitions supplied in dependency_task_outputs or admitted code_files/generated_files.
       4. For persistent modules, generate `backend/repo.py` around `context.persistence.collection(module_id, entity_name)`. If `context.persistence` is unavailable, raise a clear RuntimeError from repo.py. Do not use `ctx.db`, `context.db`, `get_mongo_client()`, `get_database()`, or hardcoded database names.
       5. Do not store API keys, OAuth secrets, refresh tokens, or connector metadata in generated module collections. Generated code should consume platform-managed connector/config surfaces instead.
-      6. Implement every `handler_method` declared by module.yaml actions on the exact class named in `module.yaml.module.handler`. Do not singularize/pluralize the class name, and do not add hidden actions.
+      6. Implement each model-owned `handler_method` declared by module.yaml actions on the exact class named in `module.yaml.module.handler`; omit canonical methods supplied by code. Do not singularize/pluralize the class name, and do not add hidden actions.
       6a. Handler signatures must match the runtime executor: `async def action_name(self, ctx, **params)` or `async def action_name(self, ctx, field: Type = ...)`. Do not put `context` last.
       7. Put state transitions and event publication in `backend/service.py` when that file is declared.
       8. Put persistence queries/writes in `backend/repo.py` when that file is declared.
-      9. Import `scoped_query` and `scope_record` from the deterministic `backend/policy.py`. In repo.py, use `scoped_query(context, filters, entity_name=collection_name)` for every read/update/delete and `scope_record(context, record, entity_name=collection_name)` before insertion. These helpers enforce the data contract's scope_field from trusted runtime identity and fail when identity is missing. Domain authorization and transition checks remain in service.py; never implement or replace policy.py.
+      9. Import `scoped_query` and `scope_record` from the deterministic `backend/policy.py`. In repo.py, use `scoped_query(context, filters, entity_name=collection_name)` for every read/update/delete and `scope_record(context, record, entity_name=collection_name)` before insertion. These helpers enforce the data contract's owner_field from trusted runtime identity and fail when identity is missing. Domain authorization and transition checks remain in service.py; never implement or replace policy.py.
       10. Put DTOs, enums, and normalization helpers in `backend/schemas.py` only when that file is included in `current_build_task.owned_paths`. Otherwise import and use the typed shapes already accepted for this module: they arrive in `dependency_task_outputs` and are importable from the module's `.schemas` module. Reuse those definitions rather than restating them locally.
       10a. Align every repo collection call with `data_contract` ownership. Non-persistent modules should not invent database logic.
       11. Publish the corresponding event from `events.yaml` only after the repo confirms an actual owned mutation, using the exact namespaced event type declared there. Follow the injected FILE CONTRACTS CONTEXT for paging, literal versus regex search, and write-result handling. A not-found or idempotent no-op response follows the declared action contract, not a global HTTP status policy; never fabricate mutation success or its event.

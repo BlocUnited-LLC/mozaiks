@@ -27,8 +27,23 @@ provider-neutral access contract.
 For generated apps, SubscriptionContractDesigner chooses which approved module
 actions each capability gates in `module_contract_updates`. It selects exact
 DesignDocs surface and action IDs; capabilities that differ between plans must
-each gate an action. AppGenerator writes those decisions into `module.yaml`
-deterministically, even when generated files omit or contradict them.
+each gate an action. The inventory combines approved `owned_mutations`, declared
+`custom_reads`, and canonical `list_<collection>` / `get_<collection>` actions
+whose collections explicitly declare the surface's entities in `data/contract.json`.
+Custom reads such as dashboard summaries are design decisions implemented by
+ServiceAgent; canonical collection reads are constructed by code.
+
+Managed-pack facade actions are excluded from gate targets, so plan browsing,
+checkout, upgrades, the billing portal, usage, and token access remain available
+to free users. If a paid feature has no approved action, DesignDocs must declare
+it before subscription design can pass; review notes cannot waive that decision.
+One compiler rejects action IDs outside the approved module inventory and applies
+the selected gates to `module.yaml` during task admission, assembly
+and repair, including gates on constructed reads. Generated YAML cannot override
+or remove the approved mapping. Writing a gated manifest, including replacing an
+existing gated manifest with an ungated repair, requires the approved subscription
+contract. Missing approval fails closed; an explicit approved no-subscription
+decision can remove old gates.
 
 ## Multi-Product Catalog
 

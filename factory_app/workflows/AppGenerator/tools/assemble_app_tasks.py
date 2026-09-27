@@ -7,13 +7,11 @@ from typing import Annotated, Any
 import yaml
 from pydantic import Field
 
-from factory_app.workflows._shared.subscription_contract_context import (
-    _find_contract,
-    approved_module_actions,
-    validate_module_contract_updates,
-)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
+)
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
@@ -30,6 +28,7 @@ from .code_file_utils import (
 )
 from .hydrate_app_revision_context import hydrate_app_revision_context
 from .materialize_app_config_contracts import materialize_app_config_contracts
+from .module_entitlement_gates import apply_entitlement_gates
 from .resolve_managed_capability_templates import resolve_managed_capability_templates
 from .save_app_schema import resolve_app_theme_config
 
@@ -270,94 +269,6 @@ def _context_deleted_files(context_variables: Any | None) -> list[str]:
     return extract_deleted_file_paths_from_payload({"deleted_files": raw})
 
 
-def _apply_entitlement_gates(
-    code_files: list[dict[str, str]],
-    *,
-    context_variables: Any,
-) -> list[dict[str, str]]:
-    """Compile the approved gate decisions after all module files are merged."""
-    if context_variables is None:
-        return code_files
-    contract = _find_contract({
-        key: detach(context_variables.get(key))
-        for key in ("subscription_contract", "subscription_contract_artifact")
-    })
-    if contract is None or not contract.get("contract_required"):
-        return code_files
-    gates_by_module = validate_module_contract_updates(contract, context_variables)
-    approved_modules = approved_module_actions(context_variables)
-
-    file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
-    remaining = set(gates_by_module)
-    for path, content in list(file_map.items()):
-        pure = PurePosixPath(path)
-        if len(pure.parts) != 3 or pure.parts[0] != "modules" or pure.parts[2] != "module.yaml":
-            continue
-        module_id = pure.parts[1]
-        if module_id not in approved_modules:
-            continue
-        gates = gates_by_module.get(module_id, {})
-        try:
-            data = yaml.safe_load(content)
-        except yaml.YAMLError as exc:
-            raise ValueError(f"{path}: cannot apply approved entitlement mapping to invalid YAML: {exc}") from exc
-        if not isinstance(data, dict) or not isinstance(data.get("actions"), list):
-            raise ValueError(f"{path}: approved entitlement mapping requires an actions list")
-        actions = data["actions"]
-        action_ids = [str(action.get("id") or "") for action in actions if isinstance(action, dict)]
-        missing = sorted(set(gates) - set(action_ids))
-        duplicates = sorted({action_id for action_id in gates if action_ids.count(action_id) > 1})
-        if missing or duplicates:
-            raise ValueError(
-                f"{path}: cannot resolve approved entitlement actions; missing={missing}, duplicate={duplicates}. "
-                f"Valid approved action ids: {approved_modules[module_id]}; generated action ids: {sorted(action_ids)}."
-            )
-        remaining.discard(module_id)
-        file_changed = False
-        metadata = data.get("module")
-        if isinstance(metadata, dict) and metadata.get("id") != module_id:
-            # The approved surface and canonical output path already fix identity.
-            metadata["id"] = module_id
-            file_changed = True
-        for action in actions:
-            if not isinstance(action, dict):
-                continue
-            action_id = str(action.get("id") or "").strip()
-            if action_id in gates:
-                if action.get("entitlement_gate") != gates[action_id]:
-                    action["entitlement_gate"] = gates[action_id]
-                    file_changed = True
-            elif "entitlement_gate" in action:
-                # File writers cannot add product decisions absent from the contract.
-                del action["entitlement_gate"]
-                file_changed = True
-        if file_changed:
-            file_map[path] = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
-    if remaining:
-        failed_tasks = _failed_batch_task_ids(detach(context_variables.get("app_task_batch_results")))
-        plan = detach(context_variables.get("app_build_plan")) or {}
-        for module_id in sorted(remaining.copy()):
-            path = f"modules/{module_id}/module.yaml"
-            owners = {
-                str(task.get("task_id") or "")
-                for task in plan.get("build_tasks") or []
-                if path in {safe_relpath(str(owned)) for owned in task.get("owned_paths") or []}
-            }
-            if owners and owners <= failed_tasks:
-                # Partial batches must reach acceptance and bounded recovery.
-                # Only recorded failure of every exact path owner excuses absence.
-                remaining.remove(module_id)
-                logger.info(
-                    "[AppGenerator] entitlement module %s not assembled: owning tasks %s failed",
-                    path, sorted(owners),
-                )
-    if remaining:
-        raise ValueError(
-            f"Missing module.yaml for approved entitlement module ids {sorted(remaining)}. "
-            f"Valid approved module ids: {sorted(approved_modules)}."
-        )
-    return [{"filename": k, "content": v} for k, v in sorted(file_map.items())]
-
 
 def _apply_deleted_files(
     code_files: list[dict[str, str]],
@@ -466,6 +377,11 @@ async def assemble_app_tasks(
             detach(context_variables.get("data_contract"))
             if context_variables and hasattr(context_variables, "get") else None
         ),
+        design_surface_map=(
+            detach(context_variables.get("design_surface_map"))
+            if context_variables and hasattr(context_variables, "get") else None
+        ),
+        subscription_contract=resolve_subscription_contract(context_variables),
     )
 
     app_build_plan = (
@@ -491,7 +407,12 @@ async def assemble_app_tasks(
         context_variables=context_variables,
     )
     code_files = _apply_deleted_files(code_files, _context_deleted_files(context_variables))
-    code_files = _apply_entitlement_gates(code_files, context_variables=context_variables)
+    code_files = apply_entitlement_gates(
+        code_files, context_variables=context_variables,
+        failed_task_ids=_failed_batch_task_ids(
+            detach(context_variables.get("app_task_batch_results")) if context_variables is not None else None
+        ),
+    )
     code_files = _apply_app_config_contracts(
         code_files,
         app_id=str(app_id),

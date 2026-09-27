@@ -24,12 +24,15 @@ if str(REPO_ROOT) not in sys.path:
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
+from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
+    apply_entitlement_gates,
+)
 from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from scripts.appgenerator_fixture_replay import execute_file_replay
-from scripts.smoke_appgenerator_live_acceptance import SmokeContext
 
 DEFAULT_APP_ID = "subscription-reporting-live-smoke"
 WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
@@ -177,7 +180,7 @@ def sample_subscription_contract() -> dict[str, Any]:
         ],
         "app_generator_instructions": [
             "Emit one config/subscriptions.yaml file from subscription_config_file.",
-            "Set reports.generate entitlement_gate on modules/reports/module.yaml generate_report.",
+            "Code compiles reports.generate onto the approved generate_report action; omit model-authored gates.",
             "Usage pages read platform-owned /api/me/usage and /api/me/tokens endpoints.",
         ],
         "validation_notes": [
@@ -226,12 +229,13 @@ def _module_contract_task() -> dict[str, Any]:
             Module id: reports.
             Module handler: backend.handler:ReportsModule.
             Actions:
-            - list_reports: handler_method list_reports, no entitlement_gate, output object with reports array.
+            - list_reports: handler_method list_reports, explicit permissions [], api_surface null, canonical items/total output.
+            - get_reports: handler_method get_reports, explicit permissions [], api_surface null, input id, output item.
             - generate_report: handler_method generate_report, input topic string, output report_id and topic strings.
             Capabilities:
             - reports.view grants list_reports.
             - reports.generate grants generate_report.
-            Subscription contract update is authoritative: set generate_report entitlement_gate to reports.generate exactly.
+            Omit entitlement_gate. Code compiles the authoritative subscription action mapping.
             No domain events or workflow trigger events are declared for this task; actions[].emits must be empty and events_yaml.events must be empty.
             module_contract must be a ModuleContractBundle wrapper: put module.yaml fields under module_contract.module_yaml, not directly under module_contract.
             Emit no backend Python files.
@@ -271,7 +275,6 @@ def _build_plan(tasks: list[dict[str, Any]]) -> dict[str, Any]:
             },
         ],
         "entities": [{"name": "Report", "operations": ["read", "create"], "notes": None}],
-        "data_contract": _data_contract(),
         "roles": ["user"],
         "auth_strategy": "basic",
         "service_scope": ["reports"],
@@ -283,7 +286,8 @@ def _build_plan(tasks: list[dict[str, Any]]) -> dict[str, Any]:
                 "surface_kind": "module",
                 "label": "Reports",
                 "capability_source": "generated_module",
-                "operations": ["list_reports", "generate_report"],
+                "operations": ["list_reports", "get_reports", "generate_report"],
+                "primary_entities": ["Report"],
             },
             {
                 "capability_pack_id": "entitlement_dispatch",
@@ -316,8 +320,17 @@ def _task_context(task: dict[str, Any], contract: dict[str, Any]) -> dict[str, A
         "current_build_task_type": task["task_type"],
         "current_build_task": task,
         "subscription_contract": contract,
+        "design_surface_map": _design_surface_map(),
+        "data_contract": _data_contract(),
         "app_build_plan": _build_plan(tasks),
     }
+
+
+def _design_surface_map() -> dict[str, Any]:
+    return {"surfaces": [{
+        "surface_id": "reports", "surface_kind": "module", "owner": "app",
+        "primary_entities": ["Report"], "owned_mutations": ["generate_report"], "custom_reads": [],
+    }]}
 
 
 def _collect_file_map(payload: dict[str, Any]) -> dict[str, str]:
@@ -459,6 +472,7 @@ def validate_subscription_output(
         errors.append(f"{SUBSCRIPTION_PATH} must parse to a YAML object.")
         return content, errors
 
+
     allowed = {
         "schema_version",
         "label",
@@ -523,6 +537,17 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
         errors.append(f"{MODULE_PATH} must parse to a YAML object.")
         return content, errors
 
+    context = ContextVariablesBridge(_task_context(_module_contract_task(), sample_subscription_contract()))
+    try:
+        compiled = apply_entitlement_gates(
+            [{"filename": MODULE_PATH, "content": content}], context_variables=context,
+        )
+    except ValueError as exc:
+        errors.append(str(exc))
+        return content, errors
+    content = compiled[0]["content"]
+    parsed = yaml.safe_load(content)
+
     module = parsed.get("module")
     if not isinstance(module, dict) or module.get("id") != "reports":
         errors.append("modules/reports/module.yaml must declare module.id: reports.")
@@ -537,7 +562,7 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
     if not isinstance(generate, dict):
         errors.append("reports module must declare generate_report.")
     elif generate.get("entitlement_gate") != "reports.generate":
-        errors.append("generate_report must copy entitlement_gate: reports.generate exactly.")
+        errors.append("The approved gate compiler must set generate_report to reports.generate.")
 
     list_reports = by_id.get("list_reports")
     if not isinstance(list_reports, dict):
@@ -614,7 +639,6 @@ def deterministic_module_contract_output() -> dict[str, Any]:
           - id: generate_report
             description: Generate an AI report.
             handler_method: generate_report
-            entitlement_gate: reports.generate
             input_schema:
               type: object
               required: [topic]
@@ -640,6 +664,22 @@ def deterministic_module_contract_output() -> dict[str, Any]:
             title: Generate reports
         """
     ).strip() + "\n"
+    module = yaml.safe_load(module_yaml)
+    for action in module["actions"]:
+        action.update({"permissions": [], "api_surface": None})
+    module["actions"].append({
+        "id": "get_reports", "description": "Read one app-wide report.", "handler_method": "get_reports",
+        "permissions": [], "api_surface": None,
+        "input_schema": {"type": "object", "properties": [{
+            "name": "id", "type": "string", "required": True,
+            "description": None, "enum_values": None, "items_type": None,
+        }], "description": None, "items_type": None},
+        "output_schema": {"type": "object", "properties": [{
+            "name": "item", "type": "object", "required": True,
+            "description": None, "enum_values": None, "items_type": None,
+        }], "description": None, "items_type": None},
+    })
+    module_yaml = _yaml_text(module)
     return {
         "mode": "module_contract_bundle",
         "module_contract": {
@@ -693,22 +733,12 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
             f"    async def {method}(self, ctx, **params):\n"
             f"        return await ReportsService(ctx).{method}(**params)\n\n"
         )
-    generic_methods = "\n\n".join(
-        textwrap.indent(
-            f"async def {method}(self, **params):\n"
-            f"    return {{\"action\": \"{method}\", \"params\": dict(params)}}\n",
-            "    ",
-        ).rstrip()
-        for method in methods
-        if method not in {"list_reports", "generate_report"}
-    )
-    service_generic = f"\n\n{generic_methods}" if generic_methods else ""
 
     return {
         "modules/reports/backend/__init__.py": "",
         "modules/reports/backend/handler.py": handler_source.strip() + "\n",
         "modules/reports/backend/service.py": textwrap.dedent(
-            f"""
+            """
             from .repo import ReportsRepo
             from .schemas import report_document
 
@@ -719,13 +749,15 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
                     self.repo = ReportsRepo(ctx)
 
                 async def list_reports(self, **params):
-                    return {{"reports": await self.repo.list_reports()}}
+                    return {"reports": await self.repo.list_reports()}
+
+                async def get_reports(self, **params):
+                    return {"item": await self.repo.get_report(params["id"])}
 
                 async def generate_report(self, **params):
                     report = report_document(topic=params.get("topic"))
                     saved = await self.repo.save_report(report)
-                    return {{"report_id": saved["report_id"], "topic": saved["topic"], "report": saved}}
-            {service_generic}
+                    return {"report_id": saved["report_id"], "topic": saved["topic"], "report": saved}
             """
         ).strip() + "\n",
         "modules/reports/backend/repo.py": textwrap.dedent(
@@ -749,6 +781,14 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
                         return []
                     query = scoped_query(self.ctx, entity_name="reports")
                     return await collection.find_many(query, limit=100)
+
+                async def get_report(self, report_id):
+                    collection = self._collection()
+                    if collection is None:
+                        return None
+                    return await collection.find_one(scoped_query(
+                        self.ctx, {"report_id": report_id}, entity_name="reports",
+                    ))
 
                 async def save_report(self, record):
                     record = scope_record(self.ctx, record, entity_name="reports")
@@ -788,7 +828,7 @@ def _data_contract() -> dict[str, Any]:
                     {
                         "name": "reports",
                         "scope": "app",
-                        "scope_field": "app_id",
+                        "entity": "Report", "tenancy": "app_wide", "owner_field": None,
                         "fields": [
                             {"name": "app_id", "type": "string", "required": True},
                             {"name": "report_id", "type": "string", "required": True},
@@ -807,6 +847,9 @@ def _data_contract() -> dict[str, Any]:
             {
                 "name": "subscription_assignments",
                 "data_alias": "billing.subscriptions",
+                "entity": "SubscriptionAssignment", "scope": "app", "tenancy": "per_user",
+                "owner_field": "user_id", "fields": [{"name": "user_id", "type": "string", "required": True}],
+                "ownership": {"surface_id": "subscription_contract", "surface_kind": "app_policy"},
             }
         ],
     }
@@ -980,7 +1023,7 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
     }
     files.update(_backend_files(module_yaml))
     files.update(_entitlement_dispatch_backend_files())
-    files.update(materialize_module_policies(files))
+    files.update(materialize_module_policies(files, data_contract))
     return files
 
 
@@ -1085,12 +1128,15 @@ async def validate_subscription_acceptance_handoff(
             "depends_on": ["reports_services", "entitlement_services", "task_subscription_config"],
         },
     ])
-    context = SmokeContext(
+    context = ContextVariablesBridge(
         {
             "workflow_name": "AppGenerator",
             "app_id": DEFAULT_APP_ID,
             "chat_id": "subscription-reporting-live-smoke",
             "generated_files": files,
+            "data_contract": _data_contract(),
+            "design_surface_map": _design_surface_map(),
+            "subscription_contract": sample_subscription_contract(),
             "app_validation_status": "skipped",
             "app_validation_strategy_used": "skip",
         }
@@ -1118,7 +1164,10 @@ async def validate_subscription_acceptance_handoff(
             for path in tasks[-1]["owned_paths"]
         ],
     }
-    accepted = await execute_file_replay(context.data, files, task_outputs=replay_outputs)
+    replay_context = context.snapshot()
+    accepted = await execute_file_replay(replay_context, files, task_outputs=replay_outputs)
+    for key, value in replay_context.items():
+        context.set(key, value)
     files.update({file["filename"]: file["content"] for task_id, output in accepted.items()
                   if not task_id.startswith("_") for file in output["code_files"]})
     context.set("generated_files", files)
@@ -1353,7 +1402,7 @@ async def run_live_appgenerator_subscription_smoke(
         timeout_seconds=timeout_seconds,
         prompt=(
             "Run the current module_contract build task for reports. "
-            "Copy subscription_contract.module_contract_updates into module.yaml exactly."
+            "Omit model-authored gates; code compiles subscription_contract.module_contract_updates."
         ),
     )
     module_output = module_live.get("structured_output") or {}

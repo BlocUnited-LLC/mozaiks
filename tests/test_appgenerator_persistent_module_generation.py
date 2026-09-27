@@ -81,7 +81,6 @@ def _app_build_plan_fixture() -> dict[str, Any]:
                 ],
             },
         ],
-        "data_contract": _data_contract(),
         "pending_schema_migration": _schema_migration(),
     }
 
@@ -98,9 +97,8 @@ def _data_contract() -> dict[str, Any]:
                     {
                         "module_id": "projects",
                         "name": "projects",
-                        "entity_name": "projects",
-                        "scope": "user",
-                        "scope_field": "owner_id",
+                        "entity": "Project", "scope": "app",
+                        "tenancy": "per_user", "owner_field": "owner_id",
                         "ownership": {"surface_id": "projects", "surface_kind": "module"},
                         "fields": [{"name": "owner_id", "type": "string", "required": True}],
                         "indexes": [
@@ -122,9 +120,8 @@ def _data_contract() -> dict[str, Any]:
                     {
                         "module_id": "tasks",
                         "name": "tasks",
-                        "entity_name": "tasks",
-                        "scope": "user",
-                        "scope_field": "owner_id",
+                        "entity": "Task", "scope": "app",
+                        "tenancy": "per_user", "owner_field": "owner_id",
                         "ownership": {"surface_id": "tasks", "surface_kind": "module"},
                         "fields": [{"name": "owner_id", "type": "string", "required": True}],
                         "indexes": [
@@ -342,7 +339,7 @@ def _assembled_file_map() -> dict[str, str]:
         _database_output(),
         _backend_output("projects"),
         _backend_output("tasks"),
-    ])
+    ], data_contract=_data_contract())
     return {entry["filename"]: entry["content"] for entry in merged}
 
 
@@ -354,7 +351,8 @@ def test_app_build_plan_fixture_uses_canonical_persistence_paths() -> None:
         for path in task["owned_paths"]
     }
 
-    assert plan["data_contract"]["surfaces"]
+    assert "data_contract" not in plan
+    assert _data_contract()["surfaces"]
     assert plan["pending_schema_migration"]["migration_id"] == "001_projects_tasks_indexes"
     assert "data/contract.json" in owned_paths
     assert "data/migrations/001_projects_tasks_indexes.json" in owned_paths
@@ -386,7 +384,7 @@ def test_config_middleware_style_module_contracts_declare_repo_and_schemas() -> 
         assert "backend/models.py" not in stub_paths
 
     intent_keys = {
-        (collection["module_id"], collection.get("entity_name") or collection["name"])
+        (collection["module_id"], collection["name"])
         for surface in _data_contract()["surfaces"]
         for collection in surface["collections"]
     }
@@ -443,7 +441,7 @@ def test_assembled_data_contract_migration_and_repos_align() -> None:
     intent = json.loads(file_map["data/contract.json"])
     migration = json.loads(file_map["data/migrations/001_projects_tasks_indexes.json"])
     intent_keys = {
-        (collection["module_id"], collection.get("entity_name") or collection["name"])
+        (collection["module_id"], collection["name"])
         for surface in intent["surfaces"]
         for collection in surface["collections"]
     }

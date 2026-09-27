@@ -63,7 +63,7 @@ def _output():
                 "actions": [{
                     "id": "get_record", "description": "Get a record.", "handler_method": "get_record",
                     "input_schema": _schema(), "output_schema": _schema(),
-                    "permissions": [], "emits": [], "entitlement_gate": None,
+                    "permissions": [], "emits": [],
                 }],
             },
             **{name: None for name in (
@@ -177,6 +177,8 @@ async def test_live_billing_action_with_only_flags_completes_task(monkeypatch, m
     bundle["module_id"] = "billing_portal"
     bundle["module_yaml"]["module"].update(id="billing_portal", display_name="Billing Portal")
     bundle["module_yaml"]["actions"] = [live_billing_action]
+    # Gate decisions now enter through the approved subscription context.
+    live_billing_action.pop("entitlement_gate", None)
     for key in ("input_schema", "output_schema"):
         del live_billing_action[key]["required"]
     module = await _execute_module_task(monkeypatch, models, output)

@@ -79,7 +79,7 @@ class AppLoadResult:
         definition:           Parsed AppDefinition from app.json and discovered owners
         modules:              Loaded module handlers
         data_contract:        Parsed data contract, or None
-        data_entities_by_key: Data entities indexed by (module_id, entity_name)
+        data_entities_by_key: Collection metadata indexed by (owner_id, declared entity).
         subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
         metrics_config:       Parsed analytics config, or None when not declared
         auth_contract:        Validated app auth behavior, or None for public apps

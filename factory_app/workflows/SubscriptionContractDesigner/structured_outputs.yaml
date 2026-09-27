@@ -447,7 +447,7 @@ models:
         description: Exact app-owned module surface_id from the injected approved DesignDocs action inventory; never an invented module name. AppGenerator preserves this id.
       action_id:
         type: str
-        description: Exact owned_mutations action id belonging to module_id in the injected approved DesignDocs action inventory; no free-text action descriptions.
+        description: Exact owned_mutations, custom_reads, or canonical collection list/get action id belonging to module_id in the injected approved DesignDocs action inventory. Managed-pack facade actions are excluded; no free-text action descriptions.
       entitlement_gate:
         type: union
         variants: [str, 'null']
@@ -593,7 +593,7 @@ models:
       validation_notes:
         type: list
         items: str
-        description: Notes and assumptions for downstream review.
+        description: Notes and assumptions for downstream review. Notes never waive missing action mappings; a feature without an approved action requires its custom read or write to be declared upstream in DesignDocs.
       forbidden_outputs:
         type: list
         items: str

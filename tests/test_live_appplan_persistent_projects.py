@@ -17,22 +17,10 @@ from typing import Any
 
 import pytest
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+
 WORKSPACE = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = WORKSPACE / "tests" / "fixtures" / "appplan_persistent_projects_output.json"
-
-
-class _Context:
-    def __init__(self) -> None:
-        self.data: dict[str, Any] = {}
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.data.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self.data[key] = value
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self.data[key] = value
 
 
 def _load_module(relative_path: str, module_name: str):
@@ -87,7 +75,7 @@ def test_app_build_plan_accepts_persistence_contract_task() -> None:
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_persistence_contract_acceptance",
     )
-    ctx = _Context()
+    ctx = ContextVariablesBridge(json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["context"])
     plan = {
         "agent_message": "Plan persistent project management app.",
         "app_kind": "project_management",
@@ -120,8 +108,8 @@ def test_app_build_plan_accepts_persistence_contract_task() -> None:
 
     mod.app_build_plan(AppBuildPlan=plan, context_variables=ctx)
 
-    assert ctx.data["app_plan_ready"] is True
-    assert ctx.data["app_build_plan"]["build_tasks"][0]["task_type"] == "persistence_contract"
+    assert ctx.snapshot()["app_plan_ready"] is True
+    assert ctx.snapshot()["app_build_plan"]["build_tasks"][0]["task_type"] == "persistence_contract"
 
 
 def test_appplan_prompt_injects_persistence_contract_for_planning() -> None:
@@ -162,16 +150,16 @@ class TestAppPlanPersistentProjectsFixtureReplay:
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
             f"tests.appplan_persistent_fixture_validation.{id(self)}",
         )
-        ctx = _Context()
+        ctx = ContextVariablesBridge(json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["context"])
         mod.app_build_plan(AppBuildPlan=self.plan, context_variables=ctx)
-        assert ctx.data.get("app_plan_ready") is True
+        assert ctx.get("app_plan_ready") is True
 
     def test_fixture_passes_persistence_shape_checks(self) -> None:
         script_mod = _load_module(
             "scripts/smoke_appplan_persistent_projects.py",
             f"tests.appplan_persistent_shape.{id(self)}",
         )
-        assert script_mod.check_plan_shape(self.plan) == []
+        assert script_mod.check_plan_shape(self.plan, data_contract=json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["context"]["data_contract"]) == []
 
     def test_projects_and_tasks_modules_exist(self) -> None:
         module_tasks = [
@@ -183,7 +171,8 @@ class TestAppPlanPersistentProjectsFixtureReplay:
         assert "tasks" in text
 
     def test_data_contract_and_canonical_backend_paths_exist(self) -> None:
-        assert isinstance(self.plan.get("data_contract"), dict)
+        assert "data_contract" not in self.plan
+        assert json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["context"]["data_contract"]["surfaces"]
         assert "data/contract.json" in self.paths
         for module_id in ("projects", "tasks"):
             assert f"modules/{module_id}/backend/repo.py" in self.paths

@@ -20,18 +20,30 @@ from factory_app.workflows.SubscriptionContractDesigner.tools import (
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+from mozaiksai.core.workflow.generator_support.module_action_inventory import all_module_actions
 from tests.factory_context import factory_context
 
 
 def _surface_map() -> dict:
     return {"surfaces": [
         {"surface_id": "task_management", "surface_kind": "module", "owner": "app",
-         "owned_mutations": ["create_task", "list_tasks", "update_task", "view_dashboard"]},
+         "primary_entities": ["Task"], "owned_mutations": ["create_task", "update_task"],
+         "custom_reads": ["view_dashboard"]},
         {"surface_id": "platform_identity", "surface_kind": "module", "owner": "platform",
          "owned_mutations": ["authenticate"]},
         {"surface_id": "TaskAnalysis", "surface_kind": "workflow", "owner": "app",
          "owned_mutations": ["analyze"]},
     ]}
+
+
+def _data_contract() -> dict:
+    return {"version": "1", "surfaces": [{
+        "surface_id": "task_management", "surface_kind": "module", "collections": [{
+            "name": "tasks", "entity": "Task", "tenancy": "per_user", "owner_field": "owner_id",
+            "ownership": {"surface_id": "task_management", "surface_kind": "module"},
+            "fields": [{"name": "owner_id", "type": "string", "required": True}],
+        }],
+    }]}
 
 
 def _contract() -> dict:
@@ -58,6 +70,7 @@ def _context(output: dict, surface_map: dict | None = None) -> StructuredOutputO
     context = ContextVariablesBridge(factory_context({
         "app_id": "task-tracker", "chat_id": "subscription-chat",
         "design_surface_map": _surface_map() if surface_map is None else surface_map,
+        "data_contract": _data_contract(),
     }))
     return StructuredOutputOverlay(context, output)
 
@@ -72,10 +85,10 @@ def side_effects(monkeypatch):
 
 
 def test_inventory_injection_reads_real_bridge_and_contains_only_approved_module_actions() -> None:
-    context = ContextVariablesBridge({"design_surface_map": _surface_map()})
+    context = ContextVariablesBridge({"design_surface_map": _surface_map(), "data_contract": _data_contract()})
     assert isinstance(context.get("design_surface_map"), MappingProxyType)
     assert approved_module_actions(context) == {
-        "task_management": ["create_task", "list_tasks", "update_task", "view_dashboard"],
+        "task_management": ["create_task", "get_tasks", "list_tasks", "update_task", "view_dashboard"],
     }
     agent = SimpleNamespace(name="ContractDesignerAgent", context_variables=context, system_message="base")
 
@@ -212,3 +225,69 @@ def test_designer_declares_inventory_hook_and_typed_reference_contract() -> None
     assert "surface_id" in fields["module_id"]["description"]
     assert "owned_mutations" in fields["action_id"]["description"]
     assert "plans" in fields["entitlement_gate"]["description"]
+
+
+def test_facade_actions_remain_page_choices_but_are_never_gate_targets() -> None:
+    surfaces = _surface_map()
+    surfaces["surfaces"].append({
+        "surface_id": "billing_portal", "surface_kind": "module", "owner": "app",
+        "source_capability_packs": ["mozaikspay"], "primary_entities": [],
+        "owned_mutations": ["start_subscription_checkout", "open_billing_portal", "start_token_top_up"],
+        "custom_reads": ["list_plans", "get_usage_status", "get_token_status"],
+    })
+    output = _contract()
+    context = _context(output, surfaces)
+    assert "billing_portal" in all_module_actions(context)
+    assert "billing_portal" not in approved_module_actions(context)
+    output["module_contract_updates"].append({
+        "module_id": "billing_portal", "action_id": "list_plans", "entitlement_gate": "dashboard.view",
+    })
+    with pytest.raises(ValueError, match="Managed-pack facade actions are never gate targets"):
+        validate_module_contract_updates(output, context)
+
+
+def test_collection_entity_is_explicit_and_does_not_use_one_collection_fallback() -> None:
+    context = ContextVariablesBridge({"design_surface_map": _surface_map(), "data_contract": _data_contract()})
+    contract = _data_contract()
+    contract["surfaces"][0]["collections"][0]["entity"] = "Unrelated"
+    context.set("data_contract", contract)
+    assert approved_module_actions(context)["task_management"] == ["create_task", "update_task", "view_dashboard"]
+
+
+@pytest.mark.asyncio
+async def test_missing_feature_action_is_diagnosed_and_notes_cannot_waive_it(side_effects) -> None:
+    output = _contract()
+    output["module_contract_updates"].pop()
+    output["validation_notes"] = ["Dashboard is not in the action inventory."]
+    result = await module.save_subscription_contract(_context(output))
+    assert result["success"] is False
+    assert "DesignDocs must declare the missing custom_reads action" in result["error"]
+    assert "validation_notes do not waive" in result["error"]
+    side_effects[0].assert_not_awaited()
+
+
+def test_designer_loads_the_approved_collection_contract() -> None:
+    root = Path(__file__).resolve().parents[1] / "factory_app/workflows/SubscriptionContractDesigner"
+    config = yaml.safe_load((root / "context_variables.yaml").read_text(encoding="utf-8"))
+    assert config["definitions"]["data_contract"]["source"]["collection"] == "DataContracts"
+    assert "data_contract" in config["agents"]["ContractDesignerAgent"]["variables"]
+    for variable in ("capability_packs", "operator_contracts"):
+        assert config["definitions"][variable]["source"]["type"] == "build_context"
+
+
+def test_external_managed_facade_is_excluded_using_trusted_pack_descriptors() -> None:
+    context = ContextVariablesBridge({
+        "design_surface_map": {"surfaces": [{
+            "surface_id": "storage_portal", "surface_kind": "module", "owner": "app",
+            "owned_mutations": ["upgrade"], "custom_reads": ["usage"],
+            "source_capability_packs": ["managed_storage"],
+        }]},
+        "capability_packs": [{"id": "managed_storage", "capability_source": "managed_capability"}],
+        "operator_contracts": [{
+            "contract_id": "managed_storage",
+            "surface_ownership": [{"owner": "Storage provider", "facade_module": "storage_portal"}],
+            "facades": [{"module_id": "storage_portal"}],
+        }],
+    })
+    assert all_module_actions(context) == {"storage_portal": ["upgrade", "usage"]}
+    assert approved_module_actions(context) == {}

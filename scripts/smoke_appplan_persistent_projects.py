@@ -38,6 +38,8 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _AGENTS_YAML = _REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "agents.yaml"
 _TOOLS_DIR = _REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "tools"
@@ -61,18 +63,9 @@ class _FakeAgent:
         self.system_message = message
 
 
-class _Context:
-    def __init__(self) -> None:
-        self.data: dict[str, Any] = {}
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.data.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self.data[key] = value
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self.data[key] = value
+def _approved_context() -> dict[str, Any]:
+    """Use the checked fixture's approved DesignDocs context as planning input."""
+    return json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))["context"]
 
 
 def _load_module(path: Path, module_name: str):
@@ -169,9 +162,9 @@ def _validate_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], str]:
         _TOOLS_DIR / "app_build_plan.py",
         f"smoke_persistent_app_build_plan.{id(object())}",
     )
-    ctx = _Context()
+    ctx = ContextVariablesBridge(_approved_context())
     result = validation_mod.app_build_plan(AppBuildPlan=plan, context_variables=ctx)
-    return ctx.data, str(result)
+    return ctx.snapshot(), str(result)
 
 
 def _all_owned_paths(plan: dict[str, Any]) -> list[str]:
@@ -217,7 +210,7 @@ def _page_endpoints_are_app_owned(plan: dict[str, Any]) -> bool:
     return not any(item in text for item in forbidden)
 
 
-def check_plan_shape(plan: dict[str, Any]) -> list[str]:
+def check_plan_shape(plan: dict[str, Any], *, data_contract: dict[str, Any]) -> list[str]:
     violations: list[str] = []
     build_tasks = [task for task in plan.get("build_tasks") or [] if isinstance(task, dict)]
     owned_paths = _all_owned_paths(plan)
@@ -244,13 +237,14 @@ def check_plan_shape(plan: dict[str, Any]) -> list[str]:
     if not persistence_tasks and not database_tasks:
         violations.append("missing persistence_contract/DatabaseAgent build task")
 
-    data_contract = plan.get("data_contract")
+    if "data_contract" in plan:
+        violations.append("AppBuildPlan must not redeclare the approved data_contract")
     if isinstance(data_contract, dict):
         contract_text = json.dumps(data_contract)
         if "projects" not in contract_text or "tasks" not in contract_text:
             violations.append("data_contract does not mention projects and tasks")
     else:
-        violations.append("missing top-level data_contract")
+        violations.append("missing approved context data_contract")
 
     migration_paths = [path for path in owned_paths if "migrations" in path]
     if migration_paths and not all(path.startswith("data/migrations/") for path in migration_paths):
@@ -310,6 +304,7 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
         context_variables={
             "concept_overview": USER_REQUEST,
             "database_setup_mode": "generated_persistence",
+            **_approved_context(),
         },
     )
     agent.system_message = base_prompt
@@ -329,7 +324,10 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     print(f"\n[3/6] Calling OpenAI ({model})...")
     print(f"      User request: {USER_REQUEST}")
     try:
-        response_text = _call_openai(system_message, USER_REQUEST, model)
+        response_text = _call_openai(
+            system_message, USER_REQUEST + "\nApproved data_contract (consume unchanged):\n"
+            + json.dumps(_approved_context()["data_contract"]), model,
+        )
     except Exception as exc:
         print(f"      ERROR: LLM call failed - {exc}")
         return 1
@@ -363,7 +361,7 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     for task in plan.get("build_tasks") or []:
         if isinstance(task, dict):
             print(f"      [{task.get('task_type')}] {task.get('task_id')} -> {task.get('owned_paths') or []}")
-    violations = check_plan_shape(plan)
+    violations = check_plan_shape(plan, data_contract=_approved_context()["data_contract"])
     if violations:
         print(f"\n      VIOLATIONS ({len(violations)}):")
         for violation in violations:
@@ -373,7 +371,7 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
 
     if save_fixture:
         _FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
-        _FIXTURE_PATH.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        _FIXTURE_PATH.write_text(json.dumps({"AppBuildPlan": plan, "context": _approved_context()}, indent=2), encoding="utf-8")
         print(f"\n      Fixture saved: {_FIXTURE_PATH}")
 
     print("\nSMOKE TEST PASSED")

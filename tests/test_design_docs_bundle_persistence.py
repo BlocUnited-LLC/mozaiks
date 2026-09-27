@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from tests.factory_context import factory_context
 from tests.import_utils import import_module_directly
 
@@ -12,16 +13,8 @@ design_docs_module = import_module_directly(
 )
 
 
-class _Context:
-    def __init__(self, initial=None) -> None:
-        self.data = factory_context(initial)
-
-    def set(self, key, value) -> None:
-        self.data[key] = value
-
-    def get(self, key, default=None):
-        from mozaiksai.core.workflow.context.frozen import freeze
-        return freeze(self.data.get(key, default))
+def _context(initial=None):
+    return ContextVariablesBridge(factory_context(initial))
 
 
 class _FakeCursor:
@@ -137,7 +130,7 @@ def _bundle():
                     "collections": [
                         {
                             "name": "users",
-                            "scope": "app",
+                            "scope": "app", "entity": "User", "tenancy": "per_user", "owner_field": "user_id",
                             "ownership": {"surface_id": "users", "surface_kind": "module"},
                             "fields": [
                                 {"name": "app_id", "type": "string", "required": True},
@@ -174,7 +167,7 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
 
     monkeypatch.setattr(design_docs_module, "persist_summary_artifact", _fake_persist_summary_artifact)
 
-    context = _Context(
+    context = _context(
         {
             "app_id": "app_123",
             "chat_id": "chat_123",
@@ -191,13 +184,13 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
     data_contracts_collection = _FakePersistenceManager.client["mozaiksai"]["DataContracts"]
 
     assert result["ok"] is True
-    assert context.data["design_surface_map"]["surfaces"][0]["surface_id"] == "users"
-    assert context.data["data_contract"]["app_id"] == "app_123"
+    assert context.snapshot()["design_surface_map"]["surfaces"][0]["surface_id"] == "users"
+    assert context.snapshot()["data_contract"]["app_id"] == "app_123"
     # Typed ExperienceSpec must be set on context as a structured object
-    assert context.data["experience_spec"]["navigation_model"] == "top-level routes with shell navigation"
-    assert context.data["experience_spec"]["pages"][0]["name"] == "Users"
+    assert context.snapshot()["experience_spec"]["navigation_model"] == "top-level routes with shell navigation"
+    assert context.snapshot()["experience_spec"]["pages"][0]["name"] == "Users"
     # Human-readable YAML string remains available for prompt consumers.
-    assert "navigation_model" in context.data["experience_spec_document"]
+    assert "navigation_model" in context.snapshot()["experience_spec_document"]
     assert len(design_docs_collection.updates) >= 4
     assert any(
         update[0].get("kind") == "backend" and "surface_map" in update[1]["$set"]
@@ -223,7 +216,7 @@ def test_save_design_docs_bundle_propagates_summary_persistence_failure(monkeypa
         raise RuntimeError("summary store unavailable")
 
     monkeypatch.setattr(design_docs_module, "persist_summary_artifact", _fail_summary)
-    context = _Context(
+    context = _context(
         {
             "app_id": "app_failure",
             "chat_id": "chat_failure",
@@ -235,7 +228,7 @@ def test_save_design_docs_bundle_propagates_summary_persistence_failure(monkeypa
     with pytest.raises(RuntimeError, match="summary store unavailable"):
         asyncio.run(design_docs_module.save_design_docs_bundle(context_variables=context))
 
-    assert "frontend_design_document" not in context.data
+    assert "frontend_design_document" not in context.snapshot()
 
 
 def test_save_design_doc_propagates_status_persistence_failure(monkeypatch) -> None:
@@ -254,7 +247,7 @@ def test_save_design_doc_propagates_status_persistence_failure(monkeypatch) -> N
                 kind="frontend",
                 stage="draft",
                 content="# Frontend",
-                context_variables=_Context({"app_id": "app_failure"}),
+                context_variables=_context({"app_id": "app_failure"}),
             )
         )
 

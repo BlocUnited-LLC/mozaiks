@@ -34,7 +34,8 @@ def test_service_agent_must_emit_every_owned_path() -> None:
     prompt = _agent_prompt("ServiceAgent")
 
     assert "Emit every model-owned path listed in `current_build_task.owned_paths`" in prompt
-    assert "Code renders the owned `backend/policy.py` from data_contract" in prompt
+    assert "Code renders canonical list/get implementations in the owned handler/service/repo files" in prompt
+    assert "owned `backend/policy.py` from data_contract collection tenancy and owner_field" in prompt
     assert "fails the whole batch" in prompt
 
 

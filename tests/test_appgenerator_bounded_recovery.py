@@ -17,9 +17,12 @@ from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_task_
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow import task_batches as tb
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
+from tests.factory_context import factory_context
 from tests.test_appplan_materialization_acceptance import (
     WORKFLOWS_ROOT,
-    _Context,
+    _approved_context_values,
     _file_map,
     _load_fixture_plan,
     _task_output,
@@ -27,12 +30,13 @@ from tests.test_appplan_materialization_acceptance import (
 
 
 def _fixture(monkeypatch, *, correction="valid"):
-    context = _Context({
+    context = ContextVariablesBridge(factory_context({
+        **_approved_context_values(),
         "app_id": "generated-saas-plan", "app_name": "Generated SaaS Plan",
         "app_slug": "generated-saas-plan", "landing_spot": "/reports",
         "chat_id": "bounded-recovery-proof", "build_task_model": "AppBuildTask",
         "app_validation_strategy_used": "skip", "app_validation_status": "skipped",
-    })
+    }))
     app_build_plan(AppBuildPlan=_load_fixture_plan(), context_variables=context)
     config = tb.load_task_batches_config("AppGenerator", workflows_root=WORKFLOWS_ROOT)
     assert config.batches[0].recovery is not None
@@ -42,15 +46,20 @@ def _fixture(monkeypatch, *, correction="valid"):
         checkpoints.append(deepcopy(updates))
 
     async def execute(trigger):
-        await tb.execute_task_batches_for_trigger(
-            workflow_name="AppGenerator", trigger_agent=trigger, batches_config=config,
-            agents={name: object() for name in (
-                "ConfigMiddlewareAgent", "DatabaseAgent", "ModelAgent", "ServiceAgent", "AppSchemaAgent",
-            )}, context_variables=context.data, chat_id=context.get("chat_id"),
-            app_id=context.get("app_id"), user_id="user-1", fresh_agents_per_task=False,
-            checkpoint=checkpoint,
-            parent_channel_id="test-parent-channel",
-        )
+        replay_context = context.snapshot()
+        try:
+            await tb.execute_task_batches_for_trigger(
+                workflow_name="AppGenerator", trigger_agent=trigger, batches_config=config,
+                agents={name: object() for name in (
+                    "ConfigMiddlewareAgent", "DatabaseAgent", "ModelAgent", "ServiceAgent", "AppSchemaAgent",
+                )}, context_variables=replay_context, chat_id=context.get("chat_id"),
+                app_id=context.get("app_id"), user_id="user-1", fresh_agents_per_task=False,
+                checkpoint=checkpoint,
+                parent_channel_id="test-parent-channel",
+            )
+        finally:
+            for key, value in replay_context.items():
+                context.set(key, value)
 
     async def run(self, request):
         task = request.context_variables["current_task"]
@@ -77,7 +86,7 @@ async def test_failed_service_correction_releases_page_and_passes_complete_app_a
     context, execute, counts, _, calls = _fixture(monkeypatch)
     await execute("AppPlanAgent")
     assert context.get("app_task_batch_status") == "partial"
-    evidence = deepcopy(context.get("app_task_batch_results"))
+    evidence = deepcopy(detach(context.get("app_task_batch_results")))
     failure = evidence["_failed"]["task_reports_services"]
     assert failure["failure_kind"] == "output_rejected"
     assert "modules/reports/backend/schemas.py" in failure["error"]
@@ -86,22 +95,22 @@ async def test_failed_service_correction_releases_page_and_passes_complete_app_a
     retained = {key: value for key, value in evidence.items() if not key.startswith("_")}
 
     partial = _file_map(await assemble_app_tasks(context_variables=context))
-    assert context.get("app_task_batch_results") == evidence
+    assert detach(context.get("app_task_batch_results")) == evidence
     assert "app.json" not in partial
     before = await run_app_bundle_acceptance_gate(files=partial, context_variables=context)
     assert before["passed"] is False
-    request = context.get("app_task_recovery_request")
+    request = detach(context.get("app_task_recovery_request"))
     assert request["root_task_ids"] == ["task_reports_services"]
 
     await execute("AppValidationAgent")
     assert context.get("app_task_batch_status") == "completed"
     assert context.get("app_task_recovery_status") == "completed"
-    assert context.get("app_task_batch_results")["_meta"]["failure_history"]["task_reports_services"][0] == failure
+    assert detach(context.get("app_task_batch_results"))["_meta"]["failure_history"]["task_reports_services"][0] == failure
     assert counts["task_reports_services"] == 2
     assert counts["task_report_pages"] == 1
     for task_id, accepted in retained.items():
         assert counts[task_id] == 1
-        assert context.get("app_task_batch_results")[task_id] == accepted
+        assert detach(context.get("app_task_batch_results"))[task_id] == accepted
     corrected_call = [call for call in calls if call.task_id == "task_reports_services"][1]
     assert failure["error"] in corrected_call.prompt
     assert any("schemas.py" in item["filename"]
@@ -109,7 +118,7 @@ async def test_failed_service_correction_releases_page_and_passes_complete_app_a
                for item in output.get("code_files", []))
 
     files = _file_map(await assemble_app_tasks(context_variables=context))
-    files.update(_file_map(await save_auth_scaffold(context_variables=context.data)))
+    files.update(_file_map(await save_auth_scaffold(context_variables=context)))
     compose_bundle_auth_routes(files)
     gate = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
     assert gate["passed"] is True, gate
@@ -129,14 +138,15 @@ async def test_failed_service_correction_releases_page_and_passes_complete_app_a
 async def test_failed_or_interrupted_correction_stays_blocked_without_replaying_successes(monkeypatch, correction):
     context, execute, counts, checkpoints, _ = _fixture(monkeypatch, correction=correction)
     await execute("AppPlanAgent")
-    retained = deepcopy(context.get("app_task_batch_results")["task_reports_models"])
-    failure = deepcopy(context.get("app_task_batch_results")["_failed"]["task_reports_services"])
+    retained = deepcopy(detach(context.get("app_task_batch_results"))["task_reports_models"])
+    failure = deepcopy(detach(context.get("app_task_batch_results"))["_failed"]["task_reports_services"])
     partial = _file_map(await assemble_app_tasks(context_variables=context))
     assert prepare_task_recovery(context)["root_task_ids"] == ["task_reports_services"]
     if correction == "interrupted":
         with pytest.raises(asyncio.CancelledError):
             await execute("AppValidationAgent")
-        context.data.update(deepcopy(checkpoints[-1]))
+        for key, value in checkpoints[-1].items():
+            context.set(key, value)
     else:
         await execute("AppValidationAgent")
     assert prepare_task_recovery(context) is None
@@ -145,8 +155,8 @@ async def test_failed_or_interrupted_correction_stays_blocked_without_replaying_
     assert counts == counts_before
     assert counts["task_reports_services"] == 2
     assert counts["task_report_pages"] == 0
-    assert context.get("app_task_batch_results")["task_reports_models"] == retained
-    assert context.get("app_task_batch_results")["_meta"]["failure_history"]["task_reports_services"][0] == failure
+    assert detach(context.get("app_task_batch_results"))["task_reports_models"] == retained
+    assert detach(context.get("app_task_batch_results"))["_meta"]["failure_history"]["task_reports_services"][0] == failure
     gate = await run_app_bundle_acceptance_gate(files=partial, context_variables=context)
     assert gate["passed"] is False
-    assert context.get("app_task_recovery_request") is None
+    assert detach(context.get("app_task_recovery_request")) is None

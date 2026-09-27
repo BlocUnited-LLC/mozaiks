@@ -20,6 +20,7 @@ from .code_files import (
     extract_deleted_file_paths_from_payload,
     safe_relpath,
 )
+from .module_action_inventory import all_module_actions
 
 logger = logging.getLogger(__name__)
 
@@ -400,7 +401,14 @@ def module_action_index_from_context(context: Any) -> dict[str, set[str]]:
         files.update(extract_code_file_map_from_payload(output))
     for path in extract_deleted_file_paths_from_payload({"deleted_files": detach(context.get("deleted_files"))}):
         files.pop(path, None)
-    return module_action_index(files)
+    return _approved_page_actions(context, module_action_index(files))
+
+
+def _approved_page_actions(context: Any, modules: dict[str, set[str]]) -> dict[str, set[str]]:
+    if context is None or not context.get("design_surface_map"):
+        return modules
+    approved = all_module_actions(context)
+    return {module: actions.intersection(approved.get(module, [])) for module, actions in modules.items()}
 
 
 def compile_page_data_sources(
@@ -474,6 +482,7 @@ def compile_authored_page_files(
     admitted.update(extract_code_file_map_from_payload({"code_files": detach(context.get("code_files"))}))
     modules = module_action_index_from_context(context)
     modules.update(module_action_index(files))
+    modules = _approved_page_actions(context, modules)
     for path in extract_deleted_file_paths_from_payload(payload):
         match = re.fullmatch(r"modules/([^/]+)/module\.yaml", path)
         if match:

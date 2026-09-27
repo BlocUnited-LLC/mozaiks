@@ -242,6 +242,7 @@ agents:
       - `primary_entities`: durable entities or records owned by the surface
       - `owned_pages`: persistent pages primarily owned by the surface
       - `owned_mutations`: deterministic mutations/actions this surface owns
+      - `custom_reads`: snake_case action ids for page reads beyond canonical entity list/get, such as `summarize_tasks` for dashboard KPI fields
       - `events_emitted`: domain/platform/hosted events this surface may emit
       - `workflow_triggers`: workflow capability ids or trigger intents this surface may start
       - `integrations`: third-party systems this surface directly owns
@@ -276,6 +277,7 @@ agents:
       - Use `ui_only` only for purely presentational/reporting surfaces that own no durable business state.
       - Every persistent page should map to one primary owning surface.
       - Every durable mutation should map to one primary owning surface.
+      - Every visible feature must have an action in the approved surface inventory. Declare custom reads for summaries, aggregates, searches, and reports that canonical list/get output cannot supply. Describe each custom read's input, output fields, and access policy in the backend design for downstream implementation. A list response with `items` and `total` does not supply arbitrary KPI value keys.
       - If a workflow changes app data, the owning module surface must still own the mutation and resulting domain event.
   - id: contract_discipline
     heading: '[CONTRACT DISCIPLINE]'
@@ -290,6 +292,9 @@ agents:
       - Do not rely on prose-only conventions for event namespaces, primitive types, layout modes, capability ids, or admin sections.
       - Keep the ui_schema YAML simple enough to transcribe into typed structured outputs without heuristic interpretation.
       - The data design must be transcribed into `data_contract`; do not leave durable collection ownership, indexes, or migration policy trapped only in prose.
+      - Decide every collection's `tenancy` here: `per_user`, `per_workspace`, or `app_wide`. `scope` remains the namespace owner (`app`, `platform`, or `hosted`), never row tenancy. Set `owner_field` to an exact declared field for scoped collections, or null for `app_wide`. Set `entity` to the exact owning surface `primary_entities` name. These decisions persist unchanged into `data/contract.json`; downstream workflows must not re-decide them.
+      - Canonical entity list/get reads are constructed for per-user and per-workspace collections with login required, owner filtering, and no role permission. For app-wide collections whose writes require permissions or subscription gates, explicitly describe each read and its access policy; public access is never inferred from protected writes.
+      - Determined platform identity normalization runs before ownership validation. Any remaining missing tenancy, owner field, or entity is a design decision: use the valid choices in save feedback and revise the typed fields.
       - Do not place API-key metadata, vault state, or workspace integration records into `data_contract`; those are platform-managed connector contracts, not app-owned schema.
       - If a surface truly needs file-backed customization, describe the need in a bounded way; do not invent ad hoc YAML keys or raw implementation blobs.
       - Persistent app UI remains declarative. Do not embed raw JSX, Tailwind, or untyped callback logic in the ui_schema.
@@ -474,6 +479,7 @@ agents:
               "primary_entities": ["User"],
               "owned_pages": ["Users"],
               "owned_mutations": ["create_user"],
+              "custom_reads": ["summarize_users"],
               "events_emitted": ["domain.users.user_created"],
               "workflow_triggers": ["users.welcome"],
               "integrations": [],
@@ -493,6 +499,9 @@ agents:
                 {
                   "name": "users",
                   "scope": "app",
+                  "tenancy": "per_user",
+                  "owner_field": "user_id",
+                  "entity": "User",
                   "ownership": {
                     "surface_id": "users",
                     "surface_kind": "module"

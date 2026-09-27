@@ -23,7 +23,13 @@ from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bund
 from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from mozaiksai.core.runtime.app.loader import AppLoader
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
 from mozaiksai.core.workflow.generator_support.module_policy import render_module_policy
+from mozaiksai.core.workflow.generator_support.module_read_actions import (
+    materialize_module_read_actions,
+    materialize_module_read_implementations,
+)
 from scripts.smoke_agentgenerator_live_pack import run_live_agentgenerator_pack_smoke
 
 DEFAULT_APP_ID = "support-operations-live-acceptance"
@@ -195,8 +201,12 @@ def build_appgenerator_acceptance_files(
                     {
                         "name": "tickets",
                         "scope": "app",
-                        "scope_field": "app_id",
-                        "fields": [{"name": "app_id", "type": "string", "required": True}],
+                        "entity": "Ticket", "tenancy": "app_wide", "owner_field": None,
+                        "search_by": "ticket_id",
+                        "fields": [
+                            {"name": name, "type": "string", "required": True}
+                            for name in ("app_id", "ticket_id", "customer_name", "issue", "priority")
+                        ],
                         "ownership": {
                             "surface_id": "support_tickets",
                             "surface_kind": "module",
@@ -208,7 +218,7 @@ def build_appgenerator_acceptance_files(
         "shared_collections": [],
     }
 
-    return {
+    files = {
         "app.json": json.dumps(
             {
                 "appId": DEFAULT_APP_ID,
@@ -413,11 +423,6 @@ class SupportTicketsService:
         self.ctx = ctx
         self.repo = SupportTicketsRepo(ctx)
 
-    async def list_tickets(self, **params):
-        priority = params.get("priority")
-        tickets = await self.repo.list_tickets(priority=priority)
-        return {{"tickets": tickets}}
-
     async def create_ticket(self, **params):
         record = ticket_document(
             customer_name=params.get("customer_name"),
@@ -449,13 +454,6 @@ class SupportTicketsRepo:
             return None
         return persistence.collection("support_tickets", "tickets")
 
-    async def list_tickets(self, *, priority=None):
-        collection = self._collection()
-        if collection is None:
-            return []
-        query = {"priority": priority} if priority else {}
-        return await collection.find_many(query, limit=100)
-
     async def create_ticket(self, record):
         collection = self._collection()
         if collection is None:
@@ -484,6 +482,13 @@ def batch_request_document(*, priority=None):
     }
 """,
     }
+    read_plan = {"capability_packs": [{
+        "capability_pack_id": "support_tickets", "capability_source": "generated_module",
+        "primary_entities": ["Ticket"],
+    }]}
+    files.update(materialize_module_read_actions(files, app_build_plan=read_plan, data_contract=data_contract))
+    files.update(materialize_module_read_implementations(files, app_build_plan=read_plan, data_contract=data_contract))
+    return files
 
 
 def build_appgenerator_acceptance_task_state(files: dict[str, str]) -> dict[str, Any]:
@@ -514,14 +519,15 @@ def build_appgenerator_acceptance_task_state(files: dict[str, str]) -> dict[str,
         for lane, task_type, agent, paths, dependencies in lanes
     ]
     return {
+        "data_contract": json.loads(files["data/contract.json"]),
         "app_build_plan": {
             "app_kind": "internal_app", "auth_strategy": "none", "roles": [], "entities": [],
             "build_tasks": tasks,
-            "data_contract": json.loads(files["data/contract.json"]),
             "pages": [{"name": "SupportTickets", "route": "/support-tickets", "purpose": "Manage support tickets."}],
             "capability_packs": [{
                 "capability_pack_id": "support_tickets", "surface_id": "support_tickets",
                 "surface_kind": "module", "capability_source": "generated_module",
+                "primary_entities": ["Ticket"],
                 "operations": ["list_tickets", "create_ticket", "request_batch_triage"],
             }],
         },
@@ -573,7 +579,7 @@ async def validate_appgenerator_acceptance_handoff(
 ) -> dict[str, Any]:
     integration = workflow_integration or default_workflow_integration()
     files = build_appgenerator_acceptance_files(integration)
-    context = SmokeContext(
+    context = ContextVariablesBridge(
         {
             "workflow_name": "AppGenerator",
             "app_id": DEFAULT_APP_ID,
@@ -617,7 +623,7 @@ async def validate_appgenerator_acceptance_handoff(
             "acceptance": acceptance,
             "export_gate": export_gate,
             "runtime_loader": loader_result,
-            "context": context.to_dict(),
+            "context": context.snapshot(),
         }
     )
 
@@ -632,7 +638,7 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
         "class SupportTicketsModule:", "class UndeclaredSupportHandler:",
     )
     unrelated = {path: content for path, content in files.items() if path != SUPPORT_HANDLER_PATH}
-    context = SmokeContext(
+    context = ContextVariablesBridge(
         {
             "workflow_name": "AppGenerator",
             "app_id": DEFAULT_APP_ID,
@@ -652,10 +658,9 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
         files=files,
         context_variables=context,
     )
-    context.set("structured_output", {
+    saved = save_generated_code(StructuredOutputOverlay(context, {
         "code_files": [{"filename": SUPPORT_HANDLER_PATH, "content": accepted_handler}],
-    })
-    saved = save_generated_code(context)
+    }))
     repaired_acceptance = await run_app_bundle_acceptance_gate(context_variables=context)
     export_gate = resolve_export_gate(context)
 
@@ -708,7 +713,7 @@ async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
                 "preserved_unrelated_output": all(packaged_files.get(path) == content for path, content in unrelated.items()),
             },
             "runtime_loader": runtime_loader,
-            "context": context.to_dict(),
+            "context": context.snapshot(),
         }
     )
 

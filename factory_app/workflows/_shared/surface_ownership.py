@@ -29,12 +29,15 @@ class SurfaceOwnershipRule(BaseModel):
     surface_entity_names: list[str] = Field(default_factory=list)
     surface_action_ids: list[str] = Field(default_factory=list)
     state_field_names: list[str] = Field(default_factory=list)
+    identity_evidence_fields: list[str] = Field(default_factory=list)
     structured_state_field_types: dict[str, list[Literal["object", "array"]]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def declared_structured_fields(self) -> Self:
         if _identifiers(self.structured_state_field_types) - _identifiers(self.state_field_names):
             raise ValueError("structured_state_field_types must reference declared state_field_names")
+        if _identifiers(self.identity_evidence_fields) - _identifiers(self.state_field_names):
+            raise ValueError("identity_evidence_fields must reference declared state_field_names")
         return self
 
 
@@ -124,12 +127,39 @@ def _facade_actions(facade: dict[str, Any]) -> list[str]:
     ))
 
 
+def managed_facade_module_ids(context_variables: Any) -> set[str]:
+    """Resolve facade identities from selected contracts and approved pack references."""
+    _, facades = _ownership_rules(context_variables, include_default_subscription=True)
+    module_ids = set(facades)
+    surface_map = _get(context_variables, "design_surface_map", {}) or {}
+    pack_ids = {
+        pack_id for surface in surface_map.get("surfaces") or []
+        for pack_id in surface.get("source_capability_packs") or []
+    }
+    for pack_id in pack_ids:
+        # Approved source references may name an OSS pack even when the next
+        # workflow does not carry the selected-pack session projection.
+        if not isinstance(pack_id, str) or Path(pack_id).name != pack_id or pack_id in {".", ".."}:
+            continue
+        registry = workflow_context_path(pack_id, "context.yaml")
+        if not registry.is_file():
+            continue
+        config = yaml.safe_load(registry.read_text(encoding="utf-8"))
+        if (config.get("pack") or {}).get("capability_source") != "managed_capability":
+            continue
+        for contract in load_contract_descriptors(registry.parent, config):
+            module_ids.update(facade["module_id"] for facade in contract.get("facades") or [])
+    return module_ids
+
+
 def _matches_surface(surface: dict[str, Any], rule: SurfaceOwnershipRule) -> bool:
     return bool(
         _identifiers([surface.get("surface_id")]) & _identifiers(rule.surface_ids)
         or surface.get("surface_id") == rule.facade_module
         or _identifiers(surface.get("primary_entities")) & _identifiers(rule.entity_names)
-        or _identifiers(surface.get("owned_mutations")) & _identifiers(rule.action_ids)
+        or _identifiers([
+            *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+        ]) & _identifiers(rule.action_ids)
     )
 
 
@@ -139,6 +169,11 @@ def _matches_collection(collection: dict[str, Any], group_id: str, rule: Surface
         _identifiers([collection.get("name")]) & _identifiers(rule.collection_names)
         or _identifiers([owner_id, group_id]) & _identifiers(rule.surface_ids)
         or rule.facade_module and rule.facade_module in {owner_id, group_id}
+        or (
+            _identifiers([collection.get("name")]) & _identifiers(rule.surface_collection_names)
+            and _identifiers(field.get("name") for field in collection.get("fields") or [])
+            & _identifiers(rule.identity_evidence_fields)
+        )
     )
 
 
@@ -178,7 +213,9 @@ def validate_surface_ownership(
             if surface.get("owner") != "app" or surface.get("surface_kind") != "module":
                 continue
             conflicts = _identifiers(surface.get("primary_entities")) & reserved_entities
-            actions = _identifiers(surface.get("owned_mutations"))
+            actions = _identifiers([
+                *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+            ])
             if is_facade:
                 conflicts |= _identifiers(surface.get("primary_entities"))
                 conflicts |= actions - _identifiers(facade_actions[surface_id])
@@ -259,7 +296,10 @@ def normalize_surface_ownership(
                     f"group {group_id!r} disagrees with declared owner {owner_id!r}."
                 )
             names = _identifiers(rule.collection_names)
-            if scoped:
+            identity_evidence = _identifiers(
+                field.get("name") for field in collection.get("fields") or []
+            ) & _identifiers(rule.identity_evidence_fields)
+            if scoped or identity_evidence:
                 names |= _identifiers(rule.surface_collection_names)
             declared_fields = collection.get("fields") or []
             fields = _identifiers(field.get("name") for field in declared_fields)
@@ -319,6 +359,8 @@ def normalize_surface_ownership(
                 residual.update(
                     ownership={"surface_id": target, "surface_kind": "module"},
                     scope="app", search_by="user_id", indexes=indexes,
+                    tenancy="per_user", owner_field="user_id",
+                    entity=(residual["name"] if residual["name"].endswith("_app_data") else f"{residual['name']}_app_data"),
                     lifecycle={**(residual.get("lifecycle") or {}), "write_mode": "module_action"},
                 )
                 collections.remove(collection)
@@ -355,6 +397,10 @@ def normalize_surface_ownership(
         ):
             raise ValueError(f"Ambiguous split destination {target!r}/{residual['name']!r}: collection already exists.")
         group["collections"].append(residual)
+        target_surface = next(surface for surface in normalized_map["surfaces"] if surface["surface_id"] == target)
+        target_surface["primary_entities"] = list(dict.fromkeys([
+            *(target_surface.get("primary_entities") or []), residual["entity"],
+        ]))
 
     surfaces = normalized_map["surfaces"]
     targets: dict[str, str] = {}
@@ -371,7 +417,9 @@ def normalize_surface_ownership(
             entities |= _identifiers(rule.surface_entity_names)
             allowed_actions |= _identifiers(rule.surface_action_ids)
         unknown_entities = _identifiers(surface.get("primary_entities")) - entities
-        unknown_actions = _identifiers(surface.get("owned_mutations")) - allowed_actions
+        unknown_actions = _identifiers([
+            *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+        ]) - allowed_actions
         remaining = [
             collection["name"] for group_id, collections in groups for collection in collections
             if surface_id in {group_id, (collection.get("ownership") or {}).get("surface_id")}
@@ -391,10 +439,11 @@ def normalize_surface_ownership(
             and (not facade or surface_id == rule.facade_module)
             and not surface.get("primary_entities")
             and not (_identifiers(surface.get("owned_mutations")) - _identifiers(_facade_actions(facade)))
+            and not (_identifiers(surface.get("custom_reads")) - _identifiers(_facade_actions(facade)))
         ):
             continue
         corrected = deepcopy(surface)
-        corrected.update(owner="app" if facade else "platform", primary_entities=[], owned_mutations=[])
+        corrected.update(owner="app" if facade else "platform", primary_entities=[], owned_mutations=[], custom_reads=[])
         if facade:
             corrected.update(
                 surface_id=rule.facade_module, surface_kind="module",
