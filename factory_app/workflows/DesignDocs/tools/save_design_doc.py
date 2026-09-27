@@ -8,7 +8,7 @@ import yaml
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows._shared.surface_ownership import (
     default_subscription_contract,
-    validate_surface_ownership,
+    normalize_surface_ownership,
 )
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
@@ -624,7 +624,7 @@ async def save_design_docs_bundle(
             artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
             surface_map=surface_map,
         )
-        validate_surface_ownership(
+        ownership_normalizations = normalize_surface_ownership(
             surface_map,
             context_variables=context_variables,
             data_contract=data_contract,
@@ -632,9 +632,26 @@ async def save_design_docs_bundle(
         )
         if not frontend_markdown or not backend_markdown or not database_markdown:
             raise ValueError("DesignDocsBundle must include all three Markdown documents")
+        normalization_messages = [
+            f"DESIGN_OWNERSHIP_NORMALIZED surface={entry['surface_id']} owner={entry['owner']} "
+            f"removed=[{','.join(entry['removed_collections'])}]"
+            for entry in ownership_normalizations
+        ]
+        if normalization_messages:
+            notice = (
+                "\n\n## Ownership normalizations\n\n"
+                "These corrections supersede conflicting ownership or storage claims in the design prose. "
+                "The saved surface_map and data_contract are authoritative; approved pages are preserved.\n\n"
+                + "\n".join(f"- `{message}`" for message in normalization_messages)
+            )
+            frontend_markdown += notice
+            backend_markdown += notice
+            database_markdown += notice
         backend_markdown = _inject_backend_surface_map(backend_markdown, surface_map)
         # Generate human-readable YAML for agents that consume ui_schema as a string
         ui_schema_content = _experience_spec_to_yaml(experience_spec, surface_map)
+        if ownership_normalizations:
+            ui_schema_content += yaml.safe_dump({"ownership_normalizations": ownership_normalizations}, sort_keys=False)
     except Exception as err:
         return _refused(context_variables, "invalid_design_docs_bundle", str(err))
 
@@ -650,7 +667,7 @@ async def save_design_docs_bundle(
         status="running",
     )
 
-    docs = (
+    docs: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         (DesignDocKinds.FRONTEND, frontend_markdown, None),
         (DesignDocKinds.BACKEND, backend_markdown, {"surface_map": surface_map}),
         (DesignDocKinds.DATABASE, database_markdown, None),
@@ -660,6 +677,8 @@ async def save_design_docs_bundle(
     )
 
     for kind, content, extra_fields in docs:
+        if ownership_normalizations:
+            extra_fields = {**(extra_fields or {}), "ownership_normalizations": ownership_normalizations}
         await _upsert_design_doc(
             store=store,
             app_id=app_id,
@@ -694,6 +713,7 @@ async def save_design_docs_bundle(
             "experience_spec": experience_spec,
             "surface_map": surface_map,
             "data_contract": data_contract,
+            "ownership_normalizations": ownership_normalizations,
         },
         source_workflow="DesignDocs",
         source_chat_id=str(chat_id) if chat_id else None,
@@ -720,6 +740,8 @@ async def save_design_docs_bundle(
     _cv_set(context_variables, "experience_spec", experience_spec)
     _cv_set(context_variables, "design_surface_map", surface_map)
     _cv_set(context_variables, "data_contract", data_contract)
+    for message in normalization_messages:
+        logger.info(message)
 
     return {
         "ok": True,

@@ -150,10 +150,17 @@ agents:
       subscriptions collection. /billing already provides subscription management;
       an explicitly needed /subscription presentation must belong to billing_portal,
       with no local subscription entities or collections. Do not create it by default.
-      The save boundary rejects duplicate ownership with feedback naming the owner.
-      Correct the surface and data_contract together; changing only the owner label
-      does not authorize app-owned storage. Downstream planning cannot repair an
-      invalid approved owner into a generated module.
+      Author the canonical surface and data_contract together. The save boundary
+      normalizes duplicate ownership only when declared contracts determine the
+      owner and every state item to remove: platform auth surfaces become platform
+      references, and managed subscription surfaces use billing_portal while
+      preserving their approved pages. Saved ownership_normalizations record these
+      corrections. A user_id field is a reference to identity, not duplicated
+      identity: preserve app-specific preferences and profile fields. Mixed state,
+      unknown fields, or competing owners still receive revision feedback; separate
+      app-owned data from platform/provider state instead of deleting it. Changing
+      only the owner label cannot authorize app-owned storage. Downstream planning
+      rejects invalid approved ownership before it can generate a replacement module.
 
       brand_intent: When non-null, use brand_intent.style_summary and
       brand_intent.brand_keywords to anchor experience_spec.brand_direction. The brand
