@@ -324,7 +324,8 @@ Selected managed ownership rules without a declared `facade_module` also reject:
 the tool cannot infer a provider's canonical app boundary from its display name.
 For mixed auth collections, the tool strips declared identity fields and moves
 the residual fields to the collection's existing app-module owner when declared,
-otherwise to the sole eligible app module. Platform surfaces, selected facades,
+otherwise to the sole eligible app module. Platform surfaces, all facade modules
+declared by selected pack contracts (even without a `surface_ownership` rule),
 and other reserved surfaces are not eligible. Zero or multiple candidates require
 revision, with candidate IDs in feedback; no app module is invented. The retained
 collection has a required string `user_id`, `search_by: user_id`, and a unique

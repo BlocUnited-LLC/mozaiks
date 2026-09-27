@@ -236,9 +236,11 @@ def normalize_surface_ownership(
 
     groups = [(group["surface_id"], group["collections"]) for group in normalized_data.get("surfaces") or []]
     groups.append(("", normalized_data.get("shared_collections") or []))
+    # Selected facades cannot own residual app data, even without an ownership rule.
     app_modules = {
         surface["surface_id"] for surface in normalized_map["surfaces"]
         if surface.get("owner") == "app" and surface.get("surface_kind") == "module"
+        and surface["surface_id"] not in facades
         and not any(_matches_surface(surface, rule) for rule in rules)
     }
     splits: list[tuple[str, dict[str, Any]]] = []

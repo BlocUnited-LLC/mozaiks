@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs excludes selected managed-pack facades from candidate owners for
+  app-specific auth fields, so a billing facade no longer blocks a determined
+  split to the app's sole domain module.
+
 - DesignDocs recognizes standard OIDC claims and platform account/session fields
   in generated auth tables, and preserves app-specific fields under a uniquely
   determined app module instead of rejecting the entire table.
