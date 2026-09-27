@@ -29,6 +29,9 @@ from mozaiksai.core.runtime.persistence import (
     app_data_from_context,
 )
 from mozaiksai.core.runtime.persistence.alias_collection import GuardedAliasCollection
+from mozaiksai.core.workflow.generator_support.subscription_data_contract import (
+    ensure_subscription_assignment_stores,
+)
 from tests import test_runtime_owner_scoping_http as ownership_http
 from tests.module_authority_test_helpers import trusted_framework_authority
 
@@ -98,22 +101,24 @@ class _AliasSource:
 
 
 def _mixed_contract(subscription_tenancy):
-    migration = json.loads((_PACK / "data/migrations/001_entitlement_dispatch_collections.json").read_text())
-    subscriptions = migration["surfaces"][0]["collections"][0]
-    subscriptions.update({
-        "name": "subscriptions", "scope": "app",
-        "fields": [{"name": field, "type": "string"} for field in ("app_id", "user_id", "plan_id", "status")],
-    })
-    if subscription_tenancy is not None:
-        subscriptions.update({
-            "entity": "Subscription", "tenancy": subscription_tenancy,
-            "owner_field": None if subscription_tenancy == "app_wide" else "user_id",
-        })
     contract = ownership_http._contract("per_user")
     contract["app_id"] = "mixed-ownership-app"
-    contract["surfaces"].append({
-        "surface_id": "entitlement_dispatch", "surface_kind": "module", "collections": [subscriptions],
+    contract = ensure_subscription_assignment_stores(contract, {
+        "contract_required": True,
+        "subscription_config_file": {
+            "schema_version": "mozaiks.subscriptions.v1",
+            "assignment_store": {"data_alias": "billing.subscriptions", "user_id_field": "user_id"},
+        },
     })
+    subscriptions = contract["surfaces"][-1]["collections"][0]
+    if subscription_tenancy is None:
+        subscriptions.pop("tenancy")
+        subscriptions.pop("owner_field")
+    else:
+        subscriptions.update({
+            "tenancy": subscription_tenancy,
+            "owner_field": None if subscription_tenancy == "app_wide" else "user_id",
+        })
     return contract
 
 
@@ -198,7 +203,7 @@ async def test_real_entitlement_template_alias_operates_beside_owned_collection(
     client = defaultdict(lambda: database)
     executor = await _template_executor(tmp_path, monkeypatch, client, subscription_tenancy)
     await _assignment_round_trip(
-        executor, database["entitlement_dispatch_subscriptions"], _configured_entitlements(client, subscription_tenancy),
+        executor, database["billing_subscriptions"], _configured_entitlements(client, subscription_tenancy),
     )
 
 
@@ -209,7 +214,7 @@ async def test_real_entitlement_template_cannot_use_alias_for_owned_collection(t
     result = await _dispatch(executor, "activate_subscription", user_id="recipient-a", plan_id="pro")
     assert result.success is False
     assert result.error_code == "PERMISSION_DENIED"
-    assert database["entitlement_dispatch_subscriptions"].rows == []
+    assert database["billing_subscriptions"].rows == []
 
 
 @pytest.mark.parametrize("stage", [
@@ -223,7 +228,7 @@ def test_mixed_app_alias_cannot_aggregate_other_owners(stage):
         app_id="mixed-ownership-app", data_contract=_mixed_contract("app_wide"),
         client=defaultdict(lambda: defaultdict(lambda: raw)),
     )
-    alias = context.literal_collection("entitlement_dispatch_subscriptions")
+    alias = context.literal_collection("billing_subscriptions")
     with pytest.raises(PersistenceScopeError):
         alias.aggregate([stage])
     assert raw.pipelines == []
@@ -270,7 +275,7 @@ async def test_app_data_alias_binding_cannot_be_retargeted(from_context):
         app_id="mixed-ownership-app", data_contract=_mixed_contract("app_wide"),
         client=defaultdict(lambda: database),
     )
-    aliases = {"billing.subscriptions": "entitlement_dispatch_subscriptions"}
+    aliases = {"billing.subscriptions": "billing_subscriptions"}
     contract = {"aliases": [{"alias": "billing.subscriptions", "collection": aliases["billing.subscriptions"]}]}
     app_data = (
         app_data_from_context(SimpleNamespace(persistence=context), contract=contract)
@@ -282,11 +287,11 @@ async def test_app_data_alias_binding_cannot_be_retargeted(from_context):
         app_data.aliases = {"billing.subscriptions": "other_app_owned_tasks"}
     aliases["billing.subscriptions"] = "other_app_owned_tasks"
     contract["aliases"][0]["collection"] = "other_app_owned_tasks"
-    assert dict(app_data.aliases) == {"billing.subscriptions": "entitlement_dispatch_subscriptions"}
+    assert dict(app_data.aliases) == {"billing.subscriptions": "billing_subscriptions"}
     await app_data.collection("billing.subscriptions").update_one(
         {"user_id": "recipient"}, {"$set": {"status": "active"}}, upsert=True,
     )
-    assert database["entitlement_dispatch_subscriptions"].rows == [{"user_id": "recipient", "status": "active"}]
+    assert database["billing_subscriptions"].rows == [{"user_id": "recipient", "status": "active"}]
     assert "other_app_owned_tasks" not in database
 
 
@@ -327,13 +332,13 @@ async def test_real_entitlement_template_alias_with_owned_sibling_on_real_mongo(
     try:
         executor = await _template_executor(tmp_path, monkeypatch, client)
         await _assignment_round_trip(
-            executor, client[database_name]["entitlement_dispatch_subscriptions"], _configured_entitlements(client),
+            executor, client[database_name]["billing_subscriptions"], _configured_entitlements(client),
         )
         context = MongoPersistenceContext(
             app_id="mixed-ownership-app", data_contract=_mixed_contract("app_wide"),
             client=client, database_name=database_name,
         )
-        alias = context.literal_collection("entitlement_dispatch_subscriptions")
+        alias = context.literal_collection("billing_subscriptions")
         await alias.insert_many([{"probe": 1, "state": "new"}, {"probe": 2, "state": "new"}])
         assert await alias.count_documents({"state": "new"}) == 2
         assert (await alias.update_many({"state": "new"}, {"$set": {"state": "active"}})).modified_count == 2
