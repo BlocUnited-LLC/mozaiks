@@ -299,6 +299,40 @@ unavailable is not headless approval. Existing tool-outcome validation and AG2
 transition graphs enforce these contracts; failed saves terminate with
 `workflow_failed` rather than starting the next workflow.
 
+DesignDocs also refuses app-owned modules and collections that duplicate platform
+authentication/session state or a selected managed pack's declared ownership.
+The shared Factory `validate_surface_ownership` check runs before persistence and
+before AppGenerator's module repairs. Rejection names the offending surface or
+collection, its owner, and the facade/platform path to use. An invalid approved
+design must be revised; AppGenerator cannot silently drop it or convert its
+managed source into generated app code.
+
+Exact ownership identifiers live in `surface_ownership` rule lists under
+`capability_routing.yaml`'s `layers.runtime_provided` and selected packs' declared
+contract assets. `SurfaceOwnershipRule` validates `owner`, optional
+`facade_module`, and lists of `surface_ids`, `entity_names`, `action_ids`, and
+`collection_names`. The validator compares these identifiers without classifying
+free-form labels or prose. Facade actions come from the contract's page
+`primary_actions`; facade modules own no local entities or collections. Grouped
+and shared data-contract collections are both checked. Explicit platform owner
+hints also constrain the corresponding surface. Domain-specific profiles,
+newsletter subscriptions, and appointment sessions remain app concerns.
+
+DesignDocs receives selected pack descriptors through its protected build-context
+projection. Available but unselected packs impose no ownership restrictions.
+The existing enabled greenfield subscription intent also activates the default
+MozaiksPay contract, using the same resolver as facade page completion. Explicitly
+selected pack rules still apply to refinements and brownfield designs.
+AppGenerator enforces actual selected packs; it does not infer provider selection
+from monetization intent during repair.
+
+MozaiksPay declares `/pricing`, `/billing`, and `/usage`. It does not require a
+separate `/subscription` page. An approved additional subscription presentation
+can belong to `billing_portal` and use `list_plans`, `get_subscription_status`,
+`start_subscription_checkout`, and `open_billing_portal`; it cannot introduce
+`subscription_management`, `update_subscription`, or a local `subscriptions`
+collection. Changing only a surface's owner label cannot authorize that storage.
+
 The AG2 adapter also treats `no_transition_matched` and `max_turns` as failures.
 Persisted channel closure takes precedence over a simultaneous user-pause
 observation. ThemeCapture explicitly routes user replies back to the active

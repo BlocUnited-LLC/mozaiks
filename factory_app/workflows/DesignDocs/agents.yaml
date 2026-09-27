@@ -126,7 +126,7 @@ agents:
       concept is what the user approved.
 
       owner_hint is a strong directive from concept time — honor it when set:
-        - owner_hint: "app" → surface_map entry owner must be "app"; plan module_contract
+        - owner_hint: "app" → use app ownership only after checking platform and selected pack ownership; plan module_contract
           generation downstream.
         - owner_hint: "hosted" → surface_map entry owner must be "hosted"; DesignDocs must
           NOT declare app-owned backend entities or actions for this surface. Use the facade
@@ -138,6 +138,22 @@ agents:
 
       capability_pack_hints[]: Upstream capability pack signals. Use these to populate
       source_capability_packs in surface_map entries where hints align.
+
+      Ownership constraints outrank owner_hint and surface_candidate_hints. Never
+      approve an app-owned authentication or platform-session module: reference
+      the platform and configure config/auth.yaml. Domain profiles and resource
+      membership may extend platform identity without replacing it.
+      A selected managed pack's declared facade is the app boundary. For
+      MozaiksPay, subscription UI belongs to billing_portal and uses list_plans,
+      get_subscription_status, start_subscription_checkout, and open_billing_portal.
+      Do not approve subscription_management, update_subscription, or a local
+      subscriptions collection. /billing already provides subscription management;
+      an explicitly needed /subscription presentation must belong to billing_portal,
+      with no local subscription entities or collections. Do not create it by default.
+      The save boundary rejects duplicate ownership with feedback naming the owner.
+      Correct the surface and data_contract together; changing only the owner label
+      does not authorize app-owned storage. Downstream planning cannot repair an
+      invalid approved owner into a generated module.
 
       brand_intent: When non-null, use brand_intent.style_summary and
       brand_intent.brand_keywords to anchor experience_spec.brand_direction. The brand

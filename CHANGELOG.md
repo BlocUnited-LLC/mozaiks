@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs rejects app modules and collections that duplicate platform auth,
+  sessions, or selected managed-pack state, naming the owner and facade in
+  revision feedback. AppGenerator refuses those designs before module repairs;
+  subscription UI can use the existing billing facade without local state.
+
 - AppGenerator resumes builds with task execution evidence through validation
   and bounded recovery, preserving accepted work and consumed repair budgets
   instead of restarting the planner after a user pause.

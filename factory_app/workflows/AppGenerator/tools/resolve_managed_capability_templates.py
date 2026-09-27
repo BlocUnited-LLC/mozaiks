@@ -10,7 +10,9 @@ from typing import Any
 
 import yaml
 from jinja2 import StrictUndefined, Template, TemplateError
+from pydantic import ValidationError
 
+from factory_app.workflows._shared.surface_ownership import SurfaceOwnershipRule
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.session.build_context import (
     BuildContextError,
@@ -385,6 +387,7 @@ def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, A
         "provider_api_response_contract",
         "runtime_connector_contract",
         "provider_lifecycle_boundary",
+        "surface_ownership",
     }
     unknown = sorted(set(contract) - allowed_root)
     if unknown:
@@ -438,6 +441,26 @@ def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, A
         value = contract.get(field)
         if value is not None and not isinstance(value, list):
             raise PackIntegrityError(f"contract.yaml {field} must be a list")
+
+    if "surface_ownership" in contract:
+        ownership_rules = contract["surface_ownership"]
+        if not isinstance(ownership_rules, list):
+            raise PackIntegrityError("contract.yaml surface_ownership must be a list")
+        facade_ids = {
+            facade["module_id"]
+            for facade in contract.get("facades") or []
+            if isinstance(facade, dict) and isinstance(facade.get("module_id"), str)
+        }
+        for index, declaration in enumerate(ownership_rules):
+            try:
+                rule = SurfaceOwnershipRule.model_validate(declaration)
+            except ValidationError as exc:
+                raise PackIntegrityError(f"contract.yaml surface_ownership[{index}] is invalid: {exc}") from exc
+            if rule.facade_module is not None and rule.facade_module not in facade_ids:
+                raise PackIntegrityError(
+                    f"contract.yaml surface_ownership[{index}].facade_module {rule.facade_module!r} "
+                    f"must reference a declared facades[].module_id; declared facades: {sorted(facade_ids)}"
+                )
 
 
 def verify_pack_integrity(pack_source_path: Path, pack_id: str) -> dict[str, Any]:

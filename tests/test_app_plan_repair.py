@@ -30,6 +30,7 @@ mode that has cost the most time on this workflow.
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -38,6 +39,7 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     _repair_plan,
     validate_plan_origins,
 )
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 
 
 class _Context:
@@ -515,6 +517,69 @@ def test_an_installed_provider_pack_is_not_rewritten() -> None:
 
     assert not any("generated_module" in r for r in repairs)
     assert plan["capability_packs"][0]["capability_source"] == "framework_pack"
+
+
+@pytest.mark.parametrize("source", [None, "managed_capability"])
+@pytest.mark.parametrize(
+    ("surface_id", "entity", "operation", "owner"),
+    [
+        ("user_authentication", "UserSession", "login", "platform"),
+        ("subscription_management", "Subscription", "update_subscription", "MozaiksPay"),
+    ],
+)
+def test_repair_rejects_reserved_surface_without_converting_or_synthesizing_it(
+    source: str | None, surface_id: str, entity: str, operation: str, owner: str,
+) -> None:
+    design = {"surfaces": [{
+        "surface_id": surface_id, "surface_kind": "module", "owner": "app",
+        "primary_entities": [entity], "owned_mutations": [operation],
+    }]}
+    context = ContextVariablesBridge({
+        "design_surface_map": design,
+        "capability_packs": [{
+            "id": "mozaikspay", "capability_source": "managed_capability",
+            "pack_source_path": str(Path(__file__).resolve().parents[1] / "factory_app/build_context/mozaikspay"),
+        }] if owner == "MozaiksPay" else [],
+    })
+    plan: dict[str, Any] = {"capability_packs": [], "build_tasks": []}
+    if source is not None:
+        plan["capability_packs"].append({
+            "capability_pack_id": surface_id, "surface_id": surface_id,
+            "surface_kind": "module", "capability_source": source,
+            "primary_entities": [entity], "operations": [operation],
+        })
+    original_plan = deepcopy(plan)
+
+    with pytest.raises(ValueError, match=owner):
+        _repair_plan(plan, context)
+
+    assert plan == original_plan
+
+
+def test_repair_preserves_selected_self_managed_subscription_owner() -> None:
+    context = ContextVariablesBridge({
+        "monetization_enabled": True,
+        "monetization_provider": "entitlement_dispatch",
+        "concept_blueprint": {
+            "monetization_intent": {"monetized": True, "subscription_contract_likely": True},
+        },
+        "capability_packs": [{
+            "id": "entitlement_dispatch", "capability_source": "generated_module",
+            "pack_source_path": str(Path(__file__).resolve().parents[1] / "factory_app/build_context/entitlement_dispatch"),
+        }],
+        "design_surface_map": {"surfaces": [{
+            "surface_id": "entitlement_dispatch", "surface_kind": "module", "owner": "app",
+            "primary_entities": ["SubscriptionAssignment"], "owned_mutations": ["activate_subscription"],
+        }]},
+    })
+    plan: dict[str, Any] = {"capability_packs": [], "build_tasks": []}
+
+    _repair_plan(plan, context)
+
+    validate_plan_origins(plan, context)
+    assert [pack["capability_pack_id"] for pack in plan["capability_packs"]] == ["entitlement_dispatch"]
+    assert plan["capability_packs"][0]["primary_entities"] == ["SubscriptionAssignment"]
+    assert context.get("monetization_provider") == "entitlement_dispatch"
 
 
 def _plan_with_two_page_bundles() -> dict[str, Any]:

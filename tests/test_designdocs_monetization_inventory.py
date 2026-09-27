@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import yaml
 
+from factory_app.workflows._shared import surface_ownership
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     review_app_build_plan,
     validate_plan_coverage,
@@ -252,15 +253,15 @@ def test_disabled_monetization_ignores_stale_subscription_intent(persistence, mo
     context = _context(monetized=True, subscription=True)
     context.set("monetization_enabled", False)
     bundle = _bundle(pricing=False)
-    pack_path = Mock(side_effect=AssertionError("Disabled monetization must not load a pack"))
-    monkeypatch.setattr(save_design_doc, "workflow_context_path", pack_path)
+    pack_path = Mock(wraps=surface_ownership.workflow_context_path)
+    monkeypatch.setattr(surface_ownership, "workflow_context_path", pack_path)
 
     result = _save(context, bundle)
 
     assert result["outcome"] == "saved", result
     assert detach(context.get("experience_spec")) == bundle["experience_spec"]
     assert detach(context.get("design_surface_map")) == bundle["surface_map"]
-    pack_path.assert_not_called()
+    assert all(call.args[0] != "mozaikspay" for call in pack_path.call_args_list)
 
 
 @pytest.mark.parametrize("monetized,pricing", [(True, False), (False, True)])

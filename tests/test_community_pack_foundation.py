@@ -394,6 +394,54 @@ def test_contract_unknown_runtime_affecting_field_rejected(tmp_path: Path) -> No
         _materialize(_pack_descriptor(pack_dir, "bad_contract"))
 
 
+def test_declared_surface_ownership_allows_pack_materialization(tmp_path: Path) -> None:
+    from shutil import copytree
+
+    pack_dir = tmp_path / "greetings"
+    copytree(GREETINGS_PACK, pack_dir)
+    contract = _read_yaml(pack_dir / "contract.yaml")
+    contract["surface_ownership"] = [{
+        "owner": "Greeting service", "facade_module": "greetings",
+        "surface_ids": ["greeting_history"], "entity_names": ["GreetingEvent"],
+        "action_ids": ["record_greeting"], "collection_names": ["greeting_events"],
+    }]
+    contract["facades"] = [{"module_id": "greetings", "provider_module": "greeting_service"}]
+    (pack_dir / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+
+    files = _files_map(_pack_descriptor(pack_dir, "greetings"))
+
+    assert "modules/greetings/module.yaml" in files
+    provenance = json.loads(files[".mozaiks/pack_provenance.json"])
+    assert provenance["packs"][0]["pack_id"] == "greetings"
+
+
+@pytest.mark.parametrize(("declarations", "diagnostic"), [
+    ({"owner": "Greeting service"}, "surface_ownership must be a list"),
+    (None, "surface_ownership must be a list"),
+    ([{"owner": ""}], "owner"),
+    ([{"owner": "Greeting service", "entity_names": "GreetingEvent"}], "entity_names"),
+    ([{"owner": "Greeting service", "unrecognized_owner_field": True}], "unrecognized_owner_field"),
+    ([{"owner": "Greeting service", "facade_module": "missing_facade"}], "missing_facade.*declared"),
+])
+def test_malformed_surface_ownership_rejected_before_pack_materialization(
+    tmp_path: Path, declarations: Any, diagnostic: str,
+) -> None:
+    from shutil import copytree
+
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+    )
+
+    pack_dir = tmp_path / "greetings"
+    copytree(GREETINGS_PACK, pack_dir)
+    contract = _read_yaml(pack_dir / "contract.yaml")
+    contract["surface_ownership"] = declarations
+    (pack_dir / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+
+    with pytest.raises(PackIntegrityError, match=diagnostic):
+        _materialize(_pack_descriptor(pack_dir, "greetings"))
+
+
 # ---------------------------------------------------------------------------
 # 6. Deterministic materialization: fixture greetings pack
 # ---------------------------------------------------------------------------

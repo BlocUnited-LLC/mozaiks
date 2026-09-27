@@ -1,8 +1,9 @@
-"""Replay the omitted-page traversal and erase all derivable plan structure.
+"""Reject the captured auth duplicate and retain omitted-structure coverage.
 
 The fixture's model payload is the unchanged response captured three times in
 the 2026-09-26 live traversal. Its context is a projection of the stored approved
-inputs; no database, credentials, or model calls are needed to replay review.
+inputs. Structural tests explicitly replace its invalid auth ownership with a
+project-members domain module; no database, credentials, or model calls are needed.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ FIXTURE = Path(__file__).parent / "fixtures/appplan_monetized_missing_structure.
 MODULE_KINDS = {"module_contract", "data_models", "business_services"}
 PAGE_PATHS = {
     "app.json", "ui/pages/dashboard.yaml", "ui/pages/tasks.yaml",
-    "ui/pages/auth.yaml", "ui/pages/pricing.yaml", "ui/pages/billing.yaml",
+    "ui/pages/members.yaml", "ui/pages/pricing.yaml", "ui/pages/billing.yaml",
     "ui/pages/usage.yaml",
 }
 
@@ -51,6 +52,64 @@ def _live_inputs():
     return fixture["plan"], ContextVariablesBridge(values)
 
 
+def _domain_inputs():
+    """Correct the test's approved inputs explicitly; review must never do this."""
+    plan, context = _live_inputs()
+    section = {
+        "primitive": "Form", "config_hint": '{"fields": [{"label": "Email", "name": "email"}]}',
+        "section_id_hint": "invite-member", "title_hint": "Invite project member",
+        "intent": "Invite a member to the project",
+    }
+    page = next(page for page in plan["pages"] if page["route"] == "/auth")
+    page.update(
+        name="Project Members", route="/members", purpose="Invite project members",
+        design_intent="Invite project members by email", primary_entities=["Member"],
+        primary_actions=["invite_member"], sections_hint=[section],
+    )
+    entity = next(entity for entity in plan["entities"] if entity["name"] == "User")
+    entity.update(name="Member", operations=["invite_member"], notes="App-owned project membership.")
+    approved = detach(context.get("design_surface_map"))
+    for surface_map in (plan["surface_map"], approved):
+        surface = next(surface for surface in surface_map["surfaces"] if surface["surface_id"] == "auth")
+        surface.update(
+            surface_id="project_members", label="Project Members", source_capability_packs=[],
+            primary_entities=["Member"], owned_mutations=["invite_member"],
+            events_emitted=["domain.project_members.member_invited"],
+        )
+        if surface["owned_pages"]:
+            surface["owned_pages"] = ["Project Members"]
+        if "summary" in surface:
+            surface["summary"] = "Invite members to a project."
+    context.set("design_surface_map", approved)
+    experience = detach(context.get("experience_spec"))
+    page = next(page for page in experience["pages"] if page["route"] == "/auth")
+    page.update(
+        name="Project Members", route="/members", intent="Invite project members by email",
+        sections=[{
+            "id": "invite-member", "primitive": section["primitive"],
+            "intent": section["intent"], "config_hint": section["config_hint"],
+        }],
+    )
+    context.set("experience_spec", experience)
+    task = next(task for task in plan["build_tasks"] if task["surface_id"] == "auth")
+    task.update(
+        task_id="invite_project_member", surface_id="project_members", capability_pack_id="project_members",
+        description="Business services for project member invitations.",
+        initial_message="Handle invite_member requests.",
+        owned_paths=[path.replace("modules/auth/", "modules/project_members/") for path in task["owned_paths"]],
+    )
+    data = detach(context.get("data_contract"))
+    surface = next(surface for surface in data["surfaces"] if surface["surface_id"] == "auth")
+    surface["surface_id"] = "project_members"
+    collection = surface["collections"][0]
+    collection.update(name="project_members", search_by="member_id")
+    collection["ownership"]["surface_id"] = "project_members"
+    collection["fields"] = [field for field in collection["fields"] if field["name"] != "password_hash"]
+    next(field for field in collection["fields"] if field["name"] == "user_id")["name"] = "member_id"
+    context.set("data_contract", data)
+    return plan, context
+
+
 def _assert_complete_review(plan, context):
     assert isinstance(context, ContextVariablesBridge)
     original = deepcopy(plan)
@@ -69,8 +128,8 @@ def _assert_complete_review(plan, context):
     page_tasks = [task for task in tasks if task["task_type"] == "page_bundle"]
     assert PAGE_PATHS <= {path for task in page_tasks for path in task["owned_paths"]}
     assert all(task["initial_agent"] == "AppSchemaAgent" for task in page_tasks)
-    assert "ui/pages/user_authentication.yaml" not in paths
-    for module in ("tasks", "auth", "billing_portal"):
+    assert "ui/pages/invite_project_member.yaml" not in paths
+    for module in ("tasks", "project_members", "billing_portal"):
         trio = [task for task in tasks if task["capability_pack_id"] == module and task["task_type"] in MODULE_KINDS]
         assert Counter(task["task_type"] for task in trio) == dict.fromkeys(MODULE_KINDS, 1)
     subscription = [task for task in tasks if task["task_type"] == "subscription_config"]
@@ -82,8 +141,25 @@ def _assert_complete_review(plan, context):
     return cached
 
 
-def test_exact_live_missing_page_bundle_plan_passes_review():
+def test_exact_live_auth_duplicate_is_rejected_before_structure_repair():
     plan, context = _live_inputs()
+    assert len(plan["build_tasks"]) == 4
+    assert all(task["task_type"] != "page_bundle" for task in plan["build_tasks"])
+    original = deepcopy(plan)
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "needs_revision", result
+    assert "platform" in result["error"].lower()
+    assert "auth" in result["error"]
+    assert context.get("app_build_plan") is None
+    assert not context.get("app_task_batch_items")
+    assert context.get("app_plan_ready") is False
+    assert plan == original
+
+
+def test_corrected_domain_missing_page_bundle_plan_passes_review():
+    plan, context = _domain_inputs()
     assert len(plan["build_tasks"]) == 4
     assert all(task["task_type"] != "page_bundle" for task in plan["build_tasks"])
     _assert_complete_review(plan, context)
@@ -91,7 +167,7 @@ def test_exact_live_missing_page_bundle_plan_passes_review():
 
 @pytest.mark.parametrize("omit_capabilities", [False, True], ids=["wrong_labels", "no_capabilities"])
 def test_minimal_judgment_plan_constructs_all_omitted_structure(omit_capabilities):
-    plan, context = _live_inputs()
+    plan, context = _domain_inputs()
     plan["build_tasks"] = []
     plan["generation_order"] = []
     plan["capability_packs"] = []
@@ -109,7 +185,7 @@ def test_minimal_judgment_plan_constructs_all_omitted_structure(omit_capabilitie
     # managed-provider entry, and all dependency edges are absent.
     assert len(plan["pages"]) == 4
     cached = _assert_complete_review(plan, context)
-    assert {"tasks", "auth", "billing_portal", "mozaikspay"} <= {
+    assert {"tasks", "project_members", "billing_portal", "mozaikspay"} <= {
         pack["capability_pack_id"] for pack in cached["capability_packs"]
     }
 
@@ -146,7 +222,7 @@ def test_complete_correct_plan_passes_unchanged():
 
 
 def test_unapproved_surface_is_rejected_before_missing_structure_is_constructed():
-    plan, context = _live_inputs()
+    plan, context = _domain_inputs()
     plan["build_tasks"] = []
     plan["capability_packs"].append(_capability("unapproved_surface"))
     original = deepcopy(plan)
@@ -162,21 +238,21 @@ def test_unapproved_surface_is_rejected_before_missing_structure_is_constructed(
 
 
 def test_explicit_custom_operations_are_preserved_without_inventing_read_actions():
-    plan, context = _live_inputs()
+    plan, context = _domain_inputs()
     plan["build_tasks"] = []
     plan["capability_packs"] = [{
-        **_capability("auth", entities=["User"]),
-        "operations": ["login_user"],
+        **_capability("project_members", entities=["Member"]),
+        "operations": ["invite_member"],
     }]
 
     cached = _assert_complete_review(plan, context)
 
-    auth = next(pack for pack in cached["capability_packs"] if pack["capability_pack_id"] == "auth")
-    assert auth["operations"] == ["login_user"]
+    members = next(pack for pack in cached["capability_packs"] if pack["capability_pack_id"] == "project_members")
+    assert members["operations"] == ["invite_member"]
 
 
 def test_selected_module_lane_constructs_missing_paths_and_labels():
-    plan, context = _live_inputs()
+    plan, context = _domain_inputs()
     task = next(task for task in plan["build_tasks"] if task["surface_id"] == "tasks")
     task.update(capability_pack_id="wrong_label", surface_kind="app_policy", owned_paths=[])
 
@@ -190,7 +266,7 @@ def test_selected_module_lane_constructs_missing_paths_and_labels():
 
 @pytest.mark.parametrize("identity", ["blank", "repeated_task_type"])
 def test_missing_or_repeated_task_ids_compose_with_omitted_structure(identity):
-    plan, context = _live_inputs()
+    plan, context = _domain_inputs()
     if identity == "blank":
         plan["build_tasks"][0]["task_id"] = ""
     else:
@@ -207,7 +283,7 @@ def test_missing_or_repeated_task_ids_compose_with_omitted_structure(identity):
 
 @pytest.mark.parametrize("misuse", ["capability", "module_task", "service_file"])
 def test_structural_page_scope_cannot_authorize_an_unapproved_module(misuse):
-    plan, context = _live_inputs()
+    plan, context = _domain_inputs()
     if misuse == "capability":
         plan["capability_packs"].append({
             **_capability("page_bundle"), "surface_kind": "ui_only",
