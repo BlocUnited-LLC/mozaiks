@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Self-hosted subscription grant and revoke actions are internal-only; HTTP
+  callers cannot assign themselves paid entitlements.
+
 - Generated collection tenancy, owner fields, and entity identities are decided
   in DesignDocs and preserved through generation and repair. Canonical reads
   require login and owner filtering for user/workspace data, with deterministic
@@ -21,6 +24,15 @@ This project follows a practical pre-1.0 changelog format:
   reads, survive repairs, and cannot lock canonical reads or billing facades.
 
 ### Fixed
+
+- Generated persistence artifacts now name omitted indexes, stamp migration
+  versions, exclude managed-facade collections, and declare subscription
+  assignment aliases and collections. Apps can start with persistence enabled
+  and resolve paid-user entitlements for managed and self-hosted billing.
+
+- Canonical generated get actions return HTTP 404 for records absent from the
+  caller's authorized scope, with a typed executor result that preserves server
+  errors for unrelated lookup bugs.
 
 - Existing app data contracts load without newly introduced ownership fields;
   present fields remain validated, and factory generation requires complete

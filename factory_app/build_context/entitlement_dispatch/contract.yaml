@@ -77,6 +77,10 @@ runtime_boundaries:
       data/contract.json. The assignment_store.data_alias in
       config/subscriptions.yaml must match this alias. Do not invent a
       separate collection or bypass the data contract alias.
+      AppGenerator compiles the configured alias, collection, and lookup index
+      into data/contract.json for both managed and self-hosted assignment
+      writers. Migrations do not declare aliases; the initial pack migration
+      has operations: [] because startup applies the contract's indexes.
   - id: app_id_required_in_document
     rule: >
       Every written document must include app_id from ctx.app_id.
@@ -85,8 +89,10 @@ runtime_boundaries:
   - id: action_contract
     rule: >
       The module must declare exactly two actions — activate_subscription and
-      deactivate_subscription — with no entitlement_gate, no permissions, and
-      capabilities: []. This is an internal system module; do not add
+      deactivate_subscription — each with api_surface: internal, permissions: [],
+      no entitlement_gate, and capabilities: []. Trusted server/event dispatch
+      owns assignment writes; HTTP callers must not invoke them. This is an
+      internal system module; do not add
       user-facing queries, admin surfaces, or UI pages.
   - id: no_provider_logic
     rule: >

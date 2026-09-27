@@ -1771,7 +1771,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional index name.
+        description: Null lets code derive a deterministic index name from ordered keys and options.
       keys:
         type: list
         items: DataMigrationIndexKey
@@ -1787,36 +1787,13 @@ models:
         values:
         - ensure_collection
         - ensure_index
-        - add_field
-        - add_collection
-        description: Additive migration operation type.
+        description: Runtime-supported additive migration operation type.
       module_id:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Module that owns the target collection when applicable.
+        type: str
+        description: Declared module that owns the target collection.
       entity_name:
-        type: union
-        variants:
-        - str
-        - 'null'
+        type: str
         description: Entity or collection name affected by the operation.
-      field_name:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Field added by add_field operations.
-      field_type:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Type for an added field when applicable.
-      required:
-        type: bool
-        description: Whether an added field is required.
       index:
         type: union
         variants:

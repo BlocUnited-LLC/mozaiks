@@ -19,6 +19,13 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 )
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 
+from .persistence_artifacts import (
+    managed_data_owners,
+    materialize_data_migrations,
+    normalize_data_contract_indexes,
+)
+from .subscription_data_contract import ensure_subscription_assignment_stores
+
 _MODULE_CONTRACT_FILENAMES = {
     "admin.yaml",
     "events.yaml",
@@ -168,19 +175,46 @@ def _materialize_app_schema_file_map(
     return file_map
 
 
+def compile_data_contract(
+    data_contract: dict[str, Any], *, subscription_contract: dict[str, Any] | None = None,
+    context_variables: Any = None,
+) -> dict[str, Any]:
+    """Resolve mechanical persistence fields from approved design and subscriptions."""
+    contract = normalize_data_contract_indexes(data_contract)
+    managed_owners = managed_data_owners(context_variables)
+    for surface in contract.get("surfaces") or []:
+        if surface.get("surface_id") in managed_owners and surface.get("collections"):
+            raise ValueError(f"Managed facade {surface['surface_id']!r} cannot own app collections")
+    for collection in contract.get("shared_collections") or []:
+        if (collection.get("ownership") or {}).get("surface_id") in managed_owners:
+            raise ValueError(f"Managed facade cannot own app collection {collection.get('name')!r}")
+    return ensure_subscription_assignment_stores(contract, subscription_contract)
+
+
 def materialize_data_contract(
     files: dict[str, str], *, data_contract: Any, owned_paths: list[str] | None = None,
+    subscription_contract: dict[str, Any] | None = None, context_variables: Any = None,
 ) -> dict[str, str]:
-    """Serialize the approved design contract within the caller's file ownership."""
+    """Compile persistence artifacts within the caller's file ownership."""
+    files = materialize_data_migrations(files, managed_owners=managed_data_owners(context_variables))
     path = "data/contract.json"
     if owned_paths is not None and path not in owned_paths:
         return files
+    if data_contract is None:
+        assignment_contract = ensure_subscription_assignment_stores(
+            {"version": "1", "surfaces": [], "shared_collections": []}, subscription_contract,
+        )
+        if assignment_contract.get("aliases"):
+            data_contract = assignment_contract
     if data_contract is None:
         if path in files:
             raise ValueError("data/contract.json requires the approved DesignDocs data_contract")
         return files
     if not isinstance(data_contract, dict):
         raise ValueError("The approved DesignDocs data_contract must be an object")
+    data_contract = compile_data_contract(
+        data_contract, subscription_contract=subscription_contract, context_variables=context_variables,
+    )
     validate_complete_data_contract_ownership(data_contract)
     return {**files, path: json.dumps(data_contract, indent=2, ensure_ascii=False)}
 

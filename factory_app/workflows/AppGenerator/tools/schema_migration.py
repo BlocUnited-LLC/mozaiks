@@ -21,6 +21,11 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
+    managed_data_owners,
+    materialize_data_migrations,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -349,13 +354,16 @@ def apply_migration_safe(
 def inject_migration_into_bundle(
     files_map: dict[str, str],
     migration: Migration,
+    *, context_variables: Any = None,
 ) -> None:
     """
     Write the migration JSON into the generated app bundle (files_map in-place).
     Also ensures data/migrations/.gitkeep exists.
     """
     path = migration_file_path(migration["migration_id"])
-    files_map[path] = json.dumps(migration, indent=2)
+    files_map.update(materialize_data_migrations(
+        {path: json.dumps(migration)}, managed_owners=managed_data_owners(context_variables),
+    ))
     gitkeep = "data/migrations/.gitkeep"
     if gitkeep not in files_map:
         files_map[gitkeep] = ""

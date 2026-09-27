@@ -6,7 +6,7 @@ from typing import Any
 from mozaiksai.core.runtime.persistence import app_data_from_context
 
 # The billing.subscriptions alias is declared in data/contract.json by the
-# entitlement_dispatch_001_collections migration. ConfiguredEntitlementAdapter
+# subscription assignment-store materializer. ConfiguredEntitlementAdapter
 # reads from the same alias via assignment_store.data_alias in
 # config/subscriptions.yaml. Both sides must resolve to the same collection.
 _SUBSCRIPTIONS_ALIAS = "billing.subscriptions"

@@ -485,7 +485,7 @@ async def _execute_module_action(
             )
         return result.data if result.data is not None else {}
 
-    if result.error_code in {"MODULE_NOT_FOUND", "ACTION_NOT_FOUND"}:
+    if result.error_code in {"MODULE_NOT_FOUND", "ACTION_NOT_FOUND", "RECORD_NOT_FOUND"}:
         status_code = 404
     elif result.error_code == "PERMISSION_DENIED":
         status_code = 403

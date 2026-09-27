@@ -140,7 +140,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Null or explicit Mongo index name.
+        description: Null lets code derive a deterministic name from ordered keys and options before saving; a nonempty explicit Mongo index name is preserved.
 
   DataContractOwnership:
     type: model

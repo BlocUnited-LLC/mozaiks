@@ -18,7 +18,10 @@ from typing import Any
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_entries_from_payload,
 )
-from mozaiksai.core.workflow.generator_support.code_files import materialize_data_contract
+from mozaiksai.core.workflow.generator_support.code_files import (
+    compile_data_contract,
+    materialize_data_contract,
+)
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_actions,
@@ -36,6 +39,7 @@ def _merge_code_files(
     data_contract: dict[str, Any] | None = None,
     design_surface_map: dict[str, Any] | None = None,
     subscription_contract: dict[str, Any] | None = None,
+    context_variables: Any = None,
 ) -> list[dict[str, str]]:
     """Merge code_files from feature outputs, deduping by filename."""
     file_map: dict[str, str] = {}
@@ -49,8 +53,23 @@ def _merge_code_files(
             if not filename or content is None:
                 continue
             file_map[str(filename)] = str(content)
+    if isinstance(data_contract, dict):
+        data_contract = compile_data_contract(
+            data_contract, subscription_contract=subscription_contract, context_variables=context_variables,
+        )
+    elif subscription_contract is not None:
+        assignment_contract = compile_data_contract(
+            {"version": "1", "surfaces": [], "shared_collections": []},
+            subscription_contract=subscription_contract, context_variables=context_variables,
+        )
+        if assignment_contract.get("aliases"):
+            data_contract = assignment_contract
+    owned_paths = list(file_map)
+    if subscription_contract is not None and (data_contract or {}).get("aliases"):
+        owned_paths.append("data/contract.json")
     file_map = materialize_data_contract(
-        file_map, data_contract=data_contract, owned_paths=list(file_map),
+        file_map, data_contract=data_contract, owned_paths=owned_paths,
+        subscription_contract=subscription_contract, context_variables=context_variables,
     )
     file_map.update(materialize_module_read_actions(
         file_map, app_build_plan=app_build_plan, data_contract=data_contract,
@@ -79,6 +98,7 @@ async def assemble_features(
     data_contract: dict[str, Any] | None = None,
     design_surface_map: dict[str, Any] | None = None,
     subscription_contract: dict[str, Any] | None = None,
+    context_variables: Any = None,
 ) -> dict[str, Any]:
     """
     Merge feature outputs into a single workflow bundle.
@@ -103,6 +123,7 @@ async def assemble_features(
         data_contract=data_contract,
         design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
+        context_variables=context_variables,
     )
     logger.info(
         "Assembled %d feature outputs into %d files",

@@ -30,6 +30,8 @@ actions:
       can grant the plan's declared capabilities to the user.
       Call this after payment confirmation or explicit plan assignment.
     handler_method: activate_subscription
+    api_surface: internal
+    permissions: []
     input_schema:
       type: object
       additionalProperties: false
@@ -80,6 +82,8 @@ actions:
       stops granting the plan's capabilities.
       Call this on subscription cancellation, expiry, or plan downgrade.
     handler_method: deactivate_subscription
+    api_surface: internal
+    permissions: []
     input_schema:
       type: object
       additionalProperties: false

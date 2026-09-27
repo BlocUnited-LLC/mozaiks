@@ -29,6 +29,7 @@ from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     resolve_managed_capability_templates,
 )
+from mozaiksai.core.workflow.generator_support.code_files import materialize_data_contract
 
 # ---------------------------------------------------------------------------
 # Pack paths
@@ -183,6 +184,14 @@ def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict]]:
             extra_secret_variables=deployment_env["secret"],
             extra_public_variables=deployment_env["public"],
         )["artifacts"]
+    )
+    files = materialize_data_contract(
+        files,
+        data_contract={"version": "1", "surfaces": [], "shared_collections": []},
+        subscription_contract={
+            "contract_required": True,
+            "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"]),
+        },
     )
     return files, capability_packs
 

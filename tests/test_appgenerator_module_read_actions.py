@@ -21,6 +21,7 @@ from factory_app.workflows.AppGenerator.tools.module_runtime_quality import (
 )
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.runtime import ModuleRecordNotFoundError
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.workflow import task_batches
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
@@ -338,7 +339,7 @@ async def test_generated_reads_enforce_login_owner_pagination_and_allowlist(tmp_
             await handler.get_tasks(ctx, id="1")
         setattr(ctx, attribute, previous)
     collection.find_one.return_value = None
-    with pytest.raises(LookupError, match="Record not found"):
+    with pytest.raises(ModuleRecordNotFoundError, match="Record not found"):
         await handler.get_tasks(ctx, id="foreign-id")
 
 

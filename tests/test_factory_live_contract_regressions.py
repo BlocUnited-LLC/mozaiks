@@ -223,7 +223,7 @@ def test_data_contract_cannot_drop_fields_or_make_optional_email_required():
     actual["surfaces"][0]["collections"][0]["fields"] = [{"name": "email", "type": "string", "required": True}]
     errors = _scan_planned_data_fields({"data/contract.json": json.dumps(actual)}, planned)
     assert len(errors) == 3
-    assert any("exactly preserve" in error for error in errors)
+    assert any("must match the compiled approved DesignDocs and subscription contracts" in error for error in errors)
     assert any("email" in error for error in errors)
     assert any("notes" in error for error in errors)
     assert _scan_planned_data_fields({"data/contract.json": json.dumps(planned)}, planned) == []

@@ -22,6 +22,7 @@ from mozaiksai.core.workflow.context.frozen import detach
 from .dependency_graph import deterministic_topological_order
 from .generator_support.code_files import (
     _MODULE_CONTRACT_OUTPUT_PATHS,
+    compile_data_contract,
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
     materialize_data_contract,
@@ -1089,16 +1090,22 @@ async def _run_one_task(
                     output, build_timestamp=base_context.get("build_timestamp"),
                 )
                 canonical_file_map = {entry["filename"]: entry["content"] for entry in canonical_code_files}
+                data_contract = detach(task_context.get("data_contract"))
+                if isinstance(data_contract, dict):
+                    data_contract = compile_data_contract(
+                        data_contract, subscription_contract=subscription_contract, context_variables=task_context,
+                    )
                 canonical_file_map = materialize_data_contract(
-                    canonical_file_map, data_contract=detach(task_context.get("data_contract")),
+                    canonical_file_map, data_contract=data_contract,
                     owned_paths=task.get("owned_paths") or [],
+                    subscription_contract=subscription_contract, context_variables=task_context,
                 )
                 canonical_file_map = compile_authored_page_files(
                     canonical_file_map, payload=output, context=task_context,
                 )
                 policies = materialize_task_module_policies(
                     canonical_file_map, task=task,
-                    data_contract=task_context.get("data_contract"),
+                    data_contract=data_contract,
                 )
                 canonical_file_map.update(policies)
                 read_sources = dict(task_context.get("generated_files") or {})

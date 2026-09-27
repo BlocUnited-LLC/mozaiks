@@ -199,6 +199,10 @@ class ModuleInputValidationError(ValueError):
     """Expected service-level input rejection before persistence or side effects."""
 
 
+class ModuleRecordNotFoundError(LookupError):
+    """A requested record is absent from the caller's authorized scope."""
+
+
 class ModuleEventPayloadValidationError(ValueError):
     """Raised when a module emits an event payload that violates its contract."""
 
@@ -621,6 +625,16 @@ class ModuleExecutor:
                 success=False,
                 error=f"Action '{request.action}' timed out",
                 error_code="ACTION_TIMEOUT",
+            )
+        except ModuleRecordNotFoundError:
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="failed", reason="RECORD_NOT_FOUND"),
+                error="RECORD_NOT_FOUND",
+            )
+            return ModuleResult(
+                success=False,
+                error="Record not found",
+                error_code="RECORD_NOT_FOUND",
             )
         except ModuleInputValidationError:
             logger.info(

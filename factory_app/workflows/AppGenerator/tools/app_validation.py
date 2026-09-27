@@ -54,6 +54,9 @@ from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     local_app_validation_available,
     resolve_app_validation_strategy,
 )
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
+)
 
 
 def _local_validation_available() -> bool:
@@ -1880,6 +1883,7 @@ async def run_app_bundle_acceptance_gate(
         generated_files,
         capability_packs=selected_capability_packs,
         planned_data_contract=_context_get(context_variables, "data_contract"),
+        subscription_contract=resolve_subscription_contract(context_variables),
         require_deployment_artifacts=_requires_deployment_artifacts(
             generated_files,
             context_variables,
