@@ -10,7 +10,10 @@ import yaml
 from fastapi.testclient import TestClient
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
-from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
+from factory_app.workflows.AppGenerator.tools.app_validation import (
+    run_app_bundle_acceptance_gate,
+    validate_app_build,
+)
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import save_auth_scaffold
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
@@ -594,6 +597,7 @@ def _approved_context_values() -> dict[str, Any]:
     }
 
 
+
 async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], Path, Any, ContextVariablesBridge, _Collection]:
     plan = _load_fixture_plan()
     ctx = ContextVariablesBridge(factory_context({
@@ -604,8 +608,6 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
         "landing_spot": "/reports",
         "chat_id": "generated-saas-plan-chat",
         "build_task_model": "AppBuildTask",
-        "app_validation_strategy_used": "skip",
-        "app_validation_status": "skipped",
     }))
     app_build_plan(AppBuildPlan=plan, context_variables=ctx)
     assert ctx.get("app_plan_ready") is True
@@ -679,6 +681,12 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
     assert validation.passed is True, validation.diagnostics
     assert scan_functional_generated_app(files, capability_packs=plan.get("capability_packs")) == []
 
+    with pytest.MonkeyPatch.context() as validation_env:
+        validation_env.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
+        build_validation = await validate_app_build(
+            files=files, validation_strategy="skip", context_variables=ctx,
+        )
+    assert build_validation["validation_status"] == "skipped", build_validation
     gate = await run_app_bundle_acceptance_gate(
         files=files,
         context_variables=ctx,

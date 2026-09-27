@@ -7,6 +7,7 @@ import re
 from typing import Annotated, Any
 
 import yaml
+from pydantic import ValidationError
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows._shared.surface_ownership import validate_surface_ownership
@@ -1298,6 +1299,32 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
         raise ValueError("Incomplete build plan:\n- " + "\n- ".join(errors))
 
 
+def _plan_validation_feedback(error: ValueError, payload: dict[str, Any] | None) -> str:
+    locations: list[str] = []
+    if isinstance(error, ValidationError) and isinstance(payload, dict):
+        pages = payload.get("pages")
+        for detail in error.errors():
+            path = detail["loc"]
+            if ("data_source" not in path or len(path) < 2 or path[0] != "pages"
+                    or not isinstance(pages, list) or not isinstance(path[1], int)
+                    or path[1] >= len(pages) or not isinstance(pages[path[1]], dict)):
+                continue
+            page = pages[path[1]]
+            page_name = page.get("name") or page.get("page_id") or f"pages[{path[1]}]"
+            section_name = "<page>"
+            sections = page.get("sections_hint")
+            if (len(path) >= 4 and path[2] == "sections_hint" and isinstance(path[3], int)
+                    and isinstance(sections, list) and path[3] < len(sections)):
+                section = sections[path[3]]
+                section_name = (
+                    section.get("section_id_hint") if isinstance(section, dict) else None
+                ) or f"sections_hint[{path[3]}]"
+            location = f"Page '{page_name}', section '{section_name}': invalid data_source"
+            if location not in locations:
+                locations.append(location)
+    return "\n".join([*locations, str(error)])[:6000]
+
+
 def review_app_build_plan(
     *,
     AppBuildPlan: Annotated[dict[str, Any] | None, "Complete AppBuildPlan output"] = None,
@@ -1348,7 +1375,7 @@ def review_app_build_plan(
         validate_plan_coverage(cached, context_variables)
     except ValueError as error:
         _clear_plan(context_variables)
-        feedback = str(error)[:6000]
+        feedback = _plan_validation_feedback(error, AppBuildPlan)
         context_variables.set("app_plan_feedback", feedback)
         outcome = "needs_revision" if attempts < 3 else "blocked"
         context_variables.set("app_plan_outcome", outcome)

@@ -116,8 +116,11 @@ def _apply_planned_page_contracts(
                     f"{path}: missing planned page during assembly{owner}; "
                     "the task reported no failure, so the page was expected to exist"
                 )
-            file_map[path] = normalize_planned_page_content(file_map[path], path=path, modules=modules)
-            validate_planned_page(file_map[path], planned_by_stem[stem], path)
+            try:
+                file_map[path] = normalize_planned_page_content(file_map[path], path=path, modules=modules)
+                validate_planned_page(file_map[path], planned_by_stem[stem], path)
+            except ValueError as exc:
+                raise ValueError(f"{path}: {exc}") from exc
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
@@ -284,7 +287,7 @@ def _apply_deleted_files(
     ]
 
 
-async def assemble_app_tasks(
+async def _assemble_app_tasks(
     *,
     context_variables: Annotated[
         Any | None,
@@ -424,40 +427,81 @@ async def assemble_app_tasks(
     # preservation resolver (which runs after AssemblyAgent's turn) can read
     # the full generated output and detect conflicts correctly.
     if context_variables and hasattr(context_variables, "set"):
-        try:
+        task_results = detach(context_variables.get("app_task_batch_results"))
+        if isinstance(task_results, dict):
+            meta = task_results.get("_meta") if isinstance(task_results.get("_meta"), dict) else {}
             context_variables.set(
-                "generated_files",
-                {str(f["filename"]): str(f["content"]) for f in code_files},
+                "app_task_batch_results_summary",
+                {
+                    "status": meta.get("status") or context_variables.get("app_task_batch_status"),  # type: ignore[union-attr]
+                    "task_count": meta.get("task_count"),  # type: ignore[union-attr]
+                    "completed_tasks": meta.get("completed_tasks") or [],  # type: ignore[union-attr]
+                    "failed_tasks": meta.get("failed_tasks") or [],  # type: ignore[union-attr]
+                    "result_keys": [
+                        str(key)
+                        for key in task_results
+                        if not str(key).startswith("_")
+                    ],
+                },
             )
-            context_variables.set("assembled_source", "schema_and_task_batch_outputs")
-            task_results = detach(context_variables.get("app_task_batch_results"))
-            if isinstance(task_results, dict):
-                meta = task_results.get("_meta") if isinstance(task_results.get("_meta"), dict) else {}
-                context_variables.set(
-                    "app_task_batch_results_summary",
-                    {
-                        "status": meta.get("status") or context_variables.get("app_task_batch_status"),  # type: ignore[union-attr]
-                        "task_count": meta.get("task_count"),  # type: ignore[union-attr]
-                        "completed_tasks": meta.get("completed_tasks") or [],  # type: ignore[union-attr]
-                        "failed_tasks": meta.get("failed_tasks") or [],  # type: ignore[union-attr]
-                        "result_keys": [
-                            str(key)
-                            for key in task_results
-                            if not str(key).startswith("_")
-                        ],
-                    },
-                )
-        except Exception:
-            pass
+        context_variables.set("assembled_source", "schema_and_task_batch_outputs")
+        context_variables.set(
+            "generated_files",
+            {str(f["filename"]): str(f["content"]) for f in code_files},
+        )
 
     status_note = result.get("message") or "Assembled app task outputs into one bundle."
     if isinstance(inject_key, str) and inject_key:
         status_note = f"{status_note} (source={inject_key})"
 
     return {
+        "success": True,
+        "status": "passed",
         "code_files": code_files,
         "agent_message": status_note,
     }
+
+
+async def assemble_app_tasks(
+    *,
+    context_variables: Annotated[
+        Any | None,
+        Field(description="AG2-injected workflow context variables."),
+    ] = None,
+) -> dict[str, Any]:
+    """Publish a complete assembly or preserve the previous bundle and cause."""
+    context = context_variables
+    previous_files = detach(context.get("generated_files")) if context is not None else None
+    previous_source = context.get("assembled_source") if context is not None else None
+    if context is not None and hasattr(context, "set"):
+        context.set("app_assembly_status", "pending")
+        context.set("app_assembly_error", None)
+        context.set("app_assembly_diagnostic", None)
+        context.set("integration_tests_passed", False)
+        context.set("app_validation_status", "pending")
+        context.set("app_bundle_acceptance_status", "pending")
+    try:
+        result = await _assemble_app_tasks(context_variables=context)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        logger.exception("App assembly failed: %s", error)
+        if context is not None and hasattr(context, "set"):
+            context.set("generated_files", previous_files)
+            context.set("assembled_source", previous_source)
+            context.set("app_assembly_status", "failed")
+            context.set("app_assembly_error", error)
+            context.set("app_assembly_diagnostic", {"code": "APP_ASSEMBLY_FAILED", "error": str(exc)})
+            context.set("app_validation_status", "failed")
+            context.set("app_bundle_acceptance_status", "failed")
+        return {
+            "success": False,
+            "status": "failed",
+            "error": error,
+            "agent_message": f"App assembly failed: {error}. The previous bundle was preserved.",
+        }
+    if context is not None and hasattr(context, "set"):
+        context.set("app_assembly_status", "passed")
+    return result
 
 
 __all__ = ["assemble_app_tasks"]

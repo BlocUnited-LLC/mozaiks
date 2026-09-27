@@ -1616,6 +1616,26 @@ definitions:
     source:
       type: computed
       default: null
+  app_assembly_status:
+    type: string
+    description: Deterministic assembly outcome, pending | passed | failed. Failed assembly retains the previous bundle and blocks validation.
+    writer_ids: [deterministic_tool]
+    source:
+      type: computed
+      default: pending
+  app_assembly_error:
+    type: string
+    description: Original assembly exception type and message, cleared by the next assembly attempt.
+    source:
+      type: computed
+      default: null
+  app_assembly_diagnostic:
+    type: object
+    description: Original assembly diagnostic resolved against approved task ownership by the bounded recovery policy.
+    writer_ids: [deterministic_tool]
+    source:
+      type: computed
+      default: null
 agents:
   InterviewAgent:
     variables:
@@ -1767,6 +1787,8 @@ agents:
     - dependency_task_outputs
   AssemblyAgent:
     variables:
+    - app_assembly_status
+    - app_assembly_error
     - app_build_plan
     - app_task_batch_items
     - app_task_batch_status
@@ -1972,6 +1994,8 @@ agents:
     - dependency_task_outputs
   AppValidationAgent:
     variables:
+    - app_assembly_status
+    - app_assembly_error
     - generated_files
     - code_files
     - deleted_files

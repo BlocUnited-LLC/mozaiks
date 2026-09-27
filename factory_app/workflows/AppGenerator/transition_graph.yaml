@@ -1,4 +1,12 @@
 transition_rules:
+# Failed assembly returns to bounded recovery policy, never unchanged assembly.
+- source_agent: user
+  target_agent: AppValidationAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_assembly_status
+  condition_value: failed
+  transition_target: AgentTarget
 # A user reply after task execution returns to the existing recovery policy.
 # Retained evidence and budgets must be checked before planning can run again.
 - source_agent: user
@@ -125,6 +133,13 @@ transition_rules:
 - source_agent: AdminRegistryAgent
   target_agent: AssemblyAgent
   transition_type: after_turn
+  transition_target: AgentTarget
+- source_agent: AssemblyAgent
+  target_agent: AppValidationAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_assembly_status
+  condition_value: failed
   transition_target: AgentTarget
 - source_agent: AssemblyAgent
   target_agent: AppValidationAgent
@@ -372,6 +387,14 @@ transition_rules:
   condition_key: bundle_repair_target
   condition_value: FrontendStubAgent
   transition_target: AgentTarget
+- source_agent: AppValidationAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_assembly_status
+  condition_value: failed
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 - source_agent: AppValidationAgent
   target_agent: AppValidationAgent
   transition_type: condition

@@ -17,7 +17,6 @@ from factory_app.app.modules.app_registry.backend.service import AppRegistryServ
 from factory_app.workflows._shared.platform import build_target
 from factory_app.workflows.AppGenerator.tools import hydrate_app_revision_context as revision
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
-from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 from mozaiksai.core.artifacts.models import BuildRecord, ChangeRequestDoc
 from mozaiksai.core.auth import UserPrincipal
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
@@ -308,8 +307,9 @@ async def test_retry_seed_runs_canonical_before_chat_baseline_loader(retry, monk
         assert context.get("generated_files") is None
         # Lifecycle errors are logged, not fatal. Assembly must still reject the
         # same missing/changed baseline, never assemble from an empty genesis.
-        with pytest.raises((ValueError, ContentNotFoundError), match=expected_error):
-            await assemble_app_tasks(context_variables=context)
+        assembly_result = await assemble_app_tasks(context_variables=context)
+        assert assembly_result["success"] is False
+        assert expected_error in assembly_result["error"]
         assert context.get("generated_files") is None
     else:
         assert event[0] == "lifecycle.tool_result" and event[1]["status"] == "success"

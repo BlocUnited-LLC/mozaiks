@@ -362,7 +362,10 @@ def test_appgenerator_interview_has_an_explicit_human_reply_route() -> None:
     rules = handoffs["transition_rules"]
 
     user_rules = [rule for rule in rules if rule["source_agent"] == "user"]
-    initial_routes = [rule for rule in user_rules if rule["target_agent"] != "AppValidationAgent"]
+    initial_routes = [
+        rule for rule in user_rules
+        if rule["target_agent"] not in {"AppValidationAgent", "AssemblyAgent"}
+    ]
 
     # A user who asked to be brought a finished app is routed past the
     # interview entirely. This has to be a routing rule: interview_complete

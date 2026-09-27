@@ -39,6 +39,12 @@ async def resolve_carry_forward_preservation(
     ``carry_forward_decisions`` is absent.  Emits ``carry_forward_report`` to
     ``context_variables``.
     """
+    if context_variables is not None and context_variables.get("app_assembly_status") == "failed":
+        return {
+            "status": "skipped",
+            "reason": "assembly_failed",
+            "error": context_variables.get("app_assembly_error"),
+        }
     return await _core(
         context_variables=(
             dict(context_variables)

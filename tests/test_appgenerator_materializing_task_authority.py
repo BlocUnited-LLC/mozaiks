@@ -36,6 +36,7 @@ from mozaiksai.core.workflow.task_batches import (
     _validate_batch_owned_paths,
     execute_task_batches_for_trigger,
     load_task_batches_config,
+    optional_task_output_paths,
 )
 from tests.factory_context import factory_context
 
@@ -119,7 +120,11 @@ async def materialize_fixture(monkeypatch: pytest.MonkeyPatch) -> tuple[dict, di
     assert context.get("app_plan_ready") is True
     items = context.get("app_task_batch_items")
     assert len(items) == len(plan["build_tasks"]) == 3
-    assert all(item["owned_paths"] and set(item["owned_paths"]) <= data["app_files"].keys() for item in items)
+    assert all(
+        item["owned_paths"]
+        and set(item["owned_paths"]) - optional_task_output_paths(item) <= data["app_files"].keys()
+        for item in items
+    )
     config = load_task_batches_config("AppGenerator", workflows_root=ROOT / "factory_app/workflows")
     assert config is not None
     assert config.batches[0].result.require_owned_paths is True
@@ -129,7 +134,10 @@ async def materialize_fixture(monkeypatch: pytest.MonkeyPatch) -> tuple[dict, di
     async def run(_self, request):
         task = request.context_variables["current_build_task"]
         seen.append(task["task_id"])
-        candidates = {path: data["app_files"][path] for path in task["owned_paths"]}
+        candidates = {
+            path: data["app_files"][path] for path in task["owned_paths"]
+            if path in data["app_files"] or path not in optional_task_output_paths(task)
+        }
         if "ui/pages/documents.yaml" in candidates:
             candidates["ui/pages/documents.yaml"] = candidates["ui/pages/documents.yaml"].replace(
                 "href: /api/modules/documents/summarize_document",

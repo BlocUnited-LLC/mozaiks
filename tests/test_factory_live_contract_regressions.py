@@ -94,7 +94,7 @@ def test_page_http_binding_rejects_internal_actions_and_routes_to_contract_owner
         context = _repair_context("module_contract", "ConfigMiddlewareAgent", {path: files[path]})
         repair = prepare_bundle_repair({"passed": False, "errors": errors}, context)
         assert repair["target_agent"] == "ConfigMiddlewareAgent"
-        assert repair["active"]["allowed_paths"] == [path]
+        assert repair["active"]["allowed_paths"] == [path, "modules/contacts/contracts/events.yaml"]
 
 
 def test_service_worker_receives_runtime_and_account_protocol_with_protected_context():

@@ -12,7 +12,7 @@ from typing import Any
 
 from mozaiksai.core.workflow.context.frozen import detach
 
-from .task_integrity import approved_task_inventory
+from .task_integrity import approved_task_inventory, task_allowed_paths
 
 
 def _get(context: Any, key: str, default: Any = None) -> Any:
@@ -51,9 +51,20 @@ def owned_diagnostics(context: Any, diagnostics: list[dict[str, Any]]) -> list[d
             prefix = error.split(":", 1)[0].strip().replace("\\", "/")
             if prefix in owners:
                 path = prefix
+            elif len(paths := [owned for owned in owners if error.startswith(owned + " ")]) == 1:
+                path = paths[0]
             elif error == "Generated app bundles must include app.json.":
                 path = "app.json"
         matches = owners.get(path, [])
+        if path and not matches and "*" not in path:
+            # Older accepted plans may omit an optional module companion from
+            # owned_paths. The batch already admits that exact path; reuse its
+            # authority without changing the frozen plan or execution evidence.
+            matches = [
+                task for task in inventory
+                if task.get("task_type") == "module_contract"
+                and path in task_allowed_paths(task, inventory)
+            ]
         if "*" in path:
             matching_paths = [owned for owned in owners if fnmatchcase(owned, path)]
             matches = list({
@@ -156,9 +167,15 @@ def prepare_bundle_repair(
             continue
         if attempts < max_attempts:
             task = inventory[task_id]
+            allowed_paths = list(task["owned_paths"])
+            allowed_paths.extend(sorted({
+                item["path"] for item in items
+                if item.get("path") and item["path"] not in allowed_paths
+                and item["path"] in task_allowed_paths(task, list(inventory.values()))
+            }))
             chosen = {
                 "task_id": task_id, "target_agent": task["initial_agent"],
-                "allowed_paths": list(task["owned_paths"]),
+                "allowed_paths": allowed_paths,
                 "failure_fingerprint": fingerprint,
                 "request_id": _digest({"fingerprint": fingerprint, "attempt": attempts + 1}),
                 "status": "selected",

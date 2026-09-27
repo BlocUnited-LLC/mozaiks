@@ -46,8 +46,9 @@ async def test_failed_exact_module_owner_preserves_partial_bundle_for_acceptance
 async def test_missing_module_requires_its_exact_owner_failure(failed, owned_path):
     context = _partial_context(failed=failed, owned_path=owned_path)
 
-    with pytest.raises(ValueError, match="Missing module.yaml"):
-        await assemble_app_tasks(context_variables=context)
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"] is False
+    assert "Missing module.yaml" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -57,5 +58,6 @@ async def test_partial_batch_does_not_excuse_missing_product_mapping():
     contract["module_contract_updates"] = []
     context.set("subscription_contract", contract)
 
-    with pytest.raises(ValueError, match="Unmapped capability ids"):
-        await assemble_app_tasks(context_variables=context)
+    result = await assemble_app_tasks(context_variables=context)
+    assert result["success"] is False
+    assert "Unmapped capability ids" in result["error"]

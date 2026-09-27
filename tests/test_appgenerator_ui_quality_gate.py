@@ -376,8 +376,9 @@ async def test_assemble_app_tasks_requires_passed_ui_quality_gate() -> None:
         }
     )
 
-    with pytest.raises(ValueError, match="app_ui_quality_status must be 'passed'"):
-        await assemble_module.assemble_app_tasks(context_variables=context)
+    result = await assemble_module.assemble_app_tasks(context_variables=context)
+    assert result["success"] is False
+    assert "app_ui_quality_status must be 'passed'" in result["error"]
 
 
 @pytest.mark.asyncio
