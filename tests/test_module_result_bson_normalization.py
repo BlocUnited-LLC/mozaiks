@@ -630,7 +630,13 @@ async def test_real_mongo_crud_results_are_json_safe_through_executor() -> None:
 
     try:
         ex = ModuleExecutor()
-        ex.register("records", _RealRepoHandler())
+        ex.register(
+            "records",
+            _RealRepoHandler(),
+            action_method_map={name: name for name in (
+                "create_record", "list_records", "read_record", "update_record", "delete_record",
+            )},
+        )
 
         created = await ex.execute(
             _request("records", "create_record", {"name": "alpha"})
