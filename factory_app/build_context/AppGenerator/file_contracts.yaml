@@ -14,8 +14,8 @@ description: >
   Runtime truth remains the structured outputs, build_tasks, owned_paths, and
   runtime loaders — not this catalog.
 
-  Authenticated app scaffolds are emitted through save_auth_scaffold outside
-  AppBuildPlan build_tasks. config/auth.yaml
+  Authenticated app scaffolds are emitted idempotently through save_auth_scaffold
+  before every app validation, outside AppBuildPlan build_tasks. config/auth.yaml
   validates against the shared mozaiks.auth.v1 model; ui/auth/authAdapter.js
   delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
   local demo identity implementations. Backend configuration selects auth mode.

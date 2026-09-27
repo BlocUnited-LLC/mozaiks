@@ -201,7 +201,6 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "ModuleRuntimeQualityAgent",
         "ModelAgent",
         "AppValidationAgent",
-        "AuthScaffoldAgent",
         "DownloadAgent",
         "ServiceAgent",
         "FrontendStubAgent",
@@ -230,6 +229,26 @@ def test_app_generator_page_contract_stays_declarative() -> None:
     assert "record_integration_need" in content
     assert agent_names == expected_agents
     assert connected_agents <= expected_agents
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["agents.yaml", "tools.yaml", "transition_graph.yaml", "structured_outputs.yaml", "ui_config.yaml"],
+)
+def test_auth_scaffolding_has_no_separate_agent_turn(filename: str) -> None:
+    assert "AuthScaffoldAgent" not in _read(f"factory_app/workflows/AppGenerator/{filename}")
+
+
+def test_integration_manifest_is_persisted_automatically_after_readiness() -> None:
+    tools = _read_yaml("factory_app/workflows/AppGenerator/tools.yaml")["tools"]
+    checkpoint_tools = [entry for entry in tools if entry["agent"] == "IntegrationReadinessAgent"]
+
+    assert [entry["function"] for entry in checkpoint_tools] == [
+        "check_integration_readiness",
+        "save_integration_manifest",
+    ]
+    assert all(entry["auto_tool_call"] is True for entry in checkpoint_tools)
+    assert all(entry["bind_to_agent"] is False for entry in checkpoint_tools)
 
 
 def test_ui_docs_define_page_customization_boundary() -> None:

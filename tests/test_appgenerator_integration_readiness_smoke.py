@@ -5,25 +5,21 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mozaiksai.core.workflow.generator_support import connector_request, connector_service
 from mozaiksai.core.data.persistence.connector_store import ConnectorStore
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from factory_app.workflows.AppGenerator.tools.integration_readiness import check_integration_readiness
+from factory_app.workflows.AppGenerator.tools import save_integration_manifest as manifest_module
+from factory_app.workflows.AppGenerator.tools.deployment_contract import generate_deployment_artifacts
+from factory_app.workflows.AppGenerator.tools.generate_and_download import _deployment_env_for_capability_packs
+from tests.factory_context import factory_context
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SECRET_VALUE = "secret-analytics-provider-api-key"
-
-
-class _Context:
-    def __init__(self, data: dict[str, Any]):
-        self.data = dict(data)
-
-    def get(self, key: str, default=None):
-        return self.data.get(key, default)
-
-    def set(self, key: str, value):
-        self.data[key] = value
 
 
 class _FakeCursor:
@@ -291,8 +287,8 @@ async def test_appgenerator_integration_readiness_blocks_requests_saves_and_pass
     monkeypatch.setattr(connector_request, "save_connector", save_connector)
     monkeypatch.setattr(connector_request, "use_ui_tool", fake_use_ui_tool)
 
-    context = _Context(
-        {
+    context = ContextVariablesBridge(
+        factory_context({
             "workflow_name": "AppGenerator",
             "run_id": "run-analytics-smoke",
             "chat_id": "chat-analytics-smoke",
@@ -300,10 +296,10 @@ async def test_appgenerator_integration_readiness_blocks_requests_saves_and_pass
             "user_id": "user-operator",
             "current_build_task_id": "task_analytics_adapter",
             "app_build_plan": _analytics_plan(),
-        }
+        })
     )
 
-    dry_run = await connector_request.collect_missing_connector_needs(
+    dry_run = await check_integration_readiness(
         context_variables=context,
         prompt=False,
     )
@@ -311,12 +307,12 @@ async def test_appgenerator_integration_readiness_blocks_requests_saves_and_pass
     assert dry_run["status"] == "blocked"
     assert dry_run["unresolved_required_services"] == ["analytics_provider"]
 
-    result = await connector_request.collect_missing_connector_needs(context_variables=context)
+    result = await check_integration_readiness(context_variables=context)
 
     assert result["status"] == "ready"
     assert result["unresolved_required_services"] == []
-    assert context.data["integration_readiness_status"] == "ready"
-    assert context.data["ready_connector_services"] == ["analytics_provider"]
+    assert context.get("integration_readiness_status") == "ready"
+    assert list(context.get("ready_connector_services")) == ["analytics_provider"]
 
     request_payload = ui_calls[0]["payload"]
     integration_request = request_payload["integration_requests"][0]
@@ -370,6 +366,121 @@ def test_generated_output_references_connector_id_without_raw_secret() -> None:
     assert SECRET_VALUE not in combined
     assert "api_key =" not in combined
     assert "secret-" not in combined
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("required_at", "expected_status"),
+    [("runtime", "ready"), ("build_time", "blocked"), ("validation_time", "blocked")],
+)
+async def test_appgenerator_readiness_blocks_only_build_phases(
+    monkeypatch: pytest.MonkeyPatch, required_at: str, expected_status: str,
+) -> None:
+    plan = _analytics_plan()
+    plan["external_integrations"][0]["required_at"] = required_at
+    plan["build_tasks"][0]["integration_needs"][0]["required_at"] = required_at
+    context = ContextVariablesBridge(factory_context({"app_build_plan": plan}))
+    requested_services = []
+
+    async def missing_inventory(*, scope, scope_id, required_services):
+        assert scope == ConnectorStore.SCOPE_APP
+        assert scope_id == "generated-app"
+        requested_services.append(required_services)
+        return {
+            "required_services": required_services,
+            "ready_services": [],
+            "missing_required_services": required_services,
+            "connectors": [],
+        }
+
+    request = AsyncMock(return_value={"status": "cancelled", "services": []})
+    monkeypatch.setattr(connector_request, "get_connector_inventory", missing_inventory)
+    monkeypatch.setattr(connector_request, "request_connector_bundle", request)
+
+    result = await check_integration_readiness(context_variables=context)
+
+    assert result["status"] == expected_status
+    assert context.get("integration_readiness_status") == expected_status
+    assert result["integration_needs"][0]["required_at"] == required_at
+    assert context.get("integration_needs")[0]["required_at"] == required_at
+    if required_at == "runtime":
+        assert requested_services == [[]]
+        assert result["blocking_needs"] == []
+        assert result["unresolved_required_services"] == []
+        request.assert_not_awaited()
+    else:
+        assert requested_services == [["analytics_provider"], ["analytics_provider"]]
+        assert result["blocking_needs"][0]["required_at"] == required_at
+        assert result["unresolved_required_services"] == ["analytics_provider"]
+        request.assert_awaited_once()
+        assert request.await_args.kwargs["services"][0]["required_at"] == required_at
+
+
+@pytest.mark.asyncio
+async def test_runtime_needs_remain_declared_with_deployment_secret_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pack = {
+        "id": "hosted_analytics",
+        "required_integrations": [{
+            "service": "analytics_provider",
+            "required_at": "runtime",
+            "required_fields": _analytics_required_fields(),
+        }],
+        "deployment_env": {
+            "required": ["ANALYTICS_API_KEY", "ANALYTICS_ENDPOINT_URL"],
+            "secret": ["ANALYTICS_API_KEY"],
+            "public": ["ANALYTICS_ENDPOINT_URL"],
+        },
+    }
+    context = ContextVariablesBridge(factory_context({
+        "app_build_plan": {"capability_packs": [pack]},
+        "capability_packs": [pack],
+    }))
+    monkeypatch.setattr(connector_request, "get_connector_inventory", AsyncMock(return_value={
+        "required_services": [],
+        "ready_services": [],
+        "missing_required_services": [],
+        "connectors": [],
+    }))
+    request = AsyncMock()
+    monkeypatch.setattr(connector_request, "request_connector_bundle", request)
+    declarations = AsyncMock()
+    declarations.declare_app_integration_needs.return_value = {"saved": 1}
+    monkeypatch.setattr(manifest_module, "WorkspaceIntegrationsService", lambda: declarations)
+
+    readiness = await check_integration_readiness(context_variables=context)
+    saved = await manifest_module.save_integration_manifest(context_variables=context)
+
+    assert readiness["status"] == "ready"
+    request.assert_not_awaited()
+    assert saved == {"saved": 1, "app_id": "generated-app"}
+    declaration = declarations.declare_app_integration_needs.await_args.kwargs["needs"][0]
+    assert declaration["service"] == "analytics_provider"
+    assert declaration["required_at"] == "runtime"
+    assert declaration["connector_status"] == "not_configured"
+    assert declaration["required_fields"] == _analytics_required_fields()
+
+    deployment_env = _deployment_env_for_capability_packs(context.snapshot()["capability_packs"])
+    deployment = generate_deployment_artifacts(
+        app_id="generated-app",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        extra_required_variables=deployment_env["required"],
+        extra_optional_variables=deployment_env["optional"],
+        extra_secret_variables=deployment_env["secret"],
+        extra_public_variables=deployment_env["public"],
+    )
+
+    manifest = deployment["deployment_manifest"]
+    assert {"ANALYTICS_API_KEY", "ANALYTICS_ENDPOINT_URL"} <= set(manifest["required_env"])
+    assert "ANALYTICS_API_KEY" in manifest["secret_env"]
+    assert "ANALYTICS_ENDPOINT_URL" in manifest["public_env"]
+    assert "ANALYTICS_API_KEY=" in deployment["artifacts"][".env.example"]
+    assert SECRET_VALUE not in repr(declaration)
+    assert SECRET_VALUE not in repr(deployment)
 
 
 @pytest.mark.asyncio

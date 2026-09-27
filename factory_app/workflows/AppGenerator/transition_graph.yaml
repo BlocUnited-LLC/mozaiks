@@ -145,7 +145,7 @@ transition_rules:
   transition_type: after_turn
   transition_target: AgentTarget
 - source_agent: IntegrationReadinessAgent
-  target_agent: AuthScaffoldAgent
+  target_agent: AppValidationAgent
   transition_type: after_turn
   transition_target: AgentTarget
 - source_agent: IntegrationReadinessAgent
@@ -404,10 +404,6 @@ transition_rules:
   target_agent: user
   transition_type: after_turn
   transition_target: RevertToUserTarget
-- source_agent: AuthScaffoldAgent
-  target_agent: AppValidationAgent
-  transition_type: after_turn
-  transition_target: AgentTarget
 - source_agent: DownloadAgent
   target_agent: RefinementHarnessAgent
   transition_type: condition

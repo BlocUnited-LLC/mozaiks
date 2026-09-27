@@ -73,8 +73,9 @@ See [ADR 0011](../../adr/0011-factory-bounded-task-recovery.md).
 
 AppPlanAgent clears stale plan/task state before validating a replacement.
 Completed or partial batches advance to assembly; incomplete assembly goes directly
-to validation before auth scaffolding can require absent app files. A rejected or
-empty plan cannot fall through to standalone page generation.
+to validation for completeness diagnostics. Auth scaffolding uses an assembled
+`app.json` when present. A rejected or empty plan cannot fall through to standalone
+page generation.
 
 The workflow-owned `review_app_build_plan` tool validates the strict AppBuildPlan
 model, registered pack origins, approved app-owned module identities, page
@@ -141,9 +142,25 @@ it is not thereby accepted or promoted. Explicit conceptual replans and full
 rebuilds retain their separate carry-forward policy and do not copy the old
 implementation wholesale. Binary-containing bundles currently require a
 binary-capable refinement path; this text-file path refuses to silently omit them.
-Auth scaffolding remains AuthScaffoldAgent's responsibility outside build tasks.
-It runs after integration readiness and before app validation, which requires the
-auth contract. Only a passed complete-bundle validation advances to DownloadAgent.
+Auth scaffolding remains deterministic Factory materialization outside build tasks.
+`validate_app_bundle_from_request` invokes `save_auth_scaffold` before every
+acceptance check, including user-reply and repair re-entry. It uses the admitted
+`app.json` and route manifest, including accepted repairs, and idempotently adds
+`config/auth.yaml`, the shared OIDC facade, and public auth routes when
+`authRequired` is true. The standalone bundle acceptance gate still rejects a
+missing or invalid required auth contract. Only a passed complete-bundle
+validation advances to DownloadAgent.
+The validation request retains the materialized snapshot through asynchronous
+checks and commits it before routing, so the next turn receives the same files
+that passed acceptance.
+
+Integration readiness blocks only on required `build_time` or `validation_time`
+needs. Runtime-only needs remain in integration declarations and names-only
+secret contracts as deployment requirements; missing runtime credentials do not
+block app generation. The checkpoint automatically runs `check_integration_readiness`
+followed by `save_integration_manifest`, so declarations persist without a model
+tool call. Manifest persistence remains best-effort.
+
 Persistent entities are planned through the canonical data contract and
 `ctx.persistence`, not a generated replacement database service.
 

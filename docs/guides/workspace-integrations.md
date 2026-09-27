@@ -65,8 +65,11 @@ No action returns raw secret values.
 AppGenerator owns the build-time flow:
 
 1. `check_workspace_integrations` lets planning inspect catalog status.
-2. IntegrationReadinessAgent resolves required, optional, and custom services.
-3. `save_integration_manifest` persists the app's integration declarations.
+2. IntegrationReadinessAgent resolves required, optional, and custom services,
+   blocking only on required `build_time` or `validation_time` setup. Runtime-only
+   needs remain recorded as deployment requirements without blocking generation.
+3. `save_integration_manifest` runs automatically after readiness and persists
+   all app integration declarations, including runtime-only requirements.
 4. AppGenerator assembly materializes `app/config/integrations.yaml` and
    `app/config/targets.json` into generated app bundles.
 5. Monetizable apps receive a removable Mozaiks Pay declaration unless the build

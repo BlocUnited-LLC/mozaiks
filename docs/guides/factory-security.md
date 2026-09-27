@@ -114,6 +114,10 @@ AppLoader validates `config/auth.yaml` against the shared typed
 validation consumes that same model. Invalid or missing required declarations
 fail before the app is served.
 
+AppGenerator materializes the auth scaffold from assembled `app.json` before
+every validation request, including after user replies and repairs. This
+idempotent step does not depend on a separate agent turn.
+
 Final bundle composition adds the shared login and callback entries to the normal
 route manifest after app-schema and auth-scaffold output are combined. Authored
 custom pages can occupy those routes. Validation requires each route to resolve

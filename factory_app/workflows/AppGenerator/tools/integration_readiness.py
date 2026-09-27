@@ -48,16 +48,15 @@ async def record_integration_need(
 
 
 async def check_integration_readiness(
-    required_at: list[str] | None = None,
     prompt: bool = True,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    """Aggregate AppGenerator integration needs and collect missing setup inline."""
+    """Collect build/validation setup, retaining runtime needs for deployment."""
 
     return await collect_missing_connector_needs(
         context_variables=context_variables,
         target_app_id=require_build_binding(context_variables).target_app_id,
-        required_at=required_at,
+        required_at=["build_time", "validation_time"],
         prompt=prompt,
     )
 
