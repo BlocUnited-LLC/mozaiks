@@ -1279,7 +1279,8 @@ definitions:
       App-scoped third-party connector needs discovered by AppPlanAgent build
       tasks, task batch outputs, or task agents via record_integration_need.
       IntegrationReadinessAgent aggregates this list and prompts inline only for
-      unresolved required integration setup.
+      unresolved required build_time or validation_time setup. Runtime-only needs
+      remain deployment requirements and do not block the build.
     source:
       type: computed
       default: []

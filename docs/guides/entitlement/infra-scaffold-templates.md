@@ -2,8 +2,10 @@
 
 `DownloadAgent` emits deployment packaging through
 `generate_and_download` and its canonical deployment contract renderer.
-`AuthScaffoldAgent` only materializes auth configuration, the shared OIDC facade,
-and public login/callback routes from assembled `app.json` before validation.
+Before every app validation, `validate_app_bundle_from_request` deterministically
+materializes auth configuration, the shared OIDC facade, and public login/callback
+routes from assembled `app.json`. This idempotent step also runs after user replies
+and repair turns.
 
 ## Staging Terms
 

@@ -126,7 +126,8 @@ tools:
   description: >
     Aggregate integration needs from AppGenerator planning, task batch outputs,
     and discovered task context. Reuse app connectors when ready and
-    prompt inline for unresolved required integration setup before validation/download.
+    prompt inline for unresolved required build_time or validation_time setup.
+    Runtime-only needs remain deployment requirements and do not block the build.
   tool_type: UI_Tool
   auto_tool_call: true
   bind_to_agent: false
@@ -172,7 +173,7 @@ tools:
     declarations store after check_integration_readiness completes. Best-effort:
     never blocks the build pipeline if the write fails.
   tool_type: Agent_Tool
-  auto_tool_call: false
+  auto_tool_call: true
   bind_to_agent: false
 - agent: ControllerAgent
   file: integration_readiness.py
@@ -180,13 +181,6 @@ tools:
   description: Record an integration need discovered while generating an API adapter or controller surface.
   tool_type: Agent_Tool
   auto_tool_call: false
-- agent: AuthScaffoldAgent
-  file: render_auth_scaffold.py
-  function: save_auth_scaffold
-  description: Materialize auth config, shared OIDC facade, and public auth routes from assembled app.json intent. Deployment packaging belongs to DownloadAgent.
-  tool_type: Agent_Tool
-  auto_tool_call: true
-  bind_to_agent: false
 - agent: DownloadAgent
   file: generate_and_download.py
   function: generate_and_download
@@ -254,7 +248,8 @@ tools:
   function: validate_app_bundle_from_request
   description: >
     Deterministically validate the generated app bundle from AppValidationAgent's
-    structured request. Runs app build validation, agent-backend checks when
+    structured request. Materializes auth scaffolding from assembled app.json
+    before every validation, then runs app build validation, agent-backend checks when
     agent backend context exists, and module/page wiring checks. Called
     automatically after AppValidationAgent speaks.
   tool_type: Agent_Tool

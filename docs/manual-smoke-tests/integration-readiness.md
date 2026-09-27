@@ -3,6 +3,11 @@
 This smoke verifies the generic integration-readiness path without calling any
 external provider.
 
+AppGenerator's build checkpoint blocks only on required `build_time` or
+`validation_time` needs. Runtime-only needs stay in integration declarations and
+names-only secret contracts as deployment requirements without blocking the build.
+The shared connector collector retains its all-phase default for other consumers.
+
 ## Run
 
 ```powershell
@@ -29,7 +34,7 @@ The script uses a neutral analytics connector:
 
 The smoke should print `PASS` and include:
 
-- `blocked_status: needs_configuration`
+- `blocked_status: blocked`
 - `ready_status: ready`
 - one `integration.required` request
 - `secret_fields[0].name: api_key`
@@ -67,7 +72,8 @@ or operator.
 This keeps app creation deterministic:
 
 - preconfigured and verified connectors are reused without asking for secrets
-- unverified or incomplete connectors are surfaced as setup dependencies
+- unverified or incomplete build-time and validation-time connectors are surfaced as setup dependencies
+- runtime-only connectors remain deployment requirements without an inline build prompt
 - unknown/custom services are recorded by name and collected inline only when a
   real build step reaches that boundary
 - generated app bundles receive connector IDs and env names only, never raw

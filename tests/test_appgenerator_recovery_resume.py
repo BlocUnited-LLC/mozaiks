@@ -17,6 +17,8 @@ import yaml
 from ag2 import Agent
 from ag2.knowledge import MemoryKnowledgeStore
 
+from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_bundle_from_request
+from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
 from factory_app.workflows.AppGenerator.tools.repair_policy import (
     prepare_bundle_repair,
     prepare_task_recovery,
@@ -38,8 +40,102 @@ from mozaiksai.core.workflow.context.authority import (
     TASK_BATCH_WRITER,
     build_context_authority_policy,
 )
+from tests.test_generated_app_functional_acceptance import _basic_crud_files
 
 WORKFLOWS = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("continuation", ["live", "reopen"])
+async def test_readiness_user_reply_materializes_auth_before_real_validation(continuation):
+    rules = yaml.safe_load(
+        (WORKFLOWS / "AppGenerator" / "transition_graph.yaml").read_text(encoding="utf-8")
+    )["transition_rules"]
+    definitions = yaml.safe_load(
+        (WORKFLOWS / "AppGenerator" / "context_variables.yaml").read_text(encoding="utf-8")
+    )["definitions"]
+    policy = build_context_authority_policy(
+        workflow_name="AppGenerator", definitions=definitions, transition_rules=rules,
+    )
+    files = _basic_crud_files()
+    manifest = json.loads(files["app.json"])
+    manifest["authRequired"] = True
+    files["app.json"] = json.dumps(manifest)
+    initial = {
+        "generated_files": files, "coding_participation": "autonomous",
+        "app_build_plan": {"build_tasks": [{
+            "task_id": "app_schema", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+            "owned_paths": ["app.json"], "depends_on": [],
+        }]},
+        "app_task_batch_results": {
+            "app_schema": {"code_files": [{"filename": "app.json", "content": files["app.json"]}]},
+            "_meta": {"status": "completed"},
+        },
+    }
+    bridge = ContextVariablesBridge(initial, authority_policy=policy)
+    speakers = []
+    validations = []
+
+    class DeterministicAgent(Agent):
+        async def ask(self, *msg, **kwargs):
+            speakers.append(self.name)
+            return SimpleNamespace(body="deterministic response")
+
+    async def output_hook(agent_name, envelope):
+        with _workflow_tool_invocation(bridge):
+            if agent_name == "IntegrationReadinessAgent":
+                bridge.set("integration_readiness_status", "blocked")
+            elif agent_name == "AppValidationAgent":
+                validations.append(await validate_app_bundle_from_request(
+                    {"validation_strategy": "skip", "start_dev_server": False},
+                    context_variables=bridge,
+                ))
+            elif agent_name != "DownloadAgent":
+                raise AssertionError(f"Unexpected turn: {agent_name}")
+
+    names = {
+        name for rule in rules for name in (rule["source_agent"], rule["target_agent"])
+        if name not in {"user", "terminate"}
+    }
+    agents = {name: DeterministicAgent(name, prompt="Deterministic test response") for name in names}
+    for agent in agents.values():
+        agent._mozaiks_context_bridge = bridge
+    store = MemoryKnowledgeStore()
+
+    def request(message, *, reopen=False):
+        return AG2NetworkRunnerRequest(
+            workflow_name="AppGenerator", chat_id="auth-readiness-resume", app_id="auth-app",
+            agents=agents, initial_agent_name="IntegrationReadinessAgent", initial_message=message,
+            transition_rules=rules, context_variables=initial, knowledge_store=store,
+            agent_output_handler=output_hook,
+            context_authority_policy=policy, resume_existing_only=reopen, close_timeout_seconds=30.0,
+        )
+
+    result = await AG2NetworkRunner().run(request("Check integration readiness"))
+    try:
+        assert result.status is RunStatus.PAUSED, result.error
+        assert speakers == ["IntegrationReadinessAgent"]
+        assert "config/auth.yaml" not in result.context_variables["generated_files"]
+        if continuation == "reopen":
+            await result.live_run.close()
+            result = await AG2NetworkRunner().run(request("Confirmed", reopen=True))
+        else:
+            result = await result.live_run.continue_with_user_message("Confirmed")
+        assert result.status is RunStatus.PAUSED, result.error
+        assert validations[0]["integration_tests_passed"] is True, json.dumps(
+            validations[0]["app_bundle_acceptance_result"]["failed_tests"], indent=2,
+        )
+        assert speakers == ["IntegrationReadinessAgent", "AppValidationAgent", "DownloadAgent"]
+        assert validations[0]["app_runtime_load_result"]["passed"] is True
+        assert validations[0]["bundle_scan_result"]["passed"] is True
+        generated = admitted_app_file_map(result.context_variables)
+        assert "schema_version: mozaiks.auth.v1" in generated["config/auth.yaml"]
+        assert {page["path"] for page in json.loads(generated["ui/route_manifest.json"])["pages"]} == {
+            "/orders", "/login", "/auth/callback",
+        }
+    finally:
+        if result.live_run is not None:
+            await result.live_run.close()
 
 
 @pytest.mark.asyncio

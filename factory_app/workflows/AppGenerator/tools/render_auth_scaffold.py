@@ -11,39 +11,56 @@ from typing import Any
 
 import yaml
 
-from mozaiksai.core.runtime.app.auth_contract import validate_app_auth_contract
+from mozaiksai.core.runtime.app.auth_contract import (
+    AppAuthContractError,
+    validate_app_auth_contract,
+)
 from mozaiksai.core.workflow.context.context_utils import context_to_dict
 
-from .code_file_utils import compose_bundle_auth_routes
+from .code_file_utils import admitted_app_file_map, compose_bundle_auth_routes
 
 _TEMPLATES = Path(__file__).resolve().parents[3] / "build_context" / "webapp_builder" / "templates"
 
 
 async def save_auth_scaffold(context_variables: Any) -> dict[str, Any]:
-    """Persist auth config, facade, and routes before runtime bundle validation."""
+    """Fill missing auth files and compose routes without replacing declared auth."""
     context = context_to_dict(context_variables)
-    generated = dict(context.get("generated_files") or {})
+    generated = admitted_app_file_map(context_variables)
     if "app.json" not in generated:
         raise ValueError("Auth scaffolding requires the assembled app.json")
     manifest = json.loads(generated["app.json"])
+    if not isinstance(manifest, dict):
+        raise AppAuthContractError("Auth scaffolding requires app.json to be an object")
     rendered: dict[str, str] = {}
     if manifest.get("authRequired") is True:
-        route = str((manifest.get("startup") or {}).get("landing_spot") or "/")
-        config = (_TEMPLATES / "config" / "auth.yaml").read_text(encoding="utf-8")
-        config = yaml.safe_load(config.replace("{{AUTH_DEFAULT_ROUTE}}", "/"))
-        config["routes"]["post_login_default"] = route
-        validate_app_auth_contract(config)
-        rendered["config/auth.yaml"] = yaml.safe_dump(config, sort_keys=False)
-        rendered["ui/auth/authAdapter.js"] = (_TEMPLATES / "ui" / "auth" / "authAdapter.js").read_text(encoding="utf-8")
+        if "config/auth.yaml" not in generated:
+            startup = manifest.get("startup") or {}
+            if not isinstance(startup, dict):
+                raise AppAuthContractError("Auth scaffolding requires app.json.startup to be an object")
+            route = str(startup.get("landing_spot") or "/")
+            config = (_TEMPLATES / "config" / "auth.yaml").read_text(encoding="utf-8")
+            config = yaml.safe_load(config.replace("{{AUTH_DEFAULT_ROUTE}}", "/"))
+            config["routes"]["post_login_default"] = route
+            validate_app_auth_contract(config)
+            rendered["config/auth.yaml"] = yaml.safe_dump(config, sort_keys=False)
+        if "ui/auth/authAdapter.js" not in generated:
+            rendered["ui/auth/authAdapter.js"] = (_TEMPLATES / "ui" / "auth" / "authAdapter.js").read_text(encoding="utf-8")
         generated.update(rendered)
         compose_bundle_auth_routes(generated)
         rendered["ui/route_manifest.json"] = generated["ui/route_manifest.json"]
 
+    if not rendered:
+        return {"code_files": []}
     overlay = {item["filename"]: item["content"] for item in context.get("code_files") or []}
     overlay.update(rendered)
     entries = [{"filename": path, "content": content} for path, content in sorted(overlay.items())]
-    if hasattr(context_variables, "set"):
-        context_variables.set("code_files", entries)
-    else:
-        context_variables["code_files"] = entries
+    updates = {
+        "code_files": entries,
+        "deleted_files": sorted(set(context.get("deleted_files") or []) - rendered.keys()),
+    }
+    for key, value in updates.items():
+        if hasattr(context_variables, "set"):
+            context_variables.set(key, value)
+        else:
+            context_variables[key] = value
     return {"code_files": [{"filename": path, "content": content} for path, content in sorted(rendered.items())]}

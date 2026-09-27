@@ -34,6 +34,9 @@ from factory_app.workflows._shared.workflow_integration import (
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
 )
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import (
+    save_auth_scaffold,
+)
 from factory_app.workflows.AppGenerator.tools.repair_policy import (
     prepare_bundle_repair as _prepare_bundle_repair,
 )
@@ -45,6 +48,7 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
     planned_artifact_diagnostics,
 )
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     local_app_validation_available,
@@ -2203,10 +2207,23 @@ async def validate_app_bundle_from_request(
     if not isinstance(commands, list):
         commands = None
 
-    acceptance_result = await run_app_bundle_acceptance_gate(context_variables=context_variables)
+    if "app.json" in admitted_app_file_map(context_variables):
+        try:
+            await save_auth_scaffold(context_variables)
+        except (AppAuthContractError, json.JSONDecodeError):
+            # Keep invalid artifacts intact for the gate's diagnostics and repair routing.
+            pass
+    # Validate one materialized snapshot and commit it after asynchronous checks.
+    # The shared bridge can be hydrated by other AG2 packet observers while we await.
+    materialized_files = admitted_app_file_map(context_variables)
+    materialized_overlay = _context_get(context_variables, "code_files", [])
+    materialized_deletions = _context_get(context_variables, "deleted_files", [])
+    acceptance_result = await run_app_bundle_acceptance_gate(
+        files=materialized_files, context_variables=context_variables,
+    )
     if acceptance_result["passed"]:
         validation = await validate_app_build(
-            files=admitted_app_file_map(context_variables), commands=commands,
+            files=materialized_files, commands=commands,
             start_dev_server=bool(request.get("start_dev_server", True)),
             timeout_seconds=int(request.get("timeout_seconds") or 120),
             validation_strategy=request.get("validation_strategy"), context_variables=context_variables,
@@ -2216,6 +2233,9 @@ async def validate_app_bundle_from_request(
         validation["success"] = False
         validation["strategy_reason"] = "Deterministic acceptance must pass before validation-environment execution."
         _persist_validation_context(context_variables=context_variables, result=validation)
+    _context_set(context_variables, "generated_files", materialized_files)
+    _context_set(context_variables, "code_files", materialized_overlay)
+    _context_set(context_variables, "deleted_files", materialized_deletions)
     agent_integration_result = acceptance_result["agent_backend"]
     wiring_result = acceptance_result["module_wiring"]
     module_implementation_result = acceptance_result["module_implementation"]

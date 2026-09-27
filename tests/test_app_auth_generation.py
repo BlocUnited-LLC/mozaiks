@@ -5,7 +5,12 @@ import json
 import pytest
 
 from factory_app.workflows.AppGenerator.tools import save_app_schema as schema_tool
+from factory_app.workflows.AppGenerator.tools.app_validation import (
+    run_app_bundle_acceptance_gate,
+    validate_app_bundle_from_request,
+)
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    admitted_app_file_map,
     collect_generated_app_file_map,
     compose_bundle_auth_routes,
 )
@@ -17,6 +22,7 @@ from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import save_a
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from tests.test_generated_app_functional_acceptance import _basic_crud_files
 
 
 @pytest.fixture
@@ -61,6 +67,86 @@ async def test_scaffold_retains_auth_files_and_routes_before_validation():
     assert "post_login_default: /customers" in overlay["config/auth.yaml"]
     assert _scan_auth_app_contract(files) == []
     assert {page["path"] for page in json.loads(overlay["ui/route_manifest.json"])["pages"]} == {"/login", "/auth/callback"}
+
+
+@pytest.mark.asyncio
+async def test_validation_materializes_auth_from_admitted_repairs_idempotently():
+    files = _basic_crud_files()
+    manifest = json.loads(files["app.json"])
+    manifest["authRequired"] = True
+    routes = json.loads(files["ui/route_manifest.json"])
+    routes["pages"].append({"path": "/help", "component": "SchemaPage", "schema": "orders"})
+    context = ContextVariablesBridge({
+        "generated_files": files,
+        "code_files": [
+            {"filename": "app.json", "content": json.dumps(manifest)},
+            {"filename": "ui/route_manifest.json", "content": json.dumps(routes)},
+        ],
+    })
+    request = {"validation_strategy": "skip", "start_dev_server": False}
+
+    result = await validate_app_bundle_from_request(request, context_variables=context)
+
+    assert result["integration_tests_passed"] is True, result
+    first = admitted_app_file_map(context)
+    assert "post_login_default: /orders" in first["config/auth.yaml"]
+    assert {page["path"] for page in json.loads(first["ui/route_manifest.json"])["pages"]} == {
+        "/orders", "/help", "/login", "/auth/callback",
+    }
+    result = await validate_app_bundle_from_request(request, context_variables=context)
+    assert result["integration_tests_passed"] is True, result
+    assert admitted_app_file_map(context) == first
+
+
+@pytest.mark.asyncio
+async def test_standalone_acceptance_still_rejects_missing_auth_scaffold():
+    files = _basic_crud_files()
+    manifest = json.loads(files["app.json"])
+    manifest["authRequired"] = True
+    files["app.json"] = json.dumps(manifest)
+    result = await run_app_bundle_acceptance_gate(files=files)
+    assert result["passed"] is False
+    assert result["app_runtime_load"]["passed"] is False
+    assert any("config/auth.yaml" in error for error in result["bundle_scan"]["errors"])
+    assert "config/auth.yaml" not in files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path,content", [
+    ("app.json", "{broken"),
+    ("app.json", "[]"),
+    ("config/auth.yaml", "schema_version: invalid\n"),
+    ("config/auth.yaml", "broken: ["),
+    ("ui/auth/authAdapter.js", "export default {};"),
+    ("ui/route_manifest.json", '{"pages":[{"path":"/login","component":"LoginPage","meta":{"requiresAuth":true}}]}'),
+])
+async def test_validation_preserves_invalid_auth_for_gate_diagnostics(path, content):
+    files = _basic_crud_files()
+    manifest = json.loads(files["app.json"])
+    manifest["authRequired"] = True
+    files["app.json"] = json.dumps(manifest)
+    files[path] = content
+    context = ContextVariablesBridge({"generated_files": files})
+
+    result = await validate_app_bundle_from_request(
+        {"validation_strategy": "skip", "start_dev_server": False}, context_variables=context,
+    )
+
+    assert result["integration_tests_passed"] is False
+    assert result["bundle_scan_result"]["passed"] is False
+    assert admitted_app_file_map(context)[path] == content
+
+
+@pytest.mark.asyncio
+async def test_auth_scaffold_restores_required_files_after_deletion(generated_auth_bundle):
+    files, _ = generated_auth_bundle
+    context = ContextVariablesBridge({
+        "generated_files": files,
+        "deleted_files": ["config/auth.yaml", "ui/auth/authAdapter.js", "obsolete.txt"],
+    })
+    await save_auth_scaffold(context)
+    assert _scan_auth_app_contract(admitted_app_file_map(context)) == []
+    assert context.get("deleted_files") == ("obsolete.txt",)
 
 
 @pytest.mark.asyncio

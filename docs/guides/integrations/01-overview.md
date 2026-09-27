@@ -31,7 +31,8 @@ raw secrets.
    `factory_app/build_context/integrations/catalog.yaml`.
 2. During planning, AppGenerator can call `check_workspace_integrations` to see
    which services are already configured.
-3. IntegrationReadinessAgent resolves the app's required and optional services.
+3. IntegrationReadinessAgent resolves required `build_time` and `validation_time`
+   setup. Runtime-only needs remain deployment requirements and do not block generation.
 4. AppGenerator assembly writes `app/config/integrations.yaml` and
    `app/config/targets.json` into the generated app bundle.
 5. `save_integration_manifest` persists those requirements as app integration

@@ -14,6 +14,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator keeps runtime-only connector setup as deployment requirements
+  while continuing to block on required build-time and validation-time setup.
+  Integration declarations persist automatically after the readiness check.
+  Auth scaffolding now runs idempotently before every app validation, including
+  after user replies and repairs, without a separate agent turn.
+
 - DesignDocs excludes selected managed-pack facades from candidate owners for
   app-specific auth fields, so a billing facade no longer blocks a determined
   split to the app's sole domain module.
@@ -624,7 +630,7 @@ This project follows a practical pre-1.0 changelog format:
   Validate page identity against its owned filename, keep display labels separate,
   and provide actionable URL diagnostics without exposing rejected input values.
   Forward build timestamps into task provenance materialization.
-- Separate AuthScaffoldAgent from DownloadAgent-owned deployment packaging;
+- Separate auth scaffolding from DownloadAgent-owned deployment packaging;
   do not emit partial deployment files or undeclared provision scripts before validation.
 - Persist schema data through the canonical data_contract state and fail explicitly
   on rejected state writes. Valid dashboard page names are no longer rejected as

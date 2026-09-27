@@ -497,8 +497,7 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert handoff_pairs[("AppUIQualityAgent", "AdminRegistryAgent")]["condition_value"] == "passed"
     assert ("AdminRegistryAgent", "AssemblyAgent") in handoff_pairs
     assert ("AssemblyAgent", "IntegrationReadinessAgent") in handoff_pairs
-    assert ("IntegrationReadinessAgent", "AuthScaffoldAgent") in handoff_pairs
-    assert ("AuthScaffoldAgent", "AppValidationAgent") in handoff_pairs
+    assert handoff_pairs[("IntegrationReadinessAgent", "AppValidationAgent")]["transition_type"] == "after_turn"
     assert ("AppValidationAgent", "DownloadAgent") in handoff_pairs
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_type"] == "context_equals"
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_key"] == "app_ui_quality_status"
@@ -508,6 +507,7 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert binding["auto_tool_call"] is True
     assert binding["bind_to_agent"] is False
     assert ("AppUIQualityAgent", "review_ui_acceptance") not in tool_entries
+    assert not any(function == "save_auth_scaffold" for _, function in tool_entries)
     assert not any(
         entry["agent"] == "AppUIQualityAgent"
         for entry in hooks["prompt_middleware"]

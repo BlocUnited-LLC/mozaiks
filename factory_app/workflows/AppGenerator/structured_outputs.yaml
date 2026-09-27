@@ -6801,7 +6801,6 @@ registry:
   ControllerAgent: ControllerOutput
   AssemblyAgent: CodeFilesOutput
   AppValidationAgent: AppValidationRequestCall
-  AuthScaffoldAgent: CodeFilesOutput
   DownloadAgent: DownloadRequestCall
 
 

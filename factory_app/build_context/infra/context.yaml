@@ -29,7 +29,7 @@ assets:
     kind: templates
     description: >
       Reference infrastructure templates for explicitly selected build packs.
-      AuthScaffoldAgent does not emit these files. DownloadAgent owns the
+      Auth scaffolding does not emit these files. DownloadAgent owns the
       canonical provider-neutral deployment artifact contract.
       Operator-owned after first emit; regeneration is explicit and opt-in.
       The readiness workflow is an environment-staging gate for the promoted or
