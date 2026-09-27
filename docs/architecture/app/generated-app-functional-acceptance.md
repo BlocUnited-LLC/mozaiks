@@ -299,24 +299,54 @@ unavailable is not headless approval. Existing tool-outcome validation and AG2
 transition graphs enforce these contracts; failed saves terminate with
 `workflow_failed` rather than starting the next workflow.
 
-DesignDocs also refuses app-owned modules and collections that duplicate platform
-authentication/session state or a selected managed pack's declared ownership.
-The shared Factory `validate_surface_ownership` check runs before persistence and
-before AppGenerator's module repairs. Rejection names the offending surface or
-collection, its owner, and the facade/platform path to use. An invalid approved
-design must be revised; AppGenerator cannot silently drop it or convert its
-managed source into generated app code.
+Before persistence, DesignDocs normalizes duplicate platform authentication/session
+and selected managed-pack state only when the declared contract determines both
+the canonical owner and the state to remove. Authentication surfaces become
+`owner: platform` references. Managed subscription surfaces become the app-owned
+`billing_portal` facade, merging into an existing facade when present. Approved
+pages and routes are preserved. Only identified duplicate collections and entities
+are removed; a duplicate collection on an otherwise valid app domain surface does
+not change that surface's owner.
+
+Each correction appears in the saved design's `ownership_normalizations` and
+human-readable documents, and produces a `DESIGN_OWNERSHIP_NORMALIZED` log entry
+with the source surface, canonical owner, and removed collections. These recorded
+corrections and normalized typed contracts govern any conflicting original prose.
+Normalization works on detached data and does not modify the model's turn-local
+structured output.
+
+Ambiguous ownership still returns `revise` with feedback before any design is
+saved. This includes collections with unknown or mixed app/provider fields,
+unknown state under reserved surfaces, app-specific entities or actions that
+cannot be assigned to the canonical owner, unrelated facade integrations,
+conflicting grouped collection owners, and competing owner declarations.
+Selected managed ownership rules without a declared `facade_module` also reject:
+the tool cannot infer a provider's canonical app boundary from its display name.
+The tool does not split mixed collections or invent an app module to hold their
+remaining fields. AppGenerator's `validate_surface_ownership` check remains
+strict before module repairs: an invalid already-approved design must be revised,
+and cannot be silently dropped or converted into generated app code.
 
 Exact ownership identifiers live in `surface_ownership` rule lists under
 `capability_routing.yaml`'s `layers.runtime_provided` and selected packs' declared
 contract assets. `SurfaceOwnershipRule` validates `owner`, optional
 `facade_module`, and lists of `surface_ids`, `entity_names`, `action_ids`, and
-`collection_names`. The validator compares these identifiers without classifying
-free-form labels or prose. Facade actions come from the contract's page
-`primary_actions`; facade modules own no local entities or collections. Grouped
-and shared data-contract collections are both checked. Explicit platform owner
-hints also constrain the corresponding surface. Domain-specific profiles,
-newsletter subscriptions, and appointment sessions remain app concerns.
+`collection_names`. Bounded normalization also declares `state_field_names`,
+`surface_collection_names`, `surface_entity_names`, and `surface_action_ids`.
+The three surface-scoped lists identify state and behavior only within a declared
+reserved surface, so `users` and `create_session` do not globally classify app
+identity or appointment behavior as platform auth. A removable collection must
+contain only declared state fields, including at least one field beyond identity
+keys and timestamps; a collection with no such evidence requires revision.
+Fields must use bounded scalar types; nested objects, arrays, and unknown types
+remain ambiguous even when their field names match the state allowlist.
+The tool compares exact identifiers without classifying free-form
+labels or prose. Facade actions come from the contract's page `primary_actions`;
+facade modules own no local entities or collections. Grouped and shared
+data-contract collections are both checked. Explicit platform owner hints also
+constrain the corresponding surface. A `user_id` key alone never makes an app
+collection identity state. Domain-specific profiles, preferences, newsletter
+subscriptions, and appointment sessions remain app concerns.
 
 DesignDocs receives selected pack descriptors through its protected build-context
 projection. Available but unselected packs impose no ownership restrictions.

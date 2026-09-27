@@ -1,4 +1,4 @@
-"""Reject duplicate state owners through the live DesignDocs save boundary."""
+"""Normalize determined ownership and reject ambiguous app-state rewrites."""
 
 from __future__ import annotations
 
@@ -81,8 +81,7 @@ def _assert_refused(context, result: dict, store_factory, *, owner: str) -> None
     store_factory.assert_not_called()
 
 
-def test_subscription_state_module_rejected_before_storage(persistence):
-    _, store_factory, _ = persistence
+def test_subscription_state_module_normalized_before_storage(persistence):
     context = _context(managed=True)
     bundle = inventory._bundle(pricing=False)
     _add_surface(
@@ -93,14 +92,17 @@ def test_subscription_state_module_rejected_before_storage(persistence):
 
     result = inventory._save(context, bundle)
 
-    _assert_refused(context, result, store_factory, owner="MozaiksPay")
-    assert "billing_portal" in result["error"]
-    assert "subscription_management" in result["error"]
+    assert result["outcome"] == "saved", result
+    surfaces = detach(context.get("design_surface_map"))["surfaces"]
+    assert not any(surface["surface_id"] == "subscription_management" for surface in surfaces)
+    facade = next(surface for surface in surfaces if surface["surface_id"] == "billing_portal")
+    assert "Subscription Management" in facade["owned_pages"]
+    assert facade["primary_entities"] == []
+    assert "update_subscription" not in facade["owned_mutations"]
 
 
 @pytest.mark.parametrize("selection", ["explicit_disabled_monetization", "subscription_default"])
 def test_managed_state_owner_follows_selected_or_default_pack(persistence, selection):
-    _, store_factory, _ = persistence
     if selection == "explicit_disabled_monetization":
         context = _context(managed=True)
         context.set("monetization_enabled", False)
@@ -117,18 +119,21 @@ def test_managed_state_owner_follows_selected_or_default_pack(persistence, selec
 
     result = inventory._save(context, bundle)
 
-    _assert_refused(context, result, store_factory, owner="MozaiksPay")
-    assert bundle == submitted, "Rejection must leave the submitted design intact for explicit revision"
+    assert result["outcome"] == "saved", result
+    assert not any(
+        collection["name"] == "subscriptions"
+        for surface in context.get("data_contract")["surfaces"] for collection in surface["collections"]
+    )
+    assert bundle == submitted, "Normalization must detach the submitted design before editing"
 
 
 @pytest.mark.parametrize("surface_id,name,route,entity,action", [
     ("user_authentication", "User Authentication", "/auth", "UserCredential", "authenticate_user"),
     ("session_management", "Session Management", "/sessions", "Session", "create_session"),
 ])
-def test_platform_capability_module_rejected_before_storage(
+def test_platform_capability_module_normalized_before_storage(
     persistence, surface_id, name, route, entity, action,
 ):
-    _, store_factory, _ = persistence
     context = _context(managed=False)
     bundle = inventory._bundle(pricing=False)
     _add_surface(
@@ -138,12 +143,15 @@ def test_platform_capability_module_rejected_before_storage(
 
     result = inventory._save(context, bundle)
 
-    _assert_refused(context, result, store_factory, owner="platform")
-    assert surface_id in result["error"]
+    assert result["outcome"] == "saved", result
+    surface = next(s for s in detach(context.get("design_surface_map"))["surfaces"] if s["surface_id"] == surface_id)
+    assert surface["owner"] == "platform"
+    assert surface["primary_entities"] == []
+    assert surface["owned_mutations"] == []
+    assert surface["owned_pages"] == [name]
 
 
-def test_concept_platform_owner_hint_rejects_app_module_alias(persistence):
-    _, store_factory, _ = persistence
+def test_concept_platform_owner_hint_normalizes_empty_app_module_alias(persistence):
     context = _context(managed=False)
     blueprint = detach(context.get("concept_blueprint"))
     blueprint["surface_candidate_hints"] = [{
@@ -158,8 +166,9 @@ def test_concept_platform_owner_hint_rejects_app_module_alias(persistence):
 
     result = inventory._save(context, bundle)
 
-    _assert_refused(context, result, store_factory, owner="platform")
-    assert "member_access" in result["error"]
+    assert result["outcome"] == "saved", result
+    surface = next(s for s in context.get("design_surface_map")["surfaces"] if s["surface_id"] == "member_access")
+    assert surface["owner"] == "platform"
 
 
 def test_subscription_ui_owned_by_billing_facade_preserves_approved_route(persistence):
@@ -193,8 +202,7 @@ def test_subscription_ui_owned_by_billing_facade_preserves_approved_route(persis
     assert summary.await_args.kwargs["summary_payload"]["experience_spec"] == experience
 
 
-def test_facade_label_does_not_authorize_local_subscription_collection(persistence):
-    _, store_factory, _ = persistence
+def test_facade_local_subscription_collection_is_removed(persistence):
     context = _context(managed=True)
     bundle = inventory._bundle(pricing=False)
     _add_surface(
@@ -204,9 +212,9 @@ def test_facade_label_does_not_authorize_local_subscription_collection(persisten
 
     result = inventory._save(context, bundle)
 
-    _assert_refused(context, result, store_factory, owner="MozaiksPay")
-    assert "billing_portal" in result["error"]
-    assert "subscriptions" in result["error"]
+    assert result["outcome"] == "saved", result
+    facade = next(s for s in context.get("data_contract")["surfaces"] if s["surface_id"] == "billing_portal")
+    assert not facade["collections"]
 
 
 @pytest.mark.parametrize("placement", ["shared", "group_facade", "owner_facade"])
@@ -230,8 +238,15 @@ def test_collection_ownership_cannot_bypass_managed_state_boundary(persistence, 
 
     result = inventory._save(context, bundle)
 
-    _assert_refused(context, result, store_factory, owner="MozaiksPay")
-    assert collection["name"] in result["error"]
+    if placement == "shared":
+        assert result["outcome"] == "saved", result
+        assert not context.get("data_contract")["shared_collections"]
+        reports = next(s for s in context.get("design_surface_map")["surfaces"] if s["surface_id"] == "reports")
+        assert reports["owner"] == "app"
+        assert detach(reports["primary_entities"]) == ["Report"]
+    else:
+        _assert_refused(context, result, store_factory, owner="MozaiksPay")
+        assert collection["name"] in result["error"]
 
 
 def test_platform_owned_auth_reference_is_not_a_generated_module(persistence):
@@ -263,8 +278,7 @@ def test_unmonetized_domain_app_preserves_ordinary_module(persistence):
     assert {page["route"] for page in context.get("experience_spec")["pages"]} == {"/reports"}
 
 
-def test_facade_completion_cannot_promote_hosted_state_to_app_ownership(persistence):
-    _, store_factory, _ = persistence
+def test_facade_completion_removes_hosted_state_before_app_ownership(persistence):
     context = _context(managed=True)
     bundle = inventory._bundle(pricing=False)
     _add_surface(
@@ -274,8 +288,11 @@ def test_facade_completion_cannot_promote_hosted_state_to_app_ownership(persiste
 
     result = inventory._save(context, bundle)
 
-    _assert_refused(context, result, store_factory, owner="MozaiksPay")
-    assert "billing_portal" in result["error"]
+    assert result["outcome"] == "saved", result
+    facade = next(s for s in detach(context.get("design_surface_map"))["surfaces"] if s["surface_id"] == "billing_portal")
+    assert facade["owner"] == "app"
+    assert facade["primary_entities"] == []
+    assert "update_subscription" not in facade["owned_mutations"]
 
 
 @pytest.mark.parametrize("managed", [False, True])

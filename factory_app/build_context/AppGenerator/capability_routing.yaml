@@ -15,6 +15,11 @@ layers:
         entity_names: [AuthIdentity, AuthSession, UserSession, auth_identity, auth_session, user_session]
         action_ids: [login, logout, authenticate_user, create_auth_session, refresh_auth_session]
         collection_names: [auth_identities, auth_sessions, user_sessions, credentials]
+        # Generic users/sessions names only identify platform state on these auth surfaces.
+        surface_collection_names: [users, sessions]
+        surface_entity_names: [User, UserCredential, Session]
+        surface_action_ids: [create_session, login_user]
+        state_field_names: [_id, id, app_id, user_id, email, username, name, display_name, password, password_hash, hashed_password, email_verified, session_id, access_token, refresh_token, expires_at, created_at, updated_at, last_login_at]
     description: >
       Built into mozaiksai. Always present in every deployed app. Never generate
       these as modules, capability packs, or build tasks — reference them as
