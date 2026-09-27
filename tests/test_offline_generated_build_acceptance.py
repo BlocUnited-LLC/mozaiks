@@ -16,6 +16,7 @@ from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import sc
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import materialize_data_contract
 from scripts.appgenerator_fixture_replay import execute_file_replay
 
 
@@ -209,7 +210,7 @@ class OrdersRepo:
 
 def _generated_saas_build_files() -> dict[str, str]:
     """Minimal self-hosted SaaS app with subscriptions, entitlement_dispatch, and a gated module."""
-    return {
+    files = {
         "app.json": json.dumps(
             {
                 "appId": "analytics-saas",
@@ -405,6 +406,14 @@ class EntitlementDispatchService:
         return {"deactivated": True}
 """,
     }
+    return materialize_data_contract(
+        files,
+        data_contract={"version": "1", "surfaces": [], "shared_collections": []},
+        subscription_contract={
+            "contract_required": True,
+            "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"]),
+        },
+    )
 
 
 def _write_files(root: Path, files: dict[str, str]) -> None:
@@ -429,15 +438,16 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         })
 
     prerequisites = []
+    if "data/contract.json" in files:
+        add("persistence", "persistence_contract", "DatabaseAgent", ["data/contract.json"], [])
+        prerequisites.append("persistence")
     if saas:
         add("subscriptions", "subscription_config", "ConfigMiddlewareAgent", ["config/subscriptions.yaml"], [],
             surface_kind="app_policy")
         prerequisites.append("subscriptions")
     else:
-        add("persistence", "persistence_contract", "DatabaseAgent", ["data/contract.json"], [])
         add("secrets", "service_foundation", "ConfigMiddlewareAgent", ["security/secrets.yaml"], [],
             surface_kind="external_integration")
-        prerequisites.append("persistence")
     for module_id in module_actions:
         add(f"{module_id}.contract", "module_contract", "ConfigMiddlewareAgent",
             [f"modules/{module_id}/module.yaml"], list(prerequisites), module_id=module_id)

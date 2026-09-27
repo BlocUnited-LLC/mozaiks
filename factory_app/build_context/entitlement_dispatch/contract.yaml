@@ -89,8 +89,10 @@ runtime_boundaries:
   - id: action_contract
     rule: >
       The module must declare exactly two actions — activate_subscription and
-      deactivate_subscription — with no entitlement_gate, no permissions, and
-      capabilities: []. This is an internal system module; do not add
+      deactivate_subscription — each with api_surface: internal, permissions: [],
+      no entitlement_gate, and capabilities: []. Trusted server/event dispatch
+      owns assignment writes; HTTP callers must not invoke them. This is an
+      internal system module; do not add
       user-facing queries, admin surfaces, or UI pages.
   - id: no_provider_logic
     rule: >

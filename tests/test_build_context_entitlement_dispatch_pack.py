@@ -21,7 +21,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
+import pytest
 import yaml
 
 from mozaiksai.core.runtime.persistence.migrations import load_data_migrations
@@ -175,6 +177,57 @@ def test_entitlement_dispatch_module_actions_have_no_entitlement_gate() -> None:
             f"action '{action['id']}' must not declare entitlement_gate — "
             "this module writes entitlement state; gating it would create a bootstrap deadlock"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action,repo_method,response_key", [
+    ("activate_subscription", "activate", "activated"),
+    ("deactivate_subscription", "deactivate", "deactivated"),
+])
+async def test_template_actions_allow_server_dispatch_and_reject_http(
+    monkeypatch, action: str, repo_method: str, response_key: str,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+    from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
+    from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
+    from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
+    from mozaiksai.hosts import platform
+
+    loaded = ModuleLoader(base_path=str(TEMPLATES)).load("entitlement_dispatch")
+    write = AsyncMock(return_value=True)
+    monkeypatch.setattr(loaded.handler._service._repo, repo_method, write)
+    assert loaded.action_api_surface_map[action] == "internal"
+    assert loaded.action_permissions_map[action] == []
+    executor = ModuleExecutor()
+    executor.register(
+        loaded.name, loaded.handler, action_method_map=loaded.action_method_map,
+        action_schemas=loaded.action_schemas_map, action_permissions=loaded.action_permissions_map,
+    )
+    result = await executor.execute(ModuleRequest(
+        module=loaded.name, action=action, app_id="template-test-app",
+        params={"user_id": "subscriber", "plan_id": "pro"},
+        authority=ModuleDispatchAuthority(
+            kind="framework_internal", permission_mode="trusted_bypass",
+            reason="Verified billing assignment test",
+        ),
+    ))
+    assert result.success and result.data[response_key] is True
+    write.assert_awaited_once()
+
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform.app.state, "executor_registry", registry)
+    monkeypatch.setattr(platform.app.state, "module_action_surfaces", {loaded.name: loaded.action_api_surface_map}, raising=False)
+    monkeypatch.setattr(platform.app.state, "failed_module_names", [], raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    client = TestClient(platform.app, raise_server_exceptions=False)
+    url = f"/api/modules/{loaded.name}/{action}"
+    assert client.get(url, params={"user_id": "subscriber", "plan_id": "pro"}).status_code == 404
+    assert client.post(url, json={"user_id": "subscriber", "plan_id": "pro"}).status_code == 404
+    write.assert_awaited_once()
 
 
 def test_entitlement_dispatch_module_type_and_visibility() -> None:

@@ -2,14 +2,15 @@
 
 This gate exercises every deterministic validation, loading, and runtime
 stage that sits below the AG2/Factory reasoning boundary.  It starts from a
-fixed, hand-authored canonical bundle fixture -- NOT from a production
-materializer or AG2 reasoning run -- and drives that fixture through
+fixed, hand-authored canonical bundle fixture with assignment storage compiled
+by the canonical materializer, without an AG2 reasoning run. It drives that fixture through
 production scanners, validators, the AppLoader, module dispatch, entitlement
 enforcement, and a fully-offline platform host boot.
 
 Proof boundary (what IS exercised):
 
     hand-authored canonical bundle fixture
+    -> canonical assignment storage materialization
     -> production bundle scanner (scan_generated_bundle)
     -> production functional scanner (scan_functional_generated_app)
     -> production validation facade (validate_generated_app_bundle)
@@ -44,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from factory_app.workflows.AppGenerator.tools.app_validation import (
@@ -64,6 +66,7 @@ from mozaiksai.core.validation import (
     scan_functional_generated_app,
     validate_generated_app_bundle,
 )
+from mozaiksai.core.workflow.generator_support.code_files import materialize_data_contract
 
 # ---------------------------------------------------------------------------
 # Test-only fakes for offline boot (no Mongo, no Redis, no external auth)
@@ -132,7 +135,8 @@ def _canonical_fixture() -> dict[str, str]:
     This fixture is NOT produced by Jinja materialization, AppBuildPlan
     processing, or any CapabilityPack engine.  It is a hand-written
     dictionary representing the file tree that the full Factory pipeline
-    would produce for a small but meaningful app.
+    would produce for a small but meaningful app. Assignment storage is compiled
+    from the fixture's subscription contract by the canonical materializer.
 
     Surfaces exercised:
       - app.json (identity + auth declaration + landing spot)
@@ -153,7 +157,7 @@ def _canonical_fixture() -> dict[str, str]:
       - Notification contract (required when reaction targets notification)
       - Bounded custom code escape hatch (authAdapter.js)
     """
-    return {
+    files = {
         "app.json": json.dumps(
             {
                 "appId": "e2e-gate-app",
@@ -504,6 +508,14 @@ def _canonical_fixture() -> dict[str, str]:
         # Deterministic facade consumes the shared browser auth implementation.
         "ui/auth/authAdapter.js": "import { createAuthAdapter as createSharedAuthAdapter } from '@mozaiks/chat-ui/auth';\n\nexport function createAuthAdapter(options) {\n  return createSharedAuthAdapter({ ...options, env: import.meta.env });\n}\n",
     }
+    return materialize_data_contract(
+        files,
+        data_contract=json.loads(files["data/contract.json"]),
+        subscription_contract={
+            "contract_required": True,
+            "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"]),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
