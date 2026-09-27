@@ -163,10 +163,12 @@ task_contracts:
       - Persistent modules express collection ownership through data_contract, not ad hoc database files.
       - backend/repo.py owns persistence operations and must not contain product policy.
       - backend/schemas.py owns typed DTO/document shapes and pure helpers.
-      - backend/policy.py owns scope query helpers.
-      - Code derives backend/policy.py from approved tenancy and owner_field, binding per_user to ctx.user_id and per_workspace to ctx.workspace_id. Additional permission checks belong in service.py. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
+      - Runtime persistence owns collection tenancy enforcement. backend/policy.py provides optional deterministic ownership preflight helpers.
+      - Code derives backend/policy.py from approved tenancy and owner_field, reading immutable ctx.persistence.principal identity. Additional permission checks belong in service.py. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
       - backend/repo.py may use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
-      - For offset pagination, PersistenceCollection.find_many has no skip argument and returns a list, not a cursor. In repo.py use aggregate with an ownership-scoped $match, a stable $sort including a unique tie-breaker, then the requested $skip and a bounded $limit. Validate the declared page/offset inputs and limit before querying; never compute an offset and leave it unused or fetch an unbounded collection for client slicing.
+      - Every collection operation enforces declared per_user/per_workspace ownership from the authenticated principal. Pass domain filters directly and omit owner fields on insert; runtime stamps the exact declared owner_field and rejects supplied values that disagree. app_wide collections and collections without ownership metadata receive no additional row filter.
+      - Aggregations are owner-scoped and have no implicit admin exemption. Do not bypass persistence with raw collections, foreign collection stages, or aggregation writes. Apps declaring any scoped collection restrict these operations across the entire persistence context, including app_wide collections. Cross-owner access requires an explicit declared and auditable runtime contract; generated code cannot create that authority.
+      - For offset pagination, PersistenceCollection.find_many has no skip argument and returns a list, not a cursor. In repo.py use aggregate with a domain-filter $match, a stable $sort including a unique tie-breaker, then the requested $skip and a bounded $limit; runtime adds ownership scope before the pipeline. Validate the declared page/offset inputs and limit before querying; never compute an offset and leave it unused or fetch an unbounded collection for client slicing.
       - Pagination totals must count the same query as the page, including ownership, search, and all other active filters. Use count(query) with that matching query or a matching aggregate count; do not count unrelated or foreign records.
       - When literal search is requested, search only the declared fields and use re.escape on user text before placing it in a Mongo $regex. Preserve the requested case behavior. Do not reinterpret literal metacharacters as regex operators or silently escape explicitly requested regex search; explicit regex intent requires its declared validation and bounds.
       - repo.py must return the actual write result needed by service.py to distinguish an owned mutation from a missing/foreign record, concurrent deletion, or unchanged state. A pre-read or a write call without checking its outcome is not proof of mutation. Emit mutation-success events only after confirmed writes; when no owned mutation happened, do not emit such an event.
@@ -208,7 +210,7 @@ task_contracts:
       - Cross-surface collection access must be declared before module repo code uses it. Cross-module reads, lifecycle updates, shared aggregate ownership, and documented alias exclusions must be explicit in data/contract.json.
       - backend/schemas.py replaces backend model files.
       - backend/repo.py is derived from the data contract and owns persistence operations only.
-      - backend/policy.py is rendered deterministically from each collection tenancy (per_user/per_workspace/app_wide) and owner_field. The field must be declared in fields and ownership must match the module. ServiceAgent must omit policy source from python_files and code_files.
+      - backend/policy.py is rendered deterministically as optional preflight from each collection tenancy (per_user/per_workspace/app_wide) and owner_field; runtime persistence independently enforces the contract on all operations. The field must be declared in fields and ownership must match the module. ServiceAgent must omit policy source from python_files and code_files.
       - Generated repo.py must use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
       - Generated repo.py may use data aliases only when its module/action is explicitly declared in data/contract.json.
       - module_id/entity_name in repo.py must match data_contract surfaces and collections.
@@ -313,7 +315,7 @@ backend_helper_files:
     - backend/handler.py       # workspace subclass — preserved on regen; add app extensions here
     - backend/service.py       # business logic, authorization, transitions, and event publication
     - backend/repo.py          # persistence queries and writes
-    - backend/policy.py        # deterministic collection scope helpers
+    - backend/policy.py        # deterministic ownership preflight helpers
     - backend/schemas.py       # typed DTOs, enums, normalization helpers
 
   workspace_handler_split:
@@ -347,7 +349,7 @@ backend_helper_files:
     prohibited_for:
       - generic business logic that belongs in service.py
       - persistence or database access that belongs in repo.py
-      - domain authorization that belongs in service.py or collection scoping provided by deterministic policy.py
+      - domain authorization that belongs in service.py or collection scoping enforced by runtime persistence
       - typed shapes or DTOs that belong in schemas.py
       - transport or WebSocket infrastructure (use runtime_extensions.yaml startup_service instead)
       - workflow or agent orchestration logic

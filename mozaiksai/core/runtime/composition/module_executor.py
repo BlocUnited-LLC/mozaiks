@@ -63,7 +63,7 @@ from mozaiksai.core.runtime.composition.schema_validation import (
 from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
     WORKFLOW_TRIGGER_TRACE_KEY,
 )
-from mozaiksai.core.runtime.persistence import MongoPersistenceContext
+from mozaiksai.core.runtime.persistence import MongoPersistenceContext, PersistencePrincipal
 
 logger = get_workflow_logger("module_executor")
 
@@ -144,6 +144,9 @@ class ModuleRequest:
     # authority's construction, never of a missing principal or empty list.
     authority: ModuleDispatchAuthority = field(kw_only=True)
     provenance: ModuleDispatchProvenance | None = None
+    # Trusted ownership identity is never inferred from requested dispatch
+    # metadata, action inputs, roles, or permission bypass authority.
+    persistence_principal: PersistencePrincipal | None = None
 
 
 @dataclass
@@ -259,6 +262,7 @@ class ModuleExecutor:
         *,
         event_emitter: Callable[[str, dict[str, Any]], Awaitable[Any] | Any] | None = None,
         entitlement_checker: EntitlementPort | None = None,
+        data_contract: dict[str, Any] | None = None,
     ) -> None:
         self._modules: dict[str, Any] = {}
         self._action_methods: dict[str, dict[str, str]] = {}
@@ -269,6 +273,7 @@ class ModuleExecutor:
         self._action_emits: dict[str, dict[str, list[str]]] = {}
         self._event_payload_schemas: dict[str, dict[str, dict[str, Any]]] = {}
         self._event_emitter = event_emitter
+        self._data_contract = data_contract
         # When None, use the no-op adapter — grants everything without a DB check.
         self._entitlement_checker: EntitlementPort = entitlement_checker or NoOpEntitlementAdapter()
 
@@ -600,6 +605,10 @@ class ModuleExecutor:
             context.dispatch_authority = dispatch_authority
             context.dispatch_provenance = dispatch_provenance
             context.dispatch_audit = dispatch_audit
+            if self._data_contract is not None:
+                # A loaded contract owns persistence on every execution path;
+                # custom contexts cannot replace its request-bound policy.
+                context.persistence = self._build_persistence_context(request)
 
         timeout = _action_timeout()
         try:
@@ -1001,4 +1010,6 @@ class ModuleExecutor:
             tenant_id=request.tenant_id,
             workspace_id=request.workspace_id,
             user_id=request.user_id,
+            data_contract=self._data_contract,
+            principal=request.persistence_principal,
         )

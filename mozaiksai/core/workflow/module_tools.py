@@ -22,6 +22,7 @@ from mozaiksai.core.runtime.composition.module_dispatch import (
 )
 from mozaiksai.core.runtime.composition.module_executor import ModuleResult
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 from mozaiksai.core.workflow.agents.factory import active_workflow_tool_run
 
 _RECONNECT_TIMEOUT_SECONDS = 2.0
@@ -117,6 +118,10 @@ async def _prepare_live_dispatch(
         transport, app_id=app_id, chat_id=chat_id, user_id=user_id,
     )
     principal_scope = _principal_scope(principal)
+    persistence_principal = (
+        PersistencePrincipal(user_id=principal.user_id, workspace_id=principal.workspace_id)
+        if is_auth_enabled() else None
+    )
     surfaces = getattr(websocket.app.state, "module_action_surfaces", {})
     module_surfaces = surfaces.get(module, {})
     # A present None value is the canonical authenticated action default. A
@@ -157,6 +162,7 @@ async def _prepare_live_dispatch(
     return (
         ModuleActionDispatchRequest(
             module=module, action=action, params=params,
+            persistence_principal=persistence_principal,
             scope=ModuleDispatchScope(
                 app_id=app_id, user_id=principal.user_id,
                 tenant_id=scope.get("tenant_id"), workspace_id=scope.get("workspace_id"),

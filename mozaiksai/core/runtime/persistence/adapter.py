@@ -1,13 +1,42 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from mozaiksai.core.auth.dependencies import UserPrincipal
 
 Document = Mapping[str, Any]
 Query = Mapping[str, Any]
 Projection = Mapping[str, Any]
 SortSpec = Sequence[tuple[str, int]]
 IndexSpec = Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class PersistencePrincipal:
+    """Authenticated ownership identity, separate from requested dispatch scope.
+
+    HTTP dispatch constructs this from a token-validated principal only. Host
+    scope selection and action inputs must never populate these fields.
+    """
+
+    user_id: str
+    workspace_id: str | None = None
+
+    @classmethod
+    def from_authenticated_user(cls, principal: UserPrincipal | None) -> PersistencePrincipal | None:
+        """Capture validated HTTP claims before any host scope selection."""
+        from mozaiksai.core.auth.dependencies import UserPrincipal
+
+        if not isinstance(principal, UserPrincipal) or not principal.is_authenticated:
+            return None
+        return cls(user_id=principal.user_id, workspace_id=principal.workspace_id)
+
+
+class PersistenceScopeError(PermissionError):
+    """A persistence operation cannot satisfy the declared ownership policy."""
 
 
 @runtime_checkable
@@ -69,6 +98,10 @@ class ModulePersistenceContext(Protocol):
     def app_id(self) -> str:
         ...
 
+    @property
+    def principal(self) -> PersistencePrincipal | None:
+        ...
+
     def collection(self, module_id: str, entity_name: str) -> PersistenceCollection:
         ...
 
@@ -84,6 +117,8 @@ __all__ = [
     "IndexSpec",
     "ModulePersistenceContext",
     "PersistenceCollection",
+    "PersistencePrincipal",
+    "PersistenceScopeError",
     "Projection",
     "Query",
     "SortSpec",

@@ -119,6 +119,28 @@ def test_app_plan_agent_explicitly_forbids_legacy_config_data_path() -> None:
     assert "config/data_migrations" not in block
 
 
+def test_service_agent_treats_runtime_persistence_as_ownership_boundary() -> None:
+    block = _agent_block("ServiceAgent")
+    assert "Runtime `context.persistence.collection(module_id, entity_name)` enforces" in block
+    assert "every read, count, update, delete, and aggregate" in block
+    assert "omit owner fields on creation rather than inventing owner_id" in block
+    assert "calling them is not required for enforcement" in block
+    assert "no implicit admin or cross-owner bypass" in block
+    assert "Do not access raw Mongo collections" in block
+    assert "must not import or call `get_mongo_client()`" in block
+
+
+def test_injected_catalogs_assign_collection_scope_to_runtime() -> None:
+    contracts = yaml.safe_load(_read(APPGEN_CATALOGS / "file_contracts.yaml"))
+    constraints = "\n".join(contracts["task_contracts"]["module_contract"]["hard_constraints"])
+    assert "Runtime persistence owns collection tenancy enforcement" in constraints
+    assert "runtime adds ownership scope before the pipeline" in constraints
+    assert "foreign collection stages, or aggregation writes" in constraints
+    archetypes = _read(APPGEN_CATALOGS / "module_archetypes.yaml")
+    assert "every operation using the authenticated principal" in archetypes
+    assert "optional preflight using ctx.persistence.principal" in archetypes
+
+
 def test_file_contracts_keep_repo_as_only_persistence_layer() -> None:
     data = yaml.safe_load(_read(APPGEN_CATALOGS / "file_contracts.yaml"))
     module_constraints = "\n".join(

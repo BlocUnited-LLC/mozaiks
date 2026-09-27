@@ -6,8 +6,22 @@ from typing import Any
 
 from mozaiksai.core.core_config import get_mongo_client
 
-from .adapter import IndexSpec, Projection, Query, SortSpec
+from .adapter import (
+    IndexSpec,
+    PersistencePrincipal,
+    PersistenceScopeError,
+    Projection,
+    Query,
+    SortSpec,
+)
+from .intent_loader import DataContract
 from .naming import collection_name_for, scope_filter_for, scope_metadata
+from .ownership import (
+    CollectionOwnership,
+    collection_ownership,
+    owned_update,
+    validate_owned_pipeline,
+)
 
 DEFAULT_APP_DATABASE_NAME = "mozaiks_apps"
 MAX_FIND_MANY_LIMIT = 100
@@ -22,12 +36,7 @@ def _default_database_name() -> str:
 
 
 class MongoPersistenceCollection:
-    """Mongo-backed collection wrapper for future generated module repositories.
-
-    Generated code should eventually access this through ``ctx.persistence``, not
-    by importing ``get_mongo_client()`` directly. This adapter is not injected
-    into ModuleContext yet.
-    """
+    """Mongo collection boundary injected into module repositories."""
 
     def __init__(
         self,
@@ -37,6 +46,9 @@ class MongoPersistenceCollection:
         tenant_id: str | None = None,
         workspace_id: str | None = None,
         user_id: str | None = None,
+        ownership: CollectionOwnership | None = None,
+        principal: PersistencePrincipal | None = None,
+        restrict_aggregation: bool = False,
     ) -> None:
         self._collection = collection
         self._app_id = scope_metadata(app_id)["app_id"]
@@ -46,8 +58,24 @@ class MongoPersistenceCollection:
             workspace_id=workspace_id,
             user_id=user_id,
         )
+        self._owner_scope = ownership.scope(principal) if ownership is not None else {}
+        self._restrict_aggregation = restrict_aggregation or ownership is not None
+        # Identity comparison must not inherit a case-insensitive collection collation.
+        self._options = {"collation": {"locale": "simple"}} if ownership is not None else {}
 
     def _scoped_query(self, query: Query) -> dict[str, Any]:
+        if self._owner_scope:
+            owner_field = next(iter(self._owner_scope))
+            scope: dict[str, Any] = {
+                "app_id": self._app_id, **self._owner_scope,
+                # Mongo equality also matches array elements. A malformed old
+                # owner array must not grant its row to several principals.
+                "$nor": [
+                    {field: {"$type": "array"}}
+                    for field in ("app_id", owner_field)
+                ],
+            }
+            return {"$and": [scope, dict(query)]} if query else scope
         return scope_filter_for(self._app_id, dict(query or {}))
 
     async def find_one(
@@ -55,7 +83,7 @@ class MongoPersistenceCollection:
         query: Query,
         projection: Projection | None = None,
     ) -> Mapping[str, Any] | None:
-        return await self._collection.find_one(self._scoped_query(query), projection)  # type: ignore[no-any-return]
+        return await self._collection.find_one(self._scoped_query(query), projection, **self._options)  # type: ignore[no-any-return]
 
     async def find_many(
         self,
@@ -66,16 +94,19 @@ class MongoPersistenceCollection:
         projection: Projection | None = None,
     ) -> list[Mapping[str, Any]]:
         safe_limit = max(1, min(int(limit), MAX_FIND_MANY_LIMIT))
-        cursor = self._collection.find(self._scoped_query(query), projection)
+        cursor = self._collection.find(self._scoped_query(query), projection, **self._options)
         if sort:
             cursor = cursor.sort(list(sort))
         cursor = cursor.limit(safe_limit)
         return await cursor.to_list(length=safe_limit)  # type: ignore[no-any-return]
 
     async def insert_one(self, document: Mapping[str, Any]) -> Any:
+        for field, identity in self._owner_scope.items():
+            if field in document and document[field] != identity:
+                raise PersistenceScopeError(f"Document cannot override ownership field {field!r}")
         if "app_id" in document and document["app_id"] != self._app_id:
             raise ValueError("document app_id cannot override context app_id")
-        scoped_document = {**dict(document), **self._scope_metadata}
+        scoped_document = {**dict(document), **self._scope_metadata, **self._owner_scope}
         return await self._collection.insert_one(scoped_document)
 
     async def update_one(
@@ -85,25 +116,32 @@ class MongoPersistenceCollection:
         *,
         upsert: bool = False,
     ) -> Any:
+        safe_update = (
+            owned_update(update, scope={"app_id": self._app_id, **self._owner_scope}, upsert=upsert)
+            if self._owner_scope else dict(update)
+        )
         return await self._collection.update_one(
             self._scoped_query(query),
-            dict(update),
+            safe_update,
             upsert=upsert,
+            **self._options,
         )
 
     async def delete_one(self, query: Query) -> Any:
-        return await self._collection.delete_one(self._scoped_query(query))
+        return await self._collection.delete_one(self._scoped_query(query), **self._options)
 
     async def delete_many(self, query: Query) -> Any:
-        return await self._collection.delete_many(self._scoped_query(query))
+        return await self._collection.delete_many(self._scoped_query(query), **self._options)
 
     async def count(self, query: Query) -> int:
-        return int(await self._collection.count_documents(self._scoped_query(query)))
+        return int(await self._collection.count_documents(self._scoped_query(query), **self._options))
 
     async def aggregate(self, pipeline: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        if self._restrict_aggregation:
+            validate_owned_pipeline(pipeline)
         scoped_pipeline: list[Mapping[str, Any]] = [{"$match": self._scoped_query({})}]
         scoped_pipeline.extend(dict(stage) for stage in pipeline or [])
-        cursor = self._collection.aggregate(scoped_pipeline)
+        cursor = self._collection.aggregate(scoped_pipeline, **self._options)
         return await cursor.to_list(length=None)  # type: ignore[no-any-return]
 
     async def ensure_indexes(self, indexes: Sequence[IndexSpec]) -> list[Any]:
@@ -111,6 +149,8 @@ class MongoPersistenceCollection:
 
         if not indexes:
             return []
+        if self._owner_scope:
+            raise PersistenceScopeError("Owned collection indexes must be managed by host startup")
         from .indexes import _ensure_raw_collection_indexes
 
         return await _ensure_raw_collection_indexes(
@@ -138,6 +178,8 @@ class MongoPersistenceContext:
         user_id: str | None = None,
         database_name: str | None = None,
         client: Any | None = None,
+        data_contract: DataContract | None = None,
+        principal: PersistencePrincipal | None = None,
     ) -> None:
         self._scope_metadata = scope_metadata(
             app_id,
@@ -149,6 +191,12 @@ class MongoPersistenceContext:
         self._database_name = (database_name or _default_database_name()).strip() or DEFAULT_APP_DATABASE_NAME
         self._client = client
         self._collections: dict[tuple[str, str], MongoPersistenceCollection] = {}
+        self._principal = principal
+        self._ownership = collection_ownership(data_contract, app_id=self.app_id, app_slug=app_slug)
+
+    @property
+    def principal(self) -> PersistencePrincipal | None:
+        return self._principal
 
     @property
     def app_id(self) -> str:
@@ -182,6 +230,9 @@ class MongoPersistenceContext:
                 tenant_id=self._scope_metadata.get("tenant_id"),
                 workspace_id=self._scope_metadata.get("workspace_id"),
                 user_id=self._scope_metadata.get("user_id"),
+                ownership=self._ownership.get(collection_name),
+                principal=self.principal,
+                restrict_aggregation=bool(self._ownership),
             )
         return self._collections[key]
 
@@ -192,8 +243,11 @@ class MongoPersistenceContext:
         App-data alias helpers use this method for explicit contract-declared
         collections such as hosted product records, shared aggregates, and
         migration/index targets that already own their own scope fields.
+        Module contexts with scoped ownership cannot return raw collections.
         """
 
+        if self._ownership:
+            raise PersistenceScopeError("Raw collection access is unavailable for apps declaring collection ownership")
         name = str(collection_name or "").strip()
         if not name:
             raise ValueError("collection_name is required")

@@ -293,7 +293,7 @@ def test_implementation_renderer_preserves_writes_and_exclusive_task_ownership()
 
 @pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
 @pytest.mark.asyncio
-async def test_generated_reads_enforce_login_owner_pagination_and_allowlist(tmp_path, monkeypatch, tenancy):
+async def test_generated_reads_use_runtime_collection_pagination_and_allowlist(tmp_path, monkeypatch, tenancy):
     files = _files(tenancy)
     package_name = f"generated_secure_reads_{tenancy}"
     package = tmp_path / package_name
@@ -322,22 +322,15 @@ async def test_generated_reads_enforce_login_owner_pagination_and_allowlist(tmp_
     result = await handler.list_tasks(ctx, page=2, page_size=2, search="a.*")
     assert result == {"items": [{"id": "1", "title": "Safe", owner_field: owner}], "total": 4}
     query = collection.count.call_args.args[0]
-    assert query[owner_field] == owner
+    assert owner_field not in query
     assert query["$or"][0]["id"]["$regex"] == "a\\.\\*"
     assert collection.aggregate.call_args.args[0][-2:] == [{"$skip": 2}, {"$limit": 2}]
     assert await handler.get_tasks(ctx, id="1") == {"item": {"id": "1", "title": "Safe", owner_field: owner}}
-    collection.find_one.assert_awaited_once_with({"id": "1", owner_field: owner})
+    collection.find_one.assert_awaited_once_with({"id": "1"})
     assert requested == [(MODULE, "tasks"), (MODULE, "tasks")]
     with pytest.raises(TypeError):
         await handler.list_tasks(ctx, owner_id="foreign")
-    for attribute in {"user_id", "workspace_id"} if tenancy == "per_workspace" else {"user_id"}:
-        previous = getattr(ctx, attribute)
-        setattr(ctx, attribute, None)
-        with pytest.raises(PermissionError, match=attribute):
-            await handler.list_tasks(ctx)
-        with pytest.raises(PermissionError, match=attribute):
-            await handler.get_tasks(ctx, id="1")
-        setattr(ctx, attribute, previous)
+    assert "scoped_query" not in files[f"{BACKEND}/repo.py"]
     collection.find_one.return_value = None
     with pytest.raises(ModuleRecordNotFoundError, match="Record not found"):
         await handler.get_tasks(ctx, id="foreign-id")

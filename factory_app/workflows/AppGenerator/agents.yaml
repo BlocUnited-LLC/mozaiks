@@ -2195,7 +2195,7 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       - Define typed DTO/document shapes, enums, and pure helpers for module backends.
-      - Keep persistence mapping in backend/repo.py and scope query helpers in backend/policy.py.
+      - Keep persistence mapping in backend/repo.py. Runtime persistence enforces collection ownership; backend/policy.py provides optional ownership preflight helpers.
       - Do not emit backend model files; backend/schemas.py is the canonical typed-shape file.
   - id: context
     heading: '[CONTEXT]'
@@ -2476,7 +2476,7 @@ agents:
         - `backend/handler.py` — action adapter only
         - `backend/service.py` — business logic + event publication
         - `backend/repo.py` — persistence
-        - `backend/policy.py` — deterministic scope helpers rendered from collection ownership
+        - `backend/policy.py` — deterministic optional ownership preflight helpers; runtime persistence owns enforcement
         - `backend/schemas.py` — typed DTOs, enums, normalization helpers
         - `module_contract.module_yaml.module.type` selects the cookie-cutter backend conventions from the injected `[MODULE ARCHETYPES CONTEXT]`. Do not invent a parallel module taxonomy or restate a different set of type rules.
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
@@ -2488,7 +2488,7 @@ agents:
       - When both base_handler.py and handler.py are owned, put real thin action dispatch in the base class and make handler.py the workspace subclass. A subclass may contain only its docstring; do not invent identity methods or empty runtime functions to fill a file.
       - Generated `backend/repo.py` must use `context.persistence.collection(module_id, entity_name)` with module/entity values aligned to `data_contract` and `data/contract.json`.
       - Generated module code must not use `ctx.db` or `context.db`, must not import or call `get_mongo_client()`, and must not hardcode database names.
-      - External HTTP module dispatch validates request-supplied tenant/workspace/user scope before this code runs. Generated module code must still build resource filters from `context.app_id`, `context.tenant_id`, `context.workspace_id`, `context.user_id`, and `context.permissions`; never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization.
+      - Runtime persistence scopes every operation using the authenticated principal and data_contract. User/workspace values from action params or requested dispatch scope cannot grant ownership. Keep domain permission checks in service.py; never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization.
       - Publish events through the runtime context: `await context.emit("domain.task_manager.task_created", payload)`.
       - Event types must exactly match `events.yaml.events[].type`.
       - Generated service methods must consume runtime input from `**params` using the exact fields declared in `module.yaml.actions[].input_schema.required`. Do not wrap request fields under a synthetic `payload` key unless the module action input schema explicitly declares a required `payload` field.
@@ -2507,7 +2507,8 @@ agents:
       6a. Handler signatures must match the runtime executor: `async def action_name(self, ctx, **params)` or `async def action_name(self, ctx, field: Type = ...)`. Do not put `context` last.
       7. Put state transitions and event publication in `backend/service.py` when that file is declared.
       8. Put persistence queries/writes in `backend/repo.py` when that file is declared.
-      9. Import `scoped_query` and `scope_record` from the deterministic `backend/policy.py`. In repo.py, use `scoped_query(context, filters, entity_name=collection_name)` for every read/update/delete and `scope_record(context, record, entity_name=collection_name)` before insertion. These helpers enforce the data contract's owner_field from trusted runtime identity and fail when identity is missing. Domain authorization and transition checks remain in service.py; never implement or replace policy.py.
+      9. Runtime `context.persistence.collection(module_id, entity_name)` enforces per_user/per_workspace ownership for every read, count, update, delete, and aggregate, and stamps the declared owner_field on inserts. Pass domain filters and records directly; omit owner fields on creation rather than inventing owner_id. A supplied owner value that disagrees with the authenticated principal is rejected. `backend/policy.py` provides optional preflight helpers using `context.persistence.principal`; calling them is not required for enforcement. Never implement or replace policy.py. Domain authorization and transition checks remain in service.py.
+      9a. Aggregations stay within the authenticated owner's rows. Module persistence has no implicit admin or cross-owner bypass. Do not access raw Mongo collections, join another collection, or write aggregation output to circumvent scope. Cross-owner requirements need an explicit declared and auditable runtime contract; do not invent an escape in generated code.
       10. Put DTOs, enums, and normalization helpers in `backend/schemas.py` only when that file is included in `current_build_task.owned_paths`. Otherwise import and use the typed shapes already accepted for this module: they arrive in `dependency_task_outputs` and are importable from the module's `.schemas` module. Reuse those definitions rather than restating them locally.
       10a. Align every repo collection call with `data_contract` ownership. Non-persistent modules should not invent database logic.
       11. Publish the corresponding event from `events.yaml` only after the repo confirms an actual owned mutation, using the exact namespaced event type declared there. Follow the injected FILE CONTRACTS CONTEXT for paging, literal versus regex search, and write-result handling. A not-found or idempotent no-op response follows the declared action contract, not a global HTTP status policy; never fabricate mutation success or its event.

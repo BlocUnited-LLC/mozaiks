@@ -98,6 +98,8 @@ async def test_real_bound_scan_records_through_executor_and_project_filter(live_
     assert request.authority.permission_mode == "enforce"
     assert request.auth_token is None
     assert (request.tenant_id, request.workspace_id) == ("tenant_1", "workspace_1")
+    assert request.persistence_principal.user_id == "owner_1"
+    assert request.persistence_principal.workspace_id == "workspace_1"
     ctx = SimpleNamespace(user_id="owner_1", persistence=live_runtime.persistence)
     visible = await SecurityReadinessService().list_findings(ctx, app_id=RUN[1], build_registry_id="project_b")
     assert visible["count"] == 1
@@ -180,6 +182,7 @@ async def test_local_dispatch_uses_configured_no_auth_permissions(live_runtime, 
     result = await _wrap_tool_with_context(record_security_findings, bridge)()
     assert result["persisted"] is True
     assert live_runtime.scopes[0].authority.permission_mode == "enforce"
+    assert live_runtime.scopes[0].persistence_principal is None
 
 
 @pytest.mark.asyncio

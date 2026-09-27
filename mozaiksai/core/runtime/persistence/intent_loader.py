@@ -148,6 +148,8 @@ def iter_data_contract_collections(
             owner_id = ownership.get("surface_id", group_id) if explicit else collection.get("module_id") or ownership.get("surface_id", group_id)
             owner_kind = ownership.get("surface_kind", group_kind)
             if not group_id and "ownership" not in collection:
+                if collection.get("tenancy") in {"per_user", "per_workspace"} and collection.get("owner_field"):
+                    raise DataContractLoadError(f"{path}.ownership is required for scoped shared collections")
                 # Retain unowned shared metadata for runtime loading and strict factory validation.
                 # Missing ownership cannot authorize indexing or generated actions/policies.
                 if not require_complete_ownership:
@@ -192,6 +194,16 @@ def index_data_contract_by_entity(contract: DataContract | None) -> DataEntityIn
     if contract is None:
         return {}
     index: DataEntityIndex = {}
+
+    def add(key: tuple[str, str], collection: dict[str, Any]) -> None:
+        previous = index.get(key)
+        if previous is not None and any(
+            row.get("tenancy") in {"per_user", "per_workspace"} and row.get("owner_field")
+            for row in (previous, collection)
+        ):
+            raise DataContractLoadError(f"Duplicate collection identity {key!r} cannot replace ownership metadata")
+        index[key] = collection
+
     for ordinal, value in enumerate(_require_list(contract.get("entities", []), "data_contract.entities")):
         path = f"data_contract.entities[{ordinal}]"
         entity = _require_object(value, path)
@@ -199,11 +211,11 @@ def index_data_contract_by_entity(contract: DataContract | None) -> DataEntityIn
         entity_name = str(entity.get("entity_name") or entity.get("name") or "").strip()
         if not module_id or not entity_name:
             raise DataContractLoadError(f"{path} requires module_id and entity_name")
-        index[(module_id, entity_name)] = entity
+        add((module_id, entity_name), entity)
     for owner_id, _owner_kind, collection in iter_data_contract_collections(contract, require_complete_ownership=False):
         name = collection.get("entity") or collection.get("entity_name") or collection.get("name")
         if owner_id and name:
-            index[(owner_id, str(name))] = collection
+            add((owner_id, str(name)), collection)
     return index
 
 

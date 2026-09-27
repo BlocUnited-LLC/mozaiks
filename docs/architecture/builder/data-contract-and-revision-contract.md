@@ -624,7 +624,7 @@ Layer responsibilities:
 - `service.py` owns orchestration, validation, and event emission after state is
   committed; it calls repo methods for data access.
 - `repo.py` owns persistence access through `ctx.persistence`.
-- `policy.py` is rendered deterministically from collection ownership, tenancy, and owner_field. Domain authorization stays in service.py.
+- `policy.py` is rendered deterministically as optional ownership preflight. Runtime persistence enforces collection tenancy and owner_field independently; domain authorization stays in service.py.
 - `schemas.py` owns typed document shapes and pure normalization helpers.
 
 Runtime app loading behavior:
@@ -784,28 +784,47 @@ This document defines the missing database layer that those docs assume.
 
 
 
-## Deterministic Generated Module Policies
+## Runtime Ownership and Generated Policy Preflight
 
 Persistent generated modules use the DesignDocs-approved collection `tenancy`,
-`owner_field`, and `entity` from `data_contract`. `per_user` maps to trusted
-`ctx.user_id`; `per_workspace` maps to trusted `ctx.workspace_id`; `app_wide`
+`owner_field`, and `entity` from `data_contract`. `per_user` maps to authenticated
+`ctx.persistence.principal.user_id`; `per_workspace` maps to authenticated
+`ctx.persistence.principal.workspace_id`; `app_wide`
 has no additional owner field. The runtime's app partition remains enforced
 independently. `scope` describes namespace ownership (`app`, `platform`, or
-`hosted`) and never determines tenancy. Missing metadata or scoped identity
-fails closed; field names and ownership are never guessed. AppBuildPlan has no
+`hosted`) and never determines tenancy. Generated contracts require complete
+metadata and missing scoped identity fails closed; field names and ownership
+are never guessed. Existing collections without ownership metadata receive no
+additional row filter. Apps without scoped ownership retain their existing
+persistence behavior. AppBuildPlan has no
 second editable copy of this contract.
 
 Code renders `modules/{module_id}/backend/policy.py` before worker output
 acceptance. ServiceAgent owns its artifact path but emits no policy source.
-Repositories import `scoped_query(context, filters, entity_name=collection_name)`
-for every read, update, and delete, and `scope_record(context, record,
-entity_name=collection_name)` for insertion. Request fields cannot replace the
-scope identity. Multiple collections require an explicit `entity_name`.
-Business authorization and lifecycle checks remain in `service.py`.
+These helpers are optional preflight: `scoped_query(context, filters,
+entity_name=collection_name)` and `scope_record(context, record,
+entity_name=collection_name)` use the immutable persistence principal.
+Multiple collections require an explicit `entity_name`. Runtime persistence
+enforces ownership on every collection operation whether generated code uses
+these helpers or passes its domain filters and records directly. Canonical
+reads use the collection directly. Business authorization and lifecycle checks
+remain in `service.py`.
 
-Queries omit `app_id` because `ctx.persistence` injects that mandatory partition
-and rejects extra `app_id` filters. App-wide policies add no other row filter.
-Scoped policies overwrite request-supplied owner fields with trusted identity.
+Queries omit `app_id` because `ctx.persistence` injects that mandatory partition.
+Owned filters are conjoined with it; existing app-wide operations reject extra
+`app_id` filters. App-wide policies add no other row filter.
+Persistence filters reads, counts, updates, deletes, and aggregations by the
+declared owner field. Inserts stamp it from the authenticated principal and
+reject conflicting supplied values; updates cannot transfer ownership. The
+optional record preflight follows the same conflict rule. Action inputs and
+requested workspace IDs are never authority. Aggregations cannot introduce
+foreign collection rows or write output, and admin permissions do not disable
+ownership. Cross-owner functionality is unavailable through module persistence
+until an explicit declared and auditable runtime access contract is implemented.
+When an app declares any scoped collection, raw literal collection access and
+unsafe aggregation stages are also unavailable from app-wide collections, so
+those collections cannot become a route around ownership. Scoped shared
+collections require an explicit owning surface; missing ownership fails loading.
 The runtime-owned fields `user_id` and `workspace_id` can only serve as the owner
 field for their corresponding tenancy; `app_id` and `tenant_id` are not valid
 per-user or per-workspace owner fields.

@@ -33,6 +33,7 @@ from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
     WORKFLOW_TRIGGER_TRACE_HEADER,
     WORKFLOW_TRIGGER_TRACE_KEY,
 )
+from mozaiksai.core.runtime.persistence import PersistencePrincipal
 
 router = APIRouter(tags=["modules"])
 logger = logging.getLogger(__name__)
@@ -302,6 +303,10 @@ async def _execute_module_action(
     if is_auth_enabled() and principal is None and not _is_public_module_action(request, module_name, action_name):
         raise HTTPException(status_code=401, detail="Missing authorization token")
 
+    # Snapshot authenticated claims before host scope hooks receive the mutable
+    # UserPrincipal. Requested workspace selection remains separate metadata.
+    persistence_principal = PersistencePrincipal.from_authenticated_user(principal)
+
     # IDOR gate: when an explicit app_id was supplied (not derived from the token),
     # verify it matches the authenticated principal's token claim. This prevents a
     # caller from executing actions scoped to a foreign app by passing ?app_id=other.
@@ -439,6 +444,7 @@ async def _execute_module_action(
         auth_token=str(auth_token) if auth_token else None,
         correlation_id=str(correlation_id) if correlation_id else None,
         authority=authority,
+        persistence_principal=persistence_principal,
         provenance=ModuleDispatchProvenance(
             surface="http_admin_module_dispatch" if lane == "admin" else "http_module_dispatch",
             correlation_id=str(correlation_id) if correlation_id else None,

@@ -219,6 +219,33 @@ effect of handler code.
   additive migration files from `data/migrations/*.json`
 - migration states are recorded in `mozaiksai.AppDatabaseMigrations`
 
+For collections declaring `per_user` or `per_workspace` tenancy and an
+`owner_field`, runtime persistence applies the authenticated principal's user or
+workspace identity to every read, count, update, delete, and aggregation. Inserts
+receive that exact owner field automatically; a supplied conflicting value is
+rejected. Updates cannot move a row to another owner. This boundary covers both
+generated canonical actions and model-authored repositories without relying on
+their filters or use of `policy.py`.
+
+The principal is captured from authenticated request identity. Action inputs,
+requested workspace scope, and later changes to module context identity do not
+change it. Missing required identity fails closed. `app_wide` collections and
+existing collections without ownership metadata receive no additional row
+filter. Apps with no scoped ownership retain their existing persistence behavior.
+
+Aggregations operate on the caller's owned rows. Foreign-collection stages and
+aggregation writes cannot bypass the boundary, and admin permissions do not
+implicitly disable it. Cross-owner behavior is unavailable through module
+persistence until an explicitly declared, auditable runtime access contract is
+implemented. Generated code must not substitute raw Mongo access.
+In an app declaring any scoped collection, the entire module persistence
+context rejects raw literal collection access and unsafe aggregation stages,
+including pipelines starting from app-wide collections. Otherwise such a
+pipeline could join protected rows without their owner filter. Scoped shared
+collections must declare their owning surface; missing ownership fails loading.
+Index changes on owned collections remain host startup work: module calls cannot
+create collection-wide indexes, including TTL indexes that delete other owners' rows.
+
 The target contract is:
 
 - additive changes can be applied deterministically
@@ -358,7 +385,7 @@ Generated module layering for app business data:
 - `handler.py` dispatches only
 - `service.py` orchestrates business logic and calls repo methods
 - `repo.py` uses `ctx.persistence.collection(module_id, entity_name)`
-- `policy.py` builds scope/domain filters
+- `policy.py` provides optional ownership preflight from the immutable persistence principal
 - `schemas.py` defines typed shapes and pure helpers
 
 Generated modules must not call `get_mongo_client()` directly, use `ctx.db`, or

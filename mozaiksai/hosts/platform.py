@@ -71,6 +71,7 @@ from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
 )
 from mozaiksai.core.runtime.persistence import (
     DatabaseStartupPolicyError,
+    PersistencePrincipal,
     apply_data_migrations,
     apply_database_indexes,
     database_persistence_is_enabled,
@@ -411,6 +412,7 @@ async def _platform_startup() -> None:
             module_executor = ModuleExecutor(
                 event_emitter=dispatcher.emit,
                 entitlement_checker=entitlement_checker,
+                data_contract=load_result.data_contract,
             )
             module_action_surfaces: dict[str, dict[str, str | None]] = {}
             module_ask_context_actions: dict[str, dict[str, bool]] = {}
@@ -1058,6 +1060,7 @@ async def get_profile_panels(
     # query app_id is contextual data for panel actions, not a persistence scope
     # override. Support links use it as the subject app id for tickets.
     requested_subject_user_id = user_id
+    persistence_principal = PersistencePrincipal.from_authenticated_user(principal)
     resolved_app_id, viewer_user_id = _resolve_profile_scope(principal, app_id=None)
     app_root = resolve_app_root()
     raw_panels = load_profile_panels(app_root)
@@ -1111,6 +1114,7 @@ async def get_profile_panels(
                         permissions=tuple(principal.scopes) if principal else (),
                     ),
                     provenance=ModuleDispatchProvenance(surface="profile_panel"),
+                    persistence_principal=persistence_principal,
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1167,6 +1171,7 @@ async def get_profile_tabs(
     and an ``error`` string so the UI can render graceful empty states.
     """
     requested_subject_user_id = user_id
+    persistence_principal = PersistencePrincipal.from_authenticated_user(principal)
     resolved_app_id, viewer_user_id = _resolve_profile_scope(principal, app_id=None)
     app_root = resolve_app_root()
     raw_tabs = load_profile_tabs(app_root)
@@ -1220,6 +1225,7 @@ async def get_profile_tabs(
                         permissions=tuple(principal.scopes) if principal else (),
                     ),
                     provenance=ModuleDispatchProvenance(surface="profile_tab"),
+                    persistence_principal=persistence_principal,
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1309,6 +1315,7 @@ async def get_profile_pages(
     Sections order: overview → platform → social → settings.
     """
     requested_subject_user_id = user_id
+    persistence_principal = PersistencePrincipal.from_authenticated_user(principal)
     resolved_app_id, viewer_user_id = _resolve_profile_scope(principal, app_id=None)
     app_root = resolve_app_root()
     raw_pages = load_profile_pages(app_root)
@@ -1378,6 +1385,7 @@ async def get_profile_pages(
                         permissions=tuple(dispatch_scope.get("permissions") or ()),
                     ),
                     provenance=ModuleDispatchProvenance(surface="profile_page"),
+                    persistence_principal=persistence_principal,
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1495,6 +1503,7 @@ async def get_current_user_relationships(
     for account, portfolio, and "my resources" surfaces. Provider failures are
     isolated so one broken module cannot blank the whole response.
     """
+    persistence_principal = PersistencePrincipal.from_authenticated_user(principal)
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
     raw_providers = load_relationship_providers(app_root)
@@ -1534,6 +1543,7 @@ async def get_current_user_relationships(
                     permissions=tuple(principal.scopes) if principal else (),
                 ),
                 provenance=ModuleDispatchProvenance(surface="relationship_provider"),
+                persistence_principal=persistence_principal,
             )
             result = await module_executor.execute(req, context=None)
             if result.success:

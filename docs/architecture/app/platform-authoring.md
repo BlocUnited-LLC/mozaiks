@@ -281,25 +281,15 @@ Generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
 with values aligned to `data/contract.json`. It must not use `ctx.db`,
 call `get_mongo_client()`, or hardcode database names.
 
-**`policy.py`** — multi-tenancy query scoping.
+**`policy.py`** — optional ownership preflight.
 
-```python
-def owner_id_from_context(ctx, user_id=None) -> str:
-    return user_id or getattr(ctx, "user_id", None) or ""
-
-def scoped_owner_query(ctx) -> dict:
-    owner_id = owner_id_from_context(ctx)
-    return {"owner_id": owner_id} if owner_id else {}
-
-def scoped_record_query(ctx, *, record_id: str) -> dict:
-    query = {"record_id": record_id}
-    owner_id = owner_id_from_context(ctx)
-    if owner_id:
-        query["owner_id"] = owner_id
-    return query
-```
-
-Rules: pure functions only, no DB access, no side effects.
+Code renders this file from collection `tenancy` and `owner_field`. Its helpers
+use the immutable `ctx.persistence.principal`; request parameters and mutable
+context identity are not authorization. Runtime persistence enforces ownership
+on every operation even when the repo passes domain filters directly and never
+calls these helpers. Inserts receive the declared owner field automatically;
+conflicting supplied values are rejected. Keep domain permission and transition
+checks in `service.py`.
 
 **`schemas.py`** — typed document definitions and pure helpers.
 

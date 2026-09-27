@@ -6,7 +6,12 @@ should use ctx.persistence rather than importing get_mongo_client() directly.
 
 from __future__ import annotations
 
-from .adapter import ModulePersistenceContext, PersistenceCollection
+from .adapter import (
+    ModulePersistenceContext,
+    PersistenceCollection,
+    PersistencePrincipal,
+    PersistenceScopeError,
+)
 from .app_data import (
     DATA_COLLECTIONS,
     AppData,
@@ -59,6 +64,8 @@ __all__ = [
     "MongoPersistenceCollection",
     "MongoPersistenceContext",
     "PersistenceCollection",
+    "PersistencePrincipal",
+    "PersistenceScopeError",
     "AppData",
     "AppDataAliasError",
     "DataContractLoadError",

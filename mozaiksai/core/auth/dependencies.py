@@ -98,7 +98,11 @@ class UserPrincipal:
         return str(self.tenant_id) == str(path_tenant_id)
 
     def validate_workspace_id(self, path_workspace_id: str) -> bool:
-        """Validate that token workspace_id matches path/payload workspace_id."""
+        """Check optional token binding for host workspace selection.
+
+        An unbound token does not grant ownership of the selected workspace.
+        Persistence uses its separately captured authenticated principal.
+        """
         if not self.workspace_id:
             return True
         return str(self.workspace_id) == str(path_workspace_id)
