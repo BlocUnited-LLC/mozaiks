@@ -15,6 +15,7 @@ from mozaiksai.core.runtime.app.provenance import (
     dump_app_provenance_yaml,
 )
 from mozaiksai.core.runtime.persistence.intent_loader import (
+    iter_data_contract_collections,
     validate_complete_data_contract_ownership,
 )
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
@@ -217,6 +218,35 @@ def materialize_data_contract(
     )
     validate_complete_data_contract_ownership(data_contract)
     return {**files, path: json.dumps(data_contract, indent=2, ensure_ascii=False)}
+
+
+def data_contract_requires_auth(data_contract: Any) -> bool:
+    """Owned collections require an authenticated app, regardless of model intent."""
+    if data_contract is None:
+        return False
+    return any(
+        collection.get("tenancy") in {"per_user", "per_workspace"}
+        for _, _, collection in iter_data_contract_collections(data_contract, require_complete_ownership=False)
+    )
+
+
+def materialize_collection_auth(
+    files: dict[str, str], *, data_contract: Any = None,
+) -> dict[str, str]:
+    """Apply ownership-derived auth only when materializing the app manifest."""
+    if "app.json" not in files:
+        return files
+    if data_contract is None and "data/contract.json" in files:
+        data_contract = json.loads(files["data/contract.json"])
+    if not data_contract_requires_auth(data_contract):
+        return files
+    manifest = json.loads(files["app.json"])
+    if not isinstance(manifest, dict):
+        raise ValueError("app.json must be an object")
+    if manifest.get("authRequired") is True:
+        return files
+    manifest["authRequired"] = True
+    return {**files, "app.json": json.dumps(manifest, indent=2, ensure_ascii=False)}
 
 
 def _materialize_schema_contract(schema: dict[str, Any], *, closed_request: bool = False) -> dict[str, Any]:
@@ -457,7 +487,7 @@ def extract_code_file_map_from_payload(
                     "skips schema materialization."
                 )
 
-    return file_map
+    return materialize_collection_auth(file_map, data_contract=payload.get("data_contract"))
 
 
 def extract_code_file_entries_from_payload(

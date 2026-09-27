@@ -64,6 +64,10 @@ from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
     WORKFLOW_TRIGGER_TRACE_KEY,
 )
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext, PersistencePrincipal
+from mozaiksai.core.runtime.persistence.request_scope import (
+    bind_persistence_principal,
+    current_persistence_principal,
+)
 
 logger = get_workflow_logger("module_executor")
 
@@ -612,15 +616,16 @@ class ModuleExecutor:
 
         timeout = _action_timeout()
         try:
-            if inspect.iscoroutinefunction(action_fn):
-                coro = action_fn(context, **request.params)
-                result = (
-                    await asyncio.wait_for(coro, timeout=timeout)
-                    if timeout is not None
-                    else await coro
-                )
-            else:
-                result = action_fn(context, **request.params)
+            with bind_persistence_principal(str(request.app_id or "").strip(), request.persistence_principal):
+                if inspect.iscoroutinefunction(action_fn):
+                    coro = action_fn(context, **request.params)
+                    result = (
+                        await asyncio.wait_for(coro, timeout=timeout)
+                        if timeout is not None
+                        else await coro
+                    )
+                else:
+                    result = action_fn(context, **request.params)
         except TimeoutError:
             logger.error(
                 "MODULE_ACTION_TIMEOUT: module=%s action=%s timeout=%.1fs user=%s",
@@ -1011,5 +1016,5 @@ class ModuleExecutor:
             workspace_id=request.workspace_id,
             user_id=request.user_id,
             data_contract=self._data_contract,
-            principal=request.persistence_principal,
+            principal=lambda: current_persistence_principal(app_id),
         )

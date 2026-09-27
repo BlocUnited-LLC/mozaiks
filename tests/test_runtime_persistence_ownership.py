@@ -146,17 +146,19 @@ async def test_module_cannot_create_collection_wide_ttl_deletion():
     assert raw.calls == []
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tenancy,principal", [
     ("per_user", None), ("per_user", PersistencePrincipal("")),
     ("per_workspace", None), ("per_workspace", PersistencePrincipal("user-a")),
     ("per_workspace", PersistencePrincipal("user-a", " ")),
 ])
-def test_metadata_cannot_substitute_for_authenticated_identity(tenancy, principal):
+async def test_metadata_cannot_substitute_for_authenticated_identity(tenancy, principal):
+    collection = MongoPersistenceCollection(
+        collection=RecordingCollection(), app_id="app-a", user_id="user-a", workspace_id="workspace-a",
+        ownership=CollectionOwnership(tenancy, "created_by"), principal=principal,
+    )
     with pytest.raises(PersistenceScopeError):
-        MongoPersistenceCollection(
-            collection=RecordingCollection(), app_id="app-a", user_id="user-a", workspace_id="workspace-a",
-            ownership=CollectionOwnership(tenancy, "created_by"), principal=principal,
-        )
+        await collection.find_one({})
 
 
 @pytest.mark.asyncio
@@ -169,6 +171,15 @@ async def test_aggregate_only_counts_principals_initial_rows():
         "$nor": [{"app_id": {"$type": "array"}}, {"created_by": {"$type": "array"}}],
     }}, *pipeline]
     assert len(pipeline) == 1
+
+
+@pytest.mark.asyncio
+async def test_validated_aggregation_is_detached_from_mutable_nested_input():
+    collection, raw = owned_collection()
+    pipeline = [{"$facet": {"counts": [{"$count": "total"}]}}]
+    await collection.aggregate(pipeline)
+    pipeline[0]["$facet"]["counts"].append({"$unionWith": "victim"})
+    assert raw.calls[0][1][-1] == {"$facet": {"counts": [{"$count": "total"}]}}
 
 
 @pytest.mark.asyncio
@@ -198,15 +209,22 @@ def test_runtime_applies_partial_generation_metadata_and_normalized_storage_name
     context = MongoPersistenceContext(
         app_id="app-a", client=FakeMongoClient(), data_contract=contract(), principal=PersistencePrincipal("user-a"),
     )
-    # No fields/scope metadata required for runtime; casing cannot escape storage ownership.
-    assert context.collection("TASKS", "TASKS")._owner_scope == {"created_by": "user-a"}
+    # No fields/scope metadata required for runtime; undeclared casing is rejected.
+    assert context.collection("tasks", "Task")._owner_scope == {"created_by": "user-a"}
+    assert context.collection_name("tasks", "Task") == context.collection_name("tasks", "tasks")
+    with pytest.raises(PersistenceScopeError, match="Undeclared collection"):
+        context.collection("TASKS", "TASKS")
     with pytest.raises(PersistenceScopeError):
         context.literal_collection(context.collection_name("tasks", "tasks"))
 
 
 @pytest.mark.asyncio
 async def test_shared_collection_cannot_aggregate_foreign_owned_rows():
-    context = MongoPersistenceContext(app_id="app-a", client=FakeMongoClient(), data_contract=contract())
+    data_contract = contract()
+    data_contract["surfaces"].append({
+        "surface_id": "shared", "surface_kind": "module", "collections": [{"name": "summary"}],
+    })
+    context = MongoPersistenceContext(app_id="app-a", client=FakeMongoClient(), data_contract=data_contract)
     with pytest.raises(PersistenceScopeError):
         await context.collection("shared", "summary").aggregate([{"$lookup": {"from": "tasks"}}])
 
@@ -255,3 +273,23 @@ def test_shared_scoped_rows_require_a_resolved_surface_owner():
     }]}
     with pytest.raises(DataContractLoadError, match="ownership is required"):
         index_data_contract_by_entity(data_contract)
+
+
+@pytest.mark.parametrize("module,reference", [("tasks", "undeclared"), ("other", "Task"), ("tasks", "task")])
+def test_loaded_contract_never_opens_an_undeclared_collection(module, reference):
+    context = MongoPersistenceContext(app_id="app-a", client=FakeMongoClient(), data_contract=contract())
+    with pytest.raises(PersistenceScopeError, match="Undeclared collection"):
+        context.collection(module, reference)
+
+
+def test_empty_loaded_contract_does_not_authorize_collections():
+    context = MongoPersistenceContext(app_id="app-a", client=FakeMongoClient(), data_contract={})
+    with pytest.raises(PersistenceScopeError, match="Undeclared collection"):
+        context.collection("tasks", "tasks")
+
+
+def test_ambiguous_entity_and_collection_name_is_rejected():
+    data_contract = contract()
+    data_contract["surfaces"][0]["collections"].append({"name": "Task", "entity": "OtherTask"})
+    with pytest.raises(DataContractLoadError, match="Ambiguous collection reference"):
+        MongoPersistenceContext(app_id="app-a", client=FakeMongoClient(), data_contract=data_contract)

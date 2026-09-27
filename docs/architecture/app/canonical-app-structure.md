@@ -137,7 +137,7 @@ app/modules/{module_id}/
 
 `handler.py` is thin dispatch. `service.py` owns business flow and emits events
 after state commits. `repo.py` owns persistence operations through
-`ctx.persistence.collection(module_id, entity_name)`, which enforces declared
+`ctx.persistence.collection(module_id, collection_name)`, which enforces declared
 collection ownership. `policy.py` provides optional ownership preflight using
 the immutable persistence principal. `schemas.py` owns typed request, response,
 and document shapes.

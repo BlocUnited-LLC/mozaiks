@@ -40,6 +40,7 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     extract_deleted_file_paths_from_payload,
+    materialize_collection_auth,
     materialize_data_contract,
     safe_relpath,
 )
@@ -152,6 +153,7 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             contract = compile_data_contract(
                 contract, subscription_contract=subscription_contract, context_variables=context_variables,
             )
+        incoming = materialize_collection_auth(incoming, data_contract=contract)
         incoming = materialize_data_contract(
             incoming, data_contract=contract, owned_paths=owned_paths or [],
             subscription_contract=subscription_contract, context_variables=context_variables,

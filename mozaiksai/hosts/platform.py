@@ -1042,6 +1042,23 @@ def _normalize_relationship_row(
     return normalized
 
 
+async def _profile_persistence_principal(
+    principal: UserPrincipal, persistence_principal: PersistencePrincipal | None,
+    *, app_id: str, user_id: str, module_name: str, action: str, params: dict[str, Any],
+) -> PersistencePrincipal | None:
+    if persistence_principal is None:
+        return None
+    scope = await get_platform_hooks().call_module_scope(
+        principal=principal, module_name=module_name, action_name=action,
+        requested_scope={
+            "app_id": app_id, "user_id": user_id,
+            "tenant_id": principal.tenant_id, "workspace_id": persistence_principal.workspace_id,
+        },
+        params=params, default_permissions=list(principal.scopes), fail_closed=True,
+    )
+    return persistence_principal.with_host_scope(scope)
+
+
 @app.get("/api/me/profile-panels")
 async def get_profile_panels(
     app_id: str | None = None,
@@ -1114,7 +1131,10 @@ async def get_profile_panels(
                         permissions=tuple(principal.scopes) if principal else (),
                     ),
                     provenance=ModuleDispatchProvenance(surface="profile_panel"),
-                    persistence_principal=persistence_principal,
+                    persistence_principal=await _profile_persistence_principal(
+                        principal, persistence_principal, app_id=resolved_app_id, user_id=viewer_user_id,
+                        module_name=module_name, action=action, params=action_params,
+                    ),
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1225,7 +1245,10 @@ async def get_profile_tabs(
                         permissions=tuple(principal.scopes) if principal else (),
                     ),
                     provenance=ModuleDispatchProvenance(surface="profile_tab"),
-                    persistence_principal=persistence_principal,
+                    persistence_principal=await _profile_persistence_principal(
+                        principal, persistence_principal, app_id=resolved_app_id, user_id=viewer_user_id,
+                        module_name=module_name, action=action, params=action_params,
+                    ),
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1385,7 +1408,9 @@ async def get_profile_pages(
                         permissions=tuple(dispatch_scope.get("permissions") or ()),
                     ),
                     provenance=ModuleDispatchProvenance(surface="profile_page"),
-                    persistence_principal=persistence_principal,
+                    persistence_principal=(
+                        persistence_principal.with_host_scope(dispatch_scope) if persistence_principal else None
+                    ),
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1543,7 +1568,10 @@ async def get_current_user_relationships(
                     permissions=tuple(principal.scopes) if principal else (),
                 ),
                 provenance=ModuleDispatchProvenance(surface="relationship_provider"),
-                persistence_principal=persistence_principal,
+                persistence_principal=await _profile_persistence_principal(
+                    principal, persistence_principal, app_id=resolved_app_id, user_id=user_id,
+                    module_name=module_id, action=action, params={},
+                ),
             )
             result = await module_executor.execute(req, context=None)
             if result.success:
@@ -2950,6 +2978,8 @@ async def _page_declared_ask_context(
     user_id: str,
     page_path: str | None = None,
     page_context: str | None = None,
+    persistence_principal: PersistencePrincipal | None = None,
+    principal: Any = None,
 ) -> dict[str, Any]:
     """Platform ask_context hook: resolve the asking page's declared actions."""
     _ = page_context  # the description already reaches the prompt via ui_context
@@ -2965,6 +2995,8 @@ async def _page_declared_ask_context(
         app=app,
         app_id=app_id,
         user_id=user_id,
+        persistence_principal=persistence_principal,
+        principal=principal,
     )
 
 

@@ -118,10 +118,7 @@ async def _prepare_live_dispatch(
         transport, app_id=app_id, chat_id=chat_id, user_id=user_id,
     )
     principal_scope = _principal_scope(principal)
-    persistence_principal = (
-        PersistencePrincipal(user_id=principal.user_id, workspace_id=principal.workspace_id)
-        if is_auth_enabled() else None
-    )
+    persistence_principal = PersistencePrincipal.from_websocket_user(principal)
     surfaces = getattr(websocket.app.state, "module_action_surfaces", {})
     module_surfaces = surfaces.get(module, {})
     # A present None value is the canonical authenticated action default. A
@@ -159,6 +156,8 @@ async def _prepare_live_dispatch(
         raise _ConnectionUnavailable("workflow_session_connection_changed")
     if current_principal is not principal:
         raise PermissionError("workflow_session_principal_changed")
+    if persistence_principal is not None:
+        persistence_principal = persistence_principal.with_host_scope(scope)
     return (
         ModuleActionDispatchRequest(
             module=module, action=action, params=params,

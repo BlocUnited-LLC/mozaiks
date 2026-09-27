@@ -44,6 +44,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     validate_complete_data_contract_ownership,
 )
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import data_contract_requires_auth
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     compile_page_data_sources,
     materialize_modal_targets,
@@ -1347,7 +1348,7 @@ def _persist_to_filesystem(
         "appName": manifest_dict["app_name"],
         "startup": {"landing_spot": default_route},
         "targets": {"web": True, "mobile": False},
-        "authRequired": bool(auth_strategy and auth_strategy != "public"),
+        "authRequired": bool(auth_strategy and auth_strategy != "public") or data_contract_requires_auth(data_contract),
         "admins": [],
     }
     for manifest_key, app_json_key in (

@@ -36,6 +36,8 @@ RUN = ("SecurityReadiness", "factory-host", "chat_1")
 
 @pytest.fixture
 def live_runtime(monkeypatch, security_build):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
     for project in ("project_a", "project_b"):
         security_build.add(project=project)
     manifest = yaml.safe_load((ROOT / "factory_app/app/modules/security_readiness/module.yaml").read_text())
@@ -174,6 +176,10 @@ async def test_local_dispatch_uses_configured_no_auth_permissions(live_runtime, 
     from mozaiksai.core.auth.adapters.no_auth import NoAuthAdapter
 
     monkeypatch.setattr(module_tools, "is_auth_enabled", lambda: False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_PROVIDER", "none")
+    monkeypatch.setenv("ENV", "test")
+    monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setattr(module_tools, "get_auth_adapter", NoAuthAdapter)
     live_runtime.principal.scopes = ["access_as_user"]
     live_runtime.principal.provider = "none"
@@ -182,7 +188,9 @@ async def test_local_dispatch_uses_configured_no_auth_permissions(live_runtime, 
     result = await _wrap_tool_with_context(record_security_findings, bridge)()
     assert result["persisted"] is True
     assert live_runtime.scopes[0].authority.permission_mode == "enforce"
-    assert live_runtime.scopes[0].persistence_principal is None
+    assert live_runtime.scopes[0].persistence_principal.user_id == "owner_1"
+    assert live_runtime.scopes[0].persistence_principal.workspace_id == "development"
+    assert live_runtime.scopes[0].persistence_principal.source == "development"
 
 
 @pytest.mark.asyncio

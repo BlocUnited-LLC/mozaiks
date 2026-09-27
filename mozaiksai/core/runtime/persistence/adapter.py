@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+
+from logs.logging_config import get_core_logger
 
 if TYPE_CHECKING:
     from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.core.auth.websocket_auth import WebSocketUser
+
+logger = get_core_logger("persistence.principal")
 
 Document = Mapping[str, Any]
 Query = Mapping[str, Any]
@@ -14,25 +19,83 @@ SortSpec = Sequence[tuple[str, int]]
 IndexSpec = Mapping[str, Any]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PersistencePrincipal:
     """Authenticated ownership identity, separate from requested dispatch scope.
 
-    HTTP dispatch constructs this from a token-validated principal only. Host
-    scope selection and action inputs must never populate these fields.
+    Runtime authentication or an explicit local development identity supplies
+    the actor. Only a host's verified membership assertion may select workspace.
     """
 
     user_id: str
     workspace_id: str | None = None
+    source: Literal["authenticated", "development"] = "authenticated"
 
     @classmethod
     def from_authenticated_user(cls, principal: UserPrincipal | None) -> PersistencePrincipal | None:
-        """Capture validated HTTP claims before any host scope selection."""
+        """Capture HTTP identity before any host scope selection."""
+        from mozaiksai.core.auth.adapters import AuthError
+        from mozaiksai.core.auth.adapters.registry import is_auth_enabled
         from mozaiksai.core.auth.dependencies import UserPrincipal
 
-        if not isinstance(principal, UserPrincipal) or not principal.is_authenticated:
+        if not isinstance(principal, UserPrincipal):
             return None
+        try:
+            auth_enabled = is_auth_enabled()
+        except AuthError:
+            return None
+        if principal.is_authenticated and auth_enabled:
+            return cls(user_id=principal.user_id, workspace_id=principal.workspace_id)
+        return cls._development(principal.user_id)
+
+    @classmethod
+    def from_websocket_user(cls, principal: WebSocketUser | None) -> PersistencePrincipal | None:
+        """Capture the server-bound socket identity, never UI context fields."""
+        import math
+        import time
+
+        from mozaiksai.core.auth.adapters import AuthError
+        from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+        from mozaiksai.core.auth.websocket_auth import WebSocketUser
+
+        if not isinstance(principal, WebSocketUser):
+            return None
+        try:
+            auth_enabled = is_auth_enabled()
+        except AuthError:
+            return None
+        if not auth_enabled:
+            return cls._development(principal.user_id)
+        if principal.provider in {"none", "unknown"}:
+            return None
+        expires = principal.raw_claims.get("exp")
+        if expires is not None:
+            try:
+                if not math.isfinite(float(expires)) or float(expires) <= time.time():
+                    return None
+            except (TypeError, ValueError):
+                return None
         return cls(user_id=principal.user_id, workspace_id=principal.workspace_id)
+
+    @classmethod
+    def _development(cls, user_id: str) -> PersistencePrincipal | None:
+        from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+        from mozaiksai.core.environment import environment_permits_no_auth
+
+        if not environment_permits_no_auth() or is_auth_enabled():
+            return None
+        logger.warning(
+            "PERSISTENCE_DEVELOPMENT_PRINCIPAL user_id=%s workspace_id=development", user_id,
+        )
+        return cls(user_id=user_id, workspace_id="development", source="development")
+
+    def with_host_scope(self, scope: Mapping[str, Any]) -> PersistencePrincipal:
+        """Apply the hook registry's explicit, host-verified membership assertion."""
+        if "_verified_workspace_id" not in scope:
+            return self
+        return PersistencePrincipal(
+            user_id=self.user_id, workspace_id=scope["_verified_workspace_id"], source=self.source,
+        )
 
 
 class PersistenceScopeError(PermissionError):
@@ -102,7 +165,7 @@ class ModulePersistenceContext(Protocol):
     def principal(self) -> PersistencePrincipal | None:
         ...
 
-    def collection(self, module_id: str, entity_name: str) -> PersistenceCollection:
+    def collection(self, module_id: str, collection_name: str) -> PersistenceCollection:
         ...
 
     def scope_filter(self, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:

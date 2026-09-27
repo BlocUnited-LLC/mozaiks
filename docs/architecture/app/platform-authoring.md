@@ -277,7 +277,7 @@ class {Name}Repo:
 ```
 
 Rules: no business logic, no event emission, no validation — pure data access.
-Generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
+Generated repo code uses `ctx.persistence.collection(module_id, collection_name)`
 with values aligned to `data/contract.json`. It must not use `ctx.db`,
 call `get_mongo_client()`, or hardcode database names.
 

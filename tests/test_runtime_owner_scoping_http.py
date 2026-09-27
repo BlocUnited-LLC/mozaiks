@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import time
+from base64 import urlsafe_b64encode
 from collections import defaultdict
 from copy import deepcopy
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ from unittest.mock import AsyncMock
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 
 from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter, JWTAdapterConfig
@@ -176,6 +177,8 @@ class _ModelWrittenHandler:
 
 @pytest.fixture
 def http_runtime(monkeypatch):
+    monkeypatch.setenv("ENV", "test")
+    monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -188,6 +191,7 @@ def http_runtime(monkeypatch):
         get_signing_key=AsyncMock(return_value=jwk),
     )))
     monkeypatch.setattr("mozaiksai.core.auth.dependencies.get_auth_adapter", lambda: adapter)
+    monkeypatch.setattr("mozaiksai.core.auth.websocket_auth.get_auth_adapter", lambda: adapter)
     monkeypatch.setattr(module_router, "record_action_invocation", lambda **kwargs: None)
     hooks = PlatformHookRegistry()
     monkeypatch.setattr(module_router, "get_platform_hooks", lambda: hooks)
@@ -320,24 +324,114 @@ def test_app_wide_and_ownerless_contracts_preserve_shared_access(http_runtime, o
     assert response.json()["items"][0]["task_id"] == "shared"
 
 
-def test_dev_persona_cannot_grant_authenticated_ownership(http_runtime, monkeypatch):
-    client = http_runtime.client()
+@pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
+@pytest.mark.parametrize("environment", ["development", "local", "test"])
+def test_no_auth_development_principal_owns_created_rows(http_runtime, monkeypatch, caplog, tenancy, environment):
+    from mozaiksai.core.auth.adapters.no_auth import NoAuthAdapter
+
+    client = http_runtime.client(tenancy)
+    monkeypatch.setenv("ENV", environment)
+    monkeypatch.setenv("ENVIRONMENT", environment)
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("AUTH_PROVIDER", "none")
-    response = client.get("/api/modules/tasks/list_tasks", headers={
-        "X-Mozaiks-Dev-User-Id": "user-a", "X-Mozaiks-Dev-Roles": "admin",
+    monkeypatch.setattr("mozaiksai.core.auth.dependencies.get_auth_adapter", NoAuthAdapter)
+    headers = {"X-Mozaiks-Dev-User-Id": "user-a"}
+    response = client.post("/api/modules/tasks/create_task", headers=headers, json={
+        "task_id": "local", "title": "Local task",
     })
+    assert response.status_code == 200, response.text
+    response = client.get("/api/modules/tasks/list_tasks?workspace_id=client-selected", headers=headers)
+    assert response.status_code == 200, response.text
+    row = response.json()["items"][0]
+    assert row["created_by" if tenancy == "per_user" else "workspace_owner"] == (
+        "user-a" if tenancy == "per_user" else "development"
+    )
+    if tenancy == "per_user":
+        assert client.get("/api/modules/tasks/custom_list", headers={
+            "X-Mozaiks-Dev-User-Id": "user-b",
+        }).json() == {"items": []}
+    assert "PERSISTENCE_DEVELOPMENT_PRINCIPAL" in caplog.text
+
+
+@pytest.mark.parametrize("environment", ["production", "staging", "preview", "qa"])
+def test_deployed_environment_cannot_mint_development_ownership(http_runtime, monkeypatch, environment):
+    from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
+
+    client = http_runtime.client()
+    monkeypatch.setenv("ENV", environment)
+    monkeypatch.setenv("ENVIRONMENT", environment)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_PROVIDER", "none")
+    principal = UserPrincipal(user_id="user-a", email=None, name=None, roles=[], scopes=[],
+                              raw_claims={}, provider="none", auth_provenance="dev_override")
+    assert PersistencePrincipal.from_authenticated_user(principal) is None
+    principal.auth_provenance = "token_validated"
+    assert PersistencePrincipal.from_authenticated_user(principal) is None
+    with TestClient(client.app, raise_server_exceptions=False) as deployed:
+        response = deployed.post("/api/modules/tasks/create_task", headers={
+            "X-Mozaiks-Dev-User-Id": "user-a",
+        }, json={"task_id": "forbidden", "title": "forbidden"})
+    assert response.status_code == 500  # canonical auth configuration guard refuses startup/request
+    assert all(not collection.rows for collection in http_runtime.database.values())
+
+
+@pytest.mark.parametrize("claim", [None, "stale-token-workspace"])
+@pytest.mark.parametrize("shape", ["query", "context", "flat", "forged_assertion"])
+def test_host_verified_membership_is_authoritative_not_client_workspace(http_runtime, claim, shape):
+    client = http_runtime.client("per_workspace")
+
+    def membership(**kwargs):
+        return {"verified_workspace_id": "workspace-" + kwargs["principal"].user_id[-1]}
+
+    http_runtime.hooks.register_bundle({"module_scope_resolver": membership}, source="membership-provider")
+    a = http_runtime.token("user-a", claim)
+    b = http_runtime.token("user-b", claim)
+    response = client.post("/api/modules/tasks/create_task", headers=a, json={"task_id": "a", "title": "A"})
+    assert response.status_code == 200, response.text
+    url = "/api/modules/tasks/custom_list"
+    if shape == "query":
+        # A mismatched token claim is rejected earlier; no claim still cannot select ownership.
+        response = client.get(url + "?workspace_id=workspace-a", headers=b)
+    else:
+        context = {"workspace_id": "workspace-a"}
+        if shape == "forged_assertion":
+            context = {"verified_workspace_id": "workspace-a", "_verified_workspace_id": "workspace-a"}
+        response = client.post(url, headers=b, json={"context": context} if shape != "flat" else context)
+    if claim is not None and shape != "forged_assertion":
+        assert response.status_code == 403, response.text
+    else:
+        assert response.status_code == 200, response.text
+        assert response.json() == {"items": []}
+    own = client.get(url, headers=a)
+    assert own.status_code == 200, own.text
+    assert own.json()["items"][0]["workspace_owner"] == "workspace-a"
+    assert client.post("/api/modules/tasks/update_task", headers=b, json={"task_id": "a", "title": "stolen"}).json() == {"matched": 0}
+    assert client.post("/api/modules/tasks/delete_task", headers=b, json={"task_id": "a"}).json() == {"deleted": 0}
+
+
+def test_explicit_host_membership_revocation_denies_token_workspace(http_runtime):
+    client = http_runtime.client("per_workspace")
+    http_runtime.hooks.register_bundle({"module_scope_resolver": lambda **_: {
+        "verified_workspace_id": None,
+    }}, source="membership-provider")
+    response = client.get("/api/modules/tasks/custom_list", headers=http_runtime.token("user-a", "workspace-a"))
     assert response.status_code == 403, response.text
 
 
 @pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
 @pytest.mark.parametrize("surface", ["panels", "tabs", "pages", "relationships"])
-def test_profile_hydration_uses_authenticated_owner(http_runtime, monkeypatch, tenancy, surface):
+@pytest.mark.parametrize("host_membership", [False, True])
+def test_profile_hydration_uses_authenticated_owner(http_runtime, monkeypatch, tenancy, surface, host_membership):
     from mozaiksai.hosts import platform
 
     client = http_runtime.client(tenancy)
-    user_a = http_runtime.token("user-a", "workspace-a")
-    user_b = http_runtime.token("user-b", "workspace-b")
+    if host_membership:
+        http_runtime.hooks.register_bundle({"module_scope_resolver": lambda **kwargs: {
+            "verified_workspace_id": "workspace-" + kwargs["principal"].user_id[-1],
+        }}, source="membership-provider")
+    user_a = http_runtime.token("user-a", None if host_membership else "workspace-a")
+    user_b = http_runtime.token("user-b", None if host_membership else "workspace-b")
     response = client.post("/api/modules/tasks/create_task", headers=user_a,
                            json={"task_id": "a", "title": "A task"})
     assert response.status_code == 200, response.text
@@ -360,6 +454,70 @@ def test_profile_hydration_uses_authenticated_owner(http_runtime, monkeypatch, t
             panel = next(row for row in response.json()[surface] if row["id"] == "owned")
             assert panel["error"] is None
             assert [row["task_id"] for row in panel["data"]["items"]] == expected
+
+
+@pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
+@pytest.mark.parametrize("host_membership", [False, True])
+def test_page_ask_uses_authenticated_socket_ownership(http_runtime, monkeypatch, tenancy, host_membership):
+    from mozaiksai.core.auth.websocket_auth import authenticate_websocket_with_path_binding
+    from mozaiksai.core.runtime import composition
+    from mozaiksai.core.runtime.composition import platform_hooks
+    from mozaiksai.core.tokens.manager import TokenManager
+    from mozaiksai.core.transport import general_mode
+    from mozaiksai.hosts import platform
+    from tests.test_general_mode_ask_context import _CapturingService, _StubTransport
+
+    client = http_runtime.client(tenancy)
+    if host_membership:
+        http_runtime.hooks.register_bundle({"module_scope_resolver": lambda **kwargs: {
+            "verified_workspace_id": "workspace-" + kwargs["principal"].user_id[-1],
+        }}, source="membership-provider")
+    headers_a = http_runtime.token("user-a", None if host_membership else "workspace-a")
+    headers_b = http_runtime.token("user-b", None if host_membership else "workspace-b")
+    created = client.post("/api/modules/tasks/create_task", headers=headers_a,
+                          json={"task_id": "a", "title": "Only user A"})
+    assert created.status_code == 200, created.text
+    client.app.state.module_ask_context_actions = {"tasks": {"list_tasks": True}}
+    monkeypatch.setattr(platform, "app", client.app)
+    monkeypatch.setattr(platform, "_find_page_ask_context_declarations", lambda path: [{
+        "module": "tasks", "action": "list_tasks", "params": {}, "label": "Tasks",
+    }])
+    platform.register_platform_ask_context_hooks(http_runtime.hooks)
+    monkeypatch.setattr(platform_hooks, "get_platform_hooks", lambda: http_runtime.hooks)
+    monkeypatch.setattr(composition, "get_platform_hooks", lambda: http_runtime.hooks)
+    monkeypatch.setattr("mozaiksai.core.session.get_session_router", lambda: SimpleNamespace(
+        get_session_snapshot=AsyncMock(return_value={}),
+    ))
+    monkeypatch.setattr(TokenManager, "emit_usage_delta", AsyncMock())
+    service = _CapturingService()
+    monkeypatch.setattr(general_mode, "_load_general_agent_service", lambda: service)
+
+    @client.app.websocket("/ask/{user_id}")
+    async def ask(socket: WebSocket, user_id: str):
+        principal = await authenticate_websocket_with_path_binding(
+            socket, user_id, "ownership-test-app", "carrier_1",
+        )
+        if principal is None:
+            return
+        await socket.accept(subprotocol="mozaiks.bearer.v1")
+        transport = _StubTransport()
+        transport.connections["carrier_1"] = {
+            "app_id": "ownership-test-app", "user_id": user_id, "ws_id": 42,
+            "websocket": socket, "active": True,
+        }
+        await transport._handle_general_agent_exchange(
+            chat_id="carrier_1", ws_id=42, user_message="What tasks do I have?",
+            ui_context={"page_path": "/tasks", "user_id": "user-a", "workspace_id": "workspace-a"},
+        )
+        await socket.send_json(service.calls[-1]["workspace_context"])
+
+    for user_id, headers, expected in (("user-a", headers_a, ["a"]), ("user-b", headers_b, [])):
+        token = headers["Authorization"].removeprefix("Bearer ")
+        protocols = ["mozaiks.bearer.v1", urlsafe_b64encode(token.encode()).decode().rstrip("=")]
+        with client.websocket_connect(f"/ask/{user_id}", subprotocols=protocols) as socket:
+            result = socket.receive_json()
+        assert "Tasks" in result, result
+        assert [row["task_id"] for row in json.loads(result["Tasks"])["items"]] == expected
 
 
 @pytest.mark.asyncio

@@ -165,15 +165,18 @@ task_contracts:
       - backend/schemas.py owns typed DTO/document shapes and pure helpers.
       - Runtime persistence owns collection tenancy enforcement. backend/policy.py provides optional deterministic ownership preflight helpers.
       - Code derives backend/policy.py from approved tenancy and owner_field, reading immutable ctx.persistence.principal identity. Additional permission checks belong in service.py. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
-      - backend/repo.py may use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
+      - backend/repo.py may use ctx.persistence.collection(module_id, collection_name) for generated module persistence.
+      - collection_name means the declared data_contract collection name, such as tasks. A declared entity value such as Task resolves to that same physical collection and ownership policy. Unknown references fail closed; do not invent, singularize, or pluralize storage names.
       - Every collection operation enforces declared per_user/per_workspace ownership from the authenticated principal. Pass domain filters directly and omit owner fields on insert; runtime stamps the exact declared owner_field and rejects supplied values that disagree. app_wide collections and collections without ownership metadata receive no additional row filter.
-      - Aggregations are owner-scoped and have no implicit admin exemption. Do not bypass persistence with raw collections, foreign collection stages, or aggregation writes. Apps declaring any scoped collection restrict these operations across the entire persistence context, including app_wide collections. Cross-owner access requires an explicit declared and auditable runtime contract; generated code cannot create that authority.
+      - Aggregations are owner-scoped and have no implicit admin exemption. Do not bypass persistence with raw collections, foreign collection stages, or aggregation writes. Mixed apps preserve unowned alias operations through a bounded facade; literal aliases targeting owned collections are denied. Cross-owner access requires an explicit declared and auditable runtime contract; generated code cannot create that authority.
+      - Generated module admission rejects private persistence backing attributes, raw Mongo clients/drivers, context or principal constructors, and request-principal binding internals, including ordinary aliases. Startup-service declarations grant no exemption; provider database SDK mechanics belong in declared services/adapters/database integrations without app persistence authority. Account-data handlers use their injected database protocol and have no raw-client exemption.
+      - Generated modules access declared aliases through app_data_from_context(ctx) without contract or app_root overrides. Do not call literal_collection or construct AppData; physical alias mappings belong to the loaded host contract.
       - For offset pagination, PersistenceCollection.find_many has no skip argument and returns a list, not a cursor. In repo.py use aggregate with a domain-filter $match, a stable $sort including a unique tie-breaker, then the requested $skip and a bounded $limit; runtime adds ownership scope before the pipeline. Validate the declared page/offset inputs and limit before querying; never compute an offset and leave it unused or fetch an unbounded collection for client slicing.
       - Pagination totals must count the same query as the page, including ownership, search, and all other active filters. Use count(query) with that matching query or a matching aggregate count; do not count unrelated or foreign records.
       - When literal search is requested, search only the declared fields and use re.escape on user text before placing it in a Mongo $regex. Preserve the requested case behavior. Do not reinterpret literal metacharacters as regex operators or silently escape explicitly requested regex search; explicit regex intent requires its declared validation and bounds.
       - repo.py must return the actual write result needed by service.py to distinguish an owned mutation from a missing/foreign record, concurrent deletion, or unchanged state. A pre-read or a write call without checking its outcome is not proof of mutation. Emit mutation-success events only after confirmed writes; when no owned mutation happened, do not emit such an event.
       - A not-found, denied, or idempotent no-op response must follow the declared action contract. Do not invent a global HTTP status or success response for all modules. Keep caller-safe outcomes consistent with the module's authorization boundary and never disclose a foreign record.
-      - backend/repo.py must use module_id/entity_name values aligned with data_contract and data/contract.json.
+      - backend/repo.py must use module_id/declared collection name values aligned with data_contract and data/contract.json.
       - Generated repo code must not use ctx.db.
       - Generated repo code must not import or call get_mongo_client().
       - Generated repo code must not hardcode database names.
@@ -198,6 +201,7 @@ task_contracts:
     hard_constraints:
       - data_contract is the canonical source of truth for durable generated app collections.
       - data/contract.json is the exported app artifact for that bundle.
+      - Any per_user or per_workspace collection deterministically requires app.json.authRequired=true and the canonical auth scaffold. AppSchema manifest auth intent cannot make an owned app public.
       - data/migrations/{migration_id}.json is the exported additive migration artifact.
       - Code derives deterministic index names for null DesignDocs names and stamps migration version/schema_version fields. Runtime still requires named indexes and versioned migrations.
       - Migration files declare operations using ensure_collection or ensure_index, never surfaces or aliases. Collections and assignment-store aliases belong in data/contract.json. Managed facade modules own no app collections or migration operations.
@@ -211,9 +215,9 @@ task_contracts:
       - backend/schemas.py replaces backend model files.
       - backend/repo.py is derived from the data contract and owns persistence operations only.
       - backend/policy.py is rendered deterministically as optional preflight from each collection tenancy (per_user/per_workspace/app_wide) and owner_field; runtime persistence independently enforces the contract on all operations. The field must be declared in fields and ownership must match the module. ServiceAgent must omit policy source from python_files and code_files.
-      - Generated repo.py must use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
+      - Generated repo.py must use ctx.persistence.collection(module_id, collection_name) for generated module persistence.
       - Generated repo.py may use data aliases only when its module/action is explicitly declared in data/contract.json.
-      - module_id/entity_name in repo.py must match data_contract surfaces and collections.
+      - module_id/collection_name in repo.py must match data_contract surfaces and collections.
       - Generated repo.py must not use ctx.db.
       - Generated repo.py must not import or call get_mongo_client().
       - Generated repo.py must not hardcode database names.
@@ -398,8 +402,11 @@ backend_helper_files:
         - "start() -> None  # sync; creates asyncio task via loop.create_task"
         - "stop() -> None   # sync; cancels task"
       db_access: >
-        Must use direct AsyncIOMotorClient(MONGO_URI) — NOT app_data_from_context.
-        Startup services run outside any module request context.
+        Do not import Motor/PyMongo or construct raw clients in module workers.
+        Startup services have no authenticated module request context and cannot
+        invent app persistence authority. Provider database SDK mechanics belong
+        in declared services/adapters/database integrations; cross-owner app data
+        requires an explicitly declared, audited runtime access contract.
       event_emission: >
         Must emit through the OSS runtime event dispatcher singleton, wrapped in
         try/except with a warning log on failure. Never let an emit failure crash

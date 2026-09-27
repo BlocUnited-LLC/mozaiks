@@ -86,6 +86,8 @@ async def test_general_exchange_uses_session_snapshot_and_ask_context_hook(monke
             user_id: str,
             page_path: str | None = None,
             page_context: str | None = None,
+            persistence_principal=None,
+            principal=None,
         ) -> dict[str, Any]:
             assert app_id == "app_1"
             assert user_id == "user_1"

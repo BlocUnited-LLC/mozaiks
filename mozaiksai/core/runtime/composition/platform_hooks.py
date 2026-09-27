@@ -54,6 +54,10 @@ Bundle keys (all optional):
         Optional host scope bridge for module action dispatch. Return any of
         app_id, user_id, tenant_id, workspace_id, permissions after validating
         the requested scope against app-local memberships.
+        Return verified_workspace_id only after verifying membership from the
+        authenticated principal. It is persistence ownership authority; ordinary
+        workspace_id remains dispatch metadata. Explicit None revokes workspace
+        ownership, while omitting it preserves the authenticated token binding.
 
     workflow_ordering     (workflow_names: List[str]) -> List[str]
         Reorder the workflow list returned to the frontend (e.g. by journey
@@ -512,6 +516,7 @@ class PlatformHookRegistry:
         tenant_id = _clean_optional(requested_scope.get("tenant_id"))
         workspace_id = _clean_optional(requested_scope.get("workspace_id"))
         permissions: list[str] = list(default_permissions) if default_permissions is not None else []
+        ownership_scope: dict[str, Any] = {}
 
         for hook in self._module_scope_resolver_hooks:
             try:
@@ -533,6 +538,8 @@ class PlatformHookRegistry:
                 if inspect.isawaitable(res):
                     res = await res
                 if isinstance(res, dict):
+                    if "verified_workspace_id" in res:
+                        ownership_scope["_verified_workspace_id"] = _clean_optional(res["verified_workspace_id"])
                     if "app_id" in res:
                         app_id = str(res.get("app_id") or "")
                     if "user_id" in res:
@@ -570,6 +577,7 @@ class PlatformHookRegistry:
             "tenant_id": tenant_id,
             "workspace_id": workspace_id,
             "permissions": permissions,
+            **ownership_scope,
         }
 
     async def call_before_module_execution(self, policy_input: Any) -> ModuleExecutionPolicyDecision:
@@ -656,6 +664,8 @@ class PlatformHookRegistry:
         *,
         page_path: str | None = None,
         page_context: str | None = None,
+        persistence_principal: Any = None,
+        principal: Any = None,
     ) -> dict[str, Any]:
         """Collect host-provided workspace context for ask-mode exchanges.
 
@@ -667,12 +677,20 @@ class PlatformHookRegistry:
         merged: dict[str, Any] = {}
         for hook in self._ask_context_hooks:
             try:
-                res = hook(
+                kwargs = dict(
                     app_id=app_id,
                     user_id=user_id,
                     page_path=page_path,
                     page_context=page_context,
                 )
+                # Existing host hooks need not accept authentication objects.
+                # Only hooks declaring these runtime parameters receive them.
+                parameters = inspect.signature(hook).parameters
+                if "persistence_principal" in parameters:
+                    kwargs["persistence_principal"] = persistence_principal
+                if "principal" in parameters:
+                    kwargs["principal"] = principal
+                res = hook(**kwargs)
                 if inspect.isawaitable(res):
                     res = await res
             except Exception as exc:

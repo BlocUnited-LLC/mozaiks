@@ -51,7 +51,7 @@ def test_database_agent_uses_intent_artifacts_not_live_database_tools() -> None:
     assert removed_schema_refs == [
         "- Do not emit removed `backend/database/schema.json` or seed files."
     ]
-    assert "ctx.persistence.collection(module_id, entity_name)" in block
+    assert "ctx.persistence.collection(module_id, collection_name)" in block
     assert "Generated repo code must not assume `ctx.db` exists" not in block
 
 
@@ -82,7 +82,7 @@ def test_structured_outputs_align_with_persistence_contract() -> None:
     assert "backend/database/seed.json" not in text
     assert "schema_json" not in text
     assert "seed_json" not in text
-    assert "ctx.persistence.collection(module_id, entity_name)" in text
+    assert "ctx.persistence.collection(module_id, collection_name)" in text
     assert "must not use ctx.db" in text
     assert "must not import get_mongo_client" in text
 
@@ -103,7 +103,7 @@ def test_file_contracts_define_canonical_persistence_and_ban_removed_paths() -> 
     assert "Do not emit backend/models/*.py." in constraints
     assert "Do not emit backend/database/schema.json." in constraints
     assert "Do not emit backend/database/seed.json." in constraints
-    assert "ctx.persistence.collection(module_id, entity_name)" in constraints
+    assert "ctx.persistence.collection(module_id, collection_name)" in constraints
     assert "must not use ctx.db" in constraints
     assert "must not import or call get_mongo_client()" in constraints
     assert "must not hardcode database names" in constraints
@@ -121,7 +121,7 @@ def test_app_plan_agent_explicitly_forbids_legacy_config_data_path() -> None:
 
 def test_service_agent_treats_runtime_persistence_as_ownership_boundary() -> None:
     block = _agent_block("ServiceAgent")
-    assert "Runtime `context.persistence.collection(module_id, entity_name)` enforces" in block
+    assert "Runtime `context.persistence.collection(module_id, collection_name)` enforces" in block
     assert "every read, count, update, delete, and aggregate" in block
     assert "omit owner fields on creation rather than inventing owner_id" in block
     assert "calling them is not required for enforcement" in block
@@ -155,13 +155,13 @@ def test_file_contracts_keep_repo_as_only_persistence_layer() -> None:
     assert "backend/handler.py must not contain persistence logic." in constraints
     assert "Do not put raw persistence logic in backend/service.py." in constraints
     assert "backend/service.py calls repo.py" in constraints
-    assert "backend/repo.py must use module_id/entity_name" in constraints
+    assert "backend/repo.py must use module_id/declared collection name" in constraints
 
 
 def test_service_agent_guides_repo_to_ctx_persistence() -> None:
     block = _agent_block("ServiceAgent")
 
-    assert "context.persistence.collection(module_id, entity_name)" in block
+    assert "context.persistence.collection(module_id, collection_name)" in block
     assert "context.persistence" in block
     assert "`backend/repo.py` is the only generated backend layer" in block
     assert "must not use `ctx.db` or `context.db`" in block
@@ -376,7 +376,7 @@ def test_docs_state_ctx_persistence_is_runtime_supported() -> None:
     )
 
     assert "`ctx.persistence`" in docs
-    assert "ctx.persistence.collection(module_id, entity_name)" in docs
+    assert "ctx.persistence.collection(module_id, collection_name)" in docs
     assert "`ctx.db` remains absent and non-canonical" in docs
     assert "must not require `ctx.db`" in docs
     assert "backend/schemas.py" in docs

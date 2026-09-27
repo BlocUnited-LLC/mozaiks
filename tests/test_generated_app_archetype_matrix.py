@@ -157,7 +157,11 @@ class _PersistenceContext:
         self.tenant_id = tenant_id
         self.workspace_id = workspace_id
         self.user_id = user_id
-        self.principal = principal
+        self._principal = principal
+
+    @property
+    def principal(self):
+        return self._principal() if callable(self._principal) else self._principal
 
     def collection(self, module_id: str, entity_name: str) -> _PersistenceCollection:
         rows = self.stores.setdefault((module_id, entity_name), [])

@@ -433,6 +433,9 @@ async def _execute_module_action(
             permissions=tuple(dispatch_scope.get("permissions") or []),
         )
 
+    if persistence_principal is not None:
+        persistence_principal = persistence_principal.with_host_scope(dispatch_scope)
+
     module_request = ModuleRequest(
         module=module_name,
         action=action_name,

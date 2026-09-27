@@ -56,7 +56,7 @@ Current truth:
   data contract where possible.
 - the OSS runtime injects `ctx.persistence` into module actions when an `app_id`
   is available; generated repo code uses
-  `ctx.persistence.collection(module_id, entity_name)`.
+  `ctx.persistence.collection(module_id, collection_name)`.
 - the OSS runtime loads promoted `data/contract.json` as app metadata.
   Ownership fields are required for factory generation, but runtime loading
   validates them only when present. Existing collections without these fields
@@ -615,7 +615,7 @@ At runtime, `ModuleContext` exposes `ctx.persistence` when the module request ha
 an `app_id`. `ctx.db` is not injected and is not canonical. Generated
 `backend/repo.py` is the only generated backend layer that should touch
 persistence, and it should use `ctx.persistence.collection(module_id,
-entity_name)` with values that match `data/contract.json`. Generated
+collection_name)` with values that match `data/contract.json`. Generated
 module code must not call `get_mongo_client()` or hardcode database names.
 
 Layer responsibilities:
@@ -799,6 +799,12 @@ additional row filter. Apps without scoped ownership retain their existing
 persistence behavior. AppBuildPlan has no
 second editable copy of this contract.
 
+Repo calls use `ctx.persistence.collection(module_id, collection_name)` with the
+declared collection `name`. Its declared `entity` is also resolved to that same
+physical collection; unknown names fail closed. Owned collections force
+`app.json.authRequired=true` during materialization and trigger the canonical
+auth scaffold. Model-written public intent cannot disable that requirement.
+
 Code renders `modules/{module_id}/backend/policy.py` before worker output
 acceptance. ServiceAgent owns its artifact path but emits no policy source.
 These helpers are optional preflight: `scoped_query(context, filters,
@@ -816,14 +822,25 @@ Owned filters are conjoined with it; existing app-wide operations reject extra
 Persistence filters reads, counts, updates, deletes, and aggregations by the
 declared owner field. Inserts stamp it from the authenticated principal and
 reject conflicting supplied values; updates cannot transfer ownership. The
-optional record preflight follows the same conflict rule. Action inputs and
-requested workspace IDs are never authority. Aggregations cannot introduce
+optional record preflight follows the same conflict rule. Request-bound
+authority is checked on every operation, including cached collection handles.
+Action inputs and requested workspace IDs are never authority. A registered
+host hook may assert `verified_workspace_id` only after authenticated membership
+verification; omitted assertions preserve token scope and explicit `None`
+revokes it. Auth-disabled development uses an explicit logged development
+principal rather than treating request scope as authenticated claims.
+Aggregations cannot introduce
 foreign collection rows or write output, and admin permissions do not disable
 ownership. Cross-owner functionality is unavailable through module persistence
 until an explicit declared and auditable runtime access contract is implemented.
-When an app declares any scoped collection, raw literal collection access and
-unsafe aggregation stages are also unavailable from app-wide collections, so
-those collections cannot become a route around ownership. Scoped shared
+When an app declares scoped collections, literal access to those physical
+targets is denied. Unowned aliases use a bounded facade retaining normal
+operations and safe aggregation, without raw database introspection or
+foreign-collection stages. Apps without owned collections retain raw aliases.
+Generated-module scanning rejects private backing attributes, raw-client and
+context factories, and principal-binding internals even through ordinary aliases.
+Separate declared startup-service workers retain their explicit driver contract;
+request code cannot import those storage implementations. Scoped shared
 collections require an explicit owning surface; missing ownership fails loading.
 The runtime-owned fields `user_id` and `workspace_id` can only serve as the owner
 field for their corresponding tenancy; `app_id` and `tenant_id` are not valid

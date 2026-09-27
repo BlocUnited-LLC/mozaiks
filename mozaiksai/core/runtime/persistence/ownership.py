@@ -55,6 +55,19 @@ def collection_ownership(
     return {name: policy for name, policy in by_name.items() if policy is not None}
 
 
+def collection_bindings(contract: DataContract) -> dict[tuple[str, str], str]:
+    """Resolve a module's declared collection name or entity to its storage name."""
+    bindings: dict[tuple[str, str], str] = {}
+    for (module_id, entity), collection in index_data_contract_by_entity(contract).items():
+        name = str(collection.get("name") or entity)
+        for reference in {name, entity}:
+            key = (module_id, reference)
+            if key in bindings and bindings[key] != name:
+                raise DataContractLoadError(f"Ambiguous collection reference {module_id}.{reference}")
+            bindings[key] = name
+    return bindings
+
+
 _READ_STAGES = frozenset({
     "$match", "$project", "$group", "$sort", "$limit", "$skip", "$unwind",
     "$addFields", "$set", "$unset", "$replaceRoot", "$replaceWith", "$count",

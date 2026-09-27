@@ -648,7 +648,7 @@ on insert. Service code does not infer that field or require a policy call.
 
 Pure data access. No business logic, no events, no validation.
 
-Generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
+Generated repo code uses `ctx.persistence.collection(module_id, collection_name)`
 with module/entity values aligned to `data_contract` and staged
 `data/contract.json`. It must not use `ctx.db`, call
 `get_mongo_client()`, or hardcode database names.
@@ -667,8 +667,20 @@ class ProjectsRepo:
 ```
 
 The collection pair must match `data/contract.json`, for example
-`module_id: projects` and `entity_name: projects`. Non-persistent modules should
+`module_id: projects` and collection `name: projects`. A declared `entity`
+reference resolves to the same collection and ownership policy; unknown
+references fail closed. Non-persistent modules should
 not invent database logic.
+
+Every operation resolves the current dispatch principal, including operations
+on a cached collection handle. HTTP, socket, and Page Ask dispatch preserve the
+authenticated actor. Registered host scope hooks may assert
+`verified_workspace_id` after membership verification; plain requested
+`workspace_id` is never ownership authority. Omission preserves token scope,
+while explicit `None` revokes workspace ownership. Auth-disabled local/test
+hosts use a logged development principal with workspace `development`; deployed
+hosts cannot enable that authority. Generated owned collections require
+`app.json.authRequired=true` and the canonical auth scaffold.
 
 ### `policy.py` — Ownership preflight
 

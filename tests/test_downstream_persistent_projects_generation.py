@@ -150,7 +150,7 @@ class FakePersistenceContext:
         principal: PersistencePrincipal | None = None,
     ) -> None:
         self._app_id = app_id
-        self.principal = principal
+        self._principal = principal
         self._scope_metadata = {"app_id": app_id}
         if tenant_id:
             self._scope_metadata["tenant_id"] = tenant_id
@@ -159,6 +159,10 @@ class FakePersistenceContext:
         if user_id:
             self._scope_metadata["user_id"] = user_id
         self.constructed.append(self)
+
+    @property
+    def principal(self):
+        return self._principal() if callable(self._principal) else self._principal
 
     @property
     def app_id(self) -> str:
