@@ -218,7 +218,7 @@ def test_ownerless_and_appwide_preserve_existing_raw_access(data_contract):
     client = FakeMongoClient()
     context = MongoPersistenceContext(app_id="app-a", client=client, data_contract=data_contract)
     assert context.collection("tasks", "tasks")._owner_scope == {}
-    assert context.literal_collection("legacy") is client[context.database_name]["legacy"]
+    assert context.literal_collection("ownerless_records") is client[context.database_name]["ownerless_records"]
 
 
 def test_principal_is_readonly_and_copied_scope_cannot_be_changed_by_context_metadata():
