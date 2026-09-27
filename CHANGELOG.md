@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator resumes builds with task execution evidence through validation
+  and bounded recovery, preserving accepted work and consumed repair budgets
+  instead of restarting the planner after a user pause.
+
 - AppGenerator derives required schema fields from property flags, eliminating
   conflicting required-name lists that blocked module-contract build tasks.
   Typed policy-hook schemas now use the same JSON Schema materialization.

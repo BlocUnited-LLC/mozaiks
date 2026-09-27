@@ -33,6 +33,27 @@ def _next(graph, source, **context):
     )
 
 
+@pytest.mark.parametrize("participation", ["autonomous", "guided"])
+@pytest.mark.parametrize("status", ["partial", "completed", "failed", "running"])
+def test_user_reentry_with_execution_evidence_returns_to_validation(graph, participation, status):
+    assert _next(
+        graph, "user", coding_participation=participation, interview_complete=False,
+        app_task_batch_status=status,
+        app_task_batch_results={"_meta": {"evidence_version": 1, "status": status}},
+    ) == "AppValidationAgent"
+
+
+@pytest.mark.parametrize("evidence", [{}, {"app_task_batch_results": None}, {"app_task_batch_results": {}}])
+@pytest.mark.parametrize("participation,target", [
+    ("autonomous", "AppPlanAgent"), ("guided", "InterviewAgent"),
+])
+def test_fresh_user_entry_keeps_participation_route(graph, evidence, participation, target):
+    assert _next(
+        graph, "user", coding_participation=participation, interview_complete=False,
+        **evidence,
+    ) == target
+
+
 @pytest.mark.parametrize("status", ["completed", "partial"])
 def test_recovered_batch_reassembles_before_artifact_repair_or_final_block(graph, status):
     assert _next(

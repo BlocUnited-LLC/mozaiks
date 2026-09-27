@@ -79,6 +79,12 @@ rejected, or interrupted target from starving an independent eligible target.
 After a blocked batch correction, validation runs once more to select remaining
 independent artifact work. The consumed request cannot dispatch again; the batch
 clears its routing projection to idle when there is no new recovery request.
+User re-entry with nonempty task execution evidence routes to validation before
+the initial planning/interview routes. Validation selects any eligible recovery
+or artifact repair using the retained evidence and original budgets; a user
+reply cannot reset consumed attempts. If validation still fails and no eligible
+repair remains, the build stays blocked. Initial dispatch continues to reject
+any batch with existing evidence.
 An interrupted top-level artifact worker is also uncertain: AG2 may have retained
 a pending turn before its result was committed. The canonical `AgentSpec` adds
 `pending_turn_replay: allow | block`, defaulting to existing `allow` behavior.
@@ -184,6 +190,10 @@ fresh build after resolving the failure. Already exported app bundles keep their
 existing runtime contracts. Generated workflow bundles declaring
 `pending_turn_replay` require the matching runtime; restore their prior compatible
 workflow bundle when rolling back rather than silently dropping the guard.
+
+AG2 channels retain the transition graph compiled when they were created.
+Updated user re-entry rules apply to new channels and their later resumes;
+they do not migrate a channel created with the earlier planning re-entry rule.
 
 ## Independently testable slices and acceptance
 
