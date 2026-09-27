@@ -14,6 +14,10 @@ from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
+from mozaiksai.core.runtime.persistence.intent_loader import (
+    iter_data_contract_collections,
+    validate_collection_ownership,
+)
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 
 _MODULE_CONTRACT_FILENAMES = {
@@ -178,6 +182,10 @@ def materialize_data_contract(
         return files
     if not isinstance(data_contract, dict):
         raise ValueError("The approved DesignDocs data_contract must be an object")
+    if data_contract.get("entities"):
+        raise ValueError("Factory data_contract requires explicit ownership under surfaces, not legacy entities")
+    for owner, _kind, collection in iter_data_contract_collections(data_contract, require_complete_ownership=False):
+        validate_collection_ownership(collection, f"data_contract collection {owner}.{collection.get('name', '')}")
     return {**files, path: json.dumps(data_contract, indent=2, ensure_ascii=False)}
 
 

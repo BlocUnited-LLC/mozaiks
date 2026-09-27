@@ -14,7 +14,10 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload,
     safe_relpath,
 )
-from mozaiksai.core.workflow.generator_support.module_action_inventory import all_module_actions
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    all_module_actions,
+    ungated_module_actions,
+)
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     compile_module_entitlement_gates,
     resolve_subscription_contract,
@@ -45,6 +48,7 @@ def apply_entitlement_gates(
     existing.update(extract_code_file_map_from_payload({"code_files": detach(context_variables.get("code_files"))}))
     file_map = compile_module_entitlement_gates(
         file_map, gates_by_module=gates_by_module, approved_actions=approved_modules,
+        ungated_actions=ungated_module_actions(context_variables),
         existing_files=existing,
     )
     present = {

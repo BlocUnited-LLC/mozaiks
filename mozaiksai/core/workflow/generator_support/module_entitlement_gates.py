@@ -67,6 +67,7 @@ def approved_subscription_gates(subscription_contract: Any) -> dict[str, dict[st
 def compile_module_entitlement_gates(
     files: Mapping[str, str], *, gates_by_module: Mapping[str, Mapping[str, str]] | None,
     approved_actions: Mapping[str, list[str]],
+    ungated_actions: Mapping[str, list[str]],
     existing_files: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Apply the single approved gate map and remove every unapproved model gate."""
@@ -77,6 +78,12 @@ def compile_module_entitlement_gates(
             continue
         module_id = pure.parts[1]
         gates = (gates_by_module or {}).get(module_id, {})
+        always_ungated = set(ungated_actions.get(module_id, []))
+        if forbidden := set(gates) & always_ungated:
+            raise ValueError(
+                f"{path}: canonical collection reads and managed facade actions cannot have entitlement gates: "
+                f"{sorted(forbidden)}. Declare a custom read for paid view behavior."
+            )
         if set(gates) - set(approved_actions.get(module_id, [])):
             raise ValueError(f"{path}: entitlement gates must reference approved module actions")
         try:
@@ -88,6 +95,15 @@ def compile_module_entitlement_gates(
                 raise ValueError(f"{path}: approved entitlement mapping requires an actions list")
             continue  # The module contract validator owns malformed ungated manifests.
         actions = data["actions"]
+        if forbidden := {
+            action_id for action in actions if isinstance(action, dict)
+            and isinstance(action_id := action.get("id"), str)
+            and action_id in always_ungated and action.get("entitlement_gate")
+        }:
+            raise ValueError(
+                f"{path}: canonical collection reads and managed facade actions cannot have entitlement gates: "
+                f"{sorted(forbidden)}. Declare a custom read for paid view behavior."
+            )
         if gates_by_module is None:
             existing = yaml.safe_load((existing_files or {}).get(path, "")) or {}
             previous_actions = existing.get("actions", []) if isinstance(existing, dict) else []

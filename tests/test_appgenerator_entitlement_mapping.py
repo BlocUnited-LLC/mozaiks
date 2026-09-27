@@ -14,7 +14,10 @@ from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
-from mozaiksai.core.workflow.generator_support.module_action_inventory import all_module_actions
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    all_module_actions,
+    ungated_module_actions,
+)
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     approved_subscription_gates,
     compile_module_entitlement_gates,
@@ -24,7 +27,6 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 MODULE_PATH = "modules/task_management/module.yaml"
 GATES = {
     "create_task": "task.create",
-    "list_tasks": "task.view",
     "edit_task": "task.edit",
     "view_dashboard": "dashboard.view",
 }
@@ -81,8 +83,8 @@ def _files(gate=None):
         "permissions": [],
         "actions": [
             {"id": action, "description": action, "handler_method": action, "permissions": [],
-             **({"entitlement_gate": gate} if gate else {})}
-            for action in [*GATES, "health"]
+             **({"entitlement_gate": gate} if gate and action != "list_tasks" else {})}
+            for action in [*GATES, "list_tasks", "health"]
         ],
     }
     return [{"filename": MODULE_PATH, "content": yaml.safe_dump(module)}]
@@ -117,6 +119,7 @@ async def test_exact_reported_plan_shape_assembles_gates_and_passes_scanner(sour
     actions = _actions(result["code_files"])
     assert {action: actions[action]["entitlement_gate"] for action in GATES} == GATES
     assert "entitlement_gate" not in actions["health"]
+    assert "entitlement_gate" not in actions["list_tasks"]
     assert yaml.safe_load(files[MODULE_PATH])["module"]["id"] == "task_management"
     assert context.get("generated_files")[MODULE_PATH] == files[MODULE_PATH]
     adapter = ConfiguredEntitlementAdapter(config=SubscriptionsConfig.model_validate(
@@ -124,7 +127,7 @@ async def test_exact_reported_plan_shape_assembles_gates_and_passes_scanner(sour
     ))
     for action in GATES:
         grant = await adapter.check(actions[action]["entitlement_gate"], app_id="task-app", user_id="free-user")
-        assert grant.granted is (action in {"create_task", "list_tasks"})
+        assert grant.granted is (action == "create_task")
 
 
 @pytest.mark.asyncio
@@ -191,7 +194,7 @@ def test_no_contract_rejects_gated_manifests_without_mutating_files():
     files = _files("existing.gate")
     with pytest.raises(ValueError, match="approved subscription contract is required"):
         apply_entitlement_gates(files, context_variables=ContextVariablesBridge({}))
-    assert all(action["entitlement_gate"] == "existing.gate" for action in _actions(files).values())
+    assert all(action["entitlement_gate"] == "existing.gate" for name, action in _actions(files).items() if name != "list_tasks")
 
 
 def test_no_contract_rejects_repair_that_removes_an_existing_gate():
@@ -228,7 +231,7 @@ async def test_malformed_contract_cannot_authorize_gate_removal_at_any_writer(so
         compile_module_entitlement_gates(
             {file["filename"]: file["content"] for file in _files()},
             gates_by_module=approved_subscription_gates(resolve_subscription_contract(context)),
-            approved_actions={}, existing_files=original,
+            approved_actions={}, ungated_actions={}, existing_files=original,
         )
     with pytest.raises(ValueError, match="existing entitlement gates cannot be removed"):
         save_generated_code(context)
@@ -265,6 +268,7 @@ async def test_unapproved_action_cannot_alias_a_gated_handler_at_any_writer():
             {file["filename"]: file["content"] for file in files},
             gates_by_module=approved_subscription_gates(resolve_subscription_contract(context)),
             approved_actions=all_module_actions(context),
+            ungated_actions=ungated_module_actions(context),
         )
     with pytest.raises(ValueError, match="unapproved module actions.*shadow_edit"):
         save_generated_code(context)
@@ -294,10 +298,64 @@ def test_repair_compiles_only_supplied_manifests_and_keeps_facades_ungated():
     })
     context.set("design_surface_map", surfaces)
     content = yaml.safe_dump({"module": {"id": "billing_portal"}, "actions": [
-        {"id": "list_plans", "entitlement_gate": "dashboard.view"},
+        {"id": "list_plans"},
     ]})
     result = apply_entitlement_gates(
         [{"filename": "modules/billing_portal/module.yaml", "content": content}],
         context_variables=context, require_all_modules=False,
     )
     assert "entitlement_gate" not in yaml.safe_load(result[0]["content"])["actions"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action_id", ["list_tasks", "get_tasks"])
+@pytest.mark.parametrize("gate_source", ["approved_mapping", "authored_manifest"])
+async def test_canonical_read_gate_rejected_without_mutating_any_writer(action_id, gate_source):
+    context = _context()
+    files = _files()
+    manifest = yaml.safe_load(files[0]["content"])
+    manifest["actions"].append({"id": "get_tasks", "handler_method": "get_tasks", "permissions": []})
+    if gate_source == "approved_mapping":
+        contract = context.snapshot()["subscription_contract"]
+        contract["module_contract_updates"].append({
+            "module_id": "task_management", "action_id": action_id,
+            "entitlement_gate": "dashboard.view", "metering": None,
+        })
+        context.set("subscription_contract", contract)
+    else:
+        next(action for action in manifest["actions"] if action["id"] == action_id)["entitlement_gate"] = "dashboard.view"
+    files[0]["content"] = yaml.safe_dump(manifest)
+    context.set("structured_output", {"code_files": files})
+    context.set("app_task_batch_results", {"task_contract": {"code_files": files}})
+    before = context.snapshot()
+    with pytest.raises(ValueError, match="canonical collection reads.*cannot have entitlement gates"):
+        compile_module_entitlement_gates(
+            {file["filename"]: file["content"] for file in files},
+            gates_by_module=approved_subscription_gates(resolve_subscription_contract(context)),
+            approved_actions=all_module_actions(context), ungated_actions=ungated_module_actions(context),
+        )
+    message = "never gate targets" if gate_source == "approved_mapping" else "cannot have entitlement gates"
+    with pytest.raises(ValueError, match=message):
+        save_generated_code(context)
+    with pytest.raises(ValueError, match=message):
+        await assembly.assemble_app_tasks(context_variables=context)
+    assert context.snapshot() == before
+
+
+def test_managed_facade_authored_gate_is_rejected_instead_of_silently_removed():
+    context = _context()
+    surfaces = context.snapshot()["design_surface_map"]
+    surfaces["surfaces"].append({
+        "surface_id": "billing_portal", "surface_kind": "module", "owner": "app",
+        "source_capability_packs": ["mozaikspay"], "custom_reads": ["list_plans"],
+    })
+    context.set("design_surface_map", surfaces)
+    files = [{"filename": "modules/billing_portal/module.yaml", "content": yaml.safe_dump({
+        "module": {"id": "billing_portal"}, "actions": [
+            {"id": "list_plans", "entitlement_gate": "dashboard.view"},
+        ],
+    })}]
+    before = deepcopy(files)
+    with pytest.raises(ValueError, match="managed facade actions cannot have entitlement gates"):
+        apply_entitlement_gates(files, context_variables=context, require_all_modules=False)
+    assert files == before

@@ -447,7 +447,7 @@ models:
         description: Exact app-owned module surface_id from the injected approved DesignDocs action inventory; never an invented module name. AppGenerator preserves this id.
       action_id:
         type: str
-        description: Exact owned_mutations, custom_reads, or canonical collection list/get action id belonging to module_id in the injected approved DesignDocs action inventory. Managed-pack facade actions are excluded; no free-text action descriptions.
+        description: Exact owned_mutations or custom_reads action id belonging to module_id in the injected approved DesignDocs gate inventory. Canonical collection list/get and managed-pack facade actions are never gate targets. A paid view requires a custom read; no free-text action descriptions.
       entitlement_gate:
         type: union
         variants: [str, 'null']

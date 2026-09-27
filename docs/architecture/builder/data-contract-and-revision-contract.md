@@ -58,6 +58,11 @@ Current truth:
   is available; generated repo code uses
   `ctx.persistence.collection(module_id, entity_name)`.
 - the OSS runtime loads promoted `data/contract.json` as app metadata.
+  Ownership fields are required for factory generation, but runtime loading
+  validates them only when present. Existing collections without these fields
+  load unchanged; they acquire no inferred reads, policies, or subscription gates.
+  Present malformed fields still fail validation. Partial metadata does not opt
+  a collection into deterministic generation.
   It applies declared collection indexes idempotently at platform startup.
   It loads `data/migrations/*.json` and applies only supported
   additive operations with migration history. Destructive migrations are not
@@ -304,10 +309,15 @@ Design surfaces declare `custom_reads` beside `owned_mutations` for actions such
 as dashboard summaries. Code supplies canonical entity list/get reads; custom
 reads remain declared design work implemented by ServiceAgent. Per-user and
 per-workspace canonical reads require login and owner filtering, without a role
-permission, and retain subscription gates from the approved feature mapping.
-Protected app-wide collections require explicit read access decisions. Page data
-bindings and subscription gate targets come from the same approved inventory;
-managed billing facade actions are excluded from subscription gate targets.
+permission. Canonical list/get actions never carry subscription gates; a paid
+view must use a declared custom read. Protected app-wide collections require
+explicit read declarations and access decisions from ConfigMiddlewareAgent;
+ServiceAgent implements reads with authored role permissions, non-default API
+exposure, or custom handlers. Ordinary canonical implementations remain code-owned.
+Page bindings use the full approved action inventory. Managed facade entries use
+the pack contract's full action set even when DesignDocs names a subset.
+Subscription gate targets are restricted to approved writes and custom reads;
+canonical collection reads and managed facade actions are excluded.
 
 The DesignDocs save boundary first removes contract-identified platform state.
 When identity data contains app fields with one determined app owner, its retained

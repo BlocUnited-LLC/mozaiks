@@ -40,6 +40,7 @@ def _data_contract() -> dict:
     return {"version": "1", "surfaces": [{
         "surface_id": "task_management", "surface_kind": "module", "collections": [{
             "name": "tasks", "entity": "Task", "tenancy": "per_user", "owner_field": "owner_id",
+            "scope": "app",
             "ownership": {"surface_id": "task_management", "surface_kind": "module"},
             "fields": [{"name": "owner_id", "type": "string", "required": True}],
         }],
@@ -88,8 +89,9 @@ def test_inventory_injection_reads_real_bridge_and_contains_only_approved_module
     context = ContextVariablesBridge({"design_surface_map": _surface_map(), "data_contract": _data_contract()})
     assert isinstance(context.get("design_surface_map"), MappingProxyType)
     assert approved_module_actions(context) == {
-        "task_management": ["create_task", "get_tasks", "list_tasks", "update_task", "view_dashboard"],
+        "task_management": ["create_task", "update_task", "view_dashboard"],
     }
+    assert {"get_tasks", "list_tasks"} <= set(all_module_actions(context)["task_management"])
     agent = SimpleNamespace(name="ContractDesignerAgent", context_variables=context, system_message="base")
 
     inject_subscription_action_inventory(agent, [])
@@ -97,6 +99,8 @@ def test_inventory_injection_reads_real_bridge_and_contains_only_approved_module
     assert "[APPROVED ENTITLEMENT ACTION INVENTORY]" in agent.system_message
     assert "task_management:" in agent.system_message
     assert "- update_task" in agent.system_message
+    assert "- list_tasks" not in agent.system_message
+    assert "paid view requires a declared custom read" in agent.system_message
     assert "platform_identity" not in agent.system_message
     assert "TaskAnalysis" not in agent.system_message
 
@@ -169,9 +173,9 @@ def test_identical_plan_grants_still_require_a_model_selected_action_gate() -> N
     with pytest.raises(ValueError, match="does not select any action entitlement_gate"):
         validate_module_contract_updates(output, _context(output))
     output["module_contract_updates"] = [
-        {"module_id": "task_management", "action_id": "list_tasks", "entitlement_gate": "task.view"},
+        {"module_id": "task_management", "action_id": "view_dashboard", "entitlement_gate": "task.view"},
     ]
-    assert validate_module_contract_updates(output, _context(output)) == {"task_management": {"list_tasks": "task.view"}}
+    assert validate_module_contract_updates(output, _context(output)) == {"task_management": {"view_dashboard": "task.view"}}
 
 
 def test_identical_mapping_duplicates_are_deterministic() -> None:
@@ -242,7 +246,7 @@ def test_facade_actions_remain_page_choices_but_are_never_gate_targets() -> None
     output["module_contract_updates"].append({
         "module_id": "billing_portal", "action_id": "list_plans", "entitlement_gate": "dashboard.view",
     })
-    with pytest.raises(ValueError, match="Managed-pack facade actions are never gate targets"):
+    with pytest.raises(ValueError, match="managed-pack facade actions are never gate targets"):
         validate_module_contract_updates(output, context)
 
 
@@ -252,6 +256,24 @@ def test_collection_entity_is_explicit_and_does_not_use_one_collection_fallback(
     contract["surfaces"][0]["collections"][0]["entity"] = "Unrelated"
     context.set("data_contract", contract)
     assert approved_module_actions(context)["task_management"] == ["create_task", "update_task", "view_dashboard"]
+
+
+@pytest.mark.parametrize("metadata", [{}, {"entity": "Task"}, {"tenancy": "per_user"}, {"owner_field": "owner_id"}])
+def test_legacy_or_partial_metadata_does_not_infer_reads_or_block_explicit_feature_mapping(metadata):
+    contract = _data_contract()
+    collection = contract["surfaces"][0]["collections"][0]
+    for field in ("entity", "tenancy", "owner_field"):
+        collection.pop(field)
+    collection.update(metadata)
+    context = ContextVariablesBridge({"design_surface_map": _surface_map(), "data_contract": contract})
+    before = context.snapshot()
+    assert all_module_actions(context) == {
+        "task_management": ["create_task", "update_task", "view_dashboard"],
+    }
+    assert validate_module_contract_updates(_contract(), context) == {
+        "task_management": {"update_task": "task.edit", "view_dashboard": "dashboard.view"},
+    }
+    assert context.snapshot() == before
 
 
 @pytest.mark.asyncio
@@ -286,8 +308,49 @@ def test_external_managed_facade_is_excluded_using_trusted_pack_descriptors() ->
         "operator_contracts": [{
             "contract_id": "managed_storage",
             "surface_ownership": [{"owner": "Storage provider", "facade_module": "storage_portal"}],
-            "facades": [{"module_id": "storage_portal"}],
+            "facades": [{"module_id": "storage_portal", "pages": [{"primary_actions": ["usage", "upgrade"]}]}],
         }],
     })
     assert all_module_actions(context) == {"storage_portal": ["upgrade", "usage"]}
     assert approved_module_actions(context) == {}
+
+
+@pytest.mark.parametrize("action_id", ["list_tasks", "get_tasks"])
+def test_canonical_reads_cannot_be_mapped_to_paid_dashboard_features(action_id):
+    output = _contract()
+    output["module_contract_updates"][-1]["action_id"] = action_id
+    with pytest.raises(ValueError, match="Canonical list/get collection reads.*never gate targets"):
+        validate_module_contract_updates(output, _context(output))
+
+
+def test_facade_subset_uses_full_contract_inventory_and_accepts_pack_manifest():
+    from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
+        apply_entitlement_gates,
+    )
+
+    surfaces = _surface_map()
+    surfaces["surfaces"].append({
+        "surface_id": "billing_portal", "surface_kind": "module", "owner": "app",
+        "source_capability_packs": ["mozaikspay"], "primary_entities": [],
+        "owned_mutations": [], "custom_reads": ["list_plans"],
+    })
+    context = _context(_contract(), surfaces)
+    pack = Path(__file__).resolve().parents[1] / "factory_app/build_context/mozaikspay"
+    manifest = (pack / "templates/modules/billing_portal/module.yaml").read_text(encoding="utf-8")
+    expected = {action["id"] for action in yaml.safe_load(manifest)["actions"]}
+    assert set(all_module_actions(context)["billing_portal"]) == expected
+    assert "billing_portal" not in approved_module_actions(context)
+    # Only the facade is supplied; its complete trusted template must not be
+    # rejected because DesignDocs listed only the page's chosen subset.
+    result = apply_entitlement_gates(
+        [{"filename": "modules/billing_portal/module.yaml", "content": manifest}],
+        context_variables=context, require_all_modules=False,
+    )
+    assert result == [{"filename": "modules/billing_portal/module.yaml", "content": manifest}]
+    data = yaml.safe_load(manifest)
+    data["actions"].append({"id": "invented_paid_portal"})
+    with pytest.raises(ValueError, match="unapproved module actions.*invented_paid_portal"):
+        apply_entitlement_gates(
+            [{"filename": "modules/billing_portal/module.yaml", "content": yaml.safe_dump(data)}],
+            context_variables=context, require_all_modules=False,
+        )

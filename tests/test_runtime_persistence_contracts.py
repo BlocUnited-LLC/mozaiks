@@ -247,13 +247,12 @@ class TestIndexDataContractByEntity:
         with pytest.raises(DataContractLoadError, match="surface_id"):
             index_data_contract_by_entity(contract)
 
-    def test_raises_for_missing_declared_entity(self):
+    def test_legacy_collection_indexes_by_its_physical_name(self):
         contract = {
             "version": "1.0",
             "surfaces": [_module_surface("wallet", [{"name": "transactions"}])],
         }
-        with pytest.raises(DataContractLoadError, match="entity"):
-            index_data_contract_by_entity(contract)
+        assert index_data_contract_by_entity(contract)[("wallet", "transactions")] == {"name": "transactions"}
 
     def test_indexes_surface_module_collections(self):
         contract = _minimal_contract()

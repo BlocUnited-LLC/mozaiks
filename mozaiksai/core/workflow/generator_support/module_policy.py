@@ -111,7 +111,12 @@ def materialize_module_policies(
         result[path] = render_module_policy(module_id, collections)
         if path in files and files[path] != result[path]:
             raise ValueError(f"{path}: policy.py is rendered from data_contract; omit model-authored policy source")
-    missing = sorted(existing_policy_modules - {path.split("/")[1] for path in result})
+    declared_modules = {
+        owner for owner, kind, _collection in iter_data_contract_collections(
+            data_contract, require_complete_ownership=False,
+        ) if kind == "module"
+    }
+    missing = sorted(existing_policy_modules - declared_modules)
     if missing:
         raise ValueError(f"Persistent module policy has no data_contract surface: {missing}")
     return result

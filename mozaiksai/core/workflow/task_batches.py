@@ -27,7 +27,7 @@ from .generator_support.code_files import (
     materialize_data_contract,
     safe_relpath,
 )
-from .generator_support.module_action_inventory import all_module_actions
+from .generator_support.module_action_inventory import all_module_actions, ungated_module_actions
 from .generator_support.module_entitlement_gates import (
     approved_subscription_gates,
     compile_module_entitlement_gates,
@@ -1114,6 +1114,7 @@ async def _run_one_task(
                     canonical_file_map,
                     gates_by_module=approved_subscription_gates(subscription_contract),
                     approved_actions=all_module_actions(task_context),
+                    ungated_actions=ungated_module_actions(task_context),
                     existing_files=task_context.get("generated_files") or {},
                 )
                 module_contract = output.get("module_contract")

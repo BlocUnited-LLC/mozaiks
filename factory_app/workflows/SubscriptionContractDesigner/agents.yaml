@@ -61,8 +61,9 @@ agents:
             nested inside concept_blueprint; it is not a separate variable.
           - backend_design_document and design_surface_map for module/workflow boundaries
           - [APPROVED ENTITLEMENT ACTION INVENTORY], injected from app-owned module
-            writes and custom_reads in design_surface_map plus canonical collection
-            reads from data_contract, for the closed module_id/action_id choices
+            writes and custom_reads in design_surface_map, for the closed
+            module_id/action_id gate choices. Canonical collection list/get and
+            managed-pack facade actions are excluded and always remain ungated.
           - experience_spec for page surfaces
           - monetization_enabled and builder_options for explicit builder settings
           - app_intelligence_summary, app_intelligence_catalog, source_context_catalog,
@@ -163,7 +164,9 @@ agents:
                module_contract_updates list. Choose module_id and action_id only
                from [APPROVED ENTITLEMENT ACTION INVENTORY]: module_id is the exact
                approved surface_id; action_id selects an owned_mutations write,
-               declared custom_reads action, or canonical list/get collection read.
+               or declared custom_reads action. Canonical collection list/get and
+               managed-pack facade actions are never gate targets. Declare a custom
+               read for paid view behavior; never sell a dashboard by gating base reads.
                Prose in backend_design_document is context, not permission to invent ids.
              - Each capability that differs between plans must be entitlement_gate
                on at least one approved action. Shared capabilities may remain ungated,

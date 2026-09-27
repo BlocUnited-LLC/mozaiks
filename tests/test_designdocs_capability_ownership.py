@@ -338,7 +338,7 @@ def _search_pack(tmp_path) -> tuple[dict, list[dict]]:
     config = {
         "context_id": "managed_search", "applies_to_workflows": ["DesignDocs", "AppGenerator"],
         "assets": [{"path": "contract.yaml", "kind": "contract"}],
-        "pack": {"id": "managed_search", "status": "active", "capability_source": "managed_capability"},
+        "pack": {"id": "managed_search", "version": "1.0.0", "status": "active", "capability_source": "managed_capability"},
     }
     contract = {
         "contract_id": "managed_search", "contract_type": "build_pack_instructions",

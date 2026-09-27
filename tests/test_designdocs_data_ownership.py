@@ -61,6 +61,19 @@ def test_ambiguous_or_invalid_ownership_returns_exact_choices_without_persisting
     store_factory.assert_not_called()
 
 
+@pytest.mark.parametrize("missing", ["entity", "tenancy", "owner_field"])
+def test_factory_save_still_requires_complete_ownership_metadata(persistence, missing):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _bundle()
+    bundle["data_contract"]["surfaces"][0]["collections"][0].pop(missing)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "revise", result
+    assert missing in result["error"]
+    assert context.get("data_contract") is None
+    store_factory.assert_not_called()
+
+
 def test_identity_storage_under_business_surface_normalizes_before_new_fields(persistence):
     context = ownership._context(managed=False)
     bundle = _bundle()

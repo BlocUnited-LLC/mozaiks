@@ -145,13 +145,13 @@ def _close_manifest(
                         f"explicitly declare {action['id']!r} in module.yaml.actions with handler_method, "
                         "input_schema, output_schema, permissions (use [] only for deliberate unrestricted "
                         "role access), and api_surface (null, public, public_readonly, internal, or admin_internal). "
-                        "Declare subscription access in the approved feature-to-action mapping."
+                        "Canonical reads remain ungated; declare paid behavior as a separate custom read."
                     )
                 continue
             if collection["tenancy"] == "app_wide" and prior is not None and _authored_app_wide_access(prior):
                 continue
             # Canonical owner-scoped reads never inherit roles from sibling writes.
-            # Gates have their own approved compiler and survive read reconstruction.
+            # Preserve authored gates so the gate compiler can reject forbidden read gates.
             if prior is not None:
                 action["entitlement_gate"] = prior.get("entitlement_gate")
                 prior.clear()

@@ -14,9 +14,12 @@ from typing import Any
 
 import yaml
 
-from factory_app.workflows._shared.surface_ownership import managed_facade_module_ids
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.module_action_inventory import all_module_actions
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    all_module_actions,
+    managed_facade_actions,
+    ungated_module_actions,
+)
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
@@ -33,10 +36,12 @@ _TARGET_AGENTS = {
 
 
 def approved_module_actions(context_variables: Any) -> dict[str, list[str]]:
-    """Project gate targets while keeping managed plan/upgrade/usage facades open."""
+    """Paid features are approved writes/custom reads, never canonical reads/facades."""
     inventory = all_module_actions(context_variables)
-    facades = managed_facade_module_ids(context_variables)
-    return {module_id: actions for module_id, actions in inventory.items() if module_id not in facades}
+    facades = managed_facade_actions(context_variables)
+    ungated = ungated_module_actions(context_variables)
+    return {module_id: sorted(set(actions) - set(ungated.get(module_id, [])))
+            for module_id, actions in inventory.items() if module_id not in facades}
 
 
 def validate_module_contract_updates(
@@ -74,8 +79,9 @@ def validate_module_contract_updates(
             raise ValueError(
                 f"module_contract_updates references unapproved action {module_id!r}.{action_id!r}. "
                 f"Choose module_id from design_surface_map.surfaces[].surface_id and action_id "
-                f"from that module's approved writes, custom_reads, or canonical collection reads. "
-                f"Managed-pack facade actions are never gate targets. {valid_ids}"
+                f"from that module's approved writes or declared custom_reads. "
+                f"Canonical list/get collection reads and managed-pack facade actions are never gate targets. "
+                f"A paid view requires a declared custom read. {valid_ids}"
             )
         if gate is not None and gate not in capabilities:
             raise ValueError(
@@ -220,8 +226,10 @@ def inject_subscription_action_inventory(agent: Any, messages: list[dict[str, An
     _apply_text(agent, "\n".join([
         "[APPROVED ENTITLEMENT ACTION INVENTORY]",
         "These are the only permitted module_id -> action_id choices for module_contract_updates.",
-        "They project approved app-owned writes, custom_reads, and canonical list/get actions from data_contract collection entities.",
-        "Managed-pack facade actions are excluded: plans, upgrade, checkout, portal, usage, and token access stay ungated.",
+        "They project approved app-owned writes and declared custom_reads.",
+        "Canonical collection list/get actions and managed-pack facades are excluded and always remain ungated.",
+        "A paid view requires a declared custom read; never gate the base collection list/get to sell a dashboard.",
+        "Plans, upgrade, checkout, portal, usage, and token access stay ungated.",
         "Copy identifiers exactly. Select entitlement_gate from your plans' capabilities.",
         "Map every capability that differs between plans to at least one action. If any plan grants",
         "capabilities, select at least one gate even when all plans grant the same capabilities.",

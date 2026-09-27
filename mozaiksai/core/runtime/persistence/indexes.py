@@ -162,7 +162,7 @@ def _normalize_index_spec(raw_spec: Any, path: str) -> _NormalizedIndexSpec:
 def _iter_indexed_collections(contract: DataContract) -> list[_IndexedCollection]:
     indexed: list[_IndexedCollection] = []
     try:
-        collections = list(iter_data_contract_collections(contract))
+        collections = list(iter_data_contract_collections(contract, require_complete_ownership=False))
     except DataContractLoadError as exc:
         raise DatabaseIndexApplyError(str(exc)) from exc
     for owner_id, _owner_kind, collection in collections:

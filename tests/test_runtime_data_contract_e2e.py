@@ -294,6 +294,24 @@ async def test_e2e_apply_indexes_creates_all_declared_indexes(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_e2e_legacy_contract_keeps_declared_indexes_without_ownership_metadata(tmp_path):
+    intent = _bundle_intent()
+    for surface in intent["surfaces"]:
+        for collection in surface["collections"]:
+            for field in ("entity", "tenancy", "owner_field"):
+                collection.pop(field)
+            collection["scope"] = "workspace"
+    _write_bundle(tmp_path, intent)
+    loaded = await AppLoader.load(str(tmp_path))
+    context, client = _make_context()
+    result = await apply_database_indexes(loaded.data_contract, persistence=context)
+    assert loaded.data_contract == intent
+    assert result.created == result.verified == 4
+    assert len(_get_collection(client, module_id="projects", entity_name="projects").create_index_calls) == 2
+    assert len(_get_collection(client, module_id="tasks", entity_name="tasks").create_index_calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_e2e_unique_flag_is_forwarded_to_create_index(tmp_path: Path) -> None:
     _write_bundle(tmp_path, _bundle_intent())
     load_result = await AppLoader.load(str(tmp_path))

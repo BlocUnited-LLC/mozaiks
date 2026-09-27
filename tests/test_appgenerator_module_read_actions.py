@@ -27,6 +27,9 @@ from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
 from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    canonical_read_actions_for_surface,
+)
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     close_module_read_actions,
@@ -192,7 +195,7 @@ def test_artifact_only_app_wide_write_gate_rejects_implicit_reads_on_save():
 def test_entity_mapping_is_explicit_even_for_one_collection(entity):
     contract = _contract()
     contract["surfaces"][0]["collections"][0]["entity"] = entity
-    with pytest.raises(ValueError, match="entity is required" if entity is None else "must declare entity.*Task"):
+    with pytest.raises(ValueError, match="entity must name" if entity is None else "must declare entity.*Task"):
         _closed(contract=contract)
 
 
@@ -228,6 +231,29 @@ def test_design_custom_reads_are_required_but_not_invented():
 
 def test_nonpersistent_facade_does_not_receive_reads():
     assert close_module_read_actions(_output(), app_build_plan=_plan(), data_contract={"surfaces": []}) == _output()
+
+
+@pytest.mark.parametrize("metadata", [
+    {}, {"entity": "Task"}, {"tenancy": "per_user"}, {"owner_field": "owner_id"},
+    {"entity": "Task", "tenancy": "per_user"},
+])
+def test_legacy_or_partial_metadata_cannot_authorize_generated_reads_or_policies(metadata):
+    contract = _contract()
+    collection = contract["surfaces"][0]["collections"][0]
+    for field in ("entity", "tenancy", "owner_field"):
+        collection.pop(field)
+    collection.update(metadata)
+    assert _closed(contract=contract) == _output()
+    files = extract_code_file_map_from_payload(_output())
+    files[f"{BACKEND}/policy.py"] = "# Existing application policy remains application-owned.\n"
+    before = dict(files)
+    assert materialize_module_read_actions(files, app_build_plan=_plan(), data_contract=contract) == {}
+    assert materialize_module_read_implementations(files, app_build_plan=_plan(), data_contract=contract) == {}
+    assert materialize_module_policies(files, contract) == {}
+    assert canonical_read_actions_for_surface({
+        "surface_id": MODULE, "surface_kind": "module", "primary_entities": ["Task"],
+    }, contract) == []
+    assert files == before
 
 
 def test_assembly_and_typed_read_contracts_are_identical_and_idempotent():
@@ -332,7 +358,7 @@ def test_real_context_save_generates_only_owned_read_backend_files():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("typed_output", [True, False])
 @pytest.mark.parametrize("artifact_only", [True, False])
-async def test_task_dependency_and_reextraction_keep_compiled_read_and_write_gates(monkeypatch, typed_output, artifact_only):
+async def test_task_dependency_keeps_custom_read_and_write_gates_and_ungated_canonical_reads(monkeypatch, typed_output, artifact_only):
     contract_task = {
         "task_id": "task_contract", "task_type": "module_contract", "capability_pack_id": MODULE,
         "initial_agent": "ConfigMiddlewareAgent", "initial_message": "Declare task actions.",
@@ -349,11 +375,11 @@ async def test_task_dependency_and_reextraction_keep_compiled_read_and_write_gat
         "design_surface_map": {"surfaces": [{
             "surface_id": MODULE, "surface_kind": "module", "owner": "app",
             "primary_entities": ["Task"], "owned_mutations": ["create_task", "update_task", "delete_task"],
-            "custom_reads": [],
+            "custom_reads": ["task_summary"],
         }]},
         "subscription_contract": {"contract_required": True, "module_contract_updates": [
             {"module_id": MODULE, "action_id": "update_task", "entitlement_gate": "task.edit"},
-            {"module_id": MODULE, "action_id": "list_tasks", "entitlement_gate": "task.list"},
+            {"module_id": MODULE, "action_id": "task_summary", "entitlement_gate": "task.summary"},
         ]},
     })
     if artifact_only:
@@ -365,6 +391,7 @@ async def test_task_dependency_and_reextraction_keep_compiled_read_and_write_gat
         worker = ContextVariablesBridge(request.context_variables)
         if request.task_id == "task_contract":
             output = _output()
+            output["module_contract"]["module_yaml"]["actions"].append({"id": "task_summary", "handler_method": "task_summary"})
             if not typed_output:
                 output = {"code_files": [{"filename": path, "content": content}
                                          for path, content in extract_code_file_map_from_payload(output).items()]}
@@ -373,7 +400,8 @@ async def test_task_dependency_and_reextraction_keep_compiled_read_and_write_gat
             files = extract_code_file_map_from_payload(detach(dependency))
             actions = {action["id"]: action for action in yaml.safe_load(files[MANIFEST])["actions"]}
             assert actions["update_task"]["entitlement_gate"] == "task.edit"
-            assert actions["list_tasks"]["entitlement_gate"] == "task.list"
+            assert actions["task_summary"]["entitlement_gate"] == "task.summary"
+            assert "entitlement_gate" not in actions["list_tasks"]
             assert actions["list_tasks"]["permissions"] == []
             assert "entitlement_gate" not in actions["get_tasks"]
             observed.append(actions)

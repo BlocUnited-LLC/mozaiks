@@ -30,39 +30,57 @@ def _require_list(value: Any, path: str) -> list[Any]:
     return value
 
 
-def validate_collection_ownership(collection: dict[str, Any], path: str) -> None:
-    """Validate the row ownership contract shared by design save and runtime load."""
-    if collection.get("scope") not in {"app", "platform", "hosted"}:
+def validate_collection_ownership(collection: dict[str, Any], path: str, *, required: bool = True) -> None:
+    """Require factory ownership decisions, or validate supplied runtime metadata."""
+    scope = collection.get("scope")
+    if required and (not isinstance(scope, str) or scope not in {"app", "platform", "hosted"}):
         raise DataContractLoadError(f"{path}.scope must be one of ['app', 'platform', 'hosted']")
-    if not _is_non_empty_string(collection.get("entity")):
+    if (required or "entity" in collection) and not _is_non_empty_string(collection.get("entity")):
         raise DataContractLoadError(f"{path}.entity must name an explicit surface primary_entities entry")
     tenancy = collection.get("tenancy")
-    if tenancy not in {"per_user", "per_workspace", "app_wide"}:
+    if (required or "tenancy" in collection) and (not isinstance(tenancy, str) or tenancy not in {"per_user", "per_workspace", "app_wide"}):
         raise DataContractLoadError(
             f"{path}.tenancy must be one of ['per_user', 'per_workspace', 'app_wide']; "
             "declare owner_field from the collection fields for scoped records, or null for app_wide"
         )
-    fields = _require_list(collection.get("fields"), f"{path}.fields")
+    fields = _require_list(collection.get("fields"), f"{path}.fields") if required or "owner_field" in collection and "fields" in collection else []
     names = sorted({
         field["name"] for field in fields
         if isinstance(field, dict) and _is_non_empty_string(field.get("name"))
     })
     owner_field = collection.get("owner_field")
+    if required and "owner_field" not in collection:
+        raise DataContractLoadError(f"{path}.owner_field is required; use null for app_wide tenancy")
+    if "owner_field" not in collection:
+        return
     if tenancy == "app_wide":
         if owner_field is not None:
             raise DataContractLoadError(f"{path}.owner_field must be null for app_wide tenancy")
-    elif not _is_non_empty_string(owner_field) or owner_field not in names:
+    elif owner_field is None and tenancy in {"per_user", "per_workspace"}:
+        raise DataContractLoadError(f"{path}.owner_field must be a declared field for {tenancy} tenancy")
+    elif owner_field is not None and not _is_non_empty_string(owner_field):
+        raise DataContractLoadError(f"{path}.owner_field must be a document field identifier or null")
+    elif owner_field is not None and "fields" in collection and owner_field not in names:
         raise DataContractLoadError(
             f"{path}.owner_field must be one of its declared fields {names} for {tenancy} tenancy"
         )
-    elif not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(owner_field)):
+    elif owner_field is not None and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(owner_field)):
         raise DataContractLoadError(f"{path}.owner_field must be a document field identifier")
-    elif owner_field in {"app_id", "user_id", "tenant_id", "workspace_id"}:
+    elif tenancy in {"per_user", "per_workspace"} and owner_field in {"app_id", "user_id", "tenant_id", "workspace_id"}:
         expected = {"per_user": "user_id", "per_workspace": "workspace_id"}[tenancy]
         if owner_field != expected:
             raise DataContractLoadError(f"{path}.owner_field {owner_field!r} conflicts with {tenancy}; use {expected!r} or a custom field")
-    if "scope_field" in collection or "entity_name" in collection:
+    if required and ("scope_field" in collection or "entity_name" in collection):
         raise DataContractLoadError(f"{path} uses obsolete scope_field/entity_name; declare tenancy, owner_field, and entity")
+
+
+def has_complete_collection_ownership(collection: dict[str, Any], path: str) -> bool:
+    """Only complete explicit ownership declarations authorize code generation."""
+    validate_collection_ownership(collection, path, required=False)
+    if not {"scope", "entity", "tenancy", "owner_field", "fields"}.issubset(collection):
+        return False
+    validate_collection_ownership(collection, path)
+    return True
 
 
 def load_data_contract(app_root: Path) -> DataContract | None:
@@ -89,12 +107,11 @@ def load_data_contract(app_root: Path) -> DataContract | None:
 
 def iter_data_contract_collections(
     contract: DataContract | None,
+    *, require_complete_ownership: bool = True,
 ) -> Iterator[tuple[str, str, dict[str, Any]]]:
-    """Yield every collection with its declared owner, independent of storage grouping."""
+    """Yield generation-eligible collections, or runtime metadata when requested."""
     if contract is None:
         return
-    if contract.get("entities") is not None:
-        raise DataContractLoadError("data_contract.entities is obsolete; declare collections with entity under surfaces")
     groups: list[tuple[str, str, str, list[Any]]] = []
     kinds: dict[str, str] = {}
     for index, surface in enumerate(_require_list(contract.get("surfaces", []), "data_contract.surfaces")):
@@ -117,48 +134,73 @@ def iter_data_contract_collections(
         for index, value in enumerate(collections):
             path = f"{group_path}[{index}]"
             collection = _require_object(value, path)
-            ownership = _require_object(collection.get("ownership", {}), f"{path}.ownership")
-            owner_id = ownership.get("surface_id", group_id)
+            if require_complete_ownership:
+                if not has_complete_collection_ownership(collection, path):
+                    continue
+            else:
+                validate_collection_ownership(collection, path, required=False)
+            explicit = any(field in collection for field in ("entity", "tenancy", "owner_field"))
+            ownership_value = collection.get("ownership", {})
+            if ownership_value is None and not explicit:
+                ownership_value = {}
+            ownership = _require_object(ownership_value, f"{path}.ownership")
+            owner_id = ownership.get("surface_id", group_id) if explicit else collection.get("module_id") or ownership.get("surface_id", group_id)
             owner_kind = ownership.get("surface_kind", group_kind)
-            if not _is_non_empty_string(owner_id) or not _is_non_empty_string(owner_kind):
+            if explicit and (not _is_non_empty_string(owner_id) or not _is_non_empty_string(owner_kind)):
                 raise DataContractLoadError(f"{path}.ownership requires surface_id and surface_kind")
-            if group_id and (owner_id, owner_kind) != (group_id, group_kind):
+            if explicit and group_id and (owner_id, owner_kind) != (group_id, group_kind):
                 raise DataContractLoadError(f"{path}.ownership must match enclosing surface {group_id!r}/{group_kind!r}")
-            if owner_id in kinds and kinds[owner_id] != owner_kind:
+            if explicit and owner_id in kinds and kinds[owner_id] != owner_kind:
                 raise DataContractLoadError(f"{path}.ownership.surface_kind conflicts with owner {owner_id!r}")
             kinds[owner_id] = owner_kind
-            if collection.get("module_id", owner_id) != owner_id:
+            if explicit and collection.get("module_id", owner_id) != owner_id:
                 raise DataContractLoadError(f"{path}.module_id conflicts with declared owner {owner_id!r}")
             for field, seen in (("entity", entities), ("name", names)):
+                if not require_complete_ownership and field == "entity" and field not in collection:
+                    continue
+                if not explicit and owner_kind != "module":
+                    continue
                 if not _is_non_empty_string(collection.get(field)):
                     raise DataContractLoadError(f"{path}.{field} is required")
                 key = (str(owner_id), str(collection[field]))
-                if key in seen:
+                if explicit and key in seen:
                     raise DataContractLoadError(f"{path}.{field} duplicates {owner_id}.{collection[field]}")
                 seen.add(key)
             yield str(owner_id), str(owner_kind), collection
 
 
 def index_data_contract_by_entity(contract: DataContract | None) -> DataEntityIndex:
-    """Index surface and shared collections by declared ``(owner_id, entity)``."""
-    return {
-        (owner_id, collection["entity"]): collection
-        for owner_id, _owner_kind, collection in iter_data_contract_collections(contract)
-    }
+    """Index runtime metadata; absent ownership metadata retains physical-name keys."""
+    if contract is None:
+        return {}
+    index: DataEntityIndex = {}
+    for ordinal, value in enumerate(_require_list(contract.get("entities", []), "data_contract.entities")):
+        path = f"data_contract.entities[{ordinal}]"
+        entity = _require_object(value, path)
+        module_id = str(entity.get("module_id") or "").strip()
+        entity_name = str(entity.get("entity_name") or entity.get("name") or "").strip()
+        if not module_id or not entity_name:
+            raise DataContractLoadError(f"{path} requires module_id and entity_name")
+        index[(module_id, entity_name)] = entity
+    for owner_id, _owner_kind, collection in iter_data_contract_collections(contract, require_complete_ownership=False):
+        name = collection.get("entity") or collection.get("entity_name") or collection.get("name")
+        if owner_id and name:
+            index[(owner_id, str(name))] = collection
+    return index
 
 
 def _validate_data_contract(contract: DataContract) -> None:
     if not _is_non_empty_string(contract.get("version")):
         raise DataContractLoadError("data_contract.version is required")
     _require_list(contract.get("surfaces"), "data_contract.surfaces")
-    for owner_id, _owner_kind, collection in iter_data_contract_collections(contract):
-        validate_collection_ownership(collection, f"data_contract collection {owner_id}.{collection['name']}")
+    index_data_contract_by_entity(contract)
 
 
 __all__ = [
     "DataContract",
     "DataContractLoadError",
     "DataEntityIndex",
+    "has_complete_collection_ownership",
     "index_data_contract_by_entity",
     "iter_data_contract_collections",
     "validate_collection_ownership",

@@ -206,9 +206,9 @@ agents:
         SubscriptionContractDesigner when the app sells plans, grants token
         allowances, gates paid features, or meters generated workflows/actions.
         Treat it as the source of truth for `config/subscriptions.yaml`,
-        `actions[].entitlement_gate`, usage/billing page requirements, and
-        metering declarations. Copy module/action entitlement gates from
-        `module_contract_updates` exactly; do not invent paid feature ids. Do
+        usage/billing page requirements, and metering declarations. Code compiles
+        the approved `module_contract_updates` into action gates; do not instruct
+        downstream agents to copy gates or invent paid feature ids. Do
         not implement a custom token ledger, usage ledger, or module-local
         subscription extension file.
         If the contract declares `token_wallets[].auto_debit_usage`,
@@ -303,7 +303,7 @@ agents:
 
       2. Synthesize one deterministic app build plan. Do not generate code files.
       3. Derive the app's realization boundaries before planning capability packs or files.
-         - If `design_surface_map` is present, preserve ALL of its surface fields in the output `surface_map`: `surface_id`, `surface_kind`, `owner`, `source_capability_packs`, `owned_mutations`, `events_emitted`, and `workflow_triggers`.
+         - If `design_surface_map` is present, preserve its declared output fields in `surface_map`: `surface_id`, `surface_kind`, `owner`, `source_capability_packs`, `owned_mutations`, `events_emitted`, and `workflow_triggers`. Include approved `custom_reads` in the matching capability's `operations`; the design context remains their authority.
          - Only if `design_surface_map` is null may you infer `surface_map` from `experience_spec_document` and `backend_design_document`. In that case, default `owner` to `"app"` unless the surface clearly belongs to a hosted product service.
          - Treat `surface_map` as authoritative when present:
            - `module` = durable deterministic runtime module
@@ -354,14 +354,13 @@ agents:
          - Only infer page structure from scratch when `experience_spec` is null.
       6. Derive the canonical entities and required operations for each entity.
          - For durable CRUD entities (create/list/update/delete/status changes), plan generated module persistence explicitly:
-           - read the approved DesignDocs `data_contract` from context. Collection namespace `scope`, `tenancy`, `owner_field`, and `entity` are already decided. Do not emit a second data contract in the plan;
-           - plan persistent module files only for surfaces with collections in the approved data contract;
-           - when `data_contract` is needed, keep it generic and emit `data/contract.json`; do not plan ad hoc shared folders or host-internal helper names;
+           - plan persistence from the approved design's app-owned durable entities and operations. Collection ownership is decided upstream; deterministic review assigns persistence paths and policy ownership from that approval. Do not emit or reinterpret a data contract in the plan;
+           - do not plan ad hoc shared folders or host-internal helper names;
            - populate top-level `pending_schema_migration` when indexes or additive collection setup are needed, otherwise set it to null;
            - include a `persistence_contract` build task with `initial_agent: DatabaseAgent`;
-           - include `data/contract.json` in that task's `owned_paths` only when `data_contract` is non-null;
+           - use `data/contract.json` as the canonical persistence artifact path; review resolves its owner and the persistence task receives the approved contract directly;
            - include `data/migrations/{migration_id}.json` when indexes or additive schema changes are planned;
-           - pass collection ownership for every persistent module/entity in the task `initial_message`;
+           - pass approved surface/entity identities and operations in the task `initial_message`; do not infer tenancy or owner fields;
            - do not plan removed model or database-schema artifacts.
          - For project/task CRUD apps, prefer separate app-owned generated modules for `projects` and `tasks` unless the user explicitly asks for a single combined module. Each persistent module must be decomposed into a contract task, a schema/model task, and a service implementation task so YAML, typed shapes, and runtime logic have separate owners.
          - For ordinary CRUD apps, use the plural lowercase entity id as the module id and path (for example `modules/projects/...` and `modules/tasks/...`). Do not rename simple CRUD modules to abstract `*_core` ids unless the user asks for a platform/core abstraction.
@@ -439,9 +438,10 @@ agents:
           `initial_message` must require serialization of only
           `subscription_contract.subscription_config_file` and to emit no module,
           service, payment-provider, host-owned billing, or token ledger code.
-          Also pass the relevant `module_contract_updates` entries to each
-          affected module_contract task so its contract output can set
-          `actions[].entitlement_gate` on the exact declared actions.
+          Code compiles approved action mappings into module manifests during
+          task admission, repair, and assembly. Module task messages must not
+          instruct agents to copy or author gates. Canonical list/get and managed
+          facade actions are never gate targets; paid views use declared custom reads.
           Usage/billing page requirements may read the platform-owned endpoints
           `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger`; do
           not plan generated modules or custom ledgers just to back those pages.
@@ -1650,9 +1650,17 @@ agents:
       - Code compiles `subscription_contract.module_contract_updates` into module action
         gates on every write, including repair. Omit `entitlement_gate` from model
         output. Do not make new gating decisions or copy capability values here.
-      - Declare DesignDocs `owned_mutations` and `custom_reads` exactly. Canonical
-        list/get actions and their backend implementations are constructed from
-        the approved data contract; do not re-decide their names or access policy.
+      - Declare DesignDocs `owned_mutations` and `custom_reads` exactly. Code constructs
+        per_user/per_workspace canonical list/get actions and their implementations
+        from the approved data contract. Do not re-decide their names or access policy.
+      - For `app_wide` collections with protected writes, explicitly declare each
+        required canonical read using its inventory id, permissions, api_surface,
+        handler_method, and input/output schemas. The compiler rejects a missing
+        read declaration instead of choosing its access policy. Authored role
+        permissions, non-default API exposure, and custom handlers are preserved.
+        Code may construct ordinary unprotected app-wide reads.
+      - Canonical list/get and managed facade actions are never subscription gate
+        targets. A paid view must use a DesignDocs-declared custom read.
 
       **Mode B inputs**:
       - `app_build_plan`: backend scope, auth strategy, and integration requirements.
@@ -1696,7 +1704,7 @@ agents:
 
       1. Read `current_build_task.capability_pack_id` — this is the module folder name (e.g. `task_manager`).
       2. Read `current_build_task.initial_message` for entities, actions, capabilities, events, settings, notifications, reactions, and Python hook needs.
-         - Treat the action list in `current_build_task.initial_message` as a closed contract. Emit every named action exactly once and do not replace it with a smaller, renamed, or reinterpreted action set.
+         - Treat the action list in `current_build_task.initial_message` as a closed contract. Preserve every named action in the final contract: emit model-owned writes, custom reads, and explicit protected app-wide read declarations; code adds the code-owned canonical reads. Do not rename or reinterpret the action set.
          - If the task lists `list_*` and mutation/generation actions for the same module, preserve both families. A list/query action is not optional just because a generation or write action is present.
          - Treat event declarations as explicit only. Use the exact event types and producing actions in `app_build_plan.event_flows` for this module, the injected manifest guard, or `current_build_task.initial_message`. Do not invent events from action verbs. If none of these inputs declares an event, set `actions[].emits: []` and `events_yaml: null`.
       3. Produce `module.yaml` and only the optional YAML companions whose typed `module_contract` fields are populated for an approved feature in `current_build_task.owned_paths`. Ownership permits an optional file but never requires inventing it, serializing an empty placeholder, or mirroring a null typed field into `code_files`. Do not produce Python files here.
@@ -1793,7 +1801,7 @@ agents:
          - When emitted, set `schema_version: mozaiks.runtime_extensions.v1` and populate `extensions[]`.
       14. Also serialize the typed contract to `code_files` entries with YAML content strings at the exact `modules/{capability_pack_id}/...` paths. Include `modules/{capability_pack_id}/runtime_extensions.yaml` in code_files only when `runtime_extensions_yaml` is non-null.
          - YAML `code_files[].content` must be valid YAML serialized from the same typed object. Preserve indentation under `module:`, `permissions:`, `actions:`, and `capabilities:`; do not flatten nested fields or emit list item markers outside their parent list.
-         - In `modules/{module_id}/module.yaml`, every action field (`description`, `handler_method`, `api_surface`, `input_schema`, `output_schema`, `permissions`, `emits`, and `entitlement_gate`) must be indented inside that action's `actions:` list item. Never place `api_surface`, `entitlement_gate`, `permissions`, or `emits` at the YAML root.
+         - In `modules/{module_id}/module.yaml`, every authored action field (`description`, `handler_method`, `api_surface`, `input_schema`, `output_schema`, `permissions`, and `emits`) must be indented inside that action's `actions:` list item. Never place `api_surface`, `permissions`, or `emits` at the YAML root. Gates are code-owned.
       15. Set `service_foundation_bundle` to null in module_contract mode.
 
       **If `current_build_task_type == "service_foundation"` (Mode B)**:
@@ -2405,7 +2413,8 @@ agents:
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
       - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
       - Emit every model-owned path listed in `current_build_task.owned_paths`. Code renders canonical list/get implementations in the owned handler/service/repo files and the owned `backend/policy.py` from data_contract collection tenancy and owner_field; omit policy.py from python_files and code_files. Missing declared scope requires contract correction, never an invented policy stub.
-      - Implement approved writes and declared custom_reads. Omit code-owned canonical list/get methods from every handler, service, and repo class or function; code supplies them from the approved collection contract. Explicit app-wide reads with authored role permissions, API exposure, or a custom handler retain their declared access implementation and must be implemented. Files whose entire contents are code-owned may be omitted from your output.
+      - Implement approved writes and declared custom_reads. Omit code-owned canonical list/get methods from every handler, service, and repo class or function; code supplies them from the approved collection contract. For app_wide collections with protected writes, the accepted module contract must explicitly declare the canonical reads and their access policy first. Implement those app-wide reads when their accepted manifest specifies role permissions, non-default API exposure, or a custom handler; preserve that policy. Reads with ordinary authenticated access and the canonical handler remain code-owned. Files whose entire contents are code-owned may be omitted from your output.
+      - Canonical list/get and managed facade actions are never subscription gate targets. Implement paid views as their declared custom read actions; do not add gating logic to canonical read methods.
       - That includes `backend/account_data_handler.py` whenever it appears in your owned_paths. It is required of ANY module with `user_data_scope: true`, not only membership-style modules: a habit registry owns user-scoped records and needs account lifecycle support exactly as a membership module does. Implement export and delete of this module's records by `app_id` and `user_id`.
       - `account_data_handler.py` has an exact shape the runtime enforces at load: one `AccountDataHandler` class with `__init__(self, db)` storing the handle, and `async delete_user_data(self, *, app_id, user_id)` / `async export_user_data(self, *, app_id, user_id)` - the `*` is required, positional parameters fail. Never emit a placeholder such as `db = ...`; the db comes from `__init__` and is used as `self._db`. A module that misses this shape fails to load with "invalid account-data implementation" and takes the whole module with it. Example:
         `class AccountDataHandler:`

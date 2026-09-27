@@ -237,7 +237,9 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
             "capability_source": "generated_module",
             "capability_pack_id": surface_id,
             "primary_entities": list(surface.get("primary_entities") or []),
-            "operations": list(surface.get("owned_mutations") or []),
+            "operations": list(dict.fromkeys([
+                *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+            ])),
         })
         repairs.append(f"{surface_id}: approved module had no capability -> generated_module")
     plan["capability_packs"] = packs
@@ -283,7 +285,11 @@ def _repair_plan(plan: dict[str, Any], context: Any) -> list[str]:
             pack["primary_entities"] = approved_entities
             repairs.append(f"{surface_id}: primary_entities -> approved {approved_entities}")
         operations = list(pack.get("operations") or [])
-        missing_operations = [operation for operation in surface.get("owned_mutations") or [] if operation not in operations]
+        missing_operations = [
+            operation for operation in dict.fromkeys([
+                *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+            ]) if operation not in operations
+        ]
         if missing_operations:
             pack["operations"] = [*operations, *missing_operations]
             repairs.append(f"{surface_id}: preserved approved operations {missing_operations}")
@@ -1050,7 +1056,10 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
         named = ", ".join(f"`{op}`" for op in operations)
         note = (
             f"Actions for this module (authoritative, from the approved plan): {named}. "
-            "Emit every one of them in actions[] exactly once, using these ids verbatim. "
+            "Every action must appear in the final actions[] exactly once with these ids. "
+            "Declare approved writes and custom reads; code constructs canonical list/get reads. "
+            "For app_wide collections with protected writes, explicitly declare the canonical "
+            "reads and their permissions, API exposure, and handler policy. "
             "The prose above describes the module; this list defines it."
         )
         contract["initial_message"] = "\n\n".join(part for part in (message, note) if part)

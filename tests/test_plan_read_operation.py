@@ -47,11 +47,13 @@ def test_public_review_does_not_invent_read_semantics(operations):
 
 
 @pytest.mark.parametrize("omit_capability", [False, True])
-def test_approved_mutations_reach_existing_or_constructed_capability(omit_capability):
+@pytest.mark.parametrize("custom_reads", [[], ["summarize_reports"]])
+def test_approved_actions_reach_existing_or_constructed_capability(omit_capability, custom_reads):
     plan, context = _approved_plan([])
     design = detach(context.get("design_surface_map"))
-    approved_operations = ["create_report", "archive_report"]
-    design["surfaces"][0]["owned_mutations"] = approved_operations
+    approved_operations = ["create_report", "archive_report", *custom_reads]
+    design["surfaces"][0]["owned_mutations"] = ["create_report", "archive_report"]
+    design["surfaces"][0]["custom_reads"] = custom_reads
     context.set("design_surface_map", design)
     if omit_capability:
         plan["capability_packs"] = []

@@ -61,6 +61,19 @@ def test_plan_cannot_supply_a_second_data_contract():
     assert detach(context.get("data_contract")) == _contract()
 
 
+@pytest.mark.parametrize("missing", ["entity", "tenancy", "owner_field"])
+def test_factory_serialization_rejects_incomplete_ownership_even_though_runtime_accepts_it(missing):
+    contract = _contract()
+    contract["surfaces"][0]["collections"][0].pop(missing)
+    context = ContextVariablesBridge({
+        "data_contract": contract, "current_build_task": {"owned_paths": ["data/contract.json"]},
+    })
+    before = context.snapshot()
+    with pytest.raises(ValueError, match=missing):
+        save_generated_code(StructuredOutputOverlay(context, {"code_files": []}))
+    assert context.snapshot() == before
+
+
 @pytest.mark.parametrize("shared", [False, True])
 def test_policy_ownership_is_constructed_only_for_collection_owners(shared):
     plan = {"build_tasks": [{

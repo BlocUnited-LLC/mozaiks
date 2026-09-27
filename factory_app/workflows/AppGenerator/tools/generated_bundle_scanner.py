@@ -1305,9 +1305,11 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
                 "config/subscriptions.yaml grants plan capabilities "
                 f"{sorted(plan_capabilities)} but no module action declares an "
                 "entitlement_gate. A SaaS bundle that sells capabilities must "
-                "enforce at least one of them: set actions[].entitlement_gate "
-                "to a granted capability_id on each plan-gated action in "
-                f"{module_paths}."
+                "enforce at least one of them: correct the approved subscription "
+                "contract's module_contract_updates mapping to an approved write "
+                "or declared custom read, then rerun deterministic gate compilation "
+                f"for {module_paths}. Do not author entitlement_gate in model output; "
+                "canonical list/get and managed facade actions cannot be gated."
             ]
         return []
 

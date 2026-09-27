@@ -8,9 +8,11 @@ import pytest
 import mozaiksai.core.runtime.persistence.mongo as mongo_module
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.persistence.intent_loader import (
+    has_complete_collection_ownership,
     index_data_contract_by_entity,
     iter_data_contract_collections,
     load_data_contract,
+    validate_collection_ownership,
 )
 
 
@@ -120,7 +122,7 @@ async def test_optional_top_level_entities_list_may_be_absent_when_surfaces_exis
     ({"tenancy": "per_user", "owner_field": "user_id"}, "declared fields"),
     ({"owner_field": "app_id"}, "must be null"),
 ])
-def test_collection_ownership_is_required(tmp_path, changes, message):
+def test_present_collection_ownership_is_validated(tmp_path, changes, message):
     intent = _valid_intent()
     intent["surfaces"][0]["collections"][0].update(changes)
     _write_intent(tmp_path, intent)
@@ -128,23 +130,90 @@ def test_collection_ownership_is_required(tmp_path, changes, message):
         load_data_contract(tmp_path)
 
 
-def test_top_level_entities_are_rejected(tmp_path):
+def test_legacy_top_level_entity_metadata_remains_loadable(tmp_path):
     intent = _valid_intent()
     intent["entities"] = [{"module_id": "tasks", "entity_name": "tasks"}]
     _write_intent(tmp_path, intent)
-    with pytest.raises(ValueError, match="entities is obsolete"):
-        load_data_contract(tmp_path)
+    assert load_data_contract(tmp_path) == intent
+    assert index_data_contract_by_entity(intent)[("tasks", "tasks")] == intent["entities"][0]
 
 
 def test_load_data_contract_missing_file_returns_none(tmp_path):
     assert load_data_contract(tmp_path) is None
 
 
-def test_entity_mapping_has_no_collection_name_fallback():
+def test_runtime_physical_name_index_does_not_authorize_generation():
     intent = _valid_intent()
     intent["surfaces"][0]["collections"][0].pop("entity")
-    with pytest.raises(ValueError, match="entity is required"):
-        index_data_contract_by_entity(intent)
+    assert index_data_contract_by_entity(intent)[("projects", "projects")]["name"] == "projects"
+    assert list(iter_data_contract_collections(intent)) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata", [
+    {}, {"entity": "Project"}, {"tenancy": "per_user"}, {"owner_field": "author_id"},
+    {"entity": "Project", "tenancy": "per_user"}, {"owner_field": None},
+])
+async def test_legacy_and_valid_partial_metadata_load_without_authorizing_generation(tmp_path, metadata):
+    _write_app(tmp_path)
+    intent = _valid_intent()
+    collection = intent["surfaces"][0]["collections"][0]
+    for field in ("entity", "tenancy", "owner_field"):
+        collection.pop(field)
+    collection["fields"].append({"name": "author_id", "type": "string", "required": True})
+    collection.update(metadata)
+    _write_intent(tmp_path, intent)
+    result = await AppLoader.load(str(tmp_path))
+    assert result.data_contract == intent
+    assert result.data_entities_by_key[("projects", metadata.get("entity", "projects"))] == collection
+    assert not has_complete_collection_ownership(collection, "collection")
+    assert list(iter_data_contract_collections(intent)) == []
+    with pytest.raises(ValueError):
+        validate_collection_ownership(collection, "factory collection")
+
+
+@pytest.mark.parametrize("metadata", [
+    {"entity": None}, {"entity": ""}, {"entity": 1}, {"tenancy": None}, {"tenancy": "organization"},
+    {"tenancy": []}, {"owner_field": ""}, {"owner_field": False},
+    {"owner_field": "owner.id"}, {"owner_field": "unknown"}, {"tenancy": "per_user", "owner_field": None},
+    {"tenancy": "per_user", "owner_field": "app_id"},
+])
+def test_invalid_present_partial_metadata_still_fails_runtime_load(tmp_path, metadata):
+    intent = _valid_intent()
+    collection = intent["surfaces"][0]["collections"][0]
+    for field in ("entity", "tenancy", "owner_field"):
+        collection.pop(field)
+    collection.update(metadata)
+    _write_intent(tmp_path, intent)
+    with pytest.raises(ValueError):
+        load_data_contract(tmp_path)
+
+
+def test_legacy_entity_name_index_is_metadata_only(tmp_path):
+    intent = _valid_intent()
+    collection = intent["surfaces"][0]["collections"][0]
+    for field in ("entity", "tenancy", "owner_field"):
+        collection.pop(field)
+    collection.update(entity_name="project_metadata", scope="workspace", scope_field="app_id")
+    _write_intent(tmp_path, intent)
+    assert load_data_contract(tmp_path) == intent
+    assert index_data_contract_by_entity(intent)[("projects", "project_metadata")] == collection
+    assert list(iter_data_contract_collections(intent)) == []
+
+
+def test_legacy_null_ownership_preserves_base_loader_behavior(tmp_path):
+    collection = {"name": "projects", "ownership": None}
+    intent = {"version": "1", "surfaces": [{
+        "surface_id": "projects", "surface_kind": "module", "collections": [collection],
+    }]}
+    _write_intent(tmp_path, intent)
+    assert load_data_contract(tmp_path) == intent
+    assert index_data_contract_by_entity(intent)[("projects", "projects")] == collection
+    assert list(iter_data_contract_collections(intent)) == []
+    collection["entity"] = "Project"
+    _write_intent(tmp_path, intent)
+    with pytest.raises(ValueError, match="ownership must be an object"):
+        load_data_contract(tmp_path)
 
 
 def test_shared_collections_are_indexed_by_their_declared_owner(tmp_path):

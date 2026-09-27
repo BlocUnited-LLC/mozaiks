@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from pathlib import Path
 from typing import Any, Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
-from mozaiksai.core.session.build_context import load_contract_descriptors
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import managed_pack_contracts
 
 
 class SurfaceOwnershipRule(BaseModel):
@@ -59,29 +58,6 @@ def default_subscription_contract(context: Any) -> dict[str, Any] | None:
     return dict(yaml.safe_load(workflow_context_path("mozaikspay", "contract.yaml").read_text(encoding="utf-8")))
 
 
-def _selected_contracts(context: Any, *, include_default_subscription: bool) -> list[dict[str, Any]]:
-    contracts: list[dict[str, Any]] = []
-    for pack in _get(context, "capability_packs", []) or []:
-        if pack.get("capability_source") != "managed_capability" or pack.get("status", "active") != "active":
-            continue
-        source = pack.get("pack_source_path")
-        if source:
-            root = Path(source)
-            config = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))
-            contracts.extend(load_contract_descriptors(root, config))
-        else:
-            pack_id = pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id")
-            contracts.extend(
-                contract for contract in _get(context, "operator_contracts", []) or []
-                if contract.get("contract_id") == pack_id
-                or (contract.get("canonical_provider") or {}).get("provider_pack_id") == pack_id
-            )
-    default = default_subscription_contract(context) if include_default_subscription else None
-    if default and not any(contract.get("contract_id") == default["contract_id"] for contract in contracts):
-        contracts.append(default)
-    return contracts
-
-
 def _identifiers(values: Any) -> set[str]:
     return {str(value).strip().casefold() for value in values or []}
 
@@ -93,7 +69,10 @@ def _ownership_rules(
         workflow_context_path("AppGenerator", "capability_routing.yaml").read_text(encoding="utf-8"),
     )
     declarations = list(catalog["layers"]["runtime_provided"]["surface_ownership"])
-    contracts = _selected_contracts(context_variables, include_default_subscription=include_default_subscription)
+    contracts = managed_pack_contracts(context_variables)
+    default = default_subscription_contract(context_variables) if include_default_subscription else None
+    if default and not any(contract.get("contract_id") == default["contract_id"] for contract in contracts):
+        contracts.append(default)
     facades: dict[str, dict[str, Any]] = {}
     for contract in contracts:
         ownership = contract.get("surface_ownership", [])
@@ -125,31 +104,6 @@ def _facade_actions(facade: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(
         action for page in facade.get("pages") or [] for action in page.get("primary_actions") or []
     ))
-
-
-def managed_facade_module_ids(context_variables: Any) -> set[str]:
-    """Resolve facade identities from selected contracts and approved pack references."""
-    _, facades = _ownership_rules(context_variables, include_default_subscription=True)
-    module_ids = set(facades)
-    surface_map = _get(context_variables, "design_surface_map", {}) or {}
-    pack_ids = {
-        pack_id for surface in surface_map.get("surfaces") or []
-        for pack_id in surface.get("source_capability_packs") or []
-    }
-    for pack_id in pack_ids:
-        # Approved source references may name an OSS pack even when the next
-        # workflow does not carry the selected-pack session projection.
-        if not isinstance(pack_id, str) or Path(pack_id).name != pack_id or pack_id in {".", ".."}:
-            continue
-        registry = workflow_context_path(pack_id, "context.yaml")
-        if not registry.is_file():
-            continue
-        config = yaml.safe_load(registry.read_text(encoding="utf-8"))
-        if (config.get("pack") or {}).get("capability_source") != "managed_capability":
-            continue
-        for contract in load_contract_descriptors(registry.parent, config):
-            module_ids.update(facade["module_id"] for facade in contract.get("facades") or [])
-    return module_ids
 
 
 def _matches_surface(surface: dict[str, Any], rule: SurfaceOwnershipRule) -> bool:

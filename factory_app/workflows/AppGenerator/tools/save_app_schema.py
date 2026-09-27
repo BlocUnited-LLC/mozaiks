@@ -502,7 +502,7 @@ def _validate_data_contract(data_contract: Any) -> None:
     if not isinstance(surfaces, list):
         raise ValueError("data_contract.surfaces must be a list")
 
-    for owner_id, _owner_kind, collection in iter_data_contract_collections(data_contract):
+    for owner_id, _owner_kind, collection in iter_data_contract_collections(data_contract, require_complete_ownership=False):
         validate_collection_ownership(collection, f"data_contract collection {owner_id}.{collection['name']}")
 
     aliases = data_contract.get("aliases") or []
