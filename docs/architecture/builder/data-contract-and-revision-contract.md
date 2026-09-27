@@ -283,10 +283,12 @@ Instead, module-level collections should be declared inside
 That keeps one canonical database source of truth while still expressing module
 ownership clearly.
 
-The same collection contract applies to `shared_collections`. Each shared entry
-declares `ownership.surface_id` and `ownership.surface_kind`; its placement does
-not erase module ownership or row tenancy. Runtime metadata, read inventories,
-and policy compilation enumerate both locations through the same owner resolver.
+The same factory collection contract applies to `shared_collections`. Each generated
+shared entry declares `ownership.surface_id` and `ownership.surface_kind`; its placement
+does not erase module ownership or row tenancy. Runtime loading preserves entries
+without declared ownership as metadata only: they receive no entity or database indexes,
+generated reads, or policies. Malformed present ownership still fails. Runtime metadata,
+read inventories, and policy compilation use the same owner resolver for both locations.
 An owner/entity pair and an owner/collection-name pair must each be unique across
 the entire contract. An entry inside a surface cannot override that surface's
 owner or kind.

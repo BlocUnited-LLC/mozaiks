@@ -74,6 +74,20 @@ def test_factory_serialization_rejects_incomplete_ownership_even_though_runtime_
     assert context.snapshot() == before
 
 
+@pytest.mark.parametrize("complete", [False, True])
+def test_factory_shared_serialization_requires_complete_explicit_surface_ownership(complete):
+    collection = dict(_contract()["surfaces"][0]["collections"][0]) if complete else {"name": "tasks", "entity": "Task"}
+    collection.pop("ownership", None)
+    contract = {"version": "1", "surfaces": [], "shared_collections": [collection]}
+    context = ContextVariablesBridge({
+        "data_contract": contract, "current_build_task": {"owned_paths": ["data/contract.json"]},
+    })
+    before = context.snapshot()
+    with pytest.raises(ValueError):
+        save_generated_code(StructuredOutputOverlay(context, {"code_files": []}))
+    assert context.snapshot() == before
+
+
 @pytest.mark.parametrize("shared", [False, True])
 def test_policy_ownership_is_constructed_only_for_collection_owners(shared):
     plan = {"build_tasks": [{

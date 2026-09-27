@@ -41,8 +41,7 @@ from mozaiksai.core.runtime.app.provenance import (
     dump_app_provenance_yaml,
 )
 from mozaiksai.core.runtime.persistence.intent_loader import (
-    iter_data_contract_collections,
-    validate_collection_ownership,
+    validate_complete_data_contract_ownership,
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
@@ -502,8 +501,7 @@ def _validate_data_contract(data_contract: Any) -> None:
     if not isinstance(surfaces, list):
         raise ValueError("data_contract.surfaces must be a list")
 
-    for owner_id, _owner_kind, collection in iter_data_contract_collections(data_contract, require_complete_ownership=False):
-        validate_collection_ownership(collection, f"data_contract collection {owner_id}.{collection['name']}")
+    validate_complete_data_contract_ownership(data_contract)
 
     aliases = data_contract.get("aliases") or []
     if not isinstance(aliases, list):

@@ -127,6 +127,20 @@ def test_shared_collection_keeps_declared_owner_and_materializes_known_null(pers
     assert index_data_contract_by_entity(saved)[("reports", "ReportNote")] == saved["shared_collections"][0]
 
 
+def test_factory_save_rejects_shared_collection_without_surface_ownership(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _bundle()
+    shared = bundle["data_contract"]["surfaces"][0]["collections"].pop()
+    shared.pop("ownership")
+    bundle["data_contract"]["shared_collections"] = [shared]
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "revise", result
+    assert "ownership" in result["error"]
+    assert context.get("data_contract") is None
+    store_factory.assert_not_called()
+
+
 @pytest.mark.parametrize("duplicate", ["entity", "name"])
 def test_duplicate_surface_and_shared_identity_is_rejected(persistence, duplicate):
     _, store_factory, _ = persistence

@@ -129,6 +129,10 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
         ({"version": "1", "surfaces": [], "mode": "app_data_contract", "aliases": [{"alias": "x"}]}, "collection"),
         ({"version": "1", "surfaces": [], "mode": "app_data_contract", "aliases": [{"alias": "x", "collection": "c"}]}, "owner_module"),
         ({"version": "1", "surfaces": [], "mode": "app_data_contract", "aliases": [], "shared_collections": "orders"}, "shared_collections"),
+        ({"version": "1", "surfaces": [], "shared_collections": [{"name": "orders", "entity": "Order"}]}, "scope"),
+        ({"version": "1", "surfaces": [], "shared_collections": [{
+            "name": "orders", "entity": "Order", "scope": "app", "tenancy": "app_wide", "owner_field": None, "fields": [],
+        }]}, "ownership"),
     ],
 )
 def test_data_contract_validation_rejects_invalid_shapes(contract: dict, match: str) -> None:

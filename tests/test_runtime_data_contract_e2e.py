@@ -312,6 +312,21 @@ async def test_e2e_legacy_contract_keeps_declared_indexes_without_ownership_meta
 
 
 @pytest.mark.asyncio
+async def test_e2e_partial_shared_metadata_does_not_authorize_database_indexes(tmp_path):
+    intent = {"version": "1", "app_id": "app_e2e", "surfaces": [], "shared_collections": [{
+        "name": "records", "entity": "Record",
+        "indexes": [{"name": "record_id", "keys": [["id", 1]]}],
+    }]}
+    _write_bundle(tmp_path, intent)
+    loaded = await AppLoader.load(str(tmp_path))
+    context, client = _make_context()
+    result = await apply_database_indexes(loaded.data_contract, persistence=context)
+    assert loaded.data_contract == intent
+    assert result.planned == result.created == 0
+    assert client.databases == {}
+
+
+@pytest.mark.asyncio
 async def test_e2e_unique_flag_is_forwarded_to_create_index(tmp_path: Path) -> None:
     _write_bundle(tmp_path, _bundle_intent())
     load_result = await AppLoader.load(str(tmp_path))

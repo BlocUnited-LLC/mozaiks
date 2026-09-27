@@ -166,6 +166,8 @@ def _iter_indexed_collections(contract: DataContract) -> list[_IndexedCollection
     except DataContractLoadError as exc:
         raise DatabaseIndexApplyError(str(exc)) from exc
     for owner_id, _owner_kind, collection in collections:
+        if not owner_id:
+            continue
         collection_path = f"data_contract collection {owner_id}.{collection['name']}"
         indexes = collection.get("indexes") or []
         if not indexes:

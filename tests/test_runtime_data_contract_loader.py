@@ -13,6 +13,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     iter_data_contract_collections,
     load_data_contract,
     validate_collection_ownership,
+    validate_complete_data_contract_ownership,
 )
 
 
@@ -233,13 +234,42 @@ def test_shared_collections_are_indexed_by_their_declared_owner(tmp_path):
     ]
 
 
-def test_shared_collection_requires_explicit_ownership(tmp_path):
+def test_unowned_shared_collection_is_runtime_metadata_only_even_with_complete_row_metadata(tmp_path):
     intent = _valid_intent()
     shared = dict(intent["surfaces"][0]["collections"].pop())
     shared.pop("ownership")
     intent["shared_collections"] = [shared]
     _write_intent(tmp_path, intent)
+    assert load_data_contract(tmp_path) == intent
+    assert index_data_contract_by_entity(intent) == {}
+    assert list(iter_data_contract_collections(intent)) == []
     with pytest.raises(ValueError, match="ownership requires surface_id and surface_kind"):
+        validate_complete_data_contract_ownership(intent)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata", [{"entity": "Record"}, {"tenancy": "per_user"}, {"owner_field": "author_id"}])
+async def test_partial_shared_metadata_without_owner_loads_unindexed_and_cannot_generate(tmp_path, metadata):
+    intent = {"version": "1", "surfaces": [], "shared_collections": [{"name": "records", **metadata}]}
+    _write_app(tmp_path)
+    _write_intent(tmp_path, intent)
+    result = await AppLoader.load(str(tmp_path))
+    assert result.data_contract == intent
+    assert result.data_entities_by_key == {}
+    assert list(iter_data_contract_collections(intent)) == []
+    # Factory serializers must still see and reject the incomplete declaration.
+    assert list(iter_data_contract_collections(intent, require_complete_ownership=False)) == [
+        ("", "", intent["shared_collections"][0]),
+    ]
+
+
+@pytest.mark.parametrize("ownership", [None, [], {}, {"surface_id": "records"}, {"surface_kind": "module"}])
+def test_partial_shared_metadata_rejects_malformed_present_ownership(tmp_path, ownership):
+    intent = {"version": "1", "surfaces": [], "shared_collections": [{
+        "name": "records", "entity": "Record", "ownership": ownership,
+    }]}
+    _write_intent(tmp_path, intent)
+    with pytest.raises(ValueError, match="ownership"):
         load_data_contract(tmp_path)
 
 

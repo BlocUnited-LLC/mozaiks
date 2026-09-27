@@ -8,6 +8,7 @@ from typing import Any
 
 DataContract = dict[str, Any]
 DataEntityIndex = dict[tuple[str, str], dict[str, Any]]
+_OWNERSHIP_FIELDS = frozenset({"scope", "entity", "tenancy", "owner_field", "fields"})
 
 
 class DataContractLoadError(ValueError):
@@ -77,7 +78,7 @@ def validate_collection_ownership(collection: dict[str, Any], path: str, *, requ
 def has_complete_collection_ownership(collection: dict[str, Any], path: str) -> bool:
     """Only complete explicit ownership declarations authorize code generation."""
     validate_collection_ownership(collection, path, required=False)
-    if not {"scope", "entity", "tenancy", "owner_field", "fields"}.issubset(collection):
+    if not _OWNERSHIP_FIELDS.issubset(collection):
         return False
     validate_collection_ownership(collection, path)
     return True
@@ -146,6 +147,12 @@ def iter_data_contract_collections(
             ownership = _require_object(ownership_value, f"{path}.ownership")
             owner_id = ownership.get("surface_id", group_id) if explicit else collection.get("module_id") or ownership.get("surface_id", group_id)
             owner_kind = ownership.get("surface_kind", group_kind)
+            if not group_id and "ownership" not in collection:
+                # Retain unowned shared metadata for runtime loading and strict factory validation.
+                # Missing ownership cannot authorize indexing or generated actions/policies.
+                if not require_complete_ownership:
+                    yield "", "", collection
+                continue
             if explicit and (not _is_non_empty_string(owner_id) or not _is_non_empty_string(owner_kind)):
                 raise DataContractLoadError(f"{path}.ownership requires surface_id and surface_kind")
             if explicit and group_id and (owner_id, owner_kind) != (group_id, group_kind):
@@ -167,6 +174,17 @@ def iter_data_contract_collections(
                     raise DataContractLoadError(f"{path}.{field} duplicates {owner_id}.{collection[field]}")
                 seen.add(key)
             yield str(owner_id), str(owner_kind), collection
+
+
+def validate_complete_data_contract_ownership(contract: DataContract) -> None:
+    """Factory artifacts require complete row metadata and a resolved collection owner."""
+    if contract.get("entities"):
+        raise DataContractLoadError("Factory data_contract requires explicit collection ownership under surfaces")
+    for owner_id, owner_kind, collection in iter_data_contract_collections(contract, require_complete_ownership=False):
+        path = f"data_contract collection {collection.get('name', '')!r}"
+        validate_collection_ownership(collection, path)
+        if not owner_id or not owner_kind:
+            raise DataContractLoadError(f"{path}.ownership requires surface_id and surface_kind")
 
 
 def index_data_contract_by_entity(contract: DataContract | None) -> DataEntityIndex:
@@ -204,5 +222,6 @@ __all__ = [
     "index_data_contract_by_entity",
     "iter_data_contract_collections",
     "validate_collection_ownership",
+    "validate_complete_data_contract_ownership",
     "load_data_contract",
 ]
