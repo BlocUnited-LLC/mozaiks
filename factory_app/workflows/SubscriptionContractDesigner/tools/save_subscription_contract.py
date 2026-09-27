@@ -14,6 +14,9 @@ from typing import Annotated, Any
 
 import yaml
 
+from factory_app.workflows._shared.subscription_contract_context import (
+    validate_module_contract_updates,
+)
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.context.frozen import detach
@@ -510,6 +513,7 @@ async def save_subscription_contract(
 
     try:
         normalized = normalize_subscription_contract(output)
+        validate_module_contract_updates(normalized, context_variables)
         page_conflict = (
             _page_inventory_conflict(normalized, context_variables) if binding.phase == "genesis" else None
         )

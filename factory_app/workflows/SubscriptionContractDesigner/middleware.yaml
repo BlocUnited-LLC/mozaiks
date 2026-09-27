@@ -1,1 +1,4 @@
-prompt_middleware: []
+prompt_middleware:
+  - agent: ContractDesignerAgent
+    filename: ../_shared/subscription_contract_context.py
+    function: inject_subscription_action_inventory

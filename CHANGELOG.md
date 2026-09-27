@@ -20,6 +20,10 @@ This project follows a practical pre-1.0 changelog format:
   Auth scaffolding now runs idempotently before every app validation, including
   after user replies and repairs, without a separate agent turn.
 
+- Generated subscription plans now require explicit capability-to-action choices
+  from approved module inventories, and assembly deterministically applies those
+  gates so paid plan differences cannot silently lose enforcement.
+
 - DesignDocs excludes selected managed-pack facades from candidate owners for
   app-specific auth fields, so a billing facade no longer blocks a determined
   split to the app's sole domain module.

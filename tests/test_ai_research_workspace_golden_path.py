@@ -638,6 +638,10 @@ async def test_ai_research_workspace_offline_golden_path(
             "chat_id": "golden",
             "user_id": "offline-test-user",
             "product_request": product_request,
+            "design_surface_map": {"surfaces": [{
+                "surface_id": "research", "surface_kind": "module", "owner": "app",
+                "owned_mutations": ["execute_research"],
+            }]},
             "structured_output": _subscription_contract(),
             "capability_packs": [mozaikspay_pack],
             "available_managed_capabilities": [mozaikspay_pack],

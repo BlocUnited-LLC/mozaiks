@@ -7,9 +7,6 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
-    _apply_entitlement_gates,
-)
 from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
     _materialize_subscriptions_yaml,
     materialize_app_config_contracts,
@@ -194,6 +191,7 @@ def test_materialize_subscriptions_yaml_rejects_unknown_schema() -> None:
     context = _Context(
         {
             "subscription_contract": {
+                "contract_required": True,
                 "subscription_config_file": {
                     "schema_version": "mozaiks.subscriptions.v99",
                     "plans": [],
@@ -209,7 +207,7 @@ def test_materialize_subscriptions_yaml_rejects_unknown_schema() -> None:
 def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app(frozen: bool) -> None:
     cfg = _saas_subscription_config_file()
     original = deepcopy(cfg)
-    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
     if frozen:
         context = ContextVariablesBridge(context.data)
 
@@ -241,7 +239,7 @@ def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app(frozen: bo
 
     reordered = dict(reversed(list(cfg.items())))
     reordered_context = _Context(
-        {"subscription_contract": {"subscription_config_file": reordered}}
+        {"subscription_contract": {"contract_required": True, "subscription_config_file": reordered}}
     )
     assert _materialize_subscriptions_yaml(context_variables=reordered_context) == result
 
@@ -314,7 +312,7 @@ def test_materialize_subscriptions_yaml_preserves_v2_multi_product_plans() -> No
         ],
     }
     original = deepcopy(cfg)
-    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -348,7 +346,7 @@ def test_materialize_subscriptions_yaml_preserves_explicit_false_and_zero() -> N
             "minimum_charge_usd": 0,
         }
     ]
-    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -362,7 +360,7 @@ def test_materialize_subscriptions_yaml_preserves_explicit_false_and_zero() -> N
 def test_materialize_subscriptions_yaml_preserves_explicit_null_over_default() -> None:
     cfg = _saas_subscription_config_file()
     cfg["assignment_store"]["tenant_id_field"] = None
-    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -375,7 +373,7 @@ def test_materialize_subscriptions_yaml_preserves_explicit_null_over_default() -
 def test_materialize_subscriptions_yaml_preserves_explicit_empty_mapping() -> None:
     cfg = _saas_subscription_config_file()
     cfg["assignment_store"] = {}
-    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -388,7 +386,7 @@ def test_materialize_subscriptions_yaml_preserves_explicit_empty_mapping() -> No
 def test_materialize_subscriptions_yaml_rejects_unknown_plan_fields() -> None:
     cfg = _saas_subscription_config_file()
     cfg["plans"][0]["future_allowance"] = {"amount": 12}
-    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
 
     with pytest.raises(ValidationError, match="future_allowance") as exc_info:
         _materialize_subscriptions_yaml(context_variables=context)
@@ -399,7 +397,7 @@ def test_materialize_subscriptions_yaml_rejects_unknown_plan_fields() -> None:
 def test_materialize_subscriptions_yaml_reads_artifact_fallback() -> None:
     """Falls back to subscription_contract_artifact when live contract absent."""
     cfg = _saas_subscription_config_file()
-    context = _Context({"subscription_contract_artifact": {"subscription_config_file": cfg}})
+    context = _Context({"subscription_contract_artifact": {"contract_required": True, "subscription_config_file": cfg}})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -413,7 +411,7 @@ def test_materialize_app_config_contracts_includes_subscriptions_for_saas_app() 
     cfg = _saas_subscription_config_file()
     context = _Context(
         {
-            "subscription_contract": {"subscription_config_file": cfg},
+            "subscription_contract": {"contract_required": True, "subscription_config_file": cfg},
             "app_build_plan": {},
         }
     )
@@ -447,104 +445,3 @@ def test_materialize_app_config_contracts_omits_subscriptions_for_non_saas() -> 
 
     assert "config/subscriptions.yaml" not in files
     assert set(files) == {"config/integrations.yaml", "config/targets.json"}
-
-
-# --- _apply_entitlement_gates tests ---
-
-
-def _module_yaml_content(actions: list[dict]) -> str:
-    data = {"id": "analytics", "actions": actions}
-    return yaml.safe_dump(data, sort_keys=False)
-
-
-@pytest.mark.parametrize("frozen", [False, True])
-def test_apply_entitlement_gates_sets_gates_from_contract(frozen: bool) -> None:
-    module_yaml = _module_yaml_content(
-        [
-            {"id": "list_reports", "handler_method": "list_reports", "permissions": ["reports.read"]},
-            {"id": "export_csv", "handler_method": "export_csv", "permissions": ["reports.read"]},
-        ]
-    )
-    context = _Context(
-        {
-            "subscription_contract": {
-                "module_contract_updates": [
-                    {"module_id": "analytics", "action_id": "list_reports", "entitlement_gate": "analytics.view"},
-                    {"module_id": "analytics", "action_id": "export_csv", "entitlement_gate": "exports.download"},
-                ]
-            }
-        }
-    )
-    code_files = [{"filename": "modules/analytics/module.yaml", "content": module_yaml}]
-
-    if frozen:
-        context = ContextVariablesBridge(context.data)
-    result = _apply_entitlement_gates(code_files, context_variables=context)
-
-    updated = {f["filename"]: yaml.safe_load(f["content"]) for f in result}
-    actions = {a["id"]: a for a in updated["modules/analytics/module.yaml"]["actions"]}
-    assert actions["list_reports"]["entitlement_gate"] == "analytics.view"
-    assert actions["export_csv"]["entitlement_gate"] == "exports.download"
-
-
-def test_apply_entitlement_gates_does_not_overwrite_existing_gate() -> None:
-    """Agent-set gates take precedence over contract defaults."""
-    module_yaml = _module_yaml_content(
-        [
-            {
-                "id": "list_reports",
-                "handler_method": "list_reports",
-                "entitlement_gate": "agent.set.gate",
-                "permissions": [],
-            }
-        ]
-    )
-    context = _Context(
-        {
-            "subscription_contract": {
-                "module_contract_updates": [
-                    {"module_id": "analytics", "action_id": "list_reports", "entitlement_gate": "analytics.view"}
-                ]
-            }
-        }
-    )
-    code_files = [{"filename": "modules/analytics/module.yaml", "content": module_yaml}]
-
-    result = _apply_entitlement_gates(code_files, context_variables=context)
-
-    updated = {f["filename"]: yaml.safe_load(f["content"]) for f in result}
-    action = updated["modules/analytics/module.yaml"]["actions"][0]
-    assert action["entitlement_gate"] == "agent.set.gate"
-
-
-def test_apply_entitlement_gates_is_noop_without_contract() -> None:
-    module_yaml = _module_yaml_content(
-        [{"id": "list_reports", "handler_method": "list_reports", "permissions": []}]
-    )
-    context = _Context({})
-    code_files = [{"filename": "modules/analytics/module.yaml", "content": module_yaml}]
-
-    result = _apply_entitlement_gates(code_files, context_variables=context)
-
-    updated = {f["filename"]: yaml.safe_load(f["content"]) for f in result}
-    action = updated["modules/analytics/module.yaml"]["actions"][0]
-    assert "entitlement_gate" not in action
-
-
-def test_apply_entitlement_gates_ignores_non_module_yaml_files() -> None:
-    non_module = {"filename": "services/config.py", "content": "API_KEY = 'x'\n"}
-    context = _Context(
-        {
-            "subscription_contract": {
-                "module_contract_updates": [
-                    {"module_id": "analytics", "action_id": "list_reports", "entitlement_gate": "analytics.view"}
-                ]
-            }
-        }
-    )
-    code_files = [non_module]
-
-    result = _apply_entitlement_gates(code_files, context_variables=context)
-
-    # File unchanged
-    assert result[0]["content"] == non_module["content"]

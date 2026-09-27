@@ -60,6 +60,8 @@ agents:
             subscription_contract_likely, and money_flow_summary. This object is
             nested inside concept_blueprint; it is not a separate variable.
           - backend_design_document and design_surface_map for module/workflow boundaries
+          - [APPROVED ENTITLEMENT ACTION INVENTORY], injected from app-owned module
+            surfaces in design_surface_map, for the closed module_id/action_id choices
           - experience_spec for page surfaces
           - monetization_enabled and builder_options for explicit builder settings
           - app_intelligence_summary, app_intelligence_catalog, source_context_catalog,
@@ -156,9 +158,23 @@ agents:
                or Enterprise with snake_case ids.
 
           3. Capability and quota mapping:
-             - Capabilities must map to generated-app module actions, workflow
-               capabilities, or page surfaces already present in design_surface_map,
-               backend_design_document, or experience_spec.
+             - Declare the capability-to-action product decision in the typed
+               module_contract_updates list. Choose module_id and action_id only
+               from [APPROVED ENTITLEMENT ACTION INVENTORY]: module_id is the exact
+               approved surface_id, action_id is one of that surface's owned_mutations.
+               Prose in backend_design_document is context, not permission to invent ids.
+             - Each capability that differs between plans must be entitlement_gate
+               on at least one approved action. Shared capabilities may remain ungated,
+               but nonempty plan capabilities require at least one selected action gate
+               even when every plan grants the same capability set.
+             - Set entitlement_gate to the exact plans[].capabilities id. One action
+               supports one gate; multiple approved actions may use the same capability.
+               Use null only for metering-only updates. AppGenerator constructs
+               actions[].entitlement_gate from this mapping regardless of model-written YAML.
+             - Empty module_contract_updates is invalid when plans grant capabilities.
+               If no approved action can represent a required feature, record the missing
+               design input in validation_notes. Do not guess ids or silently omit the
+               decision; save validation returns valid ids for revision.
              - If `brownfield_build_path` is present, declare gates and metering only
                for generated Mozaiks-owned overlays, adapters, modules, workflows, or
                pages in the approved adoption scope. Do not gate protected existing-app
@@ -235,8 +251,11 @@ agents:
           5. Capabilities must be generated-app capability ids such as
              analytics.view, reports.export, campaigns.launch, or workflow.run.
              Do not use hosted-product capability ids.
-          6. If a plan grants a capability, the module action that requires it
-             must declare actions[].entitlement_gate with that exact capability_id.
+          6. module_contract_updates is the sole capability-to-action decision.
+             Map every capability that differs between plans and at least one capability
+             whenever plans grant capabilities. Use the injected approved module/action ids.
+             The deterministic materializer writes actions[].entitlement_gate; do not rely
+             on prose instructions or later file generation to decide that mapping.
           7. If AI usage, credits, paid-resource usage, or top-up token packs are
              sold as a quota, declare a token_wallet at config root and
              token_allowances on paid plans when the plan includes an allowance.
