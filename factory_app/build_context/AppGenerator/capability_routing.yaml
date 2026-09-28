@@ -11,6 +11,9 @@ layers:
   runtime_provided:
     surface_ownership:
       - owner: Mozaiks platform authentication and sessions
+        # Sign-in pages come from the generated auth contract (config/auth.yaml
+        # routes); a design page owned by a matching surface is removed at save.
+        platform_capability: authentication
         surface_ids: [auth, authentication, user_authentication, session_management, user_sessions]
         entity_names: [AuthIdentity, AuthSession, UserSession, auth_identity, auth_session, user_session]
         action_ids: [login, logout, authenticate_user, create_auth_session, refresh_auth_session]
