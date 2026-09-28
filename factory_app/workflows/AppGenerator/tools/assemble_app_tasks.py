@@ -85,6 +85,11 @@ def _apply_planned_page_contracts(
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename") and f.get("content") is not None}
     modules = module_action_index(file_map)
     workflows = generated_workflow_names(file_map, context_variables)
+    # Typed page output is re-materialized here from the worker's structured
+    # answer, so the same contract-determined constructions the worker's compile
+    # wrote must be written again from the same approved inputs.
+    data_contract = detach(context_variables.get("data_contract")) if context_variables is not None else None
+    surface_map = detach(context_variables.get("design_surface_map")) if context_variables is not None else None
     failed_tasks = failed_task_ids or set()
     for task in tasks:
         if str(task.get("task_type") or "").strip() != "page_bundle":
@@ -122,6 +127,7 @@ def _apply_planned_page_contracts(
             try:
                 file_map[path] = normalize_planned_page_content(
                     file_map[path], path=path, modules=modules, workflow_names=workflows,
+                    data_contract=data_contract, design_surface_map=surface_map,
                 )
                 validate_planned_page(file_map[path], planned_by_stem[stem], path)
             except ValueError as exc:

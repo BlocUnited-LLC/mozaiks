@@ -42,6 +42,7 @@ def inject_primitive_catalog(agent: Any, messages: list[dict[str, Any]]) -> None
             "\n- A module delete action uses the runtime POST command endpoint, not a REST DELETE route."
             "\n- Choose data_key and metric value_key/detail_key/trend_key from the bound action's output_schema. Table columns use the returned array's declared item property keys."
             "\n- Code fills items/total only for a declared canonical list envelope; never invent or rename KPI fields based on their labels."
+            "\n- Code writes and logs the bindings the contracts determine (cleared undeclared detail/trend keys, a metric id that names a returned field, a create/edit modal replacing a workflow button with no generated workflow, an Edit modal for a gated update action on a listed collection). Open choices fail with the valid options for every page at once."
             "\n- Every user-facing action with an entitlement_gate must be reachable from a page action or data binding. Give paid create/edit actions working forms and submit bindings."
             "\n- workflow actions may reference only workflows present in the supplied bundle artifacts. Do not invent a workflow for CRUD; use the declared module action."
         )

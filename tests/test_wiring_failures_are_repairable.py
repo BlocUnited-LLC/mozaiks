@@ -133,16 +133,27 @@ def test_an_orphan_without_a_page_is_skipped_not_mislabelled() -> None:
 
 @pytest.mark.parametrize("kind", ["wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action"])
 def test_page_contract_failures_reach_the_page_bundle_without_changing_module_gates(kind) -> None:
-    files = {**FILES, "ui/pages/habits.yaml": yaml.safe_dump({"name": "Habits"})}
+    # The auth scaffold always writes ui/route_manifest.json and no task owns
+    # it; a diagnostic attributed there could never be repaired.
+    files = {
+        **FILES,
+        "ui/route_manifest.json": "{}",
+        "ui/pages/habits.yaml": yaml.safe_dump({"name": "Habits", "sections": [{
+            "id": "list", "primitive": "ResourceTable",
+            "config": {"api_endpoint": "/api/modules/habit_registry/list_habits", "columns": ["name"]},
+        }]}),
+    }
     wiring = {"passed": False, "failed_tests": [{
-        "test": kind, "page": "Habits", "error": "Invalid binding. Valid fields: items, total.",
+        "test": kind, "page": "Habits", "action": "habit_registry/create_habit",
+        "error": "Invalid binding. Valid fields: items, total.",
         "fix_suggestion": "Repair the page using the declared action.",
     }]}
-    errors = _wiring_repair_errors(wiring, files)
+    errors = _wiring_repair_errors(wiring, files, _repair_context())
     result = prepare_bundle_repair({"passed": False, "errors": errors}, _repair_context())
 
     assert len(errors) == 1
     assert errors[0].startswith("ui/pages/habits.yaml:")
+    assert "route_manifest" not in errors[0]
     assert "Valid fields: items, total" in result["repair_request"]
     assert result["status"] == "needs_revision"
     assert result["target_agent"] == "AppSchemaAgent"

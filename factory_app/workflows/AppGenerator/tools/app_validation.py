@@ -43,6 +43,10 @@ from factory_app.workflows.AppGenerator.tools.repair_policy import (
 from factory_app.workflows.AppGenerator.tools.repair_policy import (
     prepare_task_recovery,
 )
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    ManagedCapabilityTemplateError,
+    resolve_declared_pack_output_paths,
+)
 from factory_app.workflows.AppGenerator.tools.task_integrity import (
     artifact_snapshot_digest,
     planned_artifact_diagnostics,
@@ -53,6 +57,9 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     local_app_validation_available,
     resolve_app_validation_strategy,
+)
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    managed_pack_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -1757,8 +1764,41 @@ def validate_workflow_integration_contract(
     }
 
 
+def _template_owned_paths(context_variables: Any) -> frozenset[str]:
+    """Paths the selected packs' templates own, resolved the way assembly resolves packs."""
+    if context_variables is None:
+        return frozenset()
+    paths = set(managed_pack_output_paths(context_variables))
+    packs = detach(context_variables.get("capability_packs")) or []
+    if not packs:
+        plan = detach(context_variables.get("app_build_plan")) or {}
+        packs = plan.get("capability_packs") or [] if isinstance(plan, dict) else []
+    try:
+        paths |= resolve_declared_pack_output_paths(
+            [pack for pack in packs if isinstance(pack, dict)], context_variables=context_variables,
+        )
+    except ManagedCapabilityTemplateError:
+        pass  # The bundle scanner reports an unusable pack contract.
+    return frozenset(paths)
+
+
+def _gated_action_owner_page(
+    action_key: str, page_paths: dict[str, str], generated_files: dict[str, str], template_paths: frozenset[str],
+) -> str | None:
+    """Name the authored page that should expose the action.
+
+    The route manifest is scaffold output no task owns, and a pack template
+    page is replaced at assembly, so neither can carry a repairable diagnostic.
+    Prefer an authored page that already reads the action's module.
+    """
+    module_id = action_key.split("/", 1)[0]
+    authored = sorted(path for path in page_paths.values() if path not in template_paths)
+    referencing = [path for path in authored if f"/api/modules/{module_id}/" in generated_files.get(path, "")]
+    return (referencing or authored or [None])[0]
+
+
 def _wiring_repair_errors(
-    wiring_result: dict[str, Any], generated_files: dict[str, str]
+    wiring_result: dict[str, Any], generated_files: dict[str, str], context_variables: Any = None,
 ) -> list[str]:
     """Route unresolved endpoints and page contracts to their existing page owner.
 
@@ -1811,6 +1851,7 @@ def _wiring_repair_errors(
             "Bind the section to one of them, or remove the section if the app "
             "does not need it. Do not invent an action id."
         )
+    template_paths = _template_owned_paths(context_variables)
     for failure in wiring_result.get("failed_tests") or []:
         kind = failure.get("test")
         if kind not in {"wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action"}:
@@ -1818,11 +1859,15 @@ def _wiring_repair_errors(
         if kind == "wiring_unreachable_gated_action":
             # The page bundle owns placement across its pages; do not route this
             # to the module owner or remove the gate to silence the diagnostic.
-            path = "ui/route_manifest.json" if "ui/route_manifest.json" in generated_files else next(iter(page_paths.values()), None)
+            path = _gated_action_owner_page(
+                str(failure.get("action") or ""), page_paths, generated_files, template_paths,
+            )
         else:
             path = page_paths.get(str(failure.get("page") or ""))
-        if path:
-            errors.append(f"{path}: {failure['error']} {failure.get('fix_suggestion', '')}")
+        # With no authored page to carry it, the diagnostic is still recorded;
+        # repair policy marks it unowned rather than blocking with no reason.
+        prefix = f"{path}: " if path else ""
+        errors.append(f"{prefix}{failure['error']} {failure.get('fix_suggestion', '')}")
     return errors
 
 
@@ -2095,7 +2140,7 @@ async def run_app_bundle_acceptance_gate(
     repair_diagnostics = [
         *planned_diagnostics,
         *[{"error": error} for error in all_scan_errors],
-        *[{"error": error} for error in _wiring_repair_errors(wiring_result, generated_files)],
+        *[{"error": error} for error in _wiring_repair_errors(wiring_result, generated_files, context_variables)],
         *[{"error": error} for error in runtime_quality_result.get("warnings", [])],
         *[
             {**item, "error": f"{item.get('test', 'validation')}: {item['error']}"}

@@ -41,6 +41,55 @@ when the action contract determines them; it does not guess semantic metric
 renames or invent row fields. Invalid selections identify the bound action and
 list the valid fields so the page worker can revise them.
 
+### Constructed bindings
+
+The compiler rejects only genuine judgment gaps. Where the accepted contracts
+determine the binding, `page_binding_construction` writes it and logs one
+`[pages] <path>: constructed ...` line per change, in the task worker, the
+standalone save tool and assembly alike (assembly re-materializes typed page
+output, so it constructs from the same approved inputs):
+
+- a metric `detail_key`/`trend_key` the bound action does not return is set to
+  null; a metric whose own `id` exactly names a returned field reads that field;
+- a create/edit `workflow` action that names no generated workflow is replaced
+  by a modal form submitting the collection's one create-shaped or
+  update-shaped mutation, when the bundle declares no workflows at all;
+- a gated update-shaped mutation on a collection that a list table shows gets
+  an Edit row action (with `selection: single`) and a modal form that submits
+  the typed action with `{selected_row.<identifier>}` and `{form.<field>}`
+  payload entries.
+
+The collection is the approved data-contract collection whose canonical list
+read the table binds; its identifier is the `search_by` field the canonical
+get read looks up. Mutation shapes come from the surface map's
+`owned_mutations` and each action's declared input, and only a mutation whose
+inputs are all declared collection fields is a record write: a create takes no
+identifier, an update requires it plus other fields, a delete requires it
+alone. Two candidates of one shape, an input the form primitive cannot render,
+an authored section already holding the constructed modal id, an edit button in
+a table's empty state, or a missing data contract leave the author's choice
+alone; the refusal is logged as `[pages] <path>: not constructed ...`.
+Constructed openers carry their own ids (`open-<action>`), so they never
+collide with an authored action id.
+
+### Rejection and pack-owned pages
+
+A rejection closes every page in the task before it is raised: unresolved
+references, binding errors, plan identity and page-schema errors of every page
+travel in one message, so the worker's one bounded correction (and the
+standalone save tool's caller) sees them all. Pages at paths the selected packs
+declare as template outputs (`required_outputs`, resolved from the pack source
+or the projected operator contracts) are placeholders assembly replaces: their
+references still compile so the page stays well formed, but their bindings are
+checked against the template contracts at assembly and acceptance, not against
+the author's placeholder module contract at task time. A facade page route a
+pack ships no template for is authored and stays checked. Every pack's template
+pages must be declared outputs and pass the wiring gate under test. An
+acceptance diagnostic for an unreachable gated action is attributed to the
+authored page that reads the action's module, never to `ui/route_manifest.json`
+or a template page, so the page owner can repair it; with no authored page at
+all it is recorded unowned rather than dropped.
+
 Canonical list/get response schemas declare the collection fields their existing
 read implementations project. This enriches the response declaration without
 changing persistence or the data contract. Managed pack templates replace their

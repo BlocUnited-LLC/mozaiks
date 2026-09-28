@@ -20,8 +20,9 @@ from .code_files import (
     extract_deleted_file_paths_from_payload,
     safe_relpath,
 )
-from .module_action_inventory import all_module_actions
+from .module_action_inventory import all_module_actions, managed_pack_output_paths
 from .page_action_bindings import generated_workflow_names, page_workflow_binding_errors
+from .page_binding_construction import construct_page_bindings
 from .page_data_bindings import page_data_binding_errors, schema_at_path, schema_field_paths
 
 logger = logging.getLogger(__name__)
@@ -464,13 +465,28 @@ def compile_page_data_sources(
     *,
     reject_api_endpoints: bool = False,
     workflow_names: set[str] | None = None,
+    data_contract: Any = None,
+    design_surface_map: Any = None,
+    template_owned: bool = False,
+    path: str | None = None,
 ) -> int:
     """Compile explicit module/action pairs; never resolve identities from URLs.
 
     Authoring boundaries reject runtime endpoint fields. Assembly can also pass
     already compiled documents through this compiler without changing bytes.
+
+    With the approved ``data_contract`` and ``design_surface_map`` the compiler
+    also writes the bindings those contracts determine (see
+    ``page_binding_construction``) before checking what remains. A page at a
+    ``template_owned`` path is a placeholder a selected pack replaces at
+    assembly: its references are compiled so the page stays well formed, but
+    its bindings are checked against the template contracts, not the author's.
     """
     count = 0
+    label = path or (str(document.get("name") or "page") if isinstance(document, dict) else "page")
+    # Every unresolved reference on the page is collected, so one rejection
+    # names them all; the binding checks then run over whatever did resolve.
+    reference_errors: list[str] = []
 
     def walk(node: Any, location: str) -> None:
         nonlocal count
@@ -485,49 +501,68 @@ def compile_page_data_sources(
         if reject_api_endpoints and (
             "api_endpoint" in node or (mutation and "href" in node)
         ):
-            raise ValueError(f"{location}: model-authored endpoint URLs are forbidden; choose data_source")
+            reference_errors.append(f"{location}: model-authored endpoint URLs are forbidden; choose data_source")
         if "data_source" in node:
             count += 1
         source = node.pop("data_source", None)
         if source is not None:
             if not isinstance(source, dict) or set(source) != {"module_id", "action_id"}:
-                raise ValueError(f"{location}.data_source requires exactly module_id and action_id")
-            module_id, action_id = source["module_id"], source["action_id"]
-            if any(
-                not isinstance(value, str)
-                or not re.fullmatch(r"[A-Za-z0-9_.-]+", value)
-                or ".." in value
-                for value in (module_id, action_id)
-            ):
-                raise ValueError(f"{location}.data_source requires canonical identifier strings")
-            if action_id not in modules.get(module_id, {}):
-                raise ValueError(
-                    f"{location}.data_source references unknown module/action '{module_id}/{action_id}'"
-                )
-            if endpoint_key in node:
-                raise ValueError(f"{location}: data_source cannot be combined with {endpoint_key}")
-            node[endpoint_key] = f"/api/modules/{module_id}/{action_id}"
+                reference_errors.append(f"{location}.data_source requires exactly module_id and action_id")
+            else:
+                module_id, action_id = source["module_id"], source["action_id"]
+                if any(
+                    not isinstance(value, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]+", value)
+                    or ".." in value
+                    for value in (module_id, action_id)
+                ):
+                    reference_errors.append(f"{location}.data_source requires canonical identifier strings")
+                elif action_id not in modules.get(module_id, {}) and not template_owned:
+                    reference_errors.append(
+                        f"{location}.data_source references unknown module/action '{module_id}/{action_id}'"
+                    )
+                elif endpoint_key in node:
+                    reference_errors.append(f"{location}: data_source cannot be combined with {endpoint_key}")
+                else:
+                    node[endpoint_key] = f"/api/modules/{module_id}/{action_id}"
         elif mutation and reject_api_endpoints:
-            raise ValueError(f"{location}: {node['action_type']} actions require data_source")
+            reference_errors.append(f"{location}: {node['action_type']} actions require data_source")
         for key, child in node.items():
             walk(child, f"{location}.{key}")
 
     walk(document, str(document.get("name") or "page") if isinstance(document, dict) else "page")
+    if template_owned:
+        if reference_errors:
+            raise ValueError("; ".join(reference_errors))
+        logger.info("[pages] %s: a selected pack template replaces this page; bindings defer to the template", label)
+        return count
     contracts = {f"{module_id}/{action_id}": action for module_id, actions in modules.items() for action_id, action in actions.items()}
     normalized = _materialize_table_response_keys(document, contracts)
+    constructed = construct_page_bindings(
+        document, contracts, data_contract=data_contract, design_surface_map=design_surface_map,
+        workflow_names=workflow_names, page=label,
+    )
     errors = page_data_binding_errors(document, contracts)
     errors.extend(page_workflow_binding_errors(document, workflow_names or set()))
+    messages = list(reference_errors)
     if errors:
-        raise ValueError("Page bindings do not match declared contracts: " + "; ".join(errors))
-    if normalized and not count:
-        count = normalized
-    return count
+        messages.append("Page bindings do not match declared contracts: " + "; ".join(errors))
+    if messages:
+        raise ValueError("; ".join(messages))
+    return count or normalized or len(constructed)
 
 
 def compile_authored_page_files(
-    files: dict[str, str], *, payload: Any, context: Any,
+    files: dict[str, str], *, payload: Any, context: Any, failures: list[str] | None = None,
 ) -> dict[str, str]:
-    """Close raw page/admin candidates at authoring, preserving admitted readback."""
+    """Close raw page/admin candidates at authoring, preserving admitted readback.
+
+    Every page is closed before any rejection is raised, so a worker's one
+    bounded correction sees every page's errors at once. With ``failures``
+    supplied, the per-page messages are appended there instead of raised and a
+    failed page keeps its authored content, so the caller can run its later
+    checks and raise everything together.
+    """
     payload = _unwrap_output_envelope(detach(payload))
     bundle = payload.get("module_contract") if isinstance(payload, dict) else None
     typed_admin = (
@@ -543,7 +578,14 @@ def compile_authored_page_files(
         match = re.fullmatch(r"modules/([^/]+)/module\.yaml", path)
         if match:
             modules.pop(match[1], None)
+    workflows = generated_workflow_names({**_page_reference_files(context), **files}, context)
+    template_paths = managed_pack_output_paths(context)
+    data_contract = detach(context.get("data_contract"))
+    surface_map = detach(context.get("design_surface_map"))
     compiled = dict(files)
+    raise_failures = failures is None
+    if failures is None:
+        failures = []
     for path, content in files.items():
         admin = re.fullmatch(r"modules/([^/]+)/contracts/admin\.yaml", path)
         if not _page_stem_from_path(path) and not admin:
@@ -553,22 +595,38 @@ def compile_authored_page_files(
         if path == typed_admin or admitted.get(path) == content:
             continue
         try:
-            document = yaml.safe_load(content)
-        except yaml.YAMLError as exc:
-            raise ValueError(f"{path}: authored page sections require valid YAML") from exc
-        if not isinstance(document, dict):
-            raise ValueError(f"{path}: authored page sections require an object")
-        inventory = {admin[1]: modules.get(admin[1], {})} if admin else modules
-        workflows = generated_workflow_names({**_page_reference_files(context), **files}, context)
-        if compile_page_data_sources(document, inventory, reject_api_endpoints=True, workflow_names=workflows):
-            compiled[path] = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
+            try:
+                document = yaml.safe_load(content)
+            except yaml.YAMLError as exc:
+                raise ValueError(f"{path}: authored page sections require valid YAML") from exc
+            if not isinstance(document, dict):
+                raise ValueError(f"{path}: authored page sections require an object")
+            inventory = {admin[1]: modules.get(admin[1], {})} if admin else modules
+            if compile_page_data_sources(
+                document, inventory, reject_api_endpoints=True, workflow_names=workflows,
+                data_contract=None if admin else data_contract, design_surface_map=None if admin else surface_map,
+                template_owned=path in template_paths, path=path,
+            ):
+                compiled[path] = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
+        except ValueError as exc:
+            failures.append(_prefixed_failure(path, exc))
+    if failures and raise_failures:
+        raise ValueError("\n".join(failures))
     return compiled
+
+
+def _prefixed_failure(path: str, error: BaseException) -> str:
+    message = str(error)
+    return message if message.startswith(f"{path}:") else f"{path}: {message}"
 
 
 def normalize_planned_page_content(
     content: str, *, path: str = "", modules: ModuleActionIndex | None = None,
     reject_api_endpoints: bool = False,
     workflow_names: set[str] | None = None,
+    data_contract: Any = None,
+    design_surface_map: Any = None,
+    template_owned: bool = False,
 ) -> str:
     """Return page YAML with table primitives corrected, or the original.
 
@@ -591,6 +649,8 @@ def normalize_planned_page_content(
     retargeted = resolve_modal_action_targets(document)
     compiled = compile_page_data_sources(
         document, modules or {}, reject_api_endpoints=reject_api_endpoints, workflow_names=workflow_names,
+        data_contract=data_contract, design_surface_map=design_surface_map, template_owned=template_owned,
+        path=path or None,
     )
     renamed = align_page_name_with_file(document, path)
     if not promoted and not retargeted and renamed is None and not declared and not compiled and not materialized:

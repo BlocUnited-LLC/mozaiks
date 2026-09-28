@@ -37,6 +37,21 @@ This project follows a practical pre-1.0 changelog format:
 - AppGenerator supplies page workers with action output schemas, compiles
   canonical list bindings, and rejects undeclared metric/table fields,
   nonexistent workflow buttons, and gated actions unreachable from pages.
+  Where the accepted contracts determine the binding, code constructs it and
+  logs the construction instead of rejecting the page: undeclared metric
+  detail/trend keys clear, a metric id that names a returned field becomes its
+  value key, a create/edit workflow button with no generated workflow becomes a
+  modal form for the collection's one create/update action, and a gated update
+  action on a listed collection gets an Edit row action and edit modal. A
+  rejection now reports every page's errors at once, pages a selected pack's
+  templates replace are not checked against placeholder contracts at task
+  time, and an unreachable gated action is attributed to the authored page
+  that reads its module rather than to the route manifest. The commerce pack's
+  cart action declares its response fields and its products page can create a
+  product; every pack's templates pass the wiring gate under test. The page
+  Form primitive now submits `number`, `select` and `checkbox` fields with
+  their declared types, so a typed price reaches a module action as a JSON
+  number instead of failing its input schema.
 
 - Existing app data contracts load without newly introduced ownership fields;
   present fields remain validated, and factory generation requires complete

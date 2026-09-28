@@ -2,15 +2,35 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
-from mozaiksai.core.session.build_context import load_build_context, load_contract_descriptors
+from mozaiksai.core.session.build_context import (
+    BuildContextError,
+    load_build_context,
+    load_contract_descriptors,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.resources import resolve_factory_app_root
+
+logger = logging.getLogger(__name__)
+
+
+def _bundle_relative_path(raw: Any) -> str | None:
+    """Normalize a declared pack output path; reject anything outside the bundle."""
+    if not isinstance(raw, str):
+        return None
+    path = raw.replace("\\", "/").strip()
+    while path.startswith("./"):
+        path = path[2:]
+    parts = [part for part in path.split("/") if part]
+    if not parts or path.startswith("/") or ".." in parts or ":" in parts[0]:
+        return None
+    return "/".join(parts)
 
 
 def canonical_read_action_id(collection_name: str, operation: str) -> str:
@@ -114,6 +134,68 @@ def managed_facade_actions(context_variables: Any) -> dict[str, list[str]]:
                 raise ValueError(f"Conflicting managed facade action contracts for {module_id!r}")
             result[module_id] = actions
     return result
+
+
+def selected_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
+    """Contract declarations of every selected pack whose templates assembly applies.
+
+    Assembly reads the selected packs from ``capability_packs`` and falls back to
+    the approved plan's packs. A pack with a source path is read from disk, and
+    its own ``context.yaml`` says whether it is active; a pack selected by id
+    alone is read from the ``operator_contracts`` the build context projected,
+    the same way the managed facade inventory resolves it.
+    """
+    if context_variables is None:
+        return []
+    packs = detach(context_variables.get("capability_packs")) or []
+    if not packs:
+        plan = detach(context_variables.get("app_build_plan")) or {}
+        packs = plan.get("capability_packs") or [] if isinstance(plan, Mapping) else []
+    projected = detach(context_variables.get("operator_contracts")) or []
+    result: list[dict[str, Any]] = []
+    for pack in packs:
+        if not isinstance(pack, Mapping):
+            continue
+        pack_id = pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id")
+        source = pack.get("pack_source_path")
+        root = Path(str(source)) if source else None
+        if root is not None and (root / "context.yaml").is_file():
+            try:
+                config = load_build_context(root / "context.yaml")
+                pack_block = config.get("pack")
+                declared: Mapping[str, Any] = pack_block if isinstance(pack_block, Mapping) else {}
+                if str(declared.get("status") or "active") != "active":
+                    continue
+                result.extend(load_contract_descriptors(root, config))
+            except (BuildContextError, OSError) as exc:
+                # Assembly reports an unusable pack; authoring keeps checking its pages.
+                logger.warning("selected pack %s could not be read: %s", root, exc)
+            continue
+        result.extend(
+            dict(contract) for contract in projected
+            if isinstance(contract, Mapping) and pack_id and (
+                contract.get("contract_id") == pack_id
+                or (contract.get("canonical_provider") or {}).get("provider_pack_id") == pack_id
+            )
+        )
+    return result
+
+
+def managed_pack_output_paths(context_variables: Any) -> frozenset[str]:
+    """Bundle paths the selected packs declare as template outputs (``required_outputs``).
+
+    A page a worker authors at one of these paths is a placeholder the pack's
+    template replaces at assembly, so authoring-time binding checks defer to
+    the template contracts. Only declared outputs count: a facade page route a
+    pack ships no template for is authored, and stays checked.
+    """
+    paths: set[str] = set()
+    for contract in selected_pack_contracts(context_variables):
+        for entry in contract.get("required_outputs") or []:
+            path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
+            if path:
+                paths.add(path)
+    return frozenset(paths)
 
 
 def ungated_module_actions(context_variables: Any) -> dict[str, list[str]]:
