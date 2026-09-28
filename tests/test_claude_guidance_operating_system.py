@@ -47,7 +47,7 @@ def test_new_rule_files_cover_requested_contributor_layers() -> None:
     assert "contracts/reactions.yaml" in modules_rule
     assert "backend/schemas.py" in modules_rule
     assert "backend/models.py" in modules_rule
-    assert "ctx.persistence.collection(module_id, entity_name)" in modules_rule
+    assert "ctx.persistence.collection(module_id, collection_name)" in modules_rule
 
     assert "Admin UI Two-Tier Model" in frontend_rule
     assert "app/brand/theme_config.json" in frontend_rule

@@ -25,7 +25,8 @@ artifacts, or module persistence boundaries.
 - The runtime injects `ModuleContext.persistence` as `ctx.persistence`, not
   `ctx.db`.
 - `backend/repo.py` owns persistence operations only.
-- `backend/policy.py` owns scope and query helpers.
+- Runtime persistence enforces declared collection ownership from the authenticated
+  principal; `backend/policy.py` supplies optional preflight helpers.
 - `backend/schemas.py` owns typed document/request shapes and pure helpers.
 - `backend/service.py` coordinates repo calls, business logic, and event
   emission.
@@ -41,7 +42,10 @@ artifacts, or module persistence boundaries.
 
 Generated repo code should use:
 
-- `ctx.persistence.collection(module_id, entity_name)`
+- `ctx.persistence.collection(module_id, collection_name)`
+
+Use the declared collection `name`; a declared `entity` resolves to the same
+physical collection and ownership policy. Unknown references fail closed.
 
 ## Change Discipline
 

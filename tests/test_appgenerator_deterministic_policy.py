@@ -12,10 +12,14 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import save_genera
 from factory_app.workflows.AppGenerator.tools.hook_module_runtime_quality_gate import (
     run_module_runtime_quality_gate,
 )
+from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
+    scan_module_persistence,
+)
 from factory_app.workflows.AppGenerator.tools.module_runtime_quality import (
     audit_module_runtime_quality,
 )
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 from mozaiksai.core.runtime.persistence.intent_loader import load_data_contract
 from mozaiksai.core.runtime.persistence.mongo import MongoPersistenceCollection
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
@@ -50,16 +54,41 @@ def _policy(*collections):
     return SimpleNamespace(**namespace)
 
 
+def _context(app_id="app-1", user_id="user-1", workspace_id="workspace-1"):
+    context = ModuleContext(app_id=app_id, user_id=user_id, workspace_id=workspace_id)
+    context.persistence = SimpleNamespace(
+        app_id=app_id, principal=PersistencePrincipal(user_id=user_id, workspace_id=workspace_id),
+    )
+    return context
+
+
+@pytest.mark.parametrize("collections", [
+    [_collection()],
+    [_collection("per_workspace", "space_id")],
+    [_collection("app_wide")],
+    [_collection(), _collection("per_workspace", "space_id", "task_groups")],
+])
+def test_rendered_policy_satisfies_generated_persistence_admission(collections):
+    source = render_module_policy("task_management", collections)
+    assert scan_module_persistence({POLICY_PATH: source}) == []
+
+
 @pytest.mark.parametrize(("tenancy", "attribute"), [("per_user", "user_id"), ("per_workspace", "workspace_id")])
-def test_policy_uses_declared_owner_field_and_trusted_context(tenancy, attribute):
+def test_policy_preflight_uses_immutable_persistence_principal(tenancy, attribute):
     policy = _policy(_collection(tenancy, "record_owner"))
-    context = ModuleContext(app_id="app-1", user_id="user-1", workspace_id="workspace-1")
+    context = _context()
     payload = {"record_owner": "foreign", "status": "open"}
-    expected = {"record_owner": getattr(context, attribute), "status": "open"}
+    expected = {"record_owner": getattr(context.persistence.principal, attribute), "status": "open"}
+    setattr(context, attribute, "request-controlled")
+    context.app_id = "request-app"
     assert policy.scoped_query(context, payload) == expected
-    assert policy.scope_record(context, payload) == {**expected, "app_id": "app-1"}
+    assert policy.scope_record(context, {"status": "open"}) == {**expected, "app_id": "app-1"}
+    with pytest.raises(PermissionError, match="disagrees with authenticated principal"):
+        policy.scope_record(context, payload)
     assert payload == {"record_owner": "foreign", "status": "open"}
-    setattr(context, attribute, None)
+    context.persistence.principal = PersistencePrincipal(
+        user_id=None if attribute == "user_id" else "user-1", workspace_id=None,
+    )
     with pytest.raises(PermissionError, match=f"Missing required scope identity: {attribute}"):
         policy.scoped_query(context, payload)
     with pytest.raises(PermissionError):
@@ -69,27 +98,34 @@ def test_policy_uses_declared_owner_field_and_trusted_context(tenancy, attribute
 def test_workspace_policy_also_requires_login():
     policy = _policy(_collection("per_workspace", "space_id"))
     with pytest.raises(PermissionError, match="user_id"):
-        policy.scoped_query(ModuleContext(app_id="app", workspace_id="workspace"))
+        policy.scoped_query(_context(app_id="app", user_id=None, workspace_id="workspace"))
+
+
+def test_policy_rejects_untrusted_context_identity_without_persistence_principal():
+    context = _context()
+    context.persistence.principal = None
+    with pytest.raises(PermissionError, match="user_id"):
+        _policy().scoped_query(context)
 
 
 def test_app_wide_policy_relies_on_runtime_app_isolation_without_owner_field():
     policy = _policy(_collection("app_wide"))
-    ctx = ModuleContext(app_id="app")
+    ctx = _context(app_id="app")
     assert policy.scoped_query(ctx, {"app_id": "foreign", "status": "open"}) == {"status": "open"}
     assert policy.scope_record(ctx, {"app_id": "foreign", "status": "open"}) == {"app_id": "app", "status": "open"}
     with pytest.raises(PermissionError, match="app_id"):
-        policy.scoped_query(ModuleContext(app_id=None))
+        policy.scoped_query(_context(app_id=None))
 
 
 def test_namespace_scope_does_not_determine_row_tenancy():
     for scope in ("app", "platform", "hosted"):
         policy = _policy({**_collection(), "scope": scope})
-        assert policy.scoped_query(ModuleContext(app_id="app", user_id="user")) == {"owner_id": "user"}
+        assert policy.scoped_query(_context(app_id="app", user_id="user")) == {"owner_id": "user"}
 
 
 def test_policy_requires_explicit_collection_when_module_owns_multiple_tenancies():
     policy = _policy(_collection(), _collection("per_workspace", "space_id", "task_groups"))
-    context = ModuleContext(app_id="app-1", user_id="user-1", workspace_id="space-1")
+    context = _context(workspace_id="space-1")
     assert policy.scoped_query(context, entity_name="tasks") == {"owner_id": "user-1"}
     assert policy.scoped_query(context, entity_name="task_groups") == {"space_id": "space-1"}
     with pytest.raises(ValueError, match="entity_name is required"):
@@ -105,7 +141,7 @@ def test_policy_requires_explicit_collection_when_module_owns_multiple_tenancies
 ])
 async def test_policy_composes_with_real_mongo_persistence_app_scope(tenancy, field):
     policy = _policy(_collection(tenancy, field))
-    context = ModuleContext(app_id="app-1", user_id="user-1", workspace_id="workspace-1")
+    context = _context()
     raw = AsyncMock()
     collection = MongoPersistenceCollection(
         collection=raw, app_id=context.app_id, user_id=context.user_id, workspace_id=context.workspace_id,
@@ -198,6 +234,7 @@ def test_assembly_renders_policy_from_approved_contract_and_runtime_loads_it(tmp
     ], data_contract=contract)
     files = {item["filename"]: item["content"] for item in assembled}
     assert files[POLICY_PATH] == render_module_policy("task_management", [_collection()])
+    assert scan_module_persistence(files) == []
     assert audit_module_runtime_quality(assembled) == []
     (tmp_path / "data").mkdir()
     (tmp_path / "data/contract.json").write_text(files["data/contract.json"], encoding="utf-8")

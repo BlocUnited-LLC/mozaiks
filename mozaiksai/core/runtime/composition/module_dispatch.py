@@ -9,6 +9,7 @@ from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchProvenance,
 )
 from mozaiksai.core.runtime.composition.module_executor import ModuleRequest, ModuleResult
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 
 _MODULE_ACTION_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -46,6 +47,9 @@ class ModuleActionDispatchRequest:
     # ModuleExecutor unchanged.
     authority: ModuleDispatchAuthority = field(kw_only=True)
     provenance: ModuleDispatchProvenance | None = None
+    # Server-captured authenticated identity; scope fields alone cannot grant
+    # access to owned collections.
+    persistence_principal: PersistencePrincipal | None = None
 
 
 def _resolve_module_executor(app: Any | None) -> Any:
@@ -129,5 +133,6 @@ async def dispatch_module_action(
         correlation_id=request.metadata.correlation_id,
         authority=authority,
         provenance=provenance,
+        persistence_principal=request.persistence_principal,
     )
     return cast(ModuleResult, await executor.execute(module_request, context=None))

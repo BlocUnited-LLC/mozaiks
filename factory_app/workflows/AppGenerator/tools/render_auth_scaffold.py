@@ -16,22 +16,28 @@ from mozaiksai.core.runtime.app.auth_contract import (
     validate_app_auth_contract,
 )
 from mozaiksai.core.workflow.context.context_utils import context_to_dict
+from mozaiksai.core.workflow.generator_support.code_files import materialize_collection_auth
 
 from .code_file_utils import admitted_app_file_map, compose_bundle_auth_routes
 
 _TEMPLATES = Path(__file__).resolve().parents[3] / "build_context" / "webapp_builder" / "templates"
 
 
-async def save_auth_scaffold(context_variables: Any) -> dict[str, Any]:
-    """Fill missing auth files and compose routes without replacing declared auth."""
-    context = context_to_dict(context_variables)
-    generated = admitted_app_file_map(context_variables)
+def materialize_auth_scaffold(
+    files: dict[str, str], *, data_contract: Any = None,
+) -> dict[str, str]:
+    """Render the canonical auth file delta for a constructed app bundle."""
+    generated = dict(files)
     if "app.json" not in generated:
         raise ValueError("Auth scaffolding requires the assembled app.json")
+    original_manifest = generated["app.json"]
+    generated = materialize_collection_auth(generated, data_contract=data_contract)
     manifest = json.loads(generated["app.json"])
     if not isinstance(manifest, dict):
         raise AppAuthContractError("Auth scaffolding requires app.json to be an object")
     rendered: dict[str, str] = {}
+    if generated["app.json"] != original_manifest:
+        rendered["app.json"] = generated["app.json"]
     if manifest.get("authRequired") is True:
         if "config/auth.yaml" not in generated:
             startup = manifest.get("startup") or {}
@@ -48,6 +54,16 @@ async def save_auth_scaffold(context_variables: Any) -> dict[str, Any]:
         generated.update(rendered)
         compose_bundle_auth_routes(generated)
         rendered["ui/route_manifest.json"] = generated["ui/route_manifest.json"]
+
+    return rendered
+
+
+async def save_auth_scaffold(context_variables: Any) -> dict[str, Any]:
+    """Fill missing auth files and compose routes without replacing declared auth."""
+    context = context_to_dict(context_variables)
+    rendered = materialize_auth_scaffold(
+        admitted_app_file_map(context_variables), data_contract=context.get("data_contract"),
+    )
 
     if not rendered:
         return {"code_files": []}

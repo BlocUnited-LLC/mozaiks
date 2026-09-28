@@ -17,6 +17,16 @@ This project follows a practical pre-1.0 changelog format:
 - Self-hosted subscription grant and revoke actions are internal-only; HTTP
   callers cannot assign themselves paid entitlements.
 
+- Runtime persistence enforces declared user/workspace ownership for every
+  module read, write, and aggregation using authenticated identity. Inserts
+  stamp the declared owner field and reject conflicting values; client-selected
+  workspace IDs and model-authored repository code cannot bypass ownership.
+  Cached handles resolve current dispatch authority; declared entity references
+  resolve to the owned collection. Generated owned apps require auth and reject
+  private persistence/raw-client escapes before admission. Local development and
+  Page Ask retain scoped access; verified host membership can resolve workspace
+  authority. Mixed apps keep unowned alias operations through a bounded facade.
+
 - Generated collection tenancy, owner fields, and entity identities are decided
   in DesignDocs and preserved through generation and repair. Canonical reads
   require login and owner filtering for user/workspace data, with deterministic

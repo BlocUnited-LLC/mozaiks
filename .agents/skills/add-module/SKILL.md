@@ -409,9 +409,10 @@ class {Name}Repo:
         return await col.count(query)
 ```
 
-`repo.py` must use `ctx.persistence.collection(module_id, entity_name)` with
-module/entity values that match `app/data/contract.json`. Do not use
-`ctx.db`, do not call `get_mongo_client()`, and do not hardcode database names.
+`repo.py` must use `ctx.persistence.collection(module_id, collection_name)` with
+the declared collection `name` from `app/data/contract.json`; a declared `entity`
+resolves to that same collection. Do not use `ctx.db`, do not call
+`get_mongo_client()`, and do not hardcode database names.
 
 ### 12. Write `backend/service.py`
 

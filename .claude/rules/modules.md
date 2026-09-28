@@ -44,7 +44,7 @@ Persistent modules use `backend/repo.py`, `backend/policy.py`, and
   `data/migrations/{migration_id}.json` are the canonical collection
   planning artifacts
 - generated repo code must use `ModuleContext.persistence`
-  (`ctx.persistence.collection(module_id, entity_name)`), not `ctx.db`
+  (`ctx.persistence.collection(module_id, collection_name)`), not `ctx.db`
 - `repo.py` owns persistence operations only; `service.py` owns business logic
   and event emission; `handler.py` remains thin dispatch
 - modules that store user-PII or user-owned records (contacts, messages, profiles,

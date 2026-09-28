@@ -236,7 +236,9 @@ AppGenerator persistence output is data-contract-first, not runtime-DB-first:
   operations in `service.py`.
 - Runtime injects `ctx.persistence` into `ModuleContext` when `app_id` exists.
   Generated `backend/repo.py` must use
-  `ctx.persistence.collection(module_id, entity_name)`.
+  `ctx.persistence.collection(module_id, collection_name)`, using the declared
+  collection `name`. A declared `entity` reference resolves to that same
+  collection; unknown references fail closed.
 - `data/contract.json` also covers cross-module aggregate ownership and explicit
   existing database integration when needed.
 - External database provider mechanics, when explicitly required, belong under

@@ -150,12 +150,18 @@ class _PersistenceContext:
         tenant_id: str | None = None,
         workspace_id: str | None = None,
         user_id: str | None = None,
+        principal: Any | None = None,
         **_kwargs: Any,
     ) -> None:
         self.app_id = app_id
         self.tenant_id = tenant_id
         self.workspace_id = workspace_id
         self.user_id = user_id
+        self._principal = principal
+
+    @property
+    def principal(self):
+        return self._principal() if callable(self._principal) else self._principal
 
     def collection(self, module_id: str, entity_name: str) -> _PersistenceCollection:
         rows = self.stores.setdefault((module_id, entity_name), [])
@@ -928,10 +934,9 @@ def _configure_platform(
             )
         )
 
-    executor = (
-        ModuleExecutor(entitlement_checker=entitlement_checker)
-        if entitlement_checker is not None
-        else ModuleExecutor()
+    executor = ModuleExecutor(
+        entitlement_checker=entitlement_checker,
+        data_contract=loaded.data_contract,
     )
     for module in loaded.modules:
         executor.register(
