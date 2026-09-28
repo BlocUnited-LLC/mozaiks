@@ -83,18 +83,32 @@ models:
         type: str
         description: Stable field name stored in the collection.
       type:
-        type: str
-        description: Logical data type such as string, boolean, number, object, array, or datetime.
+        type: literal
+        values:
+        - string
+        - boolean
+        - integer
+        - number
+        - date
+        - datetime
+        - object
+        - array
+        description: >
+          Canonical logical data type. Dates are stored as datetimes and
+          travel as ISO-8601 strings; object and array fields cannot be
+          canonical create/update inputs, so a required one needs a default.
       required:
         type: bool
         description: True when the field must exist on inserted records.
       default:
         type: optional_str
         description: >
-          JSON-encoded default value applied when a record omits the field,
-          or null. Scalar defaults may be encoded directly as a string
-          ("true", "0", "pending"); complex defaults must be JSON-encoded.
-          Must be null or a valid JSON string.
+          JSON-encoded default applied when a record omits the field, or
+          null for no default. It must decode to the declared type: "true"
+          only for boolean, "0" for integer/number, "[]" or "{}" for
+          array/object; a string field also accepts a bare string
+          ("pending"). "null" is never a default: omit it and set
+          required=false or nullable=true instead.
       enum:
         type: optional_list
         items: str
@@ -219,7 +233,11 @@ models:
         variants:
         - str
         - 'null'
-        description: Null or primary lookup field used for updates.
+        description: >
+          Null or the declared field canonical get reads look up by. It may
+          be a user-entered natural key; it is never the generated record id.
+          Code generates `<entity>_id` when that field is declared, otherwise
+          `id`, otherwise Mongo `_id`, and clients never supply it.
       lifecycle:
         type: DataContractLifecycle
         description: Write and migration rules for this collection.

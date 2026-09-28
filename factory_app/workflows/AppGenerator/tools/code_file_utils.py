@@ -144,6 +144,7 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             data_contract=detach(context_variables.get("data_contract")),
             design_surface_map=detach(context_variables.get("design_surface_map")),
             subscription_contract=subscription_contract,
+            companion_files=admitted_app_file_map(context_variables),
         )
         incoming = extract_code_file_map_from_payload(payload)
         incoming = compile_authored_page_files(incoming, payload=payload, context=context_variables)
@@ -177,7 +178,7 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
         ))
         incoming.update(materialize_module_write_implementations(
             {**admitted, **incoming}, app_build_plan=detach(context_variables.get("app_build_plan")),
-            data_contract=contract, owned_paths=owned_paths or [],
+            data_contract=contract, owned_paths=owned_paths or [], subscription_contract=subscription_contract,
         ))
         incoming.update({path: content for path, content in schemas.items() if admitted.get(path) != content})
         incoming.update({path: content for path, content in policies.items() if admitted.get(path) != content})

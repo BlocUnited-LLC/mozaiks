@@ -96,6 +96,7 @@ def _merge_code_files(
     ))
     file_map.update(materialize_module_write_implementations(
         file_map, app_build_plan=app_build_plan, data_contract=data_contract, owned_paths=service_paths,
+        subscription_contract=subscription_contract,
     ))
     if "app.json" in file_map:
         file_map.update(materialize_auth_scaffold(file_map, data_contract=data_contract))

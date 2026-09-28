@@ -40,6 +40,11 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     extract_code_file_map_from_payload,
 )
+from mozaiksai.core.workflow.generator_support.data_contract_fields import (
+    CANONICAL_FIELD_TYPES,
+    DataContractFieldError,
+    validate_collection_fields,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
     canonical_write_action_id,
@@ -53,11 +58,14 @@ from mozaiksai.core.workflow.generator_support.module_read_actions import (
 )
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     close_module_actions,
+    code_owned_schema_paths,
+    declared_auth_grants,
     materialize_module_actions,
     materialize_module_schemas,
     materialize_module_write_implementations,
     materialize_task_module_schemas,
     render_module_schemas,
+    validate_write_hooks,
 )
 from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     normalize_data_contract_indexes,
@@ -202,40 +210,120 @@ def test_only_module_action_collections_receive_canonical_writes(write_mode):
 def test_authored_permissions_on_owner_scoped_writes_are_stripped_with_a_logged_normalization(tenancy, caplog):
     output = _output([
         {"id": "create_task", "handler_method": "create_task", "permissions": ["task.create"],
-         "emits": ["domain.tasks.task_created"], "api_surface": "public"},
+         "emits": ["domain.tasks.task_created"]},
         {"id": "update_task", "handler_method": "update_task", "permissions": ["task.update"],
          "entitlement_gate": "task.edit"},
     ])
+    output["module_contract"]["module_yaml"]["permissions"] = [
+        {"id": "task.create", "description": "create"}, {"id": "task.update", "description": "update"},
+        {"id": "task.audit", "description": "kept: referenced by a custom action"},
+    ]
+    output["module_contract"]["module_yaml"]["actions"].append(
+        {"id": "audit_tasks", "handler_method": "audit_tasks", "permissions": ["task.audit"]},
+    )
     before = deepcopy(output)
     with caplog.at_level(logging.WARNING):
-        actions = _actions(_closed(output, _contract(tenancy)))
+        closed = _closed(output, _contract(tenancy))
+    actions = _actions(closed)
     assert actions["create_task"]["permissions"] == [] and actions["create_task"]["api_surface"] is None
     assert actions["create_task"]["emits"] == ["domain.tasks.task_created"]
     assert actions["update_task"]["entitlement_gate"] == "task.edit"
     assert actions["update_task"]["permissions"] == []
+    # The stripped catalogue entries go with them; a still-referenced declaration stays.
+    assert [entry["id"] for entry in closed["module_contract"]["module_yaml"]["permissions"]] == ["task.audit"]
     normalized = [record.message for record in caplog.records if "CANONICAL_WRITE_NORMALIZED" in record.message]
-    assert len(normalized) == 2
+    assert len(normalized) == 3
     assert "action=create_task" in normalized[0] and "permissions=['task.create']" in normalized[0]
-    assert "api_surface='public'" in normalized[0] and f"tenancy={tenancy}" in normalized[0]
+    assert f"tenancy={tenancy}" in normalized[0] and "declared auth grants=[]" in normalized[0]
+    assert "removed unreferenced permission declarations ['task.create', 'task.update']" in normalized[2]
     assert output == before
 
 
-@pytest.mark.parametrize("restriction", [{"permissions": ["task.create"]}, {"api_surface": "internal"}])
-def test_app_wide_authored_access_on_canonical_writes_fails_closed(restriction):
-    output = _output([{"id": "create_task", "handler_method": "create_task", **restriction}])
-    with pytest.raises(ValueError, match="app_wide collection 'tasks' canonical write 'create_task'.*declares no role"):
-        _closed(output, _contract("app_wide"))
+def test_permissions_the_auth_contract_declares_survive_on_canonical_writes():
+    output = _output([{"id": "create_task", "handler_method": "create_task", "permissions": ["openid", "task.create"]}])
+    auth = {"config/auth.yaml": yaml.safe_dump({"frontend": {"default_scopes": ["openid", "profile", "email"]}})}
+    context = ContextVariablesBridge({"structured_output": output, "app_build_plan": _plan(), "data_contract": _contract()})
+    closed = close_module_actions(
+        context.get("structured_output"), app_build_plan=context.get("app_build_plan"),
+        data_contract=context.get("data_contract"), companion_files=auth,
+    )
+    assert _actions(closed)["create_task"]["permissions"] == ["openid"]
+    assert declared_auth_grants(auth) == frozenset({"openid", "profile", "email"})
+    assert declared_auth_grants({}) == frozenset()
 
 
-def test_app_wide_protected_sibling_writes_block_open_canonical_writes():
-    output = _output([{"id": "archive_task", "handler_method": "archive_task", "permissions": ["task.archive"]}])
-    with pytest.raises(ValueError, match=r"protected writes \['archive_task'\].*declares no role"):
+@pytest.mark.parametrize("surface", ["internal", "admin_internal"])
+def test_authored_restricted_surfaces_on_owner_scoped_writes_are_kept_not_widened(surface):
+    output = _output([{"id": "delete_task", "handler_method": "delete_task", "api_surface": surface}])
+    actions = _actions(_closed(output, _contract()))
+    assert actions["delete_task"]["api_surface"] == surface
+    assert actions["delete_task"]["permissions"] == [] and actions["create_task"]["api_surface"] is None
+    files = _files(model_files=extract_code_file_map_from_payload(_closed(output, _contract())))
+    assert "async def delete_task" in files[f"{BACKEND}/service.py"]
+
+
+@pytest.mark.parametrize("surface", ["public", "public_readonly"])
+def test_anonymous_surfaces_on_canonical_writes_fail_closed(surface):
+    output = _output([{"id": "create_task", "handler_method": "create_task", "api_surface": surface}])
+    with pytest.raises(ValueError, match=f"declares api_surface '{surface}'; anonymous canonical writes are never constructed"):
+        _closed(output, _contract())
+
+
+def test_app_wide_authored_permissions_on_canonical_writes_fail_closed():
+    output = _output([{"id": "create_task", "handler_method": "create_task", "permissions": ["task.create"]}])
+    with pytest.raises(ValueError) as excinfo:
         _closed(output, _contract("app_wide"))
-    # Entitlement gates are plan decisions, not role grants; they do not block construction.
-    # Protected app-wide reads still need their explicit declarations (read closure rule).
+    assert "protected actions [\"create_task (permissions=['task.create'])\"]" in str(excinfo.value)
+    assert "not constructed open" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("sibling, expected", [
+    ({"permissions": ["task.archive"]}, "archive_task (permissions=['task.archive'])"),
+    ({"api_surface": "admin_internal"}, "archive_task (api_surface='admin_internal')"),
+    ({"api_surface": "internal"}, "archive_task (api_surface='internal')"),
+    ({"entitlement_gate": "task.archive"}, "archive_task (entitlement_gate='task.archive')"),
+])
+def test_app_wide_protected_siblings_block_open_canonical_writes(sibling, expected):
+    """D1: any restricted sibling means the app-wide collection gets no open writes."""
+    output = _output([{"id": "archive_task", "handler_method": "archive_task", **sibling}])
+    with pytest.raises(ValueError) as excinfo:
+        _closed(output, _contract("app_wide"))
+    message = str(excinfo.value)
+    assert expected in message
+    assert "canonical writes ['create_task', 'update_task', 'delete_task'] are not constructed open" in message
+    assert "Explicitly declare each of them in module.yaml.actions with handler_method, input_schema, output_schema, permissions and api_surface" in message
+    assert "per_user or per_workspace tenancy" in message
+
+
+def test_app_wide_gate_from_the_subscription_contract_is_protection_too():
+    output = _output([{"id": "archive_task", "handler_method": "archive_task"}])
+    subscription = {"contract_required": True, "module_contract_updates": [
+        {"module_id": MODULE, "action_id": "archive_task", "entitlement_gate": "task.archive"},
+    ]}
+    with pytest.raises(ValueError, match="archive_task \\(entitlement_gate='task.archive'\\)"):
+        _closed(output, _contract("app_wide"), subscription_contract=subscription)
+
+
+def test_explicitly_declared_protected_app_wide_writes_are_preserved_and_model_implemented():
+    """Mirror of the read closure: authored access on a protected app-wide collection stays authored."""
+    declared = [
+        {"id": name, "description": f"{name} for staff", "handler_method": name, "api_surface": "admin_internal",
+         "permissions": [], "emits": [], "ask_context_safe": False,
+         "input_schema": {"type": "object", "properties": [], "description": None, "items_type": None},
+         "output_schema": {"type": "object", "properties": [], "description": None, "items_type": None}}
+        for name in WRITES
+    ]
     reads = [action for action in _actions(_closed()).values() if action["id"] in {"get_tasks", "list_tasks"}]
-    gated = _output([{"id": "archive_task", "handler_method": "archive_task", "entitlement_gate": "task.archive"}, *reads])
-    assert set(WRITES) <= set(_actions(_closed(gated, _contract("app_wide"))))
+    output = _output([{"id": "archive_task", "handler_method": "archive_task", "api_surface": "admin_internal"}, *declared, *reads])
+    closed = _closed(output, _contract("app_wide"))
+    actions = _actions(closed)
+    for name in WRITES:
+        assert actions[name]["api_surface"] == "admin_internal" and actions[name]["description"] == f"{name} for staff"
+    assert _closed(closed, _contract("app_wide")) == closed
+    files = extract_code_file_map_from_payload(closed)
+    files[f"{BACKEND}/handler.py"] = "class TaskManagementHandler:\n    async def create_task(self, ctx, **params):\n        return {'staff': True}\n"
+    changes = materialize_module_write_implementations(files, app_build_plan=_plan(), data_contract=_contract("app_wide"))
+    assert changes == {}
 
 
 def test_closure_is_idempotent_and_leaves_custom_actions_alone():
@@ -259,14 +347,50 @@ def test_design_owned_mutations_may_omit_canonical_writes_but_not_custom_ones():
 
 
 @pytest.mark.parametrize("field, message", [
-    (_field("tags", "array"), "required field 'tags' has a structured type"),
-    (_field("payload", "blob"), "type 'blob' is not a canonical contract type"),
+    (_field("tags", "array"), "required field 'tags' has structured type 'array'.*declare a JSON default"),
+    (_field("payload", "blob"), r"type 'blob' is not a canonical contract type; valid choices=\['string', 'boolean', 'integer', 'number', 'date', 'datetime', 'object', 'array'\]"),
+    (_field("label", required=False, default="true"), "default 'true' does not match declared type 'string'"),
+    (_field("count", "integer", required=False, default="1.5"), "default '1.5' does not match declared type 'integer'"),
+    (_field("title2", default="null"), "default 'null' is not allowed"),
+    (_field("tags", "array", required=False, default="{}"), "default '{}' does not match declared type 'array'"),
+    (_field("level", "integer", required=False, enum=["a"]), "enum requires type 'string'"),
 ])
-def test_unrepresentable_contract_fields_fail_closed(field, message):
+def test_unrepresentable_contract_fields_fail_closed_with_valid_choices(field, message):
+    """AppGenerator backstop; DesignDocs save applies the same validator first."""
     contract = _contract()
     contract["surfaces"][0]["collections"][0]["fields"].append(field)
     with pytest.raises(ValueError, match=message):
         _closed(contract=contract)
+    with pytest.raises(DataContractFieldError, match=message):
+        validate_collection_fields(contract["surfaces"][0]["collections"][0], "data_contract collection 'tasks'")
+
+
+def test_designdocs_save_rejects_field_shapes_with_the_valid_choices():
+    from factory_app.workflows.DesignDocs.tools.save_design_doc import _validate_design_collections
+
+    surface_map = {"surfaces": [{"surface_id": MODULE, "surface_kind": "module", "primary_entities": ["Task"],
+                                 "owned_mutations": [], "custom_reads": []}]}
+    contract = _contract()
+    contract["shared_collections"] = []
+    contract["surfaces"][0]["collections"][0]["fields"].append(_field("refs", "ObjectId", required=False))
+    with pytest.raises(ValueError, match="type 'ObjectId' is not a canonical contract type; valid choices="):
+        _validate_design_collections(contract, surface_map)
+    contract = _contract()
+    contract["shared_collections"] = []
+    contract["surfaces"][0]["collections"][0]["fields"].append(_field("tags", "array"))
+    with pytest.raises(ValueError, match="required field 'tags' has structured type 'array'"):
+        _validate_design_collections(contract, surface_map)
+    contract = _contract()
+    contract["shared_collections"] = []
+    _validate_design_collections(contract, surface_map)
+
+
+def test_designdocs_schema_prompt_and_validator_share_one_type_list():
+    schema = yaml.safe_load((Path(__file__).resolve().parents[1] / "factory_app/workflows/DesignDocs/structured_outputs.yaml").read_text(encoding="utf-8"))
+    assert schema["models"]["DataContractField"]["fields"]["type"]["values"] == list(CANONICAL_FIELD_TYPES)
+    prompt = (Path(__file__).resolve().parents[1] / "factory_app/workflows/DesignDocs/agents.yaml").read_text(encoding="utf-8")
+    assert "one of string, boolean, integer, number, date, datetime, object, array" in prompt
+    assert "Declare the generated record id as `<entity>_id`" in prompt
 
 
 def test_optional_structured_fields_are_left_to_hooks_and_defaults():
@@ -338,12 +462,16 @@ def test_schemas_are_rendered_from_the_contract_with_one_record_representation()
     namespace: dict = {}
     exec(source, namespace)
     assert namespace["TASK_ID_FIELD"] == "task_id" and namespace["TASK_OWNER_FIELD"] == "user_id"
+    assert namespace["TASK_LOOKUP_FIELD"] == "task_id"
+    assert namespace["task_hook_values"]({"title": "A", "user_id": "x", "created_at": "y", "task_id": "custom"}, "create") == {"title": "A", "user_id": "x"}
+    assert namespace["task_hook_values"]({"title": "A", "task_id": "custom", "updated_at": "y", "user_id": "x"}, "update") == {"title": "A"}
     assert namespace["TASK_CREATED_AT_FIELD"] == "created_at" and namespace["TASK_UPDATED_AT_FIELD"] == "updated_at"
     assert namespace["TASK_WRITABLE_FIELDS"] == ("title", "description", "is_completed", "priority")
     assert namespace["TASK_REQUIRED_CREATE_FIELDS"] == ("title",)
     assert namespace["TASK_DEFAULTS"] == {"is_completed": False, "priority": "normal"}
+    assert namespace["TASK_NULLABLE_FIELDS"] == ("description",)
     assert namespace["task_create_values"]({"title": "A", "user_id": "forged", "task_id": "x"}) == {
-        "title": "A", "is_completed": False, "priority": "normal",
+        "title": "A", "description": None, "is_completed": False, "priority": "normal",
     }
     assert namespace["task_update_changes"]({"task_id": "x", "title": "B", "created_at": "never"}) == {"title": "B"}
     assert namespace["serialize_task"]({"_id": 1, "task_id": "x", "title": "A", "secret": "no"}) == {"task_id": "x", "title": "A"}
@@ -353,19 +481,24 @@ def test_schemas_are_rendered_from_the_contract_with_one_record_representation()
     assert audit_module_runtime_quality([{"filename": SCHEMAS, "content": source}]) == []
 
 
-def test_model_authored_schemas_are_rejected_and_rendered_ones_accepted():
+def test_model_authored_schemas_are_overwritten_with_a_warning(caplog):
+    """D7: the file is code-owned, so an authored copy is replaced, never a dead end."""
     files = extract_code_file_map_from_payload(_closed())
     files[SCHEMAS] = "class TaskCreateRequest(dict):\n    pass\n"
-    with pytest.raises(ValueError, match="schemas.py is rendered from data_contract"):
-        materialize_module_schemas(files, app_build_plan=_plan(), data_contract=_contract())
-    rendered = materialize_task_module_schemas(
-        {MANIFEST: files[MANIFEST]}, task={"owned_paths": [SCHEMAS]}, app_build_plan=_plan(), data_contract=_contract(),
-    )
-    assert list(rendered) == [SCHEMAS]
+    with caplog.at_level(logging.WARNING):
+        rendered = materialize_module_schemas(files, app_build_plan=_plan(), data_contract=_contract())
+    assert "class TaskRecord(TypedDict, total=False):" in rendered[SCHEMAS]
+    assert any("SCHEMAS_OVERWRITTEN" in record.message and SCHEMAS in record.message for record in caplog.records)
     files[SCHEMAS] = rendered[SCHEMAS]
+    caplog.clear()
     assert materialize_module_schemas(files, app_build_plan=_plan(), data_contract=_contract()) == rendered
+    assert not caplog.records
+    assert materialize_task_module_schemas(
+        {MANIFEST: files[MANIFEST]}, task={"owned_paths": [SCHEMAS]}, app_build_plan=_plan(), data_contract=_contract(),
+    ) == rendered
     assert materialize_task_module_schemas({}, task={"owned_paths": [f"{BACKEND}/handler.py"]}, app_build_plan=_plan(), data_contract=_contract()) == {}
     assert materialize_module_schemas(files, app_build_plan=None, data_contract=_contract()) == {}
+    assert code_owned_schema_paths([SCHEMAS, f"{BACKEND}/handler.py"], app_build_plan=_plan(), data_contract=_contract()) == {SCHEMAS}
 
 
 # --------------------------------------------------------------------------- implementations
@@ -710,14 +843,15 @@ async def test_task_batch_builds_writes_from_empty_model_output_and_applies_appr
         if request.task_id == "contract":
             output = _output([deepcopy(custom)])
         elif request.task_id == "models":
+            raise AssertionError("the data_models task is code-owned and must not reach the worker")
+        else:
             dependency = worker.get("dependency_task_outputs")["contract"]
             seen["contract_actions"] = [
                 action["id"] for action in yaml.safe_load(extract_code_file_map_from_payload(detach(dependency))[MANIFEST])["actions"]
             ]
-            output = {"model_files": [], "code_files": [], "agent_message": "code-owned"}
-        else:
             dependency = worker.get("dependency_task_outputs")["models"]
             seen["schemas"] = extract_code_file_map_from_payload(detach(dependency))[SCHEMAS]
+            assert detach(dependency)["_ag2_task_lifecycle"]["status"] == "code_owned"
             output = {"python_files": [], "code_files": [
                 {"filename": path, "content": source} for path, source in authored.items()
             ]}
@@ -774,7 +908,7 @@ async def test_task_batch_builds_writes_from_empty_model_output_and_applies_appr
 
 
 @pytest.mark.asyncio
-async def test_model_authored_schemas_are_rejected_in_the_data_models_task(monkeypatch):
+async def test_data_models_task_with_nothing_to_author_completes_without_a_worker_turn(monkeypatch):
     tasks = [{
         "task_id": "contract", "task_type": "module_contract", "capability_pack_id": MODULE,
         "initial_agent": "ConfigMiddlewareAgent", "initial_message": "Declare.",
@@ -787,16 +921,11 @@ async def test_model_authored_schemas_are_rejected_in_the_data_models_task(monke
     bridge = ContextVariablesBridge({
         "app_build_plan": {**_plan(), "build_tasks": tasks}, "data_contract": _contract(), "app_task_batch_items": tasks,
     })
-    rejections = []
+    calls = []
 
     async def run(_runner, request):
-        if request.task_id == "contract":
-            return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output=_output())
-        rejections.append(request.prompt)
-        return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output={
-            "model_files": [{"path": SCHEMAS, "entity_name": "Task", "purpose": "typed", "content": "class Task(dict):\n    pass\n"}],
-            "code_files": [{"filename": SCHEMAS, "content": "class Task(dict):\n    pass\n"}],
-        })
+        calls.append(request.task_id)
+        return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output=_output())
 
     monkeypatch.setattr(task_batches.AG2TaskBatchRunner, "run", run)
     config = task_batches.load_task_batches_config(
@@ -809,10 +938,13 @@ async def test_model_authored_schemas_are_rejected_in_the_data_models_task(monke
         chat_id="schemas", app_id="schemas", user_id="user-1", fresh_agents_per_task=False,
         parent_channel_id="schemas-parent", checkpoint=AsyncMock(),
     )
-    failure = snapshot["app_task_batch_results"]["_failed"]["models"]
-    assert failure["failure_kind"] == "output_rejected"
-    assert "schemas.py is rendered from data_contract" in failure["error"]
-    assert len(rejections) == 1  # the recovery-enabled batch defers correction to Factory policy
+    results = snapshot["app_task_batch_results"]
+    assert snapshot["app_task_batch_status"] == "completed", results
+    assert calls == ["contract"]
+    rendered = extract_code_file_map_from_payload(results["models"])
+    assert list(rendered) == [SCHEMAS] and "TASK_WRITABLE_FIELDS" in rendered[SCHEMAS]
+    assert results["models"]["_ag2_task_lifecycle"]["status"] == "code_owned"
+    assert results["models"]["agent_message"].endswith("nothing left to author.")
 
 
 # --------------------------------------------------------------------------- HTTP
@@ -919,3 +1051,169 @@ def test_two_users_drive_compiled_writes_over_http_with_closed_schemas_and_gates
     assert client.post(url + "delete_task", headers=user_a, json={"task_id": item["task_id"]}).json() == {"deleted": True}
     assert client.post(url + "delete_task", headers=user_a, json={"task_id": item["task_id"]}).status_code == 404
     assert {row["title"] for row in client.get(url + "list_tasks", headers=user_a).json()["items"]} == {"A2"}
+
+
+
+# --------------------------------------------------------------------------- record id, hooks, stale imports
+
+
+def test_generated_id_is_the_entity_id_field_never_a_natural_search_key():
+    """D3: search_by is a lookup; the generated id is <entity>_id, else id, else _id."""
+    natural = _contract(search_by="title")
+    actions = _actions(_closed(contract=natural))
+    create = actions["create_task"]["input_schema"]
+    assert "title" in create["properties"] and create["required"] == ["title"]
+    assert "task_id" not in create["properties"]
+    assert actions["update_task"]["input_schema"]["required"] == ["task_id"]
+    assert actions["delete_task"]["input_schema"]["required"] == ["task_id"]
+    files = _files(natural)
+    assert "document['task_id'] = schemas.new_task_id()" in files[f"{BACKEND}/repo.py"]
+    assert "document['title'] = schemas.new_task_id()" not in files[f"{BACKEND}/repo.py"]
+    assert "TASK_LOOKUP_FIELD = 'title'" in files[SCHEMAS]
+    assert "filters = {'title': id}" in files[f"{BACKEND}/repo.py"]  # canonical get keeps the natural lookup
+    assert "async def load_task(ctx, id):\n    collection = ctx.persistence.collection('task_management', 'tasks')\n    record = await collection.find_one({'task_id': id})" in files[f"{BACKEND}/repo.py"]
+    fields = [_field("email"), _field("user_id"), _field("display_name"), _field("created_at", "date")]
+    no_declared_id = _contract(search_by="email", fields=fields, indexes=[])
+    actions = _actions(_closed(contract=no_declared_id))
+    assert sorted(actions["create_task"]["input_schema"]["properties"]) == ["display_name", "email"]
+    assert actions["update_task"]["input_schema"]["required"] == ["_id"]
+    owner_named_like_id = _contract(fields=[_field("user_id"), _field("title"), _field("created_at", "date")])
+    owner_named_like_id["surfaces"][0]["collections"][0]["entity"] = "User"
+    owner_named_like_id["surfaces"][0]["collections"][0]["search_by"] = "user_id"
+    plan = {**_plan(), "capability_packs": [{**_plan()["capability_packs"][0], "primary_entities": ["User"]}]}
+    actions = _actions(_closed(contract=owner_named_like_id, plan=plan))
+    assert actions["update_user"]["input_schema"]["required"] == ["_id"]
+
+
+@pytest.mark.asyncio
+async def test_natural_key_lookup_keeps_user_entered_values_end_to_end(tmp_path, monkeypatch):
+    files = _files(_contract(search_by="title"))
+    handler_module, _service = _import_backend(tmp_path, monkeypatch, files, "generated_writes_natural_key")
+    handler = handler_module.TaskManagementHandler()
+    raw = _RawCollection()
+    user = _context(raw, "a")
+    created = (await handler.create_task(user, title="Buy milk"))["item"]
+    assert created["title"] == "Buy milk" and len(created["task_id"]) == 32
+    assert (await handler.get_tasks(user, id="Buy milk"))["item"]["task_id"] == created["task_id"]
+    updated = await handler.update_task(user, task_id=created["task_id"], title="Buy oat milk")
+    assert updated["item"]["title"] == "Buy oat milk"
+    assert await handler.delete_task(user, task_id=created["task_id"]) == {"deleted": True}
+
+
+@pytest.mark.parametrize("source, message", [
+    ("def before_create_task(ctx, values):\n    return values\n",
+     "hook 'before_create_task' must be async: async def before_create_task(ctx, values)"),
+    ("async def before_update_task(ctx, changes):\n    return changes\n",
+     "hook 'before_update_task' has signature (ctx, changes); expected async def before_update_task(ctx, record, changes)"),
+    ("async def after_create_tasks(ctx, record):\n    return None\n",
+     "hook 'after_create_tasks' names no canonical entity of this module; expected one of ['after_create_task'"),
+    ("class TaskService:\n    async def before_delete_task(self, ctx, record):\n        return None\n",
+     "hook 'before_delete_task' must be a module-level function, not a method"),
+    ("async def before_create_task(ctx, values, *extra):\n    return values\n",
+     "has signature"),
+])
+def test_hooks_are_validated_at_task_time_with_the_expected_signature(source, message):
+    """D4: a hook the rendered service could not call is rejected where the model can fix it."""
+    with pytest.raises(ValueError) as excinfo:
+        validate_write_hooks(f"modules/{MODULE}/backend/service.py", source, ["task"])
+    assert str(excinfo.value).startswith(f"modules/{MODULE}/backend/service.py:") and message in str(excinfo.value)
+    files = extract_code_file_map_from_payload(_closed())
+    files[f"{BACKEND}/service.py"] = source
+    with pytest.raises(ValueError) as excinfo:
+        materialize_module_write_implementations(files, app_build_plan=_plan(), data_contract=_contract())
+    assert message in str(excinfo.value)
+
+
+def test_valid_hooks_and_unrelated_functions_pass_hook_validation():
+    validate_write_hooks("modules/x/backend/service.py", (
+        "async def before_create_task(ctx, values):\n    return values\n"
+        "async def after_update_task(ctx, record, changes, *, audit=None):\n    return None\n"
+        "async def before_task_export(ctx):\n    return None\n"
+        "def helper(values):\n    return values\n"
+    ), ["task"])
+
+
+@pytest.mark.asyncio
+async def test_none_returning_hooks_leave_the_payload_unchanged_and_code_owned_keys_are_stripped(tmp_path, monkeypatch, caplog):
+    """D4 and D9: None means unchanged; ids, owners and timestamps from a hook never reach the store."""
+    hooks = {f"{BACKEND}/service.py": (
+        "async def before_create_task(ctx, values):\n"
+        "    values['title'] = values['title'].strip()\n"  # mutates in place, returns None
+        "async def before_update_task(ctx, record, changes):\n"
+        "    return {**changes, 'task_id': 'renamed', 'user_id': 'user-zzz', 'updated_at': 'never', 'created_at': 'never'}\n"
+    )}
+    files = _files(model_files=hooks)
+    handler_module, _service = _import_backend(tmp_path, monkeypatch, files, "generated_writes_none_hooks")
+    handler = handler_module.TaskManagementHandler()
+    raw = _RawCollection()
+    user = _context(raw, "a")
+    created = (await handler.create_task(user, title="  First  "))["item"]
+    assert created["title"] == "First"
+    with caplog.at_level(logging.WARNING):
+        updated = (await handler.update_task(user, task_id=created["task_id"], title="Second"))["item"]
+    assert updated["task_id"] == created["task_id"] and updated["user_id"] == "a" and updated["title"] == "Second"
+    assert updated["created_at"] == created["created_at"] and updated["updated_at"] != "never"
+    stripped = [record.message for record in caplog.records if "HOOK_OUTPUT_STRIPPED" in record.message]
+    assert stripped and "operation=update" in stripped[0]
+    assert "['created_at', 'task_id', 'updated_at', 'user_id']" in stripped[0]
+    assert (await handler.get_tasks(user, id=created["task_id"]))["item"]["title"] == "Second"
+
+
+def test_stale_class_based_service_importing_retired_dtos_is_rejected_at_task_time():
+    """D6: the recorded ServiceAgent shape fails admission with a message naming the fix."""
+    files = extract_code_file_map_from_payload(_closed())
+    files[f"{BACKEND}/service.py"] = (
+        "from .repo import TaskManagerRepo\n"
+        "from .schemas import TaskCreateRequest, TaskResponse\n\n"
+        "class TaskManagerService:\n"
+        "    async def summarize_tasks(self, *, ctx):\n        return {}\n"
+    )
+    with pytest.raises(ValueError) as excinfo:
+        materialize_module_write_implementations(files, app_build_plan=_plan(), data_contract=_contract())
+    message = str(excinfo.value)
+    assert f"{BACKEND}/service.py:2: imports ['TaskCreateRequest', 'TaskResponse'] from .schemas" in message
+    assert "'TaskRecord'" in message and "'serialize_task'" in message
+    assert "author only write hooks, custom mutations and custom reads" in message
+    files[f"{BACKEND}/service.py"] = "from .schemas import TaskRecord, serialize_task\n\nasync def summarize_tasks(ctx):\n    return {}\n"
+    assert f"{BACKEND}/service.py" in materialize_module_write_implementations(files, app_build_plan=_plan(), data_contract=_contract())
+
+
+@pytest.mark.parametrize("declared_access", [
+    {"api_surface": None, "permissions": []},
+    {"api_surface": None, "permissions": ["task.write"]},
+])
+def test_fully_declared_but_unrestricted_app_wide_writes_are_still_rejected(declared_access):
+    """D1: a model that declares every access key but no restriction does not get open writes."""
+    declared = [
+        {"id": name, "description": name, "handler_method": name, "ask_context_safe": False, "emits": [],
+         "input_schema": {"type": "object", "properties": [], "description": None, "items_type": None},
+         "output_schema": {"type": "object", "properties": [], "description": None, "items_type": None},
+         **declared_access}
+        for name in WRITES
+    ]
+    output = _output([{"id": "archive_task", "handler_method": "archive_task", "api_surface": "admin_internal"}, *declared])
+    with pytest.raises(ValueError) as excinfo:
+        _closed(output, _contract("app_wide"))
+    message = str(excinfo.value)
+    assert "canonical writes ['create_task', 'update_task', 'delete_task'] are not constructed open" in message
+    assert "restricted by api_surface internal or admin_internal, an approved entitlement gate, or permissions declared in config/auth.yaml" in message
+    gated = deepcopy(output)
+    subscription = {"contract_required": True, "module_contract_updates": [
+        {"module_id": MODULE, "action_id": name, "entitlement_gate": "task.staff"} for name in WRITES
+    ]}
+    reads = [action for action in _actions(_closed()).values() if action["id"] in {"get_tasks", "list_tasks"}]
+    gated["module_contract"]["module_yaml"]["actions"].extend(reads)
+    closed = _closed(gated, _contract("app_wide"), subscription_contract=subscription)
+    assert all(_actions(closed)[name]["api_surface"] is None for name in WRITES)  # gated, authored, preserved
+
+
+@pytest.mark.asyncio
+async def test_create_hook_returning_a_foreign_owner_is_rejected_by_the_runtime(tmp_path, monkeypatch):
+    """A create hook cannot forge ownership: the value reaches the adapter, which refuses it."""
+    source = "async def before_create_task(ctx, values):" + chr(10) + "    return {**values, 'user_id': 'user-zzz'}" + chr(10)
+    files = _files(model_files={f"{BACKEND}/service.py": source})
+    handler_module, _service = _import_backend(tmp_path, monkeypatch, files, "generated_writes_forged_owner")
+    raw = _RawCollection()
+    with pytest.raises(PersistenceScopeError, match="cannot override ownership field 'user_id'"):
+        await handler_module.TaskManagementHandler().create_task(_context(raw, "a"), title="One")
+    assert raw.rows == []

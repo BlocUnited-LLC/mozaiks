@@ -54,8 +54,11 @@ async def execute_file_replay(context_values: dict, files: dict[str, str], *, ta
         )
     results = context_values["app_task_batch_results"]
     assert context_values["app_task_batch_status"] == "completed", results.get("_failed")
-    assert set(seen) == {task["task_id"] for task in tasks}
-    assert len(seen) == len(tasks)
+    task_ids = {task["task_id"] for task in tasks}
+    # A task whose owned paths are all contract-rendered completes without a worker turn.
+    code_owned = {task_id for task_id in task_ids if results[task_id].get("_ag2_task_lifecycle", {}).get("status") == "code_owned"}
+    assert set(seen) == task_ids - code_owned, (sorted(seen), sorted(code_owned))
+    assert len(seen) == len(task_ids - code_owned)
     assert not results.get("_failed")
     assert checkpoints[-1]["app_task_batch_results"]["_meta"]["in_flight"] == {}
     return deepcopy(results)

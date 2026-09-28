@@ -165,7 +165,7 @@ preserved; missing required paths are filled and conflicting non-page owners
 still fail. Selected pack inventory is resolved before coverage construction.
 Canonical worker mapping and selected subscription, refinement, and split-admin
 task file requirements are also shared with validation. Explicit approved action
-names reach module workers. Module materialization constructs canonical reads and, for module-written collections, canonical create/update/delete actions with their implementations and schemas from declared collection ownership and typed list/detail intent.
+names reach module workers. Module materialization constructs canonical reads and, for module-written collections, canonical create/update/delete actions with their implementations and schemas from declared collection ownership and typed list/detail intent. The generated record id is the declared `<entity>_id` field (else `id`, else `_id`); `search_by` is only the get lookup and a natural key there is never replaced by a generated id.
 Subscription providers must be explicit or already selected, and facade/client
 dependencies follow registered bindings rather than task prose.
 See the [construction requirement inventory](app-build-plan-construction.md) for

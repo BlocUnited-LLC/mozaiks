@@ -19,6 +19,9 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     validate_collection_ownership,
 )
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.data_contract_fields import (
+    validate_collection_fields,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_actions_for_surface,
 )
@@ -333,6 +336,8 @@ def _validate_design_collections(data_contract: dict[str, Any], surface_map: dic
         if collection.get("tenancy") == "app_wide":
             collection.setdefault("owner_field", None)
         validate_collection_ownership(collection, path)
+        # Field types, defaults and lookups are decided here, where the design agent can revise them.
+        validate_collection_fields(collection, path)
     # One owner/entity and owner/name must identify one collection across both locations.
     list(iter_data_contract_collections(data_contract))
     for surface in surfaces.values():
