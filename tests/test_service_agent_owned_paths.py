@@ -34,8 +34,8 @@ def test_service_agent_must_emit_every_owned_path() -> None:
     prompt = _agent_prompt("ServiceAgent")
 
     assert "Emit every model-owned path listed in `current_build_task.owned_paths`" in prompt
-    assert "Code renders canonical list/get implementations in the owned handler/service/repo files" in prompt
-    assert "owned `backend/policy.py` from data_contract collection tenancy and owner_field" in prompt
+    assert "Code renders the canonical create/update/delete and list/get implementations into the owned handler/service/repo files" in prompt
+    assert "the owned `backend/policy.py`, and the module's `backend/schemas.py`" in prompt
     assert "fails the whole batch" in prompt
 
 
@@ -101,7 +101,8 @@ def test_the_worked_example_still_shows_the_schemas_import() -> None:
         entry for entry in example["code_files"] if entry["filename"].endswith("backend/service.py")
     )
 
-    assert "from .schemas import" in service["content"]
+    assert "from . import repo, schemas" in service["content"]
+    assert "schemas.serialize_task(record)" in service["content"]
 
 
 def test_the_serialization_helper_is_imported_not_authored() -> None:
@@ -113,7 +114,7 @@ def test_the_serialization_helper_is_imported_not_authored() -> None:
     prompt = _agent_prompt("ServiceAgent")
 
     assert "Never create or edit `backend/schemas.py`" in prompt
-    assert "define it in a file this task owns" in prompt
+    assert "defined in a file this task owns" in prompt
     assert "Define a module-local helper in backend/schemas.py" not in prompt
 
 
@@ -126,7 +127,7 @@ def test_upstream_shapes_are_named_by_where_they_arrive() -> None:
     prompt = _agent_prompt("ServiceAgent")
 
     assert "dependency_task_outputs" in prompt
-    assert "importable from the module's `.schemas` module" in prompt
+    assert "from the module's `.schemas` module" in prompt
 
 
 def test_the_plan_still_withholds_schemas_from_the_service_task() -> None:

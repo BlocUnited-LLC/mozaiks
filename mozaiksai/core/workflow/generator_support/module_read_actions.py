@@ -191,18 +191,8 @@ def close_module_read_actions(
     if manifest.get("module", {}).get("id") != module_id:
         raise ValueError("Read action closure requires matching module_contract and module.yaml identities")
     _close_manifest(module_id, manifest, plan, contract, subscription_contract)
-    surface_map = detach(design_surface_map) or {}
-    approved = {
-        action for surface in surface_map.get("surfaces") or []
-        if surface.get("surface_id") == module_id and surface.get("surface_kind") == "module"
-        for action in [*(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or [])]
-    }
-    missing = approved - {action.get("id") for action in manifest.get("actions") or []}
-    if missing:
-        raise ValueError(
-            f"{module_id}: declare approved actions {sorted(missing)!r} in module.yaml.actions with their "
-            "access policies; ServiceAgent must implement declared custom reads and writes"
-        )
+    # Approved custom actions are checked once both canonical families are closed
+    # (module_write_actions.close_module_actions), so DesignDocs may omit code-owned writes.
     return output
 
 

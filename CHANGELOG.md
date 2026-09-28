@@ -33,6 +33,23 @@ This project follows a practical pre-1.0 changelog format:
   backend implementations. Subscription gates target approved writes and custom
   reads, survive repairs, and cannot lock canonical reads or billing facades.
 
+- Generated apps get code-owned canonical `create_<entity>`,
+  `update_<entity>` and `delete_<entity>` actions, a code-rendered
+  `backend/schemas.py` and handler/service/repo implementations for every
+  module-written collection, compiled from the approved data contract. Create
+  assigns the declared id and timestamps, update and delete address records by
+  that id and answer 404 outside the caller's scope, and the runtime stamps
+  ownership. Canonical actions carry no role permissions: authored permissions on
+  owner-scoped actions are removed with a logged normalization and rejected on
+  app-wide collections. Unique indexes on owned collections are compounded with
+  the owner field. ServiceAgent now writes only write hooks, custom mutations and
+  custom reads; ModelAgent no longer authors schemas for persistent modules.
+  App-wide collections beside gated, permissioned or internal actions get no open
+  canonical writes; hooks are validated at task admission and may return None;
+  DesignDocs validates canonical field types and defaults at save time and gives
+  required array/object fields an empty default; the generated record id is
+  `<entity>_id`, never a natural `search_by` key.
+
 ### Fixed
 
 - DesignDocs saves a design whose authentication surface declares login/logout

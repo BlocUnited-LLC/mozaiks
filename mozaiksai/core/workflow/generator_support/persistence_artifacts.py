@@ -16,22 +16,54 @@ from mozaiksai.core.runtime.persistence.migrations import (
 from .module_action_inventory import managed_pack_contracts
 
 
-def materialize_index_name(index: dict[str, Any], path: str) -> dict[str, Any]:
-    """Preserve explicit names; derive omitted names from ordered keys and options."""
+def _derived_index_name(index: dict[str, Any], path: str) -> str:
+    normalized = _normalize_index_spec({**index, "name": "generated"}, path)
+    identity = json.dumps(
+        {"keys": normalized.keys, "options": normalized.options},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )
+    return "idx_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+
+
+def scope_owned_unique_index(index: dict[str, Any], collection: dict[str, Any], path: str) -> dict[str, Any]:
+    """Compound unique keys with the owner field so principals cannot collide or probe.
+
+    A unique key declared on a per_user or per_workspace collection is unique
+    within one owner's rows, never across the app. A derived name follows the
+    scoped keys; an explicit name is preserved.
+    """
+    owner_field = collection.get("owner_field")
+    if collection.get("tenancy") not in {"per_user", "per_workspace"} or not owner_field or not index.get("unique"):
+        return index
+    keys = list(index.get("keys") or [])
+    fields = [
+        key.get("field") if isinstance(key, dict) else key[0] if isinstance(key, (list, tuple)) and key else None
+        for key in keys
+    ]
+    if owner_field in fields:
+        return index
     result = deepcopy(index)
-    normalized = _normalize_index_spec({**result, "name": result.get("name") or "generated"}, path)
+    result["keys"] = [{"field": owner_field, "order": 1}, *keys]
+    if result.get("name") is None or result["name"] == _derived_index_name(index, path):
+        result["name"] = None
+    return result
+
+
+def materialize_index_name(
+    index: dict[str, Any], path: str, *, collection: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Scope owned unique keys, preserve explicit names, and derive omitted names."""
+    result = deepcopy(index)
+    if collection is not None:
+        result = scope_owned_unique_index(result, collection, path)
     if result.get("name") is None:
-        identity = json.dumps(
-            {"keys": normalized.keys, "options": normalized.options},
-            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-        )
-        result["name"] = "idx_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+        result["name"] = _derived_index_name(result, path)
     _normalize_index_spec(result, path)
     return result
 
 
 def normalize_data_contract_indexes(data_contract: dict[str, Any]) -> dict[str, Any]:
-    """Name indexes before design persistence and when compiling recorded designs."""
+    """Scope and name indexes before design persistence and when compiling recorded designs."""
     result = deepcopy(data_contract)
     collections = [
         collection for surface in result.get("surfaces") or []
@@ -41,7 +73,9 @@ def normalize_data_contract_indexes(data_contract: dict[str, Any]) -> dict[str, 
         if "indexes" not in collection:
             continue
         collection["indexes"] = [
-            materialize_index_name(index, f"data_contract.{collection.get('name')}.indexes[{offset}]")
+            materialize_index_name(
+                index, f"data_contract.{collection.get('name')}.indexes[{offset}]", collection=collection,
+            )
             for offset, index in enumerate(collection.get("indexes") or [])
         ]
     return result

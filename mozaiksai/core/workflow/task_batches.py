@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -14,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from mozaiksai.core.adapters.ag2_task_batch_runner import (
     AG2TaskBatchRunner,
     AG2TaskBatchRunnerRequest,
+    AG2TaskBatchRunnerResult,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import ContextAuthorityPolicy
@@ -35,9 +37,12 @@ from .generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
 from .generator_support.module_policy import materialize_task_module_policies
-from .generator_support.module_read_actions import (
-    close_module_read_actions,
-    materialize_module_read_implementations,
+from .generator_support.module_read_actions import materialize_module_read_implementations
+from .generator_support.module_write_actions import (
+    close_module_actions,
+    code_owned_schema_paths,
+    materialize_module_write_implementations,
+    materialize_task_module_schemas,
 )
 from .generator_support.page_plan_utils import (
     _page_stem_from_path,
@@ -49,6 +54,8 @@ from .generator_support.page_plan_utils import (
 )
 from .path_ownership import detect_owned_path_collisions, normalize_owned_paths
 from .paths import resolve_workflow_path
+
+logger = logging.getLogger(__name__)
 
 
 class TaskBatchSource(BaseModel):
@@ -1022,6 +1029,7 @@ async def _run_one_task(
         raise ValueError(f"task {task.get('task_id')!r} references unknown agent {agent_name!r}")
     if getattr(agent, "_mozaiks_tool_outcome", None) is not None:
         raise ValueError(f"task agent {agent_name!r} declares a network-only tool outcome; use the task-batch failure policy")
+    code_owned_output = _code_owned_task_output(task, task_context)
 
     async with semaphore:
         runner_result = None
@@ -1051,22 +1059,34 @@ async def _run_one_task(
                     )
             if before_attempt:
                 await before_attempt(str(task["task_id"]), _attempt + 1)
-            runner_result = await AG2TaskBatchRunner().run(
-                AG2TaskBatchRunnerRequest(
-                    workflow_name=workflow_name,
-                    batch_id=batch.id,
-                    task_id=str(task["task_id"]),
-                    chat_id=chat_id,
-                    app_id=app_id,
-                    agent_name=agent_name,
-                    agent=agent,
-                    prompt=attempt_prompt,
-                    context_variables=task_context,
-                    structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
-                    context_authority_policy=context_authority_policy,
-                    timeout_seconds=batch.execution.timeout_seconds,
+            if code_owned_output is not None:
+                # Every owned path is rendered from the contract: there is nothing for the
+                # worker to author, so the task completes without an AG2 turn.
+                logger.info(
+                    "TASK_CODE_OWNED: task=%s agent=%s skipped; owned paths are rendered from data_contract",
+                    task.get("task_id"), agent_name,
                 )
-            )
+                runner_result = AG2TaskBatchRunnerResult(
+                    status=RunStatus.COMPLETED, output=copy.deepcopy(code_owned_output),
+                    task_id=str(task["task_id"]), lifecycle_status="code_owned",
+                )
+            else:
+                runner_result = await AG2TaskBatchRunner().run(
+                    AG2TaskBatchRunnerRequest(
+                        workflow_name=workflow_name,
+                        batch_id=batch.id,
+                        task_id=str(task["task_id"]),
+                        chat_id=chat_id,
+                        app_id=app_id,
+                        agent_name=agent_name,
+                        agent=agent,
+                        prompt=attempt_prompt,
+                        context_variables=task_context,
+                        structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
+                        context_authority_policy=context_authority_policy,
+                        timeout_seconds=batch.execution.timeout_seconds,
+                    )
+                )
             if runner_result.status is not RunStatus.COMPLETED:
                 last_error = runner_result.error or runner_result.status.value
                 rejected_output = None
@@ -1080,11 +1100,14 @@ async def _run_one_task(
                 candidate_json = json.dumps(output, separators=(",", ":"), default=str)
                 _reject_task_output_identity_drift(task, output)
                 subscription_contract = resolve_subscription_contract(task_context)
-                output = cast(dict[str, Any], close_module_read_actions(
+                companion_files = dict(task_context.get("generated_files") or {})
+                for dependency in (task_context.get("dependency_task_outputs") or {}).values():
+                    companion_files.update(extract_code_file_map_from_payload(dependency))
+                output = cast(dict[str, Any], close_module_actions(
                     output, app_build_plan=task_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"),
                     design_surface_map=task_context.get("design_surface_map"),
-                    subscription_contract=subscription_contract,
+                    subscription_contract=subscription_contract, companion_files=companion_files,
                 ))
                 canonical_code_files = extract_code_file_entries_from_payload(
                     output, build_timestamp=base_context.get("build_timestamp"),
@@ -1108,11 +1131,21 @@ async def _run_one_task(
                     data_contract=data_contract,
                 )
                 canonical_file_map.update(policies)
+                canonical_file_map.update(materialize_task_module_schemas(
+                    canonical_file_map, task=task, app_build_plan=task_context.get("app_build_plan"),
+                    data_contract=data_contract,
+                ))
                 read_sources = dict(task_context.get("generated_files") or {})
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
                     read_sources.update(extract_code_file_map_from_payload(dependency))
                 read_sources.update(canonical_file_map)
                 canonical_file_map.update(materialize_module_read_implementations(
+                    read_sources, app_build_plan=task_context.get("app_build_plan"),
+                    data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
+                    subscription_contract=subscription_contract,
+                ))
+                read_sources.update(canonical_file_map)
+                canonical_file_map.update(materialize_module_write_implementations(
                     read_sources, app_build_plan=task_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                     subscription_contract=subscription_contract,
@@ -1214,6 +1247,22 @@ def _build_scoped_worker_prompt(prompt: str, task_context: dict[str, Any]) -> st
         "The response `task_id` MUST equal `current_task_id`; the response `kind` MUST equal `current_task.kind`.\n"
         f"{json.dumps(envelope, indent=2, sort_keys=True, default=str)}"
     )
+
+
+def _code_owned_task_output(task: dict[str, Any], task_context: dict[str, Any]) -> dict[str, Any] | None:
+    """A data_models task whose every owned path is contract-rendered has nothing to author."""
+    if str(task.get("task_type") or "").strip() != "data_models":
+        return None
+    owned = _normalize_owned_paths(task.get("owned_paths"))
+    rendered = code_owned_schema_paths(
+        owned, app_build_plan=task_context.get("app_build_plan"), data_contract=task_context.get("data_contract"),
+    )
+    if not owned or not set(owned) <= rendered:
+        return None
+    return {
+        "model_files": [], "code_files": [],
+        "agent_message": f"{sorted(owned)} are rendered from data_contract; nothing left to author.",
+    }
 
 
 def _reject_task_output_identity_drift(task: dict[str, Any], output: dict[str, Any]) -> None:

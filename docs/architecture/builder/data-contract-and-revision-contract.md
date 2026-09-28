@@ -308,14 +308,61 @@ repository code resolves that entry's collection `name` before calling
 `ctx.persistence.collection(module_id, collection_name)`.
 
 Design surfaces declare `custom_reads` beside `owned_mutations` for actions such
-as dashboard summaries. Code supplies canonical entity list/get reads; custom
-reads remain declared design work implemented by ServiceAgent. Per-user and
-per-workspace canonical reads require login and owner filtering, without a role
-permission. Canonical list/get actions never carry subscription gates; a paid
-view must use a declared custom read. Protected app-wide collections require
-explicit read declarations and access decisions from ConfigMiddlewareAgent;
-ServiceAgent implements reads with authored role permissions, non-default API
-exposure, or custom handlers. Ordinary canonical implementations remain code-owned.
+as dashboard summaries. Code supplies canonical entity list/get reads and, for
+every collection whose `lifecycle.write_mode` is `module_action`, the canonical
+`create_<entity>`, `update_<entity>` and `delete_<entity>` writes. Their ids
+derive from the declared `entity`, so DesignDocs may list them in
+`owned_mutations` or omit them; custom mutations and custom reads remain declared
+design work implemented by ServiceAgent. Canonical create assigns the generated
+record id, which is the declared `<entity>_id` field, else `id`, else Mongo
+`_id`; clients never supply it. `search_by` is the canonical get lookup and may
+be a user-entered natural key, which is never overwritten with a generated id.
+Create stamps declared `created_at`/`updated_at` fields; update and delete
+address records by the generated id and answer 404 outside the caller's scope. The
+closed create/update request schemas carry only writable scalar fields: ids,
+owner fields, timestamps and scope metadata are never client input, and
+structured (array/object) fields reach records only through defaults, hooks or
+custom mutations. Per-user and per-workspace canonical actions require login and
+owner filtering, without a role permission. A permission on a canonical action
+survives only when `config/auth.yaml` `frontend.default_scopes` declares it;
+other permissions are removed with a logged normalization on owner-scoped
+collections (and their unreferenced declarations dropped) and rejected on
+app_wide collections. An authored `api_surface` of `internal` or
+`admin_internal` on a canonical write is kept; `public` is rejected. Canonical
+list/get actions never carry subscription gates; canonical writes may. A paid
+view must use a declared custom read. An app_wide collection beside actions
+with permissions, subscription gates or internal surfaces receives no open
+canonical writes or reads: ConfigMiddlewareAgent declares each of them
+explicitly with its access policy and ServiceAgent implements them. Ordinary
+canonical implementations remain code-owned.
+
+`backend/schemas.py` is rendered from the contract for every module owning
+collections: record and input `TypedDict`s, field constants, a
+`serialize_<entity>` allowlist, `<entity>_create_values`,
+`<entity>_update_changes` and `new_<entity>_id`. Records are plain dicts.
+ServiceAgent writes business logic only as module-level hooks in `service.py`
+(`before_create_<entity>(ctx, values)`, `after_create_<entity>(ctx, record)`,
+`before_update_<entity>(ctx, record, changes)`, `after_update_<entity>(ctx,
+record, changes)`, `before_delete_<entity>(ctx, record)`,
+`after_delete_<entity>(ctx, record)`), which the rendered service calls when
+present, and as custom mutations or reads written against the rendered repo API.
+Task admission parses hooks: they must be module-level `async def` functions
+with those signatures and an entity the module owns. A before hook may return
+None (unchanged); ids and managed timestamps in its result are stripped with a
+logged warning. An update hook cannot change the owner field either; a create
+hook's owner value reaches the runtime, which rejects a foreign owner (403).
+Field types come from the canonical list
+(string, boolean, integer, number, date, datetime, object, array) and defaults
+must decode to the declared type; DesignDocs validates both at save time and
+AppGenerator repeats the check only as a backstop. A required array or object
+field without a default is saved with `"[]"` or `"{}"` and a logged
+`DATA_CONTRACT_FIELD_NORMALIZED` notice; unknown types are still rejected with
+the valid choices. A model-authored
+`schemas.py` for a persistent module is overwritten by the rendered file with a
+logged warning, and a `data_models` task with nothing left to author completes
+without a worker turn.
+Unique indexes on per-user and per-workspace collections compile to compound
+keys led by the owner field, so keys are unique within one owner's rows.
 Page bindings use the full approved action inventory. Managed facade entries use
 the pack contract's full action set even when DesignDocs names a subset.
 Subscription gate targets are restricted to approved writes and custom reads;
@@ -805,8 +852,10 @@ physical collection; unknown names fail closed. Owned collections force
 `app.json.authRequired=true` during materialization and trigger the canonical
 auth scaffold. Model-written public intent cannot disable that requirement.
 
-Code renders `modules/{module_id}/backend/policy.py` before worker output
-acceptance. ServiceAgent owns its artifact path but emits no policy source.
+Code renders `modules/{module_id}/backend/policy.py` and
+`modules/{module_id}/backend/schemas.py` before worker output acceptance.
+ServiceAgent owns the policy path and ModelAgent the schema path, but neither
+emits source for a module that owns collections.
 These helpers are optional preflight: `scoped_query(context, filters,
 entity_name=collection_name)` and `scope_record(context, record,
 entity_name=collection_name)` use the immutable persistence principal.

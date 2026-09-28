@@ -740,8 +740,18 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
         "modules/reports/backend/handler.py": handler_source.strip() + "\n",
         "modules/reports/backend/service.py": textwrap.dedent(
             """
+            from uuid import uuid4
+
             from .repo import ReportsRepo
-            from .schemas import report_document
+
+
+            def report_document(*, topic=None):
+                normalized_topic = str(topic or "Untitled").strip() or "Untitled"
+                return {
+                    "report_id": uuid4().hex,
+                    "topic": normalized_topic,
+                    "status": "generated",
+                }
 
 
             class ReportsService:
@@ -798,20 +808,6 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
                         return record
                     result = await collection.insert_one(record)
                     return {**record, "report_id": str(result.inserted_id)}
-            """
-        ).strip() + "\n",
-        "modules/reports/backend/schemas.py": textwrap.dedent(
-            """
-            from uuid import uuid4
-
-
-            def report_document(*, topic=None):
-                normalized_topic = str(topic or "Untitled").strip() or "Untitled"
-                return {
-                    "report_id": uuid4().hex,
-                    "topic": normalized_topic,
-                    "status": "generated",
-                }
             """
         ).strip() + "\n",
     }

@@ -37,6 +37,7 @@ from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_actions,
     materialize_module_read_implementations,
 )
+from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
 
 MODULE = "task_management"
 MANIFEST = f"modules/{MODULE}/module.yaml"
@@ -221,13 +222,20 @@ def test_shared_collection_has_the_same_canonical_reads_policy_and_implementatio
 
 
 def test_design_custom_reads_are_required_but_not_invented():
+    # Approved custom actions are checked after both canonical families close.
     with pytest.raises(ValueError, match="declare approved actions.*task_summary"):
-        close_module_read_actions(
+        close_module_actions(
             _output(), app_build_plan=_plan(), data_contract=_contract(),
             design_surface_map={"surfaces": [{
                 "surface_id": MODULE, "surface_kind": "module", "custom_reads": ["task_summary"],
             }]},
         )
+    assert close_module_read_actions(
+        _output(), app_build_plan=_plan(), data_contract=_contract(),
+        design_surface_map={"surfaces": [{
+            "surface_id": MODULE, "surface_kind": "module", "custom_reads": ["task_summary"],
+        }]},
+    )["module_contract"]["module_yaml"]["actions"][-1]["id"] == "list_tasks"
 
 
 def test_nonpersistent_facade_does_not_receive_reads():
@@ -499,7 +507,10 @@ async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materi
         action for action in yaml.safe_load(assembled_files[MANIFEST])["actions"] if action["id"] == "list_tasks"
     )
     assert assembled_read == original_read
-    assert {path: source for path, source in assembled_files.items() if path != MANIFEST} == {
+    # Assembly renders the code-owned schemas.py for every persistent module, like policy.py.
+    schemas_path = f"{BACKEND}/schemas.py"
+    assert "class TaskRecord(TypedDict, total=False):" in assembled_files[schemas_path]
+    assert {path: source for path, source in assembled_files.items() if path not in {MANIFEST, schemas_path}} == {
         path: source for path, source in task_files.items() if path != MANIFEST
     }
     assert _merge_code_files([{"code_files": assembled}], app_build_plan=plan, data_contract=contract) == assembled
