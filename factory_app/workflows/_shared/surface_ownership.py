@@ -253,12 +253,16 @@ def _remove_platform_pages(
     spec: dict[str, Any],
     *,
     owner: str,
+    platform_auth_ids: set[str],
+    removed_by_name: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Drop the pages a platform surface owns; the platform already serves them.
 
-    A page is only removable when nothing app-owned depends on it: no other
+    A page is only removable when nothing app-owned depends on it: no app-owned
     surface lists it, and no section binds an app module through a typed
-    reference. Either one is a design decision, named for the retry.
+    reference. Either one is a design decision, named for the retry. Sibling
+    surfaces that normalize to the same platform capability are not app owners:
+    the removal is constructed once and recorded on each of them.
     """
     surface_id = str(surface["surface_id"])
     names = _identifiers(surface.get("owned_pages"))
@@ -267,22 +271,25 @@ def _remove_platform_pages(
     app_modules = {
         str(other["surface_id"]) for other in surfaces
         if other is not surface and other.get("owner") == "app" and other.get("surface_kind") == "module"
+        and str(other["surface_id"]) not in platform_auth_ids
     }
-    removed: list[dict[str, Any]] = []
+    removed: list[dict[str, Any]] = [removed_by_name[name] for name in sorted(names) if name in removed_by_name]
     for page in list(spec.get("pages") or []):
         name = str(page.get("name") or "")
-        if not _identifiers([name]) & names:
+        key = name.strip().casefold()
+        if key not in names:
             continue
         co_owners = [
             str(other["surface_id"]) for other in surfaces
-            if other is not surface and _identifiers([name]) & _identifiers(other.get("owned_pages"))
+            if other is not surface and str(other["surface_id"]) not in platform_auth_ids
+            and key in _identifiers(other.get("owned_pages"))
         ]
         if co_owners:
             raise ValueError(
                 f"Page {name!r} ({page.get('route')}) is owned by {surface_id!r}, which normalizes to "
-                f"{owner}, and also by {co_owners}. The platform serves sign-in itself, so the app builds "
-                f"no page for {surface_id!r}: remove {name!r} from owned_pages of {co_owners} and drop the "
-                f"page, or move its app-owned sections to a page owned only by {co_owners[0]!r} and remove "
+                f"{owner}, and also by app-owned {co_owners}. The platform serves sign-in itself, so the app "
+                f"builds no page for {surface_id!r}: remove {name!r} from owned_pages of {co_owners} and drop "
+                f"the page, or move its app-owned sections to a page owned only by {co_owners[0]!r} and remove "
                 f"{name!r} from {surface_id!r}.owned_pages."
             )
         bound = [
@@ -299,7 +306,9 @@ def _remove_platform_pages(
                 f"{name!r} from {surface_id!r}.owned_pages."
             )
         spec["pages"].remove(page)
-        removed.append({"name": name, "route": page.get("route")})
+        entry = {"name": name, "route": page.get("route")}
+        removed.append(entry)
+        removed_by_name[key] = entry
     if removed and not spec.get("pages"):
         raise ValueError(
             f"Removing the platform sign-in page(s) {[page['name'] for page in removed]} owned by "
@@ -308,12 +317,21 @@ def _remove_platform_pages(
     return removed
 
 
+# The page schema's typed navigation references: action/link `href` and route
+# fields. Labels, columns, and data values are never routes.
+_NAVIGATION_KEYS = frozenset({"href", "route", "path", "fallbackPath"})
+
+
 def _rewrite_routes(node: Any, routes: dict[str, str], login_route: str, hits: list[str]) -> Any:
-    if isinstance(node, str) and node in routes:
-        hits.append(node)
-        return login_route
     if isinstance(node, dict):
-        return {key: _rewrite_routes(value, routes, login_route, hits) for key, value in node.items()}
+        rewritten: dict[str, Any] = {}
+        for key, value in node.items():
+            if key in _NAVIGATION_KEYS and isinstance(value, str) and value in routes:
+                hits.append(value)
+                rewritten[key] = login_route
+            else:
+                rewritten[key] = _rewrite_routes(value, routes, login_route, hits)
+        return rewritten
     if isinstance(node, list):
         return [_rewrite_routes(value, routes, login_route, hits) for value in node]
     return node
@@ -519,6 +537,12 @@ def normalize_surface_ownership(
     surfaces = normalized_map["surfaces"]
     targets: dict[str, str] = {}
     removed_routes: dict[str, str] = {}
+    removed_by_name: dict[str, dict[str, Any]] = {}
+    auth_rules = [rule for rule in rules if rule.platform_capability == "authentication" and not rule.facade_module]
+    platform_auth_ids = {
+        str(surface["surface_id"]) for surface in surfaces
+        if any(_matches_surface(surface, rule) for rule in auth_rules)
+    }
     for surface in surfaces:
         surface_id = surface["surface_id"]
         matches = [rule for rule in rules if _matches_surface(surface, rule)]
@@ -528,20 +552,18 @@ def normalize_surface_ownership(
         facade = facades.get(rule.facade_module or "", {})
         owner = rule.facade_module or "platform"
         facade_actions = _facade_actions(facade)
+        name_match = bool(_identifiers([surface_id]) & _identifiers(rule.surface_ids)) or surface_id == rule.facade_module
         entities = _identifiers(rule.entity_names)
         allowed_actions = _identifiers([*rule.action_ids, *facade_actions])
-        if _identifiers([surface_id]) & _identifiers(rule.surface_ids):
+        if name_match:
             entities |= _identifiers(rule.surface_entity_names)
             allowed_actions |= _identifiers(rule.surface_action_ids)
-        unknown_entities = [
-            str(entity) for entity in surface.get("primary_entities") or []
-            if str(entity).strip().casefold() not in entities
+        declared_entities = [str(entity) for entity in surface.get("primary_entities") or []]
+        declared_actions = [
+            str(action) for action in [*(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or [])]
         ]
-        unknown_actions = [
-            str(action)
-            for action in [*(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or [])]
-            if str(action).strip().casefold() not in allowed_actions
-        ]
+        unknown_entities = [entity for entity in declared_entities if entity.strip().casefold() not in entities]
+        unknown_actions = [action for action in declared_actions if action.strip().casefold() not in allowed_actions]
         remaining = [
             collection["name"] for group_id, collections in groups for collection in collections
             if surface_id in {group_id, (collection.get("ownership") or {}).get("surface_id")}
@@ -568,6 +590,22 @@ def normalize_surface_ownership(
             split_out.append(
                 f"move integrations {foreign_integrations} to an app-owned surface; "
                 f"{rule.facade_module} integrates only {facade['provider_module']}"
+            )
+        if split_out and not name_match:
+            # An app-named surface matched only through a reserved entity or
+            # action is an app surface with one wrong claim. The remedy is to
+            # drop that claim, not to turn the surface into a platform reference.
+            reserved_entities = [entity for entity in declared_entities if entity not in unknown_entities]
+            reserved_actions = [action for action in declared_actions if action not in unknown_actions]
+            provides = (
+                f"bind that UI to {rule.facade_module} and its actions {sorted(facade_actions)}"
+                if facade else "the platform provides them; reference it with owner=platform and config/auth.yaml"
+            )
+            raise ValueError(
+                f"App surface {surface_id!r} claims {rule.owner}: entities {reserved_entities}, actions "
+                f"{reserved_actions}. Remove those claims from {surface_id!r} ({provides}) and keep it "
+                f"app-owned with its entities {unknown_entities}, actions {unknown_actions}, collections "
+                f"{remaining}, and workflow_triggers {triggers}."
             )
         if split_out:
             keep = (
@@ -607,7 +645,10 @@ def normalize_surface_ownership(
             continue
         removed_pages: list[dict[str, Any]] = []
         if removes_pages and normalized_spec is not None:
-            removed_pages = _remove_platform_pages(surface, surfaces, normalized_spec, owner=rule.owner)
+            removed_pages = _remove_platform_pages(
+                surface, surfaces, normalized_spec, owner=rule.owner,
+                platform_auth_ids=platform_auth_ids, removed_by_name=removed_by_name,
+            )
         corrected = deepcopy(surface)
         corrected.update(
             owner="app" if facade else "platform", primary_entities=[], owned_mutations=[], custom_reads=[],
@@ -627,12 +668,15 @@ def normalize_surface_ownership(
                 entry["removed_events"] = events
             if removed_pages:
                 entry["removed_pages"] = removed_pages
-                removed_routes.update({str(page["route"]): surface_id for page in removed_pages})
+                for page in removed_pages:
+                    removed_routes.setdefault(str(page["route"]), surface_id)
             targets[surface_id] = corrected["surface_id"]
             surface.update(corrected)
     if removed_routes:
         login_route = auth_contract_login_route()
-        for surface_id, entries in _redirect_navigation(normalized_spec or {}, removed_routes, login_route).items():
+        # A sign-in page designed at the login route itself needs no redirect.
+        redirectable = {route: owner_id for route, owner_id in removed_routes.items() if route != login_route}
+        for surface_id, entries in _redirect_navigation(normalized_spec or {}, redirectable, login_route).items():
             records[(surface_id, "platform")]["redirected_navigation"] = entries
 
     # Several duplicate provider surfaces may map to one already materialized
