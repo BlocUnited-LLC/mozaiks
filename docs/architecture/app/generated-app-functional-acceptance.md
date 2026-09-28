@@ -304,22 +304,57 @@ and selected managed-pack state only when the declared contract determines both
 the canonical owner and the state to remove. Authentication surfaces become
 `owner: platform` references. Managed subscription surfaces become the app-owned
 `billing_portal` facade, merging into an existing facade when present. Approved
-pages and routes are preserved. Only identified duplicate collections and entities
-are removed; a duplicate collection on an otherwise valid app domain surface does
-not change that surface's owner.
+app-owned pages and routes are preserved. Only identified duplicate collections
+and entities are removed; a duplicate collection on an otherwise valid app domain
+surface does not change that surface's owner.
+
+Two further corrections are determined by the same contracts. Events declared on
+a surface that normalizes to platform or managed-provider ownership are that
+owner's lifecycle events, which the app cannot emit; they are removed and
+recorded as `removed_events`. Sign-in pages owned by a surface whose ownership
+rule declares `platform_capability: authentication` duplicate what the generated
+auth contract already serves; they are removed from the approved
+`experience_spec` inventory (recorded as `removed_pages`), and typed navigation
+references (`href`, `route`, `path`, `fallbackPath`) to their route point at
+`routes.login` (recorded as `redirected_navigation`; a page designed at the
+login route itself records no redirect). Sign-in checks, removal, and redirects
+compare routes under one identity that ignores a trailing slash. A page is a sign-in page when its route
+is one of the auth contract's `login`, `callback`, or `logout` routes or a route
+one of them nests under (such as `/auth`), or when a `Form` section collects a
+field the rule lists as identity evidence (`password`, tokens, credentials).
+Any other page filed under an auth surface is a user-designed app page: it is
+never dropped, and the save rejects it naming the app-owned surface it must
+move to. Sibling surfaces that normalize to the same platform capability are not
+co-owners; the removal is constructed once and recorded on each. Facade pages
+are not removed: the pack renders them as app pages. AppGenerator plan review
+therefore never receives a sign-in page to build.
 
 Each correction appears in the saved design's `ownership_normalizations` and
 human-readable documents, and produces a `DESIGN_OWNERSHIP_NORMALIZED` log entry
-with the source surface, canonical owner, and removed collections. These recorded
+with the source surface, canonical owner, removed collections, and, when
+present, removed events, removed pages, and redirected navigation. These recorded
 corrections and normalized typed contracts govern any conflicting original prose.
 Normalization works on detached data and does not modify the model's turn-local
 structured output.
 
 Ambiguous ownership still returns `revise` with feedback before any design is
-saved. This includes mixed provider fields without an app-data split contract,
+saved, and the feedback names the exact behavior to split out and where it
+belongs. This includes mixed provider fields without an app-data split contract,
 unknown state under reserved surfaces, app-specific entities or actions that
-cannot be assigned to the canonical owner, unrelated facade integrations,
-conflicting grouped collection owners, and competing owner declarations.
+cannot be assigned to the canonical owner, `workflow_triggers` on a platform or
+facade surface, unrelated facade integrations, conflicting grouped collection
+owners, competing owner declarations, a platform auth event that another
+surface's `workflow_triggers` consume, a sign-in page that an app-owned surface
+also owns or whose sections bind app-owned modules through typed
+`data_source`/module-action references, and a non-sign-in page filed under an
+auth surface. An app-named surface (one matched only through a reserved entity
+or action, not by its surface id) that also owns app entities, actions,
+collections, workflow triggers, or non-sign-in pages is told to drop the
+reserved claim and stay app-owned rather than to become a platform reference;
+this is decided for every surface before any page is removed, so the outcome
+does not depend on surface order. An app-named surface whose every claim is
+reserved is determined and normalizes to the canonical owner. Removing sign-in
+pages can never empty the approved inventory.
 Selected managed ownership rules without a declared `facade_module` also reject:
 the tool cannot infer a provider's canonical app boundary from its display name.
 For mixed auth collections, the tool strips declared identity fields and moves

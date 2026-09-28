@@ -129,7 +129,7 @@ def test_managed_state_owner_follows_selected_or_default_pack(persistence, selec
 
 @pytest.mark.parametrize("surface_id,name,route,entity,action", [
     ("user_authentication", "User Authentication", "/auth", "UserCredential", "authenticate_user"),
-    ("session_management", "Session Management", "/sessions", "Session", "create_session"),
+    ("session_management", "Session Management", "/login", "Session", "create_session"),
 ])
 def test_platform_capability_module_normalized_before_storage(
     persistence, surface_id, name, route, entity, action,
@@ -148,7 +148,27 @@ def test_platform_capability_module_normalized_before_storage(
     assert surface["owner"] == "platform"
     assert surface["primary_entities"] == []
     assert surface["owned_mutations"] == []
-    assert surface["owned_pages"] == [name]
+    # The platform serves sign-in at the auth contract's routes; the design keeps no page for it.
+    assert surface["owned_pages"] == []
+    assert [page["route"] for page in detach(context.get("experience_spec"))["pages"]] == ["/reports"]
+
+
+def test_platform_surface_owning_a_non_sign_in_page_is_rejected_not_silently_dropped(persistence):
+    _, store_factory, _ = persistence
+    context = _context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    _add_surface(
+        bundle, surface_id="session_management", name="Session Management", route="/sessions",
+        entities=["Session"], actions=["create_session"],
+    )
+    submitted = deepcopy(bundle)
+
+    result = inventory._save(context, bundle)
+
+    _assert_refused(context, result, store_factory, owner="platform")
+    assert "Page 'Session Management' (/sessions) is owned by 'session_management'" in result["error"]
+    assert "move 'Session Management' to owned_pages of 'reports'" in result["error"]
+    assert bundle == submitted
 
 
 def test_concept_platform_owner_hint_normalizes_empty_app_module_alias(persistence):
