@@ -139,10 +139,22 @@ agents:
       capability_pack_hints[]: Upstream capability pack signals. Use these to populate
       source_capability_packs in surface_map entries where hints align.
 
-      Ownership constraints outrank owner_hint and surface_candidate_hints. Never
-      approve an app-owned authentication or platform-session module: reference
-      the platform and configure config/auth.yaml. Domain profiles and resource
-      membership may extend platform identity without replacing it.
+      Ownership constraints outrank owner_hint and surface_candidate_hints. The
+      platform provides sign-in, sessions, user accounts, and user administration.
+      Do not design surfaces, collections, actions, events, or pages for them:
+      no users, accounts, auth, or sign-in sessions module; no User entity, no
+      users collection, and no entity or collection holding sign-in sessions or
+      tokens; no create_user, delete_user, login, or logout actions; no user
+      lifecycle events; and no sign-in, registration, or user-management pages.
+      A surface holding user accounts, sign-in sessions, or tokens is the
+      platform's whatever it is called. Sessions that are app features, such as
+      tutoring or focus sessions, are app data: name them for what they are
+      (TutoringSession). Never approve an app-owned authentication or
+      platform-session module: reference the platform and configure
+      config/auth.yaml. Domain
+      profiles and resource membership may extend platform identity without
+      replacing it: model app data about a user under an app entity keyed by
+      user_id, such as a Membership or ReaderProfile record.
       A selected managed pack's declared facade is the app boundary. For
       MozaiksPay, subscription UI belongs to billing_portal and uses list_plans,
       get_subscription_status, start_subscription_checkout, and open_billing_portal.
@@ -157,7 +169,12 @@ agents:
       its own sign-in lifecycle events and serves sign-in at the config/auth.yaml
       routes (a page at those routes, at a route they nest under such as /auth,
       or with a Form collecting a credential field is removed, and typed
-      navigation to it is pointed at the login route). Any other page such a
+      navigation to it is pointed at the login route). A surface is recognized
+      as platform identity by what it declares, not its surface_id: a User or
+      Session entity whose collection holds only identity claims, including a
+      password hash or a unique email. Its user lifecycle actions are removed,
+      and a page listing its user accounts is removed together with navigation
+      to it, because the platform administers users itself. Any other page such a
       surface owns is a user-designed app page: it is never dropped, and the save
       rejects it naming the app-owned surface that must own it. Managed
       subscription surfaces use billing_portal while preserving their approved
@@ -348,33 +365,33 @@ agents:
                 "id": "summary",
                 "primitive": "SummaryStrip",
                 "intent": "Compact summary with only decision-critical metrics",
-                "config_hint": "{\"items\": [{\"label\": \"Total Users\", \"value_key\": \"total_users\"}, {\"label\": \"Monthly Revenue\", \"value_key\": \"monthly_revenue\"}]}"
+                "config_hint": "{\"items\": [{\"label\": \"Open Tasks\", \"value_key\": \"open_tasks\"}, {\"label\": \"Completed This Week\", \"value_key\": \"completed_this_week\"}]}"
               },
               {
                 "id": "activity-table",
                 "primitive": "DataTable",
-                "intent": "Recent activity log, read-only, no selection needed",
-                "config_hint": "{\"columns\": [\"id\", \"action\", \"user\", \"created_at\"], \"selection\": \"none\"}"
+                "intent": "Recent task activity, read-only, no selection needed",
+                "config_hint": "{\"columns\": [\"task_id\", \"title\", \"status\", \"updated_at\"], \"selection\": \"none\"}"
               }
             ]
           },
           {
-            "name": "Users",
-            "route": "/users",
+            "name": "Projects",
+            "route": "/projects",
             "layout": "full-width",
-            "intent": "Admin user management — list, create, edit, delete",
+            "intent": "Project management: list, create, edit, archive",
             "sections": [
               {
-                "id": "user-list",
+                "id": "project-list",
                 "primitive": "DataTable",
-                "intent": "Paginated sortable user table with row actions",
-                "config_hint": "{\"columns\": [\"id\", \"name\", \"email\", \"role\", \"created_at\"], \"selection\": \"single\"}"
+                "intent": "Paginated sortable project table with row actions",
+                "config_hint": "{\"columns\": [\"project_id\", \"name\", \"status\", \"due_date\", \"created_at\"], \"selection\": \"single\"}"
               },
               {
-                "id": "create-user-modal",
+                "id": "create-project-modal",
                 "primitive": "Modal",
-                "intent": "Form modal for creating a new user",
-                "config_hint": "{\"title\": \"Add User\", \"size\": \"medium\"}"
+                "intent": "Form modal for creating a new project",
+                "config_hint": "{\"title\": \"New Project\", \"size\": \"medium\"}"
               }
             ]
           }
@@ -481,7 +498,7 @@ agents:
                   "id": "summary",
                   "primitive": "SummaryStrip",
                   "intent": "Key metrics at a glance",
-                  "config_hint": "{\"items\": [{\"label\": \"Total Users\", \"value_key\": \"total_users\"}]}"
+                  "config_hint": "{\"items\": [{\"label\": \"Active Projects\", \"value_key\": \"active_projects\"}]}"
                 }
               ]
             }
@@ -490,17 +507,17 @@ agents:
         "surface_map": {
           "surfaces": [
             {
-              "surface_id": "users",
-              "label": "Users",
+              "surface_id": "projects",
+              "label": "Projects",
               "surface_kind": "module",
               "owner": "app",
               "source_capability_packs": ["crud_pack"],
-              "primary_entities": ["User"],
-              "owned_pages": ["Users"],
-              "owned_mutations": ["create_user"],
-              "custom_reads": ["summarize_users"],
-              "events_emitted": ["domain.users.user_created"],
-              "workflow_triggers": ["users.welcome"],
+              "primary_entities": ["Project"],
+              "owned_pages": ["Projects"],
+              "owned_mutations": ["create_project"],
+              "custom_reads": ["summarize_projects"],
+              "events_emitted": ["domain.projects.project_created"],
+              "workflow_triggers": ["projects.kickoff"],
               "integrations": [],
               "notes": null
             }
@@ -512,27 +529,29 @@ agents:
           "artifact_version_id": null,
           "surfaces": [
             {
-              "surface_id": "users",
+              "surface_id": "projects",
               "surface_kind": "module",
               "collections": [
                 {
-                  "name": "users",
+                  "name": "projects",
                   "scope": "app",
                   "tenancy": "per_user",
                   "owner_field": "user_id",
-                  "entity": "User",
+                  "entity": "Project",
                   "ownership": {
-                    "surface_id": "users",
+                    "surface_id": "projects",
                     "surface_kind": "module"
                   },
                   "fields": [
+                    { "name": "project_id", "type": "string", "required": true, "default": null, "enum": null, "nullable": false },
                     { "name": "user_id", "type": "string", "required": true, "default": null, "enum": null, "nullable": false },
-                    { "name": "app_id", "type": "string", "required": true, "default": null, "enum": null, "nullable": false }
+                    { "name": "app_id", "type": "string", "required": true, "default": null, "enum": null, "nullable": false },
+                    { "name": "name", "type": "string", "required": true, "default": null, "enum": null, "nullable": false }
                   ],
                   "indexes": [
-                      { "keys": [{"field": "app_id", "order": 1}, {"field": "user_id", "order": 1}], "unique": true, "sparse": null, "name": null }
+                      { "keys": [{"field": "app_id", "order": 1}, {"field": "project_id", "order": 1}], "unique": true, "sparse": null, "name": null }
                   ],
-                  "search_by": "user_id",
+                  "search_by": "project_id",
                   "lifecycle": {
                     "write_mode": "module_action",
                     "migration_policy": "additive_only"

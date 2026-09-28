@@ -705,15 +705,28 @@ async def save_design_docs_bundle(
         normalization_messages = [
             f"DESIGN_OWNERSHIP_NORMALIZED surface={entry['surface_id']} owner={entry['owner']} "
             f"removed=[{','.join(entry['removed_collections'])}]"
-            + (
-                f" removed_events=[{','.join(entry['removed_events'])}]"
-                if entry.get("removed_events") else ""
+            + "".join(
+                f" {key}=[{','.join(entry[key])}]"
+                for key in ("removed_mutations", "removed_reads", "removed_events") if entry.get(key)
             )
             + (
                 " removed_pages=["
-                + ",".join(f"{page['name']}@{page['route']}" for page in entry["removed_pages"])
+                + ",".join(
+                    f"{page['name']}@{page['route']}"
+                    + (f"->admin:{page['builtin_panel']}" if page.get("builtin_panel") else "")
+                    for page in entry["removed_pages"]
+                )
                 + "]"
                 if entry.get("removed_pages") else ""
+            )
+            + (
+                " removed_navigation=["
+                + ",".join(
+                    f"{item['page']}/{item['section']}:{item['route']}({item['removed']})"
+                    for item in entry["removed_navigation"]
+                )
+                + "]"
+                if entry.get("removed_navigation") else ""
             )
             + (
                 " redirected=["
@@ -737,8 +750,9 @@ async def save_design_docs_bundle(
                 "\n\n## Ownership normalizations\n\n"
                 "These corrections supersede conflicting ownership or storage claims in the design prose. "
                 "The saved surface_map, data_contract, and experience_spec are authoritative: app-owned "
-                "pages are preserved, and pages duplicating the platform's sign-in are removed because the "
-                "auth contract already serves them.\n\n"
+                "pages are preserved, pages duplicating the platform's sign-in are removed because the "
+                "auth contract already serves them, and pages listing platform user accounts are removed "
+                "(with any navigation to them) because the platform administers users itself.\n\n"
                 + "\n".join(f"- `{message}`" for message in normalization_messages)
             )
             frontend_markdown += notice

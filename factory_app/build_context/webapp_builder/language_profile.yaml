@@ -110,15 +110,6 @@ database:
     sparse_field: sparse
     name_field: name
 
-  field_types:
-    - string
-    - boolean
-    - number
-    - object
-    - array
-    - datetime
-    - objectid
-
   hard_constraints:
     - Never hardcode database names in generated code.
     - ctx.persistence resolves the declared collection name or entity to the canonical physical collection and ownership policy.

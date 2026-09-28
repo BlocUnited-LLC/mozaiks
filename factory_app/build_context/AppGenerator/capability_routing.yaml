@@ -14,12 +14,52 @@ layers:
         # Sign-in pages come from the generated auth contract (config/auth.yaml
         # routes); a design page owned by a matching surface is removed at save.
         platform_capability: authentication
+        # The platform administers users in the admin portal's built-in users
+        # panel (Access page). A design page listing a surface's user accounts
+        # is removed at save. No route is declared on purpose: the panel is not
+        # served end to end yet, so typed navigation to such a page is removed,
+        # never pointed at the admin portal.
+        user_administration:
+          builtin_panel: users
+          admin_page: access
+          entity_names: [User, AuthIdentity]
+        # The platform/IdP owns the user lifecycle: an action that is exactly one
+        # of these verbs and a platform identity entity (create_user, list_users,
+        # user_login, logout_user) is the platform's. Any other action naming a
+        # user (follow_user, award_user_badge) stays app behavior.
+        identity_lifecycle_verbs:
+          - create
+          - update
+          - delete
+          - get
+          - list
+          - register
+          - signup
+          - sign_up
+          - login
+          - log_in
+          - signin
+          - sign_in
+          - logout
+          - log_out
+          - signout
+          - sign_out
+          - authenticate
+          - refresh
+        # A collection unique on one of these claims is an account registry.
+        account_key_fields: [email, username, preferred_username]
         surface_ids: [auth, authentication, user_authentication, session_management, user_sessions]
         entity_names: [AuthIdentity, AuthSession, UserSession, auth_identity, auth_session, user_session]
         action_ids: [login, logout, authenticate_user, create_auth_session, refresh_auth_session]
         collection_names: [auth_identities, auth_sessions, user_sessions, credentials]
         # Generic users/sessions names only identify platform state on these auth surfaces.
         surface_collection_names: [users, sessions]
+        # entity_names and surface_entity_names are the platform identity
+        # entities. A surface declaring one (any casing) whose collections are
+        # identity state, with a user-account collection among them (credentials
+        # or unique on an account key), is platform identity whatever its
+        # surface_id: its identity collections, lifecycle actions, events and
+        # sign-in/user-administration pages are normalized to the platform.
         surface_entity_names: [User, UserCredential, Session]
         surface_action_ids: [create_session, login_user]
         # Credential/session fields determine identity storage even if a model
