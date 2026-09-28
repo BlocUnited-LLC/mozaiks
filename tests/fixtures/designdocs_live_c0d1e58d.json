@@ -1,0 +1,1578 @@
+{
+ "chat_id": "c0d1e58d-8186-4c24-abd5-de5741f59df5",
+ "workflow": "DesignDocs",
+ "agent": "DesignDocsAgent",
+ "oss_sha": "f4f53338",
+ "source": "read-only extract of local Mongo mozaiksai.AG2NetworkKnowledge, channel wal.jsonl ag2.packet bodies (the model's four structured outputs, in order) and channel metadata knobs.context_vars, 2026-09-28",
+ "live_rejection": "Ambiguous collection 'users' on surface 'user_management' conflicts with Mozaiks platform authentication and sessions; unrecognized state name/fields=[], unbounded fields=['created_at'], state field evidence=['email', 'password_hash']. Separate app-specific data from provider/platform state before saving; canonical owner=platform, declared facade actions=[].",
+ "live_close_reason": "workflow_failed",
+ "notes": "All four attempts share surface_map, data_contract, experience_spec, frontend_markdown and database_markdown byte for byte; only backend_markdown prose differs. Every attempt was refused with the same live_rejection and the channel closed workflow_failed.",
+ "context_vars": {
+  "app_id": "mozaiks-platform",
+  "workflow_name": "DesignDocs",
+  "database_schema_available": false,
+  "database_schema_db": null,
+  "run_build_binding": {
+   "build_registry_id": "appreg_25fe30943869495186fa9e293008a9fc",
+   "target_app_id": "release-greenfield-value-target",
+   "build_id": "build_6c1a0476aab74e81b0aac88c46fdc45a",
+   "phase": "genesis"
+  },
+  "operator_capabilities": null,
+  "capability_packs": null,
+  "operator_contracts": null,
+  "design_docs_save_outcome": "blocked",
+  "design_docs_save_attempts": 0,
+  "design_docs_save_feedback": "",
+  "build_mode": "initial",
+  "workflow_sequence": null,
+  "revision_scope": null,
+  "change_request_id": null,
+  "revision_id": null,
+  "artifact_kind": null,
+  "artifact_version_id": null,
+  "sequence_status": "in_progress",
+  "revision_origin_workflow": null,
+  "refinement_request": null,
+  "refinement_request_meta": null,
+  "screen": null,
+  "change_intent": null,
+  "impact_set": null,
+  "app_context_required": false,
+  "current_app_context_version_id": null,
+  "app_context_summary": null,
+  "app_type": "greenfield_app",
+  "app_intelligence_ready": false,
+  "app_intelligence_status": null,
+  "app_intelligence_summary": null,
+  "app_intelligence_health": null,
+  "app_intelligence_catalog": null,
+  "source_context_catalog": null,
+  "pivot_description": null,
+  "existing_concept_ref": null,
+  "preserve_families": [],
+  "previous_brand_ref": null,
+  "llm_profile": null,
+  "concept_overview": "TaskTracker Pro is a personal task management application designed specifically for authenticated users, featuring robust task management and insightful dashboard analytics. It combines essential task-tracking capabilities with a freemium business model to cater to both casual and power users.",
+  "concept_blueprint": {
+   "agent_message": "Here's the refined concept for your app.",
+   "app_name": "TaskTracker Pro",
+   "concept_overview": "TaskTracker Pro is a personal task management application designed specifically for authenticated users, featuring robust task management and insightful dashboard analytics. It combines essential task-tracking capabilities with a freemium business model to cater to both casual and power users.",
+   "value_proposition": "A comprehensive task management solution with essential features for free users and premium analytics for Pro subscribers.",
+   "target_user": "Authenticated personal users seeking effective task management solutions",
+   "target_users": [
+    "Students",
+    "Freelancers",
+    "Professionals managing personal projects"
+   ],
+   "core_jobs": [
+    "Create, manage, and track personal tasks effortlessly",
+    "Visualize productivity through analytics and completion rates",
+    "Manage tasks with advanced filtering and organization"
+   ],
+   "core_features": [
+    "Task CRUD with filtering and completion tracking",
+    "Dashboard with task completion visualization",
+    "User authentication for personalized experiences",
+    "Subscription plans with entitlement checks"
+   ],
+   "deferred_features": [
+    "Integrations with third-party productivity tools",
+    "Advanced analytics and reporting features",
+    "Mobile application for task management on the go"
+   ],
+   "unique_differentiators": [
+    "Freemium model catering to both casual and advanced users",
+    "Insightful dashboard analytics for productivity tracking",
+    "Limitless tasks and advanced filters for Pro subscribers"
+   ],
+   "brand_intent": {
+    "style_summary": "Modern, clean, and professional interface focused on usability and productivity",
+    "brand_keywords": [
+     "intuitive",
+     "efficient",
+     "user-friendly"
+    ],
+    "experience_goals": [
+     "enhance personal productivity",
+     "make task management seamless"
+    ],
+    "appearance_hint": "system"
+   },
+   "constraints": [
+    "Monetized with freemium model",
+    "User authentication required",
+    "No external integrations planned"
+   ],
+   "api_endpoints": [
+    {
+     "method": "GET",
+     "path": "/api/tasks",
+     "description": "List all tasks"
+    },
+    {
+     "method": "POST",
+     "path": "/api/tasks",
+     "description": "Create a new task"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/tasks/{taskId}",
+     "description": "Update an existing task"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/tasks/{taskId}",
+     "description": "Delete a task"
+    },
+    {
+     "method": "GET",
+     "path": "/api/dashboard",
+     "description": "Get dashboard metrics and insights"
+    },
+    {
+     "method": "POST",
+     "path": "/api/auth/login",
+     "description": "Authenticate user for access"
+    },
+    {
+     "method": "POST",
+     "path": "/api/billing/subscription",
+     "description": "Manage user subscriptions"
+    }
+   ],
+   "app_ui_requirements": [
+    "Dashboard requires visualization components to show task completion metrics",
+    "Task management page needs a user-friendly task creation and editing interface",
+    "User authentication flows for login and registration processes"
+   ],
+   "capability_pack_hints": [
+    "crud_pack",
+    "analytics_pack",
+    "billing_pack"
+   ],
+   "monetization_intent": {
+    "monetized": true,
+    "likely_revenue_models": [
+     "subscriptions"
+    ],
+    "subscription_contract_likely": true,
+    "money_flow_summary": "TaskTracker Pro will offer a free tier with a limit on tasks and a paid Pro tier with advanced features and unlimited tasks.",
+    "rationale": "The confirmed business model includes a freemium approach with clearly defined subscription benefits."
+   },
+   "surface_candidate_hints": [
+    {
+     "surface_id": "task_management",
+     "label": "Task management module",
+     "source_capability_packs": [
+      "crud_pack"
+     ],
+     "likely_surface_kind": "module",
+     "owner_hint": "app",
+     "confidence": "high",
+     "rationale": "The task CRUD functionalities and filtering belong in a dedicated surface."
+    },
+    {
+     "surface_id": "dashboard",
+     "label": "Dashboard analytics module",
+     "source_capability_packs": [
+      "analytics_pack"
+     ],
+     "likely_surface_kind": "ui_only",
+     "owner_hint": "app",
+     "confidence": "medium",
+     "rationale": "The dashboard primarily provides visualization without managing business state."
+    },
+    {
+     "surface_id": "billing_management",
+     "label": "Billing and subscription management",
+     "source_capability_packs": [
+      "billing_pack"
+     ],
+     "likely_surface_kind": "module",
+     "owner_hint": "app",
+     "confidence": "high",
+     "rationale": "The billing module will handle subscription-related functionalities and checks."
+    }
+   ],
+   "agentic_capabilities": []
+  },
+  "captured_theme_config": {
+   "theme": {
+    "primary": "#4B0082",
+    "variant": "modern",
+    "radius": "medium",
+    "font": "Roboto",
+    "font_heading": "Roboto",
+    "appearance": "light",
+    "density": "comfortable",
+    "branding": {
+     "app_name": "TaskTracker Pro",
+     "logo_url": null,
+     "favicon_url": null
+    }
+   },
+   "identity": {
+    "name": "TaskTracker Pro",
+    "tagline": "Your Personal Task Management Assistant",
+    "app_name": "TaskTracker Pro"
+   },
+   "assets": {
+    "logo": null,
+    "wordmark": null,
+    "favicon": null,
+    "chatbackgroundImage": null
+   },
+   "primitives": {
+    "radius": {
+     "surface": "8px",
+     "control": "8px",
+     "bubble": "8px"
+    },
+    "measure": {
+     "shell": "16px",
+     "chat_feed": "16px"
+    },
+    "spacing": {
+     "tight": "8px",
+     "base": "16px",
+     "loose": "24px"
+    }
+   },
+   "fonts": {
+    "body": {
+     "family": "Roboto",
+     "fallbacks": "",
+     "googleFont": "https://fonts.googleapis.com/css2?family=Roboto:wght@400&display=swap",
+     "tailwindClass": ""
+    },
+    "heading": {
+     "family": "Roboto",
+     "fallbacks": "",
+     "googleFont": "https://fonts.googleapis.com/css2?family=Roboto:wght@700&display=swap",
+     "tailwindClass": ""
+    },
+    "logo": {
+     "family": null,
+     "fallbacks": "",
+     "localFont": false,
+     "src": null,
+     "tailwindClass": ""
+    }
+   },
+   "colors": {
+    "primary": {
+     "main": "#4B0082",
+     "light": "#6F00B9",
+     "dark": "#2C0055",
+     "name": "Deep Indigo"
+    },
+    "secondary": {
+     "main": "#FFA500",
+     "light": "#FFC733",
+     "dark": "#B47A00",
+     "name": "Warm Amber"
+    },
+    "accent": {
+     "main": "#FFA500",
+     "light": "#FFC733",
+     "dark": "#B47A00",
+     "name": "Warm Amber"
+    },
+    "success": {
+     "main": "#28a745",
+     "light": "#5cb85c",
+     "dark": "#1e7e34",
+     "name": "Green"
+    },
+    "warning": {
+     "main": "#ffc107",
+     "light": "#ffd43b",
+     "dark": "#e0a800",
+     "name": "Amber"
+    },
+    "error": {
+     "main": "#dc3545",
+     "light": "#e57373",
+     "dark": "#b71c1c",
+     "name": "Red"
+    },
+    "background": {
+     "base": "#FFFFFF",
+     "surface": "#F8F9FA",
+     "elevated": "#FFFFFF",
+     "overlay": "rgba(255, 255, 255, 0.95)"
+    },
+    "border": {
+     "subtle": "#E0E0E0",
+     "strong": "#B0B0B0",
+     "accent": "#FFA500"
+    },
+    "text": {
+     "primary": "#333333",
+     "secondary": "#6c757d",
+     "muted": "#A0A0A0",
+     "onAccent": "#FFFFFF"
+    }
+   },
+   "shadows": {
+    "primary": "rgba(0, 0, 0, 0.1) 0 2px 4px",
+    "secondary": "rgba(0, 0, 0, 0.2) 0 1px 3px",
+    "accent": "",
+    "success": "",
+    "warning": "",
+    "error": "",
+    "elevated": "",
+    "focus": ""
+   },
+   "ui": {
+    "chat": {
+     "modes": {
+      "ask": {
+       "tint": "#FFA500",
+       "label": "Ask"
+      },
+      "workflow": {
+       "tint": "#4B0082",
+       "label": "Workflow"
+      }
+     },
+     "bubbleRadius": "8px",
+     "feedMaxWidth": "800px",
+     "feedPaddingTop": {
+      "base": "16px",
+      "sm": null,
+      "md": null,
+      "xl": null
+     },
+     "feedPaddingBottom": {
+      "base": "16px",
+      "sm": null,
+      "md": null,
+      "xl": null
+     },
+     "feedPaddingX": {
+      "base": "16px",
+      "sm": null,
+      "md": null,
+      "xl": null
+     },
+     "bubblePaddingY": "12px",
+     "bubblePaddingX": "16px",
+     "userBubblePaddingY": "12px",
+     "userBubblePaddingX": "16px",
+     "bubbleGap": "8px",
+     "bubbleHeaderGap": "8px",
+     "namePillPaddingY": "4px",
+     "namePillPaddingX": "8px",
+     "namePillFontSize": "12px"
+    },
+    "shell": {
+     "frame": {
+      "maxWidth": "1200px"
+     },
+     "header": {
+      "height": "60px",
+      "paddingX": "16px",
+      "gap": "16px",
+      "clusterGap": "8px",
+      "navGap": "16px",
+      "navPaddingLeft": "8px",
+      "controlGap": "8px",
+      "actionHeight": "40px",
+      "actionPaddingX": "8px",
+      "utilitySize": "24px",
+      "utilityPadding": "8px",
+      "avatarSize": "32px",
+      "avatarLargeSize": "40px",
+      "profileHeight": "40px",
+      "profilePaddingX": "8px",
+      "panelRadius": "8px"
+     },
+     "footer": {
+      "maxWidth": "1200px",
+      "paddingY": "16px",
+      "paddingX": "16px",
+      "gap": "8px"
+     }
+    },
+    "page": {
+     "maxWidth": {
+      "grid": "1200px",
+      "sidebar": "1000px",
+      "full_width": "100%",
+      "split": "1200px"
+     },
+     "paddingX": {
+      "base": "24px",
+      "sm": null,
+      "md": null,
+      "xl": null
+     },
+     "paddingY": {
+      "base": "24px",
+      "sm": null,
+      "md": null,
+      "xl": null
+     },
+     "sectionGap": "24px",
+     "titlePaddingBottom": "16px"
+    }
+   }
+  },
+  "monetization_enabled": true,
+  "builder_options": null,
+  "coding_participation": "autonomous",
+  "design_docs_hitl": false,
+  "database_provider": "mongodb",
+  "database_setup_mode": "local",
+  "brownfield_build_path": null,
+  "adoption_plan": null,
+  "ownership_boundary": null,
+  "brownfield_registration": null,
+  "chat_id": "c0d1e58d-8186-4c24-abd5-de5741f59df5",
+  "user_id": "dev-user"
+ },
+ "attempts": [
+  {
+   "agent_message": "Design docs prepared and surface ownership contract captured.",
+   "frontend_markdown": "# Frontend Design\n\n## Overview\nTaskTracker Pro is designed to offer an intuitive user experience focused on task management and analytics. The design incorporates a modern aesthetic with clear navigation to enhance user productivity.\n\n## Pages\n\n### Dashboard\n- **Route**: `/dashboard`\n- **Layout**: Grid\n  - Displays key insights and task completion metrics.\n\n### Users\n- **Route**: `/users`\n- **Layout**: Full-width\n  - Admin view for managing users and their tasks.\n\n## Components\n- **Button**: Used for actions like Create, Edit, Delete.\n- **DataTable**: For displaying lists of tasks and users.\n- **Modal**: For user creation and task editing.\n\n## Navigation\n- A top navigation bar with links to Dashboard, Users, and user profile settings.\n\n## Style Guide\n### Colors\n- Primary: Deep Indigo (`#4B0082`)\n- Secondary: Warm Amber (`#FFA500`)\n\n### Typography\n- Font used: **Roboto**\n\n### Spacing\n- General spacing set to a comfortable density.",
+   "backend_markdown": "# Backend Design\n\n## Overview\nThe backend will support task management functionalities including CRUD operations, user authentication, and billing management through APIs.\n\n## API Endpoints\n- **Tasks API**:\n  - `GET /api/tasks`: List all tasks\n  - `POST /api/tasks`: Create a new task\n  - `PUT /api/tasks/{taskId}`: Update an existing task\n  - `DELETE /api/tasks/{taskId}`: Delete a task\n\n- **User API**:\n  - `GET /api/users`: List all users\n  - `POST /api/users`: Create a new user\n\n- **Dashboard API**:\n  - `GET /api/dashboard`: Get dashboard metrics and insights\n\n## Event Architecture\n- Domain events for actions such as task creation, user creation, and subscription changes will be emitted.\n\n## Surface Realization Map\n```yaml\nsurfaces:\n  - surface_id: task_management\n    label: Task Management Module\n    surface_kind: module\n    owner: app\n    primary_entities: [Task]\n    owned_pages: [Tasks]\n    owned_mutations: [create_task]\n    events_emitted: [domain.tasks.task_created]\n```\n\n## Database Schema\nTasks and Users will be distinct collections within MongoDB. Each task will be linked to its owner.",
+   "database_markdown": "# Database Design\n\n## Overview\nThe database schema for TaskTracker Pro using MongoDB will include collections for users and tasks.\n\n## Collections\n### Users Collection\n- Collection Name: `users`\n- Fields:\n  - `user_id`: String (Primary Key)\n  - `email`: String\n  - `password_hash`: String\n  - `created_at`: Date\n\n### Tasks Collection\n- Collection Name: `tasks`\n- Fields:\n  - `task_id`: String (Primary Key)\n  - `user_id`: String (Foreign Key)\n  - `title`: String\n  - `description`: String\n  - `completed`: Boolean\n  - `created_at`: Date\n  - `updated_at`: Date\n\n## Indexes\n1. Users: Unique index on `email` for user authentication.\n2. Tasks: Index on `user_id` to allow quick lookups of tasks by users.",
+   "experience_spec": {
+    "navigation_model": "top-level routes with shell navigation",
+    "brand_direction": "Modern and clean task management tool",
+    "pages": [
+     {
+      "name": "Dashboard",
+      "route": "/dashboard",
+      "layout": "grid",
+      "intent": "Landing page with an overview of task metrics and progress",
+      "sections": [
+       {
+        "id": "summary",
+        "primitive": "SummaryStrip",
+        "intent": "Displays key metrics like total tasks, completed tasks",
+        "config_hint": "{\"items\": [{\"label\": \"Total Tasks\", \"value_key\": \"total_tasks\"}, {\"label\": \"Completed Tasks\", \"value_key\": \"completed_tasks\"}]}"
+       },
+       {
+        "id": "task-overview",
+        "primitive": "DataTable",
+        "intent": "Shows a list of tasks with options to filter and sort",
+        "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"selection\": \"single\"}"
+       }
+      ]
+     },
+     {
+      "name": "Users",
+      "route": "/users",
+      "layout": "full-width",
+      "intent": "Manage users with the ability to create and edit user profiles",
+      "sections": [
+       {
+        "id": "user-table",
+        "primitive": "DataTable",
+        "intent": "Displayed list of users with actions to edit or delete",
+        "config_hint": "{\"columns\": [\"user_id\", \"email\", \"created_at\"], \"selection\": \"single\"}"
+       },
+       {
+        "id": "create-user-modal",
+        "primitive": "Modal",
+        "intent": "Modal for creating or editing a user",
+        "config_hint": "{\"title\": \"User Management\", \"size\": \"medium\"}"
+       }
+      ]
+     }
+    ]
+   },
+   "surface_map": {
+    "surfaces": [
+     {
+      "surface_id": "task_management",
+      "label": "Task Management Module",
+      "surface_kind": "module",
+      "owner": "app",
+      "source_capability_packs": [
+       "crud_pack"
+      ],
+      "primary_entities": [
+       "Task"
+      ],
+      "owned_pages": [
+       "Dashboard"
+      ],
+      "owned_mutations": [
+       "create_task",
+       "delete_task",
+       "update_task"
+      ],
+      "custom_reads": [
+       "summarize_tasks"
+      ],
+      "events_emitted": [
+       "domain.tasks.task_created"
+      ],
+      "workflow_triggers": [],
+      "integrations": [],
+      "notes": "Handles task operations and events."
+     },
+     {
+      "surface_id": "user_management",
+      "label": "User Management Module",
+      "surface_kind": "module",
+      "owner": "app",
+      "source_capability_packs": [
+       "crud_pack"
+      ],
+      "primary_entities": [
+       "User"
+      ],
+      "owned_pages": [
+       "Users"
+      ],
+      "owned_mutations": [
+       "create_user",
+       "delete_user"
+      ],
+      "custom_reads": [],
+      "events_emitted": [
+       "domain.users.user_created"
+      ],
+      "workflow_triggers": [],
+      "integrations": [],
+      "notes": "Handles user operations and events."
+     }
+    ]
+   },
+   "data_contract": {
+    "version": "1",
+    "app_id": null,
+    "artifact_version_id": null,
+    "surfaces": [
+     {
+      "surface_id": "task_management",
+      "surface_kind": "module",
+      "collections": [
+       {
+        "name": "tasks",
+        "scope": "app",
+        "tenancy": "per_user",
+        "owner_field": "user_id",
+        "entity": "Task",
+        "ownership": {
+         "surface_id": "task_management",
+         "surface_kind": "module"
+        },
+        "fields": [
+         {
+          "name": "task_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "user_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "default": "",
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "default": "",
+          "enum": null,
+          "nullable": true
+         },
+         {
+          "name": "completed",
+          "type": "boolean",
+          "required": false,
+          "default": "false",
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "created_at",
+          "type": "date",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "updated_at",
+          "type": "date",
+          "required": false,
+          "default": null,
+          "enum": null,
+          "nullable": true
+         }
+        ],
+        "indexes": [
+         {
+          "keys": [
+           {
+            "field": "user_id",
+            "order": 1
+           }
+          ],
+          "unique": false,
+          "sparse": null,
+          "name": null
+         }
+        ],
+        "search_by": "task_id",
+        "lifecycle": {
+         "write_mode": "module_action",
+         "migration_policy": "additive_only"
+        }
+       }
+      ]
+     },
+     {
+      "surface_id": "user_management",
+      "surface_kind": "module",
+      "collections": [
+       {
+        "name": "users",
+        "scope": "app",
+        "tenancy": "app_wide",
+        "owner_field": null,
+        "entity": "User",
+        "ownership": {
+         "surface_id": "user_management",
+         "surface_kind": "module"
+        },
+        "fields": [
+         {
+          "name": "user_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "password_hash",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "created_at",
+          "type": "date",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         }
+        ],
+        "indexes": [
+         {
+          "keys": [
+           {
+            "field": "email",
+            "order": 1
+           }
+          ],
+          "unique": true,
+          "sparse": null,
+          "name": null
+         }
+        ],
+        "search_by": "user_id",
+        "lifecycle": {
+         "write_mode": "module_action",
+         "migration_policy": "additive_only"
+        }
+       }
+      ]
+     }
+    ],
+    "shared_collections": [],
+    "policies": {
+     "default_scope_field": "app_id",
+     "allow_destructive_migrations": false
+    }
+   }
+  },
+  {
+   "agent_message": "Design docs prepared and surface ownership contract captured.",
+   "frontend_markdown": "# Frontend Design\n\n## Overview\nTaskTracker Pro is designed to offer an intuitive user experience focused on task management and analytics. The design incorporates a modern aesthetic with clear navigation to enhance user productivity.\n\n## Pages\n\n### Dashboard\n- **Route**: `/dashboard`\n- **Layout**: Grid\n  - Displays key insights and task completion metrics.\n\n### Users\n- **Route**: `/users`\n- **Layout**: Full-width\n  - Admin view for managing users and their tasks.\n\n## Components\n- **Button**: Used for actions like Create, Edit, Delete.\n- **DataTable**: For displaying lists of tasks and users.\n- **Modal**: For user creation and task editing.\n\n## Navigation\n- A top navigation bar with links to Dashboard, Users, and user profile settings.\n\n## Style Guide\n### Colors\n- Primary: Deep Indigo (`#4B0082`)\n- Secondary: Warm Amber (`#FFA500`)\n\n### Typography\n- Font used: **Roboto**\n\n### Spacing\n- General spacing set to a comfortable density.",
+   "backend_markdown": "# Backend Design\n\n## Overview\nThe backend will support task management functionalities including CRUD operations, user authentication, and billing management through APIs.\n\n## API Endpoints\n- **Tasks API**:\n  - `GET /api/tasks`: List all tasks\n  - `POST /api/tasks`: Create a new task\n  - `PUT /api/tasks/{taskId}`: Update an existing task\n  - `DELETE /api/tasks/{taskId}`: Delete a task\n\n- **User API**:\n  - `GET /api/users`: List all users\n  - `POST /api/users`: Create a new user\n\n- **Dashboard API**:\n  - `GET /api/dashboard`: Get dashboard metrics and insights\n\n## Event Architecture\n- Domain events for actions such as task creation, user creation, and subscription changes will be emitted.\n\n## Surface Realization Map\n```yaml\nsurfaces:\n  - surface_id: task_management\n    label: Task Management Module\n    surface_kind: module\n    owner: app\n    primary_entities: [Task]\n    owned_pages: [Dashboard]\n    owned_mutations: [create_task]\n    events_emitted: [domain.tasks.task_created]\n  - surface_id: user_management\n    label: User Management Module\n    surface_kind: module\n    owner: app\n    primary_entities: [User]\n    owned_pages: [Users]\n    owned_mutations: [create_user]\n    events_emitted: [domain.users.user_created]\n```",
+   "database_markdown": "# Database Design\n\n## Overview\nThe database schema for TaskTracker Pro using MongoDB will include collections for users and tasks.\n\n## Collections\n### Users Collection\n- Collection Name: `users`\n- Fields:\n  - `user_id`: String (Primary Key)\n  - `email`: String\n  - `password_hash`: String\n  - `created_at`: Date\n\n### Tasks Collection\n- Collection Name: `tasks`\n- Fields:\n  - `task_id`: String (Primary Key)\n  - `user_id`: String (Foreign Key)\n  - `title`: String\n  - `description`: String\n  - `completed`: Boolean\n  - `created_at`: Date\n  - `updated_at`: Date\n\n## Indexes\n1. Users: Unique index on `email` for user authentication.\n2. Tasks: Index on `user_id` to allow quick lookups of tasks by users.",
+   "experience_spec": {
+    "navigation_model": "top-level routes with shell navigation",
+    "brand_direction": "Modern and clean task management tool",
+    "pages": [
+     {
+      "name": "Dashboard",
+      "route": "/dashboard",
+      "layout": "grid",
+      "intent": "Landing page with an overview of task metrics and progress",
+      "sections": [
+       {
+        "id": "summary",
+        "primitive": "SummaryStrip",
+        "intent": "Displays key metrics like total tasks, completed tasks",
+        "config_hint": "{\"items\": [{\"label\": \"Total Tasks\", \"value_key\": \"total_tasks\"}, {\"label\": \"Completed Tasks\", \"value_key\": \"completed_tasks\"}]}"
+       },
+       {
+        "id": "task-overview",
+        "primitive": "DataTable",
+        "intent": "Shows a list of tasks with options to filter and sort",
+        "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"selection\": \"single\"}"
+       }
+      ]
+     },
+     {
+      "name": "Users",
+      "route": "/users",
+      "layout": "full-width",
+      "intent": "Manage users with the ability to create and edit user profiles",
+      "sections": [
+       {
+        "id": "user-table",
+        "primitive": "DataTable",
+        "intent": "Displayed list of users with actions to edit or delete",
+        "config_hint": "{\"columns\": [\"user_id\", \"email\", \"created_at\"], \"selection\": \"single\"}"
+       },
+       {
+        "id": "create-user-modal",
+        "primitive": "Modal",
+        "intent": "Modal for creating or editing a user",
+        "config_hint": "{\"title\": \"User Management\", \"size\": \"medium\"}"
+       }
+      ]
+     }
+    ]
+   },
+   "surface_map": {
+    "surfaces": [
+     {
+      "surface_id": "task_management",
+      "label": "Task Management Module",
+      "surface_kind": "module",
+      "owner": "app",
+      "source_capability_packs": [
+       "crud_pack"
+      ],
+      "primary_entities": [
+       "Task"
+      ],
+      "owned_pages": [
+       "Dashboard"
+      ],
+      "owned_mutations": [
+       "create_task",
+       "delete_task",
+       "update_task"
+      ],
+      "custom_reads": [
+       "summarize_tasks"
+      ],
+      "events_emitted": [
+       "domain.tasks.task_created"
+      ],
+      "workflow_triggers": [],
+      "integrations": [],
+      "notes": "Handles task operations and events."
+     },
+     {
+      "surface_id": "user_management",
+      "label": "User Management Module",
+      "surface_kind": "module",
+      "owner": "app",
+      "source_capability_packs": [
+       "crud_pack"
+      ],
+      "primary_entities": [
+       "User"
+      ],
+      "owned_pages": [
+       "Users"
+      ],
+      "owned_mutations": [
+       "create_user",
+       "delete_user"
+      ],
+      "custom_reads": [],
+      "events_emitted": [
+       "domain.users.user_created"
+      ],
+      "workflow_triggers": [],
+      "integrations": [],
+      "notes": "Handles user operations and events."
+     }
+    ]
+   },
+   "data_contract": {
+    "version": "1",
+    "app_id": null,
+    "artifact_version_id": null,
+    "surfaces": [
+     {
+      "surface_id": "task_management",
+      "surface_kind": "module",
+      "collections": [
+       {
+        "name": "tasks",
+        "scope": "app",
+        "tenancy": "per_user",
+        "owner_field": "user_id",
+        "entity": "Task",
+        "ownership": {
+         "surface_id": "task_management",
+         "surface_kind": "module"
+        },
+        "fields": [
+         {
+          "name": "task_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "user_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "default": "",
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "default": "",
+          "enum": null,
+          "nullable": true
+         },
+         {
+          "name": "completed",
+          "type": "boolean",
+          "required": false,
+          "default": "false",
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "created_at",
+          "type": "date",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "updated_at",
+          "type": "date",
+          "required": false,
+          "default": null,
+          "enum": null,
+          "nullable": true
+         }
+        ],
+        "indexes": [
+         {
+          "keys": [
+           {
+            "field": "user_id",
+            "order": 1
+           }
+          ],
+          "unique": false,
+          "sparse": null,
+          "name": null
+         }
+        ],
+        "search_by": "task_id",
+        "lifecycle": {
+         "write_mode": "module_action",
+         "migration_policy": "additive_only"
+        }
+       }
+      ]
+     },
+     {
+      "surface_id": "user_management",
+      "surface_kind": "module",
+      "collections": [
+       {
+        "name": "users",
+        "scope": "app",
+        "tenancy": "app_wide",
+        "owner_field": null,
+        "entity": "User",
+        "ownership": {
+         "surface_id": "user_management",
+         "surface_kind": "module"
+        },
+        "fields": [
+         {
+          "name": "user_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "password_hash",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "created_at",
+          "type": "date",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         }
+        ],
+        "indexes": [
+         {
+          "keys": [
+           {
+            "field": "email",
+            "order": 1
+           }
+          ],
+          "unique": true,
+          "sparse": null,
+          "name": null
+         }
+        ],
+        "search_by": "user_id",
+        "lifecycle": {
+         "write_mode": "module_action",
+         "migration_policy": "additive_only"
+        }
+       }
+      ]
+     }
+    ],
+    "shared_collections": [],
+    "policies": {
+     "default_scope_field": "app_id",
+     "allow_destructive_migrations": false
+    }
+   }
+  },
+  {
+   "agent_message": "Design docs prepared and surface ownership contract captured.",
+   "frontend_markdown": "# Frontend Design\n\n## Overview\nTaskTracker Pro is designed to offer an intuitive user experience focused on task management and analytics. The design incorporates a modern aesthetic with clear navigation to enhance user productivity.\n\n## Pages\n\n### Dashboard\n- **Route**: `/dashboard`\n- **Layout**: Grid\n  - Displays key insights and task completion metrics.\n\n### Users\n- **Route**: `/users`\n- **Layout**: Full-width\n  - Admin view for managing users and their tasks.\n\n## Components\n- **Button**: Used for actions like Create, Edit, Delete.\n- **DataTable**: For displaying lists of tasks and users.\n- **Modal**: For user creation and task editing.\n\n## Navigation\n- A top navigation bar with links to Dashboard, Users, and user profile settings.\n\n## Style Guide\n### Colors\n- Primary: Deep Indigo (`#4B0082`)\n- Secondary: Warm Amber (`#FFA500`)\n\n### Typography\n- Font used: **Roboto**\n\n### Spacing\n- General spacing set to a comfortable density.",
+   "backend_markdown": "# Backend Design\n\n## Overview\nThe backend will support task management functionalities including CRUD operations, user authentication, and billing management through APIs.\n\n## API Endpoints\n- **Tasks API**:\n  - `GET /api/tasks`: List all tasks\n  - `POST /api/tasks`: Create a new task\n  - `PUT /api/tasks/{taskId}`: Update an existing task\n  - `DELETE /api/tasks/{taskId}`: Delete a task\n\n- **User API**:\n  - `GET /api/users`: List all users\n  - `POST /api/users`: Create a new user\n\n- **Dashboard API**:\n  - `GET /api/dashboard`: Get dashboard metrics and insights\n\n## Event Architecture\n- Domain events for actions such as task creation, user creation, and subscription changes will be emitted.\n\n## Surface Realization Map\n```yaml\nsurfaces:\n  - surface_id: task_management\n    label: Task Management Module\n    surface_kind: module\n    owner: app\n    primary_entities: [Task]\n    owned_pages: [Dashboard]\n    owned_mutations: [create_task]\n    events_emitted: [domain.tasks.task_created]\n  - surface_id: user_management\n    label: User Management Module\n    surface_kind: module\n    owner: app\n    primary_entities: [User]\n    owned_pages: [Users]\n    owned_mutations: [create_user]\n    events_emitted: [domain.users.user_created]\n```",
+   "database_markdown": "# Database Design\n\n## Overview\nThe database schema for TaskTracker Pro using MongoDB will include collections for users and tasks.\n\n## Collections\n### Users Collection\n- Collection Name: `users`\n- Fields:\n  - `user_id`: String (Primary Key)\n  - `email`: String\n  - `password_hash`: String\n  - `created_at`: Date\n\n### Tasks Collection\n- Collection Name: `tasks`\n- Fields:\n  - `task_id`: String (Primary Key)\n  - `user_id`: String (Foreign Key)\n  - `title`: String\n  - `description`: String\n  - `completed`: Boolean\n  - `created_at`: Date\n  - `updated_at`: Date\n\n## Indexes\n1. Users: Unique index on `email` for user authentication.\n2. Tasks: Index on `user_id` to allow quick lookups of tasks by users.",
+   "experience_spec": {
+    "navigation_model": "top-level routes with shell navigation",
+    "brand_direction": "Modern and clean task management tool",
+    "pages": [
+     {
+      "name": "Dashboard",
+      "route": "/dashboard",
+      "layout": "grid",
+      "intent": "Landing page with an overview of task metrics and progress",
+      "sections": [
+       {
+        "id": "summary",
+        "primitive": "SummaryStrip",
+        "intent": "Displays key metrics like total tasks, completed tasks",
+        "config_hint": "{\"items\": [{\"label\": \"Total Tasks\", \"value_key\": \"total_tasks\"}, {\"label\": \"Completed Tasks\", \"value_key\": \"completed_tasks\"}]}"
+       },
+       {
+        "id": "task-overview",
+        "primitive": "DataTable",
+        "intent": "Shows a list of tasks with options to filter and sort",
+        "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"selection\": \"single\"}"
+       }
+      ]
+     },
+     {
+      "name": "Users",
+      "route": "/users",
+      "layout": "full-width",
+      "intent": "Manage users with the ability to create and edit user profiles",
+      "sections": [
+       {
+        "id": "user-table",
+        "primitive": "DataTable",
+        "intent": "Displayed list of users with actions to edit or delete",
+        "config_hint": "{\"columns\": [\"user_id\", \"email\", \"created_at\"], \"selection\": \"single\"}"
+       },
+       {
+        "id": "create-user-modal",
+        "primitive": "Modal",
+        "intent": "Modal for creating or editing a user",
+        "config_hint": "{\"title\": \"User Management\", \"size\": \"medium\"}"
+       }
+      ]
+     }
+    ]
+   },
+   "surface_map": {
+    "surfaces": [
+     {
+      "surface_id": "task_management",
+      "label": "Task Management Module",
+      "surface_kind": "module",
+      "owner": "app",
+      "source_capability_packs": [
+       "crud_pack"
+      ],
+      "primary_entities": [
+       "Task"
+      ],
+      "owned_pages": [
+       "Dashboard"
+      ],
+      "owned_mutations": [
+       "create_task",
+       "delete_task",
+       "update_task"
+      ],
+      "custom_reads": [
+       "summarize_tasks"
+      ],
+      "events_emitted": [
+       "domain.tasks.task_created"
+      ],
+      "workflow_triggers": [],
+      "integrations": [],
+      "notes": "Handles task operations and events."
+     },
+     {
+      "surface_id": "user_management",
+      "label": "User Management Module",
+      "surface_kind": "module",
+      "owner": "app",
+      "source_capability_packs": [
+       "crud_pack"
+      ],
+      "primary_entities": [
+       "User"
+      ],
+      "owned_pages": [
+       "Users"
+      ],
+      "owned_mutations": [
+       "create_user",
+       "delete_user"
+      ],
+      "custom_reads": [],
+      "events_emitted": [
+       "domain.users.user_created"
+      ],
+      "workflow_triggers": [],
+      "integrations": [],
+      "notes": "Handles user operations and events."
+     }
+    ]
+   },
+   "data_contract": {
+    "version": "1",
+    "app_id": null,
+    "artifact_version_id": null,
+    "surfaces": [
+     {
+      "surface_id": "task_management",
+      "surface_kind": "module",
+      "collections": [
+       {
+        "name": "tasks",
+        "scope": "app",
+        "tenancy": "per_user",
+        "owner_field": "user_id",
+        "entity": "Task",
+        "ownership": {
+         "surface_id": "task_management",
+         "surface_kind": "module"
+        },
+        "fields": [
+         {
+          "name": "task_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "user_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "default": "",
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "default": "",
+          "enum": null,
+          "nullable": true
+         },
+         {
+          "name": "completed",
+          "type": "boolean",
+          "required": false,
+          "default": "false",
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "created_at",
+          "type": "date",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "updated_at",
+          "type": "date",
+          "required": false,
+          "default": null,
+          "enum": null,
+          "nullable": true
+         }
+        ],
+        "indexes": [
+         {
+          "keys": [
+           {
+            "field": "user_id",
+            "order": 1
+           }
+          ],
+          "unique": false,
+          "sparse": null,
+          "name": null
+         }
+        ],
+        "search_by": "task_id",
+        "lifecycle": {
+         "write_mode": "module_action",
+         "migration_policy": "additive_only"
+        }
+       }
+      ]
+     },
+     {
+      "surface_id": "user_management",
+      "surface_kind": "module",
+      "collections": [
+       {
+        "name": "users",
+        "scope": "app",
+        "tenancy": "app_wide",
+        "owner_field": null,
+        "entity": "User",
+        "ownership": {
+         "surface_id": "user_management",
+         "surface_kind": "module"
+        },
+        "fields": [
+         {
+          "name": "user_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "password_hash",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "created_at",
+          "type": "date",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         }
+        ],
+        "indexes": [
+         {
+          "keys": [
+           {
+            "field": "email",
+            "order": 1
+           }
+          ],
+          "unique": true,
+          "sparse": null,
+          "name": null
+         }
+        ],
+        "search_by": "user_id",
+        "lifecycle": {
+         "write_mode": "module_action",
+         "migration_policy": "additive_only"
+        }
+       }
+      ]
+     }
+    ],
+    "shared_collections": [],
+    "policies": {
+     "default_scope_field": "app_id",
+     "allow_destructive_migrations": false
+    }
+   }
+  },
+  {
+   "agent_message": "Design docs prepared and surface ownership contract captured.",
+   "frontend_markdown": "# Frontend Design\n\n## Overview\nTaskTracker Pro is designed to offer an intuitive user experience focused on task management and analytics. The design incorporates a modern aesthetic with clear navigation to enhance user productivity.\n\n## Pages\n\n### Dashboard\n- **Route**: `/dashboard`\n- **Layout**: Grid\n  - Displays key insights and task completion metrics.\n\n### Users\n- **Route**: `/users`\n- **Layout**: Full-width\n  - Admin view for managing users and their tasks.\n\n## Components\n- **Button**: Used for actions like Create, Edit, Delete.\n- **DataTable**: For displaying lists of tasks and users.\n- **Modal**: For user creation and task editing.\n\n## Navigation\n- A top navigation bar with links to Dashboard, Users, and user profile settings.\n\n## Style Guide\n### Colors\n- Primary: Deep Indigo (`#4B0082`)\n- Secondary: Warm Amber (`#FFA500`)\n\n### Typography\n- Font used: **Roboto**\n\n### Spacing\n- General spacing set to a comfortable density.",
+   "backend_markdown": "# Backend Design\n\n## Overview\nThe backend will support task management functionalities including CRUD operations, user authentication, and billing management through APIs.\n\n## API Endpoints\n- **Tasks API**:\n  - `GET /api/tasks`: List all tasks\n  - `POST /api/tasks`: Create a new task\n  - `PUT /api/tasks/{taskId}`: Update an existing task\n  - `DELETE /api/tasks/{taskId}`: Delete a task\n\n- **User API**:\n  - `GET /api/users`: List all users\n  - `POST /api/users`: Create a new user\n\n- **Dashboard API**:\n  - `GET /api/dashboard`: Get dashboard metrics and insights\n\n## Event Architecture\n- Domain events for actions such as task creation, user creation, and subscription changes will be emitted.\n\n## Surface Realization Map\n```yaml\nsurfaces:\n  - surface_id: task_management\n    label: Task Management Module\n    surface_kind: module\n    owner: app\n    primary_entities: [Task]\n    owned_pages: [Dashboard]\n    owned_mutations: [create_task]\n    events_emitted: [domain.tasks.task_created]\n  - surface_id: user_management\n    label: User Management Module\n    surface_kind: module\n    owner: app\n    primary_entities: [User]\n    owned_pages: [Users]\n    owned_mutations: [create_user]\n    events_emitted: [domain.users.user_created]\n```",
+   "database_markdown": "# Database Design\n\n## Overview\nThe database schema for TaskTracker Pro using MongoDB will include collections for users and tasks.\n\n## Collections\n### Users Collection\n- Collection Name: `users`\n- Fields:\n  - `user_id`: String (Primary Key)\n  - `email`: String\n  - `password_hash`: String\n  - `created_at`: Date\n\n### Tasks Collection\n- Collection Name: `tasks`\n- Fields:\n  - `task_id`: String (Primary Key)\n  - `user_id`: String (Foreign Key)\n  - `title`: String\n  - `description`: String\n  - `completed`: Boolean\n  - `created_at`: Date\n  - `updated_at`: Date\n\n## Indexes\n1. Users: Unique index on `email` for user authentication.\n2. Tasks: Index on `user_id` to allow quick lookups of tasks by users.",
+   "experience_spec": {
+    "navigation_model": "top-level routes with shell navigation",
+    "brand_direction": "Modern and clean task management tool",
+    "pages": [
+     {
+      "name": "Dashboard",
+      "route": "/dashboard",
+      "layout": "grid",
+      "intent": "Landing page with an overview of task metrics and progress",
+      "sections": [
+       {
+        "id": "summary",
+        "primitive": "SummaryStrip",
+        "intent": "Displays key metrics like total tasks, completed tasks",
+        "config_hint": "{\"items\": [{\"label\": \"Total Tasks\", \"value_key\": \"total_tasks\"}, {\"label\": \"Completed Tasks\", \"value_key\": \"completed_tasks\"}]}"
+       },
+       {
+        "id": "task-overview",
+        "primitive": "DataTable",
+        "intent": "Shows a list of tasks with options to filter and sort",
+        "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"selection\": \"single\"}"
+       }
+      ]
+     },
+     {
+      "name": "Users",
+      "route": "/users",
+      "layout": "full-width",
+      "intent": "Manage users with the ability to create and edit user profiles",
+      "sections": [
+       {
+        "id": "user-table",
+        "primitive": "DataTable",
+        "intent": "Displayed list of users with actions to edit or delete",
+        "config_hint": "{\"columns\": [\"user_id\", \"email\", \"created_at\"], \"selection\": \"single\"}"
+       },
+       {
+        "id": "create-user-modal",
+        "primitive": "Modal",
+        "intent": "Modal for creating or editing a user",
+        "config_hint": "{\"title\": \"User Management\", \"size\": \"medium\"}"
+       }
+      ]
+     }
+    ]
+   },
+   "surface_map": {
+    "surfaces": [
+     {
+      "surface_id": "task_management",
+      "label": "Task Management Module",
+      "surface_kind": "module",
+      "owner": "app",
+      "source_capability_packs": [
+       "crud_pack"
+      ],
+      "primary_entities": [
+       "Task"
+      ],
+      "owned_pages": [
+       "Dashboard"
+      ],
+      "owned_mutations": [
+       "create_task",
+       "delete_task",
+       "update_task"
+      ],
+      "custom_reads": [
+       "summarize_tasks"
+      ],
+      "events_emitted": [
+       "domain.tasks.task_created"
+      ],
+      "workflow_triggers": [],
+      "integrations": [],
+      "notes": "Handles task operations and events."
+     },
+     {
+      "surface_id": "user_management",
+      "label": "User Management Module",
+      "surface_kind": "module",
+      "owner": "app",
+      "source_capability_packs": [
+       "crud_pack"
+      ],
+      "primary_entities": [
+       "User"
+      ],
+      "owned_pages": [
+       "Users"
+      ],
+      "owned_mutations": [
+       "create_user",
+       "delete_user"
+      ],
+      "custom_reads": [],
+      "events_emitted": [
+       "domain.users.user_created"
+      ],
+      "workflow_triggers": [],
+      "integrations": [],
+      "notes": "Handles user operations and events."
+     }
+    ]
+   },
+   "data_contract": {
+    "version": "1",
+    "app_id": null,
+    "artifact_version_id": null,
+    "surfaces": [
+     {
+      "surface_id": "task_management",
+      "surface_kind": "module",
+      "collections": [
+       {
+        "name": "tasks",
+        "scope": "app",
+        "tenancy": "per_user",
+        "owner_field": "user_id",
+        "entity": "Task",
+        "ownership": {
+         "surface_id": "task_management",
+         "surface_kind": "module"
+        },
+        "fields": [
+         {
+          "name": "task_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "user_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "default": "",
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "default": "",
+          "enum": null,
+          "nullable": true
+         },
+         {
+          "name": "completed",
+          "type": "boolean",
+          "required": false,
+          "default": "false",
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "created_at",
+          "type": "date",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "updated_at",
+          "type": "date",
+          "required": false,
+          "default": null,
+          "enum": null,
+          "nullable": true
+         }
+        ],
+        "indexes": [
+         {
+          "keys": [
+           {
+            "field": "user_id",
+            "order": 1
+           }
+          ],
+          "unique": false,
+          "sparse": null,
+          "name": null
+         }
+        ],
+        "search_by": "task_id",
+        "lifecycle": {
+         "write_mode": "module_action",
+         "migration_policy": "additive_only"
+        }
+       }
+      ]
+     },
+     {
+      "surface_id": "user_management",
+      "surface_kind": "module",
+      "collections": [
+       {
+        "name": "users",
+        "scope": "app",
+        "tenancy": "app_wide",
+        "owner_field": null,
+        "entity": "User",
+        "ownership": {
+         "surface_id": "user_management",
+         "surface_kind": "module"
+        },
+        "fields": [
+         {
+          "name": "user_id",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "password_hash",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         },
+         {
+          "name": "created_at",
+          "type": "date",
+          "required": true,
+          "default": null,
+          "enum": null,
+          "nullable": false
+         }
+        ],
+        "indexes": [
+         {
+          "keys": [
+           {
+            "field": "email",
+            "order": 1
+           }
+          ],
+          "unique": true,
+          "sparse": null,
+          "name": null
+         }
+        ],
+        "search_by": "user_id",
+        "lifecycle": {
+         "write_mode": "module_action",
+         "migration_policy": "additive_only"
+        }
+       }
+      ]
+     }
+    ],
+    "shared_collections": [],
+    "policies": {
+     "default_scope_field": "app_id",
+     "allow_destructive_migrations": false
+    }
+   }
+  }
+ ]
+}

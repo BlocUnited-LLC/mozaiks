@@ -15,10 +15,17 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     _unwrap_output_envelope,
     extract_code_file_map_from_payload,
 )
+from mozaiksai.core.workflow.generator_support.data_contract_fields import (
+    CANONICAL_FIELD_TYPES,
+    DATE_FIELD_TYPES,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_action_id,
 )
 from mozaiksai.core.workflow.generator_support.module_policy import render_module_policy
+
+# Every canonical type except the logical date types is also a JSON Schema type.
+_JSON_RECORD_TYPES = frozenset(CANONICAL_FIELD_TYPES) - DATE_FIELD_TYPES
 
 
 def _property(name: str, kind: str, *, required: bool = False) -> dict[str, Any]:
@@ -41,8 +48,8 @@ def _record_response_schema(collection: dict[str, Any]) -> dict[str, Any]:
         name = field["name"]
         kind = "string" if name == "_id" else field.get("type")
         declaration: dict[str, Any] = {}
-        if kind in {"string", "number", "integer", "boolean", "object", "array", "null"}:
-            declaration["type"] = [kind, "null"] if field.get("nullable") and kind != "null" else kind
+        if kind in _JSON_RECORD_TYPES:
+            declaration["type"] = [kind, "null"] if field.get("nullable") else kind
         # Logical storage types outside JSON Schema keep their declared names;
         # the page compiler needs field identity, not an invented wire encoding.
         if field.get("enum"):

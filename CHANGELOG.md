@@ -52,6 +52,26 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs recognizes the platform's login/user system by what a surface
+  declares, not what it is called. A surface such as `user_management` or
+  `auth_module` normalizes to the platform when it declares a platform identity
+  entity (`User`, `Session`, ...) whose collection holds only identity claims
+  and carries a password or credential, or is unique on an email. Its identity
+  collections, its user-lifecycle actions (`create_user`, `list_users`,
+  `logout_user`, recorded as `removed_mutations`/`removed_reads`), its events,
+  its sign-in pages and a page listing its user accounts are removed. Navigation
+  to a removed user-administration page is removed, not redirected, until the
+  admin portal serves user administration end to end. Identity fields typed
+  `date`, or spelled in camelCase, no longer make the save fail. App entities
+  that merely reference users (`TeamMember`, `Task.user_id`), an app's own
+  `Session` entity, app fields stored beside a password, and actions such as
+  `follow_user` stay app-owned. A surface mixing platform identity with app
+  behavior is rejected, naming what stays app-owned on it.
+- The DesignDocs prompt no longer uses a users module and a Users page as its
+  worked examples, which taught the model to design the platform's user system.
+  It uses a projects example instead, and says plainly that the platform
+  provides sign-in, sessions, user accounts and user administration.
+
 - DesignDocs saves a design whose authentication surface declares login/logout
   events or a sign-in page instead of rejecting it on every retry. The events
   and page are platform-provided, so they are removed and recorded
