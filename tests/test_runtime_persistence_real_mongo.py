@@ -32,6 +32,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _fresh_mongo_client():
+    """Each pytest event loop needs its own process-cached Motor client."""
+    close_mongo_client()
+    yield
+    close_mongo_client()
+
+
 class RealPersistenceHandler:
     async def create_project(self, ctx, *, project_id: str, name: str):
         collection = ctx.persistence.collection("projects", "projects")
@@ -224,7 +232,6 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
         else:
             await raw_collection.drop()
             await other_collection.drop()
-        close_mongo_client()
 
 
 @pytest.mark.asyncio
@@ -354,4 +361,3 @@ async def test_real_mongo_index_readiness_is_exact_and_fail_closed(
             await ready.drop()
             await wrong.drop()
             await alternate.drop()
-        close_mongo_client()

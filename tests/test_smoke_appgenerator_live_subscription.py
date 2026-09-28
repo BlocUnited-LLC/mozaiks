@@ -204,10 +204,13 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
     assert acceptance["runtime_loader"]["action_entitlements"]["generate_report"] == "reports.generate"
 
     generated = acceptance["context"]["generated_files"]
+    assert acceptance["context"]["app_assembly_status"] == "passed"
+    assert json.loads(generated["app.json"])["authRequired"] is True
+    assert {"config/auth.yaml", "ui/auth/authAdapter.js"} <= generated.keys()
     report_collection = json.loads(generated["data/contract.json"])["surfaces"][0]["collections"][0]
     assert (report_collection["scope"], report_collection["tenancy"], report_collection["owner_field"]) == ("app", "app_wide", None)
     policy = generated["modules/reports/backend/policy.py"]
-    assert "Ownership policy compiled from data/contract.json" in policy
+    assert "Ownership preflight compiled from data/contract.json" in policy
     assert "ReportsPolicy" not in policy
 
     details = acceptance["wiring"]["checks"][0]["details"]

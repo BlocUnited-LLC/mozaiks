@@ -37,7 +37,7 @@ app/modules/{name}/
     ├── handler.py           ← required: thin dispatch, one method per action
     ├── service.py           ← all business logic and event emission
     ├── repo.py              ← MongoDB access only, no logic
-    ├── policy.py            ← query scoping for multi-tenancy
+    ├── policy.py            ← optional ownership preflight; runtime enforces tenancy
     └── schemas.py           ← typed document shapes and pure helpers
 ```
 

@@ -293,9 +293,12 @@ When working in or generating modules:
   broker); (2) background pollers for the `event_pipeline` archetype — use when
   the module needs to detect external state changes (DNS propagation, certificate
   issuance, payment confirmation) and advance a multi-step pipeline automatically.
-  Pollers must use `AsyncIOMotorClient` directly (not `app_data_from_context`),
-  resolve adapters lazily, and be accompanied by a stub adapter so the pipeline
-  runs locally without external infrastructure.
+  Pollers resolve adapters lazily and include a stub adapter so the pipeline
+  runs locally without external infrastructure. A startup declaration does not
+  grant raw app-data access: generated module code must not import Motor/PyMongo
+  or construct persistence clients. Explicit external database provider mechanics
+  belong in `app/services/adapters/database/`; app-data ownership remains in the
+  injected runtime persistence boundary.
   Internal actions that are only triggered by event reactions must use
   `api_surface: internal` and `permissions: []` — the event bus is the
   authorization boundary.

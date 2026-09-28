@@ -50,6 +50,8 @@ class FakeCollection:
 
 
 class FakePersistenceContext:
+    principal = None
+
     def __init__(self, app_id: str) -> None:
         self._app_id = app_id
         self.collections: dict[tuple[str, str], FakeCollection] = {}

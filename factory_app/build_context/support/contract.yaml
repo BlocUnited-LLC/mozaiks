@@ -98,7 +98,7 @@ runtime_boundaries:
       support events. Do not create a separate notifications module or local
       notification persistence worker.
   - id: persistence_layer
-    rule: Generated repo.py must use ctx.persistence.collection("support", entity_name). No direct Motor clients and no app_data_from_context aliases.
+    rule: Generated repo.py must use ctx.persistence.collection("support", collection_name). No direct Motor clients and no app_data_from_context aliases.
 
 facades: []
 

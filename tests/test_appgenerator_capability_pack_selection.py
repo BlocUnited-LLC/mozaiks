@@ -339,7 +339,7 @@ def test_social_pack_owns_friends_invites_posts_and_feed() -> None:
     friends_profile = _read_yaml("factory_app/build_context/social/templates/modules/friends/contracts/profile.yaml")
     assert friends_profile["tabs"][0]["action"] == "list_friends_of"
     assert "profile_tab_composition" in {boundary["id"] for boundary in contract["runtime_boundaries"]}
-    assert "ctx.persistence.collection(module_id, entity_name)" in " ".join(
+    assert "ctx.persistence.collection(module_id, collection_name)" in " ".join(
         boundary["rule"] for boundary in contract["runtime_boundaries"]
     )
 

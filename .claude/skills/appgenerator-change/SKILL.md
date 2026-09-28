@@ -78,7 +78,7 @@ Boundary rules:
 - Do not generate `transport.py` or duplicate runtime transport infrastructure.
 - Do not bind pages directly to managed-capability internals; use the app-owned facade module pattern.
 - Do not hardcode provider-specific or private product examples into OSS guidance, tests, or fixtures.
-- Do not assume `ctx.db`; use the canonical persistence model and `ctx.persistence.collection(module_id, entity_name)`.
+- Do not assume `ctx.db`; use the canonical persistence model and `ctx.persistence.collection(module_id, collection_name)`.
 - Do not generate local visual primitive clones or raw persistent-page React when the shipped schema and primitive contracts can represent the surface.
 
 Common change types:

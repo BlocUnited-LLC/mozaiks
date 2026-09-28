@@ -23,6 +23,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
+from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
     apply_entitlement_gates,
@@ -1133,6 +1134,11 @@ async def validate_subscription_acceptance_handoff(
             "workflow_name": "AppGenerator",
             "app_id": DEFAULT_APP_ID,
             "chat_id": "subscription-reporting-live-smoke",
+            "run_build_binding": {
+                "build_registry_id": "registry_subscription_smoke",
+                "target_app_id": DEFAULT_APP_ID,
+                "build_id": "build_subscription_smoke", "phase": "genesis",
+            },
             "generated_files": files,
             "data_contract": _data_contract(),
             "design_surface_map": _design_surface_map(),
@@ -1168,9 +1174,12 @@ async def validate_subscription_acceptance_handoff(
     accepted = await execute_file_replay(replay_context, files, task_outputs=replay_outputs)
     for key, value in replay_context.items():
         context.set(key, value)
-    files.update({file["filename"]: file["content"] for task_id, output in accepted.items()
-                  if not task_id.startswith("_") for file in output["code_files"]})
-    context.set("generated_files", files)
+    assembled = await assemble_app_tasks(context_variables=context)
+    if not assembled.get("success"):
+        raise RuntimeError(f"Subscription smoke assembly failed: {assembled.get('error')}")
+    files = {file["filename"]: file["content"] for file in assembled["code_files"]}
+    # This offline smoke validates the assembled bundle without a browser build.
+    context.set("app_validation_status", "skipped")
 
     wiring = await validate_wiring(context_variables=context)
     acceptance = await run_app_bundle_acceptance_gate(files=files, context_variables=context)

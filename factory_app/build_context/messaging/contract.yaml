@@ -78,7 +78,7 @@ forbidden_outputs:
 
 runtime_boundaries:
   - id: persistence_layer
-    rule: Generated repo.py must use ctx.persistence.collection("messages", entity_name). No direct Motor clients and no app_data_from_context aliases.
+    rule: Generated repo.py must use ctx.persistence.collection("messages", collection_name). No direct Motor clients and no app_data_from_context aliases.
   - id: event_emission
     rule: Events must be emitted via ctx.emit(), not direct dispatcher calls from service/handler.
   - id: support_ticket_authority

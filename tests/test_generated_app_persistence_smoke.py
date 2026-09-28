@@ -139,6 +139,8 @@ class FakePersistenceContext:
         user_id: str | None = None,
         database_name: str | None = None,
         client: Any | None = None,
+        data_contract: dict[str, Any] | None = None,
+        principal: Any | None = None,
     ) -> None:
         self._app_id = app_id
         self._scope_metadata = {"app_id": app_id}

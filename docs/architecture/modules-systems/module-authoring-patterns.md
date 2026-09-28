@@ -44,7 +44,8 @@ Use for:
 - operational logs that need queryable retention
 
 Keep append-only record creation in `service.py`, query access in `repo.py`,
-scope helpers in `policy.py`, and typed activity shapes in `schemas.py`.
+optional ownership preflight in `policy.py`, and typed activity shapes in
+`schemas.py`. Runtime persistence enforces declared row ownership.
 
 ### External adapter pattern
 

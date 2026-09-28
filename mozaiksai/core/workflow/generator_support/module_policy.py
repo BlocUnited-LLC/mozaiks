@@ -1,4 +1,4 @@
-"""Render generated ownership policies from the approved data contract."""
+"""Render optional ownership preflight helpers from the approved data contract."""
 from __future__ import annotations
 
 import json
@@ -15,7 +15,7 @@ _TENANCY_ATTRIBUTES = {"per_user": "user_id", "per_workspace": "workspace_id"}
 
 
 def render_module_policy(module_id: str, collections: list[dict[str, Any]]) -> str:
-    """Compile explicit collection tenancy into a complete, fail-closed policy."""
+    """Compile preflight helpers; persistence enforces tenancy on every operation."""
     scopes: dict[str, tuple[str | None, str | None]] = {}
     for collection in collections:
         name = str(collection.get("name") or "")
@@ -33,7 +33,8 @@ def render_module_policy(module_id: str, collections: list[dict[str, Any]]) -> s
         raise ValueError(f"data_contract module {module_id!r} requires at least one collection")
 
     return (
-        '\"\"\"Ownership policy compiled from data/contract.json.\"\"\"\n\n'
+        '\"\"\"Ownership preflight compiled from data/contract.json.\n\n'
+        'Runtime persistence enforces ownership independently of these helpers.\n\"\"\"\n\n'
         f"_SCOPES = {dict(sorted(scopes.items()))!r}\n\n\n"
         "def _scope(context, entity_name):\n"
         "    if entity_name is None:\n"
@@ -42,30 +43,34 @@ def render_module_policy(module_id: str, collections: list[dict[str, Any]]) -> s
         "        entity_name = next(iter(_SCOPES))\n"
         "    if entity_name not in _SCOPES:\n"
         "        raise ValueError(f'Undeclared policy collection: {entity_name!r}')\n"
-        "    app_id = getattr(context, 'app_id', None)\n"
+        "    persistence = getattr(context, 'persistence', None)\n"
+        "    app_id = getattr(persistence, 'app_id', None)\n"
         "    if not isinstance(app_id, str) or not app_id.strip():\n"
         "        raise PermissionError('Missing required scope identity: app_id')\n"
         "    field, attribute = _SCOPES[entity_name]\n"
         "    if attribute is None:\n"
-        "        return None, None\n"
-        "    user_id = getattr(context, 'user_id', None)\n"
+        "        return app_id, None, None\n"
+        "    principal = getattr(persistence, 'principal', None)\n"
+        "    user_id = principal.user_id if principal is not None else None\n"
         "    if not isinstance(user_id, str) or not user_id.strip():\n"
         "        raise PermissionError('Missing required scope identity: user_id')\n"
-        "    identity = getattr(context, attribute, None)\n"
+        "    identity = user_id if attribute == 'user_id' else principal.workspace_id\n"
         "    if not isinstance(identity, str) or not identity.strip():\n"
         "        raise PermissionError(f'Missing required scope identity: {attribute}')\n"
-        "    return field, identity\n\n\n"
+        "    return app_id, field, identity\n\n\n"
         "def scoped_query(context, filters=None, *, entity_name=None):\n"
-        "    field, identity = _scope(context, entity_name)\n"
+        "    _, field, identity = _scope(context, entity_name)\n"
         "    query = dict(filters or {})\n"
         "    query.pop('app_id', None)\n"
         "    if field is not None:\n"
         "        query[field] = identity\n"
         "    return query\n\n\n"
         "def scope_record(context, record, *, entity_name=None):\n"
-        "    field, identity = _scope(context, entity_name)\n"
-        "    scoped = {**dict(record), 'app_id': context.app_id}\n"
+        "    app_id, field, identity = _scope(context, entity_name)\n"
+        "    scoped = {**dict(record), 'app_id': app_id}\n"
         "    if field is not None:\n"
+        "        if field in scoped and scoped[field] != identity:\n"
+        "            raise PermissionError('Record owner disagrees with authenticated principal')\n"
         "        scoped[field] = identity\n"
         "    return scoped\n"
     )

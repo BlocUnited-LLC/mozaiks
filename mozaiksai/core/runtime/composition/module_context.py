@@ -60,9 +60,10 @@ class ModuleContext:
     # Empty dict when the module declares no settings; None for trusted internal calls.
     settings: dict[str, Any] | None = None
 
-    # App-scoped generated-module persistence. ModuleExecutor injects this
-    # when app_id is available. It may be None for explicitly constructed test
-    # contexts or trusted runtime calls. ctx.db is intentionally not provided.
+    # ModuleExecutor binds collection ownership to the authenticated persistence
+    # principal and data contract, independently of the selectable scope above.
+    # This may be None in explicit test contexts or calls without app_id.
+    # ctx.db is intentionally not provided.
     persistence: ModulePersistenceContext | None = None
 
     # Event emitter — async callable(event_type, payload) -> None

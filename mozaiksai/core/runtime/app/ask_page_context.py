@@ -10,6 +10,8 @@ import json
 import logging
 from typing import Any
 
+from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
+
 logger = logging.getLogger("ask_page_context")
 
 # Bound the prompt cost of page-declared context: at most this many actions
@@ -82,6 +84,8 @@ async def resolve_page_ask_context(
     app: Any,
     app_id: str,
     user_id: str,
+    persistence_principal: PersistencePrincipal | None = None,
+    principal: Any = None,
 ) -> dict[str, Any]:
     """Dispatch page-declared read-only module actions into ask-context lines.
 
@@ -97,6 +101,8 @@ async def resolve_page_ask_context(
     never breaks the ask exchange.
     """
     if not declarations:
+        return {}
+    if persistence_principal is not None and persistence_principal.user_id != user_id:
         return {}
     eligibility = getattr(getattr(app, "state", None), "module_ask_context_actions", None)
     if not isinstance(eligibility, dict):
@@ -128,10 +134,13 @@ async def resolve_page_ask_context(
             continue
         try:
             scope = await get_platform_hooks().call_module_scope(
-                principal=None,
+                principal=principal,
                 module_name=module,
                 action_name=action,
-                requested_scope={"app_id": app_id, "user_id": user_id},
+                requested_scope={
+                    "app_id": app_id, "user_id": user_id,
+                    "workspace_id": persistence_principal.workspace_id if persistence_principal else None,
+                },
                 params=declaration["params"],
                 default_permissions=[],
                 fail_closed=True,
@@ -150,6 +159,9 @@ async def resolve_page_ask_context(
                     module=module,
                     action=action,
                     params=declaration["params"],
+                    persistence_principal=(
+                        persistence_principal.with_host_scope(scope) if persistence_principal else None
+                    ),
                     scope=ModuleDispatchScope(
                         app_id=app_id,
                         user_id=user_id,
