@@ -14,7 +14,6 @@ from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,
     load_task_batches_config,
-    optional_task_output_paths,
 )
 
 
@@ -33,11 +32,12 @@ async def execute_file_replay(context_values: dict, files: dict[str, str], *, ta
         task = request.context_variables["current_build_task"]
         assert set(request.context_variables["dependency_task_outputs"]) == set(task["depends_on"])
         seen.append(task["task_id"])
-        optional_paths = optional_task_output_paths(task)
+        # Code-owned artifacts (schemas.py, policy.py, canonical actions) are absent from the
+        # fixture on purpose; task admission renders them and still rejects a genuinely
+        # missing required path.
         output = deepcopy(supplied[task["task_id"]]) if task["task_id"] in supplied else {
             "code_files": [
-                {"filename": path, "content": files[path]} for path in task["owned_paths"]
-                if path in files or path not in optional_paths
+                {"filename": path, "content": files[path]} for path in task["owned_paths"] if path in files
             ],
         }
         return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output=output)

@@ -35,9 +35,11 @@ from .generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
 from .generator_support.module_policy import materialize_task_module_policies
-from .generator_support.module_read_actions import (
-    close_module_read_actions,
-    materialize_module_read_implementations,
+from .generator_support.module_read_actions import materialize_module_read_implementations
+from .generator_support.module_write_actions import (
+    close_module_actions,
+    materialize_module_write_implementations,
+    materialize_task_module_schemas,
 )
 from .generator_support.page_plan_utils import (
     _page_stem_from_path,
@@ -1080,7 +1082,7 @@ async def _run_one_task(
                 candidate_json = json.dumps(output, separators=(",", ":"), default=str)
                 _reject_task_output_identity_drift(task, output)
                 subscription_contract = resolve_subscription_contract(task_context)
-                output = cast(dict[str, Any], close_module_read_actions(
+                output = cast(dict[str, Any], close_module_actions(
                     output, app_build_plan=task_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"),
                     design_surface_map=task_context.get("design_surface_map"),
@@ -1108,6 +1110,10 @@ async def _run_one_task(
                     data_contract=data_contract,
                 )
                 canonical_file_map.update(policies)
+                canonical_file_map.update(materialize_task_module_schemas(
+                    canonical_file_map, task=task, app_build_plan=task_context.get("app_build_plan"),
+                    data_contract=data_contract,
+                ))
                 read_sources = dict(task_context.get("generated_files") or {})
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
                     read_sources.update(extract_code_file_map_from_payload(dependency))
@@ -1116,6 +1122,11 @@ async def _run_one_task(
                     read_sources, app_build_plan=task_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                     subscription_contract=subscription_contract,
+                ))
+                read_sources.update(canonical_file_map)
+                canonical_file_map.update(materialize_module_write_implementations(
+                    read_sources, app_build_plan=task_context.get("app_build_plan"),
+                    data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                 ))
                 canonical_file_map = compile_module_entitlement_gates(
                     canonical_file_map,

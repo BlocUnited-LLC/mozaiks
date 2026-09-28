@@ -50,7 +50,7 @@ def _context(**overrides):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("materializer", ["materialize_module_read_actions", "materialize_module_policies"])
+@pytest.mark.parametrize("materializer", ["materialize_module_actions", "materialize_module_policies"])
 async def test_materializer_cause_reaches_tool_and_context_without_later_checks(monkeypatch, materializer):
     context = _context()
     cause = "modules/tasks/module.yaml: forced materializer failure"
@@ -137,7 +137,7 @@ def _next(source, context):
 @pytest.mark.asyncio
 async def test_unattributed_failure_terminates_after_recovery_policy_without_user_retry_loop(monkeypatch):
     context = _context()
-    monkeypatch.setattr(assembly_phase, "materialize_module_read_actions", Mock(side_effect=ValueError("unknown materializer cause")))
+    monkeypatch.setattr(assembly_phase, "materialize_module_actions", Mock(side_effect=ValueError("unknown materializer cause")))
     with _workflow_tool_invocation(context):
         failed = await assembly.assemble_app_tasks(context_variables=context)
         assert _next("AssemblyAgent", context) == "AppValidationAgent"
