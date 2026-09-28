@@ -515,8 +515,15 @@ def test_a_mutation_taking_undeclared_fields_is_not_a_record_write():
     context = _context(module_yaml=_module_yaml([reminder]),
                        owned_mutations=["send_reminder", "update_task", "delete_task"])
     page = _dashboard([{"id": "tasks_completed", "label": "Done", "value_key": "tasks_completed"}], _workflow_actions()[:1])
-    with pytest.raises(ValueError, match="workflow_id 'create_task_workflow' is not present"):
-        _compile({"ui/pages/dashboard.yaml": yaml.safe_dump(page)}, context)
+    # The collection is module-written, so its canonical create_task is an approved
+    # candidate even though the surface map omits it; send_reminder never is.
+    compiled = _compile({"ui/pages/dashboard.yaml": yaml.safe_dump(page)}, context)
+    dashboard = compiled["ui/pages/dashboard.yaml"]
+    actions = _section(dashboard, "task-table")["config"]["actions"]
+    assert ("open-create_task", "create_task-modal") in [(a["id"], a["payload"]["modal_id"]) for a in actions]
+    modals = {s["id"] for s in dashboard["sections"] if s["primitive"] == "Modal"}
+    assert "create_task-modal" in modals and not any("send_reminder" in modal for modal in modals)
+    assert "task_management/send_reminder" not in reachable_page_action_keys([dashboard])
 
 
 def test_every_unresolved_reference_on_a_page_is_reported_together():

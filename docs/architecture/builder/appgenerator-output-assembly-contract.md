@@ -62,9 +62,12 @@ output, so it constructs from the same approved inputs):
 The collection is the approved data-contract collection whose canonical list
 read the table binds; its identifier is the `search_by` field the canonical
 get read looks up, else a declared `id` field, else the field of a unique
-single-field index. Mutation shapes come from the surface map's
-`owned_mutations` and each action's declared input, and only a mutation whose
-inputs are all declared collection fields is a record write: a create takes no
+single-field index. Mutation shape candidates are the surface map's
+`owned_mutations` together with the collection's canonical writes
+(`create_<entity>`, `update_<entity>`, `delete_<entity>`, which code compiles
+for a module-written collection whether or not the design repeats them), and
+each action's declared input decides the shape: only a mutation whose inputs
+are all declared collection fields is a record write, a create takes no
 identifier, an update requires it plus other fields, a delete requires it
 alone. A collection with no record identity at all still gets the create
 replacement when exactly one record write exists; edit constructions need the

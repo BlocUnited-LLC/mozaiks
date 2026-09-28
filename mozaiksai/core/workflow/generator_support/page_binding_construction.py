@@ -21,7 +21,6 @@ author wrote and what code filled in.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
@@ -31,7 +30,12 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 
-from .module_action_inventory import canonical_read_action_id
+from .module_action_inventory import (
+    CANONICAL_WRITE_OPERATIONS,
+    canonical_read_action_id,
+    canonical_write_action_id,
+    collection_has_canonical_writes,
+)
 from .page_action_bindings import reachable_page_action_keys
 from .page_data_bindings import iter_data_bound_sections, schema_at_path, section_metrics
 
@@ -41,20 +45,15 @@ _TABLE_PRIMITIVES = frozenset({"DataTable", "ResourceTable"})
 _FORM_FIELD_TYPES = {"string": "text", "integer": "number", "number": "number", "boolean": "checkbox"}
 
 
-def _entity_identifier(entity: Any) -> str | None:
-    """Project a declared entity name such as ``ProjectMilestone`` to ``project_milestone``."""
-    if not isinstance(entity, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entity):
-        return None
-    snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", entity).lower()
-    return re.sub(r"_+", "_", snake)
-
-
 def canonical_write_ids(collection: Mapping[str, Any]) -> dict[str, str]:
     """The canonical ``{operation}_{entity}`` write ids for a collection's entity."""
-    identifier = _entity_identifier(collection.get("entity"))
-    if identifier is None:
-        return {}
-    return {operation: f"{operation}_{identifier}" for operation in ("create", "update", "delete")}
+    try:
+        return {
+            operation: canonical_write_action_id(str(collection.get("entity") or ""), operation)
+            for operation in CANONICAL_WRITE_OPERATIONS
+        }
+    except ValueError:
+        return {}  # module closure already reported the entity name
 
 
 def record_identity_field(
@@ -160,6 +159,7 @@ def mutation_shapes(
     identifier: str | None,
     declared_fields: set[str] | None = None,
     canonical_ids: Mapping[str, str] | None = None,
+    canonical_writes: set[str] | None = None,
 ) -> dict[str, list[str]]:
     """Classify the surface's owned mutations by how they address the record.
 
@@ -167,11 +167,13 @@ def mutation_shapes(
     record write. Among those, a create takes no identifier, an update requires
     the identifier and takes other fields, and a delete requires the identifier
     alone. Without a record identity only the canonical create write (named
-    ``create_<entity>``) is a create candidate. Anything else is not
-    classified, so it never becomes a constructed entry point.
+    ``create_<entity>``) is a create candidate. Canonical writes the data
+    contract approves are candidates whether or not the surface map repeats
+    them in ``owned_mutations``. Anything else is not classified, so it never
+    becomes a constructed entry point.
     """
     shapes: dict[str, list[str]] = {"create": [], "update": [], "delete": []}
-    owned = _owned_mutations(surface_map, module_id)
+    owned = (_owned_mutations(surface_map, module_id) or set()) | set(canonical_writes or ())
     if not owned:
         return shapes
     for action_id in sorted(owned):
@@ -408,9 +410,11 @@ def construct_page_bindings(
                 f"collection '{collection.get('name')}' declares no record identity "
                 "(no search_by, id field, unique single-field index or canonical update write)"
             )
+            canonical_ids = canonical_write_ids(collection)
+            canonical = set(canonical_ids.values()) & set(actions) if collection_has_canonical_writes(collection) else set()
             shapes = mutation_shapes(
                 module_id, actions, surface_map, identifier, collection_fields(collection),
-                canonical_ids=canonical_write_ids(collection),
+                canonical_ids=canonical_ids, canonical_writes=canonical,
             )
             entity = str(collection.get("entity") or collection.get("name"))
             config = section["config"]
@@ -459,7 +463,8 @@ def construct_page_bindings(
             if identifier is None:
                 gated_writes = sorted(
                     action_id for action_id, action in actions.items()
-                    if action.get("entitlement_gate") and action_id in (_owned_mutations(surface_map, module_id) or set())
+                    if action.get("entitlement_gate")
+                    and action_id in ((_owned_mutations(surface_map, module_id) or set()) | canonical)
                     and f"{module_id}/{action_id}" not in reachable_page_action_keys([document])
                 )
                 for action_id in gated_writes:
