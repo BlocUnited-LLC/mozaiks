@@ -51,8 +51,21 @@ function interpolateString(template, context) {
   });
 }
 
+const SINGLE_TOKEN = /^\{([^}]+)\}$/;
+
+// A payload entry that is exactly one token, such as `{form.price_amount}` or
+// `{selected_row.task_id}`, carries the resolved value with its own type: a
+// number field the Form coerced stays a number and a checkbox stays a boolean,
+// which is what the module action's input_schema validates. A token that
+// resolves to nothing (an empty optional number the Form left out) stays
+// undefined, so JSON serialization drops the key instead of posting "".
+// Only a template that mixes tokens with text is a string.
 function interpolateValue(value, context) {
-  if (typeof value === 'string') return interpolateString(value, context);
+  if (typeof value === 'string') {
+    const single = value.match(SINGLE_TOKEN);
+    if (single) return resolvePath(context, single[1].trim());
+    return interpolateString(value, context);
+  }
   if (Array.isArray(value)) return value.map((item) => interpolateValue(item, context));
   if (isRecord(value)) {
     return Object.fromEntries(

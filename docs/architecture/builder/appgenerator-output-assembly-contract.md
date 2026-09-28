@@ -61,16 +61,22 @@ output, so it constructs from the same approved inputs):
 
 The collection is the approved data-contract collection whose canonical list
 read the table binds; its identifier is the `search_by` field the canonical
-get read looks up. Mutation shapes come from the surface map's
+get read looks up, else a declared `id` field, else the field of a unique
+single-field index. Mutation shapes come from the surface map's
 `owned_mutations` and each action's declared input, and only a mutation whose
 inputs are all declared collection fields is a record write: a create takes no
 identifier, an update requires it plus other fields, a delete requires it
-alone. Two candidates of one shape, an input the form primitive cannot render,
-an authored section already holding the constructed modal id, an edit button in
-a table's empty state, or a missing data contract leave the author's choice
-alone; the refusal is logged as `[pages] <path>: not constructed ...`.
-Constructed openers carry their own ids (`open-<action>`), so they never
-collide with an authored action id.
+alone. A collection with no record identity at all still gets the create
+replacement when exactly one record write exists; edit constructions need the
+identifier and are refused. Two candidates of one shape, an input the form
+primitive cannot render, an authored section already holding the constructed
+modal id, an edit button in a table's empty state, or a missing data contract
+leave the author's choice alone; every refusal is logged as
+`[pages] <path>: not constructed ...` with its reason. Constructed openers
+carry their own ids (`open-<action>`), so they never collide with an authored
+action id. A constructed form's explicit `{form.<field>}` payload entries are
+served by the page renderer with the coerced field value's own type, so a
+number field reaches the action as a JSON number.
 
 ### Rejection and pack-owned pages
 

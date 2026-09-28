@@ -21,6 +21,7 @@ author wrote and what code filled in.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
@@ -40,10 +41,50 @@ _TABLE_PRIMITIVES = frozenset({"DataTable", "ResourceTable"})
 _FORM_FIELD_TYPES = {"string": "text", "integer": "number", "number": "number", "boolean": "checkbox"}
 
 
-def record_identity_field(collection: Mapping[str, Any]) -> str | None:
-    """Name the declared field the canonical get read looks a record up by."""
-    lookup = collection.get("search_by") or ("id" if "id" in collection_fields(collection) else None)
-    return lookup if isinstance(lookup, str) and lookup in collection_fields(collection) else None
+def _entity_identifier(entity: Any) -> str | None:
+    """Project a declared entity name such as ``ProjectMilestone`` to ``project_milestone``."""
+    if not isinstance(entity, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entity):
+        return None
+    snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", entity).lower()
+    return re.sub(r"_+", "_", snake)
+
+
+def canonical_write_ids(collection: Mapping[str, Any]) -> dict[str, str]:
+    """The canonical ``{operation}_{entity}`` write ids for a collection's entity."""
+    identifier = _entity_identifier(collection.get("entity"))
+    if identifier is None:
+        return {}
+    return {operation: f"{operation}_{identifier}" for operation in ("create", "update", "delete")}
+
+
+def record_identity_field(
+    collection: Mapping[str, Any], actions: Mapping[str, Mapping[str, Any]] | None = None,
+) -> str | None:
+    """Name the declared field that identifies one record of the collection.
+
+    The canonical get read looks a record up by ``search_by`` (or a declared
+    ``id``); failing both, a unique single-field index is the contract's own
+    statement that the field identifies a record; failing that, the canonical
+    update write addresses the record by its one required input.
+    """
+    declared = collection_fields(collection)
+    lookup = collection.get("search_by") or ("id" if "id" in declared else None)
+    if isinstance(lookup, str) and lookup in declared:
+        return lookup
+    unique = [
+        str(keys[0].get("field"))
+        for index in collection.get("indexes") or [] if isinstance(index, Mapping) and index.get("unique")
+        for keys in [index.get("keys")]
+        if isinstance(keys, list) and len(keys) == 1 and isinstance(keys[0], Mapping) and keys[0].get("field") in declared
+    ]
+    if len(unique) == 1:
+        return unique[0]
+    update = (actions or {}).get(canonical_write_ids(collection).get("update", ""))
+    if update is not None:
+        required = [name for name, spec in action_input_fields(update).items() if spec.get("required")]
+        if len(required) == 1 and required[0] in declared:
+            return required[0]
+    return None
 
 
 def collection_fields(collection: Mapping[str, Any]) -> set[str]:
@@ -116,16 +157,18 @@ def mutation_shapes(
     module_id: str,
     actions: Mapping[str, Mapping[str, Any]],
     surface_map: Any,
-    identifier: str,
+    identifier: str | None,
     declared_fields: set[str] | None = None,
+    canonical_ids: Mapping[str, str] | None = None,
 ) -> dict[str, list[str]]:
     """Classify the surface's owned mutations by how they address the record.
 
     Only a mutation whose inputs are all declared fields of the collection is a
     record write. Among those, a create takes no identifier, an update requires
     the identifier and takes other fields, and a delete requires the identifier
-    alone. Anything else is not classified, so it never becomes a constructed
-    entry point.
+    alone. Without a record identity only the canonical create write (named
+    ``create_<entity>``) is a create candidate. Anything else is not
+    classified, so it never becomes a constructed entry point.
     """
     shapes: dict[str, list[str]] = {"create": [], "update": [], "delete": []}
     owned = _owned_mutations(surface_map, module_id)
@@ -136,9 +179,13 @@ def mutation_shapes(
         if action is None or action.get("api_surface") in {"internal", "admin_internal"}:
             continue
         fields = action_input_fields(action)
-        if not fields or (declared_fields is not None and not set(fields) <= declared_fields | {identifier}):
+        allowed = (declared_fields | {identifier}) if declared_fields is not None and identifier else declared_fields
+        if not fields or (allowed is not None and not set(fields) <= allowed):
             continue
-        if identifier not in fields:
+        if identifier is None:
+            if action_id == (canonical_ids or {}).get("create"):
+                shapes["create"].append(action_id)
+        elif identifier not in fields:
             shapes["create"].append(action_id)
         elif fields[identifier]["required"] and len(fields) > 1:
             shapes["update"].append(action_id)
@@ -352,14 +399,19 @@ def construct_page_bindings(
             collection = listed.get((module_id, action_id))
             if collection is None:
                 continue
-            identifier = record_identity_field(collection)
-            if identifier is None:
-                continue
             actions = {
                 contract_key.split("/", 1)[1]: contract
                 for contract_key, contract in contracts.items() if contract_key.startswith(f"{module_id}/")
             }
-            shapes = mutation_shapes(module_id, actions, surface_map, identifier, collection_fields(collection))
+            identifier = record_identity_field(collection, actions)
+            no_identity = (
+                f"collection '{collection.get('name')}' declares no record identity "
+                "(no search_by, id field, unique single-field index or canonical update write)"
+            )
+            shapes = mutation_shapes(
+                module_id, actions, surface_map, identifier, collection_fields(collection),
+                canonical_ids=canonical_write_ids(collection),
+            )
             entity = str(collection.get("entity") or collection.get("name"))
             config = section["config"]
             if not workflows:
@@ -367,14 +419,26 @@ def construct_page_bindings(
                     if action.get("action_type") != "workflow":
                         continue
                     shape = "update" if action.get("requires_selection") else "create"
+                    workflow_id = action.get("workflow_id")
                     if shape == "update" and in_empty_state:
-                        continue  # an empty table has no row to edit; leave it for the author
+                        refused.append(
+                            f"{location}: workflow_id '{workflow_id}' not replaced: an empty table has no row to edit"
+                        )
+                        continue
+                    if shape == "update" and identifier is None:
+                        refused.append(f"{location}: workflow_id '{workflow_id}' not replaced: {no_identity}")
+                        continue
                     if len(shapes[shape]) != 1:
+                        refused.append(
+                            f"{location}: workflow_id '{workflow_id}' not replaced: {len(shapes[shape])} "
+                            f"{shape} candidates {shapes[shape]} for {module_id}"
+                            + ("" if identifier else f"; {no_identity}")
+                        )
                         continue
                     target = shapes[shape][0]
                     modal_id, reason = _ensure_modal(
                         document, module_id=module_id, action_id=target, action=actions[target],
-                        identifier=identifier, entity=entity, edit=shape == "update",
+                        identifier=identifier or "", entity=entity, edit=shape == "update",
                     )
                     if modal_id is None:
                         refused.append(f"{location}: workflow_id '{action.get('workflow_id')}' not replaced: {reason}")
@@ -392,7 +456,15 @@ def construct_page_bindings(
             gated = [
                 candidate for candidate in shapes["update"] if actions[candidate].get("entitlement_gate")
             ]
-            if len(gated) == 1 and f"{module_id}/{gated[0]}" not in reachable_page_action_keys([document]):
+            if identifier is None:
+                gated_writes = sorted(
+                    action_id for action_id, action in actions.items()
+                    if action.get("entitlement_gate") and action_id in (_owned_mutations(surface_map, module_id) or set())
+                    and f"{module_id}/{action_id}" not in reachable_page_action_keys([document])
+                )
+                for action_id in gated_writes:
+                    refused.append(f"{location}: no edit entry point for gated {module_id}/{action_id}: {no_identity}")
+            if identifier and len(gated) == 1 and f"{module_id}/{gated[0]}" not in reachable_page_action_keys([document]):
                 target = gated[0]
                 modal_id, reason = _ensure_modal(
                     document, module_id=module_id, action_id=target, action=actions[target],
@@ -423,6 +495,7 @@ def construct_page_bindings(
 
 __all__ = [
     "action_input_fields",
+    "canonical_write_ids",
     "collection_fields",
     "construct_page_bindings",
     "listed_collections",

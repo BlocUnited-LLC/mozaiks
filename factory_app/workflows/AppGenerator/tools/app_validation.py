@@ -1776,25 +1776,54 @@ def _template_owned_paths(context_variables: Any) -> frozenset[str]:
     try:
         paths |= resolve_declared_pack_output_paths(
             [pack for pack in packs if isinstance(pack, dict)], context_variables=context_variables,
+            owner="templates",
         )
     except ManagedCapabilityTemplateError:
         pass  # The bundle scanner reports an unusable pack contract.
     return frozenset(paths)
 
 
+def _planned_page_owner_path(module_id: str, context_variables: Any, template_paths: frozenset[str]) -> str | None:
+    """Fall back to the plan: the page task owning the module's listing page, else any page task's page."""
+    from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+    from mozaiksai.core.workflow.generator_support.page_plan_utils import _page_stem_from_path
+
+    plan = detach(context_variables.get("app_build_plan")) if context_variables is not None else None
+    if not isinstance(plan, dict):
+        return None
+    tasks = [task for task in plan.get("build_tasks") or [] if isinstance(task, dict) and task.get("task_type") == "page_bundle"]
+    owned = [
+        safe for task in tasks for raw in task.get("owned_paths") or []
+        if (safe := _safe_relpath(str(raw))) and safe.startswith("ui/pages/") and safe not in template_paths
+    ]
+    if not owned:
+        return None
+    listing_stems = {
+        _page_stem_from_path(f"ui/pages/{_page_file_stem(page)}.yaml")
+        for page in plan.get("pages") or [] if isinstance(page, dict)
+        for hint in page.get("sections_hint") or [] if isinstance(hint, dict)
+        if isinstance(hint.get("data_source"), dict) and hint["data_source"].get("module_id") == module_id
+    }
+    listing = [path for path in owned if _page_stem_from_path(path) in listing_stems]
+    return (listing or owned)[0]
+
+
 def _gated_action_owner_page(
     action_key: str, page_paths: dict[str, str], generated_files: dict[str, str], template_paths: frozenset[str],
+    context_variables: Any = None,
 ) -> str | None:
     """Name the authored page that should expose the action.
 
     The route manifest is scaffold output no task owns, and a pack template
     page is replaced at assembly, so neither can carry a repairable diagnostic.
-    Prefer an authored page that already reads the action's module.
+    Prefer an authored page that already reads the action's module; with no
+    authored page in the bundle, the approved plan's page task still owns the
+    diagnostic, through the page that lists the module or any page it owns.
     """
     module_id = action_key.split("/", 1)[0]
     authored = sorted(path for path in page_paths.values() if path not in template_paths)
     referencing = [path for path in authored if f"/api/modules/{module_id}/" in generated_files.get(path, "")]
-    return (referencing or authored or [None])[0]
+    return (referencing or authored or [None])[0] or _planned_page_owner_path(module_id, context_variables, template_paths)
 
 
 def _wiring_repair_errors(
@@ -1860,7 +1889,7 @@ def _wiring_repair_errors(
             # The page bundle owns placement across its pages; do not route this
             # to the module owner or remove the gate to silence the diagnostic.
             path = _gated_action_owner_page(
-                str(failure.get("action") or ""), page_paths, generated_files, template_paths,
+                str(failure.get("action") or ""), page_paths, generated_files, template_paths, context_variables,
             )
         else:
             path = page_paths.get(str(failure.get("page") or ""))

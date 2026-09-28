@@ -44,7 +44,10 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     validate_complete_data_contract_ownership,
 )
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import data_contract_requires_auth
+from mozaiksai.core.workflow.generator_support.code_files import (
+    _page_file_stem,
+    data_contract_requires_auth,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     managed_pack_output_paths,
 )
@@ -1624,7 +1627,9 @@ def save_app_schema(
         # Close every page before rejecting so one corrected output fixes them all.
         page_failures: list[str] = []
         for page in page_list:
-            page_path = f"ui/pages/{page.get('name')}.yaml"
+            # The same file identity the worker lane materializes (route stem),
+            # so a pack-owned placeholder such as Billing -> billing.yaml matches.
+            page_path = f"ui/pages/{_page_file_stem(page)}.yaml"
             try:
                 compile_page_data_sources(
                     page, modules, reject_api_endpoints=True, workflow_names=workflows,

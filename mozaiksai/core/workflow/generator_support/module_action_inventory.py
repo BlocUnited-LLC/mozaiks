@@ -192,6 +192,12 @@ def managed_pack_output_paths(context_variables: Any) -> frozenset[str]:
     paths: set[str] = set()
     for contract in selected_pack_contracts(context_variables):
         for entry in contract.get("required_outputs") or []:
+            # A workspace-owned output (owner: workspace) is preserved across
+            # regeneration rather than written by a template; only template
+            # outputs replace an authored placeholder.
+            owner = str(entry.get("owner") or "templates").strip() if isinstance(entry, Mapping) else "templates"
+            if owner != "templates":
+                continue
             path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
             if path:
                 paths.add(path)

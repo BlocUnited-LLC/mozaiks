@@ -60,8 +60,16 @@ This project follows a practical pre-1.0 changelog format:
   cart action declares its response fields and its products page can create a
   product; every pack's templates pass the wiring gate under test. The page
   Form primitive now submits `number`, `select` and `checkbox` fields with
-  their declared types, so a typed price reaches a module action as a JSON
-  number instead of failing its input schema.
+  their declared types, and a single-token payload entry such as
+  `{form.price_amount}` keeps that type, so a typed price reaches a module
+  action as a JSON number instead of failing its input schema. A collection
+  without `search_by` still gets its constructions: the record identity comes
+  from a unique single-field index or the canonical update write's one
+  required input, and every refused construction is logged with its reason.
+  Only `owner: templates` pack outputs count as template-owned, the standalone
+  save tool derives page paths from the route stem like the task worker, and an
+  unreachable gated action with no authored page in the bundle is attributed to
+  the plan's page task instead of being left unowned.
 
 - Existing app data contracts load without newly introduced ownership fields;
   present fields remain validated, and factory generation requires complete

@@ -692,8 +692,14 @@ def resolve_declared_pack_output_paths(
     capability_packs: list[dict[str, Any]] | None,
     *,
     context_variables: Any | None = None,
+    owner: str | None = None,
 ) -> frozenset[str]:
-    """Return exact safe required_outputs paths from selected verified packs."""
+    """Return exact safe required_outputs paths from selected verified packs.
+
+    With ``owner`` given, only outputs that entry owner writes are returned
+    (``templates`` outputs replace authored files at assembly; ``workspace``
+    outputs are preserved across regeneration).
+    """
 
     paths: set[str] = set()
     for pack in capability_packs or []:
@@ -714,6 +720,8 @@ def resolve_declared_pack_output_paths(
                 raise PackIntegrityError(
                     f"Pack '{pack_id}' contract required_outputs[{index}].path is required"
                 )
+            if owner is not None and str(output.get("owner") or "templates").strip() != owner:
+                continue
             paths.add(_safe_declared_output_path(output["path"], pack_id=pack_id))
     return frozenset(paths)
 

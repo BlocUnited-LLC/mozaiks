@@ -574,6 +574,95 @@ def test_the_validation_feedback_carries_a_whole_multi_page_rejection():
     assert "[REJECTED TASK OUTPUT]" in _validation_feedback(error, "{}")
 
 
+def _contract_without(*keys: str) -> dict:
+    contract = _data_contract()
+    collection = contract["surfaces"][0]["collections"][0]
+    for key in keys:
+        collection[key] = None if key == "search_by" else []
+    return contract
+
+
+@pytest.mark.parametrize("stripped", [("search_by",), ("search_by", "indexes")])
+def test_constructions_survive_a_collection_without_a_search_key(stripped, caplog):
+    """The identity comes from the unique index, else from the canonical update write's required input."""
+    context = _bridge({
+        "generated_files": {"modules/task_management/module.yaml": _module_yaml()},
+        "data_contract": _contract_without(*stripped), "design_surface_map": _surface_map(),
+        "app_build_plan": {"pages": [{"name": "Dashboard", "route": "/dashboard"}], "capability_packs": []},
+    })
+    page = _dashboard([{"id": "tasks_completed", "label": "Done", "value_key": "tasks_completed"}], _workflow_actions())
+    compiled = _compile({"ui/pages/dashboard.yaml": yaml.safe_dump(page)}, context, caplog)
+    dashboard = compiled["ui/pages/dashboard.yaml"]
+    assert [a["id"] for a in _section(dashboard, "task-table")["config"]["actions"]] == ["open-create_task", "open-update_task"]
+    edit_form = _section(dashboard, "update_task-modal")["config"]["children"][0]["config"]
+    assert edit_form["submit_action"]["payload"][0] == {"key": "task_id", "value": "{selected_row.task_id}"}
+    assert {"task_management/create_task", "task_management/update_task"} <= reachable_page_action_keys([dashboard])
+    assert not [r for r in caplog.records if "not constructed" in r.getMessage()]
+
+
+def test_a_collection_with_no_identity_at_all_still_gets_the_create_and_logs_the_refusals(caplog):
+    """No search_by, no unique index and a non-canonical update: only the canonical create is determined."""
+    renamed = yaml.safe_load(_module_yaml())
+    for action in renamed["actions"]:
+        if action["id"] == "update_task":
+            action["id"] = action["handler_method"] = "revise_task"
+    context = _bridge({
+        "generated_files": {"modules/task_management/module.yaml": yaml.safe_dump(renamed, sort_keys=False)},
+        "data_contract": _contract_without("search_by", "indexes"),
+        "design_surface_map": _surface_map(["create_task", "revise_task", "delete_task"]),
+        "app_build_plan": {"pages": [{"name": "Dashboard", "route": "/dashboard"}], "capability_packs": []},
+    })
+    caplog.set_level(logging.INFO, logger="mozaiksai.core.workflow.generator_support.page_binding_construction")
+    page = _dashboard([{"id": "tasks_completed", "label": "Done", "value_key": "tasks_completed"}], _workflow_actions()[:1])
+    compiled = _compile({"ui/pages/dashboard.yaml": yaml.safe_dump(page)}, context)
+    dashboard = compiled["ui/pages/dashboard.yaml"]
+    assert [a["id"] for a in _section(dashboard, "task-table")["config"]["actions"]] == ["open-create_task"]
+    assert "task_management/create_task" in reachable_page_action_keys([dashboard])
+    refused = [r.getMessage() for r in caplog.records if "not constructed" in r.getMessage()]
+    assert any("gated task_management/revise_task" in line and "declares no record identity" in line for line in refused)
+    # The edit button, which needs an identifier, is a judgment gap named in the rejection.
+    page = _dashboard([{"id": "tasks_completed", "label": "Done", "value_key": "tasks_completed"}], _workflow_actions())
+    with pytest.raises(ValueError, match="workflow_id 'edit_task_workflow' is not present"):
+        _compile({"ui/pages/dashboard.yaml": yaml.safe_dump(page)}, context)
+    assert any("'edit_task_workflow' not replaced" in line and "declares no record identity" in line
+               for line in (r.getMessage() for r in caplog.records))
+
+
+def test_only_template_owned_pack_outputs_are_template_paths():
+    context = _bridge({"capability_packs": [{"id": "shop"}], "operator_contracts": [{
+        "contract_id": "shop", "required_outputs": [
+            {"path": "ui/pages/products.yaml", "owner": "templates"},
+            {"path": "ui/pages/checkout.yaml"},
+            {"path": "modules/shop/backend/handler.py", "owner": "workspace"},
+        ],
+    }]})
+    assert managed_pack_output_paths(context) == frozenset({"ui/pages/products.yaml", "ui/pages/checkout.yaml"})
+
+
+def test_unreachable_gated_action_falls_back_to_the_plans_page_task_when_no_page_was_authored():
+    plan = {
+        "pages": [
+            {"name": "Dashboard", "route": "/dashboard", "sections_hint": [
+                {"primitive": "SummaryStrip", "data_source": {"module_id": "task_management", "action_id": "summarize_tasks"}},
+            ]},
+            {"name": "Tasks", "route": "/tasks"},
+        ],
+        "build_tasks": [{"task_id": "page_bundle", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
+                         "owned_paths": ["app.json", "ui/pages/tasks.yaml", "ui/pages/dashboard.yaml"]}],
+    }
+    wiring = {"passed": False, "failed_tests": [{
+        "test": "wiring_unreachable_gated_action", "action": "task_management/update_task",
+        "error": "Gated user-facing action 'task_management/update_task' (task.edit) has no reachable page binding.",
+        "fix_suggestion": "Bind the action.",
+    }]}
+    files = {"ui/route_manifest.json": "{}", "modules/task_management/module.yaml": _module_yaml()}
+    errors = _wiring_repair_errors(wiring, files, {"app_build_plan": plan, "capability_packs": []})
+    assert errors[0].startswith("ui/pages/dashboard.yaml: Gated user-facing action")  # the page that lists the module
+    plan["pages"][0].pop("sections_hint")
+    errors = _wiring_repair_errors(wiring, files, {"app_build_plan": plan, "capability_packs": []})
+    assert errors[0].startswith("ui/pages/tasks.yaml: ")  # else the page task's first owned page
+
+
 def test_pages_the_compiler_rejected_are_skipped_by_the_plan_check_and_reported_once():
     dashboard = _dashboard([{"id": "done_count", "label": "Done", "value_key": "completed_tasks"}])
     tasks = _tasks_page()
