@@ -153,9 +153,13 @@ agents:
       Author the canonical surface and data_contract together. The save boundary
       normalizes duplicate ownership only when declared contracts determine the
       owner and every item to remove: platform auth surfaces become platform
-      references with no events and no pages, because the platform emits its own
-      sign-in lifecycle events and serves sign-in at the config/auth.yaml login
-      route (typed navigation to a removed sign-in page is pointed there); managed
+      references with no events and no sign-in pages, because the platform emits
+      its own sign-in lifecycle events and serves sign-in at the config/auth.yaml
+      routes (a page at those routes, at a route they nest under such as /auth,
+      or with a Form collecting a credential field is removed, and typed
+      navigation to it is pointed at the login route). Any other page such a
+      surface owns is a user-designed app page: it is never dropped, and the save
+      rejects it naming the app-owned surface that must own it. Managed
       subscription surfaces use billing_portal while preserving their approved
       pages, and provider lifecycle events declared on them are removed. Do not
       design a sign-in or registration page, and do not declare login/logout
@@ -169,8 +173,10 @@ agents:
       Unresolved or competing owners still receive revision feedback naming the
       exact entities, actions, collections, triggers, or pages to split out: a
       workflow_triggers entry that consumes a platform auth event, a sign-in page
-      another surface also owns or that binds app-owned data, or app entities and
-      actions on a platform surface. Separate app-owned data from
+      an app-owned surface also owns or that binds app-owned data, a non-sign-in
+      page filed under an auth surface, or app entities and actions on a platform
+      surface. An app-named surface that claims one reserved entity or action is
+      told to drop that claim and stay app-owned. Separate app-owned data from
       platform/provider state instead of deleting it. Changing only the owner
       label cannot authorize app-owned storage. Downstream planning rejects
       invalid approved ownership before it can generate a replacement module.

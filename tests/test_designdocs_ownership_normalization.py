@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows._shared.surface_ownership import (
     SurfaceOwnershipRule,
-    auth_contract_login_route,
+    auth_contract_routes,
 )
 from mozaiksai.core.runtime.persistence.indexes import _iter_indexed_collections
 from mozaiksai.core.runtime.persistence.intent_loader import index_data_contract_by_entity
@@ -615,8 +615,89 @@ def test_login_route_comes_from_the_auth_contract_template():
     template = workflow_context_path("webapp_builder", "templates", "config", "auth.yaml")
     declared = yaml.safe_load(
         template.read_text(encoding="utf-8").replace("{{AUTH_DEFAULT_ROUTE}}", "/"),
-    )["routes"]["login"]
-    assert auth_contract_login_route() == declared == "/login"
+    )["routes"]
+    routes = auth_contract_routes()
+    assert routes.login == declared["login"] == "/login"
+    assert routes.callback == declared["callback"] == "/auth/callback"
+
+
+@pytest.mark.parametrize("route,fields,target", [
+    pytest.param("/profile", ["display_name", "avatar_url"], "move 'Profile Settings' to owned_pages of 'reports'", id="profile_form"),
+    pytest.param("/profile", ["current_password", "new_password"], "move 'Profile Settings' to owned_pages of 'reports'", id="password_change_is_not_sign_in"),
+    pytest.param("/", [], "move 'Profile Settings' to owned_pages of 'reports'", id="root_is_not_a_sign_in_ancestor"),
+])
+def test_non_sign_in_page_on_platform_auth_surface_is_rejected_naming_the_app_owner(persistence, route, fields, target):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["experience_spec"]["pages"].append({
+        "name": "Profile Settings", "route": route, "layout": "full-width", "intent": "Edit profile details.",
+        "sections": [{
+            "id": "profile-form", "primitive": "Form" if fields else "PageHeader", "intent": "Edit the profile.",
+            "config_hint": json.dumps({"fields": [{"name": name, "type": "string"} for name in fields]}) if fields else None,
+        }],
+    })
+    bundle["surface_map"]["surfaces"][-1]["owned_pages"] = ["Authentication", "Profile Settings"]
+    submitted = deepcopy(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert f"Page 'Profile Settings' ({route}) is owned by 'auth'" in result["error"]
+    assert "not a sign-in page" in result["error"]
+    assert target in result["error"]
+    assert bundle == submitted
+
+
+def test_non_sign_in_page_names_every_candidate_or_the_existing_app_owner(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    ownership._add_surface(bundle, surface_id="tasks", name="Tasks", route="/tasks", entities=["Task"], actions=["update_task"])
+    bundle["experience_spec"]["pages"].append({
+        "name": "Profile Settings", "route": "/profile", "layout": "full-width", "intent": "Edit profile details.",
+        "sections": [{"id": "profile", "primitive": "PageHeader", "intent": "Profile.", "config_hint": None}],
+    })
+    auth = next(s for s in bundle["surface_map"]["surfaces"] if s["surface_id"] == "auth")
+    auth["owned_pages"] = ["Authentication", "Profile Settings"]
+
+    result = inventory._save(context, deepcopy(bundle))
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert "move 'Profile Settings' to owned_pages of one of ['reports', 'tasks']" in result["error"]
+
+    bundle["surface_map"]["surfaces"][0]["owned_pages"] = ["Reports", "Profile Settings"]
+    context = ownership._context(managed=False)
+    result = inventory._save(context, bundle)
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert "it is already listed by ['reports']: remove 'Profile Settings' from 'auth'.owned_pages" in result["error"]
+
+
+@pytest.mark.parametrize("name,route,section", [
+    pytest.param("Login", "/login", {"primitive": "PageHeader", "config_hint": None}, id="login_route"),
+    pytest.param("Auth Callback", "/auth/callback", {"primitive": "PageHeader", "config_hint": None}, id="callback_route"),
+    pytest.param("Account Access", "/auth", {"primitive": "PageHeader", "config_hint": None}, id="route_the_callback_nests_under"),
+    pytest.param("Sign In", "/account/sign-in", {
+        "primitive": "Form",
+        "config_hint": json.dumps({"fields": [{"name": "email", "type": "string"}, {"name": "password", "type": "string"}]}),
+    }, id="credential_form"),
+])
+def test_sign_in_pages_are_recognized_by_auth_route_or_credential_form(persistence, name, route, section):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["experience_spec"]["pages"][-1].update(name=name, route=route)
+    bundle["experience_spec"]["pages"][-1]["sections"] = [{"id": "sign-in", "intent": "Sign in.", **section}]
+    bundle["surface_map"]["surfaces"][-1]["owned_pages"] = [name]
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert [page["route"] for page in detach(context.get("experience_spec"))["pages"]] == ["/reports"]
+    record = next(
+        entry for entry in summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
+        if entry["surface_id"] == "auth"
+    )
+    assert record["removed_pages"] == [{"name": name, "route": route}]
 
 
 def test_platform_auth_events_are_removed_and_logged(persistence, caplog):

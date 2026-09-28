@@ -11,7 +11,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
-from mozaiksai.core.runtime.app.auth_contract import validate_app_auth_contract
+from mozaiksai.core.runtime.app.auth_contract import AuthRoutes, validate_app_auth_contract
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import managed_pack_contracts
 
@@ -50,16 +50,65 @@ class SurfaceOwnershipRule(BaseModel):
         return self
 
 
-def auth_contract_login_route() -> str:
-    """The route where the generated auth contract serves sign-in.
+def auth_contract_routes() -> AuthRoutes:
+    """The routes where the generated auth contract serves sign-in.
 
     Generated apps receive this contract from the same template
     (render_auth_scaffold), so a design page duplicating sign-in is replaced by a
-    reference to this route rather than by an app-built page.
+    reference to ``login`` rather than by an app-built page.
     """
     template = workflow_context_path("webapp_builder", "templates", "config", "auth.yaml")
     config = yaml.safe_load(template.read_text(encoding="utf-8").replace("{{AUTH_DEFAULT_ROUTE}}", "/"))
-    return validate_app_auth_contract(config).routes.login
+    return validate_app_auth_contract(config).routes
+
+
+def _sign_in_routes(routes: AuthRoutes) -> set[str]:
+    """Sign-in routes only; post_login_default is where the app lands afterwards."""
+    return {route.rstrip("/") or "/" for route in (routes.login, routes.callback, routes.logout)}
+
+
+def _typed_form_fields(config_hint: Any) -> set[str]:
+    """Field names a Form section declares through typed ``fields[].name`` entries."""
+    if not isinstance(config_hint, str) or not config_hint.strip():
+        return set()
+    try:
+        config = json.loads(config_hint)
+    except ValueError:
+        return set()
+    names: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            fields = node.get("fields")
+            if isinstance(fields, list):
+                names.update(
+                    str(field.get("name")).strip().casefold()
+                    for field in fields if isinstance(field, dict) and field.get("name")
+                )
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(config)
+    return names
+
+
+def _is_sign_in_page(page: dict[str, Any], *, sign_in_routes: set[str], credential_fields: set[str]) -> bool:
+    """A page the auth contract already serves: one of its routes (or a route
+    such as /auth that a contract route nests under), or a form collecting a
+    credential field the ownership rule declares as identity evidence."""
+    route = str(page.get("route") or "").strip().rstrip("/") or "/"
+    if route != "/" and any(
+        candidate == route or candidate.startswith(route + "/") for candidate in sign_in_routes
+    ):
+        return True
+    return any(
+        section.get("primitive") == "Form"
+        and _typed_form_fields(section.get("config_hint")) & credential_fields
+        for section in page.get("sections") or []
+    )
 
 
 def _get(context: Any, key: str, default: Any = None) -> Any:
@@ -252,27 +301,41 @@ def _remove_platform_pages(
     surfaces: list[dict[str, Any]],
     spec: dict[str, Any],
     *,
-    owner: str,
+    rule: SurfaceOwnershipRule,
+    sign_in_routes: set[str],
     platform_auth_ids: set[str],
+    facade_ids: set[str],
     removed_by_name: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Drop the pages a platform surface owns; the platform already serves them.
+    """Drop the sign-in pages a platform surface owns; the platform serves them.
 
-    A page is only removable when nothing app-owned depends on it: no app-owned
-    surface lists it, and no section binds an app module through a typed
-    reference. Either one is a design decision, named for the retry. Sibling
+    Only a sign-in page is determined: any other page the surface owns is a
+    user-designed page the app must build, so it is never dropped silently; the
+    rejection names the app-owned surface it belongs to. A sign-in page is only
+    removable when nothing app-owned depends on it: no app-owned surface lists
+    it, and no section binds an app module through a typed reference. Sibling
     surfaces that normalize to the same platform capability are not app owners:
     the removal is constructed once and recorded on each of them.
     """
     surface_id = str(surface["surface_id"])
+    owner = rule.owner
     names = _identifiers(surface.get("owned_pages"))
     if not names:
         return []
+    app_owned = [
+        str(other["surface_id"]) for other in surfaces
+        if other is not surface and other.get("owner") == "app"
+        and str(other["surface_id"]) not in platform_auth_ids and str(other["surface_id"]) not in facade_ids
+    ]
     app_modules = {
         str(other["surface_id"]) for other in surfaces
-        if other is not surface and other.get("owner") == "app" and other.get("surface_kind") == "module"
-        and str(other["surface_id"]) not in platform_auth_ids
+        if str(other["surface_id"]) in app_owned and other.get("surface_kind") == "module"
     }
+    app_targets = [
+        str(other["surface_id"]) for other in surfaces
+        if str(other["surface_id"]) in app_owned and other.get("surface_kind") in {"module", "ui_only"}
+    ]
+    credential_fields = _identifiers(rule.identity_evidence_fields)
     removed: list[dict[str, Any]] = [removed_by_name[name] for name in sorted(names) if name in removed_by_name]
     for page in list(spec.get("pages") or []):
         name = str(page.get("name") or "")
@@ -284,6 +347,21 @@ def _remove_platform_pages(
             if other is not surface and str(other["surface_id"]) not in platform_auth_ids
             and key in _identifiers(other.get("owned_pages"))
         ]
+        if not _is_sign_in_page(page, sign_in_routes=sign_in_routes, credential_fields=credential_fields):
+            if co_owners:
+                target = f"it is already listed by {co_owners}: remove {name!r} from {surface_id!r}.owned_pages"
+            elif len(app_targets) == 1:
+                target = f"move {name!r} to owned_pages of {app_targets[0]!r}"
+            elif app_targets:
+                target = f"move {name!r} to owned_pages of one of {app_targets}"
+            else:
+                target = f"declare an app-owned module or ui_only surface and move {name!r} to its owned_pages"
+            raise ValueError(
+                f"Page {name!r} ({page.get('route')}) is owned by {surface_id!r}, which normalizes to "
+                f"{owner}, but it is not a sign-in page: its route is not an auth contract route "
+                f"{sorted(sign_in_routes)} and no Form section collects a credential field. The platform "
+                f"serves only sign-in for {surface_id!r}, so the app must own this page: {target}."
+            )
         if co_owners:
             raise ValueError(
                 f"Page {name!r} ({page.get('route')}) is owned by {surface_id!r}, which normalizes to "
@@ -543,6 +621,7 @@ def normalize_surface_ownership(
         str(surface["surface_id"]) for surface in surfaces
         if any(_matches_surface(surface, rule) for rule in auth_rules)
     }
+    auth_routes = auth_contract_routes() if platform_auth_ids and normalized_spec is not None else None
     for surface in surfaces:
         surface_id = surface["surface_id"]
         matches = [rule for rule in rules if _matches_surface(surface, rule)]
@@ -644,10 +723,10 @@ def normalize_surface_ownership(
         ):
             continue
         removed_pages: list[dict[str, Any]] = []
-        if removes_pages and normalized_spec is not None:
+        if removes_pages and normalized_spec is not None and auth_routes is not None:
             removed_pages = _remove_platform_pages(
-                surface, surfaces, normalized_spec, owner=rule.owner,
-                platform_auth_ids=platform_auth_ids, removed_by_name=removed_by_name,
+                surface, surfaces, normalized_spec, rule=rule, sign_in_routes=_sign_in_routes(auth_routes),
+                platform_auth_ids=platform_auth_ids, facade_ids=set(facades), removed_by_name=removed_by_name,
             )
         corrected = deepcopy(surface)
         corrected.update(
@@ -672,8 +751,8 @@ def normalize_surface_ownership(
                     removed_routes.setdefault(str(page["route"]), surface_id)
             targets[surface_id] = corrected["surface_id"]
             surface.update(corrected)
-    if removed_routes:
-        login_route = auth_contract_login_route()
+    if removed_routes and auth_routes is not None:
+        login_route = auth_routes.login
         # A sign-in page designed at the login route itself needs no redirect.
         redirectable = {route: owner_id for route, owner_id in removed_routes.items() if route != login_route}
         for surface_id, entries in _redirect_navigation(normalized_spec or {}, redirectable, login_route).items():

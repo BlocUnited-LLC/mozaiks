@@ -40,11 +40,14 @@ This project follows a practical pre-1.0 changelog format:
   and page are platform-provided, so they are removed and recorded
   (`removed_events`, `removed_pages`), typed navigation to the page points at
   the auth contract's login route, and the approved page inventory AppGenerator
-  builds no longer contains a page the platform already serves. Provider
-  lifecycle events on managed billing facades are removed the same way.
-  Genuine conflicts (a workflow consuming the event, a co-owned or app-data-bound
-  sign-in page, app entities or actions on a platform surface) are still
-  rejected, with feedback naming exactly what to split out.
+  builds no longer contains a page the platform already serves. Only sign-in
+  pages (auth contract routes or a credential form) are removed; any other page
+  filed under an auth surface is rejected naming the app-owned surface it must
+  move to, never dropped. Provider lifecycle events on managed billing facades
+  are removed the same way. Genuine conflicts (a workflow consuming the event,
+  a sign-in page co-owned by an app surface or bound to app data, app entities
+  or actions on a platform surface) are still rejected, with feedback naming
+  exactly what to split out.
 
 - Generated persistence artifacts now name omitted indexes, stamp migration
   versions, exclude managed-facade collections, and declare subscription

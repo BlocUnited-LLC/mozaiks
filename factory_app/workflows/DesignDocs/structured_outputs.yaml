@@ -40,7 +40,7 @@ models:
       owned_pages:
         type: optional_list
         items: str
-        description: Persistent pages primarily owned by the surface. A surface that normalizes to platform authentication owns none; the auth contract serves sign-in, and such pages are removed at save.
+        description: Persistent pages primarily owned by the surface. A surface that normalizes to platform authentication owns none; its sign-in pages (auth contract routes or a credential Form) are removed at save because the auth contract serves them, and any other page filed under it is rejected with the app-owned surface it must move to.
       owned_mutations:
         type: optional_list
         items: str
