@@ -148,7 +148,9 @@ def test_platform_capability_module_normalized_before_storage(
     assert surface["owner"] == "platform"
     assert surface["primary_entities"] == []
     assert surface["owned_mutations"] == []
-    assert surface["owned_pages"] == [name]
+    # The platform serves sign-in at the auth contract's routes; the design keeps no page for it.
+    assert surface["owned_pages"] == []
+    assert [page["route"] for page in detach(context.get("experience_spec"))["pages"]] == ["/reports"]
 
 
 def test_concept_platform_owner_hint_normalizes_empty_app_module_alias(persistence):

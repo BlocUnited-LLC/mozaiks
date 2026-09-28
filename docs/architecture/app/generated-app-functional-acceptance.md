@@ -304,22 +304,41 @@ and selected managed-pack state only when the declared contract determines both
 the canonical owner and the state to remove. Authentication surfaces become
 `owner: platform` references. Managed subscription surfaces become the app-owned
 `billing_portal` facade, merging into an existing facade when present. Approved
-pages and routes are preserved. Only identified duplicate collections and entities
-are removed; a duplicate collection on an otherwise valid app domain surface does
-not change that surface's owner.
+app-owned pages and routes are preserved. Only identified duplicate collections
+and entities are removed; a duplicate collection on an otherwise valid app domain
+surface does not change that surface's owner.
+
+Two further corrections are determined by the same contracts. Events declared on
+a surface that normalizes to platform or managed-provider ownership are that
+owner's lifecycle events, which the app cannot emit; they are removed and
+recorded as `removed_events`. Pages owned by a surface whose ownership rule
+declares `platform_capability: authentication` duplicate the sign-in the
+generated auth contract already serves at `routes.login`; they are removed from
+the approved `experience_spec` inventory (recorded as `removed_pages`), and
+typed section references to their route point at the login route (recorded as
+`redirected_navigation`). Facade pages are not removed: the pack renders them
+as app pages. AppGenerator plan review therefore never receives a sign-in page
+to build.
 
 Each correction appears in the saved design's `ownership_normalizations` and
 human-readable documents, and produces a `DESIGN_OWNERSHIP_NORMALIZED` log entry
-with the source surface, canonical owner, and removed collections. These recorded
+with the source surface, canonical owner, removed collections, and, when
+present, removed events, removed pages, and redirected navigation. These recorded
 corrections and normalized typed contracts govern any conflicting original prose.
 Normalization works on detached data and does not modify the model's turn-local
 structured output.
 
 Ambiguous ownership still returns `revise` with feedback before any design is
-saved. This includes mixed provider fields without an app-data split contract,
+saved, and the feedback names the exact behavior to split out and where it
+belongs. This includes mixed provider fields without an app-data split contract,
 unknown state under reserved surfaces, app-specific entities or actions that
-cannot be assigned to the canonical owner, unrelated facade integrations,
-conflicting grouped collection owners, and competing owner declarations.
+cannot be assigned to the canonical owner, `workflow_triggers` on a platform or
+facade surface, unrelated facade integrations, conflicting grouped collection
+owners, competing owner declarations, a platform auth event that another
+surface's `workflow_triggers` consume, and a sign-in page that another surface
+also owns or whose sections bind app-owned modules through typed
+`data_source`/module-action references. Removing sign-in pages can never empty
+the approved inventory.
 Selected managed ownership rules without a declared `facade_module` also reject:
 the tool cannot infer a provider's canonical app boundary from its display name.
 For mixed auth collections, the tool strips declared identity fields and moves

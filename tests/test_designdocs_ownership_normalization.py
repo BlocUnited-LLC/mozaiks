@@ -1,5 +1,6 @@
 """Determined ownership repairs survive the real frozen-context save boundary."""
 
+import json
 import logging
 from copy import deepcopy
 
@@ -7,7 +8,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from factory_app.workflows._shared.surface_ownership import SurfaceOwnershipRule
+from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.surface_ownership import (
+    SurfaceOwnershipRule,
+    auth_contract_login_route,
+)
 from mozaiksai.core.runtime.persistence.indexes import _iter_indexed_collections
 from mozaiksai.core.runtime.persistence.intent_loader import index_data_contract_by_entity
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
@@ -51,7 +56,7 @@ def _saved_collections(context) -> list[dict]:
     pytest.param(["full_name"], id="full_name"),
     pytest.param(["avatar_url"], id="avatar_url"),
 ])
-def test_live_auth_users_normalizes_and_preserves_auth_page(persistence, surface_kind, additional_fields):
+def test_live_auth_users_normalizes_and_removes_platform_sign_in_page(persistence, surface_kind, additional_fields):
     store, _, summary = persistence
     context = ownership._context(managed=False)
     assert isinstance(context, ContextVariablesBridge)
@@ -71,9 +76,10 @@ def test_live_auth_users_normalizes_and_preserves_auth_page(persistence, surface
     surface = next(s for s in context.get("design_surface_map")["surfaces"] if s["surface_id"] == "auth")
     assert surface["owner"] == "platform"
     assert detach(surface["primary_entities"]) == []
-    assert detach(surface["owned_pages"]) == ["Authentication"]
+    # The auth contract already serves sign-in; the app builds no page for it.
+    assert detach(surface["owned_pages"]) == []
     assert not any(c["name"] == "users" for c in _saved_collections(context))
-    assert detach(context.get("experience_spec"))["pages"][-1] == submitted["experience_spec"]["pages"][-1]
+    assert detach(context.get("experience_spec"))["pages"] == submitted["experience_spec"]["pages"][:-1]
     assert store.save_data_contract.await_args.kwargs["data_contract"] == detach(context.get("data_contract"))
     assert summary.await_args.kwargs["summary_payload"]["surface_map"] == detach(context.get("design_surface_map"))
     assert bundle == submitted, "Repair a detached copy, not the submitted structured output."
@@ -159,7 +165,7 @@ def test_mixed_auth_and_app_fields_split_to_only_app_module(persistence, caplog)
     record = {"surface_id": "auth", "owner": "platform", "removed_collections": [], "split_collections": [{
         "name": "users", "target_surface_id": "reports", "target_collection": "users",
         "removed_fields": ["email", "password_hash"], "retained_fields": ["user_id", "favorite_task_color"],
-    }]}
+    }], "removed_pages": [{"name": "Authentication", "route": "/auth"}]}
     assert record in summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
     saved = {call.kwargs["kind"]: call.kwargs for call in store.upsert_design_doc.await_args_list}
     assert record in saved["database"]["extra_fields"]["ownership_normalizations"]
@@ -200,7 +206,10 @@ def test_normalization_is_saved_for_user_and_logged(persistence, caplog):
         result = inventory._save(context, _auth_bundle())
 
     assert result["outcome"] == "saved", result
-    marker = "DESIGN_OWNERSHIP_NORMALIZED surface=auth owner=platform removed=[users]"
+    marker = (
+        "DESIGN_OWNERSHIP_NORMALIZED surface=auth owner=platform removed=[users] "
+        "removed_pages=[Authentication@/auth]"
+    )
     assert marker in caplog.text
     saved = {call.kwargs["kind"]: call.kwargs for call in store.upsert_design_doc.await_args_list}
     assert marker in saved["backend"]["content"]
@@ -208,7 +217,10 @@ def test_normalization_is_saved_for_user_and_logged(persistence, caplog):
     assert marker in saved["frontend"]["content"]
     assert marker in context.get("backend_design_document")
     assert marker in summary.await_args.kwargs["summary_payload"]["backend_markdown"]
-    record = {"surface_id": "auth", "owner": "platform", "removed_collections": ["users"]}
+    record = {
+        "surface_id": "auth", "owner": "platform", "removed_collections": ["users"],
+        "removed_pages": [{"name": "Authentication", "route": "/auth"}],
+    }
     assert record in summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
     assert record in saved["backend"]["extra_fields"]["ownership_normalizations"]
     assert record in saved["database"]["extra_fields"]["ownership_normalizations"]
@@ -316,6 +328,9 @@ def test_mixed_app_behavior_on_platform_surface_stays_a_rejection(persistence, f
 
     ownership._assert_refused(context, result, store_factory, owner="platform")
     assert "Ambiguous surface" in result["error"]
+    split = "entities ['ReaderPreference']" if field == "primary_entities" else "actions ['update_preferences']"
+    assert f"Split out the app-owned behavior: move {split} to an app-owned module surface" in result["error"]
+    assert "keep 'auth' as a platform reference (owner=platform)" in result["error"]
     assert bundle == submitted
 
 
@@ -453,8 +468,9 @@ def test_captured_auth_identity_shape_normalizes(persistence):
     assert surface["owner"] == "platform"
     assert surface["primary_entities"] == []
     assert surface["owned_mutations"] == []
+    assert surface["owned_pages"] == []
     assert not any(c["name"] == "users" for c in _saved_collections(context))
-    assert submitted["experience_spec"]["pages"][-1] in detach(context.get("experience_spec"))["pages"]
+    assert submitted["experience_spec"]["pages"][-1] not in detach(context.get("experience_spec"))["pages"]
     assert bundle == submitted
 
 
@@ -588,3 +604,200 @@ def test_structured_identity_types_must_reference_declared_state_fields():
     with pytest.raises(ValidationError, match="must reference declared state_field_names"):
         SurfaceOwnershipRule(owner="platform", state_field_names=["email"],
                              structured_state_field_types={"invented_claim": ["object"]})
+
+
+def test_platform_capability_is_not_a_facade_property():
+    with pytest.raises(ValidationError, match="platform ownership, not a managed facade"):
+        SurfaceOwnershipRule(owner="MozaiksPay", facade_module="billing_portal", platform_capability="authentication")
+
+
+def test_login_route_comes_from_the_auth_contract_template():
+    template = workflow_context_path("webapp_builder", "templates", "config", "auth.yaml")
+    declared = yaml.safe_load(
+        template.read_text(encoding="utf-8").replace("{{AUTH_DEFAULT_ROUTE}}", "/"),
+    )["routes"]["login"]
+    assert auth_contract_login_route() == declared == "/login"
+
+
+def test_platform_auth_events_are_removed_and_logged(persistence, caplog):
+    store, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["surface_map"]["surfaces"][-1].update(
+        primary_entities=["User"], owned_mutations=["login_user"],
+        events_emitted=["domain.auth.user_logged_in", "domain.auth.user_logged_out"],
+    )
+    submitted = deepcopy(bundle)
+
+    with caplog.at_level(logging.INFO):
+        result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert isinstance(context, ContextVariablesBridge)
+    surface = next(s for s in detach(context.get("design_surface_map"))["surfaces"] if s["surface_id"] == "auth")
+    assert surface["owner"] == "platform"
+    assert surface["events_emitted"] == []
+    assert surface["owned_pages"] == []
+    assert [page["route"] for page in detach(context.get("experience_spec"))["pages"]] == ["/reports"]
+    record = {
+        "surface_id": "auth", "owner": "platform", "removed_collections": ["users"],
+        "removed_events": ["domain.auth.user_logged_in", "domain.auth.user_logged_out"],
+        "removed_pages": [{"name": "Authentication", "route": "/auth"}],
+    }
+    assert record in summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
+    marker = (
+        "DESIGN_OWNERSHIP_NORMALIZED surface=auth owner=platform removed=[users] "
+        "removed_events=[domain.auth.user_logged_in,domain.auth.user_logged_out] "
+        "removed_pages=[Authentication@/auth]"
+    )
+    assert marker in caplog.text
+    saved = {call.kwargs["kind"]: call.kwargs for call in store.upsert_design_doc.await_args_list}
+    assert marker in saved["backend"]["content"]
+    assert record in saved["ui_schema"]["extra_fields"]["ownership_normalizations"]
+    assert "/auth" not in yaml.safe_dump(saved["ui_schema"]["extra_fields"]["experience_spec"])
+    assert bundle == submitted
+
+
+def test_platform_auth_event_consumed_by_workflow_trigger_is_rejected(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["surface_map"]["surfaces"][-1]["events_emitted"] = ["domain.auth.user_logged_in"]
+    bundle["surface_map"]["surfaces"][0]["workflow_triggers"] = ["domain.auth.user_logged_in"]
+    submitted = deepcopy(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert "surface 'reports' lists ['domain.auth.user_logged_in'] in workflow_triggers" in result["error"]
+    assert "app-owned surface's action or domain event" in result["error"]
+    assert bundle == submitted
+
+
+def test_sign_in_page_co_owned_by_app_surface_is_rejected(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["surface_map"]["surfaces"][0]["owned_pages"] = ["Reports", "Authentication"]
+    submitted = deepcopy(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert "also by ['reports']" in result["error"]
+    assert "remove 'Authentication' from owned_pages of ['reports']" in result["error"]
+    assert bundle == submitted
+
+
+@pytest.mark.parametrize("binding", [
+    pytest.param('{"data_source": {"module_id": "reports", "action_id": "list_reports"}}', id="data_source"),
+    pytest.param('{"items": [{"api_endpoint": "/api/modules/reports/list_reports"}]}', id="api_endpoint"),
+])
+def test_sign_in_page_bound_to_app_data_is_rejected(persistence, binding):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["experience_spec"]["pages"][-1]["sections"].append({
+        "id": "recent-reports", "primitive": "DataTable", "intent": "Recent reports", "config_hint": binding,
+    })
+    submitted = deepcopy(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert "sections ['recent-reports'] bind app-owned modules ['reports']" in result["error"]
+    assert bundle == submitted
+
+
+def test_navigation_to_removed_sign_in_page_points_at_auth_contract_login(persistence, caplog):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["experience_spec"]["pages"][0]["sections"].append({
+        "id": "sign-in-cta", "primitive": "ActionButton", "intent": "Go to sign in",
+        "config_hint": json.dumps({
+            "label": "Sign in", "href": "/auth", "links": [{"href": "/auth"}, {"href": "/reports"}],
+        }),
+    })
+
+    with caplog.at_level(logging.INFO):
+        result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    pages = detach(context.get("experience_spec"))["pages"]
+    assert [page["route"] for page in pages] == ["/reports"]
+    cta = next(section for section in pages[0]["sections"] if section["id"] == "sign-in-cta")
+    assert json.loads(cta["config_hint"]) == {
+        "label": "Sign in", "href": "/login", "links": [{"href": "/login"}, {"href": "/reports"}],
+    }
+    record = next(
+        entry for entry in summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
+        if entry["surface_id"] == "auth"
+    )
+    assert record["redirected_navigation"] == [
+        {"page": "Reports", "section": "sign-in-cta", "from": "/auth", "to": "/login"},
+    ]
+    assert "removed_pages=[Authentication@/auth] redirected=[Reports/sign-in-cta:/auth->/login]" in caplog.text
+
+
+def test_sign_in_page_as_only_page_is_rejected(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    del bundle["experience_spec"]["pages"][0]
+    bundle["surface_map"]["surfaces"][0]["owned_pages"] = []
+    submitted = deepcopy(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert "leaves no approved pages" in result["error"]
+    assert bundle == submitted
+
+
+def test_provider_lifecycle_events_on_subscription_surface_are_removed(persistence):
+    _, _, summary = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    ownership._add_surface(
+        bundle, surface_id="subscription_management", name="My Subscription", route="/subscription",
+        entities=["Subscription"], actions=["update_subscription"], collection="subscriptions",
+    )
+    bundle["surface_map"]["surfaces"][-1]["events_emitted"] = ["domain.billing.subscription_updated"]
+    page = deepcopy(bundle["experience_spec"]["pages"][-1])
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    surfaces = detach(context.get("design_surface_map"))["surfaces"]
+    facade = next(surface for surface in surfaces if surface["surface_id"] == "billing_portal")
+    assert facade["events_emitted"] == []
+    # Facade pages are app pages the pack renders; only the provider events go.
+    assert "My Subscription" in facade["owned_pages"]
+    assert page in detach(context.get("experience_spec"))["pages"]
+    record = {
+        "surface_id": "subscription_management", "owner": "billing_portal",
+        "removed_collections": ["subscriptions"], "removed_events": ["domain.billing.subscription_updated"],
+    }
+    assert record in summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
+
+
+def test_workflow_trigger_on_subscription_surface_still_requires_revision(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    ownership._add_surface(
+        bundle, surface_id="subscription_management", name="My Subscription", route="/subscription",
+        entities=["Subscription"], actions=["update_subscription"], collection="subscriptions",
+    )
+    bundle["surface_map"]["surfaces"][-1]["workflow_triggers"] = ["subscription-renewal-workflow"]
+    submitted = deepcopy(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="MozaiksPay")
+    assert (
+        "declare workflow_triggers ['subscription-renewal-workflow'] on the app-owned surface" in result["error"]
+    )
+    assert "surface_id=billing_portal" in result["error"]
+    assert bundle == submitted
