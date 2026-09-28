@@ -33,7 +33,38 @@ This project follows a practical pre-1.0 changelog format:
   backend implementations. Subscription gates target approved writes and custom
   reads, survive repairs, and cannot lock canonical reads or billing facades.
 
+- Generated apps get code-owned canonical `create_<entity>`,
+  `update_<entity>` and `delete_<entity>` actions, a code-rendered
+  `backend/schemas.py` and handler/service/repo implementations for every
+  module-written collection, compiled from the approved data contract. Create
+  assigns the declared id and timestamps, update and delete address records by
+  that id and answer 404 outside the caller's scope, and the runtime stamps
+  ownership. Canonical actions carry no role permissions: authored permissions on
+  owner-scoped actions are removed with a logged normalization and rejected on
+  app-wide collections. Unique indexes on owned collections are compounded with
+  the owner field. ServiceAgent now writes only write hooks, custom mutations and
+  custom reads; ModelAgent no longer authors schemas for persistent modules.
+  App-wide collections beside gated, permissioned or internal actions get no open
+  canonical writes; hooks are validated at task admission and may return None;
+  DesignDocs validates canonical field types and defaults at save time and gives
+  required array/object fields an empty default; the generated record id is
+  `<entity>_id`, never a natural `search_by` key.
+
 ### Fixed
+
+- DesignDocs saves a design whose authentication surface declares login/logout
+  events or a sign-in page instead of rejecting it on every retry. The events
+  and page are platform-provided, so they are removed and recorded
+  (`removed_events`, `removed_pages`), typed navigation to the page points at
+  the auth contract's login route, and the approved page inventory AppGenerator
+  builds no longer contains a page the platform already serves. Only sign-in
+  pages (auth contract routes or a credential form) are removed; any other page
+  filed under an auth surface is rejected naming the app-owned surface it must
+  move to, never dropped. Provider lifecycle events on managed billing facades
+  are removed the same way. Genuine conflicts (a workflow consuming the event,
+  a sign-in page co-owned by an app surface or bound to app data, app entities
+  or actions on a platform surface) are still rejected, with feedback naming
+  exactly what to split out.
 
 - Generated persistence artifacts now name omitted indexes, stamp migration
   versions, exclude managed-facade collections, and declare subscription

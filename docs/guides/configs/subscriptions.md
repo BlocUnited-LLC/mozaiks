@@ -27,9 +27,11 @@ provider-neutral access contract.
 For generated apps, SubscriptionContractDesigner chooses which approved module
 actions each capability gates in `module_contract_updates`. It selects exact
 DesignDocs surface and action IDs; capabilities that differ between plans must
-each gate an action. Gate targets come from approved `owned_mutations` and declared
-`custom_reads`. Canonical `list_<collection>` / `get_<collection>` actions are never
-gate targets; a paid view must be a declared custom read.
+each gate an action. Gate targets come from approved `owned_mutations`, the
+code-constructed canonical `create_<entity>` / `update_<entity>` /
+`delete_<entity>` writes, and declared `custom_reads`. Canonical
+`list_<collection>` / `get_<collection>` actions are never gate targets; a paid
+view must be a declared custom read.
 Custom reads such as dashboard summaries are design decisions implemented by
 ServiceAgent; canonical collection reads are constructed by code.
 

@@ -152,19 +152,36 @@ agents:
       with no local subscription entities or collections. Do not create it by default.
       Author the canonical surface and data_contract together. The save boundary
       normalizes duplicate ownership only when declared contracts determine the
-      owner and every state item to remove: platform auth surfaces become platform
-      references, and managed subscription surfaces use billing_portal while
-      preserving their approved pages. Saved ownership_normalizations record these
+      owner and every item to remove: platform auth surfaces become platform
+      references with no events and no sign-in pages, because the platform emits
+      its own sign-in lifecycle events and serves sign-in at the config/auth.yaml
+      routes (a page at those routes, at a route they nest under such as /auth,
+      or with a Form collecting a credential field is removed, and typed
+      navigation to it is pointed at the login route). Any other page such a
+      surface owns is a user-designed app page: it is never dropped, and the save
+      rejects it naming the app-owned surface that must own it. Managed
+      subscription surfaces use billing_portal while preserving their approved
+      pages, and provider lifecycle events declared on them are removed. Do not
+      design a sign-in or registration page, and do not declare login/logout
+      events on any surface. Saved ownership_normalizations record these
       corrections. A user_id field is a reference to identity, not duplicated
       identity: preserve app-specific preferences and profile fields. Auth identity
       includes OIDC standard claims and platform account/session fields, including
       coarse token roles; resource-scoped memberships remain app-owned. A mixed auth
       collection is split into user_id-keyed app data when its declared app owner,
       or the sole eligible app module, determines ownership. No module is invented.
-      Unresolved or competing owners still receive revision feedback; separate
-      app-owned data from platform/provider state instead of deleting it. Changing
-      only the owner label cannot authorize app-owned storage. Downstream planning
-      rejects invalid approved ownership before it can generate a replacement module.
+      Unresolved or competing owners still receive revision feedback naming the
+      exact entities, actions, collections, triggers, or pages to split out: a
+      workflow_triggers entry that consumes a platform auth event, a sign-in page
+      an app-owned surface also owns or that binds app-owned data, a non-sign-in
+      page filed under an auth surface, or app entities and actions on a platform
+      surface. An app-named surface that claims a reserved entity or action while
+      also owning app entities, actions, collections, triggers, or non-sign-in
+      pages is told to drop that claim and stay app-owned; one whose every claim
+      is reserved becomes a platform reference. Separate app-owned data from
+      platform/provider state instead of deleting it. Changing only the owner
+      label cannot authorize app-owned storage. Downstream planning rejects
+      invalid approved ownership before it can generate a replacement module.
 
       brand_intent: When non-null, use brand_intent.style_summary and
       brand_intent.brand_keywords to anchor experience_spec.brand_direction. The brand
@@ -294,6 +311,8 @@ agents:
       - The data design must be transcribed into `data_contract`; do not leave durable collection ownership, indexes, or migration policy trapped only in prose.
       - Decide every collection's `tenancy` here: `per_user`, `per_workspace`, or `app_wide`. `scope` remains the namespace owner (`app`, `platform`, or `hosted`), never row tenancy. Set `owner_field` to an exact declared field for scoped collections, or null for `app_wide`. Set `entity` to the exact owning surface `primary_entities` name. These decisions persist unchanged into `data/contract.json`; downstream workflows must not re-decide them.
       - Canonical entity list/get reads are constructed for per-user and per-workspace collections with login required, owner filtering, and no role permission. For app-wide collections whose writes require permissions or subscription gates, explicitly describe each read and its access policy; public access is never inferred from protected writes.
+      - Canonical create/update/delete writes are constructed for every collection whose lifecycle.write_mode is module_action. Declare the generated record id as `<entity>_id` (for example `task_id` for entity `Task`); code assigns it and clients never supply it. `search_by` is the lookup key for canonical get and may be a user-entered natural key such as `title` or `email`; it is never overwritten with a generated id. Declare `created_at`/`updated_at` as date or datetime fields when the record should carry managed timestamps. For app-wide collections beside actions with permissions, subscription gates, or internal surfaces, canonical writes are not constructed open; prefer per_user or per_workspace tenancy, or describe each write and its access policy explicitly.
+      - Every field `type` is one of string, boolean, integer, number, date, datetime, object, array. A `default` must decode to that type ("true" only for boolean, "0" for integer/number, "[]"/"{}" for array/object, a bare or JSON string for string); "null" is never a default. Object and array fields cannot be canonical create/update inputs; a required one without a default is saved with the empty default ("[]" or "{}") and filled by hooks or custom mutations. `enum` requires type string.
       - Determined platform identity normalization runs before ownership validation. Any remaining missing tenancy, owner field, or entity is a design decision: use the valid choices in save feedback and revise the typed fields.
       - Do not place API-key metadata, vault state, or workspace integration records into `data_contract`; those are platform-managed connector contracts, not app-owned schema.
       - If a surface truly needs file-backed customization, describe the need in a bounded way; do not invent ad hoc YAML keys or raw implementation blobs.

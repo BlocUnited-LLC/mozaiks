@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import re
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from mozaiksai.core.runtime.app.auth_contract import AuthRoutes, validate_app_auth_contract
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import managed_pack_contracts
+
+_MODULE_ACTION_ENDPOINT = re.compile(r"^/api/modules/([A-Za-z0-9_.-]+)/[A-Za-z0-9_.-]+$")
 
 
 class SurfaceOwnershipRule(BaseModel):
@@ -20,6 +26,9 @@ class SurfaceOwnershipRule(BaseModel):
 
     owner: str = Field(min_length=1)
     facade_module: str | None = None
+    # The platform capability whose own pages a matching surface duplicates.
+    # `authentication` pages are served at the generated auth contract's routes.
+    platform_capability: Literal["authentication"] | None = None
     surface_ids: list[str] = Field(default_factory=list)
     entity_names: list[str] = Field(default_factory=list)
     action_ids: list[str] = Field(default_factory=list)
@@ -37,7 +46,93 @@ class SurfaceOwnershipRule(BaseModel):
             raise ValueError("structured_state_field_types must reference declared state_field_names")
         if _identifiers(self.identity_evidence_fields) - _identifiers(self.state_field_names):
             raise ValueError("identity_evidence_fields must reference declared state_field_names")
+        if self.platform_capability and self.facade_module:
+            raise ValueError("platform_capability describes platform ownership, not a managed facade")
         return self
+
+
+def auth_contract_routes() -> AuthRoutes:
+    """The routes where the generated auth contract serves sign-in.
+
+    Generated apps receive this contract from the same template
+    (render_auth_scaffold), so a design page duplicating sign-in is replaced by a
+    reference to ``login`` rather than by an app-built page.
+    """
+    template = workflow_context_path("webapp_builder", "templates", "config", "auth.yaml")
+    config = yaml.safe_load(template.read_text(encoding="utf-8").replace("{{AUTH_DEFAULT_ROUTE}}", "/"))
+    return validate_app_auth_contract(config).routes
+
+
+def _route_key(route: Any) -> str:
+    """One route identity for sign-in checks, removal, and redirects: '/auth/' is '/auth'."""
+    return str(route or "").strip().rstrip("/") or "/"
+
+
+def _sign_in_routes(routes: AuthRoutes) -> set[str]:
+    """Sign-in routes only; post_login_default is where the app lands afterwards."""
+    return {_route_key(route) for route in (routes.login, routes.callback, routes.logout)}
+
+
+def _typed_form_fields(config_hint: Any) -> set[str]:
+    """Field names a Form section declares through typed ``fields[].name`` entries."""
+    if not isinstance(config_hint, str) or not config_hint.strip():
+        return set()
+    try:
+        config = json.loads(config_hint)
+    except ValueError:
+        return set()
+    names: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            fields = node.get("fields")
+            if isinstance(fields, list):
+                names.update(
+                    str(field.get("name")).strip().casefold()
+                    for field in fields if isinstance(field, dict) and field.get("name")
+                )
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(config)
+    return names
+
+
+def _is_sign_in_page(page: dict[str, Any], *, sign_in_routes: set[str], credential_fields: set[str]) -> bool:
+    """A page the auth contract already serves: one of its routes (or a route
+    such as /auth that a contract route nests under), or a form collecting a
+    credential field the ownership rule declares as identity evidence."""
+    route = _route_key(page.get("route"))
+    if route != "/" and any(
+        candidate == route or candidate.startswith(route + "/") for candidate in sign_in_routes
+    ):
+        return True
+    return any(
+        section.get("primitive") == "Form"
+        and _typed_form_fields(section.get("config_hint")) & credential_fields
+        for section in page.get("sections") or []
+    )
+
+
+@dataclass(frozen=True)
+class _SurfaceClaim:
+    """How one design surface relates to the ownership rule it matched."""
+
+    rule: SurfaceOwnershipRule
+    facade: dict[str, Any]
+    # Matched by its own identity (reserved surface id or facade module), not
+    # only through a reserved entity or action it declares.
+    name_match: bool
+    declared_entities: list[str]
+    declared_actions: list[str]
+    unknown_entities: list[str]
+    unknown_actions: list[str]
+    remaining: list[str]
+    triggers: list[str]
+    split_out: list[str]
 
 
 def _get(context: Any, key: str, default: Any = None) -> Any:
@@ -191,11 +286,192 @@ def validate_surface_ownership(
                 )
 
 
+def _typed_section_bindings(config_hint: Any) -> list[str]:
+    """Module ids a section binds through typed references in its config hint.
+
+    Only the two typed shapes downstream planning understands count:
+    ``data_source: {module_id, action_id}`` and a canonical module action URL.
+    Column names or labels are prose and never decide ownership.
+    """
+    if not isinstance(config_hint, str) or not config_hint.strip():
+        return []
+    try:
+        config = json.loads(config_hint)
+    except ValueError:
+        return []
+    found: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            source = node.get("data_source")
+            if isinstance(source, dict) and source.get("module_id"):
+                found.append(str(source["module_id"]))
+            endpoint = node.get("api_endpoint")
+            match = _MODULE_ACTION_ENDPOINT.match(endpoint) if isinstance(endpoint, str) else None
+            if match:
+                found.append(match.group(1))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(config)
+    return list(dict.fromkeys(found))
+
+
+def _remove_platform_pages(
+    surface: dict[str, Any],
+    surfaces: list[dict[str, Any]],
+    spec: dict[str, Any],
+    *,
+    rule: SurfaceOwnershipRule,
+    sign_in_routes: set[str],
+    platform_auth_ids: set[str],
+    facade_ids: set[str],
+    removed_by_name: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop the sign-in pages a platform surface owns; the platform serves them.
+
+    Only a sign-in page is determined: any other page the surface owns is a
+    user-designed page the app must build, so it is never dropped silently; the
+    rejection names the app-owned surface it belongs to. A sign-in page is only
+    removable when nothing app-owned depends on it: no app-owned surface lists
+    it, and no section binds an app module through a typed reference. Sibling
+    surfaces that normalize to the same platform capability are not app owners:
+    the removal is constructed once and recorded on each of them.
+    """
+    surface_id = str(surface["surface_id"])
+    owner = rule.owner
+    names = _identifiers(surface.get("owned_pages"))
+    if not names:
+        return []
+    app_owned = [
+        str(other["surface_id"]) for other in surfaces
+        if other is not surface and other.get("owner") == "app"
+        and str(other["surface_id"]) not in platform_auth_ids and str(other["surface_id"]) not in facade_ids
+    ]
+    app_modules = {
+        str(other["surface_id"]) for other in surfaces
+        if str(other["surface_id"]) in app_owned and other.get("surface_kind") == "module"
+    }
+    app_targets = [
+        str(other["surface_id"]) for other in surfaces
+        if str(other["surface_id"]) in app_owned and other.get("surface_kind") in {"module", "ui_only"}
+    ]
+    credential_fields = _identifiers(rule.identity_evidence_fields)
+    # Each sibling records its own copy, so the saved YAML carries no shared anchors.
+    removed: list[dict[str, Any]] = [dict(removed_by_name[name]) for name in sorted(names) if name in removed_by_name]
+    for page in list(spec.get("pages") or []):
+        name = str(page.get("name") or "")
+        key = name.strip().casefold()
+        if key not in names:
+            continue
+        co_owners = [
+            str(other["surface_id"]) for other in surfaces
+            if other is not surface and str(other["surface_id"]) not in platform_auth_ids
+            and key in _identifiers(other.get("owned_pages"))
+        ]
+        if not _is_sign_in_page(page, sign_in_routes=sign_in_routes, credential_fields=credential_fields):
+            if co_owners:
+                target = f"it is already listed by {co_owners}: remove {name!r} from {surface_id!r}.owned_pages"
+            elif len(app_targets) == 1:
+                target = f"move {name!r} to owned_pages of {app_targets[0]!r}"
+            elif app_targets:
+                target = f"move {name!r} to owned_pages of one of {app_targets}"
+            else:
+                target = f"declare an app-owned module or ui_only surface and move {name!r} to its owned_pages"
+            raise ValueError(
+                f"Page {name!r} ({page.get('route')}) is owned by {surface_id!r}, which normalizes to "
+                f"{owner}, but it is not a sign-in page: its route is not an auth contract route "
+                f"{sorted(sign_in_routes)} and no Form section collects a credential field. The platform "
+                f"serves only sign-in for {surface_id!r}, so the app must own this page: {target}."
+            )
+        if co_owners:
+            raise ValueError(
+                f"Page {name!r} ({page.get('route')}) is owned by {surface_id!r}, which normalizes to "
+                f"{owner}, and also by app-owned {co_owners}. The platform serves sign-in itself, so the app "
+                f"builds no page for {surface_id!r}: remove {name!r} from owned_pages of {co_owners} and drop "
+                f"the page, or move its app-owned sections to a page owned only by {co_owners[0]!r} and remove "
+                f"{name!r} from {surface_id!r}.owned_pages."
+            )
+        bound = [
+            (str(section.get("id")), module)
+            for section in page.get("sections") or []
+            for module in _typed_section_bindings(section.get("config_hint")) if module in app_modules
+        ]
+        if bound:
+            raise ValueError(
+                f"Page {name!r} ({page.get('route')}) is owned by {surface_id!r}, which normalizes to "
+                f"{owner}, but sections {sorted({section for section, _ in bound})} bind app-owned modules "
+                f"{sorted({module for _, module in bound})}. The platform serves sign-in itself: move those "
+                f"sections to a page owned by the app module they bind, or drop the binding, then remove "
+                f"{name!r} from {surface_id!r}.owned_pages."
+            )
+        spec["pages"].remove(page)
+        entry = {"name": name, "route": page.get("route")}
+        removed.append(entry)
+        removed_by_name[key] = entry
+    if removed and not spec.get("pages"):
+        raise ValueError(
+            f"Removing the platform sign-in page(s) {[page['name'] for page in removed]} owned by "
+            f"{surface_id!r} leaves no approved pages. Design the app's own pages under app-owned surfaces."
+        )
+    return removed
+
+
+# The page schema's typed navigation references: action/link `href` and route
+# fields. Labels, columns, and data values are never routes.
+_NAVIGATION_KEYS = frozenset({"href", "route", "path", "fallbackPath"})
+
+
+def _rewrite_routes(node: Any, routes: dict[str, str], login_route: str, hits: list[str]) -> Any:
+    if isinstance(node, dict):
+        rewritten: dict[str, Any] = {}
+        for key, value in node.items():
+            if (
+                key in _NAVIGATION_KEYS and isinstance(value, str)
+                and value.strip().startswith("/") and _route_key(value) in routes
+            ):
+                hits.append(value)
+                rewritten[key] = login_route
+            else:
+                rewritten[key] = _rewrite_routes(value, routes, login_route, hits)
+        return rewritten
+    if isinstance(node, list):
+        return [_rewrite_routes(value, routes, login_route, hits) for value in node]
+    return node
+
+
+def _redirect_navigation(spec: dict[str, Any], routes: dict[str, str], login_route: str) -> dict[str, list[dict[str, Any]]]:
+    """Point typed references to a removed page's route at the auth contract login route."""
+    redirected: dict[str, list[dict[str, Any]]] = {}
+    for page in spec.get("pages") or []:
+        for section in page.get("sections") or []:
+            hint = section.get("config_hint")
+            if not isinstance(hint, str) or not hint.strip():
+                continue
+            try:
+                config = json.loads(hint)
+            except ValueError:
+                continue
+            hits: list[str] = []
+            rewritten = _rewrite_routes(config, routes, login_route, hits)
+            if hits:
+                section["config_hint"] = json.dumps(rewritten)
+                for route in dict.fromkeys(hits):
+                    redirected.setdefault(routes[_route_key(route)], []).append({
+                        "page": page.get("name"), "section": section.get("id"), "from": route, "to": login_route,
+                    })
+    return redirected
+
+
 def normalize_surface_ownership(
     surface_map: dict[str, Any],
     *,
     context_variables: Any,
     data_contract: dict[str, Any],
+    experience_spec: dict[str, Any] | None = None,
     include_default_subscription: bool = False,
 ) -> list[dict[str, Any]]:
     """Apply only contract-determined corrections, atomically, before design approval.
@@ -203,9 +479,17 @@ def normalize_surface_ownership(
     A reserved surface name proves the owner, not the meaning of every field it
     contains. Residual auth data moves only to one determined existing app module;
     unresolved owners or mixed app behavior require a design decision.
+
+    Events on a surface that normalizes to platform or provider ownership are that
+    owner's lifecycle events, which the app cannot emit: they are removed and
+    recorded, unless another surface's workflow_triggers consume one. Pages owned
+    by a platform authentication surface duplicate the sign-in the auth contract
+    already serves: with ``experience_spec`` supplied they are removed from the
+    approved inventory and typed navigation to them points at the login route.
     """
     rules, facades = _ownership_rules(context_variables, include_default_subscription=include_default_subscription)
     normalized_map, normalized_data = deepcopy(surface_map), deepcopy(data_contract)
+    normalized_spec = deepcopy(experience_spec) if experience_spec is not None else None
     records: dict[tuple[str, str], dict[str, Any]] = {}
 
     def record(surface_id: str, rule: SurfaceOwnershipRule, removed: str | None = None) -> dict[str, Any]:
@@ -358,56 +642,207 @@ def normalize_surface_ownership(
 
     surfaces = normalized_map["surfaces"]
     targets: dict[str, str] = {}
-    for surface in surfaces:
+    removed_routes: dict[str, str] = {}
+    removed_by_name: dict[str, dict[str, Any]] = {}
+    auth_rules = [rule for rule in rules if rule.platform_capability == "authentication" and not rule.facade_module]
+    auth_routes = (
+        auth_contract_routes()
+        if normalized_spec is not None
+        and any(_matches_surface(surface, rule) for surface in surfaces for rule in auth_rules)
+        else None
+    )
+    sign_in_routes = _sign_in_routes(auth_routes) if auth_routes is not None else set()
+    spec_pages = list((normalized_spec or {}).get("pages") or [])
+
+    def assess(surface: dict[str, Any]) -> _SurfaceClaim | None:
         surface_id = surface["surface_id"]
         matches = [rule for rule in rules if _matches_surface(surface, rule)]
         if not matches:
-            continue
+            return None
         rule = choose(matches, f"surface {surface_id!r}")
         facade = facades.get(rule.facade_module or "", {})
+        facade_actions = _facade_actions(facade)
+        name_match = bool(_identifiers([surface_id]) & _identifiers(rule.surface_ids)) or surface_id == rule.facade_module
         entities = _identifiers(rule.entity_names)
-        allowed_actions = _identifiers([*rule.action_ids, *_facade_actions(facade)])
-        if _identifiers([surface_id]) & _identifiers(rule.surface_ids):
+        allowed_actions = _identifiers([*rule.action_ids, *facade_actions])
+        if name_match:
             entities |= _identifiers(rule.surface_entity_names)
             allowed_actions |= _identifiers(rule.surface_action_ids)
-        unknown_entities = _identifiers(surface.get("primary_entities")) - entities
-        unknown_actions = _identifiers([
-            *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
-        ]) - allowed_actions
+        declared_entities = [str(entity) for entity in surface.get("primary_entities") or []]
+        declared_actions = [
+            str(action) for action in [*(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or [])]
+        ]
+        unknown_entities = [entity for entity in declared_entities if entity.strip().casefold() not in entities]
+        unknown_actions = [action for action in declared_actions if action.strip().casefold() not in allowed_actions]
         remaining = [
             collection["name"] for group_id, collections in groups for collection in collections
             if surface_id in {group_id, (collection.get("ownership") or {}).get("surface_id")}
         ]
-        extra_behavior = [key for key in ("events_emitted", "workflow_triggers") if surface.get(key)]
-        if facade and _identifiers(surface.get("integrations")) - _identifiers([facade["provider_module"]]):
-            extra_behavior.append("integrations")
-        if unknown_entities or unknown_actions or remaining or extra_behavior:
-            raise ValueError(
-                f"Ambiguous surface {surface_id!r} conflicts with {rule.owner}: "
-                f"app/unknown entities={sorted(unknown_entities)}, actions={sorted(unknown_actions)}, "
-                f"collections={remaining}, behavior={extra_behavior}. Separate app-owned behavior before "
-                f"using canonical owner={rule.facade_module or 'platform'}."
+        # Each item names the app-owned behavior to split out and where it goes.
+        split_out: list[str] = []
+        if unknown_entities:
+            split_out.append(f"move entities {unknown_entities} to an app-owned module surface")
+        if unknown_actions:
+            split_out.append(f"move actions {unknown_actions} to an app-owned module surface")
+        if remaining:
+            split_out.append(
+                f"declare collections {remaining} under their app-owned module via ownership.surface_id"
             )
+        triggers = [str(trigger) for trigger in surface.get("workflow_triggers") or []]
+        if triggers:
+            split_out.append(
+                f"declare workflow_triggers {triggers} on the app-owned surface whose action starts them"
+            )
+        foreign_integrations = sorted(
+            _identifiers(surface.get("integrations")) - _identifiers([facade["provider_module"]])
+        ) if facade else []
+        if foreign_integrations:
+            split_out.append(
+                f"move integrations {foreign_integrations} to an app-owned surface; "
+                f"{rule.facade_module} integrates only {facade['provider_module']}"
+            )
+        return _SurfaceClaim(
+            rule=rule, facade=facade, name_match=name_match,
+            declared_entities=declared_entities, declared_actions=declared_actions,
+            unknown_entities=unknown_entities, unknown_actions=unknown_actions,
+            remaining=remaining, triggers=triggers, split_out=split_out,
+        )
+
+    claims = [(surface, assess(surface)) for surface in surfaces]
+    # An app-named surface matched only through a reserved entity or action is an
+    # app surface with a wrong claim when it also owns app behavior, including a
+    # page that is not sign-in. The remedy is to drop the claim, not to become a
+    # platform reference. Decide every such surface before any page moves, so the
+    # outcome does not depend on surface order. A surface whose every claim is
+    # reserved still normalizes to the canonical owner below.
+    for surface, claim in claims:
+        if claim is None or claim.name_match:
+            continue
+        rule = claim.rule
+        owned = _identifiers(surface.get("owned_pages"))
+        pages = [page for page in spec_pages if str(page.get("name") or "").strip().casefold() in owned]
+        kept_pages = [str(page.get("name")) for page in pages]
+        sign_in_pages: list[str] = []
+        # Only a platform-auth claim makes a page app evidence: the platform
+        # serves sign-in and nothing else. A managed facade absorbs an
+        # entity-matched surface together with its pages.
+        page_evidence = False
+        if rule.platform_capability == "authentication" and auth_routes is not None:
+            credential_fields = _identifiers(rule.identity_evidence_fields)
+            sign_in_pages = [
+                str(page.get("name")) for page in pages
+                if _is_sign_in_page(page, sign_in_routes=sign_in_routes, credential_fields=credential_fields)
+            ]
+            kept_pages = [name for name in kept_pages if name not in sign_in_pages]
+            page_evidence = bool(kept_pages)
+        if not claim.split_out and not page_evidence:
+            continue
+        surface_id = surface["surface_id"]
+        reserved_entities = [entity for entity in claim.declared_entities if entity not in claim.unknown_entities]
+        reserved_actions = [action for action in claim.declared_actions if action not in claim.unknown_actions]
+        provides = (
+            f"bind that UI to {rule.facade_module} and its actions {sorted(_facade_actions(claim.facade))}"
+            if claim.facade else "the platform provides them; reference it with owner=platform and config/auth.yaml"
+        )
+        drop_sign_in = (
+            f" Also remove its sign-in pages {sign_in_pages}: the platform serves sign-in."
+            if sign_in_pages else ""
+        )
+        raise ValueError(
+            f"App surface {surface_id!r} claims {rule.owner}: entities {reserved_entities}, actions "
+            f"{reserved_actions}. Remove those claims from {surface_id!r} ({provides}) and keep it "
+            f"app-owned with its entities {claim.unknown_entities}, actions {claim.unknown_actions}, "
+            f"collections {claim.remaining}, pages {kept_pages}, and workflow_triggers {claim.triggers}."
+            f"{drop_sign_in}"
+        )
+    # Every surface left that matches platform authentication normalizes to it,
+    # so sibling surfaces are never each other's app-owned co-owners.
+    platform_auth_ids = {
+        str(surface["surface_id"]) for surface, claim in claims
+        if claim is not None and claim.rule.platform_capability == "authentication" and not claim.rule.facade_module
+    }
+    for surface, claim in claims:
+        if claim is None:
+            continue
+        surface_id = surface["surface_id"]
+        rule = claim.rule
+        facade = claim.facade
+        owner = rule.facade_module or "platform"
+        facade_actions = _facade_actions(facade)
+        split_out = claim.split_out
+        if split_out:
+            keep = (
+                f"owner=app, surface_id={rule.facade_module}, owned_mutations within {sorted(facade_actions)}"
+                if facade else "owner=platform"
+            )
+            raise ValueError(
+                f"Ambiguous surface {surface_id!r} conflicts with {rule.owner}. Split out the app-owned "
+                f"behavior: {'; '.join(split_out)}. Then keep {surface_id!r} as a {owner} reference "
+                f"({keep}) with no entities, collections, or triggers."
+            )
+        # Events declared here are the owner's lifecycle events; the app cannot
+        # emit them. Only a declared consumer turns removal into a design decision.
+        events = [str(event) for event in surface.get("events_emitted") or []]
+        consumers = [
+            (str(other["surface_id"]), sorted(_identifiers(other.get("workflow_triggers")) & _identifiers(events)))
+            for other in surfaces if other is not surface
+        ]
+        consumers = [(other_id, shared) for other_id, shared in consumers if shared]
+        if consumers:
+            raise ValueError(
+                f"Events {events} on {surface_id!r} are {rule.owner} lifecycle events the app cannot emit, "
+                f"but {'; '.join(f'surface {other!r} lists {shared} in workflow_triggers' for other, shared in consumers)}. "
+                f"Start that workflow from an app-owned surface's action or domain event, or remove the "
+                f"trigger; then {surface_id!r} normalizes to a {owner} reference without events."
+            )
+        removes_pages = rule.platform_capability == "authentication" and not facade and normalized_spec is not None
         if (
             surface.get("owner") == ("app" if facade else "platform")
             and (not facade or surface_id == rule.facade_module)
             and not surface.get("primary_entities")
-            and not (_identifiers(surface.get("owned_mutations")) - _identifiers(_facade_actions(facade)))
-            and not (_identifiers(surface.get("custom_reads")) - _identifiers(_facade_actions(facade)))
+            and not (_identifiers(surface.get("owned_mutations")) - _identifiers(facade_actions))
+            and not (_identifiers(surface.get("custom_reads")) - _identifiers(facade_actions))
+            and not events
+            and not (removes_pages and surface.get("owned_pages"))
         ):
             continue
+        removed_pages: list[dict[str, Any]] = []
+        if removes_pages and normalized_spec is not None and auth_routes is not None:
+            removed_pages = _remove_platform_pages(
+                surface, surfaces, normalized_spec, rule=rule, sign_in_routes=sign_in_routes,
+                platform_auth_ids=platform_auth_ids, facade_ids=set(facades), removed_by_name=removed_by_name,
+            )
         corrected = deepcopy(surface)
-        corrected.update(owner="app" if facade else "platform", primary_entities=[], owned_mutations=[], custom_reads=[])
+        corrected.update(
+            owner="app" if facade else "platform", primary_entities=[], owned_mutations=[], custom_reads=[],
+            events_emitted=[],
+        )
+        if removes_pages:
+            corrected["owned_pages"] = []
         if facade:
             corrected.update(
                 surface_id=rule.facade_module, surface_kind="module",
                 source_capability_packs=[facade["pack_id"]],
-                owned_mutations=_facade_actions(facade), integrations=[facade["provider_module"]],
+                owned_mutations=facade_actions, integrations=[facade["provider_module"]],
             )
         if corrected != surface:
-            record(surface_id, rule)
+            entry = record(surface_id, rule)
+            if events:
+                entry["removed_events"] = events
+            if removed_pages:
+                entry["removed_pages"] = removed_pages
+                for page in removed_pages:
+                    removed_routes.setdefault(_route_key(page["route"]), surface_id)
             targets[surface_id] = corrected["surface_id"]
             surface.update(corrected)
+    if removed_routes and auth_routes is not None:
+        login_route = auth_routes.login
+        # A sign-in page designed at the login route itself needs no redirect.
+        redirectable = {
+            route: owner_id for route, owner_id in removed_routes.items() if route != _route_key(login_route)
+        }
+        for surface_id, entries in _redirect_navigation(normalized_spec or {}, redirectable, login_route).items():
+            records[(surface_id, "platform")]["redirected_navigation"] = entries
 
     # Several duplicate provider surfaces may map to one already materialized
     # facade. Its approved pages are a union, never replaced by pack defaults.
@@ -439,4 +874,6 @@ def normalize_surface_ownership(
     )
     surface_map.update(normalized_map)
     data_contract.update(normalized_data)
+    if experience_spec is not None and normalized_spec is not None:
+        experience_spec.update(normalized_spec)
     return list(records.values())

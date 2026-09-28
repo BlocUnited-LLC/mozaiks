@@ -27,8 +27,12 @@ from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
 from mozaiksai.core.workflow.generator_support.module_policy import render_module_policy
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
-    materialize_module_read_actions,
     materialize_module_read_implementations,
+)
+from mozaiksai.core.workflow.generator_support.module_write_actions import (
+    materialize_module_actions,
+    materialize_module_schemas,
+    materialize_module_write_implementations,
 )
 from scripts.smoke_agentgenerator_live_pack import run_live_agentgenerator_pack_smoke
 
@@ -415,8 +419,26 @@ class SupportTicketsModule:
         return await SupportTicketsService(ctx).request_batch_triage(**params)
 """,
         "modules/support_tickets/backend/service.py": f'''
+from uuid import uuid4
+
 from .repo import SupportTicketsRepo
-from .schemas import batch_request_document, ticket_document
+
+
+def ticket_document(*, customer_name, issue, priority=None):
+    return {{
+        "ticket_id": uuid4().hex,
+        "customer_name": str(customer_name or "").strip(),
+        "issue": str(issue or "").strip(),
+        "priority": str(priority or "normal").strip(),
+        "status": "open",
+    }}
+
+
+def batch_request_document(*, priority=None):
+    return {{
+        "priority": str(priority or "all").strip(),
+        "status": "requested",
+    }}
 
 
 class SupportTicketsService:
@@ -462,33 +484,16 @@ class SupportTicketsRepo:
         result = await collection.insert_one(record)
         return {**record, "ticket_id": str(result.inserted_id)}
 """,
-        "modules/support_tickets/backend/schemas.py": """
-from uuid import uuid4
-
-
-def ticket_document(*, customer_name, issue, priority=None):
-    return {
-        "ticket_id": uuid4().hex,
-        "customer_name": str(customer_name or "").strip(),
-        "issue": str(issue or "").strip(),
-        "priority": str(priority or "normal").strip(),
-        "status": "open",
     }
-
-
-def batch_request_document(*, priority=None):
-    return {
-        "priority": str(priority or "all").strip(),
-        "status": "requested",
-    }
-""",
-    }
+    # backend/schemas.py is code-rendered from the data contract below.
     read_plan = {"capability_packs": [{
         "capability_pack_id": "support_tickets", "capability_source": "generated_module",
         "primary_entities": ["Ticket"],
     }]}
-    files.update(materialize_module_read_actions(files, app_build_plan=read_plan, data_contract=data_contract))
+    files.update(materialize_module_actions(files, app_build_plan=read_plan, data_contract=data_contract))
+    files.update(materialize_module_schemas(files, app_build_plan=read_plan, data_contract=data_contract))
     files.update(materialize_module_read_implementations(files, app_build_plan=read_plan, data_contract=data_contract))
+    files.update(materialize_module_write_implementations(files, app_build_plan=read_plan, data_contract=data_contract))
     return files
 
 

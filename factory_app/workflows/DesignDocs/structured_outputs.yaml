@@ -40,7 +40,7 @@ models:
       owned_pages:
         type: optional_list
         items: str
-        description: Persistent pages primarily owned by the surface.
+        description: Persistent pages primarily owned by the surface. A surface that normalizes to platform authentication owns none; its sign-in pages (auth contract routes or a credential Form) are removed at save because the auth contract serves them, and any other page filed under it is rejected with the app-owned surface it must move to.
       owned_mutations:
         type: optional_list
         items: str
@@ -52,7 +52,7 @@ models:
       events_emitted:
         type: optional_list
         items: str
-        description: Domain, platform, or hosted events this surface may emit.
+        description: Domain, platform, or hosted events this surface may emit. Events declared on a surface that normalizes to platform or managed-provider ownership are that owner's lifecycle events and are removed at save, unless another surface's workflow_triggers consume them.
       workflow_triggers:
         type: optional_list
         items: str
@@ -83,18 +83,33 @@ models:
         type: str
         description: Stable field name stored in the collection.
       type:
-        type: str
-        description: Logical data type such as string, boolean, number, object, array, or datetime.
+        type: literal
+        values:
+        - string
+        - boolean
+        - integer
+        - number
+        - date
+        - datetime
+        - object
+        - array
+        description: >
+          Canonical logical data type. Dates are stored as datetimes and
+          travel as ISO-8601 strings; object and array fields cannot be
+          canonical create/update inputs; a required one without a default
+          is saved with the empty default ("[]" or "{}").
       required:
         type: bool
         description: True when the field must exist on inserted records.
       default:
         type: optional_str
         description: >
-          JSON-encoded default value applied when a record omits the field,
-          or null. Scalar defaults may be encoded directly as a string
-          ("true", "0", "pending"); complex defaults must be JSON-encoded.
-          Must be null or a valid JSON string.
+          JSON-encoded default applied when a record omits the field, or
+          null for no default. It must decode to the declared type: "true"
+          only for boolean, "0" for integer/number, "[]" or "{}" for
+          array/object; a string field also accepts a bare string
+          ("pending"). "null" is never a default: omit it and set
+          required=false or nullable=true instead.
       enum:
         type: optional_list
         items: str
@@ -219,7 +234,11 @@ models:
         variants:
         - str
         - 'null'
-        description: Null or primary lookup field used for updates.
+        description: >
+          Null or the declared field canonical get reads look up by. It may
+          be a user-entered natural key; it is never the generated record id.
+          Code generates `<entity>_id` when that field is declared, otherwise
+          `id`, otherwise Mongo `_id`, and clients never supply it.
       lifecycle:
         type: DataContractLifecycle
         description: Write and migration rules for this collection.
@@ -369,7 +388,7 @@ models:
       pages:
         type: list
         items: UIPage
-        description: App-owned persistent page designs. For enabled greenfield subscription concepts, the save boundary completes the approved inventory from the MozaiksPay facade page declarations and assigns billing_portal ownership, preserving designs already on those routes. Other enabled monetization requires a designed Pricing page at /pricing. Free apps do not acquire monetization pages. Every saved page has one primary surface_map owner.
+        description: App-owned persistent page designs. For enabled greenfield subscription concepts, the save boundary completes the approved inventory from the MozaiksPay facade page declarations and assigns billing_portal ownership, preserving designs already on those routes. Other enabled monetization requires a designed Pricing page at /pricing. Free apps do not acquire monetization pages. Sign-in pages owned by a platform authentication surface (an auth contract route, a route one nests under, or a credential Form) duplicate the auth contract and are removed from the saved inventory; typed navigation to them points at the login route. Any other page owned by such a surface is rejected with the app-owned surface it must move to, never dropped. Every saved page has one primary surface_map owner.
 
   DesignDocsBundle:
     type: model

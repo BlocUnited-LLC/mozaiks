@@ -26,8 +26,12 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 )
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
-    materialize_module_read_actions,
     materialize_module_read_implementations,
+)
+from mozaiksai.core.workflow.generator_support.module_write_actions import (
+    materialize_module_actions,
+    materialize_module_schemas,
+    materialize_module_write_implementations,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,20 +78,25 @@ def _merge_code_files(
         subscription_contract=subscription_contract, context_variables=context_variables,
     )
     file_map = materialize_collection_auth(file_map, data_contract=data_contract)
-    file_map.update(materialize_module_read_actions(
+    file_map.update(materialize_module_actions(
         file_map, app_build_plan=app_build_plan, data_contract=data_contract,
         design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
     ))
     file_map.update(materialize_module_policies(file_map, data_contract))
+    file_map.update(materialize_module_schemas(file_map, app_build_plan=app_build_plan, data_contract=data_contract))
+    service_paths = [
+        path for task in (app_build_plan or {}).get("build_tasks") or []
+        if task.get("task_type") == "business_services"
+        for path in task.get("owned_paths") or []
+    ]
     file_map.update(materialize_module_read_implementations(
         file_map, app_build_plan=app_build_plan, data_contract=data_contract,
+        subscription_contract=subscription_contract, owned_paths=service_paths,
+    ))
+    file_map.update(materialize_module_write_implementations(
+        file_map, app_build_plan=app_build_plan, data_contract=data_contract, owned_paths=service_paths,
         subscription_contract=subscription_contract,
-        owned_paths=[
-            path for task in (app_build_plan or {}).get("build_tasks") or []
-            if task.get("task_type") == "business_services"
-            for path in task.get("owned_paths") or []
-        ],
     ))
     if "app.json" in file_map:
         file_map.update(materialize_auth_scaffold(file_map, data_contract=data_contract))

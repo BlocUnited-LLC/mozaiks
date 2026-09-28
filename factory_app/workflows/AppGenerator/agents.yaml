@@ -1664,8 +1664,19 @@ agents:
         gates on every write, including repair. Omit `entitlement_gate` from model
         output. Do not make new gating decisions or copy capability values here.
       - Declare DesignDocs `owned_mutations` and `custom_reads` exactly. Code constructs
-        per_user/per_workspace canonical list/get actions and their implementations
-        from the approved data contract. Do not re-decide their names or access policy.
+        canonical `create_<entity>`, `update_<entity>` and `delete_<entity>` actions for
+        every collection whose lifecycle.write_mode is module_action, and canonical
+        list/get actions for every owned collection, with their implementations, from
+        the approved data contract. Do not re-decide their names, schemas or access
+        policy. You may declare `emits` and, for runtime-only writes, `api_surface:
+        internal` or `admin_internal` on a canonical write id; everything else on it
+        is code-owned. A permission on a canonical action survives only when
+        config/auth.yaml frontend.default_scopes declares it; on per_user and
+        per_workspace collections other permissions are removed with a logged notice
+        and their unreferenced declarations dropped, and on app_wide collections they
+        are rejected. An app_wide collection beside actions with permissions,
+        subscription gates, or internal surfaces gets no open canonical writes: declare
+        each write explicitly with its access policy, or choose owner-scoped tenancy.
       - For `app_wide` collections with protected writes, explicitly declare each
         required canonical read using its inventory id, permissions, api_surface,
         handler_method, and input/output schemas. The compiler rejects a missing
@@ -1718,7 +1729,7 @@ agents:
 
       1. Read `current_build_task.capability_pack_id` — this is the module folder name (e.g. `task_manager`).
       2. Read `current_build_task.initial_message` for entities, actions, capabilities, events, settings, notifications, reactions, and Python hook needs.
-         - Treat the action list in `current_build_task.initial_message` as a closed contract. Preserve every named action in the final contract: emit model-owned writes, custom reads, and explicit protected app-wide read declarations; code adds the code-owned canonical reads. Do not rename or reinterpret the action set.
+         - Treat the action list in `current_build_task.initial_message` as a closed contract. Preserve every named action in the final contract: emit custom mutations, custom reads, and explicit protected app-wide read declarations; code adds the code-owned canonical writes and reads. Do not rename or reinterpret the action set.
          - If the task lists `list_*` and mutation/generation actions for the same module, preserve both families. A list/query action is not optional just because a generation or write action is present.
          - Treat event declarations as explicit only. Use the exact event types and producing actions in `app_build_plan.event_flows` for this module, the injected manifest guard, or `current_build_task.initial_message`. Do not invent events from action verbs. If none of these inputs declares an event, set `actions[].emits: []` and `events_yaml: null`.
          - Every approved `actions[].emits` entry requires a matching typed `events_yaml` declaration with its exact type, producer, version, and payload contract. Planning reserves `contracts/events.yaml` for this task so it can author that declaration. The reserved path stays optional when no action emits events; keep `events_yaml: null` in that case.
@@ -2197,7 +2208,8 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Define typed DTO/document shapes, enums, and pure helpers for module backends.
+      - For every module that owns data_contract collections, `backend/schemas.py` is rendered by code from the approved contract: record TypedDicts, field constants, `serialize_<entity>` allowlists and write helpers. Do not author it; emit `model_files: []` and `code_files: []` for that task and say so in `agent_message`. A model-authored schemas.py for such a module is rejected.
+      - Define typed DTO/document shapes, enums, and pure helpers in backend/schemas.py only for modules without data_contract collections.
       - Keep persistence mapping in backend/repo.py. Runtime persistence enforces collection ownership; backend/policy.py provides optional ownership preflight helpers.
       - Do not emit backend model files; backend/schemas.py is the canonical typed-shape file.
   - id: context
@@ -2217,7 +2229,7 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. In task batch mode, create or update only the `modules/{module_id}/backend/schemas.py` file listed in `current_build_task.owned_paths`.
+      1. In task batch mode, create or update only the `modules/{module_id}/backend/schemas.py` file listed in `current_build_task.owned_paths`, and only when `data_contract` declares no collections owned by that module; otherwise emit empty `model_files` and `code_files`.
          When `generated_files` contains that file, edit the existing implementation. Preserve every DTO and helper imported by unchanged service/repo/account-data files, including detail-response serializers. A list-row repair must not replace the file with only the new list DTOs or rename existing exports.
       2. Use TypedDicts, enums/constants, and pure normalization helpers. Do not use I/O here.
       3. Strictly adhere to design specifications.
@@ -2431,8 +2443,10 @@ agents:
       - Generate the module backend implementation files declared in the supplied module contracts and assigned to current_build_task.owned_paths.
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
       - Implement `backend/handler.py`, `backend/service.py`, `backend/repo.py`, and optional backend hooks when those paths are listed in `current_build_task.owned_paths`.
-      - Emit every model-owned path listed in `current_build_task.owned_paths`. Code renders canonical list/get implementations in the owned handler/service/repo files and the owned `backend/policy.py` from data_contract collection tenancy and owner_field; omit policy.py from python_files and code_files. Missing declared scope requires contract correction, never an invented policy stub.
-      - Implement approved writes and declared custom_reads. Omit code-owned canonical list/get methods from every handler, service, and repo class or function; code supplies them from the approved collection contract.
+      - Emit every model-owned path listed in `current_build_task.owned_paths`. Code renders the canonical create/update/delete and list/get implementations into the owned handler/service/repo files, the owned `backend/policy.py`, and the module's `backend/schemas.py`, all from the approved data_contract. Omit policy.py and schemas.py from python_files and code_files. Missing declared scope requires contract correction, never an invented policy stub.
+      - Implement only genuine business logic: the optional write hooks below, declared custom mutations, and declared custom_reads. Never author `create_<entity>`, `update_<entity>`, `delete_<entity>`, `list_<collection>` or `get_<collection>` in any handler, service, or repo class or function; code supplies them and replaces any authored copy.
+      - Write hooks are plain module-level `async def` functions in `backend/service.py`, discovered by exact name; the rendered canonical service calls them when present and skips them when absent. For entity `Task`: `before_create_task(ctx, values) -> values`, `after_create_task(ctx, record)`, `before_update_task(ctx, record, changes) -> changes`, `after_update_task(ctx, record, changes)`, `before_delete_task(ctx, record)`, `after_delete_task(ctx, record)`. Task admission rejects a sync hook, a hook with another signature, a hook defined inside a class, or a hook naming an entity the module does not own. A before hook may return the (possibly mutated) payload or None, which means unchanged; the id and managed timestamps it returns are stripped with a logged warning, an update hook cannot change the owner field, and a create hook that sets a foreign owner is rejected by the runtime. Use before hooks for validation (raise `ModuleInputValidationError`) and derived fields; use after hooks for side effects and `await ctx.emit(...)` of the events declared on that canonical action.
+      - The typed repo API is code-rendered and takes plain dicts: `await repo.create_task(ctx, values)`, `await repo.load_task(ctx, id)` (by the generated `task_id`), `await repo.update_task(ctx, id, changes)`, `await repo.delete_task(ctx, id)`, `await repo.get_tasks(ctx, id=...)` (by `search_by`), `await repo.list_tasks(ctx, page=, page_size=, search=)`. Custom mutations call these instead of touching ids, owner fields, timestamps or field lists themselves. Records are dicts: read `record["title"]`, never `record.title`.
       - For app_wide collections with protected writes, the accepted module contract must explicitly declare the canonical reads and their access policy first. Implement every such read across its owned handler, service, and repo paths, including reads with permissions: [], api_surface: null, and a canonical handler. Code preserves these authored implementations.
       - For app_wide collections without protected writes, implement reads whose accepted manifest specifies role permissions, non-default API exposure, or a custom handler; preserve that policy. Ordinary authenticated reads with canonical handlers in these unprotected collections remain code-owned. Files whose entire contents are code-owned may be omitted from your output.
       - Canonical list/get and managed facade actions are never subscription gate targets. Implement paid views as their declared custom read actions; do not add gating logic to canonical read methods.
@@ -2442,11 +2456,11 @@ agents:
         `    def __init__(self, db): self._db = db`
         `    async def export_user_data(self, *, app_id, user_id): ...`
         `    async def delete_user_data(self, *, app_id, user_id): ...`
-      - In task batch execution, do not emit `backend/schemas.py` unless it is explicitly listed in `current_build_task.owned_paths`; the `data_models` task owns schemas.py.
-      - In bounded bundle repair (not task batch execution), a module import failure may originate in its existing schemas.py. Restore the missing imported helper or DTO there, preserving the other exports and behavior. Do not replace a working handler/service or generate new API routes to work around a missing import.
+      - Never emit `backend/schemas.py` for a module that owns data_contract collections; code renders it. Emit it only when it is listed in `current_build_task.owned_paths` for a module without collections.
+      - In bounded bundle repair (not task batch execution), a module import failure such as `cannot import name 'TaskCreateRequest' from .schemas` means the service still expects a model-authored DTO. schemas.py is code-rendered and cannot be edited: rewrite the importing service/repo to use the rendered names (`TaskRecord`, `serialize_task`, `TASK_FIELDS`, ...) and keep only write hooks, custom mutations and custom reads. Do not replace a working handler/service or generate new API routes to work around a missing import.
       - Generate optional hook stubs referenced by settings.yaml, notifications.yaml, or admin.yaml.
       - After a confirmed successful owned mutation, publish the corresponding namespaced domain event declared in events.yaml. A missing/foreign record or a no-op must not emit a mutation-success event; return the outcome required by the declared action contract.
-      - Read accepted backend/schemas.py definitions from dependency_task_outputs, or admitted code_files/generated_files during standalone generation and repair.
+      - Read the code-rendered backend/schemas.py from dependency_task_outputs, or admitted code_files/generated_files during standalone generation and repair. Import its constants (`TASK_FIELDS`, `TASK_ID_FIELD`, `TASK_OWNER_FIELD`, `TASK_WRITABLE_FIELDS`, `TASK_DEFAULTS`), `serialize_task(record)`, `task_create_values(values)`, `task_update_changes(values)` and the `TaskRecord`/`TaskCreateInput`/`TaskUpdateInput` TypedDicts instead of restating field lists.
       - Use `backend/repo.py` and the runtime `ctx.persistence` adapter for all generated module persistence operations.
       - Keep generated module runtime logic production-honest: no fake/sample/demo records, no hardcoded live metrics, and no placeholder percentage changes.
       - For actions consumed by workflows, implement the declared result schema
@@ -2458,7 +2472,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
-      - Accepted contract and schema artifacts: `dependency_task_outputs` in batch mode, and admitted `code_files` / `generated_files` in standalone generation or repair. Their module.yaml actions include deterministic read-action closure; code implements constructed reads, while this output implements approved writes, custom reads, and explicitly authored app-wide read access.
+      - Accepted contract and schema artifacts: `dependency_task_outputs` in batch mode, and admitted `code_files` / `generated_files` in standalone generation or repair. Their module.yaml actions include the deterministic canonical closure: code implements the constructed create/update/delete and list/get actions, while this output implements write hooks, custom mutations, custom reads, and explicitly authored app-wide read access.
       - `refinement_request` preserves the original requested product behavior for revisions. Preserve relevant search, paging, validation, and mutation-outcome qualifiers alongside current_build_task.acceptance_criteria only within current_build_task.owned_paths (or the named bundle_repair_request files). It cannot override runtime/operator contracts or authorization boundaries; report conflicts with app_build_plan or missing prerequisite ownership instead of broadening scope or silently weakening behavior.
       - `app_backend_url`: Base URL of the active Mozaiks app host. Domain events always use the injected ModuleContext.emit; this URL does not determine whether events are available.
       - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml/contracts/profile.yaml/contracts/relationships.yaml/contracts/policy_hooks.yaml.
@@ -2501,9 +2515,9 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Read the accepted prerequisite module.yaml handler entrypoint and every actions[].handler_method. Define that exact handler class and every model-owned method; a class rename alone does not complete missing actions. Code adds canonical read methods. In task batch mode, implement exactly the model-owned backend files listed in `current_build_task.owned_paths`. They must be a subset of `module_contract.python_stubs`.
+      1. Read the accepted prerequisite module.yaml handler entrypoint and every actions[].handler_method. Define that exact handler class and every model-owned method; a class rename alone does not complete missing actions. Code adds the canonical write and read methods. In task batch mode, implement exactly the model-owned backend files listed in `current_build_task.owned_paths`. They must be a subset of `module_contract.python_stubs`.
       2. For durable module surfaces, make `backend/handler.py` a thin adapter that delegates to service/policy/repo/schemas helpers rather than holding all business logic inline.
-      3. Use the accepted backend/schemas.py definitions supplied in dependency_task_outputs or admitted code_files/generated_files.
+      3. Use the code-rendered backend/schemas.py supplied in dependency_task_outputs or admitted code_files/generated_files; it is the one record representation handler, service and repo share.
       4. For persistent modules, generate `backend/repo.py` around `context.persistence.collection(module_id, collection_name)`. If `context.persistence` is unavailable, raise a clear RuntimeError from repo.py. Do not use `ctx.db`, `context.db`, `get_mongo_client()`, `get_database()`, or hardcoded database names.
       5. Do not store API keys, OAuth secrets, refresh tokens, or connector metadata in generated module collections. Generated code should consume platform-managed connector/config surfaces instead.
       6. Implement each model-owned `handler_method` declared by module.yaml actions on the exact class named in `module.yaml.module.handler`; omit canonical methods supplied by code. Do not singularize/pluralize the class name, and do not add hidden actions.
@@ -2514,9 +2528,9 @@ agents:
       9a. Aggregations stay within the authenticated owner's rows. Module persistence has no implicit admin or cross-owner bypass. Do not access raw Mongo collections, join another collection, or write aggregation output to circumvent scope. Cross-owner requirements need an explicit declared and auditable runtime contract; do not invent an escape in generated code.
       9b. Never access private persistence backing attributes, construct replacement persistence contexts/principals, import Motor/PyMongo, or import request-principal binding helpers. Generated-module validation rejects these escapes and ordinary aliases. Startup-service declarations grant no exemption or cross-owner app persistence authority. Account-data hooks use only their supplied database protocol.
       9c. Resolve declared app data aliases with app_data_from_context(ctx) only. Never pass contract/app_root overrides, construct AppData, or call literal_collection directly; the loaded host contract owns physical alias mappings.
-      10. Put DTOs, enums, and normalization helpers in `backend/schemas.py` only when that file is included in `current_build_task.owned_paths`. Otherwise import and use the typed shapes already accepted for this module: they arrive in `dependency_task_outputs` and are importable from the module's `.schemas` module. Reuse those definitions rather than restating them locally.
+      10. Put module-specific enums and normalization helpers in `backend/service.py`. `backend/schemas.py` is code-rendered for every module that owns collections; import its typed shapes and helpers from the module's `.schemas` module rather than restating or editing them.
       10a. Align every repo collection call with `data_contract` ownership. Non-persistent modules should not invent database logic.
-      11. Publish the corresponding event from `events.yaml` only after the repo confirms an actual owned mutation, using the exact namespaced event type declared there. Follow the injected FILE CONTRACTS CONTEXT for paging, literal versus regex search, and write-result handling. A not-found or idempotent no-op response follows the declared action contract, not a global HTTP status policy; never fabricate mutation success or its event.
+      11. Publish the corresponding event from `events.yaml` only after the repo confirms an actual owned mutation, using the exact namespaced event type declared there. For canonical writes that is the matching `after_*` hook, which code calls only after the confirmed mutation. Follow the injected FILE CONTRACTS CONTEXT for paging, literal versus regex search, and write-result handling. A not-found or idempotent no-op response follows the declared action contract, not a global HTTP status policy; never fabricate mutation success or its event.
       11a. When a module action declares input fields such as `ticket_id` and `new_status`, handler.py receives those fields in `**params`; service.py and repo.py must read `params["ticket_id"]` / `params["new_status"]` or pass the params mapping through. For settings actions that declare fields like `default_queue` and `sla_hours`, read those exact fields directly; do not invent `params["settings"]`. Do not call `params.get("payload")` unless the action schema actually has a `payload` field.
       12. Do not emit TODO, mock, fake, sample, demo, dummy, placeholder, `pass`, or "in production" runtime branches in generated module Python. Generated code must either execute real repo-backed logic or return an honest empty state.
       13. For `*_summary`, `*_stats`, `*_metrics`, `get_*_count`, dashboard, or overview actions:
@@ -2538,14 +2552,11 @@ agents:
           wraps a managed_capability, import the adapter client generated by the api_surface task:
               from services.integrations.{pack_id}_client import {PackIdClient}
           Do NOT call the managed capability module API directly from service logic.
-      20a. For list_* actions, serialize each repo record through an explicit allowlist helper before returning.
-           Import that helper from the module's `.schemas` module, whose accepted definitions arrive
-           in `dependency_task_outputs` — for example,
-           `_serialize_{entity}_row(record: Mapping[str, Any]) -> dict[str, Any]` — returning
-           only the declared response fields; constructed reads use an explicit allowlist of data_contract collection fields and the accepted DTO shape.
-           If the accepted schemas module does not supply one, define it in a file this task owns
-           (`backend/service.py`). Never create or edit `backend/schemas.py` to add it: that file
-           belongs to another task in this batch, and emitting it fails the whole batch.
+      20a. For custom list_* and detail actions, serialize each repo record through the code-rendered
+           allowlist helper `serialize_{entity}(record)` from the module's `.schemas` module before
+           returning; it returns only the declared collection fields. Narrower response shapes are
+           defined in a file this task owns (`backend/service.py`).
+           Never create or edit `backend/schemas.py`: code renders it, and emitting it fails the whole batch.
            Never return raw repo documents from a list_* service method. The allowlist pattern
            ensures unknown fields added in future DB migrations cannot leak into caller responses.
            Example:
@@ -2573,7 +2584,7 @@ agents:
       Emit ServiceOutput only after all files pass both checks. Do not include validation shell output in ServiceOutput.
 
       Cross-reference check (run after syntax and lint pass):
-      4. Events.yaml coverage: for every declared domain event, verify its exact type appears in service.py as a ctx.emit(...) argument. Exercise required-only create/update inputs and verify every emitted payload against its declared schema, including omitted optional fields. Handler files contain dispatch only, not event publication.
+      4. Events.yaml coverage: for every declared domain event, verify its exact type appears in service.py as a ctx.emit(...) argument, inside the matching `after_*` hook for canonical writes. Exercise required-only create/update inputs and verify every emitted payload against its declared schema, including omitted optional fields. Handler files contain dispatch only, not event publication.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -2585,49 +2596,49 @@ agents:
           {
             "path": "modules/task_manager/backend/handler.py",
             "kind": "handler",
-            "purpose": "Thin action adapter that delegates to TaskManagerService.",
+            "purpose": "Thin action adapter for the declared custom mutation; code adds canonical methods.",
             "contract_refs": [
               "module_yaml.module.handler",
               "module_yaml.actions[*].handler_method"
             ],
-            "content": "from .service import TaskManagerService\n\n\nclass TaskManagerModule:\n    def __init__(self):\n        self.service = TaskManagerService()\n\n    async def create_task(self, ctx, **params):\n        return await self.service.create_task(ctx=ctx, **params)\n"
+            "content": "class TaskManagerModule:\n    async def complete_task(self, ctx, **params):\n        from . import service\n        return await service.complete_task(ctx, params[\"task_id\"])\n"
           },
           {
             "path": "modules/task_manager/backend/service.py",
             "kind": "service",
-            "purpose": "Owns task manager business logic and event publication.",
+            "purpose": "Write hooks for the canonical task writes plus the declared complete_task mutation.",
             "contract_refs": [
               "module_yaml.actions[*]",
               "events_yaml.events[*]"
             ],
-            "content": "from .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None):\n        self.repo = repo or TaskManagerRepo()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await ctx.emit(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n"
+            "content": "from mozaiksai.core.runtime import ModuleInputValidationError\n\n\nasync def before_create_task(ctx, values):\n    if not values[\"title\"].strip():\n        raise ModuleInputValidationError(\"title is required\")\n    return {**values, \"title\": values[\"title\"].strip()}\n\n\nasync def after_create_task(ctx, record):\n    await ctx.emit(\"domain.task_manager.task_created\", {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]})\n\n\nasync def complete_task(ctx, task_id):\n    from . import repo, schemas\n    record = await repo.update_task(ctx, task_id, {\"is_completed\": True})\n    await ctx.emit(\"domain.task_manager.task_completed\", {\"task_id\": record[\"task_id\"]})\n    return {\"item\": schemas.serialize_task(record)}\n"
           },
           {
             "path": "modules/task_manager/backend/repo.py",
             "kind": "repo",
-            "purpose": "Owns persistence queries and writes for task records.",
+            "purpose": "Custom persistence queries beside the code-rendered canonical repo functions.",
             "contract_refs": [
               "module_yaml.actions[*]",
               "data_contract.surfaces[*].collections[*]"
             ],
-            "content": "from .policy import scope_record\n\n\nclass TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": context.user_id}\n        document = scope_record(context, document, entity_name=\"tasks\")\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id or document.get(\"task_id\", \"\"))\n        return document\n"
+            "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def count_open_tasks(self, *, context):\n        collection = await self._collection(context)\n        return await collection.count({\"is_completed\": False})\n"
           }
         ],
         "code_files": [
           {
             "filename": "modules/task_manager/backend/handler.py",
-            "content": "from .service import TaskManagerService\n\n\nclass TaskManagerModule:\n    def __init__(self):\n        self.service = TaskManagerService()\n\n    async def create_task(self, ctx, **params):\n        return await self.service.create_task(ctx=ctx, **params)\n"
+            "content": "class TaskManagerModule:\n    async def complete_task(self, ctx, **params):\n        from . import service\n        return await service.complete_task(ctx, params[\"task_id\"])\n"
           },
           {
             "filename": "modules/task_manager/backend/service.py",
-            "content": "from .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None):\n        self.repo = repo or TaskManagerRepo()\n\n    async def create_task(self, *, ctx, **params):\n        payload = CreateTaskInput.from_payload(params)\n        record = await self.repo.create_task(context=ctx, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await ctx.emit(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n"
+            "content": "from mozaiksai.core.runtime import ModuleInputValidationError\n\n\nasync def before_create_task(ctx, values):\n    if not values[\"title\"].strip():\n        raise ModuleInputValidationError(\"title is required\")\n    return {**values, \"title\": values[\"title\"].strip()}\n\n\nasync def after_create_task(ctx, record):\n    await ctx.emit(\"domain.task_manager.task_created\", {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]})\n\n\nasync def complete_task(ctx, task_id):\n    from . import repo, schemas\n    record = await repo.update_task(ctx, task_id, {\"is_completed\": True})\n    await ctx.emit(\"domain.task_manager.task_completed\", {\"task_id\": record[\"task_id\"]})\n    return {\"item\": schemas.serialize_task(record)}\n"
           },
           {
             "filename": "modules/task_manager/backend/repo.py",
-            "content": "from .policy import scope_record\n\n\nclass TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": context.user_id}\n        document = scope_record(context, document, entity_name=\"tasks\")\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id or document.get(\"task_id\", \"\"))\n        return document\n"
+            "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def count_open_tasks(self, *, context):\n        collection = await self._collection(context)\n        return await collection.count({\"is_completed\": False})\n"
           }
         ],
-        "agent_message": "Implemented task_manager backend stubs."
+        "agent_message": "Implemented task_manager write hooks and the complete_task mutation; canonical CRUD, reads, policy and schemas are code-rendered."
       }
       ```
 

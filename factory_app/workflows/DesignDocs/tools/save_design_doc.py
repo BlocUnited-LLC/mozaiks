@@ -19,6 +19,10 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     validate_collection_ownership,
 )
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.data_contract_fields import (
+    normalize_structured_defaults,
+    validate_collection_fields,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_actions_for_surface,
 )
@@ -333,6 +337,10 @@ def _validate_design_collections(data_contract: dict[str, Any], surface_map: dic
         if collection.get("tenancy") == "app_wide":
             collection.setdefault("owner_field", None)
         validate_collection_ownership(collection, path)
+        # Field types, defaults and lookups are decided here, where the design agent can revise them.
+        for message in normalize_structured_defaults(collection, path):
+            logger.warning(f"DATA_CONTRACT_FIELD_NORMALIZED: {message}")
+        validate_collection_fields(collection, path)
     # One owner/entity and owner/name must identify one collection across both locations.
     list(iter_data_contract_collections(data_contract))
     for surface in surfaces.values():
@@ -688,6 +696,7 @@ async def save_design_docs_bundle(
             surface_map,
             context_variables=context_variables,
             data_contract=data_contract,
+            experience_spec=experience_spec,
             include_default_subscription=True,
         )
         _validate_design_collections(data_contract, surface_map)
@@ -696,6 +705,25 @@ async def save_design_docs_bundle(
         normalization_messages = [
             f"DESIGN_OWNERSHIP_NORMALIZED surface={entry['surface_id']} owner={entry['owner']} "
             f"removed=[{','.join(entry['removed_collections'])}]"
+            + (
+                f" removed_events=[{','.join(entry['removed_events'])}]"
+                if entry.get("removed_events") else ""
+            )
+            + (
+                " removed_pages=["
+                + ",".join(f"{page['name']}@{page['route']}" for page in entry["removed_pages"])
+                + "]"
+                if entry.get("removed_pages") else ""
+            )
+            + (
+                " redirected=["
+                + ",".join(
+                    f"{item['page']}/{item['section']}:{item['from']}->{item['to']}"
+                    for item in entry["redirected_navigation"]
+                )
+                + "]"
+                if entry.get("redirected_navigation") else ""
+            )
             + "".join(
                 f" split={split['name']}->{split['target_surface_id']}/{split['target_collection']}"
                 f" retained=[{','.join(split['retained_fields'])}]"
@@ -708,7 +736,9 @@ async def save_design_docs_bundle(
             notice = (
                 "\n\n## Ownership normalizations\n\n"
                 "These corrections supersede conflicting ownership or storage claims in the design prose. "
-                "The saved surface_map and data_contract are authoritative; approved pages are preserved.\n\n"
+                "The saved surface_map, data_contract, and experience_spec are authoritative: app-owned "
+                "pages are preserved, and pages duplicating the platform's sign-in are removed because the "
+                "auth contract already serves them.\n\n"
                 + "\n".join(f"- `{message}`" for message in normalization_messages)
             )
             frontend_markdown += notice
