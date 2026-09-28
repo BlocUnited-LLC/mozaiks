@@ -166,7 +166,7 @@ def _wallet_replay_plan() -> dict[str, Any]:
                 "sections_hint": [
                     {
                         "section_id_hint": "wallet-summary",
-                        "primitive": "ResourceTable",
+                        "primitive": "SummaryStrip",
                         "data_source": {"module_id": "wallet", "action_id": "get_wallet_summary"},
                         "config_hint": {
                         },
@@ -251,13 +251,16 @@ def _wallet_task_outputs() -> dict[str, Any]:
                           - id: get_wallet_summary
                             handler_method: get_wallet_summary
                             input_schema: {type: object, properties: {}}
-                            output_schema: {type: object}
+                            output_schema:
+                              type: object
+                              properties:
+                                balance: {type: integer}
                         """
                     ).lstrip(),
                 },
                 {
                     "filename": "modules/wallet_dashboard/backend/handler.py",
-                    "content": "class WalletDashboardHandler:\n    async def get_wallet_summary(self, ctx, **params):\n        return {}\n",
+                    "content": "class WalletDashboardHandler:\n    async def get_wallet_summary(self, ctx, **params):\n        return {'balance': 0}\n",
                 },
                 {
                     "filename": "ui/pages/wallet.yaml",
@@ -266,11 +269,11 @@ def _wallet_task_outputs() -> dict[str, Any]:
                         "name: wallet\nroute: /wallet\ntitle: Wallet\npage_type: record_list\nlayout: full-width\n"
                         "sections:\n"
                         "  - id: wallet-summary\n"
-                        "    primitive: ResourceTable\n"
+                        "    primitive: SummaryStrip\n"
                         "    config:\n"
-                        "      columns:\n"
-                        "        - key: id\n"
-                        "          label: ID\n"
+                        "      items:\n"
+                        "        - label: Balance\n"
+                        "          value_key: balance\n"
                         "      api_endpoint: /api/modules/wallet_dashboard/get_wallet_summary\n"
                     ),
                 },
@@ -450,15 +453,16 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
         ],
     )
     plan["pages"].append({"name": "Pricing", "route": "/pricing", "purpose": "Choose a subscription plan."})
+    plan["pages"].append({"name": "Reports", "route": "/reports", "purpose": "Generate a report with the paid action."})
     tasks = {task["task_id"]: task for task in plan["build_tasks"]}
     tasks["mozaikspay.adapter"]["owned_paths"].extend([
         "services/integrations/__init__.py",
     ])
     tasks["mozaikspay.pages"]["owned_paths"].extend([
-        "app.json", "config/ai.json", "config/shell.json", "ui/pages/pricing.yaml",
+        "app.json", "config/ai.json", "config/shell.json", "ui/pages/pricing.yaml", "ui/pages/reports.yaml",
     ])
     tasks["mozaikspay.pages"]["depends_on"].extend([
-        "mozaikspay.billing_services", "reports.services", "subscriptions.config",
+        "mozaikspay.billing_services", "reports.services", "reports.contract", "subscriptions.config",
     ])
     module_task = tasks["mozaikspay.billing_facade_contract"]
     plan["build_tasks"].extend([
@@ -553,6 +557,19 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
         },
         "reports": {
             "code_files": [
+                {
+                    "filename": "ui/pages/reports.yaml",
+                    "content": yaml.safe_dump({
+                        "schema_version": "mozaiks.app_page.v1", "name": "reports", "title": "Reports",
+                        "route": "/reports", "page_type": "settings", "layout": "full-width",
+                        "sections": [{"id": "generate-report", "primitive": "Form", "config": {
+                            "fields": [{"name": "topic", "label": "Topic", "type": "text", "required": True}],
+                            "submit_action": {"action_type": "submit", "label": "Generate report", "data_source": {
+                                "module_id": "reports", "action_id": "generate_report",
+                            }},
+                        }}],
+                    }),
+                },
                 {
                     "filename": "modules/reports/module.yaml",
                     "content": textwrap.dedent(
@@ -848,7 +865,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     assert Path(sys.modules["services.integrations.mozaikspay_client"].__file__).resolve() == (
         app_root / "services/integrations/mozaikspay_client.py"
     ).resolve()
-    assert [page.name for page in loaded.definition.pages] == ["billing", "pricing", "usage"]
+    assert [page.name for page in loaded.definition.pages] == ["billing", "pricing", "reports", "usage"]
     assert loaded.subscriptions_config is not None
     assert loaded.subscriptions_config.default_plan_id == "free"
     wallet = loaded.subscriptions_config.token_wallet_by_id("ai_tokens")

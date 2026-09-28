@@ -26,11 +26,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _module_files():
+    actions = [{"id": action} for action in ("create_task", "update_task", "delete_task")]
+    actions.extend([
+        {"id": "list_tasks", "output_schema": {"type": "object", "properties": {
+            "items": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}}}},
+            "total": {"type": "integer"},
+        }}},
+        {"id": "get_dashboard_insights", "output_schema": {
+            "type": "object", "properties": {"total_tasks": {"type": "integer"}},
+        }},
+    ])
     return {"modules/task_management/module.yaml": yaml.safe_dump({
         "schema_version": "mozaiks.module.v1", "module": {"id": "task_management"},
-        "actions": [{"id": action} for action in (
-            "create_task", "update_task", "delete_task", "list_tasks", "get_dashboard_insights",
-        )],
+        "actions": actions,
     })}
 
 
@@ -155,7 +163,7 @@ def test_task_worker_compiles_against_dependency_module_contract():
         _module_files()["modules/task_management/module.yaml"],
     )}}
     context = _bridge({"dependency_task_outputs": {"module-task": dependency}})
-    assert module_action_index_from_context(context)["task_management"] == {
+    assert set(module_action_index_from_context(context)["task_management"]) == {
         "create_task", "update_task", "delete_task", "list_tasks", "get_dashboard_insights",
     }
     # The runner snapshots/detaches the bridge for a worker; it supplies only

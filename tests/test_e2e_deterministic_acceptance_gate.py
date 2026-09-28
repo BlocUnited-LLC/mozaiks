@@ -289,6 +289,7 @@ def _canonical_fixture() -> dict[str, str]:
                   search: true
                   selection: single
                   api_endpoint: /api/modules/tasks/list_tasks
+                  data_key: tasks
               - id: create-task
                 primitive: Form
                 title: Create Task
@@ -345,6 +346,16 @@ def _canonical_fixture() -> dict[str, str]:
                   properties: {}
                 output_schema:
                   type: object
+                  properties:
+                    tasks:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id: {type: string}
+                          title: {type: string}
+                          status: {type: string}
+                          created_at: {type: string}
               - id: create_task
                 description: Create a new task.
                 handler_method: create_task

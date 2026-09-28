@@ -12,6 +12,7 @@ from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
+from mozaiksai.core.workflow.generator_support.page_action_bindings import generated_workflow_names
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
@@ -67,6 +68,7 @@ def _apply_planned_page_contracts(
     code_files: list[dict[str, Any]],
     app_build_plan: Any,
     failed_task_ids: set[str] | None = None,
+    context_variables: Any = None,
 ) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
@@ -82,6 +84,12 @@ def _apply_planned_page_contracts(
 
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename") and f.get("content") is not None}
     modules = module_action_index(file_map)
+    workflows = generated_workflow_names(file_map, context_variables)
+    # Typed page output is re-materialized here from the worker's structured
+    # answer, so the same contract-determined constructions the worker's compile
+    # wrote must be written again from the same approved inputs.
+    data_contract = detach(context_variables.get("data_contract")) if context_variables is not None else None
+    surface_map = detach(context_variables.get("design_surface_map")) if context_variables is not None else None
     failed_tasks = failed_task_ids or set()
     for task in tasks:
         if str(task.get("task_type") or "").strip() != "page_bundle":
@@ -117,7 +125,10 @@ def _apply_planned_page_contracts(
                     "the task reported no failure, so the page was expected to exist"
                 )
             try:
-                file_map[path] = normalize_planned_page_content(file_map[path], path=path, modules=modules)
+                file_map[path] = normalize_planned_page_content(
+                    file_map[path], path=path, modules=modules, workflow_names=workflows,
+                    data_contract=data_contract, design_surface_map=surface_map,
+                )
                 validate_planned_page(file_map[path], planned_by_stem[stem], path)
             except ValueError as exc:
                 raise ValueError(f"{path}: {exc}") from exc
@@ -395,9 +406,15 @@ async def _assemble_app_tasks(
     )
     code_files = result.get("code_files", [])
 
+    code_files = _apply_managed_capability_templates(
+        code_files,
+        app_build_plan=app_build_plan,
+        context_variables=context_variables,
+    )
     code_files = _apply_planned_page_contracts(
         code_files,
         app_build_plan,
+        context_variables=context_variables,
         failed_task_ids=_failed_batch_task_ids(
             detach(context_variables.get("app_task_batch_results"))
             if context_variables and hasattr(context_variables, "get")
@@ -405,11 +422,6 @@ async def _assemble_app_tasks(
         ),
     )
     code_files = _apply_module_handler_method_alignment(code_files)
-    code_files = _apply_managed_capability_templates(
-        code_files,
-        app_build_plan=app_build_plan,
-        context_variables=context_variables,
-    )
     code_files = _apply_deleted_files(code_files, _context_deleted_files(context_variables))
     code_files = apply_entitlement_gates(
         code_files, context_variables=context_variables,

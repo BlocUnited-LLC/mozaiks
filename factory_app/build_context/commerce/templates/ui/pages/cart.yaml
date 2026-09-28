@@ -31,6 +31,7 @@ sections:
     primitive: SummaryStrip
     title: null
     config:
+      api_endpoint: /api/modules/commerce/get_cart
       items:
         - id: subtotal
           label: Subtotal

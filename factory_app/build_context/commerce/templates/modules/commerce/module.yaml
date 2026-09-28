@@ -181,6 +181,33 @@ actions:
     output_schema:
       type: object
       required: [cart]
+      properties:
+        cart:
+          type: object
+          nullable: true
+          properties:
+            cart_id: { type: string }
+            actor_id: { type: string }
+            status: { type: string }
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  product_id: { type: string }
+                  title: { type: string }
+                  sku: { type: string, nullable: true }
+                  quantity: { type: integer }
+                  unit_amount: { type: integer }
+                  line_total: { type: integer }
+                  currency: { type: string }
+                  track_inventory: { type: boolean }
+            subtotal_amount: { type: integer }
+            subtotal_display: { type: string }
+            currency: { type: string }
+            created_at: { type: string }
+            updated_at: { type: string }
+        error: { type: string, nullable: true }
     permissions: [commerce.cart.manage]
 
   - id: add_cart_item

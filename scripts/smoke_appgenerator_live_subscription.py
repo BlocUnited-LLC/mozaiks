@@ -637,6 +637,15 @@ def deterministic_module_contract_output() -> dict[str, Any]:
               properties:
                 reports:
                   type: array
+                  items:
+                    type: object
+                    properties:
+                      report_id:
+                        type: string
+                      topic:
+                        type: string
+                      status:
+                        type: string
           - id: generate_report
             description: Generate an AI report.
             handler_method: generate_report
@@ -917,6 +926,7 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
                     - key: report_id
                       label: Report
                   api_endpoint: /api/modules/reports/list_reports
+                  data_key: reports
               - id: report-generate
                 primitive: Form
                 config:

@@ -31,6 +31,14 @@ sections:
           variant: ghost
           action_type: navigate
           href: /orders
+        - id: new-product
+          label: New Product
+          variant: primary
+          action_type: event
+          event_type: ui.modal.open
+          closes_modal: false
+          payload:
+            modal_id: create-product-modal
 
   - id: product-list
     primitive: ResourceTable
@@ -74,4 +82,74 @@ sections:
       empty:
         title: No products yet
         message: Publish products from the commerce admin panel.
+
+  - id: create-product-modal
+    primitive: Modal
+    title: New Product
+    config:
+      title: New Product
+      description: Create a draft or active product with price, category, SKU, and inventory metadata.
+      size: medium
+      children:
+        - id: create-product-form
+          primitive: Form
+          title: New Product
+          config:
+            layout: vertical
+            columns: 1
+            fields:
+              - name: title
+                label: Title
+                type: text
+                required: true
+              - name: description
+                label: Description
+                type: textarea
+              - name: category
+                label: Category
+                type: text
+              - name: sku
+                label: SKU
+                type: text
+              - name: status
+                label: Status
+                type: select
+                options:
+                  - value: draft
+                    label: Draft
+                  - value: active
+                    label: Active
+              - name: price_amount
+                label: Price Amount
+                type: number
+                required: true
+              - name: currency
+                label: Currency
+                type: text
+              - name: inventory_quantity
+                label: Inventory Quantity
+                type: number
+              - name: track_inventory
+                label: Track Inventory
+                type: checkbox
+              - name: image_url
+                label: Image URL
+                type: text
+            submit_label: Create Product
+            submit_action:
+              id: submit-create-product
+              label: Create Product
+              variant: primary
+              action_type: submit
+              href: /api/modules/commerce/create_product
+              closes_modal: true
+            cancel_label: Cancel
+            cancel_action:
+              id: cancel-create-product
+              label: Cancel
+              action_type: event
+              event_type: ui.modal.close
+              closes_modal: true
+              payload:
+                modal_id: create-product-modal
 roles: null

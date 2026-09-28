@@ -52,7 +52,12 @@ def test_generated_server_mode_survives_json_and_runtime_roundtrip():
         }}],
     })
     document = page.model_dump(mode="json")
-    compile_page_data_sources(document, {"reports": {"list_reports"}}, reject_api_endpoints=True)
+    compile_page_data_sources(document, {"reports": {"list_reports": {"output_schema": {
+        "type": "object", "properties": {
+            "reports": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}}}},
+            "total": {"type": "integer"},
+        },
+    }}}}, reject_api_endpoints=True)
     runtime = validate_page_schema(document)
     assert runtime.sections[0].config["api_endpoint"] == "/api/modules/reports/list_reports"
     assert runtime.sections[0].config["pagination_mode"] == "server"

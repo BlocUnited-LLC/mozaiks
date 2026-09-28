@@ -205,7 +205,9 @@ def test_commerce_contracts_declare_events_admin_settings_and_reactions() -> Non
 
 
 def test_commerce_page_templates_use_canonical_primitives_and_app_owned_endpoints() -> None:
-    allowed_primitives = {"PageHeader", "ResourceTable", "SummaryStrip", "Form", "ActionButton"}
+    # The products page opens a create-product Modal so the gated create_product
+    # action has a page entry point; Modal is a shipped platform primitive.
+    allowed_primitives = {"PageHeader", "ResourceTable", "SummaryStrip", "Form", "ActionButton", "Modal"}
     valid_page_types = set(
         _read_yaml(WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "structured_outputs.yaml")
         ["models"]["AppPageSchema"]["fields"]["page_type"]["values"]

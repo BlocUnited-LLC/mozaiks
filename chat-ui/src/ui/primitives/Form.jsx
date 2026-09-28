@@ -47,6 +47,30 @@ function buildInitialValues(fields, initialValues) {
   );
 }
 
+// Inputs hand back strings, but a module action validates the submitted body
+// against its declared input_schema, where a `number` field is a JSON number
+// and a `select` option keeps the type it was declared with. Submit the values
+// the declared field types describe; an empty optional number/select has no
+// representable value and is left out of the body.
+function coerceSubmittedValues(fields, values) {
+  const out = { ...values };
+  for (const f of fields) {
+    const value = out[f.name];
+    if (f.type === 'number') {
+      if (value === '' || value === null || value === undefined) { delete out[f.name]; continue; }
+      const parsed = typeof value === 'number' ? value : Number(value);
+      if (Number.isFinite(parsed)) out[f.name] = parsed;
+    } else if (f.type === 'select') {
+      if (value === '' || value === null || value === undefined) { delete out[f.name]; continue; }
+      const option = (f.options ?? []).find((opt) => String(opt.value) === String(value));
+      if (option) out[f.name] = option.value;
+    } else if (f.type === 'checkbox') {
+      out[f.name] = !!value;
+    }
+  }
+  return out;
+}
+
 function FieldRenderer({ field, value, onChange, disabled, fieldId }) {
   const baseClass = 'w-full';
   switch (field.type) {
@@ -155,7 +179,7 @@ export function Form({
     const newErrors = validate();
     if (Object.keys(newErrors).length > 0) { setErrors(newErrors); return; }
     setLoading(true);
-    try { await onSubmit?.(values); }
+    try { await onSubmit?.(coerceSubmittedValues(fields, values)); }
     finally { setLoading(false); }
   };
 

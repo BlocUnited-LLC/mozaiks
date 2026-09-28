@@ -93,9 +93,10 @@ sections:
     primitive: DataTable
     config:
       columns:
-        - key: order_id
-          label: Order
+        - key: customer_name
+          label: Customer
       api_endpoint: /api/modules/orders/list_orders
+      data_key: orders
   - id: create-order
     primitive: Form
     config:
@@ -131,6 +132,14 @@ actions:
       properties: {}
     output_schema:
       type: object
+      properties:
+        orders:
+          type: array
+          items:
+            type: object
+            properties:
+              customer_name: {type: string}
+              status: {type: string}
   - id: create_order
     description: Create an order record.
     handler_method: create_order
@@ -275,6 +284,19 @@ sections:
         - key: report_id
           label: Report
       api_endpoint: /api/modules/reports/list_reports
+      data_key: reports
+  - id: export-report
+    primitive: Form
+    config:
+      fields:
+        - name: report_id
+          label: Report
+          type: text
+          required: true
+      submit_action:
+        label: Export Report
+        action_type: submit
+        href: /api/modules/reports/export_report
 """,
         "modules/reports/module.yaml": """\
 schema_version: mozaiks.module.v1
@@ -297,6 +319,13 @@ actions:
       properties: {}
     output_schema:
       type: object
+      properties:
+        reports:
+          type: array
+          items:
+            type: object
+            properties:
+              report_id: {type: string}
   - id: export_report
     description: Export a report as CSV. Requires Pro plan.
     handler_method: export_report
@@ -494,6 +523,9 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
             ).replace(
                 "href: /api/modules/orders/create_order",
                 "data_source: {module_id: orders, action_id: create_order}",
+            ).replace(
+                "href: /api/modules/reports/export_report",
+                "data_source: {module_id: reports, action_id: export_report}",
             )
     replay_context = context.snapshot()
     accepted = await execute_file_replay(replay_context, files, task_outputs={"pages": {"code_files": page_files}})

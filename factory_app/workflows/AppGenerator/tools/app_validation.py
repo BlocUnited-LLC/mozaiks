@@ -43,6 +43,10 @@ from factory_app.workflows.AppGenerator.tools.repair_policy import (
 from factory_app.workflows.AppGenerator.tools.repair_policy import (
     prepare_task_recovery,
 )
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    ManagedCapabilityTemplateError,
+    resolve_declared_pack_output_paths,
+)
 from factory_app.workflows.AppGenerator.tools.task_integrity import (
     artifact_snapshot_digest,
     planned_artifact_diagnostics,
@@ -53,6 +57,9 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     local_app_validation_available,
     resolve_app_validation_strategy,
+)
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    managed_pack_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -1757,10 +1764,72 @@ def validate_workflow_integration_contract(
     }
 
 
+def _template_owned_paths(context_variables: Any) -> frozenset[str]:
+    """Paths the selected packs' templates own, resolved the way assembly resolves packs."""
+    if context_variables is None:
+        return frozenset()
+    paths = set(managed_pack_output_paths(context_variables))
+    packs = detach(context_variables.get("capability_packs")) or []
+    if not packs:
+        plan = detach(context_variables.get("app_build_plan")) or {}
+        packs = plan.get("capability_packs") or [] if isinstance(plan, dict) else []
+    try:
+        paths |= resolve_declared_pack_output_paths(
+            [pack for pack in packs if isinstance(pack, dict)], context_variables=context_variables,
+            owner="templates",
+        )
+    except ManagedCapabilityTemplateError:
+        pass  # The bundle scanner reports an unusable pack contract.
+    return frozenset(paths)
+
+
+def _planned_page_owner_path(module_id: str, context_variables: Any, template_paths: frozenset[str]) -> str | None:
+    """Fall back to the plan: the page task owning the module's listing page, else any page task's page."""
+    from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+    from mozaiksai.core.workflow.generator_support.page_plan_utils import _page_stem_from_path
+
+    plan = detach(context_variables.get("app_build_plan")) if context_variables is not None else None
+    if not isinstance(plan, dict):
+        return None
+    tasks = [task for task in plan.get("build_tasks") or [] if isinstance(task, dict) and task.get("task_type") == "page_bundle"]
+    owned = [
+        safe for task in tasks for raw in task.get("owned_paths") or []
+        if (safe := _safe_relpath(str(raw))) and safe.startswith("ui/pages/") and safe not in template_paths
+    ]
+    if not owned:
+        return None
+    listing_stems = {
+        _page_stem_from_path(f"ui/pages/{_page_file_stem(page)}.yaml")
+        for page in plan.get("pages") or [] if isinstance(page, dict)
+        for hint in page.get("sections_hint") or [] if isinstance(hint, dict)
+        if isinstance(hint.get("data_source"), dict) and hint["data_source"].get("module_id") == module_id
+    }
+    listing = [path for path in owned if _page_stem_from_path(path) in listing_stems]
+    return (listing or owned)[0]
+
+
+def _gated_action_owner_page(
+    action_key: str, page_paths: dict[str, str], generated_files: dict[str, str], template_paths: frozenset[str],
+    context_variables: Any = None,
+) -> str | None:
+    """Name the authored page that should expose the action.
+
+    The route manifest is scaffold output no task owns, and a pack template
+    page is replaced at assembly, so neither can carry a repairable diagnostic.
+    Prefer an authored page that already reads the action's module; with no
+    authored page in the bundle, the approved plan's page task still owns the
+    diagnostic, through the page that lists the module or any page it owns.
+    """
+    module_id = action_key.split("/", 1)[0]
+    authored = sorted(path for path in page_paths.values() if path not in template_paths)
+    referencing = [path for path in authored if f"/api/modules/{module_id}/" in generated_files.get(path, "")]
+    return (referencing or authored or [None])[0] or _planned_page_owner_path(module_id, context_variables, template_paths)
+
+
 def _wiring_repair_errors(
-    wiring_result: dict[str, Any], generated_files: dict[str, str]
+    wiring_result: dict[str, Any], generated_files: dict[str, str], context_variables: Any = None,
 ) -> list[str]:
-    """Phrase orphaned endpoints as repairable per-page errors.
+    """Route unresolved endpoints and page contracts to their existing page owner.
 
     A wiring failure already blocks acceptance, but it was never handed to
     _prepare_bundle_repair, so the build failed without attempting a fix. The
@@ -1779,8 +1848,16 @@ def _wiring_repair_errors(
     if wiring_result.get("passed"):
         return []
     orphaned = wiring_result.get("orphaned_pages") or []
-    if not orphaned:
-        return []
+
+    page_paths: dict[str, str] = {}
+    for path, content in sorted(generated_files.items()):
+        if path.startswith("ui/pages/") and path.endswith((".yaml", ".yml")):
+            try:
+                page = yaml.safe_load(content)
+            except yaml.YAMLError:
+                continue  # The bundle scanner owns malformed page diagnostics.
+            if isinstance(page, dict):
+                page_paths[str(page.get("name") or Path(path).stem)] = path
 
     index = module_action_index(generated_files)
     declared = sorted(
@@ -1798,11 +1875,28 @@ def _wiring_repair_errors(
         section = str(item.get("section") or "").strip()
         where = f" section {section!r}" if section else ""
         errors.append(
-            f"ui/pages/{page}.yaml:{where} endpoint {item.get('endpoint')!r} "
+            f"{page_paths.get(page, f'ui/pages/{page}.yaml')}:{where} endpoint {item.get('endpoint')!r} "
             f"references no declared module action. Declared actions: {available}. "
             "Bind the section to one of them, or remove the section if the app "
             "does not need it. Do not invent an action id."
         )
+    template_paths = _template_owned_paths(context_variables)
+    for failure in wiring_result.get("failed_tests") or []:
+        kind = failure.get("test")
+        if kind not in {"wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action"}:
+            continue
+        if kind == "wiring_unreachable_gated_action":
+            # The page bundle owns placement across its pages; do not route this
+            # to the module owner or remove the gate to silence the diagnostic.
+            path = _gated_action_owner_page(
+                str(failure.get("action") or ""), page_paths, generated_files, template_paths, context_variables,
+            )
+        else:
+            path = page_paths.get(str(failure.get("page") or ""))
+        # With no authored page to carry it, the diagnostic is still recorded;
+        # repair policy marks it unowned rather than blocking with no reason.
+        prefix = f"{path}: " if path else ""
+        errors.append(f"{prefix}{failure['error']} {failure.get('fix_suggestion', '')}")
     return errors
 
 
@@ -1914,7 +2008,10 @@ async def run_app_bundle_acceptance_gate(
 
     agent_integration_result = await _agent_backend_integration_result(context_variables)
     # Wiring must inspect the accepted snapshot, not stale pages or a context write-back.
-    wiring_result = await validate_wiring(context_variables={"generated_files": generated_files})
+    wiring_result = await validate_wiring(context_variables={
+        "generated_files": generated_files,
+        "workflow_integration_metadata": _context_get(context_variables, "workflow_integration_metadata"),
+    })
     _context_set(context_variables, "wiring_validation_passed", wiring_result["passed"])
     _context_set(context_variables, "wiring_validation_result", wiring_result)
     module_implementation_result = validate_module_implementation_contract(generated_files)
@@ -2072,7 +2169,7 @@ async def run_app_bundle_acceptance_gate(
     repair_diagnostics = [
         *planned_diagnostics,
         *[{"error": error} for error in all_scan_errors],
-        *[{"error": error} for error in _wiring_repair_errors(wiring_result, generated_files)],
+        *[{"error": error} for error in _wiring_repair_errors(wiring_result, generated_files, context_variables)],
         *[{"error": error} for error in runtime_quality_result.get("warnings", [])],
         *[
             {**item, "error": f"{item.get('test', 'validation')}: {item['error']}"}

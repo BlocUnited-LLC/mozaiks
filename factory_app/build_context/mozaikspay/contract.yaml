@@ -121,6 +121,8 @@ required_outputs:
     owner: templates
   - path: ui/pages/usage.yaml
     owner: templates
+  - path: ui/pages/pricing.yaml
+    owner: templates
 
 forbidden_outputs:
   - path_prefix: modules/mozaikspay/

@@ -246,7 +246,17 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
                         "    handler_method: list_reports\n"
                         "    emits: [domain.reports.report_viewed]\n"
                         "    input_schema: {type: object, properties: {}}\n"
-                        "    output_schema: {type: object}\n"
+                        "    output_schema:\n"
+                        "      type: object\n"
+                        "      properties:\n"
+                        "        reports:\n"
+                        "          type: array\n"
+                        "          items:\n"
+                        "            type: object\n"
+                        "            properties:\n"
+                        "              id: {type: string}\n"
+                        "              title: {type: string}\n"
+                        "              status: {type: string}\n"
                         "capabilities:\n"
                         "  - capability_id: reports.view\n"
                         "    kind: action\n"
@@ -363,6 +373,7 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
                         "config": {
                             "columns": [{"key": key, "label": key.title(), "type": "text", "width": None} for key in ("id", "title", "status")],
                             "data_source": {"module_id": "reports", "action_id": "list_reports"}, "search": True,
+                            "data_key": "reports",
                         },
                     }],
                 }

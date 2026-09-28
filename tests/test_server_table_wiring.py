@@ -112,7 +112,6 @@ async def test_client_table_does_not_gain_server_query_requirements():
     page = deepcopy(page)
     page["sections"][0]["config"]["children"][0]["config"]["pagination_mode"] = "client"
     action["input_schema"] = {"type": "object", "properties": {}}
-    action["output_schema"] = {}
     assert (await check(action, page))["passed"]
 
 

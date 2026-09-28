@@ -23,7 +23,7 @@ def _page(endpoint: str = "/api/modules/orders/list_orders") -> dict:
         "sections": [{
             "id": "orders-list",
             "primitive": "DataTable",
-            "config": {"columns": ["order_id"], "api_endpoint": endpoint},
+            "config": {"columns": ["order_id"], "data_key": "orders", "api_endpoint": endpoint},
         }],
     }
 
@@ -186,3 +186,22 @@ async def test_valid_explicit_bundle_counts_real_wired_endpoints():
     assert result["module_wiring"]["checks"][0]["details"]["wired_count"] == 2
     assert result["passed"] is True
     assert files == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("artifact_backed", [True, False])
+async def test_acceptance_preserves_only_artifact_backed_workflow_inventory(artifact_backed):
+    page = _page()
+    page["sections"] = [{"id": "start", "primitive": "PageHeader", "config": {
+        "title": "Orders", "actions": [{"label": "Analyze", "action_type": "workflow", "workflow_id": "AnalyzeOrders"}],
+    }}]
+    files = {"ui/pages/orders.yaml": yaml.safe_dump(page)}
+    metadata = {"workflows": [{"workflow_name": "AnalyzeOrders"}]}
+    if artifact_backed:
+        metadata["source_artifact_version_id"] = "workflow-artifact-1"
+    context = ContextVariablesBridge({"workflow_integration_metadata": metadata})
+
+    result = await app_validation.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+
+    workflow_errors = [error for error in result["module_wiring"]["failed_tests"] if error["test"] == "wiring_page_workflow"]
+    assert bool(workflow_errors) is not artifact_backed

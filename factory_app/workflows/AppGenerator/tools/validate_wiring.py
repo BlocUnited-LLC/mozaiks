@@ -17,6 +17,8 @@ Algorithm
      platform_endpoints — platform-owned read endpoints that do not map to modules
      orphaned_pages   — endpoints with no matching module action or platform endpoint (BLOCKING)
      orphaned_actions — module actions with no page referencing them (advisory warning)
+5. Check page output fields and workflow targets, and require reachable page
+   bindings for entitlement-gated, user-facing module actions.
 
 Unresolved endpoints and missing input are blocking. A static/custom UI bundle
 may legitimately have no declarative page API references.
@@ -38,6 +40,16 @@ from mozaiksai.core.runtime.app.page_schema import (
     validate_ask_context_references,
 )
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.page_action_bindings import (
+    PAGE_ACTION_FIELDS,
+    generated_workflow_names,
+    page_workflow_binding_errors,
+    reachable_page_action_keys,
+)
+from mozaiksai.core.workflow.generator_support.page_data_bindings import (
+    page_data_binding_errors,
+    schema_field_paths,
+)
 
 _logger = logging.getLogger("tools.validate_wiring")
 
@@ -138,7 +150,7 @@ def _collect_endpoints_from_config(
     href = config.get("href")
     if isinstance(href, str) and href.strip().startswith("/api/"):
         out.append((page_name, section_id, href.strip()))
-    for field in ("submit_action", "cancel_action", "action", "empty"):
+    for field in (*PAGE_ACTION_FIELDS, "empty"):
         action = config.get(field)
         if isinstance(action, dict):
             _collect_endpoints_from_config(page_name, f"{section_id}/{field}", action, out)
@@ -371,7 +383,8 @@ def _server_table_contract_error(config: dict[str, Any], action: dict[str, Any])
         for field, expected in (("data_key", "array"), ("total_key", "integer")):
             if not _required_output_type(outputs, config.get(field), expected):
                 suffix = " with explicitly typed object items" if expected == "array" else ""
-                return f"Server paging {field} must resolve to a required {expected} response field{suffix}."
+                valid = ", ".join(schema_field_paths(outputs)) or "(none declared)"
+                return f"Server paging {field} must resolve to a required {expected} response field{suffix}. Valid fields: {valid}."
     except (SchemaError, TypeError, ValueError, RecursionError, AttributeError):
         return "Server paging requires valid, inline action schemas."
     return None
@@ -516,6 +529,9 @@ async def validate_wiring(
                 yaml.safe_load(path.read_text(encoding="utf-8"))
                 for path in discover_page_schema_paths(app_dir).values()
             ]
+        # Standalone workspaces keep workflows beside app/, outside the app bundle.
+        for path in sorted((app_dir.parent / "workflows").glob("*/orchestrator.yaml")):
+            contract_files[f"workflows/{path.parent.name}/orchestrator.yaml"] = path.read_text(encoding="utf-8")
     ask_pages = list(app_pages)
     if "ui/route_manifest.json" in contract_files:
         manifest = json.loads(contract_files["ui/route_manifest.json"])
@@ -526,6 +542,33 @@ async def validate_wiring(
     ask_context_failures = _ask_context_binding_errors(
         ask_pages, action_contracts,
     )
+    workflow_names = generated_workflow_names(contract_files, context_variables)
+    page_binding_failures: list[dict[str, Any]] = []
+    for page in app_pages:
+        for test, errors, suggestion in (
+            ("wiring_page_output", page_data_binding_errors(page, action_contracts),
+             "Select KPI keys, table response keys and columns from the bound action's declared output_schema."),
+            ("wiring_page_workflow", page_workflow_binding_errors(page, workflow_names),
+             "Use a workflow present in the generated bundle or a typed submit/delete module action."),
+        ):
+            for binding_error in errors:
+                page_binding_failures.append({
+                    "test": test, "page": page.get("name") if isinstance(page, dict) else "<unnamed>",
+                    "error": binding_error, "fix_suggestion": suggestion,
+                })
+    reachable_actions = reachable_page_action_keys(app_pages)
+    unreachable_gated_actions = sorted(
+        key for key, action in action_contracts.items()
+        if action.get("entitlement_gate")
+        and action.get("api_surface") not in ("internal", "admin_internal")
+        and key not in reachable_actions
+    )
+    for key in unreachable_gated_actions:
+        page_binding_failures.append({
+            "test": "wiring_unreachable_gated_action", "action": key,
+            "error": f"Gated user-facing action '{key}' ({action_contracts[key]['entitlement_gate']}) has no reachable page binding.",
+            "fix_suggestion": "Bind the action to a page read or typed submit/delete action; modal forms need a reachable opener.",
+        })
 
     # Collect endpoint references after standalone disk pages have been resolved.
     endpoint_refs = _extract_endpoint_refs(app_pages)
@@ -586,12 +629,12 @@ async def validate_wiring(
 
     blocking_pass: bool = not (
         missing_input or has_invalid_endpoints or has_orphaned_pages
-        or server_table_failures or ask_context_failures
+        or server_table_failures or ask_context_failures or page_binding_failures
     )
 
     # ── 5. Build human-readable output ───────────────────────────────────
     warnings: list[str] = []
-    failed_tests: list[dict[str, Any]] = [*server_table_failures, *ask_context_failures]
+    failed_tests: list[dict[str, Any]] = [*server_table_failures, *ask_context_failures, *page_binding_failures]
 
     if missing_input:
         failed_tests.append({
@@ -662,6 +705,8 @@ async def validate_wiring(
         message = f"{len(invalid_endpoints)} page endpoint(s) have invalid api_endpoint syntax."
     elif server_table_failures:
         message = f"{len(server_table_failures)} server table binding(s) do not match their module action contracts."
+    elif page_binding_failures:
+        message = f"{len(page_binding_failures)} page data/action binding(s) do not resolve to reachable declared contracts."
     elif not blocking_pass:
         message = (
             f"{len(orphaned_pages)} page endpoint(s) reference unknown module actions."
@@ -687,6 +732,8 @@ async def validate_wiring(
         "details": {
             "blocking": True,
             "ask_context_failures": ask_context_failures,
+            "page_binding_failures": page_binding_failures,
+            "unreachable_gated_actions": unreachable_gated_actions,
             "total_endpoints_referenced": len(endpoint_refs),
             "wired_count": len(wired),
             "platform_endpoint_count": len(platform_endpoints),

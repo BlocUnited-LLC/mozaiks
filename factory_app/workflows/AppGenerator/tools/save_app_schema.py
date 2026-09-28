@@ -44,7 +44,13 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     validate_complete_data_contract_ownership,
 )
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import data_contract_requires_auth
+from mozaiksai.core.workflow.generator_support.code_files import (
+    _page_file_stem,
+    data_contract_requires_auth,
+)
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    managed_pack_output_paths,
+)
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     compile_page_data_sources,
     materialize_modal_targets,
@@ -53,6 +59,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     relayable_action_reasons,
     resolve_modal_action_targets,
     resource_table_only_fields,
+    workflow_names_from_context,
 )
 from mozaiksai.core.workflow.ui_primitives import (
     validate_page_ui_primitives,
@@ -1613,8 +1620,26 @@ def save_app_schema(
                 raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
         page_list = [_normalize_page_schema(page) for page in raw_page_list]
         modules = module_action_index_from_context(context_variables)
+        workflows = workflow_names_from_context(context_variables)
+        data_contract = detach(_context_get(context_variables, "data_contract"))
+        surface_map = detach(_context_get(context_variables, "design_surface_map"))
+        template_paths = managed_pack_output_paths(context_variables)
+        # Close every page before rejecting so one corrected output fixes them all.
+        page_failures: list[str] = []
         for page in page_list:
-            compile_page_data_sources(page, modules, reject_api_endpoints=True)
+            # The same file identity the worker lane materializes (route stem),
+            # so a pack-owned placeholder such as Billing -> billing.yaml matches.
+            page_path = f"ui/pages/{_page_file_stem(page)}.yaml"
+            try:
+                compile_page_data_sources(
+                    page, modules, reject_api_endpoints=True, workflow_names=workflows,
+                    data_contract=data_contract, design_surface_map=surface_map,
+                    template_owned=page_path in template_paths, path=page_path,
+                )
+            except ValueError as exc:
+                page_failures.append(f"{page_path}: {exc}")
+        if page_failures:
+            raise ValueError("\n".join(page_failures))
         baseline_files = detach(_context_get(context_variables, "generated_files")) or {}
         code_files = extract_code_file_map_from_payload(
             {"code_files": detach(_context_get(context_variables, "code_files")) or []}

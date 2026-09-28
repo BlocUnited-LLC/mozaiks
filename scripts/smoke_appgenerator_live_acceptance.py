@@ -273,6 +273,7 @@ sections:
         - key: ticket_id
           label: Ticket
       api_endpoint: /api/modules/support_tickets/list_tickets
+      data_key: items
   - id: ticket-create
     primitive: Form
     config:

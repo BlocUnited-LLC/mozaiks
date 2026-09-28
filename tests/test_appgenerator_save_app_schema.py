@@ -47,10 +47,50 @@ class _Context:
 def _module_context():
     return _Context({"generated_files": {
         f"modules/{module_id}/module.yaml": yaml.safe_dump({
-            "module": {"id": module_id}, "actions": [{"id": action} for action in actions],
+            "module": {"id": module_id}, "actions": [{"id": action, "output_schema": {
+                "type": "array", "items": {"type": "object", "properties": {
+                    "name": {"type": "string"}, "email": {"type": "string"},
+                }},
+            }} for action in actions],
         })
         for module_id, actions in {"users": ["list_users", "create_user"], "tickets": ["save_settings"]}.items()
     }})
+
+
+def test_standalone_save_defers_pack_owned_placeholder_pages_by_their_route_stem(tmp_path, monkeypatch):
+    """The typed name is "Billing"; the file identity is billing.yaml, which the mozaikspay template owns."""
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    pack = Path(__file__).resolve().parents[1] / "factory_app" / "build_context" / "mozaikspay"
+    placeholder_module = yaml.safe_dump({"module": {"id": "billing_portal"}, "actions": [
+        {"id": "get_subscription_status", "api_surface": "public_readonly", "permissions": [],
+         "output_schema": {"type": "object", "properties": {"subscription_status": {"type": "string"}}}},
+    ]})
+    billing = {
+        **_base_page(), "name": "Billing", "route": "/billing", "title": "Billing",
+        "sections": [{"id": "billing-info", "primitive": "ResourceTable", "title": "Billing", "config": {
+            "columns": [{"key": "billing_id", "label": "ID"}],
+            "data_source": {"module_id": "billing_portal", "action_id": "get_subscription_status"},
+            "data_key": "billing_info", "selection": "single",
+        }}],
+    }
+    context = _Context({
+        "generated_files": {"modules/billing_portal/module.yaml": placeholder_module},
+        "capability_packs": [{"id": "mozaikspay", "capability_source": "managed_capability", "status": "active",
+                              "pack_source_path": str(pack)}],
+    })
+    result = save_app_schema_module.save_app_schema(
+        manifest={**_base_manifest(), "default_route": "/billing", "pages": ["Billing"]},
+        pages=[billing], context_variables=context,
+    )
+    assert "rejected" not in result, result
+    assert context.get("app_schema_ready") is True
+    # Without the pack the same placeholder is a real binding error.
+    with pytest.raises(ValueError, match="'billing_info' must select a declared array"):
+        save_app_schema_module.save_app_schema(
+            manifest={**_base_manifest(), "default_route": "/billing", "pages": ["Billing"]},
+            pages=[billing],
+            context_variables=_Context({"generated_files": {"modules/billing_portal/module.yaml": placeholder_module}}),
+        )
 
 
 def _base_manifest():
@@ -445,7 +485,9 @@ def test_save_app_schema_accepts_empty_primitive(monkeypatch, tmp_path: Path) ->
 
 def test_save_app_schema_accepts_workflow_action(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
-    context = _Context()
+    context = _Context({"generated_files": {
+        "workflows/CustomerSupport/orchestrator.yaml": "workflow_name: CustomerSupport\n",
+    }})
     page = _base_page()
     page["sections"] = [
         {

@@ -14,15 +14,15 @@ navigation:
   visible: true
 sections:
   - id: billing-status
-    primitive: DataTable
+    primitive: SummaryStrip
     title: Current Plan
     config:
       api_endpoint: /api/modules/billing_portal/get_subscription_status
-      columns:
-        - key: plan_name
-          label: Plan
-        - key: status
-          label: Status
+      items:
+        - label: Plan
+          value_key: plan_name
+        - label: Status
+          value_key: status
   - id: billing-catalog
     primitive: PricingCatalog
     title: Plans and Token Packs

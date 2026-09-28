@@ -63,6 +63,7 @@ sections:
         - key: order_id
           label: Order
       api_endpoint: /api/modules/orders/list_orders
+      data_key: orders
   - id: create-order
     primitive: Form
     config:
@@ -105,7 +106,15 @@ actions:
     description: List orders.
     handler_method: list_orders
     input_schema: {type: object, properties: {}}
-    output_schema: {type: object}
+    output_schema:
+      type: object
+      properties:
+        orders:
+          type: array
+          items:
+            type: object
+            properties:
+              order_id: {type: string}
   - id: create_order
     description: Create an order.
     handler_method: create_order

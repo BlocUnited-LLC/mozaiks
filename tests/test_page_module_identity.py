@@ -18,6 +18,13 @@ module:
   id: habits_registry
 actions:
 - id: list_habits
+  output_schema:
+    type: array
+    items:
+      type: object
+      properties:
+        name:
+          type: string
 - id: create_habit
 """
 
@@ -37,7 +44,8 @@ def _page(module_id="habits_registry", action_id="list_habits"):
 
 
 def test_index_reads_generated_contract():
-    assert _index() == {"habits_registry": {"list_habits", "create_habit"}}
+    assert set(_index()["habits_registry"]) == {"list_habits", "create_habit"}
+    assert _index()["habits_registry"]["list_habits"]["output_schema"]["type"] == "array"
 
 
 def test_explicit_pair_compiles_to_runtime_endpoint():
