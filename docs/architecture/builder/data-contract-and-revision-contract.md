@@ -354,7 +354,10 @@ hook's owner value reaches the runtime, which rejects a foreign owner (403).
 Field types come from the canonical list
 (string, boolean, integer, number, date, datetime, object, array) and defaults
 must decode to the declared type; DesignDocs validates both at save time and
-AppGenerator repeats the check only as a backstop. A model-authored
+AppGenerator repeats the check only as a backstop. A required array or object
+field without a default is saved with `"[]"` or `"{}"` and a logged
+`DATA_CONTRACT_FIELD_NORMALIZED` notice; unknown types are still rejected with
+the valid choices. A model-authored
 `schemas.py` for a persistent module is overwritten by the rendered file with a
 logged warning, and a `data_models` task with nothing left to author completes
 without a worker turn.

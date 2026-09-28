@@ -96,7 +96,8 @@ models:
         description: >
           Canonical logical data type. Dates are stored as datetimes and
           travel as ISO-8601 strings; object and array fields cannot be
-          canonical create/update inputs, so a required one needs a default.
+          canonical create/update inputs; a required one without a default
+          is saved with the empty default ("[]" or "{}").
       required:
         type: bool
         description: True when the field must exist on inserted records.

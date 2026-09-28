@@ -108,6 +108,24 @@ def record_id_field(collection: Mapping[str, Any], names: list[str]) -> str:
     return "_id"
 
 
+def normalize_structured_defaults(collection: Mapping[str, Any], location: str) -> list[str]:
+    """Give a required array/object field without a default its empty default.
+
+    The correction is determined: canonical create input cannot carry structured
+    values, so the record starts empty and hooks or custom mutations fill it.
+    Unknown types are left for validation to reject.
+    """
+    normalized: list[str] = []
+    for field in collection.get("fields") or []:
+        if (
+            isinstance(field, dict) and field.get("type") in STRUCTURED_FIELD_TYPES
+            and field.get("required") and field.get("default") is None
+        ):
+            field["default"] = "[]" if field["type"] == "array" else "{}"
+            normalized.append(f"{location} field {field.get('name')!r}: required {field['type']} default -> {field['default']}")
+    return normalized
+
+
 def validate_collection_fields(collection: Mapping[str, Any], location: str) -> None:
     """Reject field shapes canonical writes cannot carry, naming the valid choices."""
     fields = [field for field in collection.get("fields") or [] if isinstance(field, Mapping)]
@@ -147,6 +165,7 @@ __all__ = [
     "DataContractFieldError",
     "STRUCTURED_FIELD_TYPES",
     "field_type",
+    "normalize_structured_defaults",
     "parse_default",
     "record_id_field",
     "validate_collection_fields",

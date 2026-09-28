@@ -46,8 +46,9 @@ This project follows a practical pre-1.0 changelog format:
   custom reads; ModelAgent no longer authors schemas for persistent modules.
   App-wide collections beside gated, permissioned or internal actions get no open
   canonical writes; hooks are validated at task admission and may return None;
-  DesignDocs validates canonical field types and defaults at save time; the
-  generated record id is `<entity>_id`, never a natural `search_by` key.
+  DesignDocs validates canonical field types and defaults at save time and gives
+  required array/object fields an empty default; the generated record id is
+  `<entity>_id`, never a natural `search_by` key.
 
 ### Fixed
 

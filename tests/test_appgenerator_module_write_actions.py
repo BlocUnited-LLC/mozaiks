@@ -57,9 +57,9 @@ from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
 )
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
+    auth_contract_scopes,
     close_module_actions,
     code_owned_schema_paths,
-    declared_auth_grants,
     materialize_module_actions,
     materialize_module_schemas,
     materialize_module_write_implementations,
@@ -248,8 +248,8 @@ def test_permissions_the_auth_contract_declares_survive_on_canonical_writes():
         data_contract=context.get("data_contract"), companion_files=auth,
     )
     assert _actions(closed)["create_task"]["permissions"] == ["openid"]
-    assert declared_auth_grants(auth) == frozenset({"openid", "profile", "email"})
-    assert declared_auth_grants({}) == frozenset()
+    assert auth_contract_scopes(auth) == frozenset({"openid", "profile", "email"})
+    assert auth_contract_scopes({}) == frozenset()
 
 
 @pytest.mark.parametrize("surface", ["internal", "admin_internal"])
@@ -377,12 +377,32 @@ def test_designdocs_save_rejects_field_shapes_with_the_valid_choices():
         _validate_design_collections(contract, surface_map)
     contract = _contract()
     contract["shared_collections"] = []
-    contract["surfaces"][0]["collections"][0]["fields"].append(_field("tags", "array"))
-    with pytest.raises(ValueError, match="required field 'tags' has structured type 'array'"):
-        _validate_design_collections(contract, surface_map)
+    _validate_design_collections(contract, surface_map)
+
+
+def test_designdocs_save_supplies_the_empty_default_for_required_structured_fields(caplog):
+    """The correction is determined, so DesignDocs saves it with a logged normalization."""
+    from factory_app.workflows.DesignDocs.tools.save_design_doc import _validate_design_collections
+
+    surface_map = {"surfaces": [{"surface_id": MODULE, "surface_kind": "module", "primary_entities": ["Task"],
+                                 "owned_mutations": [], "custom_reads": []}]}
     contract = _contract()
     contract["shared_collections"] = []
-    _validate_design_collections(contract, surface_map)
+    fields = contract["surfaces"][0]["collections"][0]["fields"]
+    fields.extend([_field("members", "array"), _field("settings", "object"), _field("labels", "array", default='["a"]')])
+    with caplog.at_level(logging.WARNING):
+        _validate_design_collections(contract, surface_map)
+    by_name = {field["name"]: field for field in fields}
+    assert by_name["members"]["default"] == "[]" and by_name["settings"]["default"] == "{}"
+    assert by_name["labels"]["default"] == '["a"]'
+    messages = [record.getMessage() for record in caplog.records if "DATA_CONTRACT_FIELD_NORMALIZED" in record.getMessage()]
+    assert len(messages) == 2 and "field 'members': required array default -> []" in messages[0]
+    actions = _actions(_closed(contract=contract))
+    assert "members" not in actions["create_task"]["input_schema"]["properties"]
+    namespace: dict = {}
+    exec(render_module_schemas(MODULE, contract["surfaces"][0]["collections"]), namespace)
+    assert namespace["task_create_values"]({"title": "A"})["members"] == []
+    assert namespace["task_create_values"]({"title": "A"})["settings"] == {}
 
 
 def test_designdocs_schema_prompt_and_validator_share_one_type_list():

@@ -20,6 +20,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
+    normalize_structured_defaults,
     validate_collection_fields,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -337,6 +338,8 @@ def _validate_design_collections(data_contract: dict[str, Any], surface_map: dic
             collection.setdefault("owner_field", None)
         validate_collection_ownership(collection, path)
         # Field types, defaults and lookups are decided here, where the design agent can revise them.
+        for message in normalize_structured_defaults(collection, path):
+            logger.warning(f"DATA_CONTRACT_FIELD_NORMALIZED: {message}")
         validate_collection_fields(collection, path)
     # One owner/entity and owner/name must identify one collection across both locations.
     list(iter_data_contract_collections(data_contract))

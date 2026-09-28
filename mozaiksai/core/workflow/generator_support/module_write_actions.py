@@ -216,7 +216,7 @@ def _canonical_read_ids(module_id: str, plan: dict[str, Any], contract: Any) -> 
 # --------------------------------------------------------------------------- access policy
 
 
-def declared_auth_grants(files: Mapping[str, str]) -> frozenset[str]:
+def auth_contract_scopes(files: Mapping[str, str]) -> frozenset[str]:
     """Permission ids the app's auth contract can actually grant.
 
     ``config/auth.yaml`` declares no roles; the only declared grants are the
@@ -443,14 +443,14 @@ def _companions_from_files(module_id: str, files: Mapping[str, str]) -> dict[str
 
 def close_module_actions(
     payload: Any, *, app_build_plan: Any, data_contract: Any = None, design_surface_map: Any = None,
-    subscription_contract: Any = None, granted_permissions: frozenset[str] | None = None,
+    subscription_contract: Any = None, declared_auth_scopes: frozenset[str] | None = None,
     companion_files: Mapping[str, str] | None = None,
 ) -> Any:
     """Return detached output with every canonical write and read declared.
 
     Writes close first so an app-wide access conflict is reported as the write
     decision it is, before read closure asks for explicit read declarations.
-    ``granted_permissions`` are the auth contract's declared grants; when
+    ``declared_auth_scopes`` are the auth contract's declared grants; when
     omitted they are read from ``config/auth.yaml`` in ``companion_files``.
     """
     output = _unwrap_output_envelope(detach(payload))
@@ -461,14 +461,14 @@ def close_module_actions(
     if contract is not None and not isinstance(contract, dict):
         raise ValueError("Write action closure requires a structured data_contract")
     companion_files = dict(companion_files or {})
-    granted = granted_permissions if granted_permissions is not None else declared_auth_grants(companion_files)
+    granted = declared_auth_scopes if declared_auth_scopes is not None else auth_contract_scopes(companion_files)
     bundle = output.get("module_contract")
     if not isinstance(bundle, dict):
         files = extract_code_file_map_from_payload(output)
         changes = materialize_module_actions(
             {**companion_files, **files}, app_build_plan=plan, data_contract=contract,
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
-            granted_permissions=granted,
+            declared_auth_scopes=granted,
         )
         changes = {path: content for path, content in changes.items() if path in files}
         if changes:
@@ -499,13 +499,13 @@ def close_module_actions(
 def materialize_module_actions(
     files_map: Mapping[str, str], *, app_build_plan: Any, data_contract: Any = None,
     design_surface_map: Any = None, subscription_contract: Any = None,
-    granted_permissions: frozenset[str] | None = None,
+    declared_auth_scopes: frozenset[str] | None = None,
 ) -> dict[str, str]:
     """Render closed module manifests when assembling an admitted app bundle."""
     changed: dict[str, str] = {}
     if app_build_plan is None:
         return changed
-    granted = granted_permissions if granted_permissions is not None else declared_auth_grants(files_map)
+    granted = declared_auth_scopes if declared_auth_scopes is not None else auth_contract_scopes(files_map)
     for path, content in files_map.items():
         match = re.fullmatch(r"modules/([^/]+)/module\.yaml", path)
         if not match:
@@ -517,7 +517,7 @@ def materialize_module_actions(
         closed = close_module_actions(
             payload, app_build_plan=app_build_plan, data_contract=data_contract,
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
-            granted_permissions=granted, companion_files=files_map,
+            declared_auth_scopes=granted, companion_files=files_map,
         )
         expanded = closed["module_contract"]["module_yaml"]
         for action in expanded.get("actions") or []:
@@ -1049,7 +1049,7 @@ __all__ = [
     "close_module_actions",
     "code_owned_schema_paths",
     "collection_record_shape",
-    "declared_auth_grants",
+    "auth_contract_scopes",
     "materialize_module_actions",
     "materialize_module_schemas",
     "materialize_module_write_implementations",
