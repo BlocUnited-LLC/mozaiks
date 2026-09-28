@@ -175,8 +175,10 @@ agents:
       workflow_triggers entry that consumes a platform auth event, a sign-in page
       an app-owned surface also owns or that binds app-owned data, a non-sign-in
       page filed under an auth surface, or app entities and actions on a platform
-      surface. An app-named surface that claims one reserved entity or action is
-      told to drop that claim and stay app-owned. Separate app-owned data from
+      surface. An app-named surface that claims a reserved entity or action while
+      also owning app entities, actions, collections, triggers, or non-sign-in
+      pages is told to drop that claim and stay app-owned; one whose every claim
+      is reserved becomes a platform reference. Separate app-owned data from
       platform/provider state instead of deleting it. Changing only the owner
       label cannot authorize app-owned storage. Downstream planning rejects
       invalid approved ownership before it can generate a replacement module.

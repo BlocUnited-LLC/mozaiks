@@ -988,3 +988,184 @@ def test_workflow_trigger_on_subscription_surface_still_requires_revision(persis
     )
     assert "surface_id=billing_portal" in result["error"]
     assert bundle == submitted
+
+
+@pytest.mark.parametrize("page_route,href", [
+    pytest.param("/auth/", "/auth", id="page_trailing_slash"),
+    pytest.param("/auth", "/auth/", id="link_trailing_slash"),
+])
+def test_removal_and_redirect_share_one_route_identity(persistence, page_route, href):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["experience_spec"]["pages"][-1]["route"] = page_route
+    bundle["experience_spec"]["pages"][0]["sections"].append({
+        "id": "sign-in-cta", "primitive": "ActionButton", "intent": "Go to sign in",
+        "config_hint": json.dumps({"label": "Sign in", "href": href}),
+    })
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    pages = detach(context.get("experience_spec"))["pages"]
+    assert [page["route"] for page in pages] == ["/reports"]
+    cta = next(section for section in pages[0]["sections"] if section["id"] == "sign-in-cta")
+    assert json.loads(cta["config_hint"]) == {"label": "Sign in", "href": "/login"}
+    record = next(
+        entry for entry in summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
+        if entry["surface_id"] == "auth"
+    )
+    assert record["removed_pages"] == [{"name": "Authentication", "route": page_route}]
+    assert record["redirected_navigation"] == [
+        {"page": "Reports", "section": "sign-in-cta", "from": href, "to": "/login"},
+    ]
+
+
+def test_sign_in_page_at_login_route_with_trailing_slash_records_no_self_redirect(persistence):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["experience_spec"]["pages"][-1].update(name="Login", route="/login/")
+    bundle["surface_map"]["surfaces"][-1]["owned_pages"] = ["Login"]
+    bundle["experience_spec"]["pages"][0]["sections"].append({
+        "id": "sign-in-cta", "primitive": "ActionButton", "intent": "Go to sign in",
+        "config_hint": json.dumps({"label": "Sign in", "href": "/login"}),
+    })
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    record = next(
+        entry for entry in summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
+        if entry["surface_id"] == "auth"
+    )
+    assert record["removed_pages"] == [{"name": "Login", "route": "/login/"}]
+    assert "redirected_navigation" not in record
+
+
+@pytest.mark.parametrize("surface_id,entities,actions", [
+    pytest.param("accounts", ["AuthSession"], [], id="reserved_entity"),
+    pytest.param("account_menu", [], ["logout"], id="reserved_action"),
+])
+def test_app_named_surface_with_only_a_reserved_claim_and_an_app_page_is_told_to_drop_it(
+    persistence, surface_id, entities, actions,
+):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    ownership._add_surface(
+        bundle, surface_id=surface_id, name="Accounts", route="/accounts", entities=entities, actions=actions,
+    )
+    submitted = deepcopy(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert f"App surface {surface_id!r} claims" in result["error"]
+    assert f"entities {entities}, actions {actions}" in result["error"]
+    assert "keep it app-owned with its entities [], actions [], collections [], pages ['Accounts']" in result["error"]
+    assert "move 'Accounts' to owned_pages" not in result["error"]
+    assert "serves only sign-in" not in result["error"]
+    assert bundle == submitted
+
+
+def test_app_named_reserved_claim_also_names_its_sign_in_pages(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    ownership._add_surface(
+        bundle, surface_id="accounts", name="Accounts", route="/accounts", entities=["AuthSession"], actions=[],
+    )
+    bundle["experience_spec"]["pages"].append({
+        "name": "Login", "route": "/login", "layout": "full-width", "intent": "Sign in.",
+        "sections": [{"id": "sign-in", "primitive": "PageHeader", "intent": "Sign in.", "config_hint": None}],
+    })
+    bundle["surface_map"]["surfaces"][-1]["owned_pages"] = ["Accounts", "Login"]
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert "pages ['Accounts']" in result["error"]
+    assert "Also remove its sign-in pages ['Login']: the platform serves sign-in." in result["error"]
+
+
+@pytest.mark.parametrize("app_first", [False, True], ids=["auth_first", "app_surface_first"])
+def test_reserved_claim_rejection_does_not_depend_on_surface_order(persistence, app_first):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    ownership._add_surface(
+        bundle, surface_id="member_directory", name="Members", route="/members",
+        entities=["Member", "AuthSession"], actions=["invite_member"],
+    )
+    bundle["experience_spec"]["pages"].append({
+        "name": "Profile Settings", "route": "/profile", "layout": "full-width", "intent": "Edit the profile.",
+        "sections": [{"id": "profile", "primitive": "PageHeader", "intent": "Profile.", "config_hint": None}],
+    })
+    surfaces = {surface["surface_id"]: surface for surface in bundle["surface_map"]["surfaces"]}
+    surfaces["auth"]["owned_pages"] = ["Authentication", "Profile Settings"]
+    surfaces["member_directory"]["owned_pages"] = ["Members", "Profile Settings"]
+    if app_first:
+        bundle["surface_map"]["surfaces"] = [
+            surfaces["reports"], surfaces["member_directory"], surfaces["auth"],
+        ]
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert result["error"].startswith("App surface 'member_directory' claims")
+    assert "entities ['AuthSession']" in result["error"]
+    assert "pages ['Members', 'Profile Settings']" in result["error"]
+
+
+@pytest.mark.parametrize("sign_in_page", [False, True], ids=["no_pages", "sign_in_page_only"])
+def test_app_named_surface_whose_every_claim_is_reserved_normalizes_to_platform(persistence, sign_in_page):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    bundle["surface_map"]["surfaces"].append({
+        "surface_id": "account_access", "label": "Account Access", "surface_kind": "module", "owner": "app",
+        "primary_entities": ["AuthSession"], "owned_pages": ["Login"] if sign_in_page else [],
+        "owned_mutations": ["logout"], "source_capability_packs": [], "notes": None,
+    })
+    if sign_in_page:
+        bundle["experience_spec"]["pages"].append({
+            "name": "Login", "route": "/login", "layout": "full-width", "intent": "Sign in.",
+            "sections": [{"id": "sign-in", "primitive": "PageHeader", "intent": "Sign in.", "config_hint": None}],
+        })
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    surface = next(
+        s for s in detach(context.get("design_surface_map"))["surfaces"] if s["surface_id"] == "account_access"
+    )
+    assert surface["owner"] == "platform"
+    assert surface["primary_entities"] == surface["owned_mutations"] == surface["owned_pages"] == []
+    assert [page["route"] for page in detach(context.get("experience_spec"))["pages"]] == ["/reports"]
+    record = next(
+        entry for entry in summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
+        if entry["surface_id"] == "account_access"
+    )
+    assert record.get("removed_pages", []) == ([{"name": "Login", "route": "/login"}] if sign_in_page else [])
+
+
+def test_sibling_removal_records_are_independent_copies_in_the_saved_yaml(persistence):
+    store, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = _auth_bundle()
+    bundle["surface_map"]["surfaces"].append({
+        "surface_id": "session_management", "label": "Sessions", "surface_kind": "module", "owner": "app",
+        "primary_entities": [], "owned_pages": ["Authentication"], "owned_mutations": [],
+        "source_capability_packs": [], "notes": None,
+    })
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    records = summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
+    pages = [entry["removed_pages"][0] for entry in records if entry.get("removed_pages")]
+    assert len(pages) == 2 and pages[0] == pages[1] and pages[0] is not pages[1]
+    saved = {call.kwargs["kind"]: call.kwargs for call in store.upsert_design_doc.await_args_list}
+    assert "&id" not in saved["ui_schema"]["content"]
+    assert "*id" not in saved["ui_schema"]["content"]

@@ -317,7 +317,8 @@ auth contract already serves; they are removed from the approved
 `experience_spec` inventory (recorded as `removed_pages`), and typed navigation
 references (`href`, `route`, `path`, `fallbackPath`) to their route point at
 `routes.login` (recorded as `redirected_navigation`; a page designed at the
-login route itself records no redirect). A page is a sign-in page when its route
+login route itself records no redirect). Sign-in checks, removal, and redirects
+compare routes under one identity that ignores a trailing slash. A page is a sign-in page when its route
 is one of the auth contract's `login`, `callback`, or `logout` routes or a route
 one of them nests under (such as `/auth`), or when a `Form` section collects a
 field the rule lists as identity evidence (`password`, tokens, credentials).
@@ -346,9 +347,14 @@ owners, competing owner declarations, a platform auth event that another
 surface's `workflow_triggers` consume, a sign-in page that an app-owned surface
 also owns or whose sections bind app-owned modules through typed
 `data_source`/module-action references, and a non-sign-in page filed under an
-auth surface. An app-named surface that claims a reserved entity or action is
-told to drop that claim and stay app-owned rather than to become a platform
-reference. Removing sign-in pages can never empty the approved inventory.
+auth surface. An app-named surface (one matched only through a reserved entity
+or action, not by its surface id) that also owns app entities, actions,
+collections, workflow triggers, or non-sign-in pages is told to drop the
+reserved claim and stay app-owned rather than to become a platform reference;
+this is decided for every surface before any page is removed, so the outcome
+does not depend on surface order. An app-named surface whose every claim is
+reserved is determined and normalizes to the canonical owner. Removing sign-in
+pages can never empty the approved inventory.
 Selected managed ownership rules without a declared `facade_module` also reject:
 the tool cannot infer a provider's canonical app boundary from its display name.
 For mixed auth collections, the tool strips declared identity fields and moves
