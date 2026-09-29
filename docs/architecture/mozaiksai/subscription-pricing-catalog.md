@@ -16,6 +16,11 @@ product may sell platform access, token packs, hosting, domains, marketing, or
 other service lines on one page. Those service lines should not become separate
 entitlement files unless they are genuinely separate apps.
 
+In generated apps, SubscriptionContractDesigner selects approved
+`included_features` per plan. The factory derives the capability IDs and
+`plans[].capabilities` written to this runtime file; the designer does not
+author free-text capability IDs. Pricing groups remain display metadata.
+
 ## Contract Shape
 
 `mozaiks.subscriptions.v1` supports optional `pricing_catalog` display metadata:
@@ -128,8 +133,9 @@ context from `concept_overview`, `concept_blueprint`, `backend_design_document`,
 `design_surface_map`, `experience_spec`, `monetization_enabled`, and
 `builder_options`, then emits:
 
-- `subscription_config_file`: the canonical `app/config/subscriptions.yaml`
-  payload
+- `subscription_config_file`: provider-neutral plan design with
+  `plans[].included_features` selected from the approved feature inventory;
+  the save tool compiles the canonical `app/config/subscriptions.yaml` payload
 - `pricing_catalog`: optional display groups inside that same payload
 - `add_on_products`: optional provider-neutral non-token add-ons referenced by
   pricing groups inside that same payload
@@ -138,10 +144,14 @@ context from `concept_overview`, `concept_blueprint`, `backend_design_document`,
 - `plan_design_rationale`: traceable reasons that map upstream signals to plan,
   entitlement, quota, and pricing group decisions
 
+The saved contract includes derived `selected_features_by_plan`, capability
+grants, module action gates, and pending workflow feature mappings. The model
+does not author those derived fields.
+
 When a chat UI is available, the workflow presents the normalized output as a
 `SubscriptionContractReview` artifact before downstream generators consume it.
 The review surface shows the subscription plans, token wallets, token
-allowances, add-on products, gated module actions, workflow metering
+allowances, add-on products, derived gated module actions, workflow metering
 declarations, generated file preview, and guardrails. The user must confirm
 that the subscription plan contract matches what they want; requesting changes
 leaves downstream `subscription_contract` context empty until the agent revises

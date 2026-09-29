@@ -1,4 +1,4 @@
-"""Replay the reported free/pro grants through real context and app assembly."""
+"""Compile approved feature selections through real context and app assembly."""
 
 from copy import deepcopy
 
@@ -16,6 +16,7 @@ from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
+    approved_workflow_surface_ids,
     ungated_module_actions,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
@@ -26,10 +27,12 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 
 MODULE_PATH = "modules/task_management/module.yaml"
 GATES = {
-    "create_task": "task.create",
-    "edit_task": "task.edit",
-    "view_dashboard": "dashboard.view",
+    "create_task": "feature.module.task_management.create_task",
+    "edit_task": "feature.module.task_management.edit_task",
+    "delete_task": "feature.module.task_management.delete_task",
+    "view_dashboard": "feature.module.task_management.view_dashboard",
 }
+FREE_ACTIONS = {"create_task", "edit_task", "delete_task"}
 
 
 def _context(source="subscription_contract"):
@@ -40,11 +43,18 @@ def _context(source="subscription_contract"):
             "label": "Task Plans",
             "default_plan_id": "free",
             "plans": [
-                {"plan_id": "free", "label": "Free", "capabilities": ["task.create", "task.view"]},
-                {"plan_id": "pro", "label": "Pro", "capabilities": [
-                    "task.create", "task.view", "task.edit", "dashboard.view",
-                ]},
+                {"plan_id": "free", "label": "Free", "capabilities": [GATES[action] for action in sorted(FREE_ACTIONS)]},
+                {"plan_id": "pro", "label": "Pro", "capabilities": sorted(GATES.values())},
             ],
+        },
+        "selected_features_by_plan": {
+            "free": [f"module.task_management.{action}" for action in sorted(FREE_ACTIONS)],
+            "pro": sorted([
+                "module.task_management.create_task",
+                "module.task_management.edit_task",
+                "module.task_management.delete_task",
+                "module.task_management.view_dashboard",
+            ]),
         },
         "module_contract_updates": [
             {"module_id": "task_management", "action_id": action, "entitlement_gate": gate, "metering": None}
@@ -60,7 +70,7 @@ def _context(source="subscription_contract"):
         source: contract,
         "design_surface_map": {"surfaces": [{
             "surface_id": "task_management", "surface_kind": "module", "owner": "app",
-            "primary_entities": ["Task"], "owned_mutations": ["create_task", "edit_task"],
+            "primary_entities": ["Task"], "owned_mutations": ["create_task", "edit_task", "delete_task"],
             "custom_reads": ["view_dashboard", "health"],
         }]},
         "data_contract": {"version": "1", "surfaces": [{
@@ -98,10 +108,10 @@ def _actions(files):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["subscription_contract", "subscription_contract_artifact", "wrapped_artifact"])
 @pytest.mark.parametrize("writer_gate", [None, "wrong.model.gate"])
-async def test_exact_reported_plan_shape_assembles_gates_and_passes_scanner(source, writer_gate):
+async def test_selected_free_core_and_pro_dashboard_assemble_gates_and_pass_scanner(source, writer_gate):
     context = _context("subscription_contract_artifact" if source == "wrapped_artifact" else source)
     context.set("app_task_batch_results", {"task_contract": {"code_files": _files(writer_gate)}})
-    # Before the fix, the exact plans with ungated action files fail the unchanged scanner.
+    # Uncompiled manifests fail bundle acceptance even with a valid selected-feature contract.
     ungated = {file["filename"]: file["content"] for file in _files()}
     ungated["config/subscriptions.yaml"] = yaml.safe_dump(
         context.snapshot()["subscription_contract_artifact" if source == "wrapped_artifact" else source]["subscription_config_file"],
@@ -127,7 +137,7 @@ async def test_exact_reported_plan_shape_assembles_gates_and_passes_scanner(sour
     ))
     for action in GATES:
         grant = await adapter.check(actions[action]["entitlement_gate"], app_id="task-app", user_id="free-user")
-        assert grant.granted is (action == "create_task")
+        assert grant.granted is (action in FREE_ACTIONS)
 
 
 @pytest.mark.asyncio
@@ -149,6 +159,64 @@ def test_contract_overrides_are_idempotent_and_do_not_mutate_frozen_context():
     assert apply_entitlement_gates(result, context_variables=context) == result
     assert files == original
     assert context.snapshot() == before
+
+
+def test_legacy_mapping_without_selected_features_cannot_authorize_assembly():
+    context = _context()
+    contract = context.snapshot()["subscription_contract"]
+    del contract["selected_features_by_plan"]
+    context.set("subscription_contract", contract)
+    files = _files()
+
+    with pytest.raises(ValueError, match="selected_features_by_plan is required"):
+        apply_entitlement_gates(files, context_variables=context)
+    assert files == _files()
+
+
+def test_task_batch_projection_rejects_duplicate_selected_feature():
+    context = _context()
+    contract = context.snapshot()["subscription_contract"]
+    contract["selected_features_by_plan"]["pro"].append("module.task_management.create_task")
+
+    with pytest.raises(ValueError, match="repeats a selected feature"):
+        approved_subscription_gates(
+            contract,
+            approved_actions=all_module_actions(context),
+            ungated_actions=ungated_module_actions(context),
+            approved_workflows=approved_workflow_surface_ids(context),
+        )
+
+
+def test_task_batch_projection_rejects_unapproved_workflow_selection():
+    context = _context()
+    contract = context.snapshot()["subscription_contract"]
+    contract["selected_features_by_plan"]["pro"].append("workflow.Unapproved")
+    contract["subscription_config_file"]["plans"][1]["capabilities"].append("feature.workflow.unapproved")
+    contract["workflow_contract_updates"] = [
+        {"design_surface_id": "Unapproved", "capability_id": "feature.workflow.unapproved"},
+    ]
+
+    with pytest.raises(ValueError, match=r"not an approved workflow surface.*Valid workflow features: \[\]"):
+        approved_subscription_gates(
+            contract,
+            approved_actions=all_module_actions(context),
+            ungated_actions=ungated_module_actions(context),
+            approved_workflows=approved_workflow_surface_ids(context),
+        )
+
+
+def test_approved_workflow_inventory_requires_agentic_app_surface():
+    context = _context()
+    surface_map = context.snapshot()["design_surface_map"]
+    surface_map["surfaces"].extend([
+        {"surface_id": "TaskAnalysis", "surface_kind": "workflow", "owner": "app"},
+        {"surface_id": "PlatformAnalysis", "surface_kind": "workflow", "owner": "platform"},
+    ])
+    context.set("design_surface_map", surface_map)
+    assert approved_workflow_surface_ids(context) == []
+
+    context.set("concept_blueprint", {"agentic_capabilities": ["task analysis"]})
+    assert approved_workflow_surface_ids(context) == ["TaskAnalysis"]
 
 
 def test_approved_surface_id_overrides_writer_module_identity():
@@ -226,11 +294,16 @@ async def test_malformed_contract_cannot_authorize_gate_removal_at_any_writer(so
     assert resolve_subscription_contract(context) is None
     # The task boundary and the Factory save/assembly boundary share the same
     # absence-of-authority meaning, including replacement by an ungated manifest.
-    assert approved_subscription_gates(decision) is None
+    assert approved_subscription_gates(
+        decision, approved_actions={}, ungated_actions={}, approved_workflows=[],
+    ) is None
     with pytest.raises(ValueError, match="existing entitlement gates cannot be removed"):
         compile_module_entitlement_gates(
             {file["filename"]: file["content"] for file in _files()},
-            gates_by_module=approved_subscription_gates(resolve_subscription_contract(context)),
+            gates_by_module=approved_subscription_gates(
+                resolve_subscription_contract(context), approved_actions={}, ungated_actions={},
+                approved_workflows=[],
+            ),
             approved_actions={}, ungated_actions={}, existing_files=original,
         )
     with pytest.raises(ValueError, match="existing entitlement gates cannot be removed"):
@@ -278,7 +351,12 @@ async def test_unapproved_action_cannot_alias_a_gated_handler_at_any_writer():
     with pytest.raises(ValueError, match="unapproved module actions.*shadow_edit"):
         compile_module_entitlement_gates(
             {file["filename"]: file["content"] for file in files},
-            gates_by_module=approved_subscription_gates(resolve_subscription_contract(context)),
+            gates_by_module=approved_subscription_gates(
+                resolve_subscription_contract(context),
+                approved_actions=all_module_actions(context),
+                ungated_actions=ungated_module_actions(context),
+                approved_workflows=approved_workflow_surface_ids(context),
+            ),
             approved_actions=all_module_actions(context),
             ungated_actions=ungated_module_actions(context),
         )
@@ -329,7 +407,7 @@ def test_repair_compiles_only_supplied_manifests_and_keeps_facades_ungated():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action_id", ["list_tasks", "get_tasks"])
-@pytest.mark.parametrize("gate_source", ["approved_mapping", "authored_manifest"])
+@pytest.mark.parametrize("gate_source", ["selected_feature", "authored_manifest"])
 async def test_canonical_read_gate_rejected_without_mutating_any_writer(action_id, gate_source):
     context = _context()
     original = {
@@ -340,26 +418,38 @@ async def test_canonical_read_gate_rejected_without_mutating_any_writer(action_i
     files = _files()
     manifest = yaml.safe_load(files[0]["content"])
     manifest["actions"].append({"id": "get_tasks", "handler_method": "get_tasks", "permissions": []})
-    if gate_source == "approved_mapping":
+    if gate_source == "selected_feature":
         contract = context.snapshot()["subscription_contract"]
+        feature_id = f"module.task_management.{action_id}"
+        contract["selected_features_by_plan"]["pro"].append(feature_id)
+        contract["subscription_config_file"]["plans"][1]["capabilities"].append(f"feature.{feature_id}")
         contract["module_contract_updates"].append({
             "module_id": "task_management", "action_id": action_id,
-            "entitlement_gate": "dashboard.view", "metering": None,
+            "entitlement_gate": f"feature.{feature_id}", "metering": None,
         })
         context.set("subscription_contract", contract)
     else:
-        next(action for action in manifest["actions"] if action["id"] == action_id)["entitlement_gate"] = "dashboard.view"
+        next(action for action in manifest["actions"] if action["id"] == action_id)["entitlement_gate"] = GATES["view_dashboard"]
     files[0]["content"] = yaml.safe_dump(manifest)
     context.set("structured_output", {"code_files": files})
     context.set("app_task_batch_results", {"task_contract": {"code_files": files}})
     before = context.snapshot()
-    with pytest.raises(ValueError, match="canonical collection reads.*cannot have entitlement gates"):
+    compile_error = (
+        "not an approved gate target" if gate_source == "selected_feature"
+        else "canonical collection reads.*cannot have entitlement gates"
+    )
+    with pytest.raises(ValueError, match=compile_error):
         compile_module_entitlement_gates(
             {file["filename"]: file["content"] for file in files},
-            gates_by_module=approved_subscription_gates(resolve_subscription_contract(context)),
+            gates_by_module=approved_subscription_gates(
+                resolve_subscription_contract(context),
+                approved_actions=all_module_actions(context),
+                ungated_actions=ungated_module_actions(context),
+                approved_workflows=approved_workflow_surface_ids(context),
+            ),
             approved_actions=all_module_actions(context), ungated_actions=ungated_module_actions(context),
         )
-    message = "never gate targets" if gate_source == "approved_mapping" else "cannot have entitlement gates"
+    message = action_id if gate_source == "selected_feature" else "cannot have entitlement gates"
     with pytest.raises(ValueError, match=message):
         save_generated_code(context)
     assert context.snapshot() == before

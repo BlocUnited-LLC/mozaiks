@@ -149,6 +149,36 @@ conveyors:
     ]
 
 
+def _priced_workflow_contract() -> dict:
+    return {
+        "contract_required": True,
+        "selected_features_by_plan": {"free": [], "pro": ["workflow.premium_report"]},
+        "subscription_config_file": {
+            "schema_version": "mozaiks.subscriptions.v1",
+            "label": "Report plans",
+            "default_plan_id": "free",
+            "plans": [
+                {"plan_id": "free", "label": "Free", "capabilities": []},
+                {"plan_id": "pro", "label": "Pro", "capabilities": ["feature.workflow.premium_report"]},
+            ],
+        },
+        "workflow_contract_updates": [{
+            "design_surface_id": "premium_report",
+            "capability_id": "feature.workflow.premium_report",
+            "workflow_name": None,
+        }],
+    }
+
+
+def _priced_workflow_design() -> dict:
+    return {
+        "concept_blueprint": {"agentic_capabilities": ["Process premium reports"]},
+        "design_surface_map": {"surfaces": [{
+            "surface_id": "premium_report", "surface_kind": "workflow", "owner": "app",
+        }]},
+    }
+
+
 @pytest.mark.parametrize("export_result", ["not_requested", {"success": True}, {"success": False}, None, "exception"])
 def test_generate_and_download_writes_bundle_files_and_creates_zip(
     monkeypatch, tmp_path: Path, export_result,
@@ -248,6 +278,145 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     loaded_tools = runtime_tools.load_agent_tool_functions("ReviewWorkflow")
     assert len(loaded_tools["PlannerAgent"]) == 1
     assert asyncio.run(loaded_tools["PlannerAgent"][0](values=[2, 3, 5])) == {"total": 10}
+
+
+def test_priced_workflow_export_resolves_approved_surface_into_appgenerator_metadata(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    from factory_app.workflows.AppGenerator.tools.hook_workflow_integration_contract import (
+        inject_workflow_integration_contract,
+    )
+
+    contract = _priced_workflow_contract()
+    context = _Context({
+        **_priced_workflow_design(),
+        "chat_id": "chat-priced", "app_id": "app-priced", "user_id": "user-priced",
+        "pack_name": "PricedWorkflow", "subscription_contract": contract,
+        "workflows_spec": [{"name": "PricedWorkflow", "design_surface_id": "premium_report"}],
+        "workflow_bundle_results": _make_bundle_results([{
+            "workflow_name": "PricedWorkflow",
+            "files": _minimal_workflow_files("PricedWorkflow"),
+        }]),
+    })
+    registration = AsyncMock(return_value=type("BuildRecord", (), {"id": "av_priced"})())
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    monkeypatch.setattr(generate_and_download_module, "_register_workflow_bundle_artifact_version", registration)
+    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
+    monkeypatch.setattr(generate_and_download_module, "record_workflow_artifacts", AsyncMock())
+    monkeypatch.setattr(generate_and_download_module, "resolve_agent_api_url", lambda app_id: "https://api.test")
+    monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: "wss://ws.test")
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", AsyncMock(return_value={
+        "status": "completed", "data": {}, "agentContext": {},
+    }))
+
+    result = asyncio.run(generate_and_download_module.generate_and_download(
+        DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+        agent_message="Done.", context_variables=context,
+    ))
+
+    assert result["status"] == "success"
+    metadata = context.get("workflow_integration_metadata")
+    assert metadata["workflows"] == [{
+        "workflow_name": "PricedWorkflow",
+        "capability_id": "feature.workflow.premium_report",
+        "startup_mode": "AgentDriven",
+        "trigger_events": [],
+        "design_surface_id": "premium_report",
+    }]
+    assert registration.await_args.kwargs["workflow_integration_metadata"] == metadata
+    assert context.get("generated_workflow_capability_id") == "feature.workflow.premium_report"
+    assert contract["workflow_contract_updates"][0]["workflow_name"] is None
+
+    class AppPlanAgent:
+        name = "AppPlanAgent"
+        system_message = "Base prompt."
+        context_variables = context
+
+        def update_system_message(self, value):
+            self.system_message = value
+
+    agent = AppPlanAgent()
+    inject_workflow_integration_contract(agent, [])
+    assert "capability_id  : feature.workflow.premium_report" in agent.system_message
+    assert "workflow_name  : PricedWorkflow" in agent.system_message
+
+
+@pytest.mark.parametrize(("design_surface_id", "trigger_capability_id", "expected_error"), [
+    (None, None, "WorkflowInPack.design_surface_id='premium_report'"),
+    ("premium_report", "invented-capability", "different from selected pricing feature"),
+])
+def test_priced_workflow_export_blocks_unresolved_mapping_before_ui(
+    monkeypatch, tmp_path: Path, design_surface_id, trigger_capability_id, expected_error,
+) -> None:
+    triggers = ([{
+        "type": "event",
+        "event": "domain.reports.premium_requested",
+        "capability_id": trigger_capability_id,
+        "description": "Processes premium report requests for queued customer analysis.",
+    }] if trigger_capability_id else None)
+    context = _Context({
+        **_priced_workflow_design(),
+        "chat_id": "chat-priced-blocked", "app_id": "app-priced-blocked", "user_id": "user-priced",
+        "pack_name": "PricedWorkflow", "subscription_contract": _priced_workflow_contract(),
+        "workflows_spec": [{"name": "PricedWorkflow", "design_surface_id": design_surface_id}],
+        "workflow_bundle_results": _make_bundle_results([{
+            "workflow_name": "PricedWorkflow",
+            "files": _minimal_workflow_files("PricedWorkflow", triggers=triggers),
+        }]),
+    })
+    ui = AsyncMock()
+    registration = AsyncMock()
+    generated_root = tmp_path / "generated"
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui)
+    monkeypatch.setattr(generate_and_download_module, "_register_workflow_bundle_artifact_version", registration)
+
+    result = asyncio.run(generate_and_download_module.generate_and_download(
+        DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+        agent_message="Done.", context_variables=context,
+    ))
+
+    assert result["status"] == "blocked"
+    assert expected_error in "\n".join(result["validation_errors"])
+    assert context.get("workflow_bundle_validation_status") == "failed"
+    assert not generated_root.exists()
+    ui.assert_not_awaited()
+    registration.assert_not_awaited()
+
+
+@pytest.mark.parametrize("bundle_count", [0, 2])
+def test_priced_workflow_binding_requires_exactly_one_generated_bundle(bundle_count):
+    from factory_app.workflows._shared.workflow_integration import (
+        extract_pricing_workflow_integration_metadata,
+    )
+
+    context = _Context({
+        **_priced_workflow_design(),
+        "subscription_contract": _priced_workflow_contract(),
+        "workflows_spec": [{"name": "PricedWorkflow", "design_surface_id": "premium_report"}],
+    })
+    entries = [{
+        "workflow_name": "PricedWorkflow",
+        "files": _minimal_workflow_files("PricedWorkflow"),
+    } for _ in range(bundle_count)]
+    with pytest.raises(ValueError, match="no unique generated workflow bundle"):
+        extract_pricing_workflow_integration_metadata(
+            entries, bundle_name="PricedWorkflow", context_variables=context,
+        )
+
+
+def test_priced_workflow_binding_rejects_plan_grant_drift():
+    from factory_app.workflows._shared.workflow_integration import (
+        selected_pricing_workflow_bindings,
+    )
+
+    contract = _priced_workflow_contract()
+    contract["subscription_config_file"]["plans"][1]["capabilities"] = ["invented-capability"]
+    context = _Context({**_priced_workflow_design(), "subscription_contract": contract})
+    with pytest.raises(ValueError, match="capabilities differ from its selected features"):
+        selected_pricing_workflow_bindings(
+            context, [{"name": "PricedWorkflow", "design_surface_id": "premium_report"}],
+        )
 
 
 @pytest.mark.parametrize("filename", ["orchestrator.yaml", "structured_outputs.yaml"])

@@ -336,13 +336,13 @@ def _subscriptions_yaml() -> str:
             capabilities: []
           - plan_id: pro
             label: Pro
-            capabilities: [reports.generate]
+            capabilities: [feature.module.reports.generate_report]
             usage_limits:
               - meter_id: ai_tokens
                 label: AI tokens
                 unit: tokens
                 monthly_limit: 1000
-                capability_id: reports.generate
+                capability_id: feature.module.reports.generate_report
             token_allowances:
               - wallet_id: ai_tokens
                 amount: 1000
@@ -737,8 +737,12 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
             "subscription_contract": {
                 "contract_required": True,
                 "subscription_config_file": yaml.safe_load(_subscriptions_yaml()),
+                "selected_features_by_plan": {
+                    "free": [], "pro": ["module.reports.generate_report"],
+                },
                 "module_contract_updates": [{
-                    "module_id": "reports", "action_id": "generate_report", "entitlement_gate": "reports.generate",
+                    "module_id": "reports", "action_id": "generate_report",
+                    "entitlement_gate": "feature.module.reports.generate_report",
                     "metering": None,
                 }],
             },
@@ -802,7 +806,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     assert files["services/integrations/__init__.py"] == ""
     assert "modules/billing_portal/module.yaml" in files
     assert "modules/reports/module.yaml" in files
-    assert yaml.safe_load(files["modules/reports/module.yaml"])["actions"][0]["entitlement_gate"] == "reports.generate"
+    assert yaml.safe_load(files["modules/reports/module.yaml"])["actions"][0]["entitlement_gate"] == "feature.module.reports.generate_report"
     assert all(not action.get("entitlement_gate") for action in yaml.safe_load(
         files["modules/billing_portal/module.yaml"],
     )["actions"])

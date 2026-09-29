@@ -1318,6 +1318,12 @@ models:
       name:
         type: str
         description: Workflow name in PascalCase (e.g., 'ITSupportBot', 'KnowledgeBase')
+      design_surface_id:
+        type: optional_str
+        description: >
+          Exact DesignDocs design_surface_map.surfaces[].surface_id for the approved
+          workflow surface, or null when no DesignDocs workflow surface applies.
+          Required to resolve a selected pricing workflow feature.
       role:
         type: literal
         values:

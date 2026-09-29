@@ -70,6 +70,7 @@ from mozaiksai.core.workflow.generator_support.module_write_actions import (
 from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     normalize_data_contract_indexes,
 )
+from tests.appgenerator_subscription_fixture import subscription_contract
 
 MODULE = "task_management"
 MANIFEST = f"modules/{MODULE}/module.yaml"
@@ -302,10 +303,8 @@ def test_app_wide_protected_siblings_block_open_canonical_writes(sibling, expect
 
 def test_app_wide_gate_from_the_subscription_contract_is_protection_too():
     output = _output([{"id": "archive_task", "handler_method": "archive_task"}])
-    subscription = {"contract_required": True, "module_contract_updates": [
-        {"module_id": MODULE, "action_id": "archive_task", "entitlement_gate": "task.archive"},
-    ]}
-    with pytest.raises(ValueError, match="archive_task \\(entitlement_gate='task.archive'\\)"):
+    subscription = subscription_contract(MODULE, "archive_task", free_actions=("archive_task",))
+    with pytest.raises(ValueError, match="archive_task \\(entitlement_gate='feature.module.task_management.archive_task'\\)"):
         _closed(output, _contract("app_wide"), subscription_contract=subscription)
 
 
@@ -843,9 +842,7 @@ async def test_task_batch_builds_writes_from_empty_model_output_and_applies_appr
             "surface_id": MODULE, "surface_kind": "module", "owner": "app", "primary_entities": ["Task"],
             "owned_mutations": ["complete_task"], "custom_reads": [],
         }]},
-        "subscription_contract": {"contract_required": True, "module_contract_updates": [
-            {"module_id": MODULE, "action_id": "update_task", "entitlement_gate": "task.edit"},
-        ]},
+        "subscription_contract": subscription_contract(MODULE, "update_task", free_actions=("update_task",)),
     })
     custom = {"id": "complete_task", "description": "Complete a task.", "handler_method": "complete_task",
               "api_surface": None, "permissions": [], "emits": [], "ask_context_safe": False,
@@ -913,7 +910,7 @@ async def test_task_batch_builds_writes_from_empty_model_output_and_applies_appr
         for path, source in extract_code_file_map_from_payload(candidate).items()
     }
     actions = {action["id"]: action for action in yaml.safe_load(task_files[MANIFEST])["actions"]}
-    assert actions["update_task"]["entitlement_gate"] == "task.edit"
+    assert actions["update_task"]["entitlement_gate"] == "feature.module.task_management.update_task"
     assert "entitlement_gate" not in actions["create_task"] and actions["create_task"]["permissions"] == []
     assert "async def before_create_task" in task_files[f"{BACKEND}/service.py"]
     assert "async def complete_task" in task_files[f"{BACKEND}/handler.py"]
@@ -1229,9 +1226,7 @@ def test_fully_declared_but_unrestricted_app_wide_writes_are_still_rejected(decl
     assert "canonical writes ['create_task', 'update_task', 'delete_task'] are not constructed open" in message
     assert "restricted by api_surface internal or admin_internal, an approved entitlement gate, or permissions declared in config/auth.yaml" in message
     gated = deepcopy(output)
-    subscription = {"contract_required": True, "module_contract_updates": [
-        {"module_id": MODULE, "action_id": name, "entitlement_gate": "task.staff"} for name in WRITES
-    ]}
+    subscription = subscription_contract(MODULE, *WRITES, free_actions=WRITES)
     reads = [action for action in _actions(_closed()).values() if action["id"] in {"get_tasks", "list_tasks"}]
     gated["module_contract"]["module_yaml"]["actions"].extend(reads)
     closed = _closed(gated, _contract("app_wide"), subscription_contract=subscription)

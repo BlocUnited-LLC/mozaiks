@@ -1,9 +1,7 @@
-"""Subscription contract context and approved action reference closure.
+"""Closed pricing features and derived subscription entitlements.
 
-The SubscriptionContractDesigner workflow persists a provider-neutral contract
-artifact. The designer selects gates from approved DesignDocs actions;
-AppGenerator and AgentGenerator consume that contract as context. These helpers
-validate and project decisions, without deciding which actions should be paid.
+DesignDocs owns the feature inventory. The designer chooses which approved
+features each plan includes; this module names capabilities and action gates.
 """
 
 from __future__ import annotations
@@ -17,10 +15,12 @@ import yaml
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
+    approved_workflow_surface_ids,
     managed_facade_actions,
     ungated_module_actions,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    capability_id_for_feature,
     resolve_subscription_contract,
 )
 
@@ -44,76 +44,94 @@ def approved_module_actions(context_variables: Any) -> dict[str, list[str]]:
             for module_id, actions in inventory.items() if module_id not in facades}
 
 
+def approved_feature_inventory(context_variables: Any) -> dict[str, dict[str, str]]:
+    """Finite selectable features from approved design and canonical writes."""
+    features = {
+        f"module.{module_id}.{action_id}": {
+            "surface_kind": "module", "module_id": module_id, "action_id": action_id,
+        }
+        for module_id, actions in approved_module_actions(context_variables).items()
+        for action_id in actions
+    }
+    for surface_id in approved_workflow_surface_ids(context_variables):
+        features[f"workflow.{surface_id}"] = {
+            "surface_kind": "workflow", "surface_id": surface_id,
+        }
+    return dict(sorted(features.items()))
+
+
+def selected_feature_gates(
+    selected_features_by_plan: Mapping[str, list[str]], context_variables: Any,
+) -> dict[str, dict[str, str]]:
+    """Validate selections and derive module gates without interpreting prose."""
+    inventory = approved_feature_inventory(context_variables)
+    selected = set().union(*(set(features) for features in selected_features_by_plan.values()))
+    unknown = sorted(selected - inventory.keys())
+    if unknown:
+        raise ValueError(
+            f"Plans select features outside the approved inventory: {unknown}. "
+            f"Valid features: {sorted(inventory)}. Remove an unavailable feature from the plan "
+            "or have DesignDocs approve its action before pricing design."
+        )
+    gates: dict[str, dict[str, str]] = {}
+    for feature_id in sorted(selected):
+        feature = inventory[feature_id]
+        if feature["surface_kind"] == "module":
+            gates.setdefault(feature["module_id"], {})[feature["action_id"]] = capability_id_for_feature(feature_id)
+    return gates
+
+
 def validate_module_contract_updates(
     contract: Mapping[str, Any], context_variables: Any,
 ) -> dict[str, dict[str, str]]:
-    """Close model-owned gate decisions over approved actions and plan grants.
-
-    No action is selected here: choosing which feature an action implements is
-    a product decision. Once references close, downstream materialization can
-    apply the returned gates without interpreting a generated module file.
-    """
+    """Recheck persisted derived grants and gates against the closed selection."""
     contract = detach(contract)
     if not contract.get("contract_required"):
         return {}
-    inventory = approved_module_actions(context_variables)
-    valid_ids = f"Valid approved module/action ids: {inventory!r}."
+    selected_by_plan = contract.get("selected_features_by_plan")
+    if not isinstance(selected_by_plan, Mapping):
+        raise ValueError("selected_features_by_plan is required on a derived subscription contract.")
+    if not all(isinstance(features, list) and all(isinstance(feature, str) for feature in features)
+               for features in selected_by_plan.values()):
+        raise ValueError("selected_features_by_plan must map plan ids to feature id lists.")
+    if any(len(features) != len(set(features)) for features in selected_by_plan.values()):
+        raise ValueError("selected_features_by_plan must not repeat a feature within a plan.")
+    gates = selected_feature_gates(selected_by_plan, context_variables)
     config = contract.get("subscription_config_file") or {}
-    plan_groups = [config.get("plans") or []]
-    plan_groups.extend(product.get("plans") or [] for product in config.get("products") or [])
-    capabilities: set[str] = set()
-    differing: set[str] = set()
-    for plans in plan_groups:
-        plan_capabilities = [set(plan.get("capabilities") or []) for plan in plans]
-        grants = set().union(*plan_capabilities)
-        common = set.intersection(*plan_capabilities) if plan_capabilities else set()
-        capabilities.update(grants)
-        differing.update(grants - common)
-    gates: dict[str, dict[str, str]] = {}
-    decisions: dict[tuple[str, str], str | None] = {}
-    for update in contract.get("module_contract_updates") or []:
-        module_id = update.get("module_id")
-        action_id = update.get("action_id")
+    plans = config.get("plans") or []
+    plan_ids = {plan.get("plan_id") for plan in plans}
+    if set(selected_by_plan) != plan_ids:
+        raise ValueError("selected_features_by_plan must contain exactly the declared plan ids.")
+    for plan in plans:
+        plan_id = plan["plan_id"]
+        expected = sorted({capability_id_for_feature(feature) for feature in selected_by_plan[plan_id]})
+        if sorted(plan.get("capabilities") or []) != expected:
+            raise ValueError(f"Plan {plan_id!r} capabilities differ from its selected features.")
+    updates = contract.get("module_contract_updates") or []
+    actual: dict[str, dict[str, str]] = {}
+    seen_actions: set[tuple[str, str]] = set()
+    for update in updates:
+        action = (update["module_id"], update["action_id"])
+        if action in seen_actions:
+            raise ValueError(f"module_contract_updates repeats derived action {action!r}.")
+        seen_actions.add(action)
         gate = update.get("entitlement_gate")
-        if module_id not in inventory or action_id not in inventory[module_id]:
-            raise ValueError(
-                f"module_contract_updates references unapproved action {module_id!r}.{action_id!r}. "
-                f"Choose module_id from design_surface_map.surfaces[].surface_id and action_id "
-                f"from that module's approved writes or declared custom_reads. "
-                f"Canonical list/get collection reads and managed-pack facade actions are never gate targets. "
-                f"A paid view requires a declared custom read. {valid_ids}"
-            )
-        if gate is not None and gate not in capabilities:
-            raise ValueError(
-                f"module_contract_updates entitlement_gate {gate!r} is not granted by any plan. "
-                f"Valid capability ids: {sorted(capabilities)!r}. {valid_ids}"
-            )
-        action = (module_id, action_id)
-        if action in decisions and decisions[action] != gate:
-            raise ValueError(
-                f"Conflicting entitlement_gate decisions for {module_id}.{action_id}: "
-                f"{decisions[action]!r} and {gate!r}. Choose one capability for this action. "
-                f"Valid capability ids: {sorted(capabilities)!r}. {valid_ids}"
-            )
-        decisions[action] = gate
         if gate is not None:
-            gates.setdefault(module_id, {})[action_id] = gate
-    mapped = {gate for actions in gates.values() for gate in actions.values()}
-    missing = differing - mapped
-    if missing:
-        raise ValueError(
-            f"module_contract_updates must map every capability that differs between plans "
-            f"to at least one approved action. Unmapped capability ids: {sorted(missing)!r}. "
-            f"Choose the product mapping; the materializer cannot infer it. "
-            f"If no listed action implements the feature, DesignDocs must declare the missing "
-            f"custom_reads action or owned_mutations action before subscription design can pass. "
-            f"validation_notes do not waive this required design decision. {valid_ids}"
-        )
-    if capabilities and not mapped:
-        raise ValueError(
-            f"Plans grant capabilities {sorted(capabilities)!r} but module_contract_updates "
-            f"does not select any action entitlement_gate. Choose at least one approved action. {valid_ids}"
-        )
+            actual.setdefault(update["module_id"], {})[update["action_id"]] = gate
+    if actual != gates:
+        raise ValueError("module_contract_updates differ from gates derived from selected features.")
+    inventory = approved_feature_inventory(context_variables)
+    selected = set().union(*(set(features) for features in selected_by_plan.values()))
+    expected_workflows = {
+        inventory[feature]["surface_id"]: capability_id_for_feature(feature)
+        for feature in selected if inventory[feature]["surface_kind"] == "workflow"
+    }
+    workflow_updates = contract.get("workflow_contract_updates") or []
+    actual_workflows = {
+        update["design_surface_id"]: update["capability_id"] for update in workflow_updates
+    }
+    if len(actual_workflows) != len(workflow_updates) or actual_workflows != expected_workflows:
+        raise ValueError("workflow_contract_updates differ from selected workflow features.")
     return gates
 
 
@@ -162,6 +180,7 @@ def _trim_contract(contract: Mapping[str, Any]) -> dict[str, Any]:
         "app_name",
         "subscription_config_file",
         "metering_declarations",
+        "selected_features_by_plan",
         "module_contract_updates",
         "workflow_contract_updates",
         "page_surface_requirements",
@@ -219,28 +238,25 @@ def _apply_text(agent: Any, text: str) -> None:
 
 
 def inject_subscription_action_inventory(agent: Any, messages: list[dict[str, Any]]) -> None:
-    """Give the designer the finite action choices its save validator accepts."""
+    """Give the designer the finite feature choices its save validator accepts."""
     if getattr(agent, "name", None) != "ContractDesignerAgent":
         return
-    inventory = approved_module_actions(_context_data(agent))
+    inventory = approved_feature_inventory(_context_data(agent))
     rendered = yaml.safe_dump(inventory, sort_keys=True).strip()
     _apply_text(agent, "\n".join([
-        "[APPROVED ENTITLEMENT ACTION INVENTORY]",
-        "These are the only permitted module_id -> action_id choices for module_contract_updates.",
-        "They project approved app-owned writes and declared custom_reads.",
+        "[APPROVED PRICING FEATURE INVENTORY]",
+        "Select plans[].included_features only from these exact feature ids.",
+        "Module features project approved app-owned writes, canonical writes, and declared custom_reads.",
+        "Workflow features appear only when the concept declares agentic capabilities and DesignDocs approves the workflow surface.",
         "Canonical collection list/get actions and managed-pack facades are excluded and always remain ungated.",
         "A paid view requires a declared custom read; never gate the base collection list/get to sell a dashboard.",
         "Plans, upgrade, checkout, portal, usage, and token access stay ungated.",
-        "Copy identifiers exactly. Select entitlement_gate from your plans' capabilities.",
-        "Map every capability that differs between plans to at least one action. If any plan grants",
-        "capabilities, select at least one gate even when all plans grant the same capabilities.",
-        "Each action has at most one entitlement_gate. AppGenerator writes selected gates deterministically.",
-        "Every differing capability must select a real feature action. If its action is missing,",
-        "DesignDocs must first declare that custom read or write. validation_notes cannot waive this closure.",
+        "Code derives capability ids, plan grants, and module gates from the selected features.",
+        "A free tier with a limit includes the core feature and assigns a usage limit to it.",
+        "If a desired feature is missing, remove it from a plan or have DesignDocs approve its action.",
         rendered,
     ]))
-    logger.info("SUBSCRIPTION_ACTION_INVENTORY injected modules=%d actions=%d",
-                len(inventory), sum(len(actions) for actions in inventory.values()))
+    logger.info("SUBSCRIPTION_FEATURE_INVENTORY injected features=%d", len(inventory))
 
 
 def inject_subscription_contract_context(agent: Any, messages: list[dict[str, Any]]) -> None:
@@ -292,8 +308,11 @@ def inject_subscription_contract_context(agent: Any, messages: list[dict[str, An
 
 
 __all__ = [
+    "approved_feature_inventory",
     "approved_module_actions",
+    "capability_id_for_feature",
     "inject_subscription_action_inventory",
     "inject_subscription_contract_context",
+    "selected_feature_gates",
     "validate_module_contract_updates",
 ]

@@ -37,7 +37,7 @@ def _context(route: str, *, phase: str = "genesis", **overrides: object) -> Stru
             "schema_version": "mozaiks.subscriptions.v1",
             "label": "Task Tracker plans",
             "default_plan_id": "free",
-            "plans": [{"plan_id": "free", "label": "Free", "capabilities": []}],
+            "plans": [{"plan_id": "free", "label": "Free", "included_features": []}],
         },
         "page_surface_requirements": [{
             "page_id": route.removeprefix("/"),

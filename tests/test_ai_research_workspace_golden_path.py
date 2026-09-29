@@ -40,6 +40,10 @@ from scripts.appgenerator_fixture_replay import execute_file_replay
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_CONTEXT_ROOT = REPO_ROOT / "factory_app" / "build_context" / "mozaikspay"
+RESEARCH_ACTION_FEATURE = "module.research.execute_research"
+RESEARCH_ACTION_GATE = "feature.module.research.execute_research"
+RESEARCH_WORKFLOW_FEATURE = "workflow.ResearchWorkflow"
+RESEARCH_WORKFLOW_GATE = "feature.workflow.research_workflow"
 
 
 def _subscription_contract() -> dict[str, Any]:
@@ -47,7 +51,7 @@ def _subscription_contract() -> dict[str, Any]:
         "meter_id": "research_executions",
         "label": "Research executions",
         "unit": "requests",
-        "capability_id": "research.execute",
+        "feature_id": RESEARCH_ACTION_FEATURE,
     }
     return {
         "agent_message": "AI Research Workspace subscription contract ready.",
@@ -78,14 +82,14 @@ def _subscription_contract() -> dict[str, Any]:
                     "plan_id": "free",
                     "label": "Free",
                     "description": "Explore the research workspace.",
-                    "capabilities": ["research.view", "research.execute"],
+                    "included_features": [RESEARCH_ACTION_FEATURE, RESEARCH_WORKFLOW_FEATURE],
                     "usage_limits": [{**usage_limit, "monthly_limit": 20}],
                 },
                 {
                     "plan_id": "pro",
                     "label": "Pro",
                     "description": "Higher-volume AI research.",
-                    "capabilities": ["research.view", "research.execute"],
+                    "included_features": [RESEARCH_ACTION_FEATURE, RESEARCH_WORKFLOW_FEATURE],
                     "usage_limits": [{**usage_limit, "monthly_limit": 500}],
                 },
             ],
@@ -103,25 +107,10 @@ def _subscription_contract() -> dict[str, Any]:
             {
                 "surface_type": "workflow",
                 "surface_id": "ResearchWorkflow",
-                "action_id": "research.execute",
+                "action_id": None,
                 "scope": "user",
                 "enforcement": "declaration_only",
                 "idempotency_key_source": "workflow_run_id",
-            }
-        ],
-        "module_contract_updates": [
-            {
-                "module_id": "research",
-                "action_id": "execute_research",
-                "entitlement_gate": "research.execute",
-                "metering": None,
-            }
-        ],
-        "workflow_contract_updates": [
-            {
-                "workflow_id": "ResearchWorkflow",
-                "capability_id": "research.execute",
-                "metering": {"meter_id": "research_executions", "unit": "requests"},
             }
         ],
         "page_surface_requirements": [
@@ -137,7 +126,6 @@ def _subscription_contract() -> dict[str, Any]:
             "Execution-count enforcement is not currently implemented by the OSS runtime."
         ],
         "forbidden_outputs": [],
-        "code_files": [],
     }
 
 
@@ -174,7 +162,7 @@ def _research_module_task() -> dict[str, Any]:
             "modules/research/contracts/reactions.yaml",
         ],
         "depends_on": ["research.subscription_config", "research.persistence"],
-        "acceptance_criteria": ["execute_research is gated by research.execute."],
+        "acceptance_criteria": [f"execute_research is gated by {RESEARCH_ACTION_GATE}."],
     }
 
 
@@ -634,10 +622,13 @@ async def test_ai_research_workspace_offline_golden_path(
             "chat_id": "golden",
             "user_id": "offline-test-user",
             "product_request": product_request,
+            "concept_blueprint": {"agentic_capabilities": ["Run AI research"]},
             "design_surface_map": {"surfaces": [{
                 "surface_id": "research", "surface_kind": "module", "owner": "app",
                 "owned_mutations": ["execute_research"],
                 "primary_entities": ["ResearchResult"], "custom_reads": ["list_results"],
+            }, {
+                "surface_id": "ResearchWorkflow", "surface_kind": "workflow", "owner": "app",
             }]},
             "data_contract": json.loads(_research_files()["data/contract.json"]),
             "structured_output": _subscription_contract(),
@@ -714,9 +705,14 @@ async def test_ai_research_workspace_offline_golden_path(
         for plan in subscriptions["plans"]
     }
     assert limits == {"free": 20, "pro": 500}
+    assert {plan["plan_id"]: plan["capabilities"] for plan in subscriptions["plans"]} == {
+        "free": [RESEARCH_ACTION_GATE, RESEARCH_WORKFLOW_GATE],
+        "pro": [RESEARCH_ACTION_GATE, RESEARCH_WORKFLOW_GATE],
+    }
     research_module = yaml.safe_load(files["modules/research/module.yaml"])
     execute_action = next(action for action in research_module["actions"] if action["id"] == "execute_research")
-    assert execute_action["entitlement_gate"] == "research.execute"
+    assert execute_action["entitlement_gate"] == RESEARCH_ACTION_GATE
+    assert detach(context["subscription_contract"])["workflow_contract_updates"][0]["capability_id"] == RESEARCH_WORKFLOW_GATE
     assert "services/integrations/mozaikspay_client.py" in files
     assert {"ui/pages/billing.yaml", "ui/pages/pricing.yaml", "ui/pages/usage.yaml"} <= set(files)
 

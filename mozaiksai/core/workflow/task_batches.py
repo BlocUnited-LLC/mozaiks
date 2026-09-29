@@ -34,6 +34,7 @@ from .generator_support.code_files import (
 from .generator_support.module_account_data import materialize_task_module_account_handlers
 from .generator_support.module_action_inventory import (
     all_module_actions,
+    approved_workflow_surface_ids,
     pack_owned_output_paths,
     ungated_module_actions,
 )
@@ -1189,7 +1190,12 @@ async def _run_one_task(
                 ))
                 canonical_file_map = compile_module_entitlement_gates(
                     canonical_file_map,
-                    gates_by_module=approved_subscription_gates(subscription_contract),
+                    gates_by_module=approved_subscription_gates(
+                        subscription_contract,
+                        approved_actions=all_module_actions(task_context),
+                        ungated_actions=ungated_module_actions(task_context),
+                        approved_workflows=approved_workflow_surface_ids(task_context),
+                    ),
                     approved_actions=all_module_actions(task_context),
                     ungated_actions=ungated_module_actions(task_context),
                     existing_files=task_context.get("generated_files") or {},

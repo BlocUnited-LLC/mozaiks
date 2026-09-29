@@ -951,8 +951,14 @@ def test_appschema_custom_route_identity_uses_current_producer_path() -> None:
 
 
 def test_committed_design_docs_subscription_build_context_and_route_sources() -> None:
+    from factory_app.workflows.SubscriptionContractDesigner.tools.save_subscription_contract import (
+        normalize_subscription_contract,
+    )
     from tests.test_design_docs_bundle_persistence import _bundle
-    from tests.test_subscription_contract_designer import _sample_contract
+    from tests.test_subscription_contract_designer import (
+        _sample_contract,
+        _sample_design_surface_map,
+    )
 
     # Recorded surface mutations identify actions but contain no request
     # authority. Missing module contracts must not become guessed empty inputs.
@@ -967,16 +973,19 @@ def test_committed_design_docs_subscription_build_context_and_route_sources() ->
     assert design_error.value.gaps[0].kind is ProjectionGapKind.MISSING
     assert "input_schema" in design_error.value.gaps[0].reason
 
+    derived_contract = normalize_subscription_contract(
+        _sample_contract(), {"design_surface_map": _sample_design_surface_map()},
+    )
     with pytest.raises(ProjectionError) as exc_info:
         project_semantic_graph(
-            {"SubscriptionContractOutput": _sample_contract()},
+            {"SubscriptionContractOutput": derived_contract},
             graph_id="recorded-subscription",
             version=1,
             scope=SCOPE,
             taxonomy_registry=_pinned_registry(),
         )
     assert exc_info.value.gaps[0].kind is ProjectionGapKind.MISSING
-    assert "reports.generate" in exc_info.value.gaps[0].reason
+    assert "feature.module.reports.generate_report" in exc_info.value.gaps[0].reason
 
     build_context = yaml.safe_load(
         (ROOT / "factory_app/build_context/AppGenerator/context.yaml").read_text(encoding="utf-8")

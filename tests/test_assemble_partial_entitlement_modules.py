@@ -52,7 +52,7 @@ async def test_missing_module_requires_its_exact_owner_failure(failed, owned_pat
 
 
 @pytest.mark.asyncio
-async def test_partial_batch_does_not_excuse_missing_product_mapping():
+async def test_partial_batch_does_not_excuse_missing_derived_gate_summary():
     context = _partial_context()
     contract = context.snapshot()["subscription_contract"]
     contract["module_contract_updates"] = []
@@ -60,4 +60,4 @@ async def test_partial_batch_does_not_excuse_missing_product_mapping():
 
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"] is False
-    assert "Unmapped capability ids" in result["error"]
+    assert "module_contract_updates differ from gates derived from selected features" in result["error"]

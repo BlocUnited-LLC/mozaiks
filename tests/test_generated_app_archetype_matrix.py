@@ -685,10 +685,10 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
                         plans:
                           - plan_id: free
                             label: Free
-                            capabilities: [reports.view]
+                            capabilities: [feature.module.reports.view_report]
                           - plan_id: pro
                             label: Pro
-                            capabilities: [reports.view, reports.export]
+                            capabilities: [feature.module.reports.view_report, feature.module.reports.export_report]
                         """
                     ).lstrip(),
                 }
@@ -749,9 +749,15 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
             "subscription_config_file": yaml.safe_load(
                 _app_task_output(spec, task_type="subscription_config", task={})["code_files"][0]["content"],
             ),
+            "selected_features_by_plan": {
+                "free": ["module.reports.view_report"],
+                "pro": ["module.reports.view_report", "module.reports.export_report"],
+            },
             "module_contract_updates": [
-                {"module_id": "reports", "action_id": "view_report", "entitlement_gate": "reports.view"},
-                {"module_id": "reports", "action_id": "export_report", "entitlement_gate": "reports.export"},
+                {"module_id": "reports", "action_id": "view_report",
+                 "entitlement_gate": "feature.module.reports.view_report"},
+                {"module_id": "reports", "action_id": "export_report",
+                 "entitlement_gate": "feature.module.reports.export_report"},
             ],
         })
     app_build_plan(AppBuildPlan=spec.plan, context_variables=ctx)
@@ -1090,12 +1096,12 @@ def _saas_checks(client: TestClient, _files: dict[str, str], _loaded: Any) -> No
     _assert_not_missing_or_placeholder(page, surface="/api/pages/reports")
     assert page.status_code == 200
 
-    # Free default plan grants reports.view — the ungated/free surface works.
+    # The free default plan grants the approved report-view feature.
     list_reports = client.post("/api/modules/reports/view_report", json={"params": {}}, headers=headers)
     _assert_not_missing_or_placeholder(list_reports, surface="/api/modules/reports/view_report")
     assert list_reports.status_code == 200
 
-    # reports.export is pro-only: denied before any subscription exists.
+    # Export is pro-only: denied before any subscription exists.
     denied = client.post("/api/modules/reports/export_report", json={"params": {}}, headers=headers)
     assert denied.status_code == 402, (
         f"ENTITLEMENT_GATE_INERT: expected 402 before fulfillment, got {denied.status_code}"

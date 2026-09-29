@@ -38,6 +38,7 @@ from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
 )
 from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+from tests.appgenerator_subscription_fixture import subscription_contract
 
 MODULE = "task_management"
 MANIFEST = f"modules/{MODULE}/module.yaml"
@@ -147,9 +148,7 @@ def test_app_wide_protected_writes_require_exact_explicit_read_access_contract()
 def test_app_wide_gate_only_write_requires_explicit_reads_before_gate_compilation():
     context = ContextVariablesBridge({
         "app_build_plan": _plan(), "data_contract": _contract("app_wide"),
-        "subscription_contract": {"module_contract_updates": [{
-            "module_id": MODULE, "action_id": "update_task", "entitlement_gate": "task.edit",
-        }]},
+        "subscription_contract": subscription_contract(MODULE, "update_task", free_actions=("update_task",)),
     })
     with pytest.raises(ValueError, match="app_wide.*protected writes.*explicitly declare 'get_tasks'"):
         close_module_read_actions(
@@ -182,11 +181,9 @@ def test_artifact_only_app_wide_write_gate_rejects_implicit_reads_on_save():
     context = ContextVariablesBridge({
         "app_build_plan": _plan(), "data_contract": _contract("app_wide"),
         "current_build_task": {"owned_paths": [MANIFEST]},
-        "subscription_contract_artifact": {"commit_metadata": {"metadata": {"summary_payload": {
-            "contract_required": True, "module_contract_updates": [{
-                "module_id": MODULE, "action_id": "update_task", "entitlement_gate": "task.edit",
-            }],
-        }}}},
+        "subscription_contract_artifact": {"commit_metadata": {"metadata": {"summary_payload":
+            subscription_contract(MODULE, "update_task", free_actions=("update_task",)),
+        }}},
     })
     with pytest.raises(ValueError, match="app_wide.*protected writes.*explicitly declare 'get_tasks'"):
         save_generated_code(StructuredOutputOverlay(context, _output()))
@@ -379,10 +376,9 @@ async def test_task_dependency_keeps_custom_read_and_write_gates_and_ungated_can
             "primary_entities": ["Task"], "owned_mutations": ["create_task", "update_task", "delete_task"],
             "custom_reads": ["task_summary"],
         }]},
-        "subscription_contract": {"contract_required": True, "module_contract_updates": [
-            {"module_id": MODULE, "action_id": "update_task", "entitlement_gate": "task.edit"},
-            {"module_id": MODULE, "action_id": "task_summary", "entitlement_gate": "task.summary"},
-        ]},
+        "subscription_contract": subscription_contract(
+            MODULE, "update_task", "task_summary", free_actions=("update_task",),
+        ),
     })
     if artifact_only:
         bridge.set("subscription_contract_artifact", {"metadata": {"summary_payload": bridge.get("subscription_contract")}})
@@ -401,8 +397,8 @@ async def test_task_dependency_keeps_custom_read_and_write_gates_and_ungated_can
             dependency = worker.get("dependency_task_outputs")["task_contract"]
             files = extract_code_file_map_from_payload(detach(dependency))
             actions = {action["id"]: action for action in yaml.safe_load(files[MANIFEST])["actions"]}
-            assert actions["update_task"]["entitlement_gate"] == "task.edit"
-            assert actions["task_summary"]["entitlement_gate"] == "task.summary"
+            assert actions["update_task"]["entitlement_gate"] == "feature.module.task_management.update_task"
+            assert actions["task_summary"]["entitlement_gate"] == "feature.module.task_management.task_summary"
             assert "entitlement_gate" not in actions["list_tasks"]
             assert actions["list_tasks"]["permissions"] == []
             assert "entitlement_gate" not in actions["get_tasks"]

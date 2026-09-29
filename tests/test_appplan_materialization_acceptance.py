@@ -254,10 +254,10 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "plans:\n"
                         "  - plan_id: free\n"
                         "    label: Free\n"
-                        "    capabilities: [reports.view]\n"
+                        "    capabilities: [feature.module.reports.view_report]\n"
                         "  - plan_id: pro\n"
                         "    label: Pro\n"
-                        "    capabilities: [reports.view, reports.export]\n"
+                        "    capabilities: [feature.module.reports.view_report, feature.module.reports.export_report]\n"
                     ),
                 }
             ],
@@ -320,11 +320,11 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "  - id: reports.read\n"
                         "    description: Read reports.\n"
                         "capabilities:\n"
-                        "  - capability_id: reports.view\n"
+                        "  - capability_id: feature.module.reports.view_report\n"
                         "    kind: action\n"
                         "    target: view_report\n"
                         "    title: View reports\n"
-                        "  - capability_id: reports.export\n"
+                        "  - capability_id: feature.module.reports.export_report\n"
                         "    kind: action\n"
                         "    target: export_report\n"
                         "    title: Export reports\n"
@@ -574,13 +574,13 @@ def _assignment_docs(app_id: str) -> list[dict[str, Any]]:
             "plan_id": "pro",
             "status": "active",
             "granted_capabilities": [
-                {"capability_id": "reports.view"},
-                {"capability_id": "reports.export"},
+                {"capability_id": "feature.module.reports.view_report"},
+                {"capability_id": "feature.module.reports.export_report"},
             ],
             "plan_snapshot": {
                 "granted_capabilities": [
-                    {"capability_id": "reports.view"},
-                    {"capability_id": "reports.export"},
+                    {"capability_id": "feature.module.reports.view_report"},
+                    {"capability_id": "feature.module.reports.export_report"},
                 ]
             },
         }
@@ -600,9 +600,16 @@ def _approved_context_values() -> dict[str, Any]:
         "subscription_contract": {
             "contract_required": True,
             "subscription_config_file": yaml.safe_load(subscription_fixture["code_files"][0]["content"]),
-            "module_contract_updates": [{
-                "module_id": "reports", "action_id": "export_report", "entitlement_gate": "reports.export",
-            }],
+            "selected_features_by_plan": {
+                "free": ["module.reports.view_report"],
+                "pro": ["module.reports.view_report", "module.reports.export_report"],
+            },
+            "module_contract_updates": [
+                {"module_id": "reports", "action_id": "view_report",
+                 "entitlement_gate": "feature.module.reports.view_report"},
+                {"module_id": "reports", "action_id": "export_report",
+                 "entitlement_gate": "feature.module.reports.export_report"},
+            ],
         },
     }
 

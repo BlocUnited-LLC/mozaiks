@@ -32,8 +32,8 @@ function Section({ title, children }) {
   );
 }
 
-function PlanCard({ plan }) {
-  const capabilities = asList(plan?.capabilities);
+function PlanCard({ plan, includedFeatures }) {
+  const features = asList(includedFeatures);
   const limits = asList(plan?.usage_limits);
   const allowances = asList(plan?.token_allowances);
 
@@ -57,8 +57,8 @@ function PlanCard({ plan }) {
 
       <div className="grid gap-3 md:grid-cols-3">
         <div>
-          <p className="mb-1 text-xs font-semibold text-muted-foreground">Capabilities</p>
-          <TextList items={capabilities} />
+          <p className="mb-1 text-xs font-semibold text-muted-foreground">Included features</p>
+          <TextList items={features} empty="No gated features selected." />
         </div>
         <div>
           <p className="mb-1 text-xs font-semibold text-muted-foreground">Usage Limits</p>
@@ -119,7 +119,7 @@ function RationaleTable({ rows }) {
 function UpdateList({ updates }) {
   const items = asList(updates);
   if (!items.length) {
-    return <p className="text-xs text-muted-foreground">No gated module actions declared.</p>;
+    return <p className="text-xs text-muted-foreground">No gated module actions derived.</p>;
   }
   return (
     <ul className="flex flex-col gap-2">
@@ -140,11 +140,13 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
   const [submitted, setSubmitted] = useState(null);
 
   const plans = asList(payload.plans);
+  const selectedFeaturesByPlan = payload.selected_features_by_plan || {};
   const tokenWallets = asList(payload.token_wallets);
   const topUps = asList(payload.top_up_products);
   const addOns = asList(payload.add_on_products);
   const usagePolicies = asList(payload.usage_charge_policies);
   const moduleUpdates = asList(payload.module_contract_updates);
+  const moduleGates = moduleUpdates.filter((update) => Boolean(update?.entitlement_gate));
   const workflowUpdates = asList(payload.workflow_contract_updates);
   const pages = asList(payload.page_surface_requirements);
   const forbiddenOutputs = asList(payload.forbidden_outputs);
@@ -209,7 +211,7 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
         <Metric label="Plans" value={plans.length} />
         <Metric label="Token Wallets" value={tokenWallets.length} />
         <Metric label="Add-Ons" value={addOns.length} />
-        <Metric label="Gated Actions" value={moduleUpdates.length} />
+        <Metric label="Gated Actions" value={moduleGates.length} />
       </div>
 
       {contractRequired ? (
@@ -217,7 +219,11 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
           <Section title="Subscription Plans">
             <div className="grid gap-3">
               {plans.map((plan, index) => (
-                <PlanCard key={plan?.plan_id || index} plan={plan} />
+                <PlanCard
+                  key={plan?.plan_id || index}
+                  plan={plan}
+                  includedFeatures={selectedFeaturesByPlan[plan?.plan_id]}
+                />
               ))}
             </div>
           </Section>
@@ -279,17 +285,17 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
             </Section>
           </div>
 
-          <Section title="Entitlement And Workflow Updates">
+          <Section title="Derived Entitlement And Workflow Mappings">
             <div className="grid gap-4 lg:grid-cols-2">
               <div>
                 <p className="mb-2 text-xs font-semibold text-muted-foreground">Module action gates</p>
-                <UpdateList updates={moduleUpdates} />
+                <UpdateList updates={moduleGates} />
               </div>
               <div>
-                <p className="mb-2 text-xs font-semibold text-muted-foreground">Workflow metering</p>
+                <p className="mb-2 text-xs font-semibold text-muted-foreground">Workflow feature mappings</p>
                 <TextList
-                  items={workflowUpdates.map((update) => `${update?.workflow_name}: ${update?.capability_id}`)}
-                  empty="No workflow-level metering declared."
+                  items={workflowUpdates.map((update) => `${update?.design_surface_id}: ${update?.capability_id}`)}
+                  empty="No workflow features selected."
                 />
               </div>
             </div>

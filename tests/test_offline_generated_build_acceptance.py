@@ -246,13 +246,11 @@ assignment_store:
 plans:
   - plan_id: free
     label: Free
-    capabilities:
-      - reports.view
+    capabilities: []
   - plan_id: pro
     label: Pro
     capabilities:
-      - reports.view
-      - reports.export
+      - feature.module.reports.export_report
 """,
         "ui/route_manifest.json": json.dumps(
             {
@@ -329,7 +327,7 @@ actions:
   - id: export_report
     description: Export a report as CSV. Requires Pro plan.
     handler_method: export_report
-    entitlement_gate: reports.export
+    entitlement_gate: feature.module.reports.export_report
     permissions:
       - reports.read
     input_schema:
@@ -506,8 +504,12 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         context.set("subscription_contract", {
             "contract_required": True,
             "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"]),
+            "selected_features_by_plan": {
+                "free": [], "pro": ["module.reports.export_report"],
+            },
             "module_contract_updates": [{
-                "module_id": "reports", "action_id": "export_report", "entitlement_gate": "reports.export",
+                "module_id": "reports", "action_id": "export_report",
+                "entitlement_gate": "feature.module.reports.export_report",
             }],
         })
     app_build_plan(AppBuildPlan=plan, context_variables=context)
@@ -706,12 +708,12 @@ def test_scan_flags_unknown_entitlement_gate() -> None:
     """Scanner rejects a module.yaml whose entitlement_gate is not in any subscriptions.yaml plan."""
     files = _generated_saas_build_files()
     files["modules/reports/module.yaml"] = files["modules/reports/module.yaml"].replace(
-        "entitlement_gate: reports.export",
-        "entitlement_gate: reports.nonexistent_capability",
+        "entitlement_gate: feature.module.reports.export_report",
+        "entitlement_gate: feature.module.reports.nonexistent_capability",
     )
 
     errors = scan_generated_bundle(files)
-    assert any("reports.nonexistent_capability" in e for e in errors)
+    assert any("feature.module.reports.nonexistent_capability" in e for e in errors)
 
 
 @pytest.mark.asyncio

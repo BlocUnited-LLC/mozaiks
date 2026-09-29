@@ -161,6 +161,7 @@ agents:
 
       **Output Contract**:
       - `PatternSelection.workflows[]` defines the proposed workflow topology. Its entries are projected into `workflows_spec` for plan review, bundle-generation tasks, and pack registry assembly.
+      - Each workflow entry carries the exact approved DesignDocs `design_surface_id`. Selected pricing workflow features must each resolve to exactly one entry before plan review.
       - Required dispatch field: `initial_agent: WorkflowBundleBuilderAgent`. This is a task-dispatch identifier, not an input source or conversational dependency.
       - `initial_message` is the scoped generation brief each independent task receives.
       - The `pattern_selection` tool validates the response and publishes `is_multi_workflow`, `pack_name`, `pack_partition_reason`, and `workflows_spec` after your turn.
@@ -173,6 +174,7 @@ agents:
 
       If `design_surface_map` is present, use it as the realization boundary source of truth:
       - Generate workflows ONLY for entries where `surface_kind = workflow`.
+      - Copy each workflow surface's exact `surface_id` into its `WorkflowInPack.design_surface_id`. This identifies the approved surface even when its generated PascalCase workflow name differs.
       - Do NOT invent extra workflows for `module`, `app_policy`, `refinement`, `external_integration`, or `ui_only` surfaces.
       - If it has no workflow surfaces, emit workflows: [] and is_multi_workflow: false with a rationale. Do not add an optional supporting workflow.
       - If it declares workflow surfaces, do not omit them. A request that changes the design boundary requires upstream design refinement.
@@ -297,6 +299,7 @@ agents:
       Assemble the final JSON with all fields populated. Double-check:
       - `workflows[]` contains exactly the workflows that should be built.
       - Every workflow has a valid `pattern_id` (1–9).
+      - Every selected pricing workflow feature has exactly one workflow entry with the matching DesignDocs `design_surface_id`; use null only when no approved workflow surface applies.
       - Every workflow has the required `initial_agent` dispatch value.
       - Every workflow has a concrete `initial_message`.
       - Every workflow has a `depends_on` list (empty `[]` if no prerequisites).
@@ -324,6 +327,7 @@ agents:
           "workflows": [
             {
               "name": "<PascalCase>",
+              "design_surface_id": "<approved DesignDocs workflow surface_id or null>",
               "role": "primary|supporting",
               "description": "<one sentence>",
               "pattern_id": <int 1-9>,
@@ -347,6 +351,7 @@ agents:
           "workflows": [
             {
               "name": "ContentFeedAI",
+              "design_surface_id": "content_feed_ai",
               "role": "primary",
               "description": "Scores and ranks content items via parallel specialist asks",
               "pattern_id": 8,
@@ -357,6 +362,7 @@ agents:
             },
             {
               "name": "ModerationAI",
+              "design_surface_id": "moderation_ai",
               "role": "supporting",
               "description": "Triages reported content through classify → analyse → decision → action pipeline",
               "pattern_id": 9,
@@ -639,6 +645,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Your task brief** (from `initial_message`): Contains workflow_name, pattern, role, description, workflow_startup_mode, HITL flag, key integrations.
+      The task's `design_surface_id` names the exact approved DesignDocs workflow surface; preserve its selected pricing feature's derived capability_id in event triggers.
 
       **Concept context** (from context_variables):
       - `concept_overview`: Overall product intent — use to ensure your workflow fits the product design.
@@ -649,9 +656,16 @@ agents:
       **Pattern guidance**: Injected at runtime by Mozaiks prompt middleware. Contains the full patternbook entry for your assigned pattern — agent archetypes, AG2 Network primitives, transition graph strategy, required context variables, required tools, and generator notes. Use this as your structural template.
 
       **Subscription/token contract guidance**: When [SUBSCRIPTION CONTRACT CONTEXT]
-      is injected, preserve its workflow_contract_updates and metering_declarations.
-      Copy workflow ids, wallet ids, enforcement mode, estimates, and idempotency
-      key source exactly from the contract when they apply to this workflow.
+      is injected, read its derived workflow_contract_updates and authored
+      metering_declarations. Each workflow update names the approved
+      design_surface_id and derived capability_id; workflow_name is null until
+      this workflow is generated. Match the approved design surface to the
+      current task's `design_surface_id`; AgentGenerator resolves the concrete
+      workflow name in generated workflow metadata. Preserve the derived capability_id; do not
+      copy a null workflow_name or invent a workflow feature. When metering
+      applies, preserve wallet id, enforcement mode, estimate, and idempotency
+      key source from the declaration. A missing or ambiguous surface match
+      requires correction before generation.
       Generated workflows may declare metering context and idempotency fields,
       but must not implement reserve/commit logic, a custom token ledger, custom
       usage ledger, payment checkout, invoices, or hosted billing internals.

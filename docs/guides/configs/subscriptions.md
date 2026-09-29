@@ -24,34 +24,50 @@ Payment providers, invoices, taxes, payouts, and settlement stay behind app or
 managed-capability integrations. The subscriptions file defines the app's
 provider-neutral access contract.
 
-For generated apps, SubscriptionContractDesigner chooses which approved module
-actions each capability gates in `module_contract_updates`. It selects exact
-DesignDocs surface and action IDs; capabilities that differ between plans must
-each gate an action. Gate targets come from approved `owned_mutations`, the
+For generated apps, SubscriptionContractDesigner selects plan features from the
+injected approved pricing feature inventory. Module feature IDs have the form
+`module.<module_id>.<action_id>` and identify approved `owned_mutations`,
 code-constructed canonical `create_<entity>` / `update_<entity>` /
-`delete_<entity>` writes, and declared `custom_reads`. Canonical
-`list_<collection>` / `get_<collection>` actions are never gate targets; a paid
-view must be a declared custom read.
-Custom reads such as dashboard summaries are design decisions implemented by
-ServiceAgent; canonical collection reads are constructed by code.
+`delete_<entity>` writes, or declared `custom_reads`. Workflow feature IDs have
+the form `workflow.<approved_surface_id>` and appear only when the approved
+concept has an agentic capability. The model selects these IDs in
+`subscription_config_file.plans[].included_features`; it does not invent
+capability IDs or action gate mappings. The factory derives stable
+`feature.<feature_id>` capability IDs (normalizing each ID segment to lowercase
+snake case when needed), runtime `plans[].capabilities`, and
+`module_contract_updates`, then applies the gates to `module.yaml` during task
+admission, assembly, and repair. The persisted contract also records
+`selected_features_by_plan` for downstream review. It derives
+`workflow_contract_updates` for selected workflow features; AgentGenerator
+resolves the concrete workflow name later. Generated add-ons may select
+`required_feature` from the same inventory, which code translates to the
+runtime `required_capability` field.
 
-Managed-pack facade actions are also excluded from gate targets, so plan browsing,
-checkout, upgrades, the billing portal, usage, and token access remain available
-to free users. If a paid feature has no approved action, DesignDocs must declare
-it before subscription design can pass; review notes cannot waive that decision.
-One compiler rejects action IDs outside the approved module inventory and applies
-the selected gates to `module.yaml` during task admission, assembly
-and repair. Gate mappings or authored gates on canonical reads and managed
-facade actions are rejected. Generated YAML cannot override
-or remove the approved mapping. Writing a gated manifest, including replacing an
-existing gated manifest with an ungated repair, requires the approved subscription
-contract. Missing approval fails closed; an explicit approved no-subscription
-decision can remove old gates.
+For example, when the approved `tasks` module has `create_task`, `update_task`,
+`delete_task`, and a custom `summarize_tasks` read, a limited Free plan selects
+the three core write features and sets a usage limit with
+`feature_id: module.tasks.create_task`. Pro selects those features plus
+`module.tasks.summarize_tasks`. Canonical `list_tasks` and `get_tasks` reads are
+available to both plans without a gate. A paid view needs a declared custom
+read; canonical collection list/get actions and managed-pack facade actions
+are excluded from the feature inventory. Plan browsing, checkout, upgrades,
+the billing portal, usage, and token access remain available to free users.
+
+Selecting an unavailable feature produces feedback listing the valid inventory
+and the option to remove it from the plan. If the product needs a missing
+custom read or write, DesignDocs must approve it before subscription design
+can use it. Generated YAML cannot override or remove the derived gate mapping.
+Writing a gated manifest, including replacing an existing gated manifest with
+an ungated repair, requires the approved subscription contract. Missing
+approval fails closed; an explicit approved no-subscription decision can
+remove old gates.
 
 ## Multi-Product Catalog
 
-Use the product catalog shape when the app has more than one paid line, such as
-platform access, AI usage, hosting, domains, or marketing placement.
+Manually authored apps can use the v2 product catalog shape when they have more
+than one paid line, such as platform access, AI usage, hosting, domains, or
+marketing placement. SubscriptionContractDesigner emits v1 with optional
+`pricing_catalog` display groups.
 
 ```yaml
 schema_version: mozaiks.subscriptions.v2
@@ -156,12 +172,13 @@ pricing_catalog:
 
 ```yaml
 actions:
-  - action_id: export_report
-    handler_method: export_report
-    entitlement_gate: reports.export
+  - action_id: summarize_tasks
+    handler_method: summarize_tasks
+    entitlement_gate: feature.module.tasks.summarize_tasks
 ```
 
-Any active plan that grants `reports.export` allows the action to run.
+The factory derives this gate from the selected `module.tasks.summarize_tasks`
+feature. Any active plan that grants it allows the action to run.
 
 ## Custom Money Rules
 

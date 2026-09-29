@@ -51,9 +51,9 @@ def _sample_contract() -> dict:
             },
             {
                 "source_context": "design_surface_map",
-                "signal": "ReportAnalysis is the metered workflow and reports.generate is the gated action.",
-                "decision": "Gate report generation and meter the analysis workflow with ai_tokens.",
-                "affected_plan_ids": ["pro"],
+                "signal": "reports.generate_report is the approved AI action.",
+                "decision": "Include limited report generation in Free and meter the action.",
+                "affected_plan_ids": ["free", "pro"],
                 "affected_pricing_group_ids": ["ai_usage"],
             },
         ],
@@ -124,7 +124,7 @@ def _sample_contract() -> dict:
                         "display": "$25",
                         "interval": "one_time",
                     },
-                    "required_capability": "reports.generate",
+                    "required_feature": "module.reports.generate_report",
                     "capability_groups": ["reports"],
                     "duration_days": None,
                     "active": True,
@@ -179,14 +179,14 @@ def _sample_contract() -> dict:
                     "plan_id": "free",
                     "label": "Free",
                     "description": "Trial plan.",
-                    "capabilities": ["reports.view"],
+                    "included_features": ["module.reports.generate_report"],
                     "usage_limits": [
                         {
                             "meter_id": "ai_tokens",
                             "label": "AI tokens",
                             "unit": "tokens",
                             "monthly_limit": 10000,
-                            "capability_id": "reports.generate",
+                            "feature_id": "module.reports.generate_report",
                         }
                     ],
                     "token_allowances": [
@@ -202,7 +202,7 @@ def _sample_contract() -> dict:
                     "plan_id": "pro",
                     "label": "Pro",
                     "description": "Paid plan.",
-                    "capabilities": ["reports.view", "reports.generate"],
+                    "included_features": ["module.reports.generate_report"],
                     "usage_limits": [],
                     "token_allowances": [
                         {
@@ -217,25 +217,16 @@ def _sample_contract() -> dict:
         },
         "metering_declarations": [
             {
-                "surface_type": "workflow",
-                "surface_id": "ReportAnalysis",
-                "action_id": "report-analysis",
+                "surface_type": "module_action",
+                "surface_id": "reports",
+                "action_id": "generate_report",
                 "wallet_id": "ai_tokens",
                 "scope": "user",
                 "enforcement": "reserve_then_commit",
                 "estimate": 20000,
-                "idempotency_key_source": "workflow_run_id",
+                "idempotency_key_source": "request_id",
             }
         ],
-        "module_contract_updates": [
-            {
-                "module_id": "reports",
-                "action_id": "generate_report",
-                "entitlement_gate": "reports.generate",
-                "metering": None,
-            }
-        ],
-        "workflow_contract_updates": [],
         "page_surface_requirements": [
             {
                 "page_id": "usage",
@@ -247,7 +238,6 @@ def _sample_contract() -> dict:
         "app_generator_instructions": [],
         "validation_notes": [],
         "forbidden_outputs": [],
-        "code_files": [],
     }
 
 
@@ -315,7 +305,7 @@ def test_subscription_contract_designer_schema_supports_semantic_pricing_catalog
     assert "AddOnProduct" in models
     assert "AddOnProductPrice" in models
 
-    subscription_fields = models["SubscriptionConfigFile"]["fields"]
+    subscription_fields = models["SubscriptionConfigDesign"]["fields"]
     assert subscription_fields["pricing_catalog"]["variants"] == ["PricingCatalog", "null"]
     assert subscription_fields["usage_charge_policies"]["items"] == "UsageChargePolicy"
     assert subscription_fields["top_up_products"]["items"] == "TokenTopUpProduct"
@@ -323,9 +313,18 @@ def test_subscription_contract_designer_schema_supports_semantic_pricing_catalog
     assert models["TokenWallet"]["fields"]["depleted_balance"]["variants"] == ["TokenWalletRecovery", "null"]
     assert models["TokenTopUpProduct"]["fields"]["price"]["type"] == "TokenTopUpPrice"
     assert models["AddOnProduct"]["fields"]["price"]["variants"] == ["AddOnProductPrice", "null"]
+    assert "required_feature" in models["AddOnProduct"]["fields"]
+    assert "required_capability" not in models["AddOnProduct"]["fields"]
+    assert "included_features" in models["SubscriptionPlan"]["fields"]
+    assert "capabilities" not in models["SubscriptionPlan"]["fields"]
+    assert "feature_id" in models["UsageLimit"]["fields"]
+    assert "capability_id" not in models["UsageLimit"]["fields"]
 
     output_fields = models["SubscriptionContractOutput"]["fields"]
     assert output_fields["plan_design_rationale"]["items"] == "PlanDesignRationale"
+    assert "module_contract_updates" not in output_fields
+    assert "workflow_contract_updates" not in output_fields
+    assert "code_files" not in output_fields
 
 
 def test_subscription_contract_designer_prompt_maps_plans_to_upstream_context() -> None:
@@ -346,6 +345,11 @@ def test_subscription_contract_designer_prompt_maps_plans_to_upstream_context() 
     assert "access only" in agents_text
     assert "add_on_products" in agents_text
     assert "pricing_catalog.groups[].add_on_ids" in agents_text
+    assert "[APPROVED PRICING FEATURE INVENTORY]" in agents_text
+    assert "module.tasks.create_task" in agents_text
+    assert "module.tasks.summarize_tasks" in agents_text
+    assert "monthly_limit: 25" in agents_text
+    assert "Do not write" in agents_text
 
 
 def test_subscription_contract_designer_exposes_review_ui() -> None:
@@ -367,12 +371,16 @@ def test_subscription_contract_designer_exposes_review_ui() -> None:
     assert tool["tool_type"] == "UI_Tool"
     assert tool["ui"]["component"] == "SubscriptionContractReview"
     assert tool["ui"]["mode"] == "artifact"
+    assert tool["ui_contract"]["payload_schema"]["properties"]["selected_features_by_plan"]["type"] == "object"
     assert tool["ui_contract"]["actions_schema"][0]["id"] == "confirm"
     assert "SubscriptionContractReview" in ui_index
     assert "Confirm Subscription Plan Contract" in ui_source
     assert "matches what the user wants" in ui_source
     assert "does not charge anyone" in ui_source
     assert "Add-on products" in ui_source
+    assert "Included features" in ui_source
+    assert "selected_features_by_plan" in ui_source
+    assert "design_surface_id" in ui_source
     assert "Request Changes" in ui_source
     assert "canRequestChanges" in ui_source
 
@@ -402,8 +410,14 @@ def test_appgenerator_and_agentgenerator_receive_subscription_contract_context()
 
 def test_subscription_context_injection_preserves_plan_design_reasoning() -> None:
     from factory_app.workflows._shared.subscription_contract_context import _trim_contract
+    from factory_app.workflows.SubscriptionContractDesigner.tools.save_subscription_contract import (
+        normalize_subscription_contract,
+    )
 
-    trimmed = _trim_contract(_sample_contract())
+    normalized = normalize_subscription_contract(
+        _sample_contract(), {"design_surface_map": _sample_design_surface_map()},
+    )
+    trimmed = _trim_contract(normalized)
 
     assert "plan_design_rationale" in trimmed
     assert trimmed["plan_design_rationale"][0]["source_context"] == "concept_blueprint"
@@ -414,6 +428,10 @@ def test_subscription_context_injection_preserves_plan_design_reasoning() -> Non
     assert trimmed["subscription_config_file"]["add_on_products"][0]["add_on_id"] == "priority_review"
     assert trimmed["subscription_config_file"]["pricing_catalog"]["groups"][2]["add_on_ids"] == ["priority_review"]
     assert trimmed["subscription_config_file"]["token_wallets"][0]["depleted_balance"]["recovery_action"] == "top_up"
+    assert trimmed["selected_features_by_plan"] == {
+        "free": ["module.reports.generate_report"],
+        "pro": ["module.reports.generate_report"],
+    }
 
 
 def test_appgenerator_declares_subscription_config_task_contract() -> None:
@@ -437,7 +455,7 @@ def test_appgenerator_declares_subscription_config_task_contract() -> None:
     assert "top_up_products" in agents_text
     assert "add_on_products" in agents_text
     assert "depleted_balance" in agents_text
-    assert "module_contract_updates" in agents_text
+    assert "action gates from the approved plan feature selections" in agents_text
     assert "Omit `entitlement_gate`; deterministic code applies approved subscription decisions." in agents_text
     assert "entitlement_gate" not in structured_outputs["models"]["ModuleAction"]["fields"]
     assert "Treat the action list in `current_build_task.initial_message` as a closed contract" in agents_text
@@ -531,8 +549,10 @@ def test_app_build_plan_accepts_subscription_config_task() -> None:
 def test_agentgenerator_preserves_workflow_metering_contract_without_runtime_logic() -> None:
     agents_text = (WORKFLOWS_ROOT / "AgentGenerator" / "agents.yaml").read_text(encoding="utf-8")
 
-    assert "workflow_contract_updates and metering_declarations" in agents_text
-    assert "Copy workflow ids, wallet ids, enforcement mode, estimates" in agents_text
+    assert "workflow_contract_updates and authored" in agents_text
+    assert "design_surface_id and derived capability_id" in agents_text
+    assert "workflow_name is null until" in agents_text
+    assert "resolves the concrete" in agents_text
     assert "must not implement reserve/commit logic" in agents_text
     assert "OSS runtime token wallet primitives" in agents_text
 
@@ -545,6 +565,7 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     )
 
     persisted: dict = {}
+    review_payload: dict = {}
 
     async def _fake_persist_summary_artifact(**kwargs):
         persisted.update(kwargs)
@@ -553,6 +574,7 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
 
     async def _fake_use_ui_tool(*args, **kwargs):
+        review_payload.update(args[1])
         return {"action": "confirm", "approved": True, "status": "approved"}
 
     monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
@@ -592,6 +614,18 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     assert config.pricing_catalog.groups[1].group_id == "ai_usage"
     assert config.usage_charge_policies[0].markup_percent == 35
     assert config.plans[1].token_allowances[0].amount == 250000
+    assert config.plans[0].capabilities == ["feature.module.reports.generate_report"]
+    assert config.plans[0].usage_limits[0].capability_id == "feature.module.reports.generate_report"
+    assert config.add_on_products[0].required_capability == "feature.module.reports.generate_report"
+    assert context["subscription_contract"]["selected_features_by_plan"]["free"] == [
+        "module.reports.generate_report"
+    ]
+    assert context["subscription_contract"]["module_contract_updates"] == [{
+        "module_id": "reports", "action_id": "generate_report",
+        "entitlement_gate": "feature.module.reports.generate_report",
+        "metering": _sample_contract()["metering_declarations"][0],
+    }]
+    assert review_payload["selected_features_by_plan"] == context["subscription_contract"]["selected_features_by_plan"]
     assert context["subscription_contract"]["plan_design_rationale"][0]["source_context"] == "concept_blueprint"
 
     assert persisted["artifact_kind"] == "subscription_contract"
@@ -773,7 +807,7 @@ def test_subscription_contract_normalizer_rejects_hosted_product_terms() -> None
     ]
 
     with pytest.raises(ValueError, match="provider-neutral"):
-        normalize_subscription_contract(contract)
+        normalize_subscription_contract(contract, {"design_surface_map": _sample_design_surface_map()})
 
 
 def test_subscription_contract_allows_access_only_saas_without_token_wallets() -> None:
@@ -784,7 +818,6 @@ def test_subscription_contract_allows_access_only_saas_without_token_wallets() -
     contract = _sample_contract()
     contract["rationale"] = "The app sells paid access tiers but no AI credits or quotas."
     contract["metering_declarations"] = []
-    contract["workflow_contract_updates"] = []
     config = contract["subscription_config_file"]
     config.pop("token_wallets", None)
     config.pop("top_up_products", None)
@@ -794,7 +827,7 @@ def test_subscription_contract_allows_access_only_saas_without_token_wallets() -
         plan["usage_limits"] = []
         plan["token_allowances"] = []
 
-    normalized = normalize_subscription_contract(contract)
+    normalized = normalize_subscription_contract(contract, {"design_surface_map": _sample_design_surface_map()})
 
     parsed = normalized["subscription_config_file"]
     assert "token_wallets" not in parsed
@@ -803,7 +836,7 @@ def test_subscription_contract_allows_access_only_saas_without_token_wallets() -
     assert "usage_charge_policies" not in parsed
     assert all("token_allowances" not in plan for plan in parsed["plans"])
     assert all("usage_limits" not in plan for plan in parsed["plans"])
-    assert parsed["plans"][1]["capabilities"] == ["reports.view", "reports.generate"]
+    assert parsed["plans"][1]["capabilities"] == ["feature.module.reports.generate_report"]
 
 
 def test_subscription_contract_rejects_token_wallets_without_usage_credit_or_quota_intent() -> None:
@@ -813,8 +846,6 @@ def test_subscription_contract_rejects_token_wallets_without_usage_credit_or_quo
 
     contract = _sample_contract()
     contract["metering_declarations"] = []
-    contract["module_contract_updates"][0]["metering"] = None
-    contract["workflow_contract_updates"] = []
     config = contract["subscription_config_file"]
     config.pop("top_up_products", None)
     config.pop("usage_charge_policies", None)
@@ -822,15 +853,19 @@ def test_subscription_contract_rejects_token_wallets_without_usage_credit_or_quo
         plan["usage_limits"] = []
 
     with pytest.raises(ValueError, match="token_wallets are only valid"):
-        normalize_subscription_contract(contract)
+        normalize_subscription_contract(contract, {"design_surface_map": _sample_design_surface_map()})
 
 
 def _normalize(config: dict) -> dict:
-    from factory_app.workflows.SubscriptionContractDesigner.tools.save_subscription_contract import (  # noqa: E501
-        _normalize_subscription_config,
+    from factory_app.workflows.SubscriptionContractDesigner.tools.save_subscription_contract import (
+        normalize_subscription_contract,
     )
 
-    return _normalize_subscription_config(config)
+    contract = _sample_contract()
+    contract["subscription_config_file"] = config
+    return normalize_subscription_contract(
+        contract, {"design_surface_map": _sample_design_surface_map()},
+    )["subscription_config_file"]
 
 
 def test_assignment_store_schema_declares_the_revision_field() -> None:
@@ -892,10 +927,16 @@ def test_null_revision_field_survives_the_full_generator_roundtrip() -> None:
 
     contract = _sample_contract()
     contract["subscription_config_file"]["assignment_store"]["revision_field"] = None
-    normalized = _normalize(contract["subscription_config_file"])
+    from factory_app.workflows.SubscriptionContractDesigner.tools.save_subscription_contract import (
+        normalize_subscription_contract,
+    )
+
+    normalized = normalize_subscription_contract(
+        contract, {"design_surface_map": _sample_design_surface_map()},
+    )
 
     rendered = _materialize_subscriptions_yaml(
-        context_variables={"subscription_contract": {**contract, "subscription_config_file": normalized}}
+        context_variables={"subscription_contract": normalized}
     )
     assert "revision_field: null" in rendered
 
@@ -944,8 +985,6 @@ def _no_contract_output() -> dict:
         "app_name": "TaskTracker Pro",
         "subscription_config_file": None,
         "metering_declarations": [],
-        "module_contract_updates": [],
-        "workflow_contract_updates": [],
         "page_surface_requirements": [],
         "app_generator_instructions": [],
         "validation_notes": [],

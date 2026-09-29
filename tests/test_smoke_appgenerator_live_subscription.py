@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from scripts.smoke_appgenerator_live_subscription import (
+    REPORT_GATE_ID,
     WORKFLOWS_ROOT,
     deterministic_module_contract_output,
     deterministic_subscription_output,
@@ -53,7 +54,7 @@ def test_module_contract_validator_compiles_the_exact_approved_entitlement_gate(
     content, errors = validate_module_contract_output(output)
 
     assert not errors
-    assert yaml.safe_load(content)["actions"][1]["entitlement_gate"] == "reports.generate"
+    assert yaml.safe_load(content)["actions"][1]["entitlement_gate"] == REPORT_GATE_ID
     assert "entitlement_gate" not in output["module_contract"]["module_yaml"]["actions"][1]
 
 
@@ -201,10 +202,13 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
     assert acceptance["acceptance"]["passed"] is True
     assert acceptance["export_gate"]["allow_export"] is True
     assert acceptance["runtime_loader"]["subscriptions_loaded"] is True
-    assert acceptance["runtime_loader"]["action_entitlements"]["generate_report"] == "reports.generate"
+    assert acceptance["runtime_loader"]["action_entitlements"]["generate_report"] == REPORT_GATE_ID
 
     generated = acceptance["context"]["generated_files"]
     assert acceptance["context"]["app_assembly_status"] == "passed"
+    plans = yaml.safe_load(generated["config/subscriptions.yaml"])["plans"]
+    assert [plan["capabilities"] for plan in plans] == [[REPORT_GATE_ID], [REPORT_GATE_ID]]
+    assert [plan["usage_limits"][0]["monthly_limit"] for plan in plans] == [10, 1000]
     assert json.loads(generated["app.json"])["authRequired"] is True
     assert {"config/auth.yaml", "ui/auth/authAdapter.js"} <= generated.keys()
     report_collection = json.loads(generated["data/contract.json"])["surfaces"][0]["collections"][0]

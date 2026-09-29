@@ -15,6 +15,9 @@ from typing import Annotated, Any
 import yaml
 
 from factory_app.workflows._shared.subscription_contract_context import (
+    approved_feature_inventory,
+    capability_id_for_feature,
+    selected_feature_gates,
     validate_module_contract_updates,
 )
 from mozaiksai.core.artifacts import persist_summary_artifact
@@ -307,6 +310,137 @@ def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
     return normalized
 
 
+def _compile_feature_selections(
+    raw_config: dict[str, Any], context_variables: Any,
+) -> tuple[dict[str, Any], dict[str, list[str]]]:
+    """Compile model-selected features into runtime plan capability grants."""
+    inventory = approved_feature_inventory(context_variables)
+    valid_features = sorted(inventory)
+    config = dict(raw_config)
+    selections: dict[str, list[str]] = {}
+    errors: list[str] = []
+    plans: list[dict[str, Any]] = []
+    for plan in raw_config.get("plans") or []:
+        if not isinstance(plan, dict):
+            raise ValueError("subscription_config_file.plans entries must be objects.")
+        plan_id = str(plan.get("plan_id") or "").strip()
+        features = plan.get("included_features")
+        if "capabilities" in plan:
+            errors.append(f"Plan {plan_id!r} writes capabilities; select included_features instead")
+        if not isinstance(features, list) or any(not isinstance(item, str) for item in features):
+            errors.append(f"Plan {plan_id!r} must list included_features")
+            features = []
+        unknown = sorted(set(features) - inventory.keys())
+        if unknown:
+            errors.append(f"Plan {plan_id!r} selects unavailable features {unknown}")
+        if len(features) != len(set(features)):
+            errors.append(f"Plan {plan_id!r} repeats a feature")
+        selections[plan_id] = list(features)
+        compiled = {key: value for key, value in plan.items() if key not in {"included_features", "capabilities"}}
+        compiled["capabilities"] = sorted({
+            capability_id_for_feature(feature_id) for feature_id in features if feature_id in inventory
+        })
+        limits: list[dict[str, Any]] = []
+        for limit in plan.get("usage_limits") or []:
+            if not isinstance(limit, dict):
+                raise ValueError(f"Plan {plan_id!r} usage_limits entries must be objects.")
+            feature_id = limit.get("feature_id")
+            if "capability_id" in limit:
+                errors.append(f"Plan {plan_id!r} usage limit writes capability_id; select feature_id instead")
+            if feature_id is not None and (not isinstance(feature_id, str) or feature_id not in features):
+                errors.append(f"Plan {plan_id!r} usage limit references feature {feature_id!r} that it does not include")
+            resolved = {key: value for key, value in limit.items() if key not in {"feature_id", "capability_id"}}
+            resolved["capability_id"] = capability_id_for_feature(feature_id) if feature_id in features and feature_id in inventory else None
+            limits.append(resolved)
+        compiled["usage_limits"] = limits
+        plans.append(compiled)
+    config["plans"] = plans
+    add_ons: list[dict[str, Any]] = []
+    for add_on in raw_config.get("add_on_products") or []:
+        if not isinstance(add_on, dict):
+            raise ValueError("subscription_config_file.add_on_products entries must be objects.")
+        feature_id = add_on.get("required_feature")
+        if "required_capability" in add_on:
+            errors.append(f"Add-on {add_on.get('add_on_id')!r} writes required_capability; select required_feature instead")
+        if feature_id is not None and (not isinstance(feature_id, str) or feature_id not in inventory):
+            errors.append(f"Add-on {add_on.get('add_on_id')!r} references unavailable feature {feature_id!r}")
+        compiled = {key: value for key, value in add_on.items() if key not in {"required_feature", "required_capability"}}
+        compiled["required_capability"] = capability_id_for_feature(feature_id) if isinstance(feature_id, str) and feature_id in inventory else None
+        add_ons.append(compiled)
+    config["add_on_products"] = add_ons
+    capability_sources: dict[str, str] = {}
+    for feature_id in sorted({feature for features in selections.values() for feature in features}):
+        if feature_id not in inventory:
+            continue
+        capability = capability_id_for_feature(feature_id)
+        previous = capability_sources.setdefault(capability, feature_id)
+        if previous != feature_id:
+            errors.append(
+                f"Features {previous!r} and {feature_id!r} derive the same capability id {capability!r}"
+            )
+    if errors:
+        raise ValueError(
+            "Invalid pricing feature selection: " + "; ".join(errors) + ". "
+            f"Valid features: {valid_features}. Remove an unavailable feature from the plan "
+            "or have DesignDocs approve its action before pricing design."
+        )
+    return config, selections
+
+
+def _derive_contract_updates(
+    selected_features_by_plan: dict[str, list[str]], output: dict[str, Any], context_variables: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build module gates and pending workflow mappings from selected features."""
+    inventory = approved_feature_inventory(context_variables)
+    gates = selected_feature_gates(selected_features_by_plan, context_variables)
+    metering: dict[tuple[str, str], dict[str, Any]] = {}
+    for declaration in output.get("metering_declarations") or []:
+        if not isinstance(declaration, dict):
+            raise ValueError("metering_declarations entries must be objects.")
+        if declaration.get("surface_type") == "workflow":
+            feature_id = f"workflow.{declaration.get('surface_id')}"
+            if feature_id not in inventory or declaration.get("action_id") is not None:
+                raise ValueError(
+                    f"Workflow metering declaration references unavailable feature {feature_id!r} "
+                    "or specifies an action_id before workflow generation. "
+                    f"Valid features: {sorted(inventory)}. Remove the feature or have DesignDocs approve its workflow surface."
+                )
+            continue
+        if declaration.get("surface_type") != "module_action":
+            continue
+        module_id = declaration.get("surface_id")
+        action_id = declaration.get("action_id")
+        if not isinstance(module_id, str) or not isinstance(action_id, str):
+            raise ValueError("Module metering declaration requires approved surface_id and action_id strings.")
+        feature_id = f"module.{module_id}.{action_id}"
+        if feature_id not in inventory:
+            raise ValueError(
+                f"Metering declaration references unavailable feature {feature_id!r}. "
+                f"Valid features: {sorted(inventory)}. Remove the feature or have DesignDocs approve its action."
+            )
+        metering[(module_id, action_id)] = declaration
+    module_updates = [
+        {"module_id": module_id, "action_id": action_id, "entitlement_gate": gate,
+         "metering": metering.pop((module_id, action_id), None)}
+        for module_id, actions in sorted(gates.items()) for action_id, gate in sorted(actions.items())
+    ]
+    module_updates.extend(
+        {"module_id": module_id, "action_id": action_id, "entitlement_gate": None, "metering": declaration}
+        for (module_id, action_id), declaration in sorted(metering.items())
+    )
+    selected = set().union(*(set(features) for features in selected_features_by_plan.values()))
+    workflow_updates = [
+        {"design_surface_id": inventory[feature_id]["surface_id"],
+         "capability_id": capability_id_for_feature(feature_id),
+         "workflow_name": None,
+         "metering": next((declaration for declaration in output.get("metering_declarations") or []
+                           if declaration.get("surface_type") == "workflow"
+                           and declaration.get("surface_id") == inventory[feature_id]["surface_id"]), None)}
+        for feature_id in sorted(selected) if inventory[feature_id]["surface_kind"] == "workflow"
+    ]
+    return module_updates, workflow_updates
+
+
 def _token_wallet_usage_intent_present(
     output: dict[str, Any],
     config: SubscriptionsConfig,
@@ -375,6 +509,7 @@ def _build_review_payload(
         "contract_required": bool(output.get("contract_required")),
         "rationale": output.get("rationale") or "",
         "plans": list(config.get("plans") or []),
+        "selected_features_by_plan": dict(output.get("selected_features_by_plan") or {}),
         "default_plan_id": config.get("default_plan_id"),
         "assignment_store": config.get("assignment_store"),
         "token_wallets": list(config.get("token_wallets") or []),
@@ -446,10 +581,17 @@ def _normalized_noop(output: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _normalize_required(output: dict[str, Any]) -> dict[str, Any]:
+def _normalize_required(output: dict[str, Any], context_variables: Any) -> dict[str, Any]:
     normalized = dict(output)
     raw_config = normalized.get("subscription_config_file")
-    config = _normalize_subscription_config(raw_config)
+    if not isinstance(raw_config, dict):
+        raise ValueError("subscription_config_file must be an object when contract_required=true")
+    compiled_config, selections = _compile_feature_selections(raw_config, context_variables)
+    config = _normalize_subscription_config(compiled_config)
+    normalized["selected_features_by_plan"] = selections
+    normalized["module_contract_updates"], normalized["workflow_contract_updates"] = _derive_contract_updates(
+        selections, output, context_variables,
+    )
     _validate_token_wallet_scope(
         normalized,
         SubscriptionsConfig.model_validate(config),
@@ -474,16 +616,21 @@ def _normalize_required(output: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def normalize_subscription_contract(output: dict[str, Any]) -> dict[str, Any]:
+def normalize_subscription_contract(output: dict[str, Any], context_variables: Any = None) -> dict[str, Any]:
     """Normalize and validate a SubscriptionContractOutput dict."""
 
+    forbidden_authored = {
+        "selected_features_by_plan", "module_contract_updates", "workflow_contract_updates", "code_files",
+    } & output.keys()
+    if forbidden_authored:
+        raise ValueError(f"Model output must not author derived fields: {sorted(forbidden_authored)}")
     term = _contains_proprietary_term(output)
     if term:
         raise ValueError(f"Subscription contract must be provider-neutral; found proprietary term {term!r}")
 
     if not bool(output.get("contract_required")):
         return _normalized_noop(output)
-    return _normalize_required(output)
+    return _normalize_required(output, context_variables)
 
 
 async def save_subscription_contract(
@@ -512,7 +659,7 @@ async def save_subscription_contract(
         return {"success": False, "review_status": "blocked", "error": "app_id required in context or output"}
 
     try:
-        normalized = normalize_subscription_contract(output)
+        normalized = normalize_subscription_contract(output, context_variables)
         validate_module_contract_updates(normalized, context_variables)
         page_conflict = (
             _page_inventory_conflict(normalized, context_variables) if binding.phase == "genesis" else None

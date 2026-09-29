@@ -39,6 +39,8 @@ DEFAULT_APP_ID = "subscription-reporting-live-smoke"
 WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
 SUBSCRIPTION_PATH = "config/subscriptions.yaml"
 MODULE_PATH = "modules/reports/module.yaml"
+REPORT_FEATURE_ID = "module.reports.generate_report"
+REPORT_GATE_ID = f"feature.{REPORT_FEATURE_ID}"
 
 _PY_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _FORBIDDEN_PROVIDER_TERMS = (
@@ -126,20 +128,31 @@ def sample_subscription_contract() -> dict[str, Any]:
                 {
                     "plan_id": "free",
                     "label": "Free",
-                    "capabilities": ["reports.view"],
-                    "token_allowances": [],
+                    "capabilities": [REPORT_GATE_ID],
+                    "usage_limits": [
+                        {
+                            "meter_id": "ai_tokens",
+                            "label": "AI tokens",
+                            "unit": "tokens",
+                            "monthly_limit": 10,
+                            "capability_id": REPORT_GATE_ID,
+                        }
+                    ],
+                    "token_allowances": [
+                        {"wallet_id": "ai_tokens", "amount": 10, "cadence": "monthly", "label": "Monthly AI tokens"},
+                    ],
                 },
                 {
                     "plan_id": "pro",
                     "label": "Pro",
-                    "capabilities": ["reports.view", "reports.generate"],
+                    "capabilities": [REPORT_GATE_ID],
                     "usage_limits": [
                         {
                             "meter_id": "ai_tokens",
                             "label": "AI tokens",
                             "unit": "tokens",
                             "monthly_limit": 1000,
-                            "capability_id": "reports.generate",
+                            "capability_id": REPORT_GATE_ID,
                         }
                     ],
                     "token_allowances": [
@@ -153,11 +166,12 @@ def sample_subscription_contract() -> dict[str, Any]:
                 },
             ],
         },
+        "selected_features_by_plan": {"free": [REPORT_FEATURE_ID], "pro": [REPORT_FEATURE_ID]},
         "module_contract_updates": [
             {
                 "module_id": "reports",
                 "action_id": "generate_report",
-                "entitlement_gate": "reports.generate",
+                "entitlement_gate": REPORT_GATE_ID,
             }
         ],
         "metering_declarations": [
@@ -166,7 +180,7 @@ def sample_subscription_contract() -> dict[str, Any]:
                 "wallet_id": "ai_tokens",
                 "unit": "tokens",
                 "scope": "user",
-                "consumed_by": ["reports.generate"],
+                "consumed_by": [REPORT_GATE_ID],
             }
         ],
         "page_surface_requirements": [
@@ -181,7 +195,7 @@ def sample_subscription_contract() -> dict[str, Any]:
         ],
         "app_generator_instructions": [
             "Emit one config/subscriptions.yaml file from subscription_config_file.",
-            "Code compiles reports.generate onto the approved generate_report action; omit model-authored gates.",
+            "Code derives the generate_report gate from the selected report feature; omit model-authored gates.",
             "Usage pages read platform-owned /api/me/usage and /api/me/tokens endpoints.",
         ],
         "validation_notes": [
@@ -236,7 +250,7 @@ def _module_contract_task() -> dict[str, Any]:
             Capabilities:
             - reports.view grants list_reports.
             - reports.generate grants generate_report.
-            Omit entitlement_gate. Code compiles the authoritative subscription action mapping.
+            Omit entitlement_gate. Code derives it from approved subscription plan features.
             No domain events or workflow trigger events are declared for this task; actions[].emits must be empty and events_yaml.events must be empty.
             module_contract must be a ModuleContractBundle wrapper: put module.yaml fields under module_contract.module_yaml, not directly under module_contract.
             Emit no backend Python files.
@@ -252,7 +266,7 @@ def _module_contract_task() -> dict[str, Any]:
         ],
         "depends_on": ["task_subscription_config"],
         "acceptance_criteria": [
-            "modules/reports/module.yaml declares generate_report entitlement_gate: reports.generate.",
+            f"modules/reports/module.yaml declares generate_report entitlement_gate: {REPORT_GATE_ID}.",
             "No backend Python files are emitted by the module_contract task.",
         ],
     }
@@ -562,8 +576,8 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
     generate = by_id.get("generate_report")
     if not isinstance(generate, dict):
         errors.append("reports module must declare generate_report.")
-    elif generate.get("entitlement_gate") != "reports.generate":
-        errors.append("The approved gate compiler must set generate_report to reports.generate.")
+    elif generate.get("entitlement_gate") != REPORT_GATE_ID:
+        errors.append(f"The derived gate compiler must set generate_report to {REPORT_GATE_ID}.")
 
     list_reports = by_id.get("list_reports")
     if not isinstance(list_reports, dict):
@@ -1234,7 +1248,7 @@ async def validate_subscription_acceptance_handoff(
         errors.append("Runtime subscription loader did not preserve default_plan_id=free.")
     if "ai_tokens" not in loader_result.get("token_wallet_ids", []):
         errors.append("Runtime subscription loader did not expose ai_tokens wallet.")
-    if loader_result.get("action_entitlements", {}).get("generate_report") != "reports.generate":
+    if loader_result.get("action_entitlements", {}).get("generate_report") != REPORT_GATE_ID:
         errors.append("Runtime module loader did not preserve generate_report entitlement_gate.")
     errors.extend(_forbidden_drift_errors(files))
 
@@ -1410,7 +1424,7 @@ async def run_live_appgenerator_subscription_smoke(
         timeout_seconds=timeout_seconds,
         prompt=(
             "Run the current module_contract build task for reports. "
-            "Omit model-authored gates; code compiles subscription_contract.module_contract_updates."
+            "Omit model-authored gates; code derives action gates from approved plan features."
         ),
     )
     module_output = module_live.get("structured_output") or {}

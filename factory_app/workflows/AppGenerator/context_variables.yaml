@@ -894,9 +894,11 @@ definitions:
   generated_workflow_capability_id:
     type: string
     description: >
-      Stable hyphenated capability ID for the AgentGenerator-produced workflow
-      (e.g. "customer-support"). This is the value to use in workflow_capability_ids
-      fields of module.yaml and events.yaml so the platform can resolve the workflow
+      Stable capability ID for the AgentGenerator-produced workflow. Ordinary
+      workflows can use a hyphenated ID such as "customer-support"; priced
+      workflows use the derived dotted feature.workflow.* ID from the approved
+      subscription mapping. Use this value in workflow_capability_ids fields
+      of module.yaml and events.yaml so the platform can resolve the workflow
       at runtime. Null when no workflow has been generated.
     source:
       type: data_reference

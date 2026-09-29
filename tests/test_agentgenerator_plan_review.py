@@ -63,6 +63,27 @@ def workflow():
     }
 
 
+def priced_workflow_contract():
+    return {
+        "contract_required": True,
+        "selected_features_by_plan": {"free": [], "pro": ["workflow.customers"]},
+        "subscription_config_file": {
+            "schema_version": "mozaiks.subscriptions.v1",
+            "label": "Customer plans",
+            "default_plan_id": "free",
+            "plans": [
+                {"plan_id": "free", "label": "Free", "capabilities": []},
+                {"plan_id": "pro", "label": "Pro", "capabilities": ["feature.workflow.customers"]},
+            ],
+        },
+        "workflow_contract_updates": [{
+            "design_surface_id": "customers",
+            "capability_id": "feature.workflow.customers",
+            "workflow_name": None,
+        }],
+    }
+
+
 def surface_map(kind):
     return {"surfaces": [{
         "surface_id": "customers", "label": "Customers", "surface_kind": kind, "owner": "app",
@@ -104,6 +125,39 @@ def test_partition_cannot_contradict_canonical_surface_map(kind, workflows):
     ctx = Context({"design_surface_map": surface_map(kind)})
     with pytest.raises(ValueError, match="surface map"):
         partition.validate_selection(selection(workflows), ctx)
+
+
+def test_selected_pricing_workflow_must_reference_exact_approved_surface():
+    ctx = Context({
+        "design_surface_map": surface_map("workflow"),
+        "concept_blueprint": {"agentic_capabilities": ["Classify requests"]},
+        "subscription_contract": priced_workflow_contract(),
+    })
+    with pytest.raises(ValueError, match="WorkflowInPack.design_surface_id='customers'"):
+        partition.validate_selection(selection([workflow()]), ctx)
+
+    selected = partition.validate_selection(
+        selection([{**workflow(), "design_surface_id": "customers"}]), ctx,
+    )
+    assert selected["workflows"][0]["design_surface_id"] == "customers"
+
+
+def test_selected_pricing_workflow_rechecks_current_design_inventory():
+    contract = priced_workflow_contract()
+    mapped = selection([{**workflow(), "design_surface_id": "customers"}])
+    ctx = Context({"design_surface_map": surface_map("workflow"), "subscription_contract": contract})
+    with pytest.raises(ValueError, match="not an approved workflow surface"):
+        partition.validate_selection(mapped, ctx)
+
+    changed_map = surface_map("workflow")
+    changed_map["surfaces"][0]["surface_id"] = "other_surface"
+    ctx = Context({
+        "design_surface_map": changed_map,
+        "concept_blueprint": {"agentic_capabilities": ["Classify requests"]},
+        "subscription_contract": contract,
+    })
+    with pytest.raises(ValueError, match="not an approved workflow surface"):
+        partition.validate_selection(mapped, ctx)
 
 
 def test_unknown_design_surface_kind_is_rejected():

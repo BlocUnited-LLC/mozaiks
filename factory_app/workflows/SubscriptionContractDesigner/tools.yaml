@@ -34,9 +34,13 @@ tools:
             type: boolean
           plans:
             type: array
+          selected_features_by_plan:
+            type: object
           token_wallets:
             type: array
           module_contract_updates:
+            type: array
+          workflow_contract_updates:
             type: array
           yaml_preview:
             type: string

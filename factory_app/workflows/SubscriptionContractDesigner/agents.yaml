@@ -21,11 +21,12 @@ agents:
           grant token allowances, emit:
           - contract_required: false
           - subscription_config_file: null
-          - empty metering/update/page/instruction lists
+          - empty metering/page/instruction lists
 
           If the app is a SaaS app or needs paid access, emit a deterministic
           generated-app contract covering:
-          - app/config/subscriptions.yaml content as subscription_config_file
+          - a provider-neutral subscription_config_file plan design that the
+            save tool compiles into app/config/subscriptions.yaml
           - optional pricing_catalog display groups inside subscription_config_file
             when the app has multiple service lines on one pricing surface
           - provider-neutral token_wallets and token_allowances when the app sells
@@ -40,7 +41,8 @@ agents:
           - provider-neutral usage_charge_policies when the app charges users
             for measured AI usage, including markup over provider cost or a
             fixed customer token unit price
-          - module action entitlement gates for plan-gated features
+          - plan feature selections from the approved pricing inventory; code
+            derives capability ids and module action entitlement gates
           - workflow metering declarations for AI or paid-resource workflows
           - usage/billing page requirements in page_surface_requirements
           - AppGenerator instructions that describe the exact generated files and
@@ -60,10 +62,14 @@ agents:
             subscription_contract_likely, and money_flow_summary. This object is
             nested inside concept_blueprint; it is not a separate variable.
           - backend_design_document and design_surface_map for module/workflow boundaries
-          - [APPROVED ENTITLEMENT ACTION INVENTORY], injected from app-owned module
-            writes and custom_reads in design_surface_map, for the closed
-            module_id/action_id gate choices. Canonical collection list/get and
-            managed-pack facade actions are excluded and always remain ungated.
+          - [APPROVED PRICING FEATURE INVENTORY], injected from approved
+            DesignDocs app-owned mutations, custom reads, canonical writes, and
+            eligible AI workflow surfaces. Its feature ids are the only choices
+            for subscription_config_file.plans[].included_features and
+            usage_limits[].feature_id. Module ids use
+            module.<module_id>.<action_id>; workflow ids use
+            workflow.<approved_surface_id>. Canonical collection list/get and
+            managed-pack facade actions are excluded and remain ungated.
           - experience_spec for page surfaces
           - monetization_enabled and builder_options for explicit builder settings
           - app_intelligence_summary, app_intelligence_catalog, source_context_catalog,
@@ -159,41 +165,57 @@ agents:
                clearer; otherwise use stable labels like Free, Pro, Team, Business,
                or Enterprise with snake_case ids.
 
-          3. Capability and quota mapping:
-             - Declare the capability-to-action product decision in the typed
-               module_contract_updates list. Choose module_id and action_id only
-               from [APPROVED ENTITLEMENT ACTION INVENTORY]: module_id is the exact
-               approved surface_id; action_id selects an owned_mutations write,
-               or declared custom_reads action. Canonical collection list/get and
-               managed-pack facade actions are never gate targets. Declare a custom
-               read for paid view behavior; never sell a dashboard by gating base reads.
-               Prose in backend_design_document is context, not permission to invent ids.
-             - Each capability that differs between plans must be entitlement_gate
-               on at least one approved action. Shared capabilities may remain ungated,
-               but nonempty plan capabilities require at least one selected action gate
-               even when every plan grants the same capability set.
-             - Set entitlement_gate to the exact plans[].capabilities id. One action
-               supports one gate; multiple approved actions may use the same capability.
-               Use null only for metering-only updates. AppGenerator constructs
-               actions[].entitlement_gate from this mapping regardless of model-written YAML.
-             - Empty module_contract_updates is invalid when plans grant capabilities.
-               If no approved action can represent a required feature, the upstream
-               DesignDocs contract must first declare its custom read or write.
-               validation_notes never waive a missing mapping. Do not guess ids or
-               silently omit the decision; save validation diagnoses the missing input.
-             - If `brownfield_build_path` is present, declare gates and metering only
-               for generated Mozaiks-owned overlays, adapters, modules, workflows, or
-               pages in the approved adoption scope. Do not gate protected existing-app
-               surfaces discovered as `read_only_discovered`.
-             - Do not invent capabilities just to make tiers look different.
-             - Put entitlement gates only on actions that truly require paid
-               access. Every managed-pack facade action remains ungated, including
-               plans, checkout, upgrade, portal, usage, and tokens. Free users must
-               always be able to discover plans and upgrade.
+          3. Feature and quota selection:
+             - Set each plan's included_features by selecting exact feature ids
+               from [APPROVED PRICING FEATURE INVENTORY]. This approved inventory,
+               not backend_design_document prose, defines what can be sold. Do not
+               invent a module action, workflow, feature id, or capability id.
+             - A module feature names one approved app-owned mutation, canonical
+               write, or custom read. Canonical list/get reads are available to
+               every plan and are never selectable gate targets. For a paid view,
+               DesignDocs must declare a custom read. Managed-pack facade actions
+               also remain ungated so free users can browse plans and upgrade.
+             - Select workflow.<approved_surface_id> only when the approved
+               concept declares an agentic capability and that workflow feature
+               appears in the injected inventory. AgentGenerator resolves its
+               concrete workflow contract later. An app with no agentic
+               capabilities has no workflow feature to sell.
+             - When a free plan promises limited core use, include its core
+               module write features in Free and put a usage limit on the
+               relevant selected feature. Do not express "limited tasks" by
+               leaving task creation out of Free. A Pro-only custom read can
+               distinguish the paid plan without locking basic CRUD.
+             - Worked task example, showing only the plan fields relevant here:
+               the approved inventory contains module.tasks.create_task,
+               module.tasks.update_task, module.tasks.delete_task, and
+               module.tasks.summarize_tasks. Free includes the three core
+               writes and a usage_limits entry with feature_id:
+               module.tasks.create_task, unit: requests, monthly_limit: 25.
+               Pro includes those same writes plus
+               module.tasks.summarize_tasks. Canonical list_tasks/get_tasks
+               reads are available to both and are absent from the inventory.
+             - Code derives feature.<feature_id> capability ids, runtime
+               plans[].capabilities, module_contract_updates/action gates, and
+               workflow_contract_updates from these selections. Do not write
+               capability ids, entitlement_gate mappings, either update list,
+               selected_features_by_plan, or code_files yourself. An unavailable
+               feature must be removed from the plan or declared upstream in
+               DesignDocs; validation feedback lists valid inventory choices.
+             - If `brownfield_build_path` is present, select only generated
+               Mozaiks-owned overlay features in the approved adoption scope.
+               Do not select protected existing-app surfaces discovered as
+               `read_only_discovered`.
+             - Do not add a feature just to make tiers look different. If the
+               cheapest plan promises basic use, include the approved features
+               that provide it; do not leave that plan empty.
              - Use usage_limits, token_wallets, and token_allowances only for
                AI, request, credit, or resource budgets that are visible in
                upstream workflow/module context or explicitly requested by
                builder_options.
+             - For a feature-specific usage limit, set feature_id to an
+               included feature in that plan; code derives its capability_id
+               in the runtime subscription file. Use null for a meter that
+               does not correspond to one selected feature.
              - Do not emit token_wallets, token_allowances, or top_up_products
                for ordinary subscription tiers that sell access only. Access-only
                SaaS uses plans, capabilities, assignment_store, and
@@ -242,8 +264,10 @@ agents:
       - id: contract_rules
         heading: '[CONTRACT RULES]'
         content: |-
-          1. subscription_config_file models app/config/subscriptions.yaml only.
-             Use schema_version: mozaiks.subscriptions.v1.
+          1. subscription_config_file is the plan design for
+             app/config/subscriptions.yaml. It contains included_features;
+             the save tool compiles the runtime file. Use schema_version:
+             mozaiks.subscriptions.v1.
           2. Non-SaaS apps must omit config/subscriptions.yaml.
           3. SaaS apps should default assignment_store to:
              data_alias: billing.subscriptions
@@ -256,14 +280,15 @@ agents:
              plan_snapshot_field: plan_snapshot
           4. Plan ids must be stable snake_case. Prefer a small ladder such as
              free, pro, enterprise unless the concept provides a better domain fit.
-          5. Capabilities must be generated-app capability ids such as
-             analytics.view, reports.export, campaigns.launch, or workflow.run.
-             Do not use hosted-product capability ids.
-          6. module_contract_updates is the sole capability-to-action decision.
-             Map every capability that differs between plans and at least one capability
-             whenever plans grant capabilities. Use the injected approved module/action ids.
-             The deterministic materializer writes actions[].entitlement_gate; do not rely
-             on prose instructions or later file generation to decide that mapping.
+          5. The model chooses only included_features from the injected closed
+             inventory. Module feature ids have the form
+             module.<module_id>.<action_id>; workflow feature ids have the form
+             workflow.<approved_surface_id>. Never write a free-text capability id.
+          6. Code derives capability ids, plans[].capabilities,
+             module_contract_updates, workflow_contract_updates, and
+             actions[].entitlement_gate. They are not model-authored decisions.
+             The persisted contract records selected_features_by_plan for
+             downstream review; do not emit it or code_files.
           7. If AI usage, credits, paid-resource usage, or top-up token packs are
              sold as a quota, declare a token_wallet at config root and
              token_allowances on paid plans when the plan includes an allowance.
@@ -281,8 +306,10 @@ agents:
               credit add-ons at subscription_config_file.add_on_products when
               pricing_catalog.groups[].add_on_ids need real purchasable product
               metadata. They may include price.amount_cents, price.currency,
-              price.display, billing_mode, duration_days, required_capability,
-              and capability_groups, but they must not contain provider product
+              price.display, billing_mode, duration_days, required_feature,
+              and capability_groups. If required_feature is set, select it from
+              the approved pricing feature inventory; code derives the runtime
+              required_capability. Add-ons must not contain provider product
               ids, provider price ids, checkout session ids, invoices, taxes,
               settlement details, or entitlement grants.
           9c. token_wallets[].depleted_balance declares safe app-local recovery
@@ -303,7 +330,7 @@ agents:
               reference declared plans. When subscription_config_file declares
               add_on_products, pricing_catalog.groups[].add_on_ids must
               reference declared add_on_products[].add_on_id. pricing_catalog
-              must not replace plans[].capabilities, usage_limits,
+              must not replace derived plans[].capabilities, usage_limits,
               token_allowances, add_on_products, or assignment_store.
           13. The contract must not reference concrete hosted products, operator
               billing admin actions, payment-provider product ids, price ids,
@@ -326,6 +353,12 @@ agents:
         content: |-
           Output ONLY valid JSON matching SubscriptionContractOutput.
           Use null for subscription_config_file when contract_required is false.
+          When contract_required is true, author plans[].included_features and
+          usage_limits[].feature_id and add_on_products[].required_feature when
+          applicable from the injected feature inventory. Author metering intent
+          in metering_declarations when applicable. Do not author derived
+          capability ids, plan capabilities, gate mappings, update lists,
+          selected_features_by_plan, or code_files; the save tool creates them.
           Include plan_design_rationale entries when contract_required is true,
           with source_context values matching the context variable names above.
           Keep lists empty instead of inventing placeholder entries.

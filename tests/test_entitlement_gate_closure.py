@@ -125,6 +125,22 @@ _SUBS_V2_NO_STORE = textwrap.dedent("""\
               - tasks.create
 """)
 
+_SUBS_DERIVED_MODULE_AND_WORKFLOW = textwrap.dedent("""\
+    schema_version: mozaiks.subscriptions.v1
+    label: Derived feature plans
+    default_plan_id: free
+    plans:
+      - plan_id: free
+        label: Free
+        capabilities: []
+      - plan_id: pro
+        label: Pro
+        capabilities:
+          - feature.module.tasks.create_task
+          - feature.module.tasks.delete_task
+          - feature.workflow.task_analysis
+""")
+
 
 def _module_yaml(module_id: str, *, actions: list[dict]) -> str:
     """Build a minimal valid module.yaml string."""
@@ -275,6 +291,40 @@ class TestPlanDefDuplicateCapabilities:
 class TestEntitlementGateClosurePositive:
     """Valid bundles must produce zero errors."""
 
+    def test_workflow_only_feature_does_not_require_a_module_gate(self) -> None:
+        subscriptions = textwrap.dedent("""\
+            schema_version: mozaiks.subscriptions.v1
+            label: Workflow plans
+            default_plan_id: free
+            plans:
+              - plan_id: free
+                label: Free
+                capabilities: []
+              - plan_id: pro
+                label: Pro
+                capabilities: [feature.workflow.task_analysis]
+        """)
+        bundle = _bundle(
+            subs=subscriptions,
+            modules={"modules/tasks/module.yaml": _module_yaml(
+                "tasks", actions=[{"id": "list_tasks"}],
+            )},
+        )
+        assert _scan_entitlement_gate_capability_alignment(bundle) == []
+
+    def test_every_derived_module_capability_has_its_action_gate(self) -> None:
+        bundle = _bundle(
+            subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW,
+            modules={"modules/tasks/module.yaml": _module_yaml(
+                "tasks",
+                actions=[
+                    {"id": "create_task", "entitlement_gate": "feature.module.tasks.create_task"},
+                    {"id": "delete_task", "entitlement_gate": "feature.module.tasks.delete_task"},
+                ],
+            )},
+        )
+        assert _scan_entitlement_gate_capability_alignment(bundle) == []
+
     def test_valid_gated_action_with_granted_capability(self) -> None:
         bundle = _bundle(
             subs=_SUBS_V1_WITH_STORE,
@@ -400,6 +450,64 @@ class TestEntitlementGateClosureNegative:
         assert "tasks.create" in errors[0]
         assert "modules/tasks/module.yaml" in errors[0]
 
+    def test_one_gate_does_not_cover_another_derived_module_capability(self) -> None:
+        bundle = _bundle(
+            subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW,
+            modules={"modules/tasks/module.yaml": _module_yaml(
+                "tasks",
+                actions=[
+                    {"id": "create_task", "entitlement_gate": "feature.module.tasks.create_task"},
+                    {"id": "delete_task"},
+                ],
+            )},
+        )
+        errors = _scan_entitlement_gate_capability_alignment(bundle)
+        assert len(errors) == 1
+        assert "feature.module.tasks.delete_task" in errors[0]
+        assert "feature.workflow.task_analysis" not in errors[0]
+        assert "selected features" in errors[0]
+
+    def test_partial_derived_gate_omission_reaches_full_bundle_scan(self) -> None:
+        bundle = _bundle(
+            subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW,
+            modules={"modules/tasks/module.yaml": _module_yaml(
+                "tasks",
+                actions=[
+                    {"id": "create_task", "entitlement_gate": "feature.module.tasks.create_task"},
+                    {"id": "delete_task"},
+                ],
+            )},
+        )
+        errors = scan_generated_bundle(bundle)
+        assert any(
+            "feature.module.tasks.delete_task" in error and "without matching module action" in error
+            for error in errors
+        )
+
+    def test_derived_gate_must_bind_the_corresponding_action(self) -> None:
+        bundle = _bundle(
+            subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW,
+            modules={"modules/tasks/module.yaml": _module_yaml(
+                "tasks",
+                actions=[
+                    {"id": "create_task", "entitlement_gate": "feature.module.tasks.delete_task"},
+                    {"id": "delete_task", "entitlement_gate": "feature.module.tasks.create_task"},
+                ],
+            )},
+        )
+        errors = _scan_entitlement_gate_capability_alignment(bundle)
+        assert len(errors) == 1
+        assert "feature.module.tasks.create_task" in errors[0]
+        assert "feature.module.tasks.delete_task" in errors[0]
+
+    def test_derived_module_capabilities_without_module_files_fail(self) -> None:
+        errors = _scan_entitlement_gate_capability_alignment(
+            _bundle(subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW)
+        )
+        assert len(errors) == 1
+        assert "no module action declares an entitlement_gate" in errors[0]
+        assert "feature.module.tasks.create_task" in errors[0]
+
     def test_zero_gate_error_reaches_scan_generated_bundle(self) -> None:
         bundle = _bundle(
             subs=_SUBS_V1_WITH_STORE,
@@ -428,6 +536,8 @@ class TestEntitlementGateClosureNegative:
         assert "tasks.unknown_cap" in errors[0]
         assert "create_task" in errors[0]
         assert "modules/tasks/module.yaml" in errors[0]
+        assert "selected features" in errors[0]
+        assert "Do not edit generated capabilities" in errors[0]
 
     def test_typo_near_match_fails_with_suggestion(self) -> None:
         """A near-misspelling of a valid capability must fail with a helpful suggestion."""

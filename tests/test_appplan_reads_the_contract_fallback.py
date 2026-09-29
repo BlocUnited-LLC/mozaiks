@@ -110,7 +110,18 @@ def test_the_tools_still_read_both_keys() -> None:
         resolve_subscription_contract,
     )
 
-    approved = {"contract_required": True, "module_contract_updates": []}
+    approved = {
+        "contract_required": True,
+        "subscription_config_file": {
+            "schema_version": "mozaiks.subscriptions.v1",
+            "label": "Free plan",
+            "default_plan_id": "free",
+            "plans": [{"plan_id": "free", "label": "Free", "capabilities": []}],
+        },
+        "selected_features_by_plan": {"free": []},
+        "module_contract_updates": [],
+        "workflow_contract_updates": [],
+    }
     context = ContextVariablesBridge({
         "subscription_contract": None,
         "subscription_contract_artifact": {"metadata": {"summary_payload": approved}},
