@@ -76,9 +76,10 @@ This project follows a practical pre-1.0 changelog format:
   the stored record as payload, and the rendered service emits it after the
   write. Custom events keep their names; an emit and a declaration that differ
   only by the `domain.` prefix are reconciled, and anything else is rejected in
-  one message naming both sides. Model-authored repository code no business
-  logic uses (the live run's dead `TaskRepo` class with Motor calls) is removed
-  with a logged normalization; a repository class or Motor call that business
+  one message naming both sides. Model-authored repository code that neither
+  business logic nor any import-time statement reaches (the live run's dead
+  `TaskRepo` class with Motor calls) is removed with a logged normalization,
+  and a dynamic import of the module prunes nothing; a repository class or Motor call that business
   logic does use is rejected at task time with its site. A gated canonical
   create or delete on a listed collection gets a `New <Entity>` toolbar action
   with a modal form or a Delete row action with a confirmation dialog. A module

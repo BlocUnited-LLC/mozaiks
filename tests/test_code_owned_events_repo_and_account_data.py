@@ -324,6 +324,89 @@ def test_an_opaque_use_of_the_repository_proves_nothing_dead():
     assert prune_repository(REPO, source, module_id=MODULE, code_owned={"get_tasks"}, business_sources=business) == source
 
 
+_PROBE_RENDERED = (
+    "async def insert_task(ctx, record):\n"
+    "    return await ctx.persistence.collection('tm', 'tasks').insert_one(record)\n\n\n"
+    "async def load_task(ctx, task_id):\n"
+    "    return await ctx.persistence.collection('tm', 'tasks').find_one({'task_id': task_id})\n"
+)
+_PROBE_SERVICE = "modules/tm/backend/service.py"
+
+
+@pytest.mark.parametrize(("extra", "service", "live"), [
+    pytest.param(  # a registration statement is not a definition, but it runs at import
+        "\n\nHANDLERS = {}\n\n\nasync def archive_docs(ctx, ids):\n    return len(ids)\n\n\n"
+        "HANDLERS['archive'] = archive_docs\n",
+        "from . import repo\n\nasync def go(ctx):\n    return await repo.HANDLERS['archive'](ctx, [])\n",
+        {"HANDLERS", "archive_docs"}, id="top-level-registration",
+    ),
+    pytest.param(  # a decorated definition registers itself
+        "\n\nREGISTRY = {}\n\n\ndef register(fn):\n    REGISTRY[fn.__name__] = fn\n    return fn\n\n\n"
+        "@register\nasync def summarize(ctx):\n    return 1\n",
+        "from .repo import REGISTRY\n\nasync def go(ctx):\n    return await REGISTRY['summarize'](ctx)\n",
+        {"REGISTRY", "register", "summarize"}, id="decorator-registry",
+    ),
+    pytest.param(  # importlib reaches the module by a computed name
+        "\n\nasync def custom_query(ctx):\n    return await ctx.persistence.collection('tm', 'tasks').find_many({})\n",
+        "import importlib\n\nrepo = importlib.import_module(__package__ + '.repo')\n\n"
+        "async def go(ctx):\n    return await repo.custom_query(ctx)\n",
+        {"custom_query"}, id="importlib",
+    ),
+    pytest.param(
+        "\n\nasync def custom_query(ctx):\n    return 1\n",
+        "from . import repo\n\nasync def go(ctx):\n    return await getattr(repo, 'custom_query')(ctx)\n",
+        {"custom_query"}, id="getattr",
+    ),
+    pytest.param(
+        "\n\nasync def custom_query(ctx):\n    return 1\n",
+        "from .repo import custom_query as cq\n\nasync def go(ctx):\n    return await cq(ctx)\n",
+        {"custom_query"}, id="import-alias",
+    ),
+    pytest.param(  # a module-level if block runs at import
+        "\n\nasync def fast(ctx):\n    return 1\n\n\nasync def slow(ctx):\n    return 2\n\n\n"
+        "if True:\n    chosen = fast\nelse:\n    chosen = slow\n",
+        "from . import repo\n\nasync def go(ctx):\n    return await repo.chosen(ctx)\n",
+        {"fast", "slow", "chosen"}, id="module-level-if",
+    ),
+])
+def test_code_used_at_import_or_reached_opaquely_survives_pruning_and_imports(extra, service, live):
+    """The verifier's probes (PR #765 review): pruning must never delete used code."""
+    source = _PROBE_RENDERED + extra
+    pruned = prune_repository(
+        "modules/tm/backend/repo.py", source, module_id="tm", code_owned={"insert_task", "load_task"},
+        business_sources={_PROBE_SERVICE: service},
+    )
+    assert pruned == source
+    namespace: dict = {}
+    exec(compile(pruned, "repo.py", "exec"), namespace)
+    assert live <= set(namespace)
+
+
+@pytest.mark.parametrize("marker", [
+    "import importlib\n", "import sys\nMODULES = sys.modules\n", "LOADER = __import__\n",
+])
+def test_a_dynamic_import_in_the_repository_itself_prunes_nothing(marker):
+    source = marker + LIVE_TASK_REPO
+    assert prune_repository(REPO, source, module_id=MODULE, code_owned=set(), business_sources={}) == source
+
+
+def test_dead_definitions_beside_a_registration_are_still_removed(caplog):
+    source = (
+        _PROBE_RENDERED + "\n\nHANDLERS = {}\n\n\nasync def archive_docs(ctx, ids):\n    return len(ids)\n\n\n"
+        "HANDLERS['archive'] = archive_docs\n\n\n" + LIVE_TASK_REPO
+    )
+    with caplog.at_level(logging.WARNING):
+        pruned = prune_repository(
+            "modules/tm/backend/repo.py", source, module_id="tm", code_owned={"insert_task", "load_task"},
+            business_sources={_PROBE_SERVICE: "from . import repo\n\nasync def go(ctx):\n    return repo.HANDLERS\n"},
+        )
+    assert "class TaskRepo" not in pruned and "HANDLERS['archive'] = archive_docs" in pruned
+    namespace: dict = {}
+    exec(compile(pruned, "repo.py", "exec"), namespace)
+    assert namespace["HANDLERS"]["archive"] is namespace["archive_docs"]
+    assert any("['TaskRepo']" in record.getMessage() for record in caplog.records)
+
+
 # --------------------------------------------------------------------------- account data
 
 

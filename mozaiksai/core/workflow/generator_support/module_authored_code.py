@@ -4,9 +4,10 @@ Code renders a persistent module's canonical repository functions and, when an
 action declares one, its canonical write event. What a model wrote beside them
 is reconciled here instead of reaching runtime:
 
-- a model-authored definition in ``backend/repo.py`` that no business logic
-  references (a leftover repository class, a duplicate CRUD helper) is removed
-  and the removal is logged; a referenced repository class, or referenced code
+- a model-authored top-level function or class in ``backend/repo.py`` that
+  neither business logic nor any import-time statement reaches (a leftover
+  repository class, a duplicate CRUD helper) is removed and the removal is
+  logged; decorated definitions, registrations and dynamic imports keep code; a referenced repository class, or referenced code
   calling a Motor-only method, is rejected with the site and the replacement;
 - a ``ctx.emit`` literal naming a declared event under another spelling is
   rewritten to the declared type, and a write hook emitting the event its
@@ -36,17 +37,50 @@ PERSISTENCE_COLLECTION_METHODS = (
 _HOOK = re.compile(r"^(before|after)_(create|update|delete)_([A-Za-z0-9_]+)$")
 
 
-def _top_level_definitions(tree: ast.Module) -> dict[str, ast.stmt]:
-    definitions: dict[str, ast.stmt] = {}
+def _top_level_functions(tree: ast.Module) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
+    return {
+        node.name: node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and not (node.name.startswith("__") and node.name.endswith("__"))
+    }
+
+
+def _import_time_roots(tree: ast.Module) -> set[str]:
+    """Names live at import: used by any top-level statement other than an undecorated definition.
+
+    Assignments, subscript registrations (``HANDLERS["x"] = f``), module-level
+    ``if`` blocks and decorated definitions all run when the module is imported,
+    so everything they touch is used even when no business logic names it.
+    """
+    roots: set[str] = set()
     for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            definitions[node.name] = node
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            names = [target.id for target in targets if isinstance(target, ast.Name)]
-            if len(names) == len(targets):
-                definitions.update(dict.fromkeys(names, node))
-    return {name: node for name, node in definitions.items() if not (name.startswith("__") and name.endswith("__"))}
+            if not node.decorator_list:
+                continue
+            roots.add(node.name)
+        roots |= _names(node)
+    return roots
+
+
+def _imports_dynamically(tree: ast.AST) -> bool:
+    """True when code can reach a module by computed name (importlib, __import__, sys.modules)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in {"__import__", "import_module"}:
+            return True
+        if isinstance(node, ast.Attribute) and (
+            node.attr == "import_module"
+            or (node.attr == "modules" and isinstance(node.value, ast.Name) and node.value.id == "sys")
+        ):
+            return True
+        if isinstance(node, ast.ImportFrom) and (
+            node.module == "importlib" or (node.module == "sys" and any(a.name == "modules" for a in node.names))
+        ):
+            return True
+        if isinstance(node, ast.Import) and any(alias.name.split(".")[0] == "importlib" for alias in node.names):
+            return True
+    return False
 
 
 def _names(node: ast.AST) -> set[str]:
@@ -57,14 +91,17 @@ def repository_references(sources: Mapping[str, str]) -> tuple[dict[str, str], b
     """Map each ``backend/repo.py`` name the given sources use to its first use site.
 
     The flag is False when a source uses the repository opaquely (a star import,
-    the module object passed around or reflected on, or unparseable source), so
-    no definition can be proven unused.
+    the module object passed around or reflected on, a dynamic import through
+    importlib, ``__import__`` or ``sys.modules``, or unparseable source), so no
+    definition can be proven unused.
     """
     sites: dict[str, str] = {}
     for path, source in sources.items():
         try:
             tree = ast.parse(source)
         except SyntaxError:
+            return sites, False
+        if _imports_dynamically(tree):
             return sites, False
         aliases: set[str] = set()
         for node in ast.walk(tree):
@@ -107,12 +144,13 @@ def prune_repository(
     except SyntaxError:
         return source  # The module implementation gate reports syntax errors.
     sites, provable = repository_references(business_sources)
-    definitions = _top_level_definitions(tree)
-    rendered = sorted(name for name in code_owned if name in definitions and not name.startswith("_"))
+    provable = provable and not _imports_dynamically(tree)
+    functions = _top_level_functions(tree)
+    rendered = sorted(name for name in code_owned if name in functions and not name.startswith("_"))
     rendered_clause = f"; code renders {', '.join(rendered)}" if rendered else ""
     errors: list[str] = []
     for name, site in sorted(sites.items()):
-        node = definitions.get(name)
+        node = functions.get(name)
         if isinstance(node, ast.ClassDef) and name not in code_owned:
             errors.append(
                 f"{site}: uses repo.{name}, a model-authored repository class ({path}:{node.lineno}). The "
@@ -120,19 +158,23 @@ def prune_repository(
                 f"Write the persistence this class performs as module-level repo functions taking ctx, over "
                 f"ctx.persistence.collection({module_id!r}, <collection>), and call them as repo.<function>(ctx, ...)."
             )
-    reached: set[str] = set()
-    pending = [name for name in {*code_owned, *sites} if name in definitions]
-    while pending:
-        name = pending.pop()
-        if name in reached:
-            continue
-        reached.add(name)
-        pending.extend(used for used in _names(definitions[name]) if used in definitions and used not in reached)
-    # An opaque use proves nothing dead: everything is kept, and only code a use
-    # site actually reaches is held to the persistence API here.
-    keep = reached if provable else set(definitions)
-    for name in sorted(reached - code_owned):
-        for call in ast.walk(definitions[name]):
+
+    def closure(start: set[str]) -> set[str]:
+        reached: set[str] = set()
+        pending = [name for name in start if name in functions]
+        while pending:
+            name = pending.pop()
+            if name in reached:
+                continue
+            reached.add(name)
+            pending.extend(used for used in _names(functions[name]) if used in functions and used not in reached)
+        return reached
+
+    referenced = closure({*code_owned, *sites})
+    live = closure({*code_owned, *sites, *_import_time_roots(tree)})
+    # Only code a business use site reaches is held to the persistence API here.
+    for name in sorted(referenced - code_owned):
+        for call in ast.walk(functions[name]):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr in MOTOR_ONLY_METHODS:
                 used_by = sites.get(name, "a referenced repo definition")
                 errors.append(
@@ -141,19 +183,15 @@ def prune_repository(
                 )
     if errors:
         raise ValueError("\n".join(dict.fromkeys(errors)))
-    dead = {id(node): node for name, node in definitions.items() if name not in keep}
-    # A statement binding several names stays when any of them is kept.
-    kept_nodes = {id(definitions[name]) for name in keep}
-    removed = sorted(name for name, node in definitions.items() if id(node) in dead and id(node) not in kept_nodes)
+    # An opaque use proves nothing dead. Otherwise only an undecorated top-level
+    # function or class that nothing live reaches is removed.
+    removed = [] if not provable else sorted(
+        name for name, node in functions.items() if name not in live and not node.decorator_list
+    )
     if not removed:
         return source
     lines = source.splitlines(keepends=True)
-    spans = []
-    for node in dead.values():
-        if id(node) in kept_nodes:
-            continue
-        decorators = getattr(node, "decorator_list", [])
-        spans.append((min([node.lineno, *(item.lineno for item in decorators)]) - 1, node.end_lineno or node.lineno))
+    spans = [(functions[name].lineno - 1, functions[name].end_lineno or functions[name].lineno) for name in removed]
     for start, end in sorted(spans, reverse=True):
         del lines[start:end]
     pruned = _drop_unused_imports("".join(lines))

@@ -1310,17 +1310,17 @@ class ModuleLoader:
                 candidate for _, candidate in inspect.getmembers(mod, inspect.isclass)
                 if candidate.__module__ == mod.__name__
             ]
+            from mozaiksai.core.account.registry import account_handler_arguments
+
             valid = []
             for candidate in candidates:
                 if not inspect.isclass(candidate):
                     continue
                 try:
-                    # The account routes inject the resources a constructor declares.
-                    constructor = inspect.signature(candidate)
-                    resources = {name: None for name in ("db", "persistence") if name in constructor.parameters}
-                    if not resources:
-                        raise TypeError("__init__ must accept db or persistence")
-                    constructor.bind(**resources)
+                    # Bind exactly what the account routes will pass (db, or persistence when named).
+                    inspect.signature(candidate).bind(
+                        **account_handler_arguments(candidate, db=None, persistence=None),
+                    )
                     for method_name in ("delete_user_data", "export_user_data"):
                         method = getattr(candidate, method_name, None)
                         if not inspect.iscoroutinefunction(method):

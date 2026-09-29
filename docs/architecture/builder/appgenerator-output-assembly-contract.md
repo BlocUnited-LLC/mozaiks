@@ -977,13 +977,17 @@ the callable signatures from the runtime's `PersistenceCollection` protocol,
 not a Motor collection API. The repository quality gate rejects unsupported
 cursor and find-and-modify calls. A persistent module's repository is
 module-level functions, and code renders the canonical ones. At task time and
-assembly, model-authored `repo.py` definitions that no business logic
-references (a leftover repository class, a duplicate CRUD helper) are removed
-with a `REPO_CODE_DISCARDED` warning; a repository class the handler or service
-uses, or a referenced repo function calling a Motor-only method, is rejected
-with the use site and the replacement. An opaque use of the repository module
-(a star import, the module passed or reflected on) proves nothing dead, so
-nothing is removed. Bundle acceptance also checks that generated
+assembly, a model-authored undecorated top-level function or class in
+`repo.py` that neither business logic nor any import-time statement reaches (a
+leftover repository class, a duplicate CRUD helper) is removed with a
+`REPO_CODE_DISCARDED` warning. Every name a non-definition top-level statement
+uses (an assignment, a `HANDLERS["x"] = f` registration, a module-level `if`)
+and every decorated definition is live. A repository class the handler or
+service uses, or a referenced repo function calling a Motor-only method, is
+rejected with the use site and the replacement. An opaque use of the
+repository module (a star import, the module passed or reflected on,
+`importlib`, `__import__` or `sys.modules` anywhere in the module's code)
+proves nothing dead, so nothing is removed. Bundle acceptance also checks that generated
 data contracts preserve the approved plan's field types and required flags.
 These checks do not prove arbitrary business logic correct; live authenticated
 CRUD and ownership tests remain necessary for end-to-end acceptance.

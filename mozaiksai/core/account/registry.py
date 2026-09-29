@@ -115,7 +115,25 @@ class AccountDataRegistry:
         return export
 
 
-ACCOUNT_HANDLER_RESOURCES = ("db", "persistence")
+def account_handler_arguments(handler_cls: type, *, db: Any, persistence: Any) -> dict[str, Any]:
+    """The keyword arguments a handler class is constructed with.
+
+    ``persistence`` is passed only to a constructor that names it; every other
+    constructor, including ``__init__(self, **kwargs)``, receives ``db`` as it
+    always has. The loader binds the same arguments to validate a handler.
+    """
+    parameters = inspect.signature(handler_cls).parameters
+    named = {
+        name for name, parameter in parameters.items()
+        if parameter.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    }
+    accepts_any = any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+    arguments: dict[str, Any] = {}
+    if "persistence" not in named or "db" in named or accepts_any:
+        arguments["db"] = db
+    if "persistence" in named:
+        arguments["persistence"] = persistence
+    return arguments
 
 
 def _resolve_instance(
@@ -125,16 +143,14 @@ def _resolve_instance(
 ) -> AccountDataHandler:
     """Return a handler instance.
 
-    If *handler* is a class, construct it with the resources its constructor
-    declares (``db`` and/or ``persistence``) as keyword arguments.  If it's
-    already an instance, return it directly.
+    If *handler* is a class, construct it with ``account_handler_arguments``.
+    If it's already an instance, return it directly.
     """
     if isinstance(handler, type):
-        declared = inspect.signature(handler).parameters
-        resources = {"db": db, "persistence": persistence}
-        if "persistence" in declared and persistence is None:
+        arguments = account_handler_arguments(handler, db=db, persistence=persistence)
+        if "persistence" in arguments and persistence is None:
             raise RuntimeError("account handler requires runtime persistence, but none was supplied")
-        return handler(**{name: resources[name] for name in ACCOUNT_HANDLER_RESOURCES if name in declared})
+        return handler(**arguments)
     return handler
 
 
