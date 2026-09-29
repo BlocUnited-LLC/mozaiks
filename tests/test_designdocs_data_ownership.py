@@ -151,5 +151,10 @@ def test_duplicate_surface_and_shared_identity_is_rejected(persistence, duplicat
     bundle["data_contract"]["shared_collections"] = [shared]
     result = inventory._save(ownership._context(managed=False), bundle)
     assert result["outcome"] == "revise"
-    assert f".{duplicate} duplicates" in result["error"]
+    if duplicate == "entity":
+        # The design message names both collections and what to change.
+        assert "'report_documents' and 'report_notes' on 'reports' both declare entity 'Report'" in result["error"]
+        assert "Give 'report_notes' an entity of its own" in result["error"]
+    else:
+        assert f".{duplicate} duplicates" in result["error"]
     store_factory.assert_not_called()

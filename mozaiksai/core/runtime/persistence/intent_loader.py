@@ -173,7 +173,10 @@ def iter_data_contract_collections(
                     raise DataContractLoadError(f"{path}.{field} is required")
                 key = (str(owner_id), str(collection[field]))
                 if explicit and key in seen:
-                    raise DataContractLoadError(f"{path}.{field} duplicates {owner_id}.{collection[field]}")
+                    raise DataContractLoadError(
+                        f"{path}.{field} duplicates {owner_id}.{collection[field]}: each collection of an owner "
+                        f"needs its own {field}"
+                    )
                 seen.add(key)
             yield str(owner_id), str(owner_kind), collection
 

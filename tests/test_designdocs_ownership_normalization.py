@@ -101,7 +101,7 @@ def test_selected_subscription_state_normalizes_to_billing_facade(persistence):
     context = ownership._context(managed=True)
     bundle = inventory._bundle(pricing=False)
     ownership._add_surface(
-        bundle, surface_id="subscription_management", name="My Subscription", route="/subscription",
+        bundle, surface_id="subscription_management", name="Subscription", route="/subscription",
         entities=["Subscription"], actions=["update_subscription"], collection="subscriptions",
     )
     page = deepcopy(bundle["experience_spec"]["pages"][-1])
@@ -113,7 +113,7 @@ def test_selected_subscription_state_normalizes_to_billing_facade(persistence):
     assert not any(s["surface_id"] == "subscription_management" for s in surfaces)
     facade = next(s for s in surfaces if s["surface_id"] == "billing_portal")
     assert facade["owner"] == "app"
-    assert "My Subscription" in facade["owned_pages"]
+    assert "Subscription" in facade["owned_pages"]
     assert facade["primary_entities"] == []
     assert "update_subscription" not in facade["owned_mutations"]
     assert page in detach(context.get("experience_spec"))["pages"]
@@ -352,7 +352,7 @@ def test_two_subscription_surfaces_merge_pages_without_losing_normalization_reco
     bundle = inventory._bundle(pricing=False)
     for surface_id, name, route in (
         ("subscription_management", "Subscription", "/subscription"),
-        ("billing_management", "Invoices", "/invoices"),
+        ("billing_management", "Billing Management", "/billing-management"),
     ):
         ownership._add_surface(
             bundle, surface_id=surface_id, name=name, route=route,
@@ -366,7 +366,7 @@ def test_two_subscription_surfaces_merge_pages_without_losing_normalization_reco
     surfaces = detach(context.get("design_surface_map"))["surfaces"]
     facades = [surface for surface in surfaces if surface["surface_id"] == "billing_portal"]
     assert len(facades) == 1
-    assert {"Subscription", "Invoices"} <= set(facades[0]["owned_pages"])
+    assert {"Subscription", "Billing Management"} <= set(facades[0]["owned_pages"])
     assert all(page in detach(context.get("experience_spec"))["pages"] for page in approved_pages)
     assert not any(collection["name"] == "subscriptions" for collection in _saved_collections(context))
     records = summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
@@ -959,7 +959,7 @@ def test_provider_lifecycle_events_on_subscription_surface_are_removed(persisten
     context = ownership._context(managed=True)
     bundle = inventory._bundle(pricing=False)
     ownership._add_surface(
-        bundle, surface_id="subscription_management", name="My Subscription", route="/subscription",
+        bundle, surface_id="subscription_management", name="Subscription", route="/subscription",
         entities=["Subscription"], actions=["update_subscription"], collection="subscriptions",
     )
     bundle["surface_map"]["surfaces"][-1]["events_emitted"] = ["domain.billing.subscription_updated"]
@@ -972,7 +972,7 @@ def test_provider_lifecycle_events_on_subscription_surface_are_removed(persisten
     facade = next(surface for surface in surfaces if surface["surface_id"] == "billing_portal")
     assert facade["events_emitted"] == []
     # Facade pages are app pages the pack renders; only the provider events go.
-    assert "My Subscription" in facade["owned_pages"]
+    assert "Subscription" in facade["owned_pages"]
     assert page in detach(context.get("experience_spec"))["pages"]
     record = {
         "surface_id": "subscription_management", "owner": "billing_portal",
@@ -986,7 +986,7 @@ def test_workflow_trigger_on_subscription_surface_still_requires_revision(persis
     context = ownership._context(managed=True)
     bundle = inventory._bundle(pricing=False)
     ownership._add_surface(
-        bundle, surface_id="subscription_management", name="My Subscription", route="/subscription",
+        bundle, surface_id="subscription_management", name="Subscription", route="/subscription",
         entities=["Subscription"], actions=["update_subscription"], collection="subscriptions",
     )
     bundle["surface_map"]["surfaces"][-1]["workflow_triggers"] = ["subscription-renewal-workflow"]
@@ -1507,9 +1507,12 @@ def test_identity_surface_with_app_behavior_names_what_stays_app_owned(persisten
     result = inventory._save(context, bundle)
 
     ownership._assert_refused(context, result, store_factory, owner="platform")
+    # The claim names everything the save removes as platform identity, so a
+    # retry drops the users collection and the lifecycle event too.
     assert result["error"].startswith(
         "App surface 'user_management' claims Mozaiks platform authentication and sessions: "
-        "entities ['User'], actions ['create_user']."
+        "entities ['User'], actions ['create_user'], collections ['users'], "
+        "events ['domain.users.user_created']."
     )
     assert (
         f"keep it app-owned with its entities ['Team'], actions {app_actions}, collections ['teams'], pages []"
@@ -1599,10 +1602,8 @@ def test_create_user_form_with_a_password_does_not_make_an_admin_page_sign_in(pe
 
 
 @pytest.mark.parametrize("page", [
-    pytest.param(_users_page(columns=("user_id", "email", "favorite_genre")), id="lists_app_fields"),
     pytest.param(_users_page(columns=("display_name", "avatar_url"), primitive="Form"), id="profile_form_lists_nobody"),
     pytest.param(_users_page(columns=("session_id", "created_at", "expires_at")), id="lists_sessions"),
-    pytest.param(_users_page(columns=("id", "name", "email", "role", "created_at")), id="fields_the_accounts_do_not_declare"),
 ])
 def test_identity_page_that_is_not_user_administration_stays_an_app_page(persistence, page):
     _, store_factory, _ = persistence
@@ -1615,10 +1616,38 @@ def test_identity_page_that_is_not_user_administration_stays_an_app_page(persist
     ownership._assert_refused(context, result, store_factory, owner="platform")
     assert result["error"].startswith(
         "App surface 'user_management' claims Mozaiks platform authentication and sessions: "
-        "entities ['User'], actions ['create_user', 'delete_user']."
+        "entities ['User'], actions ['create_user', 'delete_user'], collections ['users'], "
+        "events ['domain.users.user_created']."
     )
     assert "keep it app-owned with its entities [], actions [], collections [], pages ['Users']" in result["error"]
     assert "user-administration" not in result["error"]
+
+
+@pytest.mark.parametrize("columns,extra", [
+    pytest.param(("user_id", "email", "favorite_genre"), ["favorite_genre"], id="lists_app_fields"),
+    pytest.param(("id", "name", "email", "role", "created_at"), ["name", "role"], id="fields_the_accounts_do_not_declare"),
+])
+def test_page_listing_accounts_beside_app_fields_is_never_kept_app_owned(persistence, columns, extra):
+    """A page listing the platform's accounts is not app evidence, even beside app columns.
+
+    Keeping it app-owned would save a /users page listing platform identity: the
+    rejection names the columns the accounts do not declare instead, as it does
+    on a surface the catalog names.
+    """
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _identity_bundle(page=_users_page(columns=columns))
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert result["error"].startswith(
+        "Page 'Users' (/users) is owned by 'user_management', which normalizes to Mozaiks platform "
+        f"authentication and sessions, and lists its user accounts, but it also names fields the accounts do "
+        f"not declare: {extra}."
+    )
+    assert "drop the page, or keep only app data on it and move 'Users' to owned_pages of 'reports'" in result["error"]
+    assert "keep it app-owned" not in result["error"]
 
 
 def _named_auth_with_users_page(page: dict) -> dict:
