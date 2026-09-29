@@ -1096,7 +1096,7 @@ def _section_label(schema: Mapping[str, Any] | None, location: tuple[Any, ...]) 
             node = node[part]
         else:
             break
-        if isinstance(node, Mapping) and "primitive" in node and "config" in node:
+        if isinstance(node, Mapping) and "primitive" in node:
             primitive = node.get("primitive")
             section_id = node.get("id")
             kind = f"{primitive} " if primitive in _TOP_LEVEL_CONFIG_MODELS else ""

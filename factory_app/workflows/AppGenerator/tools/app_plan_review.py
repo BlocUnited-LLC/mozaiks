@@ -398,7 +398,8 @@ def _authored_page_paths(plan: dict[str, Any], pack_paths: frozenset[str]) -> li
 
 def _note_pack_pages(plan: dict[str, Any], context: Any) -> list[str]:
     """Tell each page_bundle worker which approved pages the selected packs ship."""
-    pack_pages = [path for path in _required_page_paths(plan) if path in pack_owned_output_paths(context)]
+    pack_paths = pack_owned_output_paths(context)
+    pack_pages = [path for path in _required_page_paths(plan) if path in pack_paths]
     if not pack_pages:
         return []
     note = (

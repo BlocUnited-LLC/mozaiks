@@ -289,6 +289,13 @@ def test_literal_missing_and_nested_errors_name_the_allowed_values_and_the_real_
     ) in messages
 
 
+def test_a_section_missing_its_config_is_still_named():
+    page = _page("Records", "/records", [{"id": "list", "primitive": "DataTable"}])
+    assert _diagnostics(page) == [
+        "$.sections[0].config: page_schema.missing: DataTable section 'list': required field 'config' is missing."
+    ]
+
+
 def test_unknown_primitives_list_the_registered_ones_without_echoing_the_value():
     page = _page("Records", "/records", [{"id": "x", "primitive": "SyntheticPrivateWidget", "config": {}}])
     [message] = _diagnostics(page)

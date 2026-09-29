@@ -156,7 +156,12 @@ def _plan_from_saved_design(context: ContextVariablesBridge) -> dict:
         "summary": "Managed subscription provider.", "implementation_mode": "external_integration",
         "primary_entities": [],
     }]
-    page_paths = ["app.json", *[f"ui/pages/{page['route'][1:]}.yaml" for page in experience["pages"]]]
+    # The selected MozaiksPay pack ships billing_portal, its client and its pages from templates;
+    # pack-owned outputs are never model work, so a correct plan schedules no task for them.
+    page_paths = ["app.json", *[
+        f"ui/pages/{page['route'][1:]}.yaml" for page in experience["pages"]
+        if page["route"] not in {"/pricing", "/billing", "/usage"}
+    ]]
     plan["build_tasks"] = [
         _task("task_management.module_contract", "module_contract", "ConfigMiddlewareAgent", "task_management",
               ["modules/task_management/module.yaml"]),
@@ -165,18 +170,6 @@ def _plan_from_saved_design(context: ContextVariablesBridge) -> dict:
         _task("task_management.business_services", "business_services", "ServiceAgent", "task_management",
               [f"modules/task_management/backend/{name}.py" for name in ("handler", "service", "repo", "policy")],
               dependencies=["task_management.module_contract", "task_management.data_models"]),
-        {
-            **_task("mozaikspay.api_surface", "api_surface", "ControllerAgent", "mozaikspay",
-                    ["services/integrations/mozaikspay_client.py"]),
-            "surface_id": "billing_portal", "surface_kind": "module",
-        },
-        _task("billing_portal.module_contract", "module_contract", "ConfigMiddlewareAgent", "billing_portal",
-              ["modules/billing_portal/module.yaml"]),
-        _task("billing_portal.data_models", "data_models", "ModelAgent", "billing_portal",
-              ["modules/billing_portal/backend/schemas.py"], dependencies=["billing_portal.module_contract"]),
-        _task("billing_portal.business_services", "business_services", "ServiceAgent", "billing_portal",
-              ["modules/billing_portal/backend/handler.py", "modules/billing_portal/backend/service.py"],
-              dependencies=["billing_portal.module_contract", "billing_portal.data_models", "mozaikspay.api_surface"]),
         {
             "task_id": "subscription.config", "task_type": "subscription_config", "capability_pack_id": None,
             "surface_id": "subscription_contract", "surface_kind": "app_policy",
@@ -187,7 +180,7 @@ def _plan_from_saved_design(context: ContextVariablesBridge) -> dict:
         },
         {
             **_task("page_bundle", "page_bundle", "AppSchemaAgent", None, page_paths,
-                    dependencies=["task_management.business_services", "billing_portal.business_services"]),
+                    dependencies=["task_management.business_services"]),
             "surface_id": "task_management", "surface_kind": "module",
         },
     ]
@@ -221,10 +214,7 @@ def test_plan_from_the_saved_live_design_passes_review(persistence):
     cached = detach(plan_context.get("app_build_plan"))
     assert [(page["name"], page["route"]) for page in cached["pages"]] == APPROVED_PAGES
     page_bundle = next(task for task in cached["build_tasks"] if task["task_type"] == "page_bundle")
-    assert sorted(page_bundle["owned_paths"]) == sorted([
-        "app.json", "ui/pages/dashboard.yaml", "ui/pages/tasks.yaml",
-        "ui/pages/pricing.yaml", "ui/pages/billing.yaml", "ui/pages/usage.yaml",
-    ])
+    assert sorted(page_bundle["owned_paths"]) == sorted(["app.json", "ui/pages/dashboard.yaml", "ui/pages/tasks.yaml"])
     assert not any(
         "auth" in str(path) for task in cached["build_tasks"] for path in task.get("owned_paths") or []
     )
