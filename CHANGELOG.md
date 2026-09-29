@@ -52,6 +52,22 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Outputs a selected capability pack ships from its templates are no longer
+  treated as model work. AppGenerator plan review stopped synthesizing a
+  `billing_portal` module_contract/data_models/business_services trio for the
+  MozaiksPay facade (whose module, schemas, handler and service the pack
+  templates provide), and `page_bundle` no longer owns the pack's billing,
+  pricing and usage pages; a worker's copy of any pack-owned path is discarded
+  with a logged normalization, assembly takes those files only from the
+  templates and checks the template pages themselves, and a template defect
+  names its pack and source directory. A live greenfield build failed at
+  assembly on exactly these paths. Page-schema errors now name the section,
+  its primitive, the offending field and the allowed fields or values instead
+  of "Field value does not match the registered page-schema contract", a page
+  whose bindings were rejected still reports its schema errors in the same
+  rejection, and a dotted metric key such as `items.total` whose final segment
+  is a returned top-level field is constructed to that field.
+
 - DesignDocs recognizes the platform's login/user system by what a surface
   declares, not what it is called. A surface such as `user_management` or
   `auth_module` normalizes to the platform when it declares a platform identity

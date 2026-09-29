@@ -11,6 +11,7 @@ needs full payload materialization including admin surface codegen.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,7 @@ from mozaiksai.core.runtime.app.auth_contract import (
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
+    discard_pack_owned_outputs,
     extract_deleted_file_paths_from_payload,
     materialize_collection_auth,
     materialize_data_contract,
@@ -46,6 +48,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 )
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
+)
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -60,6 +65,8 @@ from mozaiksai.core.workflow.generator_support.module_write_actions import (
     materialize_task_module_schemas,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import compile_authored_page_files
+
+logger = logging.getLogger(__name__)
 
 
 def compose_bundle_auth_routes(files_map: dict[str, str]) -> None:
@@ -137,6 +144,12 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
     try:
         if not isinstance(payload, dict):
             raise ValueError("Generated code persistence requires validated structured_output.")
+        payload, discarded = discard_pack_owned_outputs(payload, pack_owned_output_paths(context_variables))
+        if discarded:
+            logger.info(
+                "PACK_OWNED_OUTPUT_DISCARDED: repair output paths=%s; selected pack templates provide them",
+                discarded,
+            )
         subscription_contract = resolve_subscription_contract(context_variables)
         payload = close_module_actions(
             payload,

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import Iterable
 from pathlib import PurePosixPath
 from typing import Annotated, Any
@@ -17,6 +18,10 @@ from mozaiksai.core.runtime.app.paths import (
 )
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_owned_output_paths,
+)
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
@@ -183,6 +188,46 @@ def _construct_task_requirements(plan: dict[str, Any], context_variables: Any) -
         if missing:
             task["owned_paths"] = [*(task.get("owned_paths") or []), *sorted(missing)]
             repairs.append(f"{task_id}: added required paths {sorted(missing)}")
+    return repairs
+
+
+def release_pack_owned_paths(plan: dict[str, Any], context: Any) -> list[str]:
+    """Pack-owned outputs are never model work; no task keeps one.
+
+    A selected pack writes every path it declares in required_outputs from its
+    templates (owner: workspace only at genesis), and assembly takes those
+    files only from the templates. A task that owns one - drafted by the
+    planner or synthesized by an earlier repair - is building a file that is
+    discarded. Its pack-owned paths are released; a task left with nothing to
+    build is dropped with its dependency edges.
+    """
+    pack_paths = pack_owned_output_paths(context)
+    if not pack_paths:
+        return []
+    repairs: list[str] = []
+    kept: list[dict[str, Any]] = []
+    dropped: set[str] = set()
+    for task in plan.get("build_tasks") or []:
+        owned = list(task.get("owned_paths") or [])
+        released = [path for path in owned if normalize_app_path(str(path)) in pack_paths]
+        if not released:
+            kept.append(task)
+            continue
+        remaining = [path for path in owned if path not in released]
+        if remaining:
+            task["owned_paths"] = remaining
+            kept.append(task)
+            repairs.append(f"{task.get('task_id')}: released pack-owned {released}; selected pack templates provide them")
+        else:
+            dropped.add(str(task.get("task_id")))
+            repairs.append(f"dropped task {task.get('task_id')!r}: every owned path {released} is pack-owned")
+    for task in kept:
+        depends = [dep for dep in task.get("depends_on") or [] if str(dep) not in dropped]
+        if len(depends) != len(task.get("depends_on") or []):
+            task["depends_on"] = depends
+    if dropped and plan.get("generation_order"):
+        plan["generation_order"] = [ref for ref in plan["generation_order"] if str(ref) not in dropped]
+    plan["build_tasks"] = kept
     return repairs
 
 
@@ -1519,9 +1564,17 @@ def _validate_user_facing_managed_capability_tasks(
     build_tasks: list[dict[str, Any]],
     *,
     managed_capability_ids: frozenset[str],
+    pack_paths: frozenset[str] = frozenset(),
 ) -> None:
+    """A user-facing managed capability needs an app-owned facade and pages bound to it.
+
+    The selected pack's templates may provide both (its facade ``module.yaml``
+    and its pages); those are never model work, so no task is required for them.
+    """
     if not managed_capability_ids or not pages:
         return
+    template_facade = any(re.fullmatch(r"modules/[^/]+/module\.yaml", path) for path in pack_paths)
+    authored_pages = [page for page in pages if f"ui/pages/{_page_file_stem(page)}.yaml" not in pack_paths]
 
     page_bundle_tasks = [
         task
@@ -1544,12 +1597,12 @@ def _validate_user_facing_managed_capability_tasks(
             continue
         if not _managed_capability_is_user_facing(pack, pages):
             continue
-        if not page_bundle_tasks:
+        if not page_bundle_tasks and authored_pages:
             raise ValueError(
                 f"Managed capability '{pack_id}' appears in page intent but no page_bundle build task was planned. "
                 "User-facing managed capabilities must include a page_bundle task whose endpoints bind to an app-owned facade module."
             )
-        if not facade_module_tasks:
+        if not facade_module_tasks and not template_facade:
             raise ValueError(
                 f"Managed capability '{pack_id}' appears in page intent but no app-owned facade module_contract task was planned. "
                 f"Do not generate modules/{pack_id}/. Plan a separate generated facade module and bind pages to that facade."
@@ -2163,6 +2216,11 @@ def app_build_plan(
         build_tasks=build_tasks,
         context_variables=context_variables,
     )
+    # The cached plan never schedules model work for an output a selected pack writes.
+    released: dict[str, Any] = {"build_tasks": build_tasks, "generation_order": generation_order}
+    for repair in release_pack_owned_paths(released, context_variables):
+        _logger.info("[AppGenerator] plan normalized: %s", repair)
+    build_tasks, generation_order = released["build_tasks"], released["generation_order"]
     pages = _normalize_page_config_hints(pages)
     pages = _normalize_managed_capability_page_bindings(
         pages,
@@ -2198,6 +2256,7 @@ def app_build_plan(
         pages,
         build_tasks,
         managed_capability_ids=managed_capability_ids,
+        pack_paths=pack_owned_output_paths(context_variables),
     )
     _validate_monetization_provider_selection(
         capability_packs,

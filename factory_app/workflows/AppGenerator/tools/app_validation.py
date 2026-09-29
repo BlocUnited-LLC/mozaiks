@@ -59,7 +59,7 @@ from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     resolve_app_validation_strategy,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
-    managed_pack_output_paths,
+    pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -1768,7 +1768,7 @@ def _template_owned_paths(context_variables: Any) -> frozenset[str]:
     """Paths the selected packs' templates own, resolved the way assembly resolves packs."""
     if context_variables is None:
         return frozenset()
-    paths = set(managed_pack_output_paths(context_variables))
+    paths = set(pack_owned_output_paths(context_variables))
     packs = detach(context_variables.get("capability_packs")) or []
     if not packs:
         plan = detach(context_variables.get("app_build_plan")) or {}

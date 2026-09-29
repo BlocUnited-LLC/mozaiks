@@ -8,7 +8,14 @@ import yaml
 from pydantic import Field
 
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
+from mozaiksai.core.workflow.generator_support.code_files import (
+    discard_pack_owned_outputs,
+    safe_relpath,
+)
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    PackOwnedOutput,
+    pack_owned_outputs,
+)
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
@@ -18,6 +25,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stems,
     module_action_index,
     normalize_planned_page_content,
+    pack_template_page_errors,
     validate_planned_page,
 )
 
@@ -69,6 +77,7 @@ def _apply_planned_page_contracts(
     app_build_plan: Any,
     failed_task_ids: set[str] | None = None,
     context_variables: Any = None,
+    pack_outputs: dict[str, PackOwnedOutput] | None = None,
 ) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
@@ -91,6 +100,7 @@ def _apply_planned_page_contracts(
     data_contract = detach(context_variables.get("data_contract")) if context_variables is not None else None
     surface_map = detach(context_variables.get("design_surface_map")) if context_variables is not None else None
     failed_tasks = failed_task_ids or set()
+    pack_outputs = pack_outputs or {}
     for task in tasks:
         if str(task.get("task_type") or "").strip() != "page_bundle":
             continue
@@ -101,8 +111,8 @@ def _apply_planned_page_contracts(
             # a plan path written as "./ui/pages/x.yaml" still matches the file
             # the worker emitted as "ui/pages/x.yaml".
             path = safe_relpath(str(raw_path or ""))
-            if not path:
-                continue
+            if not path or path in pack_outputs:
+                continue  # a pack template page is checked below, never re-derived
             stem = _page_stem_from_path(path)  # type: ignore[assignment]
             if not stem or stem not in planned_by_stem:
                 continue
@@ -132,6 +142,22 @@ def _apply_planned_page_contracts(
                 validate_planned_page(file_map[path], planned_by_stem[stem], path)
             except ValueError as exc:
                 raise ValueError(f"{path}: {exc}") from exc
+    template_errors: list[str] = []
+    for path, owned in sorted(pack_outputs.items()):
+        template_stem = _page_stem_from_path(path)
+        if not template_stem or path not in file_map:
+            continue
+        errors = pack_template_page_errors(
+            file_map[path], path=path, modules=modules, workflow_names=workflows,
+            planned=planned_by_stem.get(template_stem),
+        )
+        if errors:
+            template_errors.append(
+                f"{path}: selected pack {owned.pack_id!r} template (from {owned.source or 'its registered contract'}) "
+                "fails assembly checks; no task authors it, so the pack itself must be fixed: " + " | ".join(errors)
+            )
+    if template_errors:
+        raise ValueError("\n".join(template_errors))
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
@@ -375,6 +401,20 @@ async def _assemble_app_tasks(
     ):
         raise ValueError("No AppGenerator schema artifacts, task batch outputs, or accumulated code files are available for assembly")
 
+    # Pack-owned files come only from the selected packs' templates, applied
+    # below; no worker, repair or earlier assembly copy of one is merged.
+    pack_outputs = pack_owned_outputs(context_variables)
+    kept_outputs: list[dict[str, Any]] = []
+    for output in feature_outputs:
+        kept, discarded = discard_pack_owned_outputs(output, frozenset(pack_outputs))
+        if discarded:
+            logger.info(
+                "[AppGenerator] PACK_OWNED_OUTPUT_DISCARDED at assembly: task=%s paths=%s; selected pack templates provide them",
+                output.get("_task_id") or "accumulated", discarded,
+            )
+        kept_outputs.append(kept)
+    feature_outputs = kept_outputs
+
     result = await assemble_features(
         app_id=str(app_id),
         feature_outputs=feature_outputs,
@@ -420,9 +460,12 @@ async def _assemble_app_tasks(
             if context_variables and hasattr(context_variables, "get")
             else None
         ),
+        pack_outputs=pack_outputs,
     )
     code_files = _apply_module_handler_method_alignment(code_files)
-    code_files = _apply_deleted_files(code_files, _context_deleted_files(context_variables))
+    code_files = _apply_deleted_files(
+        code_files, [path for path in _context_deleted_files(context_variables) if path not in pack_outputs],
+    )
     code_files = apply_entitlement_gates(
         code_files, context_variables=context_variables,
         failed_task_ids=_failed_batch_task_ids(

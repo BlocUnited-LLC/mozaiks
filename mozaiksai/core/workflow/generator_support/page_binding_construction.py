@@ -4,6 +4,9 @@ A page author's choice is rejected only when the contracts leave a genuine
 judgment gap. Where the accepted module contracts, the approved data contract
 and the surface map determine the correct binding, code writes it:
 
+- a metric key that is a dotted path the bound action does not return, whose
+  final segment names a returned top-level field, reads that field
+  (``items.total`` -> ``total``);
 - a metric ``detail_key``/``trend_key`` the bound action does not return is
   cleared; a metric whose own ``id`` names a returned field reads that field;
 - a create/edit ``workflow`` action that names no generated workflow is
@@ -372,7 +375,19 @@ def construct_page_bindings(
         if action is None or not key:
             continue
         outputs = action.get("output_schema")
+        top_level = outputs.get("properties") if isinstance(outputs, Mapping) else None
         for metric, suffix in section_metrics(section):
+            for field in ("value_key", "detail_key", "trend_key"):
+                value = metric.get(field)
+                if not isinstance(value, str) or "." not in value or schema_at_path(outputs, value) is not None:
+                    continue
+                final = value.rsplit(".", 1)[1]
+                if isinstance(top_level, Mapping) and final in top_level:
+                    metric[field] = final
+                    notes.append(
+                        f"{location}{suffix}.{field}: '{value}' is not returned by {key}; its final segment "
+                        f"names the returned top-level field '{final}', used it"
+                    )
             for field in ("detail_key", "trend_key"):
                 value = metric.get(field)
                 if value is not None and schema_at_path(outputs, value) is None:

@@ -751,15 +751,15 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     app_build_plan(AppBuildPlan=_mozaikspay_replay_plan(), context_variables=ctx)
     cached_plan = detach(ctx.get("app_build_plan"))
 
-    adapter_task = next(
-        task for task in cached_plan["build_tasks"] if task["task_id"] == "mozaikspay.adapter"
-    )
-    facade_task = next(
-        task for task in cached_plan["build_tasks"] if task["task_id"] == "mozaikspay.billing_facade_contract"
-    )
-
-    assert adapter_task["capability_pack_id"] == "mozaikspay"
-    assert facade_task["capability_pack_id"] == "billing_portal"
+    tasks = {task["task_id"]: task for task in cached_plan["build_tasks"]}
+    # Pack-owned outputs are never model work: the plan keeps only what the pack does not ship.
+    assert "mozaikspay.billing_facade_contract" not in tasks and "mozaikspay.billing_models" not in tasks
+    assert tasks["mozaikspay.adapter"]["owned_paths"] == ["services/integrations/__init__.py"]
+    assert tasks["mozaikspay.billing_services"]["owned_paths"] == ["modules/billing_portal/backend/__init__.py"]
+    assert tasks["mozaikspay.pages"]["owned_paths"] == [
+        "app.json", "config/ai.json", "config/shell.json", "ui/pages/reports.yaml",
+    ]
+    assert tasks["mozaikspay.adapter"]["capability_pack_id"] == "mozaikspay"
     assert cached_plan["pages"][0]["page_type_hint"] == "analytics_dashboard"
     assert cached_plan["pages"][1]["page_type_hint"] == "analytics_dashboard"
     assert cached_plan["pages"][0]["sections_hint"][0]["data_source"] == (
@@ -774,14 +774,6 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     )}
     candidates.update({file["filename"]: file["content"] for output in _mozaikspay_task_outputs().values()
                        for file in output["code_files"]})
-    pricing_candidate = yaml.safe_load(candidates["ui/pages/pricing.yaml"])
-    catalog = pricing_candidate["sections"][0]["config"]
-    del catalog["api_endpoint"]
-    catalog["data_source"] = {"module_id": "billing_portal", "action_id": "list_plans"}
-    manage = pricing_candidate["sections"][1]["config"]["actions"][0]
-    del manage["href"]
-    manage["data_source"] = {"module_id": "billing_portal", "action_id": "open_billing_portal"}
-    candidates["ui/pages/pricing.yaml"] = yaml.safe_dump(pricing_candidate)
     replay_context = ctx.snapshot()
     accepted = await execute_file_replay(replay_context, candidates)
     for key, value in replay_context.items():

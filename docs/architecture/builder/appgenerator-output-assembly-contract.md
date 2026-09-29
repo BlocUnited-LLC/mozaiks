@@ -81,23 +81,42 @@ action id. A constructed form's explicit `{form.<field>}` payload entries are
 served by the page renderer with the coerced field value's own type, so a
 number field reaches the action as a JSON number.
 
-### Rejection and pack-owned pages
+### Rejection and pack-owned outputs
 
 A rejection closes every page in the task before it is raised: unresolved
 references, binding errors, plan identity and page-schema errors of every page
 travel in one message, so the worker's one bounded correction (and the
-standalone save tool's caller) sees them all. Pages at paths the selected packs
-declare as template outputs (`required_outputs`, resolved from the pack source
-or the projected operator contracts) are placeholders assembly replaces: their
-references still compile so the page stays well formed, but their bindings are
-checked against the template contracts at assembly and acceptance, not against
-the author's placeholder module contract at task time. A facade page route a
-pack ships no template for is authored and stays checked. Every pack's template
-pages must be declared outputs and pass the wiring gate under test. An
-acceptance diagnostic for an unreachable gated action is attributed to the
-authored page that reads the action's module, never to `ui/route_manifest.json`
-or a template page, so the page owner can repair it; with no authored page at
-all it is recorded unowned rather than dropped.
+standalone save tool's caller) sees them all. A page whose bindings were
+rejected keeps its compiled form and still gets the structural corrections and
+the page-schema check, so its schema errors join the same rejection. A
+page-schema diagnostic names the location (including `.config` for a
+section's configuration), the section's registered primitive and plain id, the
+offending field, and what the contract allows: the accepted fields for an
+unknown key, the allowed values for a literal, the rule text for a contract
+rule. It never echoes a rejected value.
+
+Pack-owned outputs are never model work. Every path a selected pack declares in
+`required_outputs` with `owner: templates`, and every `owner: workspace` path
+the pack ships a template for in a genesis build, is written from the pack's
+templates (`pack_owned_outputs`, resolved from the pack source or the projected
+operator contracts). Plan review releases those paths from every task and drops
+a task left with nothing to build, so it never synthesizes a facade task trio
+for a template module; `page_bundle` owns only the pages no pack ships, and its
+message names the pack-provided pages. A worker's, repairer's or earlier
+assembly's copy of a pack-owned path is discarded with a
+`PACK_OWNED_OUTPUT_DISCARDED` log line instead of validated. Pages bind facade
+actions against the template module contract, the one assembly applies.
+Assembly takes pack-owned files only from the templates and never re-derives a
+template page; it runs `pack_template_page_errors` on each template page (page
+schema and action closure, the approved route, metric and table bindings
+against the assembled module contracts, workflow references), and a failure
+names the pack and the directory its templates came from, because no task can
+repair it. CI runs every shipped pack's templates through the same function, and
+every `owner: templates` output must ship a template. An acceptance diagnostic
+for an unreachable gated action is attributed to the authored page that reads
+the action's module, never to `ui/route_manifest.json` or a template page, so
+the page owner can repair it; with no authored page at all it is recorded
+unowned rather than dropped.
 
 Canonical list/get response schemas declare the collection fields their existing
 read implementations project. This enriches the response declaration without

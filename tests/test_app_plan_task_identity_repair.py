@@ -39,6 +39,31 @@ def _live_plan(*, monetized=True, repeated_ids=True):
     return plan, context
 
 
+def _with_second_app_module(plan, context, module_id="invoices"):
+    """Rebuild the fixture's facade task trio as an independently approved app module.
+
+    The selected MozaiksPay pack's templates write billing_portal, so plan review builds no task
+    for it (pack-owned outputs are never model work). Identity repair needs two app modules whose
+    tasks survive review to exercise repeated task-type ids; the pack stays selected.
+    """
+    for pack in plan["capability_packs"]:
+        if pack["capability_pack_id"] == "billing_portal":
+            pack.update(capability_pack_id=module_id, surface_id=module_id, primary_pages=[])
+    for task in plan["build_tasks"]:
+        if task["capability_pack_id"] == "billing_portal":
+            task.update(capability_pack_id=module_id, surface_id=module_id)
+            task["owned_paths"] = [
+                path.replace("modules/billing_portal/", f"modules/{module_id}/") for path in task["owned_paths"]
+            ]
+    design = detach(context.get("design_surface_map"))
+    design["surfaces"].append({
+        "surface_id": module_id, "surface_kind": "module", "owner": "app",
+        "primary_entities": [], "owned_pages": [],
+    })
+    context.set("design_surface_map", design)
+    return plan, context
+
+
 def _review(plan, context):
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
     assert result["outcome"] == "ready", result
@@ -57,10 +82,11 @@ def _review(plan, context):
 
 def test_reported_two_module_task_type_ids_pass_public_review():
     """The reported nine rows plus the page task needed for full traversal."""
-    plan, context = _live_plan()
+    plan, context = _with_second_app_module(*_live_plan())
     cached = _review(plan, context)
     by_scope = {(task["capability_pack_id"], task["task_type"]): task for task in cached["build_tasks"]}
-    for module_id in ("task_management", "billing_portal"):
+    assert not [task for task in cached["build_tasks"] if task["capability_pack_id"] in {"billing_portal", "mozaikspay"}]
+    for module_id in ("task_management", "invoices"):
         contract = by_scope[(module_id, "module_contract")]
         models = by_scope[(module_id, "data_models")]
         services = by_scope[(module_id, "business_services")]
@@ -69,15 +95,19 @@ def test_reported_two_module_task_type_ids_pass_public_review():
         assert services["task_id"] == f"{module_id}.business_services"
         assert contract["task_id"] in models["depends_on"]
         assert {contract["task_id"], models["task_id"]} <= set(services["depends_on"])
-        sibling = "billing_portal" if module_id == "task_management" else "task_management"
+        sibling = "invoices" if module_id == "task_management" else "task_management"
         assert not any(dependency.startswith(f"{sibling}.") for dependency in models["depends_on"] + services["depends_on"])
     pages = next(task for task in cached["build_tasks"] if task["task_type"] == "page_bundle")
-    assert {"task_management.module_contract", "billing_portal.module_contract"} <= set(pages["depends_on"])
+    assert {"task_management.module_contract", "invoices.module_contract"} <= set(pages["depends_on"])
 
 
 def test_unique_task_ids_survive_public_review_unchanged():
-    plan, context = _live_plan(repeated_ids=False)
-    before = {(task["capability_pack_id"], task["task_type"]): task["task_id"] for task in plan["build_tasks"]}
+    plan, context = _with_second_app_module(*_live_plan(repeated_ids=False))
+    # The MozaiksPay client adapter is pack-owned, so review drops its task; every other identity survives.
+    before = {
+        (task["capability_pack_id"], task["task_type"]): task["task_id"]
+        for task in plan["build_tasks"] if task["capability_pack_id"] != "mozaikspay"
+    }
     cached = _review(plan, context)
     assert {(task["capability_pack_id"], task["task_type"]): task["task_id"] for task in cached["build_tasks"]} == before
 
@@ -98,13 +128,13 @@ def test_identity_repair_leaves_unique_ids_untouched():
 
 
 def test_page_dependencies_expand_all_owners_without_losing_explicit_foreign_edges():
-    plan, context = _live_plan()
+    plan, context = _with_second_app_module(*_live_plan())
     design = detach(context.get("design_surface_map"))
     design["surfaces"].append({
         "surface_id": "app_pages", "surface_kind": "ui_only", "owner": "app",
     })
     context.set("design_surface_map", design)
-    billing_service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services" and task["capability_pack_id"] == "billing_portal")
+    billing_service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services" and task["capability_pack_id"] == "invoices")
     billing_service["task_id"] = "billing.services"
     task_service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services" and task["capability_pack_id"] == "task_management")
     task_service["depends_on"].append("billing.services")
@@ -117,8 +147,8 @@ def test_page_dependencies_expand_all_owners_without_losing_explicit_foreign_edg
     tasks = {task["task_id"]: task for task in cached["build_tasks"]}
     assert "billing.services" in tasks["business_services"]["depends_on"]
     assert {
-        "task_management.module_contract", "billing_portal.module_contract",
-        "task_management.data_models", "billing_portal.data_models",
+        "task_management.module_contract", "invoices.module_contract",
+        "task_management.data_models", "invoices.data_models",
         "business_services", "billing.services",
     } <= set(tasks["page_bundle"]["depends_on"])
 
@@ -185,12 +215,12 @@ def test_synthesized_coverage_task_cannot_reintroduce_an_existing_identity():
 
 
 def test_task_references_in_plan_metadata_and_integration_needs_keep_their_scope():
-    plan, context = _live_plan()
+    plan, context = _with_second_app_module(*_live_plan())
     plan["generation_order"] = ["design", "module_contract", "data_models", "module_contract", "publish"]
     plan["carry_forward_decisions"] = [{
         "module_id": module_id, "decision": "regenerate", "reason": "Regenerate approved module",
         "source": "planner", "affected_build_tasks": ["module_contract", "data_models", "business_services"],
-    } for module_id in ("task_management", "billing_portal")]
+    } for module_id in ("task_management", "invoices")]
     for task in plan["build_tasks"]:
         if task["task_type"] != "business_services":
             continue
@@ -203,8 +233,8 @@ def test_task_references_in_plan_metadata_and_integration_needs_keep_their_scope
     cached = _review(plan, context)
 
     assert cached["generation_order"] == [
-        "design", "task_management.module_contract", "billing_portal.module_contract",
-        "task_management.data_models", "billing_portal.data_models", "publish",
+        "design", "task_management.module_contract", "invoices.module_contract",
+        "task_management.data_models", "invoices.data_models", "publish",
     ]
     for decision in cached["carry_forward_decisions"]:
         assert decision["affected_build_tasks"] == [

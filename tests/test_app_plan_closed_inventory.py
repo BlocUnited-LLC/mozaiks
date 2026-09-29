@@ -12,6 +12,9 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_owned_output_paths,
+)
 from tests.test_app_plan_managed_facade_repair import _capability, _task
 from tests.test_app_plan_task_identity_repair import _live_plan
 from tests.test_continuous_deterministic_materialization import _load_models
@@ -162,14 +165,20 @@ def test_selected_provider_facade_and_subscription_surfaces_pass_unchanged(provi
         (pack["capability_pack_id"], pack["surface_id"], pack["surface_kind"])
         for pack in original["capability_packs"]
     }
+    # Tasks that only built outputs the selected pack writes from its templates are dropped.
+    pack_paths = pack_owned_output_paths(context)
+    model_work = [task for task in original["build_tasks"] if not set(task["owned_paths"]) <= pack_paths]
+    assert {task["capability_pack_id"] for task in original["build_tasks"] if task not in model_work} == {
+        "billing_portal", "mozaikspay",
+    }
     assert {
         (task["task_id"], task["surface_id"], task["surface_kind"])
         for task in cached["build_tasks"]
     } == {
         (task["task_id"], task["surface_id"], task["surface_kind"])
-        for task in original["build_tasks"]
+        for task in model_work
     }
-    assert result["task_count"] == len(original["build_tasks"])
+    assert result["task_count"] == len(model_work)
     assert context.get("app_plan_feedback") == ""
 
 

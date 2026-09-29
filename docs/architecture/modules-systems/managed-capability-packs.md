@@ -114,6 +114,16 @@ factory_app/build_context/{pack_id}/
 
 Templates mirror the generated app tree under `app/`.
 
+`required_outputs` entries declare who writes each path. `owner: templates`
+(the default) is written from the pack's templates at every assembly;
+`owner: workspace` is written from its template at genesis and then belongs to
+the workspace; any other owner (`generator`) is work the pack asks a model to
+author. Pack-owned outputs (template outputs, and workspace outputs the pack
+ships a template for in a genesis build) are never model work: plan review
+builds no task for them, a worker's copy is discarded, and assembly takes them
+only from the templates. Every `owner: templates` path must ship a template.
+See [AppGenerator Output Assembly Contract](../builder/appgenerator-output-assembly-contract.md#rejection-and-pack-owned-outputs).
+
 ## Generated App Output
 
 A selected managed capability may generate:

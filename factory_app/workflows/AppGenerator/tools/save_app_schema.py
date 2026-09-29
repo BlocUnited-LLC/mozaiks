@@ -49,14 +49,13 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     data_contract_requires_auth,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
-    managed_pack_output_paths,
+    pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     compile_page_data_sources,
     materialize_modal_targets,
     module_action_index_from_context,
     promote_table_primitive,
-    relayable_action_reasons,
     resolve_modal_action_targets,
     resource_table_only_fields,
     workflow_names_from_context,
@@ -1618,23 +1617,31 @@ def save_app_schema(
         for page in raw_page_list:
             if isinstance(page, dict) and "extensions" in page:
                 raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
-        page_list = [_normalize_page_schema(page) for page in raw_page_list]
+        typed_pages = [_normalize_page_schema(page) for page in raw_page_list]
+        # Selected packs ship these pages from their templates (the same file
+        # identity the worker lane materializes, so Billing -> billing.yaml):
+        # the author's copy is discarded, never validated or persisted. The
+        # manifest still lists them, because the app ships them.
+        pack_paths = pack_owned_output_paths(context_variables)
+        pack_pages = [page for page in typed_pages if f"ui/pages/{_page_file_stem(page)}.yaml" in pack_paths]
+        if pack_pages:
+            _logger.info(
+                "PACK_OWNED_OUTPUT_DISCARDED: pages=%s; selected pack templates provide them",
+                sorted(f"ui/pages/{_page_file_stem(page)}.yaml" for page in pack_pages),
+            )
+        page_list = [page for page in typed_pages if page not in pack_pages]
         modules = module_action_index_from_context(context_variables)
         workflows = workflow_names_from_context(context_variables)
         data_contract = detach(_context_get(context_variables, "data_contract"))
         surface_map = detach(_context_get(context_variables, "design_surface_map"))
-        template_paths = managed_pack_output_paths(context_variables)
         # Close every page before rejecting so one corrected output fixes them all.
         page_failures: list[str] = []
         for page in page_list:
-            # The same file identity the worker lane materializes (route stem),
-            # so a pack-owned placeholder such as Billing -> billing.yaml matches.
             page_path = f"ui/pages/{_page_file_stem(page)}.yaml"
             try:
                 compile_page_data_sources(
                     page, modules, reject_api_endpoints=True, workflow_names=workflows,
-                    data_contract=data_contract, design_surface_map=surface_map,
-                    template_owned=page_path in template_paths, path=page_path,
+                    data_contract=data_contract, design_surface_map=surface_map, path=page_path,
                 )
             except ValueError as exc:
                 page_failures.append(f"{page_path}: {exc}")
@@ -1725,19 +1732,13 @@ def save_app_schema(
             try:
                 validate_page_schema(page)
             except PageSchemaValidationError as exc:
-                # Carry the reason, not just the code. These messages are built by
-                # the runtime's own sanitizer, so they name the rule without ever
-                # echoing the author's value back at them.
-                reasons = relayable_action_reasons(exc)
+                # The runtime's diagnostics name the section, field and allowed
+                # values without echoing the author's value back at them.
                 page_defects.extend(
                     f"Page '{page.get('name')}' {diagnostic.location}: {diagnostic.code}"
                     + (f" - {diagnostic.message}" if diagnostic.message else "")
                     for diagnostic in exc.diagnostics
                 )
-                if reasons:
-                    page_defects.append(
-                        f"Page '{page.get('name')}' action requirements: " + "; ".join(reasons)
-                    )
 
         if page_defects:
             # Sorted so the same page always produces the same text: the repair loop
@@ -1750,8 +1751,10 @@ def save_app_schema(
             raise ValueError("save_app_schema: at least one declarative page or custom route bundle is required")
 
         _validate_custom_route_bundle(custom_route_bundle)
-        _canonicalize_manifest_routes(manifest_dict, page_list, custom_route_bundle)
-        _validate_manifest_against_pages(manifest_dict, page_list, custom_route_bundle)
+        shipped_names = {page["name"] for page in page_list}
+        shipped_pages = [*page_list, *(page for page in pack_pages if page.get("name") not in shipped_names)]
+        _canonicalize_manifest_routes(manifest_dict, shipped_pages, custom_route_bundle)
+        _validate_manifest_against_pages(manifest_dict, shipped_pages, custom_route_bundle)
         _validate_shell_header_actions(shell_config)
         _validate_shell_shortcuts(shell_config)
         _validate_shell_navigation(shell_config)

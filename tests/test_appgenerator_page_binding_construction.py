@@ -18,12 +18,14 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
     _apply_planned_page_contracts,
 )
 from mozaiksai.core.runtime.app.page_schema import validate_page_schema
+from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.context.schema import load_context_variables_config
+from mozaiksai.core.workflow.generator_support.code_files import discard_pack_owned_outputs
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
-    managed_pack_output_paths,
+    pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.page_action_bindings import (
     reachable_page_action_keys,
@@ -379,24 +381,28 @@ def _placeholder_billing_files() -> dict[str, str]:
     return {"modules/billing_portal/module.yaml": module, "ui/pages/billing.yaml": yaml.safe_dump(page)}
 
 
-def test_pack_template_pages_are_not_checked_against_placeholder_contracts(caplog):
+def test_a_worker_copy_of_a_pack_template_page_is_discarded_not_validated():
+    """Live chat fdfa818e: the page worker's pricing.yaml failed extra_forbidden on a page the pack ships."""
     packs = [{"id": "mozaikspay", "capability_source": "managed_capability", "status": "active",
               "pack_source_path": str(MOZAIKSPAY_PACK)}]
     files = _placeholder_billing_files()
     context = _bridge({
-        "generated_files": {"modules/billing_portal/module.yaml": files["modules/billing_portal/module.yaml"]},
         "capability_packs": packs,
         "app_build_plan": {"pages": [{"name": "Billing", "route": "/billing"}], "capability_packs": []},
     })
+    pack_paths = pack_owned_output_paths(context)
     assert {"ui/pages/billing.yaml", "ui/pages/usage.yaml", "ui/pages/pricing.yaml",
-            "modules/billing_portal/module.yaml"} <= managed_pack_output_paths(context)
-    caplog.set_level(logging.INFO, logger="mozaiksai.core.workflow.generator_support.page_plan_utils")
-    compiled = _compile({"ui/pages/billing.yaml": files["ui/pages/billing.yaml"]}, context)
-    billing = compiled["ui/pages/billing.yaml"]
-    assert billing["sections"][0]["config"]["api_endpoint"] == "/api/modules/billing_portal/get_subscription_status"
-    assert "data_source" not in billing["sections"][0]["config"]
-    assert any("a selected pack template replaces this page" in record.getMessage() for record in caplog.records)
-    # Without the pack the same placeholder is a real binding error.
+            "modules/billing_portal/module.yaml"} <= pack_paths
+    placeholder = yaml.safe_load(files["ui/pages/billing.yaml"])
+    payload = {"manifest": None, "pages": [placeholder, {"name": "Tasks", "route": "/tasks"}], "code_files": [
+        {"filename": "modules/billing_portal/module.yaml", "content": files["modules/billing_portal/module.yaml"]},
+    ], "deleted_files": ["ui/pages/usage.yaml"]}
+    kept, discarded = discard_pack_owned_outputs(payload, pack_paths)
+    assert discarded == ["modules/billing_portal/module.yaml", "ui/pages/billing.yaml", "ui/pages/usage.yaml"]
+    assert kept["pages"] == [{"name": "Tasks", "route": "/tasks"}] and kept["code_files"] == []
+    assert kept["deleted_files"] == []
+    assert payload["pages"][0] is placeholder  # the worker's payload itself is not mutated
+    # Without the pack the same page is authored work, and its binding error is real.
     with pytest.raises(ValueError, match="'billing_info' must select a declared array"):
         _compile({"ui/pages/billing.yaml": files["ui/pages/billing.yaml"]}, _bridge({
             "generated_files": {"modules/billing_portal/module.yaml": files["modules/billing_portal/module.yaml"]},
@@ -537,24 +543,28 @@ def test_every_unresolved_reference_on_a_page_is_reported_together():
     assert "unknown module/action 'task_management/list_everything'" in message
 
 
-def test_template_owned_page_may_reference_an_action_only_the_template_declares():
+def test_an_authored_page_binds_a_facade_action_against_the_pack_template_contract():
+    """No task authors the facade module, so pages compile against the template assembly applies."""
     packs = [{"id": "mozaikspay", "capability_source": "managed_capability", "status": "active",
               "pack_source_path": str(MOZAIKSPAY_PACK)}]
     page = {
-        "schema_version": "mozaiks.app_page.v1", "name": "usage", "route": "/usage", "title": "Usage",
-        "page_type": "record_list", "layout": "full-width", "shell_mode": "standard",
+        "schema_version": "mozaiks.app_page.v1", "name": "dashboard", "route": "/dashboard", "title": "Dashboard",
+        "page_type": "analytics_dashboard", "layout": "full-width", "shell_mode": "standard",
         "sections": [{"id": "usage", "primitive": "SummaryStrip", "title": "Usage", "config": {
             "data_source": {"module_id": "billing_portal", "action_id": "get_token_status"},
             "items": [{"label": "Wallets", "value_key": "token_wallets"}],
         }}],
     }
     context = _bridge({
-        "generated_files": {"modules/billing_portal/module.yaml": _placeholder_billing_files()["modules/billing_portal/module.yaml"]},
         "capability_packs": packs,
-        "app_build_plan": {"pages": [{"name": "Usage", "route": "/usage"}], "capability_packs": []},
+        "app_build_plan": {"pages": [{"name": "Dashboard", "route": "/dashboard"}], "capability_packs": []},
     })
-    compiled = _compile({"ui/pages/usage.yaml": yaml.safe_dump(page)}, context)
-    assert compiled["ui/pages/usage.yaml"]["sections"][0]["config"]["api_endpoint"] == "/api/modules/billing_portal/get_token_status"
+    compiled = _compile({"ui/pages/dashboard.yaml": yaml.safe_dump(page)}, context)
+    assert compiled["ui/pages/dashboard.yaml"]["sections"][0]["config"]["api_endpoint"] == "/api/modules/billing_portal/get_token_status"
+    # A field the template contract does not return is still the author's binding error.
+    page["sections"][0]["config"]["items"][0]["value_key"] = "wallet_count"
+    with pytest.raises(ValueError, match="'wallet_count' is not declared in 'billing_portal/get_token_status'"):
+        _compile({"ui/pages/dashboard.yaml": yaml.safe_dump(page)}, context)
 
 
 def test_packs_selected_by_id_resolve_through_the_projected_operator_contracts():
@@ -563,9 +573,9 @@ def test_packs_selected_by_id_resolve_through_the_projected_operator_contracts()
         "app_build_plan": {"pages": [], "capability_packs": [{"capability_pack_id": "mozaikspay"}]},
         "operator_contracts": [{**contract, "contract_id": "mozaikspay"}],
     })
-    assert {"ui/pages/billing.yaml", "ui/pages/usage.yaml", "ui/pages/pricing.yaml"} <= managed_pack_output_paths(context)
-    # Facade page routes alone do not make a page template-owned.
-    assert managed_pack_output_paths(_bridge({"operator_contracts": [{
+    assert {"ui/pages/billing.yaml", "ui/pages/usage.yaml", "ui/pages/pricing.yaml"} <= pack_owned_output_paths(context)
+    # Facade page routes alone do not make a page pack-owned.
+    assert pack_owned_output_paths(_bridge({"operator_contracts": [{
         "contract_id": "cloud", "required_outputs": [{"path": "services/integrations/cloud_client.py"}],
         "facades": [{"module_id": "cloud", "pages": [{"name": "Deployments", "route": "/deployments"}]}],
     }], "capability_packs": [{"id": "cloud"}]})) == frozenset({"services/integrations/cloud_client.py"})
@@ -635,15 +645,26 @@ def test_a_collection_with_no_identity_at_all_still_gets_the_create_and_logs_the
                for line in (r.getMessage() for r in caplog.records))
 
 
-def test_only_template_owned_pack_outputs_are_template_paths():
+def test_pack_owned_outputs_are_template_outputs_and_genesis_workspace_templates():
     context = _bridge({"capability_packs": [{"id": "shop"}], "operator_contracts": [{
         "contract_id": "shop", "required_outputs": [
             {"path": "ui/pages/products.yaml", "owner": "templates"},
             {"path": "ui/pages/checkout.yaml"},
             {"path": "modules/shop/backend/handler.py", "owner": "workspace"},
+            {"path": "modules/shop/backend/service.py", "owner": "generator"},
         ],
     }]})
-    assert managed_pack_output_paths(context) == frozenset({"ui/pages/products.yaml", "ui/pages/checkout.yaml"})
+    # Selected by id alone the pack's templates are unknown, so a workspace output stays authorable.
+    assert pack_owned_output_paths(context) == frozenset({"ui/pages/products.yaml", "ui/pages/checkout.yaml"})
+    packs = [{"id": "mozaikspay", "capability_source": "managed_capability", "status": "active",
+              "pack_source_path": str(MOZAIKSPAY_PACK)}]
+    handler = "modules/billing_portal/backend/handler.py"  # owner: workspace, shipped as a template
+    assert handler in pack_owned_output_paths(_bridge({"capability_packs": packs}))
+    binding = RunBuildBinding(target_app_id="generated-app", build_id="build-test",
+                              build_registry_id="registry-test", phase="refinement").model_dump()
+    refinement = _bridge({"capability_packs": packs, "run_build_binding": binding})
+    assert handler not in pack_owned_output_paths(refinement)
+    assert "modules/billing_portal/module.yaml" in pack_owned_output_paths(refinement)
 
 
 def test_unreachable_gated_action_falls_back_to_the_plans_page_task_when_no_page_was_authored():
@@ -670,7 +691,7 @@ def test_unreachable_gated_action_falls_back_to_the_plans_page_task_when_no_page
     assert errors[0].startswith("ui/pages/tasks.yaml: ")  # else the page task's first owned page
 
 
-def test_pages_the_compiler_rejected_are_skipped_by_the_plan_check_and_reported_once():
+def test_pages_the_compiler_rejected_keep_their_compiled_form_and_are_reported_once():
     dashboard = _dashboard([{"id": "done_count", "label": "Done", "value_key": "completed_tasks"}])
     tasks = _tasks_page()
     tasks["route"] = "/work"
@@ -682,7 +703,8 @@ def test_pages_the_compiler_rejected_are_skipped_by_the_plan_check_and_reported_
         payload={"code_files": []}, context=context, failures=failures,
     )
     assert [line.split(":")[0] for line in failures] == ["ui/pages/dashboard.yaml"]
-    assert "data_source" in compiled["ui/pages/dashboard.yaml"]  # the rejected page keeps its authored content
+    # The rejected page keeps what compilation made of it, so its structure can still be checked.
+    assert "data_source" not in compiled["ui/pages/dashboard.yaml"]
     with pytest.raises(ValueError) as error:
         _normalize_owned_page_files_from_plan(
             [{"filename": path, "content": content} for path, content in compiled.items()],

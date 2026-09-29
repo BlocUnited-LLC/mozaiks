@@ -23,16 +23,19 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_owned_output_paths,
+)
 from tests.test_app_plan_closed_inventory import _approved_plan
 from tests.test_app_plan_managed_facade_repair import _capability, _task
 from tests.test_continuous_deterministic_materialization import _load_models
 
 FIXTURE = Path(__file__).parent / "fixtures/appplan_monetized_missing_structure.json"
 MODULE_KINDS = {"module_contract", "data_models", "business_services"}
+# The selected MozaiksPay pack ships billing_portal and its pages from templates.
+PACK_PAGE_PATHS = {"ui/pages/pricing.yaml", "ui/pages/billing.yaml", "ui/pages/usage.yaml"}
 PAGE_PATHS = {
-    "app.json", "ui/pages/dashboard.yaml", "ui/pages/tasks.yaml",
-    "ui/pages/members.yaml", "ui/pages/pricing.yaml", "ui/pages/billing.yaml",
-    "ui/pages/usage.yaml",
+    "app.json", "ui/pages/dashboard.yaml", "ui/pages/tasks.yaml", "ui/pages/members.yaml", *PACK_PAGE_PATHS,
 }
 
 
@@ -140,12 +143,16 @@ def _assert_complete_review(plan, context):
     paths = Counter(path for task in tasks for path in task["owned_paths"])
     assert all(count == 1 for count in paths.values())
     page_tasks = [task for task in tasks if task["task_type"] == "page_bundle"]
-    assert PAGE_PATHS <= {path for task in page_tasks for path in task["owned_paths"]}
+    assert {path for task in page_tasks for path in task["owned_paths"]} == PAGE_PATHS - PACK_PAGE_PATHS
     assert all(task["initial_agent"] == "AppSchemaAgent" for task in page_tasks)
     assert "ui/pages/invite_project_member.yaml" not in paths
-    for module in ("tasks", "project_members", "billing_portal"):
+    for module in ("tasks", "project_members"):
         trio = [task for task in tasks if task["capability_pack_id"] == module and task["task_type"] in MODULE_KINDS]
         assert Counter(task["task_type"] for task in trio) == dict.fromkeys(MODULE_KINDS, 1)
+    # Pack-owned outputs are never model work: the facade module and pages come from templates.
+    assert not [task for task in tasks if task["capability_pack_id"] == "billing_portal"]
+    assert not set(paths) & pack_owned_output_paths(context)
+    assert any(pack["capability_pack_id"] == "billing_portal" for pack in cached["capability_packs"])
     subscription = [task for task in tasks if task["task_type"] == "subscription_config"]
     assert len(subscription) == 1
     assert subscription[0]["owned_paths"] == ["config/subscriptions.yaml"]

@@ -25,6 +25,7 @@ from .dependency_graph import deterministic_topological_order
 from .generator_support.code_files import (
     _MODULE_CONTRACT_OUTPUT_PATHS,
     compile_data_contract,
+    discard_pack_owned_outputs,
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
     materialize_data_contract,
@@ -32,7 +33,7 @@ from .generator_support.code_files import (
 )
 from .generator_support.module_action_inventory import (
     all_module_actions,
-    managed_pack_output_paths,
+    pack_owned_output_paths,
     ungated_module_actions,
 )
 from .generator_support.module_entitlement_gates import (
@@ -53,6 +54,7 @@ from .generator_support.page_plan_utils import (
     _page_stems,
     compile_authored_page_files,
     module_action_index_from_context,
+    normalize_page_structure,
     normalize_planned_page_content,
     validate_planned_page,
     workflow_names_from_context,
@@ -1058,6 +1060,7 @@ async def _run_one_task(
     if getattr(agent, "_mozaiks_tool_outcome", None) is not None:
         raise ValueError(f"task agent {agent_name!r} declares a network-only tool outcome; use the task-batch failure policy")
     code_owned_output = _code_owned_task_output(task, task_context)
+    pack_paths = pack_owned_output_paths(task_context)
 
     async with semaphore:
         runner_result = None
@@ -1115,6 +1118,14 @@ async def _run_one_task(
                 # AG2 task attempts have independent streams; preserve the candidate for repair.
                 candidate_json = json.dumps(output, separators=(",", ":"), default=str)
                 _reject_task_output_identity_drift(task, output)
+                # Selected packs write their declared outputs from templates; a
+                # worker's copy of one is never validated or assembled.
+                output, discarded = discard_pack_owned_outputs(output, pack_paths)
+                if discarded:
+                    logger.info(
+                        "PACK_OWNED_OUTPUT_DISCARDED: task=%s agent=%s paths=%s; selected pack templates provide them",
+                        task.get("task_id"), agent_name, discarded,
+                    )
                 subscription_contract = resolve_subscription_contract(task_context)
                 companion_files = dict(task_context.get("generated_files") or {})
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
@@ -1377,26 +1388,30 @@ def _normalize_owned_page_files_from_plan(
 
     modules = module_action_index_from_context(base_context)
     workflows = workflow_names_from_context(base_context)
-    template_paths = managed_pack_output_paths(base_context)
     data_contract = detach(base_context.get("data_contract"))
     surface_map = detach(base_context.get("design_surface_map"))
     # Validate every owned page before rejecting, so one correction sees it all.
     failures: list[str] = []
     for path in owned_page_paths:
         stem = _page_stem_from_path(path)  # type: ignore[assignment]
-        if not stem or path in (skip_paths or set()):
-            continue  # a page the compiler already rejected keeps its recorded errors
+        if not stem:
+            continue
         try:
             planned = planned_by_stem.get(stem)
             if not planned:
                 raise ValueError(f"{path}: page has no approved plan identity")
             if path not in file_map:
                 raise ValueError(f"{path}: page worker did not materialize its owned page")
-            file_map[path] = normalize_planned_page_content(
-                file_map[path], path=path, modules=modules, reject_api_endpoints=reject_api_endpoints,
-                workflow_names=workflows, data_contract=data_contract, design_surface_map=surface_map,
-                template_owned=path in template_paths,
-            )
+            if path in (skip_paths or set()):
+                # The compiler already rejected this page's bindings and recorded
+                # why; its structure is still checked so the same rejection
+                # carries every schema error too.
+                file_map[path] = normalize_page_structure(file_map[path], path=path)
+            else:
+                file_map[path] = normalize_planned_page_content(
+                    file_map[path], path=path, modules=modules, reject_api_endpoints=reject_api_endpoints,
+                    workflow_names=workflows, data_contract=data_contract, design_surface_map=surface_map,
+                )
             validate_planned_page(file_map[path], planned, path)
         except ValueError as exc:
             message = str(exc)

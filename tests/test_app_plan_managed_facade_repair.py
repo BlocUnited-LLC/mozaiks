@@ -15,6 +15,9 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
 from mozaiksai.core.session.build_context import discover_pack_descriptors
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_owned_output_paths,
+)
 from tests.test_continuous_deterministic_materialization import _load_models, _plan_payload
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -163,17 +166,13 @@ def _assert_reviewed_facade(plan, context):
     assert packs["mozaikspay"]["capability_source"] == "managed_capability"
     assert packs["mozaikspay"]["surface_kind"] == "external_integration"
     assert packs["mozaikspay"]["surface_id"] != "billing_portal"
-    facade_paths = {
-        path for task in cached["build_tasks"] if task["capability_pack_id"] == "billing_portal"
-        for path in task["owned_paths"]
-    }
-    assert "modules/billing_portal/backend/repo.py" not in facade_paths
-    assert "modules/billing_portal/backend/policy.py" not in facade_paths
-    provider_task = next(task for task in cached["build_tasks"] if task["task_id"] == "2")
-    assert provider_task["capability_pack_id"] == "mozaikspay"
-    assert provider_task["surface_id"] == packs["mozaikspay"]["surface_id"]
-    assert provider_task["surface_kind"] == "external_integration"
-    assert provider_task["owned_paths"] == ["services/integrations/mozaikspay_client.py"]
+    # The pack's templates write the facade module, its pages and the provider client:
+    # pack-owned outputs are never model work, so no task builds them.
+    assert not [
+        task["task_id"] for task in cached["build_tasks"]
+        if task["capability_pack_id"] in {"billing_portal", "mozaikspay"}
+    ]
+    assert not {path for task in cached["build_tasks"] for path in task["owned_paths"]} & pack_owned_output_paths(context)
     assert {(page["name"], page["route"]) for page in cached["pages"]} == {
         ("Dashboard", "/dashboard"), ("Tasks", "/tasks"), ("Pricing", "/pricing"),
         ("Billing", "/billing"), ("Usage", "/usage"),
@@ -241,12 +240,10 @@ def test_same_surface_alias_preserves_tasks_and_retargets_owned_module_paths():
     cached = _assert_reviewed_facade(plan, context)
     assert not any(pack["capability_pack_id"] == "billing_module" for pack in cached["capability_packs"])
     tasks = {task["task_id"]: task for task in cached["build_tasks"]}
-    assert tasks["3"]["owned_paths"] == [
-        "modules/billing_portal/module.yaml", "modules/billing_portal/contracts/events.yaml",
-    ]
-    assert tasks["4"]["capability_pack_id"] == "billing_portal"
-    assert "3" in tasks["4"]["depends_on"]
-    assert {"2", "3", "4"} <= set(tasks["5"]["depends_on"])
+    # Retargeted onto the facade, every alias path is pack-owned, so the alias tasks are dropped
+    # and no surviving task waits on them.
+    assert not {"2", "3", "4", "5"} & set(tasks)
+    assert all(not {"2", "3", "4", "5"} & set(task["depends_on"]) for task in tasks.values())
 
 
 def test_separately_approved_billing_module_is_preserved():
@@ -275,14 +272,17 @@ def test_facade_descriptor_display_entities_do_not_invent_app_persistence():
 
 
 def test_conflicting_task_ownership_remains_rejected():
+    """Two tasks claiming one facade file the pack does not ship still conflict after consolidation."""
     plan, context = _plan_and_context()
     alias = _capability("billing_module")
     alias["surface_id"] = "billing_portal"
     plan["capability_packs"].append(alias)
-    plan["build_tasks"].append({
-        **_task("conflicting.contract", "module_contract", "ConfigMiddlewareAgent", "billing_module", ["modules/billing_module/module.yaml"]),
-        "surface_id": "billing_portal",
-    })
+    plan["build_tasks"] += [
+        {**_task("facade.events", "module_contract", "ConfigMiddlewareAgent", "billing_portal",
+                 ["modules/billing_portal/contracts/events.yaml"]), "surface_id": "billing_portal"},
+        {**_task("conflicting.contract", "module_contract", "ConfigMiddlewareAgent", "billing_module",
+                 ["modules/billing_module/contracts/events.yaml"]), "surface_id": "billing_portal"},
+    ]
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
     assert result["outcome"] == "needs_revision", result
     assert "own" in result["error"].lower()

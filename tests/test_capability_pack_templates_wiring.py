@@ -1,8 +1,10 @@
-"""Every shipped capability pack's templates pass the wiring gate they will face.
+"""Every shipped capability pack's templates pass the assembly checks they will face.
 
-Pack templates replace authored pages at assembly, so acceptance validates the
-templates, not the author. A template that binds an undeclared response field
-or leaves a gated action unreachable would fail every app that selects the pack.
+Pack-owned outputs are never model work: assembly takes them only from the
+templates and runs its page checks on the template bytes, with the same
+function this test calls. A template that binds an undeclared response field,
+breaks the page schema, or leaves a gated action unreachable would fail every
+app that selects the pack, and no task could repair it.
 """
 
 from __future__ import annotations
@@ -17,13 +19,12 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     resolve_templates_for_pack,
 )
 from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
-from mozaiksai.core.runtime.app.page_schema import validate_page_schema
 from mozaiksai.core.workflow.generator_support.page_action_bindings import (
     reachable_page_action_keys,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    compile_page_data_sources,
     module_action_index,
+    pack_template_page_errors,
 )
 
 BUILD_CONTEXT = Path(__file__).resolve().parents[1] / "factory_app" / "build_context"
@@ -78,13 +79,16 @@ def test_pack_templates_pass_the_wiring_gate(pack_dir: Path):
 
 
 @pytest.mark.parametrize("pack_dir", _packs(), ids=lambda pack: pack.name)
-def test_pack_template_pages_compile_against_their_own_module_contracts(pack_dir: Path):
+def test_pack_template_pages_pass_the_assembly_checks_against_their_own_module_contracts(pack_dir: Path):
+    """The same check assembly runs on template pages: schema, action closure, bindings, workflows."""
     files = _template_files(pack_dir)
     modules = module_action_index(files)
     pages = _pages(files)
-    for path, page in pages.items():
-        validate_page_schema(page, expected_name=Path(path).stem)
-        compile_page_data_sources(page, modules, reject_api_endpoints=False, workflow_names=set(), path=path)
+    errors = [
+        error for path in pages
+        for error in pack_template_page_errors(files[path], path=path, modules=modules, workflow_names=set())
+    ]
+    assert errors == []
     gated = {
         f"{module}/{action_id}" for module, actions in modules.items()
         for action_id, action in actions.items() if action.get("entitlement_gate")
@@ -93,11 +97,46 @@ def test_pack_template_pages_compile_against_their_own_module_contracts(pack_dir
 
 
 @pytest.mark.parametrize("pack_dir", _packs(), ids=lambda pack: pack.name)
-def test_every_template_page_is_a_declared_pack_output(pack_dir: Path):
-    """Authoring defers a page's binding checks only for declared template outputs.
+def test_every_template_owned_output_ships_a_template(pack_dir: Path):
+    """No task builds a pack-owned output, so a declared template output with no template is a hole."""
+    contract = yaml.safe_load((pack_dir / "contract.yaml").read_text(encoding="utf-8")) or {}
+    template_owned = {
+        str(entry.get("path") if isinstance(entry, dict) else entry)
+        for entry in contract.get("required_outputs") or []
+        if not isinstance(entry, dict) or str(entry.get("owner") or "templates") == "templates"
+    }
+    assert template_owned <= set(_template_files(pack_dir)), sorted(template_owned - set(_template_files(pack_dir)))
 
-    A template page the contract does not declare would be checked against the
-    author's placeholder contract at task time and then replaced at assembly.
+
+def test_the_assembly_template_check_rejects_the_stale_billing_page_a_live_run_shipped():
+    """Chat fdfa818e read mozaikspay from a stale checkout (1bdaf248): billing-status was a DataTable.
+
+    Assembly failed there with "Billing/billing-status.data_key: 'None' must select a declared
+    array"; the shared check names the same defect for any pack template that regresses to it.
+    """
+    files = _template_files(BUILD_CONTEXT / "mozaikspay")
+    stale = yaml.safe_load(files["ui/pages/billing.yaml"])
+    stale["sections"][0].update(primitive="DataTable", config={
+        "api_endpoint": "/api/modules/billing_portal/get_subscription_status",
+        "columns": [{"key": "plan_name", "label": "Plan"}, {"key": "status", "label": "Status"}],
+    })
+    errors = pack_template_page_errors(
+        yaml.safe_dump(stale), path="ui/pages/billing.yaml", modules=module_action_index(files),
+        workflow_names=set(), planned={"route": "/billing"},
+    )
+    assert len(errors) == 1
+    assert "Billing/billing-status.data_key: 'None' must select a declared array" in errors[0]
+    assert pack_template_page_errors(
+        files["ui/pages/billing.yaml"], path="ui/pages/billing.yaml", modules=module_action_index(files),
+        planned={"route": "/pricing"},
+    ) == ["ui/pages/billing.yaml: route '/billing' does not match the approved route '/pricing'"]
+
+
+@pytest.mark.parametrize("pack_dir", _packs(), ids=lambda pack: pack.name)
+def test_every_template_page_is_a_declared_pack_output(pack_dir: Path):
+    """Only declared outputs are pack-owned, so an undeclared template page would still be authored.
+
+    The author's copy would be validated as model work and then overwritten by the template.
     """
     contract = yaml.safe_load((pack_dir / "contract.yaml").read_text(encoding="utf-8")) or {}
     declared = {

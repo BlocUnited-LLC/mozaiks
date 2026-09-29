@@ -57,8 +57,12 @@ def _module_context():
     }})
 
 
-def test_standalone_save_defers_pack_owned_placeholder_pages_by_their_route_stem(tmp_path, monkeypatch):
-    """The typed name is "Billing"; the file identity is billing.yaml, which the mozaikspay template owns."""
+def test_standalone_save_discards_pack_owned_pages_by_their_route_stem(tmp_path, monkeypatch):
+    """The typed name is "Billing"; the file identity is billing.yaml, which the mozaikspay template writes.
+
+    The author's copy is discarded, never validated or persisted; the manifest still lists the page
+    and may land on it, because the app ships it from the pack.
+    """
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
     pack = Path(__file__).resolve().parents[1] / "factory_app" / "build_context" / "mozaikspay"
     placeholder_module = yaml.safe_dump({"module": {"id": "billing_portal"}, "actions": [
@@ -79,11 +83,14 @@ def test_standalone_save_defers_pack_owned_placeholder_pages_by_their_route_stem
                               "pack_source_path": str(pack)}],
     })
     result = save_app_schema_module.save_app_schema(
-        manifest={**_base_manifest(), "default_route": "/billing", "pages": ["Billing"]},
-        pages=[billing], context_variables=context,
+        manifest={**_base_manifest(), "default_route": "/billing", "pages": ["Dashboard", "Billing"]},
+        pages=[_base_page(), billing], context_variables=context,
     )
     assert "rejected" not in result, result
     assert context.get("app_schema_ready") is True
+    assert [page["name"] for page in context.get("app_pages")] == ["Dashboard"]
+    assert context.get("app_manifest")["pages"] == ["Dashboard", "Billing"]
+    assert not list(tmp_path.rglob("billing.yaml"))
     # Without the pack the same placeholder is a real binding error.
     with pytest.raises(ValueError, match="'billing_info' must select a declared array"):
         save_app_schema_module.save_app_schema(
