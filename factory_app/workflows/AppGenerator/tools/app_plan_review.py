@@ -31,6 +31,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.dependency_graph import deterministic_topological_order
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
@@ -438,6 +439,23 @@ def _required_module_paths(pack: dict[str, Any], context: Any) -> dict[str, set[
     if pack.get("user_data_scope") is True:
         required["business_services"].add(f"modules/{module_id}/backend/account_data_handler.py")
     return required
+
+
+def _repair_user_data_scope(plan: dict[str, Any], context: Any) -> list[str]:
+    """A module owning per_user collections takes part in account export and deletion.
+
+    The data contract decides it, so the plan records user_data_scope and code
+    renders the module's account-data handler (owned by its business_services task).
+    """
+    repairs = []
+    for pack in plan.get("capability_packs") or []:
+        module_id = _pack_id_from_descriptor(pack)
+        if pack.get("capability_source") != "generated_module" or not owns_per_user_collections(module_id, context.get("data_contract")):
+            continue
+        if pack.get("user_data_scope") is not True:
+            repairs.append(f"{module_id}: user_data_scope {pack.get('user_data_scope')!r} -> true (owns per_user collections)")
+            pack["user_data_scope"] = True
+    return repairs
 
 
 def _authored_module_paths(pack: dict[str, Any], context: Any, pack_paths: frozenset[str]) -> dict[str, set[str]]:
@@ -1416,6 +1434,7 @@ def review_app_build_plan(
             *_repair_plan(plan, context_variables),
             *_repair_selected_pack_inventory(plan, context_variables),
             *release_pack_owned_paths(plan, context_variables),
+            *_repair_user_data_scope(plan, context_variables),
             *_repair_coverage(plan, context_variables),
             *_repair_subscription_config_task(plan, context_variables),
             *_construct_task_requirements(plan, context_variables),

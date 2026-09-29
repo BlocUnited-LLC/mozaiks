@@ -405,23 +405,23 @@ reactions:
 """,
         "modules/support_tickets/backend/__init__.py": "",
         "modules/support_tickets/backend/handler.py": """
-from .service import SupportTicketsService
+from . import service
 
 
 class SupportTicketsModule:
     async def list_tickets(self, ctx, **params):
-        return await SupportTicketsService(ctx).list_tickets(**params)
+        return await service.list_tickets(ctx, **params)
 
     async def create_ticket(self, ctx, **params):
-        return await SupportTicketsService(ctx).create_ticket(**params)
+        return await service.create_ticket(ctx, **params)
 
     async def request_batch_triage(self, ctx, **params):
-        return await SupportTicketsService(ctx).request_batch_triage(**params)
+        return await service.request_batch_triage(ctx, **params)
 """,
         "modules/support_tickets/backend/service.py": f'''
 from uuid import uuid4
 
-from .repo import SupportTicketsRepo
+from . import repo
 
 
 def ticket_document(*, customer_name, issue, priority=None):
@@ -441,48 +441,42 @@ def batch_request_document(*, priority=None):
     }}
 
 
-class SupportTicketsService:
-    def __init__(self, ctx):
-        self.ctx = ctx
-        self.repo = SupportTicketsRepo(ctx)
+async def create_ticket(ctx, **params):
+    record = ticket_document(
+        customer_name=params.get("customer_name"),
+        issue=params.get("issue"),
+        priority=params.get("priority"),
+    )
+    created = await repo.insert_ticket(ctx, record)
+    await _emit(ctx, "domain.support_ticket.created", created)
+    return {{"ticket": created}}
 
-    async def create_ticket(self, **params):
-        record = ticket_document(
-            customer_name=params.get("customer_name"),
-            issue=params.get("issue"),
-            priority=params.get("priority"),
-        )
-        created = await self.repo.create_ticket(record)
-        await self._emit("domain.support_ticket.created", created)
-        return {{"ticket": created}}
 
-    async def request_batch_triage(self, **params):
-        request = batch_request_document(priority=params.get("priority"))
-        await self._emit("{trigger_event_type}", request)
-        return {{"batch_request": request}}
+async def request_batch_triage(ctx, **params):
+    request = batch_request_document(priority=params.get("priority"))
+    await _emit(ctx, "{trigger_event_type}", request)
+    return {{"batch_request": request}}
 
-    async def _emit(self, event_type, payload):
-        emit = getattr(self.ctx, "emit", None)
-        if callable(emit):
-            await emit(event_type, payload)
+
+async def _emit(ctx, event_type, payload):
+    emit = getattr(ctx, "emit", None)
+    if callable(emit):
+        await emit(event_type, payload)
 ''',
         "modules/support_tickets/backend/repo.py": """
-class SupportTicketsRepo:
-    def __init__(self, ctx):
-        self.ctx = ctx
+def _collection(ctx):
+    persistence = getattr(ctx, "persistence", None)
+    if persistence is None:
+        return None
+    return persistence.collection("support_tickets", "tickets")
 
-    def _collection(self):
-        persistence = getattr(self.ctx, "persistence", None)
-        if persistence is None:
-            return None
-        return persistence.collection("support_tickets", "tickets")
 
-    async def create_ticket(self, record):
-        collection = self._collection()
-        if collection is None:
-            return record
-        result = await collection.insert_one(record)
-        return {**record, "ticket_id": str(result.inserted_id)}
+async def insert_ticket(ctx, record):
+    collection = _collection(ctx)
+    if collection is None:
+        return record
+    result = await collection.insert_one(record)
+    return {**record, "ticket_id": str(result.inserted_id)}
 """,
     }
     # backend/schemas.py is code-rendered from the data contract below.

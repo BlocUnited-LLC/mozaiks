@@ -326,9 +326,17 @@ resolve their own collection contracts and enforce app/user ownership. Factory's
 onboarding module exercises this path with canonical generated collection names;
 an alias manifest is not required merely to resolve the account database.
 
-AppGenerator's ServiceAgent owns generated `backend/account_data_handler.py`;
-the materializer preserves its `ServiceOutput.python_files` content, rather than
-generating a deletion policy from module stubs. The existing account-data file
+For a module owning `per_user` collections, code renders
+`backend/account_data_handler.py` from the data contract. Its constructor takes
+`persistence`: the account routes build the requesting account's
+`MongoPersistenceContext` from the loaded app's data contract
+(`app.state.data_contract`) and the authenticated principal, so every export and
+delete query is app- and owner-scoped by the runtime exactly like a module
+action's `ctx.persistence`, and the handler also filters by the owner field.
+Handlers whose constructor takes `db` still receive the app database. For any
+other module declaring `user_data_scope`, AppGenerator's ServiceAgent owns the
+handler; the materializer preserves its `ServiceOutput.python_files` content,
+rather than generating a deletion policy from module stubs. The existing account-data file
 contract and hook supply raw Motor API guidance and the current
 `mozaiksai.core.runtime.persistence.naming.collection_name_for` signature.
 For a repo using `ctx.persistence.collection(module_id, collection_name)`, the handler

@@ -68,6 +68,25 @@ This project follows a practical pre-1.0 changelog format:
   rejection, and a dotted metric key such as `items.total` whose final segment
   is a returned top-level field is constructed to that field.
 
+- Code now builds what the generated module contracts determine, so the same
+  live run's `task_management` module reaches acceptance without hand fixes.
+  Canonical creates, updates and deletes own their events under one naming rule
+  (`domain.<entity>.<created|updated|deleted>`): an approved spelling such as
+  `task.created` is reconciled to it, its events.yaml entry is rendered with
+  the stored record as payload, and the rendered service emits it after the
+  write. Custom events keep their names; an emit and a declaration that differ
+  only by the `domain.` prefix are reconciled, and anything else is rejected in
+  one message naming both sides. Model-authored repository code no business
+  logic uses (the live run's dead `TaskRepo` class with Motor calls) is removed
+  with a logged normalization; a repository class or Motor call that business
+  logic does use is rejected at task time with its site. A gated canonical
+  create or delete on a listed collection gets a `New <Entity>` toolbar action
+  with a modal form or a Delete row action with a confirmation dialog. A module
+  owning `per_user` collections gets `user_data_scope: true` and a
+  code-rendered account-data handler that exports and deletes the owner's rows
+  through runtime-scoped persistence, which the account routes now inject into
+  handlers that declare `persistence`.
+
 - DesignDocs recognizes the platform's login/user system by what a surface
   declares, not what it is called. A surface such as `user_management` or
   `auth_module` normalizes to the platform when it declares a platform identity

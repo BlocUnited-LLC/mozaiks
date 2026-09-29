@@ -9,6 +9,7 @@ begins) and read-only thereafter, so no locking is required.
 """
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -30,9 +31,10 @@ class AccountDataRegistry:
     ) -> None:
         """Register a handler for *module_id*.
 
-        *handler* may be a class (instantiated per-request with a ``db``
-        argument) or a pre-constructed instance.  When a class is registered
-        the platform passes the active ``db`` at dispatch time.
+        *handler* may be a class (instantiated per request) or a
+        pre-constructed instance.  A class receives, by keyword, the resources
+        its constructor declares: ``db`` (the app database) and/or
+        ``persistence`` (the requesting account's runtime-scoped persistence).
         """
         if module_id in self._handlers:
             logger.warning(
@@ -50,6 +52,7 @@ class AccountDataRegistry:
         app_id: str,
         user_id: str,
         db: Any,
+        persistence: Any = None,
     ) -> dict[str, Any]:
         """Call ``delete_user_data`` on every registered handler.
 
@@ -59,8 +62,8 @@ class AccountDataRegistry:
         """
         results: dict[str, Any] = {}
         for module_id, handler in self._handlers.items():
-            instance = _resolve_instance(handler, db)
             try:
+                instance = _resolve_instance(handler, db, persistence)
                 result = await instance.delete_user_data(app_id=app_id, user_id=user_id)
                 results[module_id] = result
                 logger.info(
@@ -87,6 +90,7 @@ class AccountDataRegistry:
         app_id: str,
         user_id: str,
         db: Any,
+        persistence: Any = None,
     ) -> dict[str, Any]:
         """Call ``export_user_data`` on every registered handler.
 
@@ -95,8 +99,8 @@ class AccountDataRegistry:
         """
         export: dict[str, Any] = {}
         for module_id, handler in self._handlers.items():
-            instance = _resolve_instance(handler, db)
             try:
+                instance = _resolve_instance(handler, db, persistence)
                 module_export = await instance.export_user_data(app_id=app_id, user_id=user_id)
                 export.update(module_export or {})
             except Exception as exc:
@@ -111,17 +115,26 @@ class AccountDataRegistry:
         return export
 
 
+ACCOUNT_HANDLER_RESOURCES = ("db", "persistence")
+
+
 def _resolve_instance(
     handler: type[AccountDataHandler] | AccountDataHandler,
     db: Any,
+    persistence: Any = None,
 ) -> AccountDataHandler:
     """Return a handler instance.
 
-    If *handler* is a class, construct it with ``db`` as a keyword argument.
-    If it's already an instance, return it directly.
+    If *handler* is a class, construct it with the resources its constructor
+    declares (``db`` and/or ``persistence``) as keyword arguments.  If it's
+    already an instance, return it directly.
     """
     if isinstance(handler, type):
-        return handler(db=db)  # type: ignore[call-arg]
+        declared = inspect.signature(handler).parameters
+        resources = {"db": db, "persistence": persistence}
+        if "persistence" in declared and persistence is None:
+            raise RuntimeError("account handler requires runtime persistence, but none was supplied")
+        return handler(**{name: resources[name] for name in ACCOUNT_HANDLER_RESOURCES if name in declared})
     return handler
 
 

@@ -34,6 +34,20 @@ Usage in a generated or hand-authored module::
 
 The platform router calls ``account_data_registry.delete_all`` /
 ``account_data_registry.export_all`` and aggregates the results.
+
+A handler constructor may instead (or also) declare ``persistence``: the
+requesting account's runtime persistence, bound to the app's data contract and
+the authenticated principal exactly like a module action's ``ctx.persistence``.
+Generated handlers for ``per_user`` collections are code-rendered that way::
+
+    class AccountDataHandler:
+        def __init__(self, persistence):
+            self.persistence = persistence
+
+        async def delete_user_data(self, *, app_id: str, user_id: str) -> dict:
+            collection = self.persistence.collection("my_module", "records")
+            result = await collection.delete_many({"user_id": user_id})
+            return {"deleted_count": result.deleted_count}
 """
 from __future__ import annotations
 

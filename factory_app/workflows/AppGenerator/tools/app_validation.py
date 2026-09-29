@@ -1364,8 +1364,9 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
                             ),
                             "error": error,
                             "fix_suggestion": (
-                                "Declare the approved action's event in module_contract.events_yaml, including "
-                                "its version, producer, and payload contract; preserve the approved action emits."
+                                "Declare the action's custom event in module_contract.events_yaml under its exact "
+                                "domain.-prefixed type, with version, producer, and payload contract, and emit that "
+                                "type. Canonical create/update/delete events are declared and emitted by code."
                                 if undeclared_event else
                                 "Fix the module contract, companion manifests, handler entrypoint, "
                                 "or app-owned service imports so AppLoader.load() can load every module."

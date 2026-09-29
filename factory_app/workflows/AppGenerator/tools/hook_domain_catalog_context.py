@@ -33,6 +33,7 @@ from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 
 logger = logging.getLogger(__name__)
 
@@ -386,7 +387,13 @@ def inject_module_file_manifest_guard(agent: Any, messages: list[dict[str, Any]]
             if pack.get("capability_pack_id") == module_id and "user_data_scope" in pack:
                 scope = bool(pack["user_data_scope"])
                 body += f"\nPlanned module.user_data_scope MUST be {str(scope).lower()}."
-                if scope:
+                if scope and owns_per_user_collections(module_id, context_variables.get("data_contract")):
+                    body += (
+                        " Code renders backend/account_data_handler.py from this module's per_user collections"
+                        " (export and delete of the account owner's rows); list it with kind account_data_handler"
+                        " in python_stubs and never implement it."
+                    )
+                elif scope:
                     body += " Declare backend/account_data_handler.py with kind account_data_handler in python_stubs; its implementation belongs in the business_services task output."
         update_agent_section(agent, _MANIFEST_GUARD_HEADER, body)
 

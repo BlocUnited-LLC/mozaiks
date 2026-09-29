@@ -57,7 +57,14 @@ output, so it constructs from the same approved inputs):
 - a gated update-shaped mutation on a collection that a list table shows gets
   an Edit row action (with `selection: single`) and a modal form that submits
   the typed action with `{selected_row.<identifier>}` and `{form.<field>}`
-  payload entries.
+  payload entries;
+- a gated canonical create (`create_<entity>`) on that collection gets a
+  `New <Entity>` toolbar action and a modal form submitting the create's
+  fields, and a gated canonical delete (`delete_<entity>`) gets a Delete row
+  action opening a confirmation dialog whose Delete button posts
+  `{selected_row.<identifier>}` (Cancel closes it). Only the canonical ids
+  qualify, so a custom delete-shaped mutation such as an archive action is
+  never presented as Delete.
 
 The collection is the approved data-contract collection whose canonical list
 read the table binds; its identifier is the `search_by` field the canonical
@@ -368,10 +375,33 @@ observation.
 Each normalized `module_contract` task reserves its module's optional
 `contracts/events.yaml` alongside `module.yaml`. This reserves write authority,
 not a required output: a module with no events still emits no manifest, as with
-the other typed optional companions. Action `emits` names alone do not determine
-event versions or payload schemas, so assembly does not invent declarations.
+the other typed optional companions.
+
+Canonical writes own their events. One naming rule
+(`canonical_write_event_type`) names them: the canonical create, update and
+delete of entity `Task` emit `domain.task.created`, `domain.task.updated` and
+`domain.task.deleted`. When the approved design's `events_emitted`, an action's
+`emits` or an events.yaml declaration names one of them under any spelling
+(`task.created`, `domain.tasks.task_created`, `task_management.created`, ...),
+`close_module_events` puts it on the canonical action's `emits`, renders its
+events.yaml entry (version 1, producer the module, payload schema the stored
+record's declared fields) and the rendered service emits it after the
+`after_*` hook with `serialize_<entity>(record)`. A spelling two collections
+share maps to neither. Nothing is emitted when nothing names the event.
+
+A custom event keeps its own name. An emit and a declaration that differ only
+by the required `domain.` prefix are reconciled to the prefixed type, on both
+sides and in reactions/notifications. Otherwise action `emits` names alone do
+not determine event versions or payload schemas, so code does not invent the
+declaration: closure rejects the output with one message naming the action, the
+emitted type, the declared types and the declaration to add. In model service
+code, a `ctx.emit` literal naming a declared event under another spelling is
+rewritten to the declared type; a write hook re-emitting the event its
+canonical write already emits is removed; emitting a canonical write event the
+module does not declare is rejected with the site. Every normalization is
+logged as `CANONICAL_EVENTS_NORMALIZED` or `EMIT_LITERAL_NORMALIZED`.
 Runtime undeclared-event diagnostics identify `contracts/events.yaml`, allowing
-the contract worker to author the missing typed declarations. For an already
+the contract worker to author the missing typed custom declarations. For an already
 accepted plan without that explicit path, repair uses the task's existing
 optional companion authority and adds only the diagnosed companion to its
 allowed paths. An explicit foreign owner always takes precedence; the approved
@@ -489,8 +519,17 @@ bindings with planner hints. Invalid schemas receive bounded task feedback.
 Missing worker pages fail instead of being synthesized from incomplete hints.
 Generated-module capability plans declare `user_data_scope`, matching the
 runtime module field. True requires a planned `backend/account_data_handler.py`
-implementation and its module stub; bundle validation rejects scope drift or a
-missing handler. The account lifecycle protocol remains owned by the runtime.
+and its module stub; bundle validation rejects scope drift or a missing handler.
+The data contract decides it for a module owning `per_user` collections: plan
+review sets the pack's `user_data_scope` and assigns the handler path to the
+module's `business_services` task, module closure sets `module.user_data_scope:
+true`, and code renders the handler (`module_account_data`): it exports the
+owner's rows of each such collection (declared fields, datetimes as ISO 8601,
+paged past the persistence page size) and deletes them through the account's
+runtime-scoped persistence. A model-authored copy is replaced with an
+`ACCOUNT_DATA_HANDLER_OVERWRITTEN` warning. `per_workspace` rows belong to a
+workspace, not one member, so account deletion never removes them. The account
+lifecycle protocol remains owned by the runtime.
 The plan's page name is a display label; the runtime page `name` must match its
 owned filename, with the display label in `title`. The approved route remains
 unchanged. Page URL validation supplies input-free corrective diagnostics, and
@@ -925,8 +964,9 @@ load. The check persists `app_runtime_load_passed` and
 in `app_bundle_acceptance_result.validation_evidence`.
 
 Modules declaring `user_data_scope` must provide a loadable account-data class
-with a `db` constructor and asynchronous, keyword-callable `delete_user_data`
-and `export_user_data` methods accepting `app_id` and `user_id`. The loader
+whose constructor takes `db` or `persistence` (the account routes inject what it
+declares) and asynchronous, keyword-callable `delete_user_data` and
+`export_user_data` methods accepting `app_id` and `user_id`. The loader
 imports it in the same module namespace as the action handler and fails the
 module when the contract cannot be registered. Account-data load failures and
 repository API quality failures join the existing bounded `ServiceAgent`
@@ -935,7 +975,15 @@ repair path; they do not become successful loads with warnings.
 File-contract prompt hooks preserve all hard constraints. Service workers see
 the callable signatures from the runtime's `PersistenceCollection` protocol,
 not a Motor collection API. The repository quality gate rejects unsupported
-cursor and find-and-modify calls. Bundle acceptance also checks that generated
+cursor and find-and-modify calls. A persistent module's repository is
+module-level functions, and code renders the canonical ones. At task time and
+assembly, model-authored `repo.py` definitions that no business logic
+references (a leftover repository class, a duplicate CRUD helper) are removed
+with a `REPO_CODE_DISCARDED` warning; a repository class the handler or service
+uses, or a referenced repo function calling a Motor-only method, is rejected
+with the use site and the replacement. An opaque use of the repository module
+(a star import, the module passed or reflected on) proves nothing dead, so
+nothing is removed. Bundle acceptance also checks that generated
 data contracts preserve the approved plan's field types and required flags.
 These checks do not prove arbitrary business logic correct; live authenticated
 CRUD and ownership tests remain necessary for end-to-end acceptance.

@@ -68,6 +68,75 @@ def collection_has_canonical_writes(collection: Mapping[str, Any]) -> bool:
     return isinstance(lifecycle, Mapping) and lifecycle.get("write_mode") == "module_action"
 
 
+CANONICAL_WRITE_EVENT_VERBS = {"create": "created", "update": "updated", "delete": "deleted"}
+
+
+def canonical_write_event_type(entity: str, operation: str) -> str:
+    """Name the domain event a canonical write emits: ``domain.<entity>.<created|updated|deleted>``.
+
+    This is the one naming rule for canonical write events; module.yaml emits,
+    events.yaml declarations, the rendered service and every alias reconciliation
+    use it.
+    """
+    if operation not in CANONICAL_WRITE_EVENT_VERBS:
+        raise ValueError(f"Unsupported canonical write operation {operation!r}; choose create, update or delete.")
+    return f"domain.{entity_identifier(entity)}.{CANONICAL_WRITE_EVENT_VERBS[operation]}"
+
+
+def _event_spellings(entity: str, collection_name: str, operation: str, module_id: str) -> set[str]:
+    verb = CANONICAL_WRITE_EVENT_VERBS[operation]
+    names = {entity_identifier(entity), entity.lower()}
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", collection_name or ""):
+        names.add(collection_name.lower())
+    subjects = {f"{name}{separator}{verb}" for name in names for separator in (".", "_")}
+    qualifiers = {*names, module_id.lower()} - {""}
+    spellings = set(subjects)
+    for qualifier in qualifiers:
+        spellings.add(f"{qualifier}.{verb}")
+        spellings.update(f"{qualifier}.{subject}" for subject in subjects)
+    return spellings | {f"domain.{spelling}" for spelling in spellings}
+
+
+def canonical_write_event_aliases(data_contract: Any) -> dict[str, str]:
+    """Map each spelling of a canonical write event to its canonical type.
+
+    A spelling names the write's subject (the entity identifier, entity name or
+    collection name) joined to ``created``/``updated``/``deleted`` by ``.`` or
+    ``_``, optionally qualified by the owning module id, the collection or the
+    entity (``task_management.task_created``), or the qualifier alone followed
+    by the verb (``task_management.created``); each with or without the
+    ``domain.`` prefix, compared case-insensitively. A spelling two collections
+    share is ambiguous and maps to neither.
+    """
+    contract = detach(data_contract)
+    if not isinstance(contract, Mapping):
+        return {}
+    claims: dict[str, set[str]] = {}
+    try:
+        collections = list(iter_data_contract_collections(dict(contract), require_complete_ownership=False))
+    except (TypeError, ValueError, KeyError):
+        return {}
+    for owner, owner_kind, collection in collections:
+        if owner_kind != "module" or not collection_has_canonical_writes(collection):
+            continue
+        entity = str(collection.get("entity") or "")
+        try:
+            events = {operation: canonical_write_event_type(entity, operation) for operation in CANONICAL_WRITE_EVENT_VERBS}
+        except ValueError:
+            continue  # module closure reports the entity name
+        for operation, event_type in events.items():
+            for spelling in _event_spellings(entity, str(collection.get("name") or ""), operation, str(owner)):
+                claims.setdefault(spelling, set()).add(event_type)
+    return {spelling: next(iter(types)) for spelling, types in claims.items() if len(types) == 1}
+
+
+def canonical_write_event_for(event_type: Any, aliases: Mapping[str, str]) -> str | None:
+    """Return the canonical write event a spelling names, or None for a custom event."""
+    if not isinstance(event_type, str):
+        return None
+    return aliases.get(event_type.strip().lower())
+
+
 def _surface_collections(surface: Mapping[str, Any], data_contract: Any) -> list[dict[str, Any]]:
     """Use explicit collection entity declarations, never inferred singular names."""
     contract = detach(data_contract)

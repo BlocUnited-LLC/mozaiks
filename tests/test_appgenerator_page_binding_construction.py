@@ -712,3 +712,67 @@ def test_pages_the_compiler_rejected_keep_their_compiled_form_and_are_reported_o
             reject_api_endpoints=False, skip_paths={"ui/pages/dashboard.yaml"},
         )
     assert str(error.value).startswith("ui/pages/tasks.yaml: ") and "route must preserve approved" in str(error.value)
+
+
+def _gated_module_yaml(*gated: str) -> str:
+    manifest = yaml.safe_load(_module_yaml())
+    for action in manifest["actions"]:
+        if action["id"] in gated:
+            action["entitlement_gate"] = f"task.{action['id'].split('_')[0]}"
+    return yaml.safe_dump(manifest, sort_keys=False)
+
+
+def test_gated_canonical_create_and_delete_get_a_toolbar_create_and_a_confirmed_row_delete(caplog):
+    """Live chat fdfa818e: gated create_task/delete_task had no page entry point at all."""
+    context = _context(module_yaml=_gated_module_yaml("create_task", "delete_task"))
+    compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(_tasks_page(selection=None))}, context, caplog)
+    tasks = compiled["ui/pages/tasks.yaml"]
+    validate_page_schema(deepcopy(tasks))
+    table = _section(tasks, "task-table")["config"]
+    assert table["selection"] == "single"
+    assert [(a["id"], a["label"], a["variant"], a["requires_selection"]) for a in table["actions"]] == [
+        ("open-update_task", "Edit", "secondary", True),
+        ("open-create_task", "New Task", "primary", False),
+        ("open-delete_task", "Delete", "danger", True),
+    ]
+    create_form = _section(tasks, "create_task-modal")["config"]["children"][0]["config"]
+    assert create_form["submit_action"]["href"] == "/api/modules/task_management/create_task"
+    assert [field["name"] for field in create_form["fields"]] == ["title", "description"]
+    assert "initial_values_key" not in create_form
+    confirm = _section(tasks, "delete_task-modal")["config"]
+    assert confirm["actions"] == [
+        {"id": "confirm-delete_task", "label": "Delete", "variant": "danger", "action_type": "delete",
+         "href": "/api/modules/task_management/delete_task",
+         "payload": {"task_id": "{selected_row.task_id}"}, "requires_selection": False, "closes_modal": True},
+        {"id": "cancel-delete_task", "label": "Cancel", "variant": "secondary", "action_type": "event",
+         "event_type": "ui.modal.close", "payload": {"modal_id": "delete_task-modal"},
+         "requires_selection": False, "closes_modal": True},
+    ]
+    assert {f"task_management/{name}" for name in ("create_task", "update_task", "delete_task")} <= (
+        reachable_page_action_keys([tasks])
+    )
+    lines = [record.getMessage() for record in caplog.records if "constructed" in record.getMessage()]
+    assert any("create_task (task.create) has no page entry point; added a 'New Task' toolbar action" in line
+               for line in lines)
+    assert any("delete_task (task.delete) has no page entry point; added a Delete row action and a confirmation"
+               in line for line in lines)
+    # Construction is idempotent: assembly re-normalizes to the same page.
+    again = normalize_planned_page_content(
+        yaml.safe_dump(tasks, sort_keys=False, allow_unicode=True), path="ui/pages/tasks.yaml",
+        modules=module_action_index_from_context(context),
+        data_contract=detach(context.get("data_contract")), design_surface_map=detach(context.get("design_surface_map")),
+    )
+    assert yaml.safe_load(again) == tasks
+
+
+def test_an_authored_section_holding_the_confirmation_id_is_never_overwritten(caplog):
+    page = _tasks_page()
+    page["sections"].append({"id": "delete_task-modal", "primitive": "Alert", "config": {"message": "Careful"}})
+    context = _context(module_yaml=_gated_module_yaml("delete_task"))
+    compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(page)}, context, caplog)
+    tasks = compiled["ui/pages/tasks.yaml"]
+    assert _section(tasks, "delete_task-modal")["primitive"] == "Alert"
+    assert "task_management/delete_task" not in reachable_page_action_keys([tasks])
+    refused = [record.getMessage() for record in caplog.records if "not constructed" in record.getMessage()]
+    assert any("no delete entry point for gated task_management/delete_task: section 'delete_task-modal' exists"
+               in line for line in refused)

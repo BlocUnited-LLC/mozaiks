@@ -18,6 +18,10 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_authored_code import (
+    MOTOR_ONLY_METHODS,
+    PERSISTENCE_COLLECTION_METHODS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -234,11 +238,11 @@ def _audit_ast(filename: str, content: str) -> list[str]:
             filename.endswith("/backend/repo.py")
             and isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"find", "count_documents", "find_one_and_update", "find_one_and_delete", "estimated_document_count", "to_list"}
+            and node.func.attr in MOTOR_ONLY_METHODS
         ):
             warnings.append(
                 f"{filename}:{node.lineno}: {node.func.attr} is not a PersistenceCollection method. "
-                "Use find_many (returns a list), count, or update_one/delete_one followed by scoped find_one; no Motor cursor API in generated repositories."
+                f"Use {PERSISTENCE_COLLECTION_METHODS}; no Motor cursor API in generated repositories."
             )
         if isinstance(node, ast.Pass) and id(node) in function_passes:
             warnings.append(

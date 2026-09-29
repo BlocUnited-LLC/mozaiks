@@ -1315,7 +1315,12 @@ class ModuleLoader:
                 if not inspect.isclass(candidate):
                     continue
                 try:
-                    inspect.signature(candidate).bind(db=None)
+                    # The account routes inject the resources a constructor declares.
+                    constructor = inspect.signature(candidate)
+                    resources = {name: None for name in ("db", "persistence") if name in constructor.parameters}
+                    if not resources:
+                        raise TypeError("__init__ must accept db or persistence")
+                    constructor.bind(**resources)
                     for method_name in ("delete_user_data", "export_user_data"):
                         method = getattr(candidate, method_name, None)
                         if not inspect.iscoroutinefunction(method):
@@ -1326,7 +1331,7 @@ class ModuleLoader:
                 valid.append(candidate)
             if len(valid) != 1:
                 raise ValueError(
-                    "export one AccountDataHandler class with __init__(db) and async "
+                    "export one AccountDataHandler class with __init__(db) or __init__(persistence) and async "
                     "delete_user_data(*, app_id, user_id) / export_user_data(*, app_id, user_id)"
                 )
             from mozaiksai.core.account import AccountDataHandler, account_data_registry

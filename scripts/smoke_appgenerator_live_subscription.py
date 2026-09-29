@@ -736,12 +736,12 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
     module_data = yaml.safe_load(module_yaml) or {}
     class_name = _handler_class(module_data)
     methods = _action_methods(module_data)
-    handler_source = "from .service import ReportsService\n\n\n"
+    handler_source = "from . import service\n\n\n"
     handler_source += f"class {class_name}:\n"
     for method in methods:
         handler_source += (
             f"    async def {method}(self, ctx, **params):\n"
-            f"        return await ReportsService(ctx).{method}(**params)\n\n"
+            f"        return await service.{method}(ctx, **params)\n\n"
         )
 
     return {
@@ -751,7 +751,7 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
             """
             from uuid import uuid4
 
-            from .repo import ReportsRepo
+            from . import repo
 
 
             def report_document(*, topic=None):
@@ -763,21 +763,18 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
                 }
 
 
-            class ReportsService:
-                def __init__(self, ctx):
-                    self.ctx = ctx
-                    self.repo = ReportsRepo(ctx)
+            async def list_reports(ctx, **params):
+                return {"reports": await repo.list_report_records(ctx)}
 
-                async def list_reports(self, **params):
-                    return {"reports": await self.repo.list_reports()}
 
-                async def get_reports(self, **params):
-                    return {"item": await self.repo.get_report(params["id"])}
+            async def get_reports(ctx, **params):
+                return {"item": await repo.load_report(ctx, params["id"])}
 
-                async def generate_report(self, **params):
-                    report = report_document(topic=params.get("topic"))
-                    saved = await self.repo.save_report(report)
-                    return {"report_id": saved["report_id"], "topic": saved["topic"], "report": saved}
+
+            async def generate_report(ctx, **params):
+                report = report_document(topic=params.get("topic"))
+                saved = await repo.save_report(ctx, report)
+                return {"report_id": saved["report_id"], "topic": saved["topic"], "report": saved}
             """
         ).strip() + "\n",
         "modules/reports/backend/repo.py": textwrap.dedent(
@@ -785,38 +782,34 @@ def _backend_files(module_yaml: str) -> dict[str, str]:
             from .policy import scoped_query, scope_record
 
 
-            class ReportsRepo:
-                def __init__(self, ctx):
-                    self.ctx = ctx
+            def _collection(ctx):
+                persistence = getattr(ctx, "persistence", None)
+                if persistence is None:
+                    return None
+                return persistence.collection("reports", "reports")
 
-                def _collection(self):
-                    persistence = getattr(self.ctx, "persistence", None)
-                    if persistence is None:
-                        return None
-                    return persistence.collection("reports", "reports")
 
-                async def list_reports(self):
-                    collection = self._collection()
-                    if collection is None:
-                        return []
-                    query = scoped_query(self.ctx, entity_name="reports")
-                    return await collection.find_many(query, limit=100)
+            async def list_report_records(ctx):
+                collection = _collection(ctx)
+                if collection is None:
+                    return []
+                return await collection.find_many(scoped_query(ctx, entity_name="reports"), limit=100)
 
-                async def get_report(self, report_id):
-                    collection = self._collection()
-                    if collection is None:
-                        return None
-                    return await collection.find_one(scoped_query(
-                        self.ctx, {"report_id": report_id}, entity_name="reports",
-                    ))
 
-                async def save_report(self, record):
-                    record = scope_record(self.ctx, record, entity_name="reports")
-                    collection = self._collection()
-                    if collection is None:
-                        return record
-                    result = await collection.insert_one(record)
-                    return {**record, "report_id": str(result.inserted_id)}
+            async def load_report(ctx, report_id):
+                collection = _collection(ctx)
+                if collection is None:
+                    return None
+                return await collection.find_one(scoped_query(ctx, {"report_id": report_id}, entity_name="reports"))
+
+
+            async def save_report(ctx, record):
+                record = scope_record(ctx, record, entity_name="reports")
+                collection = _collection(ctx)
+                if collection is None:
+                    return record
+                result = await collection.insert_one(record)
+                return {**record, "report_id": str(result.inserted_id)}
             """
         ).strip() + "\n",
     }

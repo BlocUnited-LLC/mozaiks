@@ -24,6 +24,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     materialize_collection_auth,
     materialize_data_contract,
 )
+from mozaiksai.core.workflow.generator_support.module_account_data import (
+    materialize_module_account_handlers,
+)
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
@@ -85,6 +88,9 @@ def _merge_code_files(
     ))
     file_map.update(materialize_module_policies(file_map, data_contract))
     file_map.update(materialize_module_schemas(file_map, app_build_plan=app_build_plan, data_contract=data_contract))
+    file_map.update(materialize_module_account_handlers(
+        file_map, app_build_plan=app_build_plan, data_contract=data_contract,
+    ))
     service_paths = [
         path for task in (app_build_plan or {}).get("build_tasks") or []
         if task.get("task_type") == "business_services"

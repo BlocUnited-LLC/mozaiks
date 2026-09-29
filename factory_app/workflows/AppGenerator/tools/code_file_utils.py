@@ -49,6 +49,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
 )
+from mozaiksai.core.workflow.generator_support.module_account_data import (
+    materialize_task_module_account_handlers,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
@@ -183,6 +186,10 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             incoming, task={"owned_paths": owned_paths or []},
             app_build_plan=detach(context_variables.get("app_build_plan")), data_contract=contract,
         )
+        schemas.update(materialize_task_module_account_handlers(
+            incoming, task={"owned_paths": owned_paths or []},
+            app_build_plan=detach(context_variables.get("app_build_plan")), data_contract=contract,
+        ))
         admitted = admitted_app_file_map(context_variables)
         incoming.update(materialize_module_read_implementations(
             {**admitted, **incoming}, app_build_plan=detach(context_variables.get("app_build_plan")),

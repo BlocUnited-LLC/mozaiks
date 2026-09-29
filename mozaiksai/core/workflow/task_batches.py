@@ -31,6 +31,7 @@ from .generator_support.code_files import (
     materialize_data_contract,
     safe_relpath,
 )
+from .generator_support.module_account_data import materialize_task_module_account_handlers
 from .generator_support.module_action_inventory import (
     all_module_actions,
     pack_owned_output_paths,
@@ -1164,6 +1165,10 @@ async def _run_one_task(
                 )
                 canonical_file_map.update(policies)
                 canonical_file_map.update(materialize_task_module_schemas(
+                    canonical_file_map, task=task, app_build_plan=task_context.get("app_build_plan"),
+                    data_contract=data_contract,
+                ))
+                canonical_file_map.update(materialize_task_module_account_handlers(
                     canonical_file_map, task=task, app_build_plan=task_context.get("app_build_plan"),
                     data_contract=data_contract,
                 ))
