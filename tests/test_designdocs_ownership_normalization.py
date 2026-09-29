@@ -1507,9 +1507,12 @@ def test_identity_surface_with_app_behavior_names_what_stays_app_owned(persisten
     result = inventory._save(context, bundle)
 
     ownership._assert_refused(context, result, store_factory, owner="platform")
+    # The claim names everything the save removes as platform identity, so a
+    # retry drops the users collection and the lifecycle event too.
     assert result["error"].startswith(
         "App surface 'user_management' claims Mozaiks platform authentication and sessions: "
-        "entities ['User'], actions ['create_user']."
+        "entities ['User'], actions ['create_user'], collections ['users'], "
+        "events ['domain.users.user_created']."
     )
     assert (
         f"keep it app-owned with its entities ['Team'], actions {app_actions}, collections ['teams'], pages []"
@@ -1599,10 +1602,8 @@ def test_create_user_form_with_a_password_does_not_make_an_admin_page_sign_in(pe
 
 
 @pytest.mark.parametrize("page", [
-    pytest.param(_users_page(columns=("user_id", "email", "favorite_genre")), id="lists_app_fields"),
     pytest.param(_users_page(columns=("display_name", "avatar_url"), primitive="Form"), id="profile_form_lists_nobody"),
     pytest.param(_users_page(columns=("session_id", "created_at", "expires_at")), id="lists_sessions"),
-    pytest.param(_users_page(columns=("id", "name", "email", "role", "created_at")), id="fields_the_accounts_do_not_declare"),
 ])
 def test_identity_page_that_is_not_user_administration_stays_an_app_page(persistence, page):
     _, store_factory, _ = persistence
@@ -1615,10 +1616,38 @@ def test_identity_page_that_is_not_user_administration_stays_an_app_page(persist
     ownership._assert_refused(context, result, store_factory, owner="platform")
     assert result["error"].startswith(
         "App surface 'user_management' claims Mozaiks platform authentication and sessions: "
-        "entities ['User'], actions ['create_user', 'delete_user']."
+        "entities ['User'], actions ['create_user', 'delete_user'], collections ['users'], "
+        "events ['domain.users.user_created']."
     )
     assert "keep it app-owned with its entities [], actions [], collections [], pages ['Users']" in result["error"]
     assert "user-administration" not in result["error"]
+
+
+@pytest.mark.parametrize("columns,extra", [
+    pytest.param(("user_id", "email", "favorite_genre"), ["favorite_genre"], id="lists_app_fields"),
+    pytest.param(("id", "name", "email", "role", "created_at"), ["name", "role"], id="fields_the_accounts_do_not_declare"),
+])
+def test_page_listing_accounts_beside_app_fields_is_never_kept_app_owned(persistence, columns, extra):
+    """A page listing the platform's accounts is not app evidence, even beside app columns.
+
+    Keeping it app-owned would save a /users page listing platform identity: the
+    rejection names the columns the accounts do not declare instead, as it does
+    on a surface the catalog names.
+    """
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=False)
+    bundle = _identity_bundle(page=_users_page(columns=columns))
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="platform")
+    assert result["error"].startswith(
+        "Page 'Users' (/users) is owned by 'user_management', which normalizes to Mozaiks platform "
+        f"authentication and sessions, and lists its user accounts, but it also names fields the accounts do "
+        f"not declare: {extra}."
+    )
+    assert "drop the page, or keep only app data on it and move 'Users' to owned_pages of 'reports'" in result["error"]
+    assert "keep it app-owned" not in result["error"]
 
 
 def _named_auth_with_users_page(page: dict) -> dict:

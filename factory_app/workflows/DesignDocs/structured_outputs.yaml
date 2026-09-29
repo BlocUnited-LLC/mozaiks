@@ -21,7 +21,7 @@ models:
         - refinement
         - external_integration
         - ui_only
-        description: Concrete realization boundary for the surface.
+        description: Concrete realization boundary for the surface. A workflow surface the approved concept never asked for (agentic_capabilities empty or null) is saved as module when it declares entities, mutations, custom reads, or collections (grouped or shared), and as ui_only otherwise.
       owner:
         type: literal
         values:
@@ -36,7 +36,7 @@ models:
       primary_entities:
         type: optional_list
         items: str
-        description: Durable entities or records owned by the surface. Managed facade modules do not own provider records or platform state; use an empty list for these facades. App-specific profiles and preferences keyed by user_id remain app-owned entities.
+        description: Durable entities or records owned by the surface. Managed facade modules do not own provider records or platform state; use an empty list for these facades. App-specific profiles and preferences keyed by user_id remain app-owned entities. A module's collection entity missing here is added at save unless another surface declares it or another module's collections hold it too, the module lists it under another spelling, or it is a platform identity or selected-provider entity (an Account only where its records carry a password hash).
       owned_pages:
         type: optional_list
         items: str
@@ -44,7 +44,7 @@ models:
       owned_mutations:
         type: optional_list
         items: str
-        description: Deterministic mutations or actions owned by the surface.
+        description: Deterministic mutations or actions owned by the surface. Sign-in actions (login_user, register_user) on a surface that declares or stores platform identity are the platform's and are removed at save, together with page sections bound to them. On a surface that normalizes to a managed facade, a provider action the facade serves (subscribe_user, manage_subscription) maps to that facade action and typed page bindings follow it; elsewhere these ids stay app actions.
       custom_reads:
         type: optional_list
         items: str
@@ -217,7 +217,7 @@ models:
         description: Exact declared field holding trusted user_id for per_user or workspace_id for per_workspace. Null for app_wide.
       entity:
         type: str
-        description: Exact entity name from the owning surface primary_entities. No pluralization or collection-name inference is permitted.
+        description: Exact entity name from the owning surface primary_entities; each collection of an owner has its own entity. No pluralization or collection-name inference is permitted. A module's missing entity is added to its primary_entities at save, unless another surface declares it or another module's collections hold it too, the module lists it under another spelling, or it is a platform identity or selected-provider entity (an Account only where its records carry a password hash).
       ownership:
         type: DataContractOwnership
         description: Surface ownership for the collection.
@@ -262,7 +262,7 @@ models:
       collections:
         type: list
         items: DataContractCollection
-        description: Collection intents owned by the surface. Platform auth/session state and selected managed-provider state cannot be declared here; managed facade surfaces have no local collections. Save-time normalization removes contract-identified identity fields and preserves residual app fields in a user_id-keyed collection under a uniquely determined existing app module. Ambiguous ownership requires revision.
+        description: Collection intents owned by the surface. Platform auth/session state and selected managed-provider state cannot be declared here; managed facade surfaces have no local collections. Save-time normalization removes a collection the ownership rules identify (a reserved collection name or surface, a managed facade, or platform identity content) that holds only their state, wherever it is filed; a provider-state collection is removed whatever types it declares its fields with. A collection named for the provider only by its entity, or a reserved collection name beside an app entity its app surface declares, is a design decision; remove it, or name the app's own records for what they are. Only platform identity has a residual split -- an identity collection with app fields keeps them in a user_id-keyed collection under a uniquely determined existing app module; a provider-state collection with app fields is rejected naming them, because a managed facade owns no collections. Ambiguous ownership requires revision.
 
   DataContractPolicies:
     type: model

@@ -333,18 +333,34 @@ Platform identity is recognized by what a surface declares, not by its
 `surface_id`. The authentication rule's `entity_names` and
 `surface_entity_names` (`User`, `UserCredential`, `Session`, `AuthIdentity`,
 ..., compared case-insensitively and across camelCase/snake_case) are the platform
-identity entities. Recognition needs evidence: a catalog identifier the
-surface declares (a reserved surface id, entity, or action), or a user-account
-collection of one of its platform identity entities. A user-account collection
-is identity state (every field a declared identity claim in its bounded type,
-beyond bookkeeping keys) and either carries a credential field or has a unique
-index on one of the rule's `account_key_fields` (email identity), alone or
-beside bookkeeping keys such as `app_id` or the owner field the save path
-prefixes to unique indexes on owned collections. An identity
-entity is the platform's only when every collection anywhere in the design
-declaring it (singular or plural) is identity state. App fields beside a
-password make it app data, and so do its actions. That data stays
-with its module and splits as described below. Such a surface normalizes to the
+identity entities; a `credential_entity_names` entity (`Account`) is one only
+where its records carry one of the rule's `sign_in_credential_fields` (a password
+hash), so a CRM, bank, or linked social account, or a password manager's saved
+logins, stays app data. Recognition needs evidence: a catalog
+identifier the surface declares (a reserved surface id, entity, or action); a
+user-account collection of one of its platform identity entities; or a sign-in
+action (one of the rule's `sign_in_verbs` with a platform identity entity, such
+as `login_user`) over identity records of an entity it declares, such as a
+session store. A user-account collection is identity state (every field a
+declared identity claim in its bounded type, beyond bookkeeping keys and the
+collection's own `<entity>_id` record id unless that name is itself a declared
+claim, as `session_id` is) and either carries a credential field
+or has a unique index on one of the rule's `account_key_fields` (email
+identity), alone or beside bookkeeping keys such as `app_id` or the owner field
+the save path prefixes to unique indexes on owned collections. An identity
+entity is the platform's on a surface when none of that surface's own records of
+it (singular or plural) hold app data, and either the surface stores identity
+records of it or no collection anywhere in the design holds app data for it. App
+fields beside a password make it app data, and so do its actions. That data
+stays with its module and splits as described below. A users collection of an
+account entity (`User`, `AuthIdentity`, or an `Account` holding a password hash) that
+no surface declares, filed under an app module or under a data group with no
+surface at all, is judged by its fields, but only when its records are one per user (identity with
+one of the rule's `account_credential_fields`, unique on an account key, or unique
+on `user_id`; never kept per workspace): identity state is
+removed, and app fields beside identity split to its app module as below. A
+device, ledger, integration, membership, or history collection is left to the
+design. Such a surface normalizes to the
 platform whatever it is called (`user_management`, `auth_module`). Its identity
 collections of identity entities are removed regardless of collection name. An
 action that is exactly one of the rule's `identity_lifecycle_verbs` and a
@@ -352,7 +368,17 @@ platform identity entity (`create_user`, `list_users`, `user_login`,
 `logout_user`) is the platform's user lifecycle. It is removed and recorded as
 `removed_mutations`/`removed_reads`; actions the catalog already reserves are not
 re-recorded. Any other action naming a user (`follow_user`, `update_user_theme`)
-is app behavior. Its events and sign-in pages are removed as above. Field types
+is app behavior. Its events and sign-in pages are removed as above. Sign-in is
+the platform's even where the identity entity carries app data: on an app-owned
+surface that declares a platform identity entity, or whose identity records were
+removed or split out, sign-in actions (one of the rule's `sign_in_verbs` with an
+account entity, such as `login_user` or `register_user`) and sign-in events
+(`<entity>_<fact>` with one of the rule's `sign_in_facts`, such as
+`domain.users.user_logged_in`) are removed and recorded, and so is a page section
+whose typed binding targets a removed action (`removed_sections`) and a sign-in
+page it owns (`removed_pages`, with typed navigation pointed at the login route);
+its app data and other actions stay. A workflow trigger on a removed sign-in event, on any
+surface, is a design decision and is rejected. Field types
 are bounded when they are any canonical scalar type (`CANONICAL_FIELD_TYPES`
 minus `STRUCTURED_FIELD_TYPES`, so `date` counts), and structured only where the
 rule declares that shape for the claim.
@@ -384,30 +410,56 @@ a purpose:
 Any other action keeps its control. Each removal is recorded at the outermost
 object that went. A section left without a purpose is removed. A page left with
 no sections is a design decision and is rejected. A form alone, such as a profile form, lists nobody. Neither does a
-list of sessions, teams, or fields the accounts do not declare. These stay
-user-designed pages that must move to an app owner. An app entity that merely
+list of sessions or teams. These stay user-designed pages that must move to an
+app owner. A page listing the accounts beside columns they do not declare is
+never kept app-owned: it is rejected naming those columns, whatever the
+surface is called. An app entity that merely
 references users (`TeamMember`, or `Task` with a `user_id`) is not an identity
 entity and stays app-owned. So do identity-named entities with no account
-evidence (an app's own `Session` of focus time) and those with app data behind
-them.
+evidence (an app's own `Session` of focus time, unless the surface pairs its
+identity records with sign-in actions) and those with app data behind them.
 
 Each correction appears in the saved design's `ownership_normalizations` and
 human-readable documents, and produces a `DESIGN_OWNERSHIP_NORMALIZED` log entry
 with the source surface, canonical owner, removed collections, and, when
 present, removed mutations and reads, removed events, removed pages (a
 user-administration page names the admin panel that administers users),
-redirected navigation, and removed navigation. These recorded
+redirected navigation, and removed navigation. A managed facade correction also
+records `mapped_actions` (a provider action the facade serves, such as
+`subscribe_user` -> `start_subscription_checkout`, declared by the rule's
+`action_aliases`; an alias never makes a surface billing by itself),
+`rebound_sections` (typed page bindings moved to the facade and its action), and
+`released_pages` (a page an app-owned surface also owns, which stays app-owned). Two design completions share the record: an AI
+`workflow` surface the approved concept never asked for is saved as `module`
+when it declares entities, mutations, custom reads, or collections and as
+`ui_only` otherwise (`realized_surface_kind`; with no AI in the app, every
+module-owned collection declared `workflow_write` becomes module-written,
+`module_written_collections`, and a
+custom read equal to a canonical read is dropped, `removed_reads`), a module
+owning a collection whose entity it does not list gains it (`added_entities`)
+unless another surface declares it or another module's collections hold it too,
+the module lists it under another spelling, or it is a platform identity or
+selected-provider entity, and a collection's `ownership.surface_kind` follows its
+owner's kind (`mirrored_collection_kinds`). These recorded
 corrections and normalized typed contracts govern any conflicting original prose.
 Normalization works on detached data and does not modify the model's turn-local
 structured output.
 
 Ambiguous ownership still returns `revise` with feedback before any design is
 saved, and the feedback names the exact behavior to split out and where it
-belongs. This includes mixed provider fields without an app-data split contract,
-unknown state under reserved surfaces, app-specific entities or actions that
-cannot be assigned to the canonical owner, `workflow_triggers` on a platform or
-facade surface, unrelated facade integrations, conflicting grouped collection
-owners, competing owner declarations, a platform auth event that another
+belongs. This includes a provider-state collection with app fields (a managed
+facade owns no collections, so the feedback names the collection to remove, the
+facade read that serves its state per the rule's `state_readers`, and the app
+fields to keep under an app module), a collection on app surfaces named for the
+provider only by its entity or by a reserved collection name beside an app entity
+its surface declares (remove it, or name the app's own records for what they
+are), unknown state under reserved surfaces,
+app-specific entities or actions that cannot be assigned to the canonical owner,
+`workflow_triggers` on a platform or facade surface, unrelated facade
+integrations, a grouped collection whose declared app owner disagrees with its
+group (a collection holding only the rule's state is removed wherever it is
+filed when its declared owner is the rule's own surface), competing owner
+declarations, a platform auth event that another
 surface's `workflow_triggers` consume, a sign-in page that an app-owned surface
 also owns or whose sections bind app-owned modules through typed
 `data_source`/module-action references, and a non-sign-in page filed under an
@@ -420,8 +472,9 @@ does not depend on surface order. An app-named surface whose every claim is
 reserved is determined and normalizes to the canonical owner. A surface
 recognized as platform identity that also declares app-owned entities, actions,
 collections, or pages is told the same thing. The rejection names its identity
-claims to remove, and the entities, actions, collections, pages, and triggers
-that stay app-owned on it. Removing platform pages can never empty the approved
+claims to remove (entities, actions, the identity collections the save removes,
+and the platform lifecycle events it declares), and the entities, actions,
+collections, pages, and triggers that stay app-owned on it. Removing platform pages can never empty the approved
 inventory.
 Selected managed ownership rules without a declared `facade_module` also reject:
 the tool cannot infer a provider's canonical app boundary from its display name.

@@ -46,6 +46,49 @@ layers:
           - sign_out
           - authenticate
           - refresh
+        # Sign-in is the platform's even where the entity also carries app data:
+        # these lifecycle verbs with a platform account entity (login_user,
+        # user_logout, register_user) are removed from any surface that declares
+        # or stores platform identity, and a surface pairing one with identity
+        # records is platform identity. create/update/delete/get/list/refresh of
+        # an identity entity with app data stay the app's.
+        sign_in_verbs:
+          - register
+          - signup
+          - sign_up
+          - login
+          - log_in
+          - signin
+          - sign_in
+          - logout
+          - log_out
+          - signout
+          - sign_out
+          - authenticate
+        # Lifecycle facts: an event whose last segment is `<entity>_<fact>` for a
+        # platform identity entity (domain.users.user_created) is a platform
+        # lifecycle event the app cannot emit.
+        identity_lifecycle_facts:
+          - created
+          - updated
+          - deleted
+          - registered
+          - signed_up
+          - logged_in
+          - logged_out
+          - signed_in
+          - signed_out
+          - authenticated
+        # The sign-in facts among them (user_logged_in): the platform's even where
+        # the entity also carries app data.
+        sign_in_facts:
+          - registered
+          - signed_up
+          - logged_in
+          - logged_out
+          - signed_in
+          - signed_out
+          - authenticated
         # A collection unique on one of these claims is an account registry.
         account_key_fields: [email, username, preferred_username]
         surface_ids: [auth, authentication, user_authentication, session_management, user_sessions]
@@ -61,6 +104,15 @@ layers:
         # surface_id: its identity collections, lifecycle actions, events and
         # sign-in/user-administration pages are normalized to the platform.
         surface_entity_names: [User, UserCredential, Session]
+        # Entities that are platform identity only where their records carry a
+        # hashed sign-in credential: an Account holding a password hash is the
+        # platform's account registry, while a CRM, bank, linked social account or
+        # a password manager's saved logins (a plain password to fill in) is app data.
+        credential_entity_names: [Account]
+        sign_in_credential_fields: [password_hash, hashed_password]
+        # A user record carrying one of these is its user's account (one row per
+        # user); a record of tokens for other services may hold many per user.
+        account_credential_fields: [password, password_hash, hashed_password]
         surface_action_ids: [create_session, login_user]
         # Credential/session fields determine identity storage even if a model
         # incorrectly groups generic users/sessions under a business module.
@@ -118,6 +170,10 @@ layers:
           - avatar_url
           - bio
           - subscription_tier
+          # The same account-profile projection under the names designs give it;
+          # MozaiksPay's billing_portal serves the subscription itself.
+          - subscription_status
+          - subscription_type
           - created_at
           - last_login_at
           # Keycloak token mapping: core/auth/adapters/keycloak.py:_extract_claims

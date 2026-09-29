@@ -251,7 +251,11 @@ At minimum, each collection intent must declare:
 - `tenancy` (`per_user`, `per_workspace`, or `app_wide`: row ownership)
 - `owner_field` (a declared field receiving trusted `user_id` or `workspace_id`,
   respectively; null for `app_wide`)
-- `entity` (an exact entry in the owning surface's `primary_entities`)
+- `entity` (an exact entry in the owning surface's `primary_entities`; the
+  DesignDocs save adds a module-owned collection's missing entity unless another
+  surface declares it or another module's collections hold it too, the module
+  lists it under another spelling, or it is a platform identity or
+  selected-provider entity)
 - `ownership.surface_id`
 - `ownership.surface_kind`
 - `fields`
@@ -353,10 +357,18 @@ logged warning. An update hook cannot change the owner field either; a create
 hook's owner value reaches the runtime, which rejects a foreign owner (403).
 Field types come from the canonical list
 (string, boolean, integer, number, date, datetime, object, array) and defaults
-must decode to the declared type; DesignDocs validates both at save time and
-AppGenerator repeats the check only as a backstop. A required array or object
-field without a default is saved with `"[]"` or `"{}"` and a logged
-`DATA_CONTRACT_FIELD_NORMALIZED` notice; unknown types are still rejected with
+must be null or decode to the declared type; DesignDocs validates both at save
+time and AppGenerator repeats the check only as a backstop. Determined default
+corrections are saved with a logged `DATA_CONTRACT_FIELD_NORMALIZED` notice: a
+managed timestamp (`created_at`/`updated_at` declared as date or datetime,
+`MANAGED_TIMESTAMP_FIELDS`) has its default dropped because canonical writes
+stamp it; a non-string default that means exactly one value (`True` on a
+boolean, `3.0` on an integer, a bare ISO date) is JSON-encoded; an empty default
+on a non-string field, and an optional non-string field's default that does not
+decode to its type, become null; a required array or object field without a
+default gets `"[]"` or `"{}"`. These corrections are also saved as
+`field_normalizations` on the design and appended to the database document. A
+required field's undecodable default and unknown types are still rejected with
 the valid choices. A model-authored
 `schemas.py` for a persistent module is overwritten by the rendered file with a
 logged warning, and a `data_models` task with nothing left to author completes

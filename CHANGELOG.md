@@ -52,6 +52,32 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs saves the model's natural variation instead of rejecting
+  corrections the contract determines. The live model changes a rejected design
+  at most once and then resubmits it unchanged until the run is blocked, so each
+  such rejection killed the run. Replayed through the real save path, 87 of the
+  89 distinct recorded DesignDocs outputs now save (49 before). The other 2 are
+  design decisions and get a message naming the three possible changes.
+  - A local `subscriptions` collection holding only provider state (plan,
+    plan type, status, period dates) is removed wherever it is filed. On a
+    subscription surface, `subscribe_user` and `manage_subscription` become
+    billing_portal's `start_subscription_checkout` and `open_billing_portal`,
+    and page bindings follow them. A page an app-owned surface also owns stays
+    app-owned. Subscription status on a users collection is treated as the
+    account-profile projection.
+  - A managed timestamp's default (`"now"`) is dropped. So are an empty default
+    on a non-string field and an optional non-string field's undecodable
+    default. A default that means one value (`True`, a bare ISO date) is
+    encoded instead of rejected.
+  - An AI workflow surface the concept never asked for (no agentic
+    capabilities) is saved as a `module` or
+    `ui_only` surface.
+  - A module lists the entities of the collections it owns.
+  - A users collection that no surface declares is judged by its fields.
+  - Sign-in actions and events are the platform's wherever identity is
+    declared or stored. An `Account` holding a password hash, or a session store
+    paired with login/logout, is recognized as platform identity.
+  - Rejections name exactly what to change.
 - DesignDocs recognizes the platform's login/user system by what a surface
   declares, not what it is called. A surface such as `user_management` or
   `auth_module` normalizes to the platform when it declares a platform identity
