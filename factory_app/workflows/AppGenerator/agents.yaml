@@ -1102,7 +1102,7 @@ agents:
           "auth_strategy": "role-based",
           "roles": ["admin", "user"],
           "default_route": "/dashboard",
-          "pages": ["Dashboard", "Users", "UserDetail"],
+          "pages": ["Dashboard", "Tasks", "TaskDetail"],
           "custom_routes": []
         },
         "pages": [
@@ -1121,7 +1121,7 @@ agents:
                 "primitive": "Grid",
                 "title": null,
                 "config": { "columns": 3, "gap": "md", "children": [
-                  { "primitive": "Metric", "config": { "label": "Total Users", "value": 1204, "detail": "Active users" } },
+                  { "primitive": "Metric", "config": { "label": "Open Tasks", "value": 128, "detail": "Awaiting follow-up" } },
                   { "primitive": "Metric", "config": { "label": "Revenue", "value": "$182.3k", "detail": "Monthly revenue" } }
                 ]},
                 "event_triggers": [],

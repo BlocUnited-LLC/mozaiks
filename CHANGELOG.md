@@ -52,6 +52,35 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs saves the model's natural variation instead of rejecting
+  corrections the contract determines. The live model changes a rejected design
+  at most once and then resubmits it unchanged until the run is blocked, so each
+  such rejection killed the run. Replayed through the real save path, 87 of the
+  89 distinct recorded DesignDocs outputs now save (49 before). The other 2 are
+  design decisions and get a message naming the three possible changes.
+  - A local `subscriptions` collection holding only provider state (plan,
+    plan type, status, period dates) is removed wherever it is filed. On a
+    subscription surface, `subscribe_user` and `manage_subscription` become
+    billing_portal's `start_subscription_checkout` and `open_billing_portal`,
+    and page bindings follow them. Only pages billing_portal serves move to it;
+    an app page such as `Alerts` stays with an app surface, or one rejection
+    names every such page and each change that saves. While MozaiksPay is active, subscription status or
+    type on a users collection is the account-profile projection it serves;
+    without MozaiksPay those fields stay app data.
+  - A managed timestamp's default (`"now"`) is dropped. So are an empty default
+    on a non-string field and an optional non-string field's undecodable
+    default. A default that means one value (`True`, `yes`/`no` on a boolean, a
+    bare ISO date) is encoded instead of rejected.
+  - An AI workflow surface the concept never asked for (no agentic
+    capabilities) is saved as a `module` or
+    `ui_only` surface.
+  - A module lists the entities of the collections it owns.
+  - A users collection that no surface declares is judged by its fields.
+  - Sign-in actions and events are the platform's wherever identity is
+    declared or stored. An `Account` holding a password hash, or a session store
+    paired with login/logout, is recognized as platform identity.
+  - Rejections name exactly what to change.
+
 - Outputs a selected capability pack ships from its templates are no longer
   treated as model work. AppGenerator plan review stopped synthesizing a
   `billing_portal` module_contract/data_models/business_services trio for the
@@ -79,8 +108,9 @@ This project follows a practical pre-1.0 changelog format:
   one message naming both sides. Model-authored repository code that neither
   business logic nor any import-time statement reaches (the live run's dead
   `TaskRepo` class with Motor calls) is removed with a logged normalization,
-  and a dynamic import of the module prunes nothing; a repository class or Motor call that business
-  logic does use is rejected at task time with its site. A gated canonical
+  and a dynamic import of the module prunes nothing; a repository class or
+  Motor call that business logic does use is rejected at task time with its
+  site. A gated canonical
   create or delete on a listed collection gets a `New <Entity>` toolbar action
   with a modal form or a Delete row action with a confirmation dialog. A module
   owning `per_user` collections gets `user_data_scope: true` and a

@@ -34,9 +34,61 @@ surface_ownership:
     surface_ids: [subscription_management, subscriptions, billing_management]
     entity_names: [Subscription, subscriptions, SubscriptionAssignment, subscription_assignment, TokenWallet, token_wallet]
     action_ids: [update_subscription, create_subscription, cancel_subscription, assign_subscription]
+    # App actions a facade action already serves: the design's action is realized as the facade's.
+    action_aliases:
+      subscribe_user: start_subscription_checkout
+      manage_subscription: open_billing_portal
     collection_names: [subscriptions, subscription_assignments, token_wallets]
     # Unknown or mixed app fields require revision rather than deletion.
-    state_field_names: [_id, id, app_id, user_id, subscription_id, customer_id, plan_id, status, current_period_start, current_period_end, cancel_at_period_end, canceled_at, created_at, updated_at, token_balance, balance, currency]
+    state_field_names:
+      - _id
+      - id
+      - app_id
+      - user_id
+      - subscription_id
+      - customer_id
+      - plan_id
+      - status
+      - current_period_start
+      - current_period_end
+      - cancel_at_period_end
+      - canceled_at
+      - created_at
+      - updated_at
+      - token_balance
+      - balance
+      - currency
+      # provider_api_contract.yaml subscription_status response fields.
+      - plan_name
+      - starts_at
+      - expires_at
+      - on_free_plan
+      # Names designs give the same provider facts (the plan, its status, its period).
+      - plan
+      - plan_type
+      - subscription_type
+      - subscription_status
+      - start_date
+      - end_date
+      - expiration_date
+      # This rule only classifies collections it already matched (subscriptions,
+      # subscription assignments, token wallets, or collections on its reserved
+      # surfaces), where a bare `type` is the record's kind: the subscription's plan
+      # type or the wallet's token type. Both are provider/runtime state.
+      - type
+    # The facade reads that serve this state to app pages, and the fields each serves.
+    state_readers:
+      get_subscription_status: [plan_id, plan_name, status, starts_at, expires_at, on_free_plan]
+    # Names designs give this state on the platform account record (a users
+    # collection). While this pack is active the platform authentication rule
+    # treats them as the account's projection of state get_subscription_status
+    # serves; in an app without this pack they stay app data.
+    account_state_field_names: [subscription_status, subscription_type]
+    # Entity names that also name app records (a newsletter's or an alert's
+    # subscriptions). A surface matched only through one of them may stay
+    # app-owned by naming its records for what they are. Token wallets and
+    # subscription assignments are runtime state whatever the design calls them.
+    homonym_entity_names: [Subscription, subscriptions]
 
 selection_rules:
   - id: select_for_token_wallets

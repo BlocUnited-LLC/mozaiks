@@ -29,6 +29,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
     DATE_FIELD_TYPES,
     STRUCTURED_FIELD_TYPES,
+    is_managed_timestamp,
     parse_default,
     record_id_field,
     validate_collection_fields,
@@ -64,7 +65,6 @@ _FIELD_TYPES: dict[str, tuple[str | None, str]] = {
     "number": ("number", "float"), "date": ("string", "datetime"), "datetime": ("string", "datetime"),
     "object": (None, "dict[str, Any]"), "array": (None, "list[Any]"),
 }
-_TIMESTAMP_FIELDS = {"created_at": "created_at", "updated_at": "updated_at"}
 _RESERVED_SCOPE_FIELDS = frozenset({"app_id", "tenant_id", "workspace_id", "user_id"})
 _RESTRICTED_SURFACES = frozenset({"internal", "admin_internal"})
 _ANONYMOUS_SURFACES = frozenset({"public", "public_readonly"})
@@ -103,8 +103,8 @@ def collection_record_shape(module_id: str, collection: Mapping[str, Any]) -> di
         field_name = str(field["name"])
         kind = str(field["type"])
         json_type, annotation = _FIELD_TYPES[kind]
-        if field_name in _TIMESTAMP_FIELDS and kind in DATE_FIELD_TYPES:
-            timestamps[_TIMESTAMP_FIELDS[field_name]] = field_name
+        if is_managed_timestamp(field):
+            timestamps[field_name] = field_name
             continue
         if field_name in {"_id", id_field, owner_field} or field_name in _RESERVED_SCOPE_FIELDS:
             continue
