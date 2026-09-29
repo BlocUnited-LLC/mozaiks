@@ -304,7 +304,23 @@ and selected managed-pack state only when the declared contract determines both
 the canonical owner and the state to remove. Authentication surfaces become
 `owner: platform` references. Managed subscription surfaces become the app-owned
 `billing_portal` facade, merging into an existing facade when present. Approved
-app-owned pages and routes are preserved. Only identified duplicate collections
+app-owned pages and routes are preserved. A page a normalizing surface owns moves
+to the facade only when the facade serves it: one of the facade's pages by name or
+route, or a page whose every section is billing. A section is billing when its
+typed binding (`data_source` or a module action URL) targets only the facade's own
+actions, whatever fields it shows; when it binds only the surface's aliases of
+them and shows only the rule's state fields; or, on a page named exactly for the
+rule's reserved state (`Subscription`, `Subscription Management`), when it binds
+nothing and shows only state fields. Wording alone never moves a page (`My Plans`,
+`Usage Alerts`), nor does a reserved name over app columns. Any other page
+(`Alerts`) stays with an app surface that also owns it; with none left, one
+rejection names every such page, and other pages' bindings the facade will not
+serve, with each change that saves: bind every section to a facade action through
+`data_source`, or remove the page while the design keeps another, if it shows
+billing; otherwise move it to an app surface's `owned_pages`, or keep the surface
+app-owned under entity and collection names of its own when the rule declares its
+entity a homonym (`homonym_entity_names`: `Subscription`, not token wallets). Pages
+the design itself puts on `billing_portal` are not moved and are not checked. Only identified duplicate collections
 and entities are removed; a duplicate collection on an otherwise valid app domain
 surface does not change that surface's owner.
 
@@ -506,7 +522,13 @@ contract assets. `SurfaceOwnershipRule` validates `owner`, optional
 `collection_names`. Bounded normalization also declares `state_field_names`,
 `surface_collection_names`, `surface_entity_names`, and `surface_action_ids`;
 the authentication rule adds `identity_lifecycle_verbs`, `account_key_fields`,
-and `user_administration`.
+and `user_administration`. A managed facade rule may declare
+`account_state_field_names`, the names designs give its state on the platform
+account record (MozaiksPay: `subscription_status`, `subscription_type`). They join
+the authentication rule's account state only while that pack is active, because
+the facade serves them; in an app without the pack nothing serves them and they
+stay app data. Its `homonym_entity_names` are the provider entities whose names
+also name app records.
 The auth field inventory cites [OIDC Core standard claims](https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims),
 the platform account profile, `UserClaims`, provider claim mapping, and input
 aliases in the catalog itself. `role`/`roles` on an identified auth table are

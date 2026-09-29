@@ -62,13 +62,15 @@ This project follows a practical pre-1.0 changelog format:
     plan type, status, period dates) is removed wherever it is filed. On a
     subscription surface, `subscribe_user` and `manage_subscription` become
     billing_portal's `start_subscription_checkout` and `open_billing_portal`,
-    and page bindings follow them. A page an app-owned surface also owns stays
-    app-owned. Subscription status on a users collection is treated as the
-    account-profile projection.
+    and page bindings follow them. Only pages billing_portal serves move to it;
+    an app page such as `Alerts` stays with an app surface, or one rejection
+    names every such page and each change that saves. While MozaiksPay is active, subscription status or
+    type on a users collection is the account-profile projection it serves;
+    without MozaiksPay those fields stay app data.
   - A managed timestamp's default (`"now"`) is dropped. So are an empty default
     on a non-string field and an optional non-string field's undecodable
-    default. A default that means one value (`True`, a bare ISO date) is
-    encoded instead of rejected.
+    default. A default that means one value (`True`, `yes`/`no` on a boolean, a
+    bare ISO date) is encoded instead of rejected.
   - An AI workflow surface the concept never asked for (no agentic
     capabilities) is saved as a `module` or
     `ui_only` surface.

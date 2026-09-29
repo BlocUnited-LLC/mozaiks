@@ -362,8 +362,10 @@ time and AppGenerator repeats the check only as a backstop. Determined default
 corrections are saved with a logged `DATA_CONTRACT_FIELD_NORMALIZED` notice: a
 managed timestamp (`created_at`/`updated_at` declared as date or datetime,
 `MANAGED_TIMESTAMP_FIELDS`) has its default dropped because canonical writes
-stamp it; a non-string default that means exactly one value (`True` on a
-boolean, `3.0` on an integer, a bare ISO date) is JSON-encoded; an empty default
+stamp it; a non-string default that means exactly one value (`True`, `yes`, `No`
+or `"yes"` on a boolean, `3.0` on an integer, a bare ISO date) is JSON-encoded,
+required or not (a non-string field with an enum is left for validation, which
+names the enum first and the default each fix needs); an empty default
 on a non-string field, and an optional non-string field's default that does not
 decode to its type, become null; a required array or object field without a
 default gets `"[]"` or `"{}"`. These corrections are also saved as

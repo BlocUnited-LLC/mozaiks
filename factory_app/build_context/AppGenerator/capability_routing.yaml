@@ -170,10 +170,10 @@ layers:
           - avatar_url
           - bio
           - subscription_tier
-          # The same account-profile projection under the names designs give it;
-          # MozaiksPay's billing_portal serves the subscription itself.
-          - subscription_status
-          - subscription_type
+          # subscription_status/subscription_type join this list only while a
+          # managed pack that serves them is active (MozaiksPay's
+          # account_state_field_names); otherwise nothing serves them and they
+          # stay the app's own data.
           - created_at
           - last_login_at
           # Keycloak token mapping: core/auth/adapters/keycloak.py:_extract_claims

@@ -79,6 +79,16 @@ surface_ownership:
     # The facade reads that serve this state to app pages, and the fields each serves.
     state_readers:
       get_subscription_status: [plan_id, plan_name, status, starts_at, expires_at, on_free_plan]
+    # Names designs give this state on the platform account record (a users
+    # collection). While this pack is active the platform authentication rule
+    # treats them as the account's projection of state get_subscription_status
+    # serves; in an app without this pack they stay app data.
+    account_state_field_names: [subscription_status, subscription_type]
+    # Entity names that also name app records (a newsletter's or an alert's
+    # subscriptions). A surface matched only through one of them may stay
+    # app-owned by naming its records for what they are. Token wallets and
+    # subscription assignments are runtime state whatever the design calls them.
+    homonym_entity_names: [Subscription, subscriptions]
 
 selection_rules:
   - id: select_for_token_wallets

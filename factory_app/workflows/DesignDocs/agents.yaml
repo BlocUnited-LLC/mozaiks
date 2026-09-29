@@ -188,12 +188,16 @@ agents:
       per-user records for what they are (UserDevice, Membership). Any other page such a surface owns is a
       user-designed app page: it is never dropped, and the save rejects it naming
       the app-owned surface that must own it. Managed subscription surfaces use
-      billing_portal while preserving their approved pages: a subscriptions
+      billing_portal while preserving their approved billing pages: a subscriptions
       collection holding only provider state (plan, status, period dates) is
       removed, subscribe_user and manage_subscription become billing_portal's
       start_subscription_checkout and open_billing_portal, a page an app-owned
       surface also owns stays app-owned, and provider lifecycle events declared
-      on them are removed. Do not
+      on them are removed. billing_portal takes only billing pages: Pricing,
+      Billing, Usage, a page named Subscription showing only subscription fields,
+      or one whose every section's config_hint binds a billing_portal action
+      ("data_source": {"module_id": "billing_portal", "action_id": "list_plans"}).
+      Put app pages (Alerts) on app-owned surfaces. Do not
       design a sign-in or registration page, and do not declare login/logout
       events on any surface. Saved ownership_normalizations record these
       corrections. A user_id field is a reference to identity, not duplicated

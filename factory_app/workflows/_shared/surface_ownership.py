@@ -102,6 +102,14 @@ class SurfaceOwnershipRule(BaseModel):
     action_aliases: dict[str, str] = Field(default_factory=dict)
     # Facade reads that serve the rule's state to app pages, and the state fields each serves.
     state_readers: dict[str, list[str]] = Field(default_factory=dict)
+    # Names designs give the facade's state on the platform account record
+    # (users.subscription_status). While the pack is active they are account state
+    # the facade serves; without the pack nothing serves them and they stay app data.
+    account_state_field_names: list[str] = Field(default_factory=list)
+    # Provider entity names that also name app records (a newsletter's or an alert's
+    # Subscription). A surface matched only through one of them may stay app-owned by
+    # naming its records for what they are; other provider state (token wallets) may not.
+    homonym_entity_names: list[str] = Field(default_factory=list)
 
     @property
     def reserved_action_ids(self) -> list[str]:
@@ -140,6 +148,12 @@ class SurfaceOwnershipRule(BaseModel):
             self.state_field_names
         ):
             raise ValueError("state_readers must serve declared state_field_names")
+        if (self.account_state_field_names or self.homonym_entity_names) and not self.facade_module:
+            raise ValueError("account_state_field_names and homonym_entity_names describe a managed facade")
+        if _identifiers(self.homonym_entity_names) - _identifiers(self.entity_names):
+            raise ValueError("homonym_entity_names must be declared entity_names")
+        if _identifiers(self.account_state_field_names) - _identifiers(self.state_field_names):
+            raise ValueError("account_state_field_names must be declared state_field_names")
         if (self.sign_in_verbs or self.identity_lifecycle_facts or self.sign_in_facts) and (
             self.platform_capability != "authentication"
         ):
@@ -689,6 +703,15 @@ def _ownership_rules(
             raise ValueError(
                 f"{rule.owner}: action_aliases and state_readers must name actions of facade {rule.facade_module!r}."
             )
+    # An active facade's account state (users.subscription_status) is the platform account's
+    # projection of state the facade serves; without the pack it stays the app's own data.
+    account_state = [name for rule in rules if rule.facade_module for name in rule.account_state_field_names]
+    if account_state:
+        rules = [
+            rule.model_copy(update={"state_field_names": list(dict.fromkeys([*rule.state_field_names, *account_state]))})
+            if rule.platform_capability == "authentication" else rule
+            for rule in rules
+        ]
     return rules, facades
 
 
@@ -696,6 +719,210 @@ def _facade_actions(facade: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(
         action for page in facade.get("pages") or [] for action in page.get("primary_actions") or []
     ))
+
+
+def _facade_serves(
+    module: str, action: str, rule: SurfaceOwnershipRule, facade: dict[str, Any], *, surface_id: str,
+) -> bool:
+    """A binding the facade serves once ``surface_id`` normalizes to it: its own action, or the surface's alias of one."""
+    if module == rule.facade_module:
+        return action in _facade_actions(facade)
+    aliases = {alias.strip().casefold(): target for alias, target in rule.action_aliases.items()}
+    return module == surface_id and aliases.get(action.strip().casefold(), action) in _facade_actions(facade)
+
+
+def _facade_provides_page(
+    name: Any, page: dict[str, Any] | None, rule: SurfaceOwnershipRule, facade: dict[str, Any], *, surface_id: str,
+) -> bool:
+    """A page the facade serves, which moves with a surface normalizing to it.
+
+    One of the facade's own pages (by name or route), which the save completes; or a
+    page whose every section is billing. A section is billing when it binds only the
+    facade's own actions (``data_source`` or a module action URL), whatever fields it
+    shows; when it binds only the normalizing surface's aliases of them and shows
+    only the rule's state fields ("Upgrade" bound to subscribe_user); or, on a page
+    named exactly for the reserved state ("Subscription", "Subscription Management"),
+    when it binds nothing and shows only state fields. Wording alone never moves a
+    page ("Alerts", "My Plans"), and neither does a reserved name over app fields.
+    """
+    def exact(value: Any) -> str:
+        return re.sub(r"[^0-9a-z]+", "_", _key(value)).strip("_")
+
+    pages = facade.get("pages") or []
+    if exact(name) in {exact(item.get("name")) for item in pages}:
+        return True
+    if page is None:
+        return False
+    if _route_key(page.get("route")) in {_route_key(item.get("route")) for item in pages if item.get("route")}:
+        return True
+    reserved_name = exact(name) in {exact(value) for value in [*rule.surface_ids, *rule.entity_names, *rule.collection_names]}
+    state = _keys(rule.state_field_names)
+
+    def billing(section: dict[str, Any]) -> bool:
+        bound = _typed_section_actions(section.get("config_hint"))
+        fields, columns = _typed_record_fields(section.get("config_hint"), section.get("primitive"))
+        shows_state = (fields | columns) <= state
+        if not bound:
+            return reserved_name and shows_state
+        if not all(_facade_serves(module, action, rule, facade, surface_id=surface_id) for module, action in bound):
+            return False
+        return all(module == rule.facade_module for module, _action in bound) or shows_state
+
+    sections = page.get("sections") or []
+    return bool(sections) and all(billing(section) for section in sections)
+
+
+def _app_record_names(surface_id: str, collection: str, entity: str, rule: SurfaceOwnershipRule) -> tuple[str, str]:
+    """Example app names for records a design filed under provider names: alerts_subscriptions, AlertsSubscription.
+
+    When the joined name is itself reserved (surface 'token' + 'wallets' is token_wallets),
+    '_app_' separates the parts, so applying the example is never rejected again.
+    """
+    name, entity_name = f"{_key(surface_id)}_{_key(collection)}", f"{_pascal(surface_id)}{_pascal(entity or collection)}"
+    if name.casefold() in _identifiers([*rule.collection_names, *rule.surface_ids, *rule.surface_collection_names]):
+        name = f"{_key(surface_id)}_app_{_key(collection)}"
+    if entity_name.casefold() in _identifiers(rule.entity_names):
+        entity_name = f"{_pascal(surface_id)}App{_pascal(entity or collection)}"
+    return name, entity_name
+
+
+_FacadePageEntry = tuple[
+    dict[str, Any], _SurfaceClaim, list[tuple[str, dict[str, Any] | None]], list[tuple[str, str]], list[tuple[str, str]],
+]
+
+
+def _unserved_bindings(
+    pages: list[dict[str, Any]], rule: SurfaceOwnershipRule, facade: dict[str, Any], *, surface_id: str,
+) -> list[tuple[str, str]]:
+    """(page name, 'surface.action') for each section binding of ``surface_id`` the facade will not serve."""
+    return [
+        (str(page.get("name")), f"{module}.{action}")
+        for page in pages for section in page.get("sections") or []
+        for module, action in _typed_section_actions(section.get("config_hint"))
+        if module == surface_id and not _facade_serves(module, action, rule, facade, surface_id=surface_id)
+    ]
+
+
+def _facade_app_page_message(
+    entries: list[_FacadePageEntry], *, facades: dict[str, dict[str, Any]], app_surfaces: list[str], removable: bool,
+) -> str:
+    """Name every page a surface normalizing to a facade owns that the facade does not serve, and each change that saves.
+
+    Each entry is (surface, claim, [(page name, page)], [(removed collection, its entity)],
+    [(other page, binding)]): the last lists other pages' bindings the facade will not serve.
+    """
+    parts = []
+    for surface, claim, pages, removed, elsewhere in entries:
+        rule, surface_id = claim.rule, str(surface["surface_id"])
+        facade_id = str(rule.facade_module)
+        facade = facades[facade_id]
+        declared = [*(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or [])]
+        entities = [
+            str(entity) for entity in surface.get("primary_entities") or []
+            if _identifiers([entity]) & _identifiers(rule.entity_names)
+        ]
+        actions = [str(action) for action in declared if _identifiers([action]) & _identifiers(rule.action_ids)]
+        aliases = [str(action) for action in declared if _identifiers([action]) & _identifiers(rule.action_aliases)]
+        events = [str(event) for event in surface.get("events_emitted") or []]
+        held = [
+            f"{label} {values}" for label, values in (
+                ("entities", entities), ("collections", [name for name, _entity in removed]),
+                ("actions", [*actions, *aliases]), ("events", events),
+            ) if values
+        ]
+        names = [name for name, _page in pages]
+        one = len(names) == 1
+        it, they, shows, its = ("it", "it", "shows", "its") if one else ("them", "they", "show", "their")
+        unserved = [
+            binding for _page_name, binding in _unserved_bindings(
+                [page for _name, page in pages if page is not None], rule, facade, surface_id=surface_id,
+            )
+        ]
+        text = (
+            (f"Page {names[0]!r} is" if one else f"Pages {names} are") + f" owned by {surface_id!r}, which normalizes "
+            f"to {facade_id}: its {', '.join(held) or 'claims'} are {rule.owner}. {facade_id} takes only its own pages "
+            f"{[str(page.get('name')) for page in facade.get('pages') or []]} and pages whose every section binds its "
+            f"actions, so {it} cannot move with {surface_id!r}"
+            + (f" ({its} sections bind {unserved}, which {facade_id} does not serve)" if unserved else "") + ". "
+            f"If {they} {shows} billing, bind every section to {facade_id}: add \"data_source\": "
+            f"{{\"module_id\": \"{facade_id}\", \"action_id\": <one of {sorted(_facade_actions(facade))}>}} to each "
+            f"section's config_hint" + (f", or remove {it}" if removable else "") + ". "
+        )
+        if elsewhere:
+            text += (
+                f"Other pages bind {surface_id!r} too: {[f'{binding} on {page!r}' for page, binding in elsewhere]}, "
+                f"which {facade_id} does not serve; unless {surface_id!r} stays app-owned, bind those sections to "
+                "actions the app surface owning each page declares. "
+            )
+        rebind = f" and bind {unserved} to actions that surface declares" if unserved else ""
+        if not app_surfaces:
+            options = [f"declare an app-owned module or ui_only surface and move {it} to its owned_pages{rebind}"]
+        elif len(app_surfaces) == 1:
+            options = [f"move {it} to owned_pages of {app_surfaces[0]!r}{rebind}"]
+        else:
+            options = [f"move {it} to owned_pages of one of {app_surfaces}{rebind}"]
+        # Only a surface matched through a provider entity or action whose names also name app
+        # records (Subscription) can stay app-owned; token wallets are runtime state whatever
+        # they are called. Its records then need names of their own, or they are removed again.
+        provider_entities = [*entities, *(entity for _name, entity in removed)]
+        if not claim.name_match and (entities or actions or removed) and not any(
+            _identifiers([entity]) & _identifiers(rule.entity_names)
+            and not _identifiers([entity]) & _identifiers(rule.homonym_entity_names)
+            for entity in provider_entities
+        ):
+            example = ""
+            if removed or entities:
+                collection, entity = removed[0] if removed else (_key(entities[0]), entities[0])
+                example_collection, example_entity = _app_record_names(surface_id, collection, entity, rule)
+                example = (
+                    f" (for example {example_entity} in {example_collection})" if removed
+                    else f" (for example {example_entity})"
+                )
+            renames = [
+                *([f"replace {entities} in its primary_entities with an app entity of its own"] if entities else []),
+                *(
+                    f"rename collection {held_name!r} and its entity {held_entity!r} to match"
+                    for held_name, held_entity in removed
+                ),
+                *([f"rename actions {actions} for what they do"] if actions else []),
+            ]
+            options.append(
+                f"keep {surface_id!r} app-owned by naming its records for what they are: {', '.join(renames)}"
+                f"{example}"
+                + (
+                    f", and {aliases} {'stays its own action' if len(aliases) == 1 else 'stay its own actions'}"
+                    if aliases else ""
+                )
+            )
+        parts.append(text + f"If {they} {shows} the app's own records, " + "; or ".join(options) + ".")
+    return " ".join(parts)
+
+
+def _app_behavior(
+    surface: dict[str, Any], rule: SurfaceOwnershipRule, facade: dict[str, Any], *,
+    collections: list[str], pages: dict[str, dict[str, Any]],
+) -> list[str]:
+    """What a surface declares beyond a managed facade's claims: behavior that keeps it app-owned."""
+    served = _identifiers([*rule.action_ids, *rule.action_aliases, *_facade_actions(facade)])
+    entities = [
+        str(entity) for entity in surface.get("primary_entities") or []
+        if not _identifiers([entity]) & _identifiers(rule.entity_names)
+    ]
+    actions = [
+        str(action) for action in [*(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or [])]
+        if str(action).strip().casefold() not in served
+    ]
+    owned_pages = [
+        str(name) for name in surface.get("owned_pages") or []
+        if not _facade_provides_page(
+            name, pages.get(str(name).strip().casefold()), rule, facade, surface_id=str(surface.get("surface_id")),
+        )
+    ]
+    return [
+        f"{label} {values}" for label, values in (
+            ("entities", entities), ("actions", actions), ("collections", collections), ("pages", owned_pages),
+        ) if values
+    ]
 
 
 def _matches_surface(surface: dict[str, Any], rule: SurfaceOwnershipRule) -> bool:
@@ -1357,6 +1584,13 @@ def normalize_surface_ownership(
 
     groups = [(group["surface_id"], group["collections"]) for group in normalized_data.get("surfaces") or []]
     groups.append(("", normalized_data.get("shared_collections") or []))
+    # Each collection's entity before any is removed: a message names what a removed one held.
+    entity_of = {
+        (str((collection.get("ownership") or {}).get("surface_id") or group_id), str(collection.get("name") or "")):
+            str(collection.get("entity") or "")
+        for group_id, collections in groups for collection in collections
+    }
+    facade_page_entries: list[_FacadePageEntry] = []
     # Platform identity is recognized by what each surface declares, before any repair. A
     # collection a managed facade rule matches is provider state, removed or rejected by that
     # rule, never a surface's app data.
@@ -1504,10 +1738,11 @@ def normalize_surface_ownership(
                     )
                     + ". If it is the app's own data, name it for what it is: "
                     + (
-                        f"rename the collection (for example {_key(owner_id)}_{name})."
+                        f"rename the collection (for example "
+                        f"{_app_record_names(owner_id, name, str(collection.get('entity') or ''), rule)[0]})."
                         if app_entity else
                         f"give it an app entity of its own (for example "
-                        f"{_pascal(owner_id)}{_pascal(str(collection.get('entity') or ''))})."
+                        f"{_app_record_names(owner_id, name, str(collection.get('entity') or ''), rule)[1]})."
                     )
                 )
             # A managed facade owns no collections: a matched one holding only provider state
@@ -1605,14 +1840,117 @@ def normalize_surface_ownership(
                     f"{facade_id}.{action} serves {', '.join(fields)}" for action, fields in rule.state_readers.items()
                 )
                 app_fields = sorted(unknown)
-                raise ValueError(
-                    f"Collection {name!r} on surface {owner_id!r} duplicates {rule.owner}: remove collection "
-                    f"{name!r}" + (f"; {served}" if served else "") + ". "
-                    + (
-                        f"Its fields {app_fields} are not provider state: if the app needs them, declare them in "
-                        "a collection of an app-owned module keyed by user_id. "
+                # An app surface keeping other app behavior stays app-owned once the collection
+                # goes: name its own provider claims too, so the design is changed once, and keep
+                # its alias actions (subscribe_user), which are then its own.
+                behavior: list[str] = []
+                if owner_surface.get("owner") == "app" and not (
+                    owner_id.casefold() in _identifiers(rule.surface_ids) or owner_id == facade_id
+                ):
+                    behavior = _app_behavior(
+                        owner_surface, rule, facades[facade_id],
+                        collections=[
+                            str(item.get("name")) for other_group, items in groups for item in items
+                            if item is not collection
+                            and owner_id in {other_group, (item.get("ownership") or {}).get("surface_id")}
+                            and not _matches_collection(item, other_group, rule)
+                        ],
+                        pages={
+                            str(page.get("name") or "").strip().casefold(): page
+                            for page in (normalized_spec or {}).get("pages") or []
+                        },
+                    )
+                owner_actions = [
+                    *(owner_surface.get("owned_mutations") or []), *(owner_surface.get("custom_reads") or []),
+                ]
+                claimed_entities = [
+                    str(entity) for entity in owner_surface.get("primary_entities") or []
+                    if _identifiers([entity]) & _identifiers(rule.entity_names)
+                ]
+                claimed_actions = [
+                    str(action) for action in owner_actions if _identifiers([action]) & _identifiers(rule.action_ids)
+                ]
+                alias_actions = [
+                    str(action) for action in owner_actions if _identifiers([action]) & _identifiers(rule.action_aliases)
+                ]
+                example_collection, example_entity = _app_record_names(
+                    owner_id, name, str(collection.get("entity") or name), rule,
+                )
+                example = f"{example_collection} with entity {example_entity}"
+                if behavior:
+                    keep = (
+                        f"Its fields {app_fields} are not provider state: if the app needs them, keep them on "
+                        f"{owner_id!r} in a collection of their own keyed by user_id and named for what it holds "
+                        f"(for example {example}). "
                         if app_fields else ""
                     )
+                    changes = [
+                        *([
+                            f"replace {claimed_entities} in its primary_entities with "
+                            f"{'that app entity' if app_fields else 'an app entity of its own'} or drop "
+                            f"{'it' if len(claimed_entities) == 1 else 'them'}: {facade_id} serves "
+                            f"{'it' if len(claimed_entities) == 1 else 'them'}"
+                        ] if claimed_entities else []),
+                        *([f"rename actions {claimed_actions} for what they do"] if claimed_actions else []),
+                        *([
+                            f"{alias_actions} "
+                            f"{'stays its own action' if len(alias_actions) == 1 else 'stay its own actions'}"
+                        ] if alias_actions and (claimed_entities or claimed_actions) else []),
+                    ]
+                    keep += (
+                        f"{owner_id!r} stays app-owned ({'; '.join(behavior)})"
+                        + (": " + "; ".join(changes) if changes else "") + ". "
+                    )
+                else:
+                    # The surface itself normalizes to the facade, so the fields need another module.
+                    modules = sorted(app_modules - {owner_id})
+                    keep = (
+                        f"Its fields {app_fields} are not provider state: if the app needs them, declare them in "
+                        "a collection keyed by user_id of "
+                        + (
+                            f"the app-owned module {modules[0]!r}" if len(modules) == 1
+                            else f"one of the app-owned modules {modules}" if modules
+                            else "an app-owned module declared for them"
+                        )
+                        + ". "
+                        if app_fields else ""
+                    )
+                    # Its pages the facade does not take need a place too, in the same revision.
+                    spec_named = {
+                        str(page.get("name") or "").strip().casefold(): page
+                        for page in (normalized_spec or {}).get("pages") or []
+                    }
+                    co_owned = {
+                        name for other in normalized_map["surfaces"]
+                        if other is not owner_surface and other.get("owner") == "app"
+                        and not any(matches_surface(other, item) for item in rules)
+                        for name in _identifiers(other.get("owned_pages"))
+                    }
+                    stranded = [
+                        str(page_name) for page_name in owner_surface.get("owned_pages") or []
+                        if owner_id != facade_id and str(page_name).strip().casefold() in spec_named
+                        and str(page_name).strip().casefold() not in co_owned
+                        and not _facade_provides_page(
+                            page_name, spec_named[str(page_name).strip().casefold()], rule, facades[facade_id],
+                            surface_id=owner_id,
+                        )
+                    ]
+                    if stranded:
+                        written = set(spec_named) - _identifiers(stranded) - _identifiers(
+                            page.get("name") for page in facades[facade_id].get("pages") or []
+                        )
+                        keep += (
+                            f"{owner_id!r} normalizes to {facade_id}, which does not take its pages {stranded}: "
+                            + (
+                                f"move them to owned_pages of {modules[0]!r}" if len(modules) == 1
+                                else f"move them to owned_pages of one of {modules}" if modules
+                                else "declare an app-owned module or ui_only surface and move them to its owned_pages"
+                            )
+                            + (" or remove them" if written else "") + ". "
+                        )
+                raise ValueError(
+                    f"Collection {name!r} on surface {owner_id!r} duplicates {rule.owner}: remove collection "
+                    f"{name!r}" + (f"; {served}" if served else "") + ". " + keep
                     + f"Bind subscription UI to {facade_id} and its actions {sorted(_facade_actions(facades[facade_id]))}."
                 )
             raise ValueError(
@@ -1791,10 +2129,18 @@ def normalize_surface_ownership(
             continue
         surface_id = surface["surface_id"]
         reserved_entities = [entity for entity in claim.declared_entities if entity not in claim.unknown_entities]
-        reserved_actions = [action for action in claim.declared_actions if action not in claim.unknown_actions]
+        # An alias (subscribe_user) is the facade's only on a surface that normalizes to it;
+        # this surface stays app-owned, so its alias stays its own action.
+        kept_actions = [
+            action for action in claim.declared_actions
+            if action in claim.unknown_actions or action.strip().casefold() in _identifiers(rule.action_aliases)
+        ]
+        reserved_actions = [action for action in claim.declared_actions if action not in kept_actions]
         platform_identity = identity_claim(surface_id, rule)
-        # What the save removes as platform identity is part of the claim the design must drop.
-        claimed_collections = records.get((surface_id, "platform"), {}).get("removed_collections", [])
+        # What the save removes as the owner's state is part of the claim the design must drop.
+        claimed_collections = records.get((surface_id, rule.facade_module or "platform"), {}).get(
+            "removed_collections", [],
+        )
         claimed_events = [
             str(event) for event in surface.get("events_emitted") or []
             if platform_identity is not None
@@ -1825,7 +2171,7 @@ def normalize_surface_ownership(
             + (f", collections {claimed_collections}" if claimed_collections else "")
             + (f", events {claimed_events}" if claimed_events else "")
             + f". Remove those claims from {surface_id!r} ({provides}) and keep it "
-            f"app-owned with its entities {claim.unknown_entities}, actions {claim.unknown_actions}, "
+            f"app-owned with its entities {claim.unknown_entities}, actions {kept_actions}, "
             f"collections {claim.remaining}, pages {kept_pages}, and workflow_triggers {claim.triggers}."
             f"{drop_sign_in}{drop_admin}{drop_listings}"
         )
@@ -1912,6 +2258,35 @@ def normalize_surface_ownership(
                 ]
                 if co_owners:
                     released.append({"name": str(name), "owners": co_owners})
+            # The facade takes only pages it serves. Any other page stays with an app surface; with
+            # none left to own it, where it goes is the design's call, named for every such surface
+            # at once after this loop.
+            # Pages the design put on the facade itself are not moving; an owned_pages name with
+            # no page is no page at all.
+            spec_by_name = {str(page.get("name") or "").strip().casefold(): page for page in spec_pages}
+            unserved_pages = [
+                (str(name), spec_by_name[str(name).strip().casefold()])
+                for name in surface.get("owned_pages") or []
+                if surface_id != rule.facade_module and str(name).strip().casefold() in spec_by_name
+                and str(name) not in {page["name"] for page in released}
+                and not _facade_provides_page(
+                    name, spec_by_name[str(name).strip().casefold()], rule, facade, surface_id=str(surface_id),
+                )
+            ]
+            if unserved_pages:
+                moving = {name.casefold() for name, _page in unserved_pages}
+                facade_page_entries.append((
+                    surface, claim, unserved_pages,
+                    [
+                        (name, entity_of.get((str(surface_id), name), ""))
+                        for name in records.get((surface_id, owner), {}).get("removed_collections", [])
+                    ],
+                    _unserved_bindings(
+                        [page for page in spec_pages if str(page.get("name") or "").strip().casefold() not in moving],
+                        rule, facade, surface_id=str(surface_id),
+                    ),
+                ))
+                continue
             corrected["owned_pages"] = [
                 name for name in surface.get("owned_pages") or []
                 if str(name) not in {page["name"] for page in released}
@@ -1970,6 +2345,23 @@ def normalize_surface_ownership(
                         redirects.setdefault(route, (surface_id, auth_routes.login))
             targets[surface_id] = corrected["surface_id"]
             surface.update(corrected)
+    if facade_page_entries:
+        named = {
+            name.strip().casefold() for _surface, _claim, pages, _removed, _elsewhere in facade_page_entries
+            for name, _page in pages
+        }
+        # The facade's own pages are completed at save; removal must leave a page the design wrote.
+        completed = {
+            str(page.get("name")).strip().casefold() for facade in facades.values() for page in facade.get("pages") or []
+        }
+        raise ValueError(_facade_app_page_message(
+            facade_page_entries, facades=facades,
+            app_surfaces=[
+                str(other["surface_id"]) for other, other_claim in claims
+                if other_claim is None and other.get("owner") == "app"
+            ],
+            removable=bool({str(page.get("name")).strip().casefold() for page in spec_pages} - named - completed),
+        ))
     # Sign-in is the platform's even on a surface that stays app-owned: one that
     # declares a platform identity entity, or whose identity records were removed
     # or split out, loses its sign-in actions (login_user) and sign-in events

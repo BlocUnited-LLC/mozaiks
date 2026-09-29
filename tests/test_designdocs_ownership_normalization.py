@@ -101,7 +101,7 @@ def test_selected_subscription_state_normalizes_to_billing_facade(persistence):
     context = ownership._context(managed=True)
     bundle = inventory._bundle(pricing=False)
     ownership._add_surface(
-        bundle, surface_id="subscription_management", name="My Subscription", route="/subscription",
+        bundle, surface_id="subscription_management", name="Subscription", route="/subscription",
         entities=["Subscription"], actions=["update_subscription"], collection="subscriptions",
     )
     page = deepcopy(bundle["experience_spec"]["pages"][-1])
@@ -113,7 +113,7 @@ def test_selected_subscription_state_normalizes_to_billing_facade(persistence):
     assert not any(s["surface_id"] == "subscription_management" for s in surfaces)
     facade = next(s for s in surfaces if s["surface_id"] == "billing_portal")
     assert facade["owner"] == "app"
-    assert "My Subscription" in facade["owned_pages"]
+    assert "Subscription" in facade["owned_pages"]
     assert facade["primary_entities"] == []
     assert "update_subscription" not in facade["owned_mutations"]
     assert page in detach(context.get("experience_spec"))["pages"]
@@ -352,7 +352,7 @@ def test_two_subscription_surfaces_merge_pages_without_losing_normalization_reco
     bundle = inventory._bundle(pricing=False)
     for surface_id, name, route in (
         ("subscription_management", "Subscription", "/subscription"),
-        ("billing_management", "Invoices", "/invoices"),
+        ("billing_management", "Billing Management", "/billing-management"),
     ):
         ownership._add_surface(
             bundle, surface_id=surface_id, name=name, route=route,
@@ -366,7 +366,7 @@ def test_two_subscription_surfaces_merge_pages_without_losing_normalization_reco
     surfaces = detach(context.get("design_surface_map"))["surfaces"]
     facades = [surface for surface in surfaces if surface["surface_id"] == "billing_portal"]
     assert len(facades) == 1
-    assert {"Subscription", "Invoices"} <= set(facades[0]["owned_pages"])
+    assert {"Subscription", "Billing Management"} <= set(facades[0]["owned_pages"])
     assert all(page in detach(context.get("experience_spec"))["pages"] for page in approved_pages)
     assert not any(collection["name"] == "subscriptions" for collection in _saved_collections(context))
     records = summary.await_args.kwargs["summary_payload"]["ownership_normalizations"]
@@ -959,7 +959,7 @@ def test_provider_lifecycle_events_on_subscription_surface_are_removed(persisten
     context = ownership._context(managed=True)
     bundle = inventory._bundle(pricing=False)
     ownership._add_surface(
-        bundle, surface_id="subscription_management", name="My Subscription", route="/subscription",
+        bundle, surface_id="subscription_management", name="Subscription", route="/subscription",
         entities=["Subscription"], actions=["update_subscription"], collection="subscriptions",
     )
     bundle["surface_map"]["surfaces"][-1]["events_emitted"] = ["domain.billing.subscription_updated"]
@@ -972,7 +972,7 @@ def test_provider_lifecycle_events_on_subscription_surface_are_removed(persisten
     facade = next(surface for surface in surfaces if surface["surface_id"] == "billing_portal")
     assert facade["events_emitted"] == []
     # Facade pages are app pages the pack renders; only the provider events go.
-    assert "My Subscription" in facade["owned_pages"]
+    assert "Subscription" in facade["owned_pages"]
     assert page in detach(context.get("experience_spec"))["pages"]
     record = {
         "surface_id": "subscription_management", "owner": "billing_portal",
@@ -986,7 +986,7 @@ def test_workflow_trigger_on_subscription_surface_still_requires_revision(persis
     context = ownership._context(managed=True)
     bundle = inventory._bundle(pricing=False)
     ownership._add_surface(
-        bundle, surface_id="subscription_management", name="My Subscription", route="/subscription",
+        bundle, surface_id="subscription_management", name="Subscription", route="/subscription",
         entities=["Subscription"], actions=["update_subscription"], collection="subscriptions",
     )
     bundle["surface_map"]["surfaces"][-1]["workflow_triggers"] = ["subscription-renewal-workflow"]

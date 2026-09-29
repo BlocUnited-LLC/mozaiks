@@ -106,6 +106,10 @@ def _page(name: str, route: str, *sections: tuple[str, str, dict | None]) -> dic
     pytest.param(_field("count", "integer", default="3.0", required=True), "3", id="integral_number"),
     pytest.param(_field("due", "date", default="2026-01-01", required=True), '"2026-01-01"', id="bare_date"),
     pytest.param(_field("at", "datetime", default="2026-01-01T09:00:00"), '"2026-01-01T09:00:00"', id="bare_datetime"),
+    pytest.param(_field("notify", "boolean", default="yes", required=True), "true", id="yes_word"),
+    pytest.param(_field("notify", "boolean", default=" No "), "false", id="no_word"),
+    pytest.param(_field("notify", "boolean", default="FALSE", required=True), "false", id="upper_boolean"),
+    pytest.param(_field("notify", "boolean", default='"yes"'), "true", id="json_quoted_word"),
 ])
 def test_determined_default_corrections(field, expected):
     collection = {"fields": [field]}
@@ -125,11 +129,27 @@ def test_a_required_scalar_bad_default_is_still_a_decision_and_null_is_offered()
         validate_collection_fields(collection, "c")
 
 
+def test_a_word_that_is_no_boolean_is_not_guessed():
+    required = {"fields": [_field("notify", "boolean", default="maybe", required=True)]}
+    optional = {"fields": [_field("notify", "boolean", default="on")]}
+
+    assert normalize_structured_defaults(required, "c") == []
+    with pytest.raises(DataContractFieldError, match=re.escape("valid examples=['true', 'false'] or null")):
+        validate_collection_fields(required, "c")
+    assert normalize_structured_defaults(optional, "c") == [
+        "c field 'notify': optional boolean default 'on' does not decode -> null",
+    ]
+    assert optional["fields"][0]["default"] is None
+
+
 def test_string_defaults_and_string_timestamps_are_kept_as_written():
-    collection = {"fields": [_field("title", "string", default="now"), _field("created_at", "string", default="now")]}
+    collection = {"fields": [
+        _field("title", "string", default="now"), _field("created_at", "string", default="now"),
+        _field("answer", "string", default="yes"),
+    ]}
 
     assert normalize_structured_defaults(collection, "c") == []
-    assert [field["default"] for field in collection["fields"]] == ["now", "now"]
+    assert [field["default"] for field in collection["fields"]] == ["now", "now", "yes"]
 
 
 def test_field_corrections_are_recorded_on_the_saved_design(persistence):
@@ -278,9 +298,10 @@ def test_a_page_an_app_surface_also_owns_stays_the_apps(persistence):
 # ---------------------------------------------------------------------------
 
 
-def test_subscription_status_on_a_users_collection_is_the_account_profile(persistence):
+@pytest.mark.parametrize("managed", [True, False])
+def test_subscription_status_on_users_is_account_state_only_while_mozaikspay_serves_it(persistence, managed):
     _, _, summary = persistence
-    context = ownership._context(managed=False)
+    context = ownership._context(managed=managed)
     fields = (*normalization.IDENTITY_FIELDS, ("subscription_status", "string"))
     bundle = normalization._identity_bundle(collections=(("users", "User", fields),))
 
@@ -288,7 +309,11 @@ def test_subscription_status_on_a_users_collection_is_the_account_profile(persis
 
     assert result["outcome"] == "saved", result
     record = normalization._record(summary, "user_management")
-    assert record["removed_collections"] == ["users"] and "split_collections" not in record
+    if managed:
+        assert record["removed_collections"] == ["users"] and "split_collections" not in record
+    else:
+        # Nothing serves it without the pack: it is the app's own data.
+        assert record["split_collections"][0]["retained_fields"] == ["user_id", "subscription_status"]
 
 
 def test_a_crm_account_without_a_password_is_app_data(persistence):
@@ -585,6 +610,9 @@ def _auth_rule() -> dict:
     ({"sign_in_credential_fields": ["api_key"]}, "sign_in_credential_fields must be declared identity_evidence_fields"),
     ({"credential_entity_names": []}, "declared together"),
     ({"action_aliases": {"subscribe_user": "login"}}, "map onto a managed facade's actions"),
+    ({"account_state_field_names": ["email"]},
+     "account_state_field_names and homonym_entity_names describe a managed facade"),
+    ({"homonym_entity_names": ["User"]}, "account_state_field_names and homonym_entity_names describe a managed facade"),
 ])
 def test_the_identity_catalog_rejects_inconsistent_declarations(change, message):
     with pytest.raises(ValidationError, match=re.escape(message)):
@@ -618,6 +646,8 @@ def _facade_rule() -> dict:
      "sign-in verbs and lifecycle facts belong to the platform authentication capability"),
     ({"credential_entity_names": ["Wallet"], "sign_in_credential_fields": ["token_balance"]},
      "credential-gated identity entities belong to the platform authentication capability"),
+    ({"account_state_field_names": ["newsletter_opt_in"]}, "account_state_field_names must be declared state_field_names"),
+    ({"homonym_entity_names": ["Alert"]}, "homonym_entity_names must be declared entity_names"),
 ])
 def test_the_facade_catalog_rejects_identity_declarations(change, message):
     with pytest.raises(ValidationError, match=re.escape(message)):
@@ -833,7 +863,20 @@ def test_a_binding_to_an_action_the_facade_does_not_serve_is_named(persistence):
 
     result = inventory._save(context, bundle)
 
-    ownership._assert_refused(context, result, store_factory, owner="does not serve 'compare_plans'")
+    ownership._assert_refused(
+        context, result, store_factory,
+        owner="its sections bind ['subscription_management.compare_plans'], which billing_portal does not serve",
+    )
+    assert 'If it shows billing, bind every section to billing_portal: add "data_source": {"module_id": "billing_portal"' in result["error"]
+
+    # Applied as written: the page binds a facade action and moves with its surface.
+    compare["sections"][0]["config_hint"] = json.dumps({
+        "label": "Compare", "data_source": {"module_id": "billing_portal", "action_id": "list_plans"},
+    })
+    context = ownership._context(managed=True)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    assert _pages_of(context)["Compare"] == "billing_portal"
 
 
 def test_a_page_that_only_binds_a_removed_sign_in_action_goes_with_it(persistence):
@@ -1209,3 +1252,552 @@ def test_a_valid_choice_another_collection_holds_is_not_offered(persistence):
 def test_account_credentials_must_be_declared_evidence():
     with pytest.raises(ValidationError, match="account_credential_fields must be declared identity_evidence_fields"):
         SurfaceOwnershipRule.model_validate({**_auth_rule(), "account_credential_fields": ["api_key"]})
+
+
+# ---------------------------------------------------------------------------
+# Pre-merge verification of #764: subscription fields on users, app pages under
+# billing, one message per remedy, boolean words
+# ---------------------------------------------------------------------------
+
+
+def _saved_fields(context) -> dict[str, dict]:
+    contract = detach(context.get("data_contract"))
+    collections = [*(c for g in contract["surfaces"] for c in g["collections"]), *(contract.get("shared_collections") or [])]
+    return {field["name"]: field for collection in collections for field in collection["fields"]}
+
+
+_USER_ID = _field("user_id", "string", required=True)
+_STATUS = _field("subscription_status", "string")
+_ENUM_STATUS = {**_field("subscription_status", "string"), "enum": ["subscribed", "unsubscribed"]}
+_USERS_PROBES = {
+    "profile_bio_preferences": (True, [_USER_ID, _STATUS, _field("bio", "string"), _field("preferences", "object")],
+                                ("user_id",)),
+    "account_with_profile": (True, [
+        _USER_ID, _field("email", "string", required=True), _field("password_hash", "string"), _STATUS,
+        _field("bio", "string"), _field("preferences", "object"), _field("favorite_genres", "array"),
+    ], ("email",)),
+    "undeclared_newsletter_opt_in": (False, [_USER_ID, _STATUS, _field("newsletter_opt_in", "boolean")], ("user_id",)),
+    "undeclared_enum_status": (False, [_USER_ID, _ENUM_STATUS], ("user_id",)),
+    "undeclared_subscription_type": (False, [
+        _USER_ID, _field("subscription_type", "string"), _field("newsletter_opt_in", "boolean"),
+    ], ("user_id",)),
+}
+_ACCOUNT_STATE = {"subscription_status", "subscription_type"}
+
+
+def _users_bundle(probe: str) -> dict:
+    declared, fields, unique = _USERS_PROBES[probe]
+    bundle = inventory._bundle(pricing=False)
+    if declared:
+        _module(bundle, "profiles", entities=["User"], actions=["update_profile"],
+                collections=[("users", "User", fields, {"unique": unique})])
+    else:
+        _unclaimed(bundle, fields, unique=unique)
+    return bundle
+
+
+@pytest.mark.parametrize("probe", list(_USERS_PROBES))
+def test_without_mozaikspay_subscription_fields_on_users_stay_app_data(persistence, probe):
+    context = ownership._context(managed=False)
+    bundle = _users_bundle(probe)
+    submitted = {field["name"]: field for field in _USERS_PROBES[probe][1]}
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    saved = _saved_fields(context)
+    for name in _ACCOUNT_STATE & set(submitted):
+        assert saved[name] == submitted[name]
+    # Only fields the platform account profile serves (email, password_hash, bio) leave.
+    platform = {"email", "password_hash", "bio"} if probe == "account_with_profile" else set()
+    assert set(submitted) - platform <= set(saved)
+
+
+@pytest.mark.parametrize("probe", [
+    "account_with_profile", "undeclared_newsletter_opt_in", "undeclared_enum_status", "undeclared_subscription_type",
+])
+def test_with_mozaikspay_subscription_fields_on_users_are_account_state(persistence, probe):
+    context = ownership._context(managed=True)
+    bundle = _users_bundle(probe)
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert not _ACCOUNT_STATE & set(_saved_fields(context))
+
+
+def test_only_the_active_pack_makes_subscription_fields_account_state():
+    auth = _auth_rule()
+    assert not _ACCOUNT_STATE & set(auth["state_field_names"])
+    assert set(_facade_rule()["account_state_field_names"]) == _ACCOUNT_STATE
+
+
+def _alerts(bundle: dict, *, pages=("Alerts",)) -> dict:
+    """The verifier's probe: an app surface whose only entity is Subscription, holding only provider state names."""
+    surface = _module(bundle, "alerts", entities=["Subscription"], actions=["subscribe_user"], collections=[
+        ("subscriptions", "Subscription", [
+            _USER_ID, _field("type", "string", required=True), _field("status", "string"), _field("start_date", "date"),
+        ]),
+    ])
+    for name in pages:
+        route = "/" + name.lower().replace(" ", "-")
+        bundle["experience_spec"]["pages"].append(
+            _page(name, route, ("list", "DataTable", {"columns": ["type", "status"]})),
+        )
+    surface["owned_pages"] = list(pages)
+    return surface
+
+
+def _pages_of(context) -> dict[str, str]:
+    return {
+        page: surface["surface_id"]
+        for surface in detach(context.get("design_surface_map"))["surfaces"] for page in surface["owned_pages"]
+    }
+
+
+def test_an_app_page_never_moves_into_the_facade(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _alerts(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="Page 'Alerts' is owned by 'alerts'")
+    for option in (
+        "which normalizes to billing_portal: its entities ['Subscription'], collections ['subscriptions'], "
+        "actions ['subscribe_user'] are MozaiksPay billing state",
+        "billing_portal takes only its own pages ['Pricing', 'Billing', 'Usage']",
+        'If it shows billing, bind every section to billing_portal: add "data_source": {"module_id": "billing_portal"',
+        ", or remove it.",
+        "If it shows the app's own records, move it to owned_pages of 'reports'; or keep 'alerts' app-owned by "
+        "naming its records for what they are: replace ['Subscription'] in its primary_entities with an app entity "
+        "of its own, rename collection 'subscriptions' and its entity 'Subscription' to match "
+        "(for example AlertsSubscription in alerts_subscriptions), and ['subscribe_user'] stays its own action.",
+    ):
+        assert option in result["error"]
+    assert "app UI" not in result["error"]
+
+
+@pytest.mark.parametrize("page_name,route", [
+    pytest.param("Meal Plans", "/meal-plans", id="plan_word"),
+    pytest.param("Usage Alerts", "/usage-alerts", id="usage_word"),
+    pytest.param("Alerts", "/alerts/usage", id="usage_route"),
+    pytest.param("Payment Reminders", "/payment-reminders", id="payment_word"),
+    pytest.param("My Subscription", "/subscription", id="billing_wording_without_billing_content"),
+])
+def test_wording_alone_never_moves_a_page_into_the_facade(persistence, page_name, route):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _alerts(bundle, pages=(page_name,))
+    bundle["experience_spec"]["pages"][-1]["route"] = route
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner=f"Page {page_name!r} is owned by 'alerts'")
+
+
+def test_a_form_bound_to_the_surfaces_subscribe_action_but_collecting_app_fields_stays_app_ui(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _alerts(bundle)
+    bundle["experience_spec"]["pages"][-1]["sections"] = [{
+        "id": "subscribe", "primitive": "Form", "intent": "Subscribe to price alerts",
+        "config_hint": json.dumps({
+            "fields": [{"name": "sku"}, {"name": "threshold"}],
+            "data_source": {"module_id": "alerts", "action_id": "subscribe_user"},
+        }),
+    }]
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="Page 'Alerts' is owned by 'alerts'")
+
+
+@pytest.mark.parametrize("option", ["bind", "move", "keep", "remove"])
+def test_every_place_the_app_page_message_offers_saves(persistence, option):
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    alerts = _alerts(bundle)
+    if option == "bind":
+        bundle["experience_spec"]["pages"][-1]["sections"][0]["config_hint"] = json.dumps({
+            "columns": ["type", "status"],
+            "data_source": {"module_id": "billing_portal", "action_id": "get_subscription_status"},
+        })
+    elif option == "move":
+        alerts["owned_pages"] = []
+        bundle["surface_map"]["surfaces"][0]["owned_pages"].append("Alerts")
+    elif option == "keep":
+        alerts["primary_entities"] = ["AlertsSubscription"]
+        bundle["data_contract"]["surfaces"][-1]["collections"][0].update(
+            name="alerts_subscriptions", entity="AlertsSubscription",
+        )
+    else:
+        alerts["owned_pages"] = []
+        bundle["experience_spec"]["pages"] = [p for p in bundle["experience_spec"]["pages"] if p["name"] != "Alerts"]
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    pages = _pages_of(context)
+    assert pages.get("Alerts") == {"bind": "billing_portal", "move": "reports", "keep": "alerts", "remove": None}[option]
+    if option == "keep":
+        assert (_surface(context, "alerts")["owner"], _surface(context, "alerts")["owned_mutations"]) == (
+            "app", ["subscribe_user"],
+        )
+        assert "alerts_subscriptions" in _collection_names(context)
+
+
+def test_with_no_app_surface_left_the_app_page_message_asks_for_one(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    bundle["surface_map"]["surfaces"], bundle["data_contract"]["surfaces"], bundle["experience_spec"]["pages"] = [], [], []
+    _alerts(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="Page 'Alerts' is owned by 'alerts'")
+    assert "declare an app-owned module or ui_only surface and move it to its owned_pages" in result["error"]
+    # It is the only page: removing it would leave none, so removal is not offered.
+    assert "remove it" not in result["error"]
+
+
+def test_a_billing_surfaces_app_page_is_named_and_its_billing_page_moves(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    surface = _alerts(bundle, pages=("Subscription Management", "Alerts"))
+    surface["surface_id"] = bundle["data_contract"]["surfaces"][-1]["surface_id"] = "subscription_management"
+    bundle["data_contract"]["surfaces"][-1]["collections"][0]["ownership"]["surface_id"] = "subscription_management"
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="Page 'Alerts' is owned by 'subscription_management'")
+    assert "Subscription Management" not in result["error"]
+    # A reserved surface cannot stay app-owned, so only the billing remedies and the move are offered.
+    assert "keep 'subscription_management' app-owned" not in result["error"]
+
+    surface["owned_pages"] = ["Subscription Management"]
+    bundle["surface_map"]["surfaces"][0]["owned_pages"].append("Alerts")
+    context = ownership._context(managed=True)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    pages = _pages_of(context)
+    assert (pages["Subscription Management"], pages["Alerts"]) == ("billing_portal", "reports")
+
+
+def _newsletters(bundle: dict) -> dict:
+    """The verifier's probe: an app module that also declares Subscription and a subscriptions collection."""
+    return _module(
+        bundle, "newsletters", entities=["Newsletter", "Subscription"],
+        actions=["create_newsletter", "subscribe_user", "unsubscribe_user"],
+        page=_page("Newsletters", "/newsletters", ("list", "DataTable", {"columns": ["title"]})),
+        collections=[
+            ("newsletters", "Newsletter", [_field("newsletter_id", "string", required=True), _field("title", "string")],
+             {"tenancy": "app_wide"}),
+            ("subscriptions", "Subscription", [
+                _field("subscription_id", "string", required=True), _USER_ID,
+                _field("newsletter_id", "string", required=True), _field("status", "string"),
+            ]),
+        ],
+    )
+
+
+def test_the_provider_duplicate_message_names_every_change_and_keeps_subscribe_user(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _newsletters(bundle)
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="remove collection 'subscriptions'")
+    error = result["error"]
+    for change in (
+        "keep them on 'newsletters' in a collection of their own keyed by user_id and named for what it holds "
+        "(for example newsletters_subscriptions with entity NewslettersSubscription)",
+        "'newsletters' stays app-owned (entities ['Newsletter']; actions ['create_newsletter', 'unsubscribe_user']; "
+        "collections ['newsletters']; pages ['Newsletters'])",
+        "replace ['Subscription'] in its primary_entities with that app entity or drop it",
+        "['subscribe_user'] stays its own action",
+    ):
+        assert change in error
+    assert not re.search(r"(remove|drop|rename)[^.;]*subscribe_user", error)
+
+
+@pytest.mark.parametrize("entity", ["NewslettersSubscription", None])
+def test_the_provider_duplicate_message_applied_as_written_saves(persistence, entity):
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    newsletters = _newsletters(bundle)
+    group = bundle["data_contract"]["surfaces"][-1]
+    group["collections"] = [collection for collection in group["collections"] if collection["name"] != "subscriptions"]
+    group["collections"].append(_records_of(
+        "newsletters", "newsletters_subscriptions" if entity else "newsletter_follows", entity or "NewsletterFollow",
+        [_USER_ID, _field("newsletter_id", "string", required=True)],
+    ))
+    newsletters["primary_entities"] = ["Newsletter", *([entity] if entity else [])]
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    saved = _surface(context, "newsletters")
+    assert (saved["owner"], saved["owned_mutations"]) == (
+        "app", ["create_newsletter", "subscribe_user", "unsubscribe_user"],
+    )
+
+
+def test_the_claims_message_keeps_an_app_surfaces_subscribe_user_and_names_its_removed_records(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    alerts = _alerts(bundle)
+    alerts["primary_entities"].append("AlertRule")
+    alerts["owned_mutations"].append("create_alert_rule")
+    bundle["data_contract"]["surfaces"][-1]["collections"].append(
+        _records_of("alerts", "alert_rules", "AlertRule", [_USER_ID, _field("sku", "string", required=True)]),
+    )
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="App surface 'alerts' claims")
+    assert "entities ['Subscription'], actions [], collections ['subscriptions']." in result["error"]
+    assert "actions ['subscribe_user', 'create_alert_rule']" in result["error"]
+
+    alerts["primary_entities"] = ["AlertRule"]
+    group = bundle["data_contract"]["surfaces"][-1]
+    group["collections"] = [collection for collection in group["collections"] if collection["name"] != "subscriptions"]
+    context = ownership._context(managed=True)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    assert _surface(context, "alerts")["owned_mutations"] == ["subscribe_user", "create_alert_rule"]
+
+
+def test_a_page_collecting_app_fields_through_subscribe_user_keeps_its_surface_app_owned(persistence):
+    """A page bound to the surface's own subscribe_user that collects app fields is app behavior, not billing."""
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _module(bundle, "newsletter", entities=["Subscription"], actions=["subscribe_user"], collections=[
+        ("subscriptions", "Subscription", [_USER_ID, _field("email_frequency", "string"), _field("status", "string")]),
+    ], page=_page("Newsletter", "/newsletter", ("signup", "Form", {
+        "fields": [{"name": "email_frequency"}], "data_source": {"module_id": "newsletter", "action_id": "subscribe_user"},
+    })))
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="remove collection 'subscriptions'")
+    assert "'newsletter' stays app-owned (pages ['Newsletter'])" in result["error"]
+    assert "replace ['Subscription'] in its primary_entities with that app entity or drop it" in result["error"]
+    assert "['subscribe_user'] stays its own action" in result["error"]
+
+
+def test_token_wallets_are_never_offered_as_app_records(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _module(bundle, "wallet", entities=["TokenWallet"], actions=[], collections=[
+        ("token_wallets", "TokenWallet", [_USER_ID, _field("balance", "number"), _field("currency", "string")]),
+    ], page=_page("Wallet", "/wallet", ("balance", "MetricCard", {"value_key": "balance"})))
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="Page 'Wallet' is owned by 'wallet'")
+    assert "app-owned by naming" not in result["error"]
+    assert 'If it shows billing, bind every section to billing_portal: add "data_source": {"module_id": "billing_portal"' in result["error"]
+
+
+def test_a_surface_matched_by_action_is_told_to_rename_its_collections_entity_too(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    alerts = _alerts(bundle)
+    alerts["primary_entities"], alerts["owned_mutations"] = [], ["create_subscription"]
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="Page 'Alerts' is owned by 'alerts'")
+    assert (
+        "rename collection 'subscriptions' and its entity 'Subscription' to match, rename actions "
+        "['create_subscription'] for what they do (for example AlertsSubscription in alerts_subscriptions)"
+    ) in result["error"]
+
+    alerts["owned_mutations"] = ["create_alert_subscription"]
+    bundle["data_contract"]["surfaces"][-1]["collections"][0].update(
+        name="alerts_subscriptions", entity="AlertsSubscription",
+    )
+    context = ownership._context(managed=True)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    assert _pages_of(context)["Alerts"] == "alerts"
+
+
+def test_example_names_are_never_themselves_reserved(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _module(bundle, "token", entities=["Token", "TokenWallet"], actions=["create_token"], collections=[
+        ("tokens", "Token", [_field("token_id", "string", required=True), _USER_ID]),
+        ("wallets", "TokenWallet", [_USER_ID, _field("address", "string", required=True), _field("balance", "number")]),
+    ])
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="remove collection 'wallets'")
+    assert "(for example token_app_wallets with entity TokenTokenWallet)" in result["error"]
+
+    group = bundle["data_contract"]["surfaces"][-1]
+    group["collections"] = [
+        group["collections"][0],
+        _records_of("token", "token_app_wallets", "TokenTokenWallet", [_USER_ID, _field("address", "string", required=True)]),
+    ]
+    bundle["surface_map"]["surfaces"][-1]["primary_entities"] = ["Token", "TokenTokenWallet"]
+    context = ownership._context(managed=True)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+
+
+def test_pages_of_every_normalizing_surface_are_named_in_one_message(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _alerts(bundle)
+    _module(bundle, "reminders", entities=["Subscription"], actions=[], collections=[
+        ("reminder_subscriptions", "Subscription", [_USER_ID, _field("status", "string")]),
+    ], page=_page("Reminders", "/reminders", ("list", "DataTable", {"columns": ["status"]})))
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="Page 'Alerts' is owned by 'alerts'")
+    assert "Page 'Reminders' is owned by 'reminders'" in result["error"]
+
+
+@pytest.mark.parametrize("kind,raw,string_default", [
+    pytest.param("boolean", "yes", "yes", id="word_fits_a_string"),
+    pytest.param("integer", "1", '"1"', id="number_needs_quotes"),
+    pytest.param("boolean", "false", '"false"', id="json_boolean_needs_quotes"),
+])
+def test_a_non_string_enum_is_named_first_with_the_default_each_fix_needs(kind, raw, string_default):
+    field = {**_field("level", kind, default=raw), "enum": ["yes", "no", "1", "2", "false"]}
+    collection = {"fields": [field]}
+
+    assert normalize_structured_defaults(collection, "c") == []
+    with pytest.raises(DataContractFieldError) as error:
+        validate_collection_fields(collection, "c")
+
+    clause = "" if string_default == raw else f" and default {string_default!r}"
+    assert f"enum requires type 'string', got {kind!r}: set type 'string'{clause}, or set enum null" in str(error.value)
+    # Applied as written, either fix saves.
+    validate_collection_fields({"fields": [{**field, "type": "string", "default": string_default}]}, "c")
+    without_enum = {"fields": [{**field, "enum": None}]}
+    normalize_structured_defaults(without_enum, "c")
+    validate_collection_fields(without_enum, "c")
+
+
+def test_a_billing_page_bound_to_the_facade_moves_whatever_fields_it_shows(persistence):
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _alerts(bundle, pages=("My Subscription",))
+    bundle["experience_spec"]["pages"][-1]["sections"] = [
+        {"id": "plan", "primitive": "Panel", "intent": "Current plan", "config_hint": json.dumps({
+            "fields": [{"name": "plan_name"}, {"name": "renewal_date"}],
+            "data_source": {"module_id": "billing_portal", "action_id": "get_subscription_status"},
+        })},
+        {"id": "plans", "primitive": "DataTable", "intent": "Plans", "config_hint": json.dumps({
+            "columns": ["plan_name", "price"], "data_source": {"module_id": "billing_portal", "action_id": "list_plans"},
+        })},
+    ]
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert _pages_of(context)["My Subscription"] == "billing_portal"
+
+
+def test_a_reserved_page_name_does_not_carry_app_columns_into_the_facade(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _alerts(bundle, pages=("Subscriptions",))
+    bundle["experience_spec"]["pages"][-1]["sections"][0]["config_hint"] = json.dumps({"columns": ["topic", "frequency"]})
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="Page 'Subscriptions' is owned by 'alerts'")
+
+
+def test_pages_the_design_put_on_billing_portal_stay_there(persistence):
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _module(bundle, "billing_portal", entities=["Subscription"],
+            actions=["start_subscription_checkout", "open_billing_portal"],
+            page=_page("My Subscription", "/subscription", ("plan", "Panel", {"title": "Your plan"})))
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert _pages_of(context)["My Subscription"] == "billing_portal"
+
+
+def test_a_billing_surfaces_duplicate_message_also_places_its_app_page(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    surface = _module(bundle, "subscription_management", entities=["Subscription"], actions=["subscribe_user"],
+                      page=_page("Alerts", "/alerts", ("list", "DataTable", {"columns": ["alert_threshold"]})),
+                      collections=[("subscriptions", "Subscription", [
+                          _USER_ID, _field("plan", "string"), _field("alert_threshold", "number"),
+                      ])])
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="remove collection 'subscriptions'")
+    assert "declare them in a collection keyed by user_id of the app-owned module 'reports'" in result["error"]
+    assert (
+        "'subscription_management' normalizes to billing_portal, which does not take its pages ['Alerts']: "
+        "move them to owned_pages of 'reports' or remove them"
+    ) in result["error"]
+
+    # Applied as written, in one revision.
+    bundle["data_contract"]["surfaces"][-1]["collections"] = []
+    bundle["data_contract"]["surfaces"][0]["collections"].append(
+        _records_of("reports", "alert_settings", "AlertSetting", [_USER_ID, _field("alert_threshold", "number")]),
+    )
+    surface["owned_pages"] = []
+    bundle["surface_map"]["surfaces"][0]["owned_pages"].append("Alerts")
+    context = ownership._context(managed=True)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    assert _pages_of(context)["Alerts"] == "reports"
+
+
+def test_other_pages_bindings_to_the_normalizing_surface_are_named_too(persistence):
+    _, store_factory, _ = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    _alerts(bundle)
+    bundle["experience_spec"]["pages"][0]["sections"][0]["config_hint"] = json.dumps({
+        "columns": ["title"], "data_source": {"module_id": "alerts", "action_id": "list_alerts"},
+    })
+
+    result = inventory._save(context, bundle)
+
+    ownership._assert_refused(context, result, store_factory, owner="Page 'Alerts' is owned by 'alerts'")
+    assert "Other pages bind 'alerts' too: [\"alerts.list_alerts on 'Reports'\"]" in result["error"]
+
+
+def test_an_owned_page_name_without_a_page_is_not_a_page_to_place(persistence):
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    ownership._add_surface(
+        bundle, surface_id="subscription_management", name="Subscription", route="/subscription",
+        entities=["Subscription"], actions=["update_subscription"], collection="subscriptions",
+    )
+    bundle["surface_map"]["surfaces"][-1]["owned_pages"].append("Manage Plan")
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
