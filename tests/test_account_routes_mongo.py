@@ -111,3 +111,104 @@ async def test_account_routes_export_delete_and_retry_preserve_app_and_owner_sco
     again = await host.http.delete("/api/account", headers=headers)
     assert again.json()["results"] == {"user_onboarding": {"deleted_count": 0}}
     assert (await host.http.get("/api/account/export", headers=headers)).json()["user_onboarding_status"] == []
+
+
+@pytest_asyncio.fixture
+async def rendered_account_host(monkeypatch, tmp_path):
+    """The code-rendered handler of a per_user module, loaded and served by the real routes."""
+    from mozaiksai.core.runtime.persistence import PersistencePrincipal
+    from mozaiksai.core.workflow.generator_support.module_account_data import (
+        materialize_module_account_handlers,
+    )
+    from tests.test_appgenerator_module_write_actions import MODULE, _contract, _files, _plan
+
+    database_name = f"alignment_account_{uuid4().hex}"
+    monkeypatch.setenv("MONGO_URI", os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017"))
+    for name in ("MOZAIKS_APP_DATA_DATABASE_NAME", "MOZAIKS_APP_DATABASE_NAME", "MOZAIKS_APPS_DATABASE"):
+        monkeypatch.delenv(name, raising=False)
+    # Module persistence (and so the account routes' scoped persistence) uses the app database.
+    monkeypatch.setenv("MOZAIKS_APP_DATABASE_NAME", database_name)
+    monkeypatch.setenv("ENV", "test")
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "supabase")
+    monkeypatch.setenv("SUPABASE_URL", "http://127.0.0.1")
+    signing_key = uuid4().hex + uuid4().hex
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", signing_key)
+    monkeypatch.setattr(core_config, "_mongo_client", None)
+    monkeypatch.setattr(core_config, "_mongo_client_conn_str", None)
+    client = core_config.get_mongo_client()
+    try:
+        await client.admin.command("ping", maxTimeMS=1500)
+    except Exception:
+        client.close()
+        if os.getenv("MOZAIKS_REQUIRE_REAL_MONGO"):
+            pytest.fail("Mongo is required for account route acceptance")
+        pytest.skip("Mongo is unavailable")
+
+    contract = _contract()
+    files = _files()
+    files.update(materialize_module_account_handlers(files, app_build_plan=_plan(), data_contract=contract))
+    for path, source in files.items():
+        target = tmp_path / "app" / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+    registry = account.AccountDataRegistry()
+    monkeypatch.setattr(account, "account_data_registry", registry)
+    monkeypatch.setattr(account_routes, "account_data_registry", registry)
+    monkeypatch.setattr(PlatformHookRegistry, "_instance", PlatformHookRegistry())
+    ModuleLoader(str(tmp_path / "app")).load(MODULE)
+    assert registry.registered_module_ids() == [MODULE]
+    host = FastAPI()
+    host.state.data_contract = contract
+    host.include_router(account_routes.router)
+
+    def authorization(app_id, user_id):
+        now = datetime.now(UTC)
+        token = jwt.encode(
+            {"sub": user_id, "aud": "authenticated", "role": "authenticated",
+             "iat": now, "exp": now + timedelta(minutes=5), "app_metadata": {"app_id": app_id}},
+            signing_key, algorithm="HS256",
+        )
+        return {"Authorization": f"Bearer {token}"}
+
+    def tasks(app_id, user_id):
+        return MongoPersistenceContext(
+            app_id=app_id, user_id=user_id, database_name=database_name, data_contract=contract,
+            principal=PersistencePrincipal(user_id=user_id),
+        ).collection(MODULE, "tasks")
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=host), base_url="http://test") as http:
+            yield SimpleNamespace(http=http, tasks=tasks, authorization=authorization, module=MODULE)
+    finally:
+        assert database_name.startswith("alignment_account_")
+        await client.drop_database(database_name)
+        client.close()
+
+
+async def test_rendered_account_handler_exports_and_deletes_only_the_owners_rows(rendered_account_host):
+    host = rendered_account_host
+    created = datetime(2026, 9, 1, tzinfo=UTC)
+    alice, bob, other_app = host.tasks("app-one", "alice"), host.tasks("app-one", "bob"), host.tasks("app-two", "alice")
+    # More rows than one persistence page, so the export pages through them.
+    for index in range(105):
+        await alice.insert_one({"task_id": f"a-{index:03d}", "title": f"Task {index}", "created_at": created,
+                                "updated_at": created})
+    await bob.insert_one({"task_id": "b-1", "title": "Bob's", "created_at": created, "updated_at": created})
+    await other_app.insert_one({"task_id": "x-1", "title": "Other app", "created_at": created, "updated_at": created})
+
+    headers = host.authorization("app-one", "alice")
+    exported = await host.http.get("/api/account/export", headers=headers)
+    assert exported.status_code == 200
+    rows = exported.json()[f"{host.module}_tasks"]
+    assert len(rows) == 105 and {row["user_id"] for row in rows} == {"alice"}
+    assert rows[0] == {"task_id": "a-000", "user_id": "alice", "title": "Task 0",
+                       "created_at": "2026-09-01T00:00:00", "updated_at": "2026-09-01T00:00:00"}
+    deleted = await host.http.request("DELETE", "/api/account", headers=headers, json={"user_id": "bob"})
+    assert deleted.status_code == 200
+    assert deleted.json()["results"] == {host.module: {"deleted_count": 105}}
+    assert await alice.count({}) == 0
+    assert await bob.count({}) == 1 and await other_app.count({}) == 1
+    again = await host.http.delete("/api/account", headers=headers)
+    assert again.json()["results"] == {host.module: {"deleted_count": 0}}

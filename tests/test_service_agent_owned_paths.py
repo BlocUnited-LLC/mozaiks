@@ -40,11 +40,11 @@ def test_service_agent_must_emit_every_owned_path() -> None:
 
 
 def test_account_data_handler_is_not_limited_to_membership_modules() -> None:
-    """The planner requires it for any user-scoped module; implementation must match."""
+    """Code renders it for any module owning per_user rows; any other user-scoped module's worker authors it."""
     prompt = _agent_prompt("ServiceAgent")
 
-    assert "ANY module with `user_data_scope: true`" in prompt
-    assert "not only membership-style modules" in prompt
+    assert "`backend/account_data_handler.py` of a module owning `per_user` collections is rendered by code" in prompt
+    assert "Author it only when your owned_paths list it for a module with `user_data_scope: true`" in prompt
 
 
 def test_the_planner_and_the_worker_agree_on_the_rule() -> None:

@@ -14,6 +14,9 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_owned_output_paths,
+)
 from tests.test_app_plan_managed_facade_repair import _task
 from tests.test_app_plan_task_identity_repair import _live_plan
 from tests.test_continuous_deterministic_materialization import _load_models
@@ -55,6 +58,13 @@ def _ownership(plan):
     return {task["task_id"]: set(task["owned_paths"]) for task in plan["build_tasks"]}
 
 
+def _model_work(ownership, context):
+    """Ownership once review releases pack-owned outputs: they are never model work."""
+    pack_paths = pack_owned_output_paths(context)
+    released = {task_id: paths - pack_paths for task_id, paths in ownership.items()}
+    return {task_id: paths for task_id, paths in released.items() if paths}
+
+
 def _assert_exclusive_paths(plan):
     counts = Counter(path.replace("\\", "/") for task in plan["build_tasks"] for path in task["owned_paths"])
     assert not {path: count for path, count in counts.items() if count > 1}
@@ -63,9 +73,9 @@ def _assert_exclusive_paths(plan):
 @pytest.mark.parametrize("label", ["task_registry", "task_management"])
 def test_reported_drift_keeps_model_tasks_and_one_trio_per_module(label):
     plan, context = _reported_plan(label)
-    before = _ownership(plan)
+    before = _model_work(_ownership(plan), context)
     before["module_contract"].add("modules/tasks/contracts/events.yaml")
-    before["3"].add("modules/billing_portal/contracts/events.yaml")
+    assert {"2", "3", "4", "5"}.isdisjoint(before)  # the MozaiksPay adapter and facade trio are pack-owned
     assert sorted(pack["capability_pack_id"] for pack in plan["capability_packs"]) == [
         "billing_portal", "mozaikspay", "tasks",
     ]
@@ -77,11 +87,11 @@ def test_reported_drift_keeps_model_tasks_and_one_trio_per_module(label):
     validate_plan_origins(cached, context)
     assert _ownership(cached) == before
     _assert_exclusive_paths(cached)
-    for module in ("tasks", "billing_portal"):
-        trio = [task for task in cached["build_tasks"] if task["capability_pack_id"] == module and task["task_type"] != "persistence_contract"]
-        assert Counter(task["task_type"] for task in trio) == {
-            "module_contract": 1, "data_models": 1, "business_services": 1,
-        }
+    trio = [task for task in cached["build_tasks"] if task["capability_pack_id"] == "tasks" and task["task_type"] != "persistence_contract"]
+    assert Counter(task["task_type"] for task in trio) == {
+        "module_contract": 1, "data_models": 1, "business_services": 1,
+    }
+    assert not [task for task in cached["build_tasks"] if task["capability_pack_id"] == "billing_portal"]
     by_id = {task["task_id"]: task for task in cached["build_tasks"]}
     for kind in ("module_contract", "data_models", "business_services"):
         assert by_id[kind]["capability_pack_id"] == "tasks"
@@ -117,11 +127,15 @@ def test_drift_repair_composes_with_task_identity_and_managed_facade_repairs():
     assert result["outcome"] == "ready", result
     cached = detach(context.get("app_build_plan"))
     validate_plan_origins(cached, context)
-    assert len(cached["build_tasks"]) == len(plan["build_tasks"])
+    pack_paths = pack_owned_output_paths(context)
+    assert len(cached["build_tasks"]) == len([
+        task for task in plan["build_tasks"] if not set(task["owned_paths"]) <= pack_paths
+    ])
     _assert_exclusive_paths(cached)
+    assert not [task for task in cached["build_tasks"] if task["capability_pack_id"] == "billing_portal"]
     by_module = {
         module: [task for task in cached["build_tasks"] if task["capability_pack_id"] == module and task["task_type"] in kinds]
-        for module in ("tasks", "billing_portal")
+        for module in ("tasks",)
     }
     for module, trio in by_module.items():
         assert Counter(task["task_type"] for task in trio) == dict.fromkeys(kinds, 1)
@@ -186,9 +200,8 @@ def test_correct_plan_retains_its_task_identities_and_ownership():
     assert result["outcome"] == "ready", result
     assert plan == before
     cached = detach(context.get("app_build_plan"))
-    expected = _ownership(before)
+    expected = _model_work(_ownership(before), context)
     expected["module_contract"].add("modules/tasks/contracts/events.yaml")
-    expected["3"].add("modules/billing_portal/contracts/events.yaml")
     assert _ownership(cached) == expected
     _assert_exclusive_paths(cached)
 

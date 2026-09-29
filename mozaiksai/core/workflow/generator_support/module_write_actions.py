@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.runtime.app.module_loader import CANONICAL_EVENT_PREFIXES
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
@@ -34,11 +35,19 @@ from mozaiksai.core.workflow.generator_support.data_contract_fields import (
     validate_collection_fields,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    CANONICAL_WRITE_EVENT_VERBS,
     CANONICAL_WRITE_OPERATIONS,
     canonical_read_action_id,
     canonical_write_action_id,
+    canonical_write_event_aliases,
+    canonical_write_event_for,
+    canonical_write_event_type,
     collection_has_canonical_writes,
     entity_identifier,
+)
+from mozaiksai.core.workflow.generator_support.module_authored_code import (
+    prune_repository,
+    reconcile_emit_literals,
 )
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     _owned_collections,
@@ -441,6 +450,187 @@ def _companions_from_files(module_id: str, files: Mapping[str, str]) -> dict[str
     return companions
 
 
+# --------------------------------------------------------------------------- events
+
+
+def _built_write_shapes(
+    module_id: str, manifest: dict[str, Any], plan: dict[str, Any], contract: Any, subscription_contract: Any,
+) -> list[dict[str, Any]]:
+    """Record shapes of the collections whose canonical writes code constructs and implements."""
+    actions = manifest.get("actions") or []
+    read_ids = _canonical_read_ids(module_id, plan, contract)
+    shapes = []
+    for collection in _write_collections(module_id, plan, contract):
+        if collection["tenancy"] == "app_wide" and _protected_siblings(
+            actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
+        ):
+            continue  # Explicitly declared protected app-wide writes keep their authored contract.
+        shapes.append(collection_record_shape(module_id, collection))
+    return shapes
+
+
+def _design_events(module_id: str, design_surface_map: Any) -> list[str]:
+    surface_map = detach(design_surface_map) or {}
+    return [
+        str(event) for surface in surface_map.get("surfaces") or [] if isinstance(surface, dict)
+        and surface.get("surface_id") == module_id for event in surface.get("events_emitted") or []
+    ]
+
+
+def _canonical_event_entry(module_id: str, shape: dict[str, Any], operation: str) -> dict[str, Any]:
+    verb = CANONICAL_WRITE_EVENT_VERBS[operation]
+    return {
+        "type": canonical_write_event_type(shape["entity"], operation),
+        "version": 1,
+        "description": (
+            f"A {shape['entity']} record was {verb} by {canonical_write_action_id(shape['entity'], operation)}; "
+            "the payload is the stored record's declared fields."
+        ),
+        "producer": module_id,
+        "payload_schema": _record_schema(shape),
+    }
+
+
+def _rename_companion_events(
+    document: Any, key: str, rename: Any,
+) -> list[str]:
+    """Rename event references in reactions/notifications; return one note per rename."""
+    notes: list[str] = []
+    entries = document.get("reactions" if key == "reactions_yaml" else "notifications") if isinstance(document, dict) else None
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        for field in ("event_type", "on"):
+            value = entry.get(field)
+            renamed = rename(value) if isinstance(value, str) else None
+            if renamed and renamed != value:
+                entry[field] = renamed
+                notes.append(f"{_COMPANION_PATHS[key]} {entry.get('id')!r}.{field}: {value!r} -> {renamed!r}")
+    return notes
+
+
+def close_module_events(
+    module_id: str, manifest: dict[str, Any], events_document: Any, companions: dict[str, Any], *,
+    shapes: list[dict[str, Any]], aliases: dict[str, str], design_surface_map: Any,
+) -> Any:
+    """Declare, emit and reconcile a module's events; return the closed events document.
+
+    Canonical writes own their events: ``domain.<entity>.<created|updated|deleted>``
+    (one naming rule) is emitted by the canonical action when the approved design
+    or the module contract names it under any spelling, and code renders its
+    events.yaml entry with the stored record as payload. A custom event keeps
+    its own name; an emit and a declaration that differ only by the required
+    ``domain.`` prefix are reconciled to the prefixed name. Anything else is one
+    error naming both the emit and the declarations. ``manifest`` and the
+    companion documents are edited in place.
+    """
+    canonical: dict[str, tuple[dict[str, Any], str]] = {
+        canonical_write_event_type(shape["entity"], operation): (shape, operation)
+        for shape in shapes for operation in CANONICAL_WRITE_OPERATIONS
+    }
+    action_events = {
+        canonical_write_action_id(shape["entity"], operation): event_type
+        for event_type, (shape, operation) in canonical.items()
+    }
+
+    def own(value: Any) -> str | None:
+        event_type = canonical_write_event_for(value, aliases)
+        return event_type if event_type in canonical else None
+
+    document = events_document if isinstance(events_document, dict) else None
+    entries = [entry for entry in (document or {}).get("events") or [] if isinstance(entry, dict)]
+    actions = [action for action in manifest.get("actions") or [] if isinstance(action, dict)]
+    approved = {event for event in (own(value) for value in _design_events(module_id, design_surface_map)) if event}
+    approved.update(event for action in actions for value in action.get("emits") or [] if (event := own(value)))
+    approved.update(event for entry in entries if (event := own(entry.get("type"))))
+
+    notes: list[str] = []
+    custom: list[dict[str, Any]] = []
+
+    def is_rendered(entry: dict[str, Any], event_type: str) -> bool:
+        expected = _canonical_event_entry(module_id, *canonical[event_type])
+        schemas = (expected["payload_schema"], _materialize_schema_contract(expected["payload_schema"]))
+        return entry.get("type") == event_type and entry.get("payload_schema") in schemas and all(
+            entry.get(key) == expected[key] for key in ("version", "producer", "description")
+        )
+
+    replaced = [
+        str(entry.get("type")) for entry in entries
+        if (event_type := own(entry.get("type"))) and not is_rendered(entry, event_type)
+    ]
+    if replaced:
+        notes.append(f"events.yaml canonical write declarations {replaced!r} are rendered from the record contract")
+    renamed: dict[str, str] = {}
+    errors: list[str] = []
+    for entry in entries:
+        if own(entry.get("type")):
+            continue
+        event_type = str(entry.get("type") or "")
+        if event_type and not event_type.startswith(CANONICAL_EVENT_PREFIXES):
+            renamed[event_type] = f"domain.{event_type}"
+            entry["type"] = renamed[event_type]
+            notes.append(f"events.yaml {event_type!r} -> {entry['type']!r} (module events use the domain. prefix)")
+        custom.append(entry)
+    seen: dict[str, dict[str, Any]] = {}
+    for entry in custom:
+        prior = seen.get(entry["type"])
+        if prior is None:
+            seen[entry["type"]] = entry
+        elif prior.get("payload_schema") != entry.get("payload_schema"):
+            errors.append(
+                f"{module_id}: contracts/events.yaml declares {entry['type']!r} twice with different payload "
+                "schemas (once without the domain. prefix); keep one declaration"
+            )
+    rendered = [
+        _canonical_event_entry(module_id, *canonical[event_type])
+        for event_type in canonical if event_type in approved
+    ]
+    declared = {*approved, *seen}
+    for action in actions:
+        own_event = action_events.get(str(action.get("id")))
+        original = list(action.get("emits") or [])
+        emits: list[str] = [own_event] if own_event in approved else []
+        for value in original:
+            record_event = own(value)
+            if record_event is not None:
+                if own_event is None:
+                    emits.append(record_event)  # A custom mutation may publish the canonical record event.
+                continue  # A canonical write emits only its own event.
+            value = renamed.get(value, value)
+            if value not in declared and not str(value).startswith(CANONICAL_EVENT_PREFIXES) and f"domain.{value}" in declared:
+                value = f"domain.{value}"
+            if value not in declared:
+                suggestion = value if str(value).startswith(CANONICAL_EVENT_PREFIXES) else f"domain.{value}"
+                errors.append(
+                    f"{module_id}: module.yaml action {action.get('id')!r} emits {value!r}, but "
+                    f"contracts/events.yaml declares {sorted(declared) or 'no events'}. A custom event keeps its "
+                    f"own name: declare {suggestion!r} in module_contract.events_yaml (version, producer "
+                    f"{module_id!r}, payload_schema) and emit that type, or remove it from the action's emits. "
+                    "Canonical record writes emit domain.<entity>.<created|updated|deleted>, which code declares "
+                    "and emits."
+                )
+                continue
+            emits.append(str(value))
+        emits = list(dict.fromkeys(emits))
+        if emits != original:
+            action["emits"] = emits
+            notes.append(f"module.yaml action {action.get('id')!r} emits {original!r} -> {emits!r}")
+    if errors:
+        raise ValueError("\n".join(errors))
+
+    def rename(value: str) -> str | None:
+        return canonical_write_event_for(value, aliases) or renamed.get(value)
+
+    for key in ("reactions_yaml", "notifications_yaml"):
+        notes.extend(_rename_companion_events(companions.get(key), key, rename))
+    for note in notes:
+        logger.info("CANONICAL_EVENTS_NORMALIZED: module=%s %s", module_id, note)
+    events = rendered + list(seen.values())
+    if document is None and not events:
+        return None
+    return {**(document or {}), "schema_version": "mozaiks.events.v1", "events": events}
+
+
 def close_module_actions(
     payload: Any, *, app_build_plan: Any, data_contract: Any = None, design_surface_map: Any = None,
     subscription_contract: Any = None, declared_auth_scopes: frozenset[str] | None = None,
@@ -470,7 +660,13 @@ def close_module_actions(
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
             declared_auth_scopes=granted,
         )
-        changes = {path: content for path, content in changes.items() if path in files}
+        # A manifest's events companion travels with it: code declares canonical write events.
+        changes = {
+            path: content for path, content in changes.items()
+            if path in files or (
+                path.endswith(f"/{_EVENTS_PATH}") and path.removesuffix(_EVENTS_PATH) + "module.yaml" in files
+            )
+        }
         if changes:
             files.update(changes)
             output["code_files"] = [{"filename": path, "content": content} for path, content in sorted(files.items())]
@@ -492,8 +688,43 @@ def close_module_actions(
         output, app_build_plan=plan, data_contract=contract, design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
     )
-    _require_declared_design_actions(module_id, output["module_contract"]["module_yaml"], design_surface_map)
+    closed = output["module_contract"]
+    _require_declared_design_actions(module_id, closed["module_yaml"], design_surface_map)
+    _close_user_data_scope(module_id, closed["module_yaml"], plan, contract)
+    events = close_module_events(
+        module_id, closed["module_yaml"], closed.get("events_yaml"),
+        {key: closed[key] for key in _COMPANION_PATHS if isinstance(closed.get(key), dict)},
+        shapes=_built_write_shapes(module_id, closed["module_yaml"], plan, contract, subscription_contract),
+        aliases=canonical_write_event_aliases(contract), design_surface_map=design_surface_map,
+    )
+    if events is not None or closed.get("events_yaml") is not None:
+        closed["events_yaml"] = events
     return output
+
+
+def per_user_collections(module_id: str, plan: dict[str, Any], contract: Any) -> list[dict[str, Any]]:
+    """The module's approved collections whose rows belong to one account."""
+    return [
+        collection for collection in _owned_collections(module_id, plan, contract)
+        if collection.get("tenancy") == "per_user" and collection.get("owner_field")
+    ]
+
+
+def _close_user_data_scope(module_id: str, manifest: dict[str, Any], plan: dict[str, Any], contract: Any) -> None:
+    """A module owning per-user rows takes part in account export and deletion."""
+    module = manifest.get("module")
+    if not isinstance(module, dict) or not per_user_collections(module_id, plan, contract):
+        return
+    if module.get("user_data_scope") is not True:
+        logger.info(
+            "USER_DATA_SCOPE_NORMALIZED: module=%s user_data_scope %r -> true; it owns per_user collections, "
+            "whose account-data handler code renders",
+            module_id, module.get("user_data_scope"),
+        )
+        module["user_data_scope"] = True
+
+
+_EVENTS_KEY, _EVENTS_PATH = "events_yaml", "contracts/events.yaml"
 
 
 def materialize_module_actions(
@@ -501,11 +732,12 @@ def materialize_module_actions(
     design_surface_map: Any = None, subscription_contract: Any = None,
     declared_auth_scopes: frozenset[str] | None = None,
 ) -> dict[str, str]:
-    """Render closed module manifests when assembling an admitted app bundle."""
+    """Render closed module manifests and their event companions for an admitted app bundle."""
     changed: dict[str, str] = {}
     if app_build_plan is None:
         return changed
     granted = declared_auth_scopes if declared_auth_scopes is not None else auth_contract_scopes(files_map)
+    companion_paths = {_EVENTS_KEY: _EVENTS_PATH, **_COMPANION_PATHS}
     for path, content in files_map.items():
         match = re.fullmatch(r"modules/([^/]+)/module\.yaml", path)
         if not match:
@@ -513,19 +745,42 @@ def materialize_module_actions(
         manifest = yaml.safe_load(content)
         if not isinstance(manifest, dict):
             raise ValueError(f"{path}: module manifest must be an object")
-        payload = {"module_contract": {"module_id": match[1], "module_yaml": manifest}}
+        module_id = match[1]
+        bundle: dict[str, Any] = {"module_id": module_id, "module_yaml": manifest}
+        authored: dict[str, Any] = {}
+        for key, relative in companion_paths.items():
+            raw = files_map.get(f"modules/{module_id}/{relative}")
+            if raw is None:
+                continue
+            try:
+                document = yaml.safe_load(raw)
+            except yaml.YAMLError:
+                continue  # The companion manifest gate reports unparseable YAML.
+            if isinstance(document, dict):
+                bundle[key] = document
+                authored[key] = document
         closed = close_module_actions(
-            payload, app_build_plan=app_build_plan, data_contract=data_contract,
+            {"module_contract": bundle}, app_build_plan=app_build_plan, data_contract=data_contract,
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
             declared_auth_scopes=granted, companion_files=files_map,
-        )
-        expanded = closed["module_contract"]["module_yaml"]
+        )["module_contract"]
+        expanded = closed["module_yaml"]
         for action in expanded.get("actions") or []:
             for key in ("input_schema", "output_schema"):
                 if isinstance(action.get(key), dict):
                     action[key] = _materialize_schema_contract(action[key], closed_request=key == "input_schema")
         if expanded != manifest:
             changed[path] = yaml.safe_dump(expanded, sort_keys=False, allow_unicode=True)
+        for key, relative in companion_paths.items():
+            document = closed.get(key)
+            if not isinstance(document, dict) or (key != _EVENTS_KEY and key not in authored):
+                continue
+            if key == _EVENTS_KEY:
+                for event in document.get("events") or []:
+                    if isinstance(event.get("payload_schema"), dict):
+                        event["payload_schema"] = _materialize_schema_contract(event["payload_schema"])
+            if document != authored.get(key):
+                changed[f"modules/{module_id}/{relative}"] = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
     return changed
 
 
@@ -814,9 +1069,21 @@ def _hook_call(name: str, arguments: str, *, guard: str | None = None) -> str:
     return "".join(lines)
 
 
-def _write_functions(module_id: str, shape: dict[str, Any], operation: str) -> tuple[str, str, str]:
-    """Render the handler method, service function and repo function for one write."""
+def _write_functions(
+    module_id: str, shape: dict[str, Any], operation: str, event_type: str | None = None,
+) -> tuple[str, str, str]:
+    """Render the handler method, service function and repo function for one write.
+
+    When the action declares its canonical event, the service emits it with the
+    stored record's declared fields once the after hook has returned.
+    """
     identifier, id_field, prefix = shape["identifier"], shape["id_field"], shape["constant"]
+    respond = (
+        f"    item = schemas.serialize_{identifier}(record)\n"
+        f"    await ctx.emit({event_type!r}, item)\n"
+        "    return {'item': item}\n"
+        if event_type else f"    return {{'item': schemas.serialize_{identifier}(record)}}\n"
+    )
     method = canonical_write_action_id(shape["entity"], operation)
     load_method = f"load_{identifier}"
     lookup = f"{{{id_field!r}: id}}"
@@ -847,7 +1114,7 @@ def _write_functions(module_id: str, shape: dict[str, Any], operation: str) -> t
             + _hook_call(f"before_{method}", "ctx, prepared", guard=f"prepared:{identifier}_hook_values:create")
             + f"    record = await repo.{method}(ctx, prepared)\n"
             + _hook_call(f"after_{method}", "ctx, record")
-            + f"    return {{'item': schemas.serialize_{identifier}(record)}}\n"
+            + respond
         )
         repo = (
             f"async def {method}(ctx, values):\n"
@@ -891,7 +1158,7 @@ def _write_functions(module_id: str, shape: dict[str, Any], operation: str) -> t
             + _hook_call(f"before_{method}", "ctx, record, changes", guard=f"changes:{identifier}_hook_values:update")
             + f"    record = await repo.{method}(ctx, id, changes)\n"
             + _hook_call(f"after_{method}", "ctx, record, changes")
-            + f"    return {{'item': schemas.serialize_{identifier}(record)}}\n"
+            + respond
         )
         updated_at = shape["timestamps"].get("updated_at")
         repo = (
@@ -919,11 +1186,12 @@ def _write_functions(module_id: str, shape: dict[str, Any], operation: str) -> t
         )
         service = (
             f"async def {method}(ctx, id):\n"
-            "    from . import repo\n"
-            f"    record = await repo.{load_method}(ctx, id)\n"
+            + ("    from . import repo, schemas\n" if event_type else "    from . import repo\n")
+            + f"    record = await repo.{load_method}(ctx, id)\n"
             + _hook_call(f"before_{method}", "ctx, record")
             + f"    await repo.{method}(ctx, id)\n"
             + _hook_call(f"after_{method}", "ctx, record")
+            + (f"    await ctx.emit({event_type!r}, schemas.serialize_{identifier}(record))\n" if event_type else "")
             + "    return {'deleted': True}\n"
         )
         repo = (
@@ -972,11 +1240,15 @@ def materialize_module_write_implementations(
     Supply admitted module manifests alongside the task's candidate sources.
     Scope ``owned_paths`` before task ownership validation; omit it at assembly.
     Authored hooks and schema imports are validated before any replacement.
+    Model-authored code around the rendered functions is then normalized:
+    ``ctx.emit`` literals point at declared events and repository code no
+    business logic references is removed (see ``module_authored_code``).
     """
     plan = detach(app_build_plan)
     if not isinstance(plan, dict):
         return {}
     contract = detach(data_contract)
+    aliases = canonical_write_event_aliases(contract)
     changed: dict[str, str] = {}
     allowed = set(owned_paths) if owned_paths is not None else None
     for path, content in files.items():
@@ -984,20 +1256,24 @@ def materialize_module_write_implementations(
         if not match:
             continue
         module_id = match[1]
+        if not _owned_collections(module_id, plan, contract):
+            continue
         manifest = yaml.safe_load(content)
         collections = _write_collections(module_id, plan, contract)
-        if not collections:
-            continue
         actions = manifest.get("actions") or []
         declared = {action["id"] for action in actions}
+        emits = {action["id"]: list(action.get("emits") or []) for action in actions}
         read_ids = _canonical_read_ids(module_id, plan, contract)
-        rendered_schemas = render_module_schemas(module_id, _owned_collections(module_id, plan, contract))
-        _reject_stale_schema_imports(module_id, files, rendered_schemas)
-        identifiers = [entity_identifier(collection["entity"]) for collection in collections]
-        service_source = files.get(f"modules/{module_id}/backend/service.py")
-        if service_source:
-            validate_write_hooks(f"modules/{module_id}/backend/service.py", service_source, identifiers)
         functions: list[dict[str, str]] = [{}, {}, {}]
+        write_events: dict[str, str] = {}
+        canonical_events: set[str] = set()
+        if collections:
+            rendered_schemas = render_module_schemas(module_id, _owned_collections(module_id, plan, contract))
+            _reject_stale_schema_imports(module_id, files, rendered_schemas)
+            identifiers = [entity_identifier(collection["entity"]) for collection in collections]
+            service_source = files.get(f"modules/{module_id}/backend/service.py")
+            if service_source:
+                validate_write_hooks(f"modules/{module_id}/backend/service.py", service_source, identifiers)
         for collection in collections:
             if collection["tenancy"] == "app_wide" and _protected_siblings(
                 actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
@@ -1011,13 +1287,20 @@ def materialize_module_write_implementations(
                 method = canonical_write_action_id(shape["entity"], operation)
                 if method not in declared:
                     raise ValueError(f"{module_id}: construct {method!r} in module.yaml before its implementation")
-                for layer, source in zip(functions, _write_functions(module_id, shape, operation), strict=True):
+                event_type = canonical_write_event_type(shape["entity"], operation)
+                canonical_events.add(event_type)
+                if event_type in emits[method]:
+                    write_events[method] = event_type
+                rendered = _write_functions(module_id, shape, operation, write_events.get(method))
+                for layer, source in zip(functions, rendered, strict=True):
                     layer[method] = source
-        if not functions[0]:
-            continue
+        sources = {
+            name: files[name] for name in files
+            if name.startswith(f"modules/{module_id}/backend/") and name.endswith(".py")
+        }
         for index, filename in enumerate(("handler.py", "service.py", "repo.py")):
             target = f"modules/{module_id}/backend/{filename}"
-            if allowed is not None and target not in allowed:
+            if not functions[index] or (allowed is not None and target not in allowed):
                 continue
             class_name = None
             if filename == "handler.py":
@@ -1025,10 +1308,29 @@ def materialize_module_write_implementations(
                 if not re.fullmatch(r"backend\.handler:[A-Za-z_][A-Za-z0-9_]*", entrypoint):
                     raise ValueError(f"{module_id}: canonical writes require module.handler=backend.handler:ClassName")
                 class_name = entrypoint.split(":", 1)[1]
-            source = files.get(target, "")
-            rendered = _replace_functions(source, functions[index], class_name=class_name)
-            if rendered != source:
-                changed[target] = rendered
+            sources[target] = _replace_functions(files.get(target, ""), functions[index], class_name=class_name)
+        events_source = files.get(f"modules/{module_id}/contracts/events.yaml")
+        events_document = yaml.safe_load(events_source) if events_source else None
+        declared_events = {
+            str(event.get("type")) for event in (events_document or {}).get("events") or [] if isinstance(event, dict)
+        } | {str(event) for values in emits.values() for event in values}
+        for filename in ("handler.py", "service.py"):
+            target = f"modules/{module_id}/backend/{filename}"
+            if target in sources and (allowed is None or target in allowed):
+                sources[target] = reconcile_emit_literals(
+                    target, sources[target], declared=declared_events, aliases=aliases, write_events=write_events,
+                    canonical_events=canonical_events,
+                )
+        repo_path = f"modules/{module_id}/backend/repo.py"
+        if repo_path in sources and (allowed is None or repo_path in allowed):
+            sources[repo_path] = prune_repository(
+                repo_path, sources[repo_path], module_id=module_id,
+                code_owned=set(functions[2]) | read_ids,
+                business_sources={name: text for name, text in sources.items() if name != repo_path},
+            )
+        for target, source in sources.items():
+            if source != files.get(target, "") and (allowed is None or target in allowed):
+                changed[target] = source
     return changed
 
 

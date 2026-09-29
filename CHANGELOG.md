@@ -80,6 +80,44 @@ This project follows a practical pre-1.0 changelog format:
     declared or stored. An `Account` holding a password hash, or a session store
     paired with login/logout, is recognized as platform identity.
   - Rejections name exactly what to change.
+
+- Outputs a selected capability pack ships from its templates are no longer
+  treated as model work. AppGenerator plan review stopped synthesizing a
+  `billing_portal` module_contract/data_models/business_services trio for the
+  MozaiksPay facade (whose module, schemas, handler and service the pack
+  templates provide), and `page_bundle` no longer owns the pack's billing,
+  pricing and usage pages; a worker's copy of any pack-owned path is discarded
+  with a logged normalization, assembly takes those files only from the
+  templates and checks the template pages themselves, and a template defect
+  names its pack and source directory. A live greenfield build failed at
+  assembly on exactly these paths. Page-schema errors now name the section,
+  its primitive, the offending field and the allowed fields or values instead
+  of "Field value does not match the registered page-schema contract", a page
+  whose bindings were rejected still reports its schema errors in the same
+  rejection, and a dotted metric key such as `items.total` whose final segment
+  is a returned top-level field is constructed to that field.
+
+- Code now builds what the generated module contracts determine, so the same
+  live run's `task_management` module reaches acceptance without hand fixes.
+  Canonical creates, updates and deletes own their events under one naming rule
+  (`domain.<entity>.<created|updated|deleted>`): an approved spelling such as
+  `task.created` is reconciled to it, its events.yaml entry is rendered with
+  the stored record as payload, and the rendered service emits it after the
+  write. Custom events keep their names; an emit and a declaration that differ
+  only by the `domain.` prefix are reconciled, and anything else is rejected in
+  one message naming both sides. Model-authored repository code that neither
+  business logic nor any import-time statement reaches (the live run's dead
+  `TaskRepo` class with Motor calls) is removed with a logged normalization,
+  and a dynamic import of the module prunes nothing; a repository class or
+  Motor call that business logic does use is rejected at task time with its
+  site. A gated canonical
+  create or delete on a listed collection gets a `New <Entity>` toolbar action
+  with a modal form or a Delete row action with a confirmation dialog. A module
+  owning `per_user` collections gets `user_data_scope: true` and a
+  code-rendered account-data handler that exports and deletes the owner's rows
+  through runtime-scoped persistence, which the account routes now inject into
+  handlers that declare `persistence`.
+
 - DesignDocs recognizes the platform's login/user system by what a surface
   declares, not what it is called. A surface such as `user_management` or
   `auth_module` normalizes to the platform when it declares a platform identity

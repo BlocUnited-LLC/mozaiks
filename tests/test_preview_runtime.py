@@ -128,22 +128,24 @@ async def test_preview_account_routes_reach_module_persistence(app_root, monkeyp
         app_id="preview-app", user_id="owner-a", email=None, name=None,
         roles=[], scopes=[], raw_claims={}, provider="test",
     )
+    # The routes read the loaded data contract from app state to scope handler persistence.
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
     own = contexts[0]
     own_rows = client[own.database_name][own.collection_name("user_onboarding", "status")].docs
     foreign = contexts[2]
     foreign_rows = client[foreign.database_name][foreign.collection_name("user_onboarding", "status")].docs
     if action == "export":
-        response = json.loads((await account.export_account_data(principal=principal)).body)
+        response = json.loads((await account.export_account_data(request, principal=principal)).body)
         assert response["user_onboarding_status"] == [
             {"app_id": "preview-app", "user_id": "owner-a", "seen_welcome": True},
         ]
         assert len(own_rows) == 2
     else:
-        response = json.loads((await account.delete_account(principal=principal)).body)
+        response = json.loads((await account.delete_account(request, principal=principal)).body)
         assert response["results"]["user_onboarding"] == {"deleted_count": 1}
         remaining = client[own.database_name][own.collection_name("user_onboarding", "status")].docs
         assert [row["user_id"] for row in remaining] == ["owner-b"]
-        repeated = json.loads((await account.delete_account(principal=principal)).body)
+        repeated = json.loads((await account.delete_account(request, principal=principal)).body)
         assert repeated["results"]["user_onboarding"] == {"deleted_count": 0}
     assert foreign_rows == [{"app_id": "other-app", "user_id": "owner-a", "seen_welcome": True}]
     assert app_data.app_data_from_context(None, contract={}).db is client[own.database_name]

@@ -6,13 +6,13 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import approved_tas
 from mozaiksai.core.workflow import task_batches as tb
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
-from tests.test_app_plan_task_identity_repair import _live_plan, _review
+from tests.test_app_plan_task_identity_repair import _live_plan, _review, _with_second_app_module
 from tests.test_continuous_deterministic_materialization import _load_models
 
 
 def test_repaired_module_tasks_receive_their_own_accepted_contract_outputs():
     _load_models()
-    plan, context = _live_plan()
+    plan, context = _with_second_app_module(*_live_plan())
     assert isinstance(context, ContextVariablesBridge)
     cached = _review(plan, context)
     queued = detach(context.get("app_task_batch_items"))
@@ -37,7 +37,7 @@ def test_repaired_module_tasks_receive_their_own_accepted_contract_outputs():
     assert len(collected["_meta"]["completed_tasks"]) == len(completed)
     assert approved_task_inventory(context) == cached["build_tasks"]
 
-    for module_id in ("task_management", "billing_portal"):
+    for module_id in ("task_management", "invoices"):
         task = next(item for item in queued if (
             item["capability_pack_id"] == module_id and item["task_type"] == "business_services"
         ))
@@ -56,5 +56,5 @@ def test_repaired_module_tasks_receive_their_own_accepted_contract_outputs():
             dependency_id = f"{module_id}.{kind}"
             assert prerequisite_outputs[dependency_id]["task_id"] == dependency_id
             assert prerequisite_outputs[dependency_id] == collected[dependency_id]
-        foreign = "billing_portal" if module_id == "task_management" else "task_management"
+        foreign = "invoices" if module_id == "task_management" else "task_management"
         assert not any(identifier.startswith(f"{foreign}.") for identifier in prerequisite_outputs)

@@ -502,6 +502,102 @@ def extract_code_file_entries_from_payload(
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 
+_FILE_ENTRY_LANES = ("code_files", "python_files", "database_files", "model_files", "js_files")
+_APP_SCHEMA_JSON_OUTPUTS = {
+    "theme_config_patch": "brand/theme_config.json",
+    "shell_config": "config/shell.json",
+    "asset_manifest": "config/asset_manifest.json",
+}
+
+
+def discard_pack_owned_outputs(payload: Any, pack_paths: frozenset[str]) -> tuple[Any, list[str]]:
+    """Remove every representation of a pack-owned path from a worker payload.
+
+    Selected packs write these paths from their templates, so a worker's copy
+    is never validated or assembled: file entries, typed pages, typed module
+    contract fields and the other typed app-schema outputs that would
+    materialize at one of these paths are dropped, and so is a request to
+    delete one. Returns the payload without them and the sorted dropped paths.
+    """
+    unwrapped = _unwrap_output_envelope(payload)
+    if not pack_paths or not isinstance(unwrapped, dict):
+        return payload, []
+    result = deepcopy(unwrapped)
+    dropped: set[str] = set()
+
+    def pack_owned(raw: Any) -> str | None:
+        safe = safe_relpath(str(raw or ""))
+        path = _canonical_generated_path(safe) if safe else None
+        return path if path in pack_paths else None
+
+    def keep_entries(entries: Any, *name_keys: str) -> Any:
+        if not isinstance(entries, list):
+            return entries
+        kept = []
+        for item in entries:
+            if isinstance(item, str):
+                raw: Any = item
+            elif isinstance(item, dict):
+                raw = next((item[key] for key in name_keys if item.get(key)), None)
+            else:
+                raw = None
+            path = pack_owned(raw)
+            if path:
+                dropped.add(path)
+                continue
+            kept.append(item)
+        return kept
+
+    for lane in _FILE_ENTRY_LANES:
+        if lane in result:
+            result[lane] = keep_entries(result[lane], "filename", "path")
+    foundation = result.get("service_foundation_bundle")
+    if isinstance(foundation, dict) and "files" in foundation:
+        foundation["files"] = keep_entries(foundation["files"], "path")
+    if isinstance(result.get("pages"), list):
+        kept_pages = []
+        for page in result["pages"]:
+            path = f"ui/pages/{_page_file_stem(page)}.yaml" if isinstance(page, dict) else None
+            if path in pack_paths:
+                dropped.add(path)
+                continue
+            kept_pages.append(page)
+        result["pages"] = kept_pages
+    for key, path in _APP_SCHEMA_JSON_OUTPUTS.items():
+        if path in pack_paths and result.get(key) is not None:
+            result[key] = None
+            dropped.add(path)
+    routes = result.get("custom_route_bundle")
+    if isinstance(routes, dict):
+        if "ui/route_manifest.json" in pack_paths and routes.get("route_manifest") is not None:
+            routes["route_manifest"] = None
+            dropped.add("ui/route_manifest.json")
+        if "ui/index.js" in pack_paths and routes.get("ui_index") is not None:
+            routes["ui_index"] = None
+            dropped.add("ui/index.js")
+        if "page_files" in routes:
+            routes["page_files"] = keep_entries(routes["page_files"], "path")
+    if "ui/index.js" in pack_paths and result.get("registration_barrel") is not None:
+        result["registration_barrel"] = None
+        dropped.add("ui/index.js")
+    bundle = result.get("module_contract")
+    if isinstance(bundle, dict) and str(bundle.get("module_id") or "").strip():
+        prefix = PurePosixPath("modules", str(bundle["module_id"]).strip())
+        for key, relative_path in _MODULE_CONTRACT_OUTPUT_PATHS.items():
+            path = str(prefix / relative_path)
+            if path in pack_paths and bundle.get(key) is not None:
+                bundle[key] = None
+                dropped.add(path)
+    if "deleted_files" in result:
+        result["deleted_files"] = keep_entries(result["deleted_files"], "filename", "path")
+    if not dropped:
+        return payload, []
+    if unwrapped is not payload:
+        key = next(iter(payload))
+        return {key: result}, sorted(dropped)
+    return result, sorted(dropped)
+
+
 def extract_deleted_file_paths_from_payload(payload: Any) -> list[str]:
     """Resolve deleted generated file paths from a structured output payload."""
     payload = _unwrap_output_envelope(payload)
@@ -528,6 +624,7 @@ def extract_deleted_file_paths_from_payload(payload: Any) -> list[str]:
 
 
 __all__ = [
+    "discard_pack_owned_outputs",
     "extract_code_file_entries_from_payload",
     "extract_code_file_map_from_payload",
     "extract_deleted_file_paths_from_payload",

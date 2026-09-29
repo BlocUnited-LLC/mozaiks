@@ -42,7 +42,8 @@ def test_nested_submit_feedback_preserves_the_runtime_reason(href):
     with pytest.raises(ValueError) as caught:
         validate_planned_page(yaml.safe_dump(page), {"route": "/records"}, "ui/pages/records.yaml")
     message = str(caught.value)
-    assert "$.sections[1].children[0].submit_action" in message
+    assert "$.sections[1].config.children[0].config.submit_action" in message
+    assert "Form section 'edit-form'" in message
     assert "submit actions require href" in message
     assert "input_value" not in message
     assert "selected_row.record_id" not in message
@@ -62,7 +63,7 @@ def test_builder_action_feedback_uses_only_known_runtime_messages(action_type, r
     assert "Synthetic private text" not in str(caught.value)
 
 
-def test_unrecognized_runtime_value_errors_stay_sanitized():
+def test_contract_rules_are_relayed_without_the_rejected_value():
     page = _page()
     page["sections"] = [
         {"id": "synthetic-private-value", "primitive": "PageHeader", "config": {"title": "One"}},
@@ -71,8 +72,8 @@ def test_unrecognized_runtime_value_errors_stay_sanitized():
     with pytest.raises(ValueError) as caught:
         validate_planned_page(yaml.safe_dump(page), {"route": "/records"}, "ui/pages/records.yaml")
     assert "page_schema.value_error" in str(caught.value)
+    assert "section ids must be unique within a page; sections[1] repeats" in str(caught.value)
     assert "synthetic-private-value" not in str(caught.value)
-    assert "duplicate section" not in str(caught.value)
 
 
 def test_separate_create_edit_forms_satisfy_the_unchanged_runtime_contract():

@@ -9,6 +9,7 @@ begins) and read-only thereafter, so no locking is required.
 """
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -30,9 +31,10 @@ class AccountDataRegistry:
     ) -> None:
         """Register a handler for *module_id*.
 
-        *handler* may be a class (instantiated per-request with a ``db``
-        argument) or a pre-constructed instance.  When a class is registered
-        the platform passes the active ``db`` at dispatch time.
+        *handler* may be a class (instantiated per request) or a
+        pre-constructed instance.  A class receives, by keyword, the resources
+        its constructor declares: ``db`` (the app database) and/or
+        ``persistence`` (the requesting account's runtime-scoped persistence).
         """
         if module_id in self._handlers:
             logger.warning(
@@ -50,6 +52,7 @@ class AccountDataRegistry:
         app_id: str,
         user_id: str,
         db: Any,
+        persistence: Any = None,
     ) -> dict[str, Any]:
         """Call ``delete_user_data`` on every registered handler.
 
@@ -59,8 +62,8 @@ class AccountDataRegistry:
         """
         results: dict[str, Any] = {}
         for module_id, handler in self._handlers.items():
-            instance = _resolve_instance(handler, db)
             try:
+                instance = _resolve_instance(handler, db, persistence)
                 result = await instance.delete_user_data(app_id=app_id, user_id=user_id)
                 results[module_id] = result
                 logger.info(
@@ -87,6 +90,7 @@ class AccountDataRegistry:
         app_id: str,
         user_id: str,
         db: Any,
+        persistence: Any = None,
     ) -> dict[str, Any]:
         """Call ``export_user_data`` on every registered handler.
 
@@ -95,8 +99,8 @@ class AccountDataRegistry:
         """
         export: dict[str, Any] = {}
         for module_id, handler in self._handlers.items():
-            instance = _resolve_instance(handler, db)
             try:
+                instance = _resolve_instance(handler, db, persistence)
                 module_export = await instance.export_user_data(app_id=app_id, user_id=user_id)
                 export.update(module_export or {})
             except Exception as exc:
@@ -111,17 +115,42 @@ class AccountDataRegistry:
         return export
 
 
+def account_handler_arguments(handler_cls: type, *, db: Any, persistence: Any) -> dict[str, Any]:
+    """The keyword arguments a handler class is constructed with.
+
+    ``persistence`` is passed only to a constructor that names it; every other
+    constructor, including ``__init__(self, **kwargs)``, receives ``db`` as it
+    always has. The loader binds the same arguments to validate a handler.
+    """
+    parameters = inspect.signature(handler_cls).parameters
+    named = {
+        name for name, parameter in parameters.items()
+        if parameter.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    }
+    accepts_any = any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+    arguments: dict[str, Any] = {}
+    if "persistence" not in named or "db" in named or accepts_any:
+        arguments["db"] = db
+    if "persistence" in named:
+        arguments["persistence"] = persistence
+    return arguments
+
+
 def _resolve_instance(
     handler: type[AccountDataHandler] | AccountDataHandler,
     db: Any,
+    persistence: Any = None,
 ) -> AccountDataHandler:
     """Return a handler instance.
 
-    If *handler* is a class, construct it with ``db`` as a keyword argument.
+    If *handler* is a class, construct it with ``account_handler_arguments``.
     If it's already an instance, return it directly.
     """
     if isinstance(handler, type):
-        return handler(db=db)  # type: ignore[call-arg]
+        arguments = account_handler_arguments(handler, db=db, persistence=persistence)
+        if "persistence" in arguments and persistence is None:
+            raise RuntimeError("account handler requires runtime persistence, but none was supplied")
+        return handler(**arguments)
     return handler
 
 

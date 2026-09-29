@@ -1310,12 +1310,17 @@ class ModuleLoader:
                 candidate for _, candidate in inspect.getmembers(mod, inspect.isclass)
                 if candidate.__module__ == mod.__name__
             ]
+            from mozaiksai.core.account.registry import account_handler_arguments
+
             valid = []
             for candidate in candidates:
                 if not inspect.isclass(candidate):
                     continue
                 try:
-                    inspect.signature(candidate).bind(db=None)
+                    # Bind exactly what the account routes will pass (db, or persistence when named).
+                    inspect.signature(candidate).bind(
+                        **account_handler_arguments(candidate, db=None, persistence=None),
+                    )
                     for method_name in ("delete_user_data", "export_user_data"):
                         method = getattr(candidate, method_name, None)
                         if not inspect.iscoroutinefunction(method):
@@ -1326,7 +1331,7 @@ class ModuleLoader:
                 valid.append(candidate)
             if len(valid) != 1:
                 raise ValueError(
-                    "export one AccountDataHandler class with __init__(db) and async "
+                    "export one AccountDataHandler class with __init__(db) or __init__(persistence) and async "
                     "delete_user_data(*, app_id, user_id) / export_user_data(*, app_id, user_id)"
                 )
             from mozaiksai.core.account import AccountDataHandler, account_data_registry

@@ -19,17 +19,37 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from mozaiksai.core.account import account_data_registry
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import validate_user_id_against_principal
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
-from mozaiksai.core.runtime.persistence import app_data_from_context
+from mozaiksai.core.runtime.persistence import (
+    MongoPersistenceContext,
+    PersistencePrincipal,
+    app_data_from_context,
+)
 
 router = APIRouter(tags=["account"])
 logger = logging.getLogger("mozaiks_app.account_router")
+
+
+def _account_persistence(request: Request, principal: UserPrincipal, *, app_id: str, user_id: str) -> Any:
+    """The requesting account's persistence, scoped as a module action's would be.
+
+    The loaded app's data contract (``app.state.data_contract``) binds collection
+    names and per-user ownership, so owned collections only ever match the
+    authenticated account's rows.
+    """
+    return MongoPersistenceContext(
+        app_id=app_id,
+        user_id=user_id,
+        data_contract=getattr(request.app.state, "data_contract", None),
+        principal=PersistencePrincipal.from_authenticated_user(principal),
+    )
+
 
 # ---------------------------------------------------------------------------
 # DELETE /api/account
@@ -41,6 +61,7 @@ logger = logging.getLogger("mozaiks_app.account_router")
     status_code=200,
 )
 async def delete_account(
+    request: Request,
     principal: UserPrincipal = Depends(require_user_scope),
 ) -> JSONResponse:
     """Permanently delete the authenticated user's account.
@@ -67,6 +88,7 @@ async def delete_account(
         app_id=app_id,
         user_id=user_id,
         db=db,
+        persistence=_account_persistence(request, principal, app_id=app_id, user_id=user_id),
     )
 
     # Platform hook — hosted product can cancel subscriptions, revoke OIDC, etc.
@@ -109,6 +131,7 @@ async def delete_account(
     status_code=200,
 )
 async def export_account_data(
+    request: Request,
     principal: UserPrincipal = Depends(require_user_scope),
 ) -> JSONResponse:
     """Return a machine-readable JSON archive of all user-owned data.
@@ -136,6 +159,7 @@ async def export_account_data(
         app_id=app_id,
         user_id=user_id,
         db=db,
+        persistence=_account_persistence(request, principal, app_id=app_id, user_id=user_id),
     )
     export_payload.update(module_export)
 

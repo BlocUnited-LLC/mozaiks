@@ -143,9 +143,13 @@ def _actions(closed):
     return {action["id"]: action for action in closed["module_contract"]["module_yaml"]["actions"]}
 
 
-def _files(contract=None, model_files=None):
+def _design(events):
+    return {"surfaces": [{"surface_id": MODULE, "surface_kind": "module", "events_emitted": list(events)}]}
+
+
+def _files(contract=None, model_files=None, design_surface_map=None):
     contract = contract or _contract()
-    files = extract_code_file_map_from_payload(_closed(contract=contract))
+    files = extract_code_file_map_from_payload(_closed(contract=contract, design_surface_map=design_surface_map))
     files.update(model_files or {})
     files.update(materialize_module_schemas(files, app_build_plan=_plan(), data_contract=contract))
     files.update(materialize_module_policies(files, contract))
@@ -226,7 +230,8 @@ def test_authored_permissions_on_owner_scoped_writes_are_stripped_with_a_logged_
         closed = _closed(output, _contract(tenancy))
     actions = _actions(closed)
     assert actions["create_task"]["permissions"] == [] and actions["create_task"]["api_surface"] is None
-    assert actions["create_task"]["emits"] == ["domain.tasks.task_created"]
+    # 'domain.tasks.task_created' names the canonical create event under the one naming rule.
+    assert actions["create_task"]["emits"] == ["domain.task.created"]
     assert actions["update_task"]["entitlement_gate"] == "task.edit"
     assert actions["update_task"]["permissions"] == []
     # The stripped catalogue entries go with them; a still-referenced declaration stays.
@@ -705,15 +710,12 @@ async def test_generated_writes_scope_stamp_and_hook_through_the_real_adapter(tm
             "        from mozaiksai.core.runtime import ModuleInputValidationError\n"
             "        raise ModuleInputValidationError('blank title')\n"
             "    return {**values, 'title': values['title'].strip()}\n\n"
-            "async def after_create_task(ctx, record):\n"
-            "    await ctx.emit('domain.tasks.task_created', {'task_id': record['task_id']})\n\n"
             "async def before_update_task(ctx, record, changes):\n"
-            "    return {**changes, 'title': changes.get('title', record['title']).upper()}\n\n"
-            "async def after_delete_task(ctx, record):\n"
-            "    await ctx.emit('domain.tasks.task_deleted', {'task_id': record['task_id']})\n"
+            "    return {**changes, 'title': changes.get('title', record['title']).upper()}\n"
         ),
     }
-    files = _files(_contract(tenancy), model_files=hooks)
+    # The approved design names the create and delete events; the rendered service emits them.
+    files = _files(_contract(tenancy), model_files=hooks, design_surface_map=_design(["task.created", "task.deleted"]))
     handler_module, _service = _import_backend(tmp_path, monkeypatch, files, f"generated_writes_{tenancy}")
     handler = handler_module.TaskManagementHandler()
     raw = _RawCollection()
@@ -726,7 +728,7 @@ async def test_generated_writes_scope_stamp_and_hook_through_the_real_adapter(tm
     assert item[owner] == ("a" if tenancy == "per_user" else "space-a")
     assert item["created_at"] == item["updated_at"] and len(item["task_id"]) == 32
     assert set(item) == {"task_id", owner, "title", "description", "is_completed", "priority", "created_at", "updated_at"}
-    assert user_a.events == [("domain.tasks.task_created", {"task_id": item["task_id"]})]
+    assert user_a.events == [("domain.task.created", item)]
     stored = raw.rows[0]
     assert stored["app_id"] == "app" and stored[owner] == item[owner]
     with pytest.raises(ModuleInputValidationError):
@@ -750,7 +752,12 @@ async def test_generated_writes_scope_stamp_and_hook_through_the_real_adapter(tm
             await attempt
     assert raw.rows[0]["title"] == "EDITED"
     assert await handler.delete_task(user_a, task_id=item["task_id"]) == {"deleted": True}
-    assert user_a.events[-1] == ("domain.tasks.task_deleted", {"task_id": item["task_id"]})
+    deleted_event, deleted_payload = user_a.events[-1]
+    assert deleted_event == "domain.task.deleted" and deleted_payload["task_id"] == item["task_id"]
+    assert deleted_payload["title"] == "EDITED"  # the stored record at deletion
+    assert [event for event, _payload in user_a.events] == [
+        "domain.task.created", "domain.task.created", "domain.task.deleted",
+    ]
     assert [row["task_id"] for row in (await handler.list_tasks(user_a))["items"]] == [second["item"]["task_id"]]
     with pytest.raises(PersistenceScopeError):
         await user_b.persistence.collection(MODULE, "tasks").insert_one({owner: "a", "task_id": "forged"})
@@ -822,7 +829,11 @@ async def test_task_batch_builds_writes_from_empty_model_output_and_applies_appr
     }, {
         "task_id": "service", "task_type": "business_services", "capability_pack_id": MODULE,
         "initial_agent": "ServiceAgent", "initial_message": "Implement hooks and custom actions.",
-        "owned_paths": [f"{BACKEND}/handler.py", f"{BACKEND}/service.py", f"{BACKEND}/repo.py", f"{BACKEND}/policy.py"],
+        # Plan review assigns the per_user module's code-rendered account-data handler here.
+        "owned_paths": [
+            f"{BACKEND}/handler.py", f"{BACKEND}/service.py", f"{BACKEND}/repo.py", f"{BACKEND}/policy.py",
+            f"{BACKEND}/account_data_handler.py",
+        ],
         "depends_on": ["contract", "models"],
     }]
     plan = {**_plan(), "build_tasks": tasks}

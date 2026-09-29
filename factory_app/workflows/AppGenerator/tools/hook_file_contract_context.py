@@ -13,6 +13,7 @@ from mozaiksai.core.runtime.persistence.adapter import PersistenceCollection
 from mozaiksai.core.runtime.persistence.naming import collection_name_for
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +181,14 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         task = _context_get(context, "current_build_task", {}) or {}
         module = (_context_get(context, "module_contract", {}) or {}).get("module_yaml") or {}
         owns_handler = any(str(path).endswith("/backend/account_data_handler.py") for path in task.get("owned_paths") or [])
-        if owns_handler or (module.get("module") or {}).get("user_data_scope"):
+        module_id = str(task.get("capability_pack_id") or (module.get("module") or {}).get("id") or "")
+        if module_id and owns_per_user_collections(module_id, _context_get(context, "data_contract")):
+            lines.append(
+                f"modules/{module_id}/backend/account_data_handler.py is rendered by code from the module's "
+                "per_user collections (export and delete of the account owner's rows through runtime-scoped "
+                "persistence). Do not author it; a written copy is replaced."
+            )
+        elif owns_handler or (module.get("module") or {}).get("user_data_scope"):
             contract = (file_contracts.get("backend_helper_files") or {}).get("account_data_handler")
             if contract:
                 import yaml

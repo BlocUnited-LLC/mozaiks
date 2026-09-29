@@ -1154,6 +1154,35 @@ def test_module_loader_registers_account_handler_with_relative_imports(tmp_path:
     assert account_data_registry.registered_module_ids() == ["tasks"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("constructor", "received"), [
+    ("def __init__(self, **kwargs): self.received = kwargs", {"db": "the-db"}),
+    ("def __init__(self, db): self.received = {'db': db}", {"db": "the-db"}),
+    ("def __init__(self, persistence): self.received = {'persistence': persistence}", {"persistence": "scoped"}),
+])
+async def test_account_handler_constructors_receive_what_they_declare(
+    tmp_path: Path, monkeypatch, constructor: str, received: dict,
+) -> None:
+    """``**kwargs`` and ``db`` constructors load and receive ``db`` as on main; ``persistence`` only when named."""
+    import mozaiksai.core.account as account
+    from mozaiksai.core.account import AccountDataRegistry
+
+    registry = AccountDataRegistry()
+    monkeypatch.setattr(account, "account_data_registry", registry)
+    module_dir = _write_canonical_module(tmp_path)
+    manifest = module_dir / "module.yaml"
+    manifest.write_text(manifest.read_text().replace("  handler: backend.handler:TasksModule", "  handler: backend.handler:TasksModule\n  user_data_scope: true"))
+    (module_dir / "backend/account_data_handler.py").write_text(
+        "class AccountDataHandler:\n"
+        f"    {constructor}\n"
+        "    async def delete_user_data(self, *, app_id, user_id): return {'received': self.received}\n"
+        "    async def export_user_data(self, *, app_id, user_id): return {}\n"
+    )
+    ModuleLoader(str(tmp_path)).load("tasks")
+    results = await registry.delete_all(app_id="app", user_id="u", db="the-db", persistence="scoped")
+    assert results == {"tasks": {"received": received}}
+
+
 def test_module_loader_rejects_missing_handler_method(tmp_path: Path) -> None:
     """Loader must raise ModuleLoadError when module.yaml declares a
     handler_method that does not exist on the handler class.

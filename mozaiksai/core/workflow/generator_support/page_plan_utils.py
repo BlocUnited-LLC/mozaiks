@@ -9,7 +9,6 @@ from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
-from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.page_schema import PageSchemaValidationError, validate_page_schema
 from mozaiksai.core.workflow.context.frozen import detach
@@ -20,7 +19,7 @@ from .code_files import (
     extract_deleted_file_paths_from_payload,
     safe_relpath,
 )
-from .module_action_inventory import all_module_actions, managed_pack_output_paths
+from .module_action_inventory import all_module_actions, pack_template_module_contracts
 from .page_action_bindings import generated_workflow_names, page_workflow_binding_errors
 from .page_binding_construction import construct_page_bindings
 from .page_data_bindings import page_data_binding_errors, schema_at_path, schema_field_paths
@@ -395,7 +394,11 @@ def module_action_index(file_map: dict[str, str]) -> ModuleActionIndex:
 
 
 def _page_reference_files(context: Any) -> dict[str, str]:
-    """Read admitted files and declared dependencies shared by page references."""
+    """Read admitted files, declared dependencies and pack template module contracts.
+
+    No task authors a module a selected pack's templates provide, so its
+    contract is read from the template assembly will apply.
+    """
     if context is None:
         return {}
     files = detach(context.get("generated_files")) or {}
@@ -407,6 +410,7 @@ def _page_reference_files(context: Any) -> dict[str, str]:
         files.update(extract_code_file_map_from_payload(output))
     for path in extract_deleted_file_paths_from_payload({"deleted_files": detach(context.get("deleted_files"))}):
         files.pop(path, None)
+    files.update(pack_template_module_contracts(context))
     return files
 
 
@@ -467,7 +471,6 @@ def compile_page_data_sources(
     workflow_names: set[str] | None = None,
     data_contract: Any = None,
     design_surface_map: Any = None,
-    template_owned: bool = False,
     path: str | None = None,
 ) -> int:
     """Compile explicit module/action pairs; never resolve identities from URLs.
@@ -477,10 +480,7 @@ def compile_page_data_sources(
 
     With the approved ``data_contract`` and ``design_surface_map`` the compiler
     also writes the bindings those contracts determine (see
-    ``page_binding_construction``) before checking what remains. A page at a
-    ``template_owned`` path is a placeholder a selected pack replaces at
-    assembly: its references are compiled so the page stays well formed, but
-    its bindings are checked against the template contracts, not the author's.
+    ``page_binding_construction``) before checking what remains.
     """
     count = 0
     label = path or (str(document.get("name") or "page") if isinstance(document, dict) else "page")
@@ -517,7 +517,7 @@ def compile_page_data_sources(
                     for value in (module_id, action_id)
                 ):
                     reference_errors.append(f"{location}.data_source requires canonical identifier strings")
-                elif action_id not in modules.get(module_id, {}) and not template_owned:
+                elif action_id not in modules.get(module_id, {}):
                     reference_errors.append(
                         f"{location}.data_source references unknown module/action '{module_id}/{action_id}'"
                     )
@@ -531,11 +531,6 @@ def compile_page_data_sources(
             walk(child, f"{location}.{key}")
 
     walk(document, str(document.get("name") or "page") if isinstance(document, dict) else "page")
-    if template_owned:
-        if reference_errors:
-            raise ValueError("; ".join(reference_errors))
-        logger.info("[pages] %s: a selected pack template replaces this page; bindings defer to the template", label)
-        return count
     contracts = {f"{module_id}/{action_id}": action for module_id, actions in modules.items() for action_id, action in actions.items()}
     normalized = _materialize_table_response_keys(document, contracts)
     constructed = construct_page_bindings(
@@ -560,8 +555,9 @@ def compile_authored_page_files(
     Every page is closed before any rejection is raised, so a worker's one
     bounded correction sees every page's errors at once. With ``failures``
     supplied, the per-page messages are appended there instead of raised and a
-    failed page keeps its authored content, so the caller can run its later
-    checks and raise everything together.
+    failed page keeps what compilation made of it (data sources resolved to
+    endpoints where they could be), so the caller can run its structural
+    checks on it and raise everything together.
     """
     payload = _unwrap_output_envelope(detach(payload))
     bundle = payload.get("module_contract") if isinstance(payload, dict) else None
@@ -579,7 +575,6 @@ def compile_authored_page_files(
         if match:
             modules.pop(match[1], None)
     workflows = generated_workflow_names({**_page_reference_files(context), **files}, context)
-    template_paths = managed_pack_output_paths(context)
     data_contract = detach(context.get("data_contract"))
     surface_map = detach(context.get("design_surface_map"))
     compiled = dict(files)
@@ -594,6 +589,7 @@ def compile_authored_page_files(
         # extraction. Identical admitted bytes are readback, not new authoring.
         if path == typed_admin or admitted.get(path) == content:
             continue
+        document: Any = None
         try:
             try:
                 document = yaml.safe_load(content)
@@ -605,11 +601,13 @@ def compile_authored_page_files(
             if compile_page_data_sources(
                 document, inventory, reject_api_endpoints=True, workflow_names=workflows,
                 data_contract=None if admin else data_contract, design_surface_map=None if admin else surface_map,
-                template_owned=path in template_paths, path=path,
+                path=path,
             ):
                 compiled[path] = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
         except ValueError as exc:
             failures.append(_prefixed_failure(path, exc))
+            if isinstance(document, dict):
+                compiled[path] = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
     if failures and raise_failures:
         raise ValueError("\n".join(failures))
     return compiled
@@ -626,7 +624,6 @@ def normalize_planned_page_content(
     workflow_names: set[str] | None = None,
     data_contract: Any = None,
     design_surface_map: Any = None,
-    template_owned: bool = False,
 ) -> str:
     """Return page YAML with table primitives corrected, or the original.
 
@@ -640,75 +637,118 @@ def normalize_planned_page_content(
         return content
     if not isinstance(document, dict):
         return content
+    restructured = _normalize_page_structure(document, path)
+    compiled = compile_page_data_sources(
+        document, modules or {}, reject_api_endpoints=reject_api_endpoints, workflow_names=workflow_names,
+        data_contract=data_contract, design_surface_map=design_surface_map, path=path or None,
+    )
+    renamed = _align_page_name(document, path)
+    if not restructured and not compiled and not renamed:
+        return content
+    return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
+
+
+def normalize_page_structure(content: str, *, path: str = "") -> str:
+    """Apply the structural corrections of :func:`normalize_planned_page_content` only.
+
+    A page whose bindings were already rejected still gets these corrections,
+    so its schema errors join the same rejection instead of the next attempt.
+    """
+    try:
+        document = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return content
+    if not isinstance(document, dict):
+        return content
+    restructured = _normalize_page_structure(document, path)
+    renamed = _align_page_name(document, path)
+    if not restructured and not renamed:
+        return content
+    return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
+
+
+def _normalize_page_structure(document: dict[str, Any], path: str) -> bool:
     promoted = promote_page_table_primitives(document)
     # Before the resolver: a stated target must not be overwritten by a guess.
     materialized = materialize_modal_targets(document)
     declared = declare_the_intended_modal(document)
+    retargeted = resolve_modal_action_targets(document)
     if declared:
         logger.info("[pages] %s: declared the intended Modal %r", path or "page", declared)
-    retargeted = resolve_modal_action_targets(document)
-    compiled = compile_page_data_sources(
-        document, modules or {}, reject_api_endpoints=reject_api_endpoints, workflow_names=workflow_names,
-        data_contract=data_contract, design_surface_map=design_surface_map, template_owned=template_owned,
-        path=path or None,
-    )
-    renamed = align_page_name_with_file(document, path)
-    if not promoted and not retargeted and renamed is None and not declared and not compiled and not materialized:
-        return content
-    if renamed is not None:
-        logger.info("[pages] %s: name %r -> file identity", path or "page", renamed)
     if promoted:
         logger.info("[pages] %s: promoted %d DataTable -> ResourceTable", path or "page", promoted)
     if retargeted:
         logger.info("[pages] %s: pointed %d modal action(s) at a declared Modal", path or "page", retargeted)
     if materialized:
         logger.info("[pages] %s: carried %d typed modal target(s) into the payload", path or "page", materialized)
-    return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
+    return bool(promoted or materialized or declared or retargeted)
 
 
-# The runtime sanitizes validation text to "Field value does not match the
-# registered page-schema contract", which tells a repairing agent nothing about
-# WHICH rule it broke. These five messages are written by the page contract
-# itself and contain no author input, so they are safe to relay verbatim. Kept
-# in one place because both validation lanes need them and a second copy would
-# drift the moment the contract reworded one.
-_RELAYABLE_ACTION_MESSAGES = frozenset({
-    "Value error, navigate actions require href",
-    "Value error, submit actions require href",
-    "Value error, delete actions require href",
-    "Value error, event actions require event_type",
-    "Value error, workflow actions require workflow_id",
-})
+def _align_page_name(document: dict[str, Any], path: str) -> bool:
+    renamed = align_page_name_with_file(document, path)
+    if renamed is not None:
+        logger.info("[pages] %s: name %r -> file identity", path or "page", renamed)
+    return renamed is not None
 
 
-def relayable_action_reasons(error: Exception) -> list[str]:
-    """Input-free reasons behind a page rejection, or nothing if none apply."""
-    cause = getattr(error, "__cause__", None)
-    if not isinstance(cause, ValidationError):
-        return []
-    return sorted({
-        item["msg"].removeprefix("Value error, ")
-        for item in cause.errors(include_input=False, include_context=False, include_url=False)
-        if item["type"] == "value_error" and item["msg"] in _RELAYABLE_ACTION_MESSAGES
-    })
+def page_schema_error_details(error: PageSchemaValidationError, *, expected_name: str | None = None) -> str:
+    """Every page-schema diagnostic as ``location: code: message``, joined for one rejection."""
+    details = "; ".join(f"{item.location}: {item.code}: {item.message}" for item in error.diagnostics)
+    if expected_name and any(item.code == "page_schema.name_mismatch" for item in error.diagnostics):
+        details += f" Runtime page name must match file identity {expected_name!r}; keep the display label in title."
+    return details
 
 
 def validate_planned_page(content: str, planned: dict[str, Any], path: str) -> None:
+    expected_name = PurePosixPath(path).stem
     try:
         document = yaml.safe_load(content)
         if not isinstance(document, dict):
             raise ValueError("page must be a YAML object")
-        expected_name = PurePosixPath(path).stem
         page = validate_page_schema(document, expected_name=expected_name)
         if page.route != planned["route"]:
             raise ValueError(f"route must preserve approved {planned['route']!r}")
     except PageSchemaValidationError as error:
-        details = "; ".join(f"{item.location}: {item.code}: {item.message}" for item in error.diagnostics)
-        reasons = relayable_action_reasons(error)
-        if reasons:
-            details += " Action requirements: " + "; ".join(reasons) + "."
-        if any(item.code == "page_schema.name_mismatch" for item in error.diagnostics):
-            details += f" Runtime page name must match file identity {expected_name!r}; keep the display label in title."
-        raise ValueError(f"{path}: {details}") from error
+        raise ValueError(f"{path}: {page_schema_error_details(error, expected_name=expected_name)}") from error
     except (ValueError, yaml.YAMLError) as error:
         raise ValueError(f"{path}: {error}") from error
+
+
+def pack_template_page_errors(
+    content: str,
+    *,
+    path: str,
+    modules: ModuleActionIndex,
+    workflow_names: set[str] | None = None,
+    planned: dict[str, Any] | None = None,
+) -> list[str]:
+    """Every assembly-time page check, run on a pack template page without rewriting it.
+
+    A selected pack's template is the page that ships, so assembly checks the
+    template bytes themselves: the page schema and its module action closure,
+    the approved route, each metric and table binding against the declared
+    module contracts, and every workflow reference. CI runs each shipped pack
+    template through this same function, so a template that would fail here
+    cannot merge.
+    """
+    try:
+        document = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return [f"{path}: template page is not valid YAML"]
+    if not isinstance(document, dict):
+        return [f"{path}: template page must be a YAML object"]
+    errors: list[str] = []
+    expected_name = PurePosixPath(path).stem
+    action_index = {module_id: frozenset(actions) for module_id, actions in modules.items()}
+    try:
+        page = validate_page_schema(document, expected_name=expected_name, action_index=action_index)
+        if planned is not None and page.route != planned.get("route"):
+            errors.append(f"{path}: route {page.route!r} does not match the approved route {planned.get('route')!r}")
+    except PageSchemaValidationError as error:
+        errors.append(f"{path}: {page_schema_error_details(error, expected_name=expected_name)}")
+    contracts = {f"{module_id}/{action_id}": action for module_id, actions in modules.items() for action_id, action in actions.items()}
+    bindings = page_data_binding_errors(document, contracts)
+    bindings.extend(page_workflow_binding_errors(document, workflow_names or set()))
+    if bindings:
+        errors.append(f"{path}: Page bindings do not match declared contracts: " + "; ".join(bindings))
+    return errors

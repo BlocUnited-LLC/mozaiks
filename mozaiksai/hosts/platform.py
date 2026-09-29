@@ -281,6 +281,8 @@ async def _platform_startup() -> None:
             for name, schema in sorted(load_result.page_schemas.items())
         }
         app.state.database_index_readiness = None
+        # Account export/deletion scopes handler persistence with the loaded contract.
+        app.state.data_contract = load_result.data_contract
         persistence_enabled = database_persistence_is_enabled(database_startup_policy)
         if load_result.data_contract and persistence_enabled:
             index_app_id = (

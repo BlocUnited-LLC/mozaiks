@@ -417,9 +417,10 @@ def _monetized_plan(context: ContextVariablesBridge, *, subscription: bool = Fal
         "primary_entities": [], "primary_actions": [], "ui_layout": "full-width",
         "ui_surface": "declarative_page", "page_type_hint": "landing", "sections_hint": [],
     })
-    next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")["owned_paths"].append(
-        "ui/pages/pricing.yaml"
-    )
+    if not subscription:
+        next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")["owned_paths"].append(
+            "ui/pages/pricing.yaml"
+        )
     plan["build_tasks"].append({
         "task_id": "subscription.config", "task_type": "subscription_config",
         "capability_pack_id": None, "surface_id": "subscription_contract", "surface_kind": "app_policy",
@@ -446,29 +447,14 @@ def _monetized_plan(context: ContextVariablesBridge, *, subscription: bool = Fal
             "pack_type": "custom_domain", "label": "Billing Portal", "summary": "Managed billing facade",
             "implementation_mode": "hybrid", "primary_entities": [],
         })
+        # The selected pack ships the facade module and the pricing, billing and usage pages
+        # from its templates; pack-owned outputs are never model work, so no task builds them.
         for name in ("Billing", "Usage"):
             plan["pages"].append({
                 "name": name, "route": f"/{name.lower()}", "purpose": f"Manage {name.lower()}",
                 "primary_entities": [], "primary_actions": [], "ui_layout": "full-width",
                 "ui_surface": "declarative_page", "page_type_hint": "analytics_dashboard", "sections_hint": [],
             })
-            next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")["owned_paths"].append(
-                f"ui/pages/{name.lower()}.yaml"
-            )
-        for task_type, agent, filenames in (
-            ("module_contract", "ConfigMiddlewareAgent", ["module.yaml"]),
-            ("data_models", "ModelAgent", ["backend/schemas.py"]),
-            ("business_services", "ServiceAgent", ["backend/handler.py", "backend/service.py"]),
-        ):
-            task_id = f"billing_portal.{task_type}"
-            plan["build_tasks"].append({
-                "task_id": task_id, "task_type": task_type, "capability_pack_id": "billing_portal",
-                "surface_id": "billing_portal", "surface_kind": "module",
-                "execution_target": "AppGenerator", "initial_agent": agent,
-                "description": "Materialize approved billing facade", "initial_message": "Use the managed pack facade.",
-                "owned_paths": [f"modules/billing_portal/{filename}" for filename in filenames], "depends_on": [],
-            })
-            plan["generation_order"].append(task_id)
     context.set("subscription_contract", {
         "contract_required": True,
         "subscription_config_file": {"plans": [{"plan_id": "free"}, {"plan_id": "pro"}]},

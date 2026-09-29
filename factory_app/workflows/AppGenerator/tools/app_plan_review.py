@@ -24,12 +24,17 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _pack_id_from_descriptor,
     _required_selected_task_paths,
     app_build_plan,
+    release_pack_owned_paths,
 )
-from mozaiksai.core.runtime.app.paths import is_safe_app_path
+from mozaiksai.core.runtime.app.paths import is_safe_app_path, normalize_app_path
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.dependency_graph import deterministic_topological_order
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_owned_output_paths,
+)
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
@@ -387,6 +392,33 @@ def _required_page_paths(plan: dict[str, Any]) -> list[str]:
     ]]
 
 
+def _authored_page_paths(plan: dict[str, Any], pack_paths: frozenset[str]) -> list[str]:
+    """The page artifacts page_bundle authors: every required one a selected pack does not ship."""
+    return [path for path in _required_page_paths(plan) if path not in pack_paths]
+
+
+def _note_pack_pages(plan: dict[str, Any], context: Any) -> list[str]:
+    """Tell each page_bundle worker which approved pages the selected packs ship."""
+    pack_paths = pack_owned_output_paths(context)
+    pack_pages = [path for path in _required_page_paths(plan) if path in pack_paths]
+    if not pack_pages:
+        return []
+    note = (
+        f"Selected pack templates provide {', '.join(pack_pages)}; do not author those pages. "
+        "Their routes, names and bound actions are fixed by the pack."
+    )
+    repairs: list[str] = []
+    for task in plan.get("build_tasks") or []:
+        if task.get("task_type") != "page_bundle":
+            continue
+        message = str(task.get("initial_message") or "").rstrip()
+        if note in message:
+            continue
+        task["initial_message"] = "\n\n".join(part for part in (message, note) if part)
+        repairs.append(f"{task.get('task_id')}: named the pack-provided pages {pack_pages}")
+    return repairs
+
+
 def _approved_page_inventory(context: Any) -> list[dict[str, Any]]:
     return list((detach(context.get("experience_spec")) or {}).get("pages") or [])
 
@@ -407,6 +439,28 @@ def _required_module_paths(pack: dict[str, Any], context: Any) -> dict[str, set[
     if pack.get("user_data_scope") is True:
         required["business_services"].add(f"modules/{module_id}/backend/account_data_handler.py")
     return required
+
+
+def _repair_user_data_scope(plan: dict[str, Any], context: Any) -> list[str]:
+    """A module owning per_user collections takes part in account export and deletion.
+
+    The data contract decides it, so the plan records user_data_scope and code
+    renders the module's account-data handler (owned by its business_services task).
+    """
+    repairs = []
+    for pack in plan.get("capability_packs") or []:
+        module_id = _pack_id_from_descriptor(pack)
+        if pack.get("capability_source") != "generated_module" or not owns_per_user_collections(module_id, context.get("data_contract")):
+            continue
+        if pack.get("user_data_scope") is not True:
+            repairs.append(f"{module_id}: user_data_scope {pack.get('user_data_scope')!r} -> true (owns per_user collections)")
+            pack["user_data_scope"] = True
+    return repairs
+
+
+def _authored_module_paths(pack: dict[str, Any], context: Any, pack_paths: frozenset[str]) -> dict[str, set[str]]:
+    """The required module files a task authors: those no selected pack ships from its templates."""
+    return {kind: paths - pack_paths for kind, paths in _required_module_paths(pack, context).items()}
 
 
 def _repair_selected_pack_sources(plan: dict[str, Any], context: Any) -> list[str]:
@@ -480,11 +534,12 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             plan["pages"] = rebuilt
             repairs.append(f"pages -> approved inventory {sorted(expected)}")
 
-    # 2. page_bundle must own app.json and every materialized page file.
-    required_paths = _required_page_paths(plan)
-    page_paths = required_paths[1:]
+    # 2. page_bundle must own app.json and every materialized page file a
+    #    selected pack does not ship from its templates.
+    pack_paths = pack_owned_output_paths(context)
+    required_paths = _authored_page_paths(plan, pack_paths)
     bundle_tasks = [task for task in tasks if task.get("task_type") == "page_bundle"]
-    if not bundle_tasks and page_paths:
+    if not bundle_tasks and plan.get("pages"):
         task = {
             "task_id": _available_task_id("page_bundle", {str(task.get("task_id")) for task in tasks}),
             "task_type": "page_bundle",
@@ -505,7 +560,7 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
         tasks.append(task)
         bundle_tasks.append(task)
         repairs.append(f"constructed page_bundle owning {required_paths}")
-    if bundle_tasks and page_paths:
+    if bundle_tasks and plan.get("pages"):
         wanted_stems = {path.lower() for path in required_paths}
 
         # A plan may split page work across several page_bundle tasks. The
@@ -528,6 +583,11 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             for path in task.get("owned_paths") or []:
                 text = str(path)
                 if text.lower() in wanted_stems:
+                    continue
+                if normalize_app_path(text) in pack_paths:
+                    # An approved page a selected pack ships: releasing it is
+                    # release_pack_owned_paths' decision, not an unapproved page.
+                    others.append(text)
                     continue
                 # Rewriting pages to the approved inventory can orphan a page
                 # file the planner invented. Keeping it fails materialization
@@ -562,7 +622,8 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             plan["build_tasks"] = tasks
 
     # 3. Every generated module needs its required files owned by a task of the
-    #    right type. The required set is derived exactly as the validator does.
+    #    right type. The required set is derived exactly as the validator does;
+    #    files a selected pack ships (a facade's template module) need no task.
     path_owners: dict[str, list[str]] = {}
     for task in tasks:
         for path in _normalized_owned_paths(task):
@@ -572,7 +633,7 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             continue
         module_id = _pack_id_from_descriptor(pack)
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
-        required = _required_module_paths(pack, context)
+        required = _authored_module_paths(pack, context, pack_paths)
 
         for kind, paths in required.items():
             typed = [t for t in module_tasks if t.get("task_type") == kind]
@@ -648,14 +709,17 @@ def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list
         if task.get("task_type") == "persistence_contract"
         and "data/contract.json" in _normalized_owned_paths(task)
     ]
+    pack_paths = pack_owned_output_paths(context)
     for pack in plan.get("capability_packs") or []:
         if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
             continue
         module_id = _pack_id_from_descriptor(pack)
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
-        prerequisites: list[str] = []
-        required_paths = _required_module_paths(pack, context)
+        prerequisites: dict[str, str] = {}
+        required_paths = _authored_module_paths(pack, context, pack_paths)
         for kind in ("module_contract", "data_models"):
+            if not required_paths[kind]:
+                continue  # the selected pack's template is the contract input
             path = next(iter(required_paths[kind]))
             owners = [
                 task for task in by_scope_and_type.get((module_id, kind), [])
@@ -666,13 +730,16 @@ def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list
                     f"{path}: expected exactly one {kind} task owner; "
                     f"found {[task.get('task_id') for task in owners]}"
                 )
-            prerequisites.append(str(owners[0]["task_id"]))
+            prerequisites[kind] = str(owners[0]["task_id"])
 
         for task in module_tasks:
             kind = task.get("task_type")
             if kind not in {"data_models", "business_services"}:
                 continue
-            required = prerequisites[:1] if kind == "data_models" else list(prerequisites)
+            required = (
+                [prerequisites["module_contract"]] if kind == "data_models" and "module_contract" in prerequisites
+                else [] if kind == "data_models" else list(prerequisites.values())
+            )
             if f"modules/{module_id}/backend/repo.py" in required_paths["business_services"]:
                 required.extend(persistence_tasks)
             declared = list(task.get("depends_on") or [])
@@ -1257,6 +1324,16 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
     tasks = plan.get("build_tasks") or []
     if not tasks:
         raise ValueError("A build plan must declare materializing build_tasks, not just a page or capability inventory")
+    pack_paths = pack_owned_output_paths(context)
+    pack_owned = {
+        str(task.get("task_id")): sorted(set(_normalized_owned_paths(task)) & pack_paths)
+        for task in tasks if set(_normalized_owned_paths(task)) & pack_paths
+    }
+    if pack_owned:
+        raise ValueError(
+            "Selected packs write these paths from their templates, so no task may own them: "
+            + "; ".join(f"{task_id} owns {paths}" for task_id, paths in sorted(pack_owned.items()))
+        )
     if context.get("build_mode") == "revision" or context.get("brownfield_build_path"):
         return
 
@@ -1268,10 +1345,11 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
     expected_pages = {(page["name"], page["route"]) for page in _approved_page_inventory(context)}
     if expected_pages and {(page["name"], page["route"]) for page in pages} != expected_pages:
         errors.append(f"pages must preserve the approved name/route inventory: {sorted(expected_pages)}")
-    required_page_paths = _required_page_paths(plan)
-    page_paths = required_page_paths[1:]
-    if len(set(page_paths)) != len(page_paths):
+    all_page_paths = _required_page_paths(plan)[1:]
+    if len(set(all_page_paths)) != len(all_page_paths):
         errors.append("page routes resolve to colliding materialized filenames")
+    required_page_paths = _authored_page_paths(plan, pack_paths)
+    page_paths = [path for path in required_page_paths if path != "app.json"]
     page_owned = {
         path for task in tasks if task.get("task_type") == "page_bundle"
         for path in _normalized_owned_paths(task)
@@ -1290,7 +1368,7 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
             continue
         module_id = _pack_id_from_descriptor(pack)
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
-        required = _required_module_paths(pack, context)
+        required = _authored_module_paths(pack, context, pack_paths)
         for kind, paths in required.items():
             owned = {path for task in module_tasks if task.get("task_type") == kind for path in _normalized_owned_paths(task)}
             if paths - owned:
@@ -1355,11 +1433,14 @@ def review_app_build_plan(
             *_repair_managed_facade_capabilities(plan, context_variables),
             *_repair_plan(plan, context_variables),
             *_repair_selected_pack_inventory(plan, context_variables),
+            *release_pack_owned_paths(plan, context_variables),
+            *_repair_user_data_scope(plan, context_variables),
             *_repair_coverage(plan, context_variables),
             *_repair_subscription_config_task(plan, context_variables),
             *_construct_task_requirements(plan, context_variables),
             *_repair_contract_task_operations(plan, context_variables),
             *_repair_page_contract_dependencies(plan, context_variables),
+            *_note_pack_pages(plan, context_variables),
         ):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         validate_plan_dependencies(plan, context_variables)

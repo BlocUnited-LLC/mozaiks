@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import yaml
 from pydantic import (
@@ -63,6 +63,31 @@ class PageSchemaDiagnostic(BaseModel):
     message: str
 
 
+class PageContractRule(ValueError):
+    """A page-contract rule violation whose message is contract text only.
+
+    Diagnostics relay these messages verbatim; they never echo an author value.
+    """
+
+
+class PageConfigErrors(ValueError):
+    """A section config's own validation errors, kept structured.
+
+    Raised from the section validator so each config error keeps its real
+    ``config`` location and can be described against the primitive's model.
+    """
+
+    def __init__(self, primitive: str, model: type[BaseModel], errors: list[Any]) -> None:
+        self.primitive = primitive
+        self.model = model
+        self.errors = errors
+        where = "; ".join(
+            f"{'.'.join(str(part) for part in error.get('loc', ())) or '<config>'}: {error.get('type')}"
+            for error in errors
+        )
+        super().__init__(f"{primitive} config does not match its registered contract ({where})")
+
+
 class PageContractModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -93,7 +118,7 @@ class AppPageAction(PageContractModel):
     @classmethod
     def _unique_mapping_keys(cls, value):
         if isinstance(value, list) and len({item.key for item in value}) != len(value):
-            raise ValueError("Action mapping keys must be unique")
+            raise PageContractRule("action mapping keys must be unique")
         return value
 
     @field_serializer("payload", "context_variables")
@@ -103,11 +128,11 @@ class AppPageAction(PageContractModel):
     @model_validator(mode="after")
     def _validate_action_shape(self) -> AppPageAction:
         if self.action_type in {"navigate", "submit", "delete"} and not self.href:
-            raise ValueError(f"{self.action_type} actions require href")
+            raise PageContractRule(f"{self.action_type} actions require href")
         if self.action_type == "event" and not self.event_type:
-            raise ValueError("event actions require event_type")
+            raise PageContractRule("event actions require event_type")
         if self.action_type == "workflow" and not self.workflow_id:
-            raise ValueError("workflow actions require workflow_id")
+            raise PageContractRule("workflow actions require workflow_id")
         if self.href is not None:
             _validate_href(self.href, self.action_type)
         return self
@@ -209,14 +234,19 @@ class AppDataTableConfig(DataBackedConfig):
     def _validate_pagination(self) -> AppDataTableConfig:
         if self.pagination_mode == "server":
             if not self.pagination or self.page_size is None or self.page_size > 100:
-                raise ValueError("Server pagination requires pagination=true and page_size (1-100)")
+                raise PageContractRule("pagination_mode 'server' requires pagination: true and page_size between 1 and 100")
             if not self.api_endpoint or not _MODULE_API_RE.fullmatch(self.api_endpoint):
-                raise ValueError("Server pagination requires a canonical module endpoint")
+                raise PageContractRule("pagination_mode 'server' requires a canonical module data source")
             for key in (self.data_key, self.total_key):
                 if not key or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", key):
-                    raise ValueError("Server pagination requires explicit data_key and total_key response paths")
+                    raise PageContractRule(
+                        "pagination_mode 'server' requires data_key and total_key as dotted response paths"
+                    )
         elif self.total_key is not None:
-            raise ValueError("total_key requires server pagination")
+            raise PageContractRule(
+                "total_key is only read with pagination_mode 'server'; either set pagination_mode: server "
+                "(with pagination: true and page_size 1-100) or set total_key to null for client pagination"
+            )
         return self
 
 
@@ -231,7 +261,7 @@ class AppResourceTableConfig(AppDataTableConfig):
     @model_validator(mode="after")
     def _client_pagination_only(self) -> AppResourceTableConfig:
         if self.pagination_mode != "client":
-            raise ValueError("Server pagination is supported only by DataTable")
+            raise PageContractRule("ResourceTable supports pagination_mode 'client' only; use DataTable for server pagination")
         return self
 
 
@@ -480,7 +510,7 @@ class AppGridConfig(PageContractModel):
     @classmethod
     def _columns_in_bounds(cls, value: int) -> int:
         if value < 1 or value > 6:
-            raise ValueError("grid columns must be between 1 and 6")
+            raise PageContractRule("grid columns must be between 1 and 6")
         return value
 
 
@@ -613,19 +643,23 @@ class AppPageSchema(PageContractModel):
     @classmethod
     def _route_is_safe(cls, value: str) -> str:
         if not value.startswith("/") or ".." in value or not _SAFE_ROUTE_RE.fullmatch(value):
-            raise ValueError("route must be a safe absolute app route")
+            raise PageContractRule(
+                "route must be a safe absolute app route: start with '/', no '..', only letters, digits and _ . / : { } ? -"
+            )
         return value
 
     @model_validator(mode="after")
     def _page_is_consistent(self) -> AppPageSchema:
         if self.page_type == "checkout_success":
-            raise ValueError("checkout_success must use a custom route bundle")
+            raise PageContractRule("checkout_success must use a custom route bundle")
         if not self.sections:
-            raise ValueError("sections must contain at least one section")
+            raise PageContractRule("sections must contain at least one section")
         seen = set()
-        for section in self.sections:
+        for index, section in enumerate(self.sections):
             if section.id in seen:
-                raise ValueError(f"duplicate section id {section.id!r}")
+                raise PageContractRule(
+                    f"section ids must be unique within a page; sections[{index}] repeats an earlier section's id"
+                )
             seen.add(section.id)
         return self
 
@@ -721,7 +755,7 @@ def validate_page_schema(
     try:
         page = AppPageSchema.model_validate(dict(schema))
     except ValidationError as exc:
-        raise PageSchemaValidationError(_diagnostics_from_validation_error(exc)) from exc
+        raise PageSchemaValidationError(_diagnostics_from_validation_error(exc, schema)) from exc
     except ValueError as exc:
         raise PageSchemaValidationError(
             [
@@ -870,17 +904,23 @@ def _validate_config(primitive: str, config: Mapping[str, Any], *, child: bool) 
     model_map = _CHILD_CONFIG_MODELS if child else _TOP_LEVEL_CONFIG_MODELS
     model_cls = model_map.get(primitive)
     if model_cls is None:
-        raise ValueError(f"primitive {primitive!r} is not valid in this position")
-    parsed = model_cls.model_validate(dict(config))
+        raise PageContractRule(
+            f"this primitive is not valid {'inside a container' if child else 'as a page section'}; "
+            f"allowed primitives here: {', '.join(sorted(model_map))}"
+        )
+    try:
+        parsed = model_cls.model_validate(dict(config))
+    except ValidationError as exc:
+        raise PageConfigErrors(primitive, model_cls, exc.errors(include_input=False, include_url=False)) from None
     return parsed.model_dump(exclude_none=True)
 
 
 def _validate_primitive(primitive: str, *, allow_grid: bool) -> None:
     allowed = set(get_page_ui_primitive_names())
     if primitive not in allowed:
-        raise ValueError(f"unknown page primitive {primitive!r}")
+        raise PageContractRule(f"unknown page primitive; allowed primitives: {', '.join(sorted(allowed))}")
     if not allow_grid and primitive == "Grid":
-        raise ValueError("nested Grid sections are not supported")
+        raise PageContractRule("Grid sections cannot be nested inside a Grid")
 
 
 def _validate_href(value: str, action_type: str) -> None:
@@ -997,18 +1037,139 @@ def _walk_api_endpoints(value: Any, location: str = "$") -> Iterable[tuple[str, 
             yield from _walk_api_endpoints(item, f"{location}[{index}]")
 
 
-def _diagnostics_from_validation_error(exc: ValidationError) -> tuple[PageSchemaDiagnostic, ...]:
+def _diagnostics_from_validation_error(
+    exc: ValidationError, schema: Mapping[str, Any] | None = None,
+) -> tuple[PageSchemaDiagnostic, ...]:
+    """One diagnostic per rule broken, each naming the section, primitive, field and what is allowed.
+
+    Messages are built from the contract and the page's structure, never from a
+    rejected value: a section is named by its location, its registered
+    primitive, and its id when that id is a plain identifier.
+    """
     diagnostics: list[PageSchemaDiagnostic] = []
-    for error in exc.errors(include_input=False):
-        loc = _format_location(error.get("loc", ()))
-        diagnostics.append(
-            PageSchemaDiagnostic(
-                code=f"page_schema.{error.get('type', 'invalid')}",
-                location=loc,
-                message=_safe_validation_message(error),
-            )
-        )
+    for error in exc.errors(include_input=False, include_url=False):
+        loc = tuple(error.get("loc", ()))
+        diagnostics.extend(_diagnostics_for(error, location=loc, model=AppPageSchema, model_loc=loc, schema=schema))
     return tuple(diagnostics)
+
+
+def _diagnostics_for(
+    error: Mapping[str, Any],
+    *,
+    location: tuple[Any, ...],
+    model: type[BaseModel],
+    model_loc: tuple[Any, ...],
+    schema: Mapping[str, Any] | None,
+) -> list[PageSchemaDiagnostic]:
+    cause = (error.get("ctx") or {}).get("error")
+    if error.get("type") == "value_error" and isinstance(cause, PageConfigErrors):
+        # A section's config validates against its primitive's own model; keep
+        # the real ".config" location and describe each error against that model.
+        diagnostics: list[PageSchemaDiagnostic] = []
+        for inner in cause.errors:
+            inner_loc = tuple(inner.get("loc", ()))
+            diagnostics.extend(_diagnostics_for(
+                inner, location=(*location, "config", *inner_loc), model=cause.model, model_loc=inner_loc,
+                schema=schema,
+            ))
+        return diagnostics
+    detail = _safe_validation_message(error, model=model, model_loc=model_loc)
+    section = _section_label(schema, location)
+    return [PageSchemaDiagnostic(
+        code=f"page_schema.{error.get('type', 'invalid')}",
+        location=_format_location(location),
+        message=f"{section}: {detail}" if section else detail,
+    )]
+
+
+_PLAIN_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+
+
+def _section_label(schema: Mapping[str, Any] | None, location: tuple[Any, ...]) -> str | None:
+    """Name the innermost section containing ``location``: its id and registered primitive."""
+    node: Any = schema
+    label: str | None = None
+    for part in location:
+        if isinstance(node, Mapping) and isinstance(part, str):
+            node = node.get(part)
+        elif isinstance(node, list) and isinstance(part, int) and 0 <= part < len(node):
+            node = node[part]
+        else:
+            break
+        if isinstance(node, Mapping) and "primitive" in node:
+            primitive = node.get("primitive")
+            section_id = node.get("id")
+            kind = f"{primitive} " if primitive in _TOP_LEVEL_CONFIG_MODELS else ""
+            if isinstance(section_id, str) and _PLAIN_IDENTIFIER_RE.fullmatch(section_id):
+                label = f"{kind}section '{section_id}'"
+            else:
+                label = f"{kind}section"
+    return label
+
+
+def _annotation_model(annotation: Any) -> type[BaseModel] | None:
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    for argument in get_args(annotation):
+        found = _annotation_model(argument)
+        if found is not None:
+            return found
+    return None
+
+
+def _model_at(model: type[BaseModel] | None, loc: tuple[Any, ...]) -> type[BaseModel] | None:
+    """The contract model that owns the field at ``loc`` (list indexes and union tags skipped)."""
+    for part in loc:
+        if model is None:
+            return None
+        if isinstance(part, int):
+            continue
+        field = model.model_fields.get(part)
+        if field is None:
+            if part == model.__name__:
+                continue  # smart-union member tag
+            return None
+        model = _annotation_model(field.annotation)
+    return model
+
+
+_EXPECTED_KINDS = {
+    "string": "a string", "int": "an integer", "float": "a number", "bool": "a boolean",
+    "list": "a list", "dict": "an object", "model": "an object", "model_attributes": "an object",
+}
+_BOUNDS = {
+    "greater_than_equal": ("ge", "at least"), "less_than_equal": ("le", "at most"),
+    "greater_than": ("gt", "greater than"), "less_than": ("lt", "less than"),
+}
+
+
+def _safe_validation_message(
+    error: Mapping[str, Any], *, model: type[BaseModel] | None = None, model_loc: tuple[Any, ...] = (),
+) -> str:
+    error_type = str(error.get("type") or "invalid")
+    ctx = error.get("ctx") or {}
+    field = next((part for part in reversed(model_loc) if isinstance(part, str)), None)
+    if error_type in {"page_href", "page_api_path"}:
+        # These validator-owned messages contain no rejected input values.
+        return str(error["msg"])
+    if error_type == "value_error" and isinstance(ctx.get("error"), PageContractRule):
+        return str(ctx["error"])
+    if error_type == "extra_forbidden":
+        owner = _model_at(model, model_loc[:-1])
+        allowed = ", ".join(sorted(owner.model_fields)) if owner is not None else "(none)"
+        return f"field {field!r} is not part of this contract; allowed fields: {allowed}."
+    if error_type == "missing":
+        return f"required field {field!r} is missing."
+    if error_type in {"literal_error", "enum"}:
+        return f"{field!r} is outside the registered page-schema contract; allowed values: {ctx.get('expected')}."
+    if error_type in _BOUNDS and _BOUNDS[error_type][0] in ctx:
+        key, words = _BOUNDS[error_type]
+        return f"{field!r} must be {words} {ctx[key]}."
+    for suffix in ("_type", "_parsing"):
+        kind = _EXPECTED_KINDS.get(error_type.removesuffix(suffix)) if error_type.endswith(suffix) else None
+        if kind:
+            return f"{field!r} must be {kind}."
+    return "Field value does not match the registered page-schema contract."
 
 
 def _format_location(raw_location: Any) -> str:
@@ -1023,23 +1184,11 @@ def _format_location(raw_location: Any) -> str:
     return location
 
 
-def _safe_validation_message(error: Mapping[str, Any]) -> str:
-    error_type = str(error.get("type") or "invalid")
-    if error_type in {"page_href", "page_api_path"}:
-        # These validator-owned messages contain no rejected input values.
-        return str(error["msg"])
-    if error_type == "extra_forbidden":
-        return "Unknown runtime-affecting field is not allowed."
-    if error_type == "missing":
-        return "Required field is missing."
-    if error_type == "literal_error":
-        return "Field value is outside the registered page-schema contract."
-    return "Field value does not match the registered page-schema contract."
-
-
 __all__ = [
     "AppPageSchema",
     "PAGE_SCHEMA_VERSION",
+    "PageConfigErrors",
+    "PageContractRule",
     "PageSchemaDiagnostic",
     "PageSchemaValidationError",
     "VALID_PAGE_TYPES",

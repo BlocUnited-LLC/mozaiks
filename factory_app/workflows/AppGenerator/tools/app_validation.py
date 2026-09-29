@@ -59,7 +59,7 @@ from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     resolve_app_validation_strategy,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
-    managed_pack_output_paths,
+    pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -1364,8 +1364,9 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
                             ),
                             "error": error,
                             "fix_suggestion": (
-                                "Declare the approved action's event in module_contract.events_yaml, including "
-                                "its version, producer, and payload contract; preserve the approved action emits."
+                                "Declare the action's custom event in module_contract.events_yaml under its exact "
+                                "domain.-prefixed type, with version, producer, and payload contract, and emit that "
+                                "type. Canonical create/update/delete events are declared and emitted by code."
                                 if undeclared_event else
                                 "Fix the module contract, companion manifests, handler entrypoint, "
                                 "or app-owned service imports so AppLoader.load() can load every module."
@@ -1768,7 +1769,7 @@ def _template_owned_paths(context_variables: Any) -> frozenset[str]:
     """Paths the selected packs' templates own, resolved the way assembly resolves packs."""
     if context_variables is None:
         return frozenset()
-    paths = set(managed_pack_output_paths(context_variables))
+    paths = set(pack_owned_output_paths(context_variables))
     packs = detach(context_variables.get("capability_packs")) or []
     if not packs:
         plan = detach(context_variables.get("app_build_plan")) or {}

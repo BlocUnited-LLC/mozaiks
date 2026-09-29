@@ -6,13 +6,15 @@ import logging
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.session.build_context import (
     BuildContextError,
+    iter_context_assets,
     load_build_context,
     load_contract_descriptors,
+    resolve_context_asset_path,
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.resources import resolve_factory_app_root
@@ -64,6 +66,75 @@ def collection_has_canonical_writes(collection: Mapping[str, Any]) -> bool:
     """Only collections written by module actions receive code-owned writes."""
     lifecycle = collection.get("lifecycle")
     return isinstance(lifecycle, Mapping) and lifecycle.get("write_mode") == "module_action"
+
+
+CANONICAL_WRITE_EVENT_VERBS = {"create": "created", "update": "updated", "delete": "deleted"}
+
+
+def canonical_write_event_type(entity: str, operation: str) -> str:
+    """Name the domain event a canonical write emits: ``domain.<entity>.<created|updated|deleted>``.
+
+    This is the one naming rule for canonical write events; module.yaml emits,
+    events.yaml declarations, the rendered service and every alias reconciliation
+    use it.
+    """
+    if operation not in CANONICAL_WRITE_EVENT_VERBS:
+        raise ValueError(f"Unsupported canonical write operation {operation!r}; choose create, update or delete.")
+    return f"domain.{entity_identifier(entity)}.{CANONICAL_WRITE_EVENT_VERBS[operation]}"
+
+
+def _event_spellings(entity: str, collection_name: str, operation: str, module_id: str) -> set[str]:
+    verb = CANONICAL_WRITE_EVENT_VERBS[operation]
+    names = {entity_identifier(entity), entity.lower()}
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", collection_name or ""):
+        names.add(collection_name.lower())
+    subjects = {f"{name}{separator}{verb}" for name in names for separator in (".", "_")}
+    qualifiers = {*names, module_id.lower()} - {""}
+    spellings = set(subjects)
+    for qualifier in qualifiers:
+        spellings.add(f"{qualifier}.{verb}")
+        spellings.update(f"{qualifier}.{subject}" for subject in subjects)
+    return spellings | {f"domain.{spelling}" for spelling in spellings}
+
+
+def canonical_write_event_aliases(data_contract: Any) -> dict[str, str]:
+    """Map each spelling of a canonical write event to its canonical type.
+
+    A spelling names the write's subject (the entity identifier, entity name or
+    collection name) joined to ``created``/``updated``/``deleted`` by ``.`` or
+    ``_``, optionally qualified by the owning module id, the collection or the
+    entity (``task_management.task_created``), or the qualifier alone followed
+    by the verb (``task_management.created``); each with or without the
+    ``domain.`` prefix, compared case-insensitively. A spelling two collections
+    share is ambiguous and maps to neither.
+    """
+    contract = detach(data_contract)
+    if not isinstance(contract, Mapping):
+        return {}
+    claims: dict[str, set[str]] = {}
+    try:
+        collections = list(iter_data_contract_collections(dict(contract), require_complete_ownership=False))
+    except (TypeError, ValueError, KeyError):
+        return {}
+    for owner, owner_kind, collection in collections:
+        if owner_kind != "module" or not collection_has_canonical_writes(collection):
+            continue
+        entity = str(collection.get("entity") or "")
+        try:
+            events = {operation: canonical_write_event_type(entity, operation) for operation in CANONICAL_WRITE_EVENT_VERBS}
+        except ValueError:
+            continue  # module closure reports the entity name
+        for operation, event_type in events.items():
+            for spelling in _event_spellings(entity, str(collection.get("name") or ""), operation, str(owner)):
+                claims.setdefault(spelling, set()).add(event_type)
+    return {spelling: next(iter(types)) for spelling, types in claims.items() if len(types) == 1}
+
+
+def canonical_write_event_for(event_type: Any, aliases: Mapping[str, str]) -> str | None:
+    """Return the canonical write event a spelling names, or None for a custom event."""
+    if not isinstance(event_type, str):
+        return None
+    return aliases.get(event_type.strip().lower())
 
 
 def _surface_collections(surface: Mapping[str, Any], data_contract: Any) -> list[dict[str, Any]]:
@@ -178,8 +249,15 @@ def managed_facade_actions(context_variables: Any) -> dict[str, list[str]]:
     return result
 
 
-def selected_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
-    """Contract declarations of every selected pack whose templates assembly applies.
+class _SelectedPack(NamedTuple):
+    pack_id: str
+    root: Path | None
+    config: Mapping[str, Any] | None
+    contracts: list[dict[str, Any]]
+
+
+def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
+    """Every selected pack whose templates assembly applies, with its contract declarations.
 
     Assembly reads the selected packs from ``capability_packs`` and falls back to
     the approved plan's packs. A pack with a source path is read from disk, and
@@ -194,11 +272,11 @@ def selected_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
         plan = detach(context_variables.get("app_build_plan")) or {}
         packs = plan.get("capability_packs") or [] if isinstance(plan, Mapping) else []
     projected = detach(context_variables.get("operator_contracts")) or []
-    result: list[dict[str, Any]] = []
+    result: list[_SelectedPack] = []
     for pack in packs:
         if not isinstance(pack, Mapping):
             continue
-        pack_id = pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id")
+        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "")
         source = pack.get("pack_source_path")
         root = Path(str(source)) if source else None
         if root is not None and (root / "context.yaml").is_file():
@@ -208,42 +286,111 @@ def selected_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
                 declared: Mapping[str, Any] = pack_block if isinstance(pack_block, Mapping) else {}
                 if str(declared.get("status") or "active") != "active":
                     continue
-                result.extend(load_contract_descriptors(root, config))
+                result.append(_SelectedPack(pack_id, root, config, load_contract_descriptors(root, config)))
             except (BuildContextError, OSError) as exc:
                 # Assembly reports an unusable pack; authoring keeps checking its pages.
                 logger.warning("selected pack %s could not be read: %s", root, exc)
             continue
-        result.extend(
+        result.append(_SelectedPack(pack_id, None, None, [
             dict(contract) for contract in projected
             if isinstance(contract, Mapping) and pack_id and (
                 contract.get("contract_id") == pack_id
                 or (contract.get("canonical_provider") or {}).get("provider_pack_id") == pack_id
             )
-        )
+        ]))
     return result
 
 
-def managed_pack_output_paths(context_variables: Any) -> frozenset[str]:
-    """Bundle paths the selected packs declare as template outputs (``required_outputs``).
-
-    A page a worker authors at one of these paths is a placeholder the pack's
-    template replaces at assembly, so authoring-time binding checks defer to
-    the template contracts. Only declared outputs count: a facade page route a
-    pack ships no template for is authored, and stays checked.
-    """
-    paths: set[str] = set()
-    for contract in selected_pack_contracts(context_variables):
-        for entry in contract.get("required_outputs") or []:
-            # A workspace-owned output (owner: workspace) is preserved across
-            # regeneration rather than written by a template; only template
-            # outputs replace an authored placeholder.
-            owner = str(entry.get("owner") or "templates").strip() if isinstance(entry, Mapping) else "templates"
-            if owner != "templates":
+def _pack_template_file(root: Path, config: Mapping[str, Any], path: str) -> Path | None:
+    """The file a pack's declared templates asset renders to ``path``, if it ships one."""
+    for asset in iter_context_assets(config, kind="templates"):
+        try:
+            base = resolve_context_asset_path(root, asset)
+        except BuildContextError:
+            continue
+        for candidate in (base / path, base / f"{path}.j2"):
+            try:
+                candidate.resolve().relative_to(base.resolve())
+            except ValueError:
                 continue
-            path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
-            if path:
-                paths.add(path)
-    return frozenset(paths)
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def _is_genesis_build(context_variables: Any) -> bool:
+    binding = detach(context_variables.get("run_build_binding")) or {}
+    phase = binding.get("phase") if isinstance(binding, Mapping) else None
+    return (
+        (phase or "genesis") == "genesis"
+        and context_variables.get("build_mode") != "revision"
+        and not context_variables.get("brownfield_build_path")
+    )
+
+
+class PackOwnedOutput(NamedTuple):
+    pack_id: str
+    owner: str
+    source: str | None
+
+
+def pack_owned_outputs(context_variables: Any) -> dict[str, PackOwnedOutput]:
+    """Bundle paths the selected packs write from their templates, by path.
+
+    Pack-owned outputs are never model work: plan review builds no task for
+    them, a worker's copy is discarded, and assembly takes them only from the
+    templates. A ``required_outputs`` entry with ``owner: templates`` is written
+    at every assembly. An ``owner: workspace`` entry the pack ships a template
+    for is written at genesis and then belongs to the workspace, so it is
+    pack-owned only in a genesis build. Any other owner (``generator``) names
+    work the pack asks a model to author.
+    """
+    if context_variables is None:
+        return {}
+    genesis = _is_genesis_build(context_variables)
+    outputs: dict[str, PackOwnedOutput] = {}
+    for pack in _selected_packs(context_variables):
+        for contract in pack.contracts:
+            for entry in contract.get("required_outputs") or []:
+                owner = str(entry.get("owner") or "templates").strip() if isinstance(entry, Mapping) else "templates"
+                path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
+                if not path:
+                    continue
+                if owner == "workspace":
+                    if not genesis or pack.root is None or pack.config is None:
+                        continue
+                    if _pack_template_file(pack.root, pack.config, path) is None:
+                        continue
+                elif owner != "templates":
+                    continue
+                outputs.setdefault(path, PackOwnedOutput(pack.pack_id, owner, str(pack.root) if pack.root else None))
+    return outputs
+
+
+def pack_owned_output_paths(context_variables: Any) -> frozenset[str]:
+    """The bundle paths of :func:`pack_owned_outputs`."""
+    return frozenset(pack_owned_outputs(context_variables))
+
+
+def pack_template_module_contracts(context_variables: Any) -> dict[str, str]:
+    """``module.yaml`` contracts the selected packs' templates provide, by bundle path.
+
+    No task authors a pack-owned module, so pages that bind its actions compile
+    against the template contract, the same one assembly applies.
+    """
+    files: dict[str, str] = {}
+    for pack in _selected_packs(context_variables):
+        if pack.root is None or pack.config is None:
+            continue
+        for contract in pack.contracts:
+            for entry in contract.get("required_outputs") or []:
+                path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
+                if not path or not re.fullmatch(r"modules/[^/]+/module\.yaml", path):
+                    continue
+                template = _pack_template_file(pack.root, pack.config, path)
+                if template is not None and template.suffix != ".j2":
+                    files[path] = template.read_text(encoding="utf-8")
+    return files
 
 
 def ungated_module_actions(context_variables: Any) -> dict[str, list[str]]:
