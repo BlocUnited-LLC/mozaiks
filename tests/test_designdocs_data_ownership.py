@@ -103,7 +103,7 @@ def test_generic_users_without_identity_evidence_remains_app_owned(persistence):
 
 
 @pytest.mark.parametrize("reads", [
-    ["edit_report"], ["summarize_reports", "summarize_reports"], ["Bad Name"], ["list_report_documents"],
+    ["edit_report"], ["summarize_reports", "summarize_reports"], ["Bad Name"],
 ])
 def test_custom_reads_are_distinct_valid_action_ids(persistence, reads):
     bundle = _bundle()
@@ -111,6 +111,15 @@ def test_custom_reads_are_distinct_valid_action_ids(persistence, reads):
     result = inventory._save(ownership._context(managed=False), bundle)
     assert result["outcome"] == "revise"
     assert "custom_reads" in result["error"]
+
+
+def test_a_canonical_read_in_custom_reads_is_dropped_not_refused(persistence):
+    context = ownership._context(managed=False)
+    bundle = _bundle()
+    bundle["surface_map"]["surfaces"][0]["custom_reads"] = ["list_report_documents"]
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    assert detach(context.get("design_surface_map"))["surfaces"][0]["custom_reads"] == []
 
 
 def test_shared_collection_keeps_declared_owner_and_materializes_known_null(persistence):
