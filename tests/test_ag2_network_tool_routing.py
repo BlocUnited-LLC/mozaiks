@@ -253,7 +253,7 @@ async def _run(
                 initial_message="Complete the current deterministic operation.",
                 context_variables={_KEY: False},
                 context_authority_policy=policy,
-                close_timeout_seconds=3.0,
+                idle_timeout_seconds=3.0,
             )
         )
     return result

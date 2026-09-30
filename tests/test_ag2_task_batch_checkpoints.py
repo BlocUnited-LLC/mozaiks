@@ -60,7 +60,7 @@ async def test_batch_checkpoint_survives_hub_reopen_without_advancing_failed_pac
             {"source_agent": "After", "target_agent": "terminate", "transition_type": "after_turn"},
         ],
         agent_output_handler=output_handler, knowledge_store=store, context_authority_policy=policy,
-        close_timeout_seconds=10,
+        idle_timeout_seconds=10,
     ))
     assert result.status is (RunStatus.FAILED if fail_after_checkpoint else RunStatus.COMPLETED)
     assert bool(downstream.ask_calls) is not fail_after_checkpoint
@@ -149,7 +149,7 @@ async def test_same_channel_resume_hydrates_inflight_evidence_before_recovery(mo
             transition_rules=[{"source_agent": "Plan", "target_agent": "terminate", "transition_type": "after_turn"}],
             context_variables=deepcopy(stale) if resumed else _context(),
             knowledge_store=store, context_authority_policy=policy, agent_output_handler=output_handler,
-            resume_existing_only=resumed, close_timeout_seconds=3,
+            resume_existing_only=resumed, idle_timeout_seconds=3,
         )
 
     first = await AG2NetworkRunner().run(request())
@@ -177,7 +177,7 @@ async def test_empty_hub_context_removes_stale_seed_and_pending_mutations():
         workflow_name="EmptyHydration", chat_id="chat", app_id="app", agents={"Check": agent},
         initial_agent_name="Check", initial_message="Check", context_variables={},
         transition_rules=[{"source_agent": "Check", "target_agent": "terminate", "transition_type": "after_turn"}],
-        agent_output_handler=output_handler, close_timeout_seconds=3,
+        agent_output_handler=output_handler, idle_timeout_seconds=3,
     ))
     assert result.status is RunStatus.COMPLETED, result.error
 
@@ -198,7 +198,7 @@ async def test_interrupted_artifact_worker_cannot_replay_before_validation():
             initial_agent_name="ServiceAgent", initial_message=None if resumed else "Repair",
             context_variables={"accepted_output": {"schemas.py": "preserved"}, "repair_status": "selected"},
             transition_rules=[{"source_agent": "ServiceAgent", "target_agent": "terminate", "transition_type": "after_turn"}],
-            knowledge_store=store, resume_existing_only=resumed, close_timeout_seconds=3,
+            knowledge_store=store, resume_existing_only=resumed, idle_timeout_seconds=3,
         )
 
     first_worker = InterruptedWorker("ServiceAgent", "unused")

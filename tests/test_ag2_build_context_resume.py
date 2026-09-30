@@ -74,7 +74,7 @@ def _request(policy, store, *, resume=False):
         # Match orchestration's detached initial snapshot while the real agents
         # receive the bridge, which AG2 hydrates before each turn.
         context_variables=bridge.snapshot(), context_authority_policy=policy,
-        knowledge_store=store, resume_existing_only=resume, close_timeout_seconds=3.0,
+        knowledge_store=store, resume_existing_only=resume, idle_timeout_seconds=3.0,
         transition_rules=[
             {"source_agent": "Planner", "target_agent": "user", "transition_type": "after_turn"},
             {"source_agent": "user", "target_agent": "Worker", "transition_type": "after_turn"},

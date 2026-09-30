@@ -23,7 +23,11 @@ from typing import Any, cast
 
 from logs.logging_config import get_workflow_logger
 from logs.runtime_artifacts import get_agent_outputs_dir
-from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
+from mozaiksai.core.adapters.ag2_network_runner import (
+    DEFAULT_IDLE_TIMEOUT_SECONDS,
+    AG2NetworkRunner,
+    AG2NetworkRunnerRequest,
+)
 from mozaiksai.core.data.persistence.persistence_manager import (
     SERVER_OWNED_SESSION_FIELDS,
     AG2PersistenceManager,
@@ -515,7 +519,7 @@ async def _run_ag2_network_phase(
     resume_existing_only: bool = False,
     resume_context_updates: Mapping[str, Any] | None = None,
     agent_output_handler: Callable | None = None,
-    close_timeout_seconds: float = 120.0,
+    idle_timeout_seconds: float = DEFAULT_IDLE_TIMEOUT_SECONDS,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -531,7 +535,7 @@ async def _run_ag2_network_phase(
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
             agent_output_handler=agent_output_handler,
-            close_timeout_seconds=close_timeout_seconds,
+            idle_timeout_seconds=idle_timeout_seconds,
             knowledge_store=knowledge_store,
             context_authority_policy=context_authority_policy,
             resume_existing_only=resume_existing_only,
@@ -982,9 +986,11 @@ async def run_workflow_orchestration(
         from .workflow_manager import workflow_manager
 
         auto_tool_agents = workflow_manager.get_auto_tool_agents(workflow_name)
-        # UI tools wait for a person, not the adapter's settlement deadline.
-        close_timeout_seconds = (
-            float("inf") if any(tool.get("tool_type") == "UI_Tool" for tool in config.get("tools", [])) else 120.0
+        # UI tools wait for a person, so those channels have no idle deadline.
+        idle_timeout_seconds = (
+            float("inf")
+            if any(tool.get("tool_type") == "UI_Tool" for tool in config.get("tools", []))
+            else DEFAULT_IDLE_TIMEOUT_SECONDS
         )
 
         async def _before_agent_packet(agent_name: str, packet: Any) -> None:
@@ -1078,7 +1084,7 @@ async def run_workflow_orchestration(
             initial_message=network_trigger,
             context_variables=ctx_dict,
             agent_output_handler=_before_agent_packet,
-            close_timeout_seconds=close_timeout_seconds,
+            idle_timeout_seconds=idle_timeout_seconds,
             structured_registry=structured_registry,
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
