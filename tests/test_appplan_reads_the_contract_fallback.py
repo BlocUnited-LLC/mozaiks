@@ -60,12 +60,9 @@ def _rules_mentioning(prompt: str, needle: str) -> list[str]:
     return [line.strip() for line in prompt.splitlines() if needle in line]
 
 
-def test_the_task_rule_reads_the_fallback(appgen_prompts: str) -> None:
-    """The rule that gates the subscription_config task must know about the artifact."""
-    gating = "\n".join(
-        _rules_mentioning(appgen_prompts, "contract_required")
-        + _rules_mentioning(appgen_prompts, "subscription_config` task")
-    )
+def test_the_contract_rule_reads_the_fallback(appgen_prompts: str) -> None:
+    """The rule that gates monetization_provider must know about the artifact."""
+    gating = "\n".join(_rules_mentioning(appgen_prompts, "contract_required"))
     assert "subscription_contract_artifact" in appgen_prompts, (
         "the planning rules named only subscription_contract; with state null the agent "
         "concluded there was no contract while the artifact beside it said otherwise"

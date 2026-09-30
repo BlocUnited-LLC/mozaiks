@@ -118,23 +118,6 @@ def _subscription_contract() -> dict[str, Any]:
     }
 
 
-def _subscription_task() -> dict[str, Any]:
-    return {
-        "task_id": "research.subscription_config",
-        "task_type": "subscription_config",
-        "capability_pack_id": None,
-        "surface_id": "subscription_contract",
-        "surface_kind": "app_policy",
-        "execution_target": "AppGenerator",
-        "initial_agent": "ConfigMiddlewareAgent",
-        "description": "Materialize the confirmed subscription contract.",
-        "initial_message": "Write config/subscriptions.yaml from the confirmed contract.",
-        "owned_paths": ["config/subscriptions.yaml"],
-        "depends_on": [],
-        "acceptance_criteria": ["Pro research access and its display-only limit are preserved."],
-    }
-
-
 def _research_module_task() -> dict[str, Any]:
     return {
         "task_id": "research.module",
@@ -150,7 +133,7 @@ def _research_module_task() -> dict[str, Any]:
             "modules/research/module.yaml", "modules/research/contracts/events.yaml",
             "modules/research/contracts/reactions.yaml",
         ],
-        "depends_on": ["research.subscription_config", "research.persistence"],
+        "depends_on": ["research.persistence"],
         "acceptance_criteria": [f"execute_research is gated by {RESEARCH_ACTION_GATE}."],
     }
 
@@ -177,7 +160,7 @@ def _research_page_task() -> dict[str, Any]:
 
 def _build_plan(mozaikspay_pack: dict[str, Any]) -> dict[str, Any]:
     tasks = [
-        _subscription_task(), _research_module_task(), _research_page_task(),
+        _research_module_task(), _research_page_task(),
         {
             **_research_module_task(), "task_id": "research.persistence", "task_type": "persistence_contract",
             "initial_agent": "DatabaseAgent", "owned_paths": ["data/contract.json"], "depends_on": [],

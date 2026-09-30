@@ -880,7 +880,7 @@ def _subscription_contract_required(context_variables: Any | None) -> bool:
     if context_variables is None:
         return False
     contract = resolve_subscription_contract(context_variables)
-    return bool(contract) and contract.get("contract_required") is True
+    return contract is not None and contract.get("contract_required") is True
 
 
 def _resolve_monetization_provider(

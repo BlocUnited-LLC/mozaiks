@@ -13,6 +13,9 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+from factory_app.workflows._shared.subscription_contract_context import (
+    subscription_assignment_store,
+)
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
@@ -578,6 +581,21 @@ def _base_plan(
     }
 
 
+# The approved contract's runtime file; assembly writes config/subscriptions.yaml from it.
+_MONETIZED_SUBSCRIPTION_CONFIG = {
+    "schema_version": "mozaiks.subscriptions.v1",
+    "label": "Matrix SaaS",
+    "default_plan_id": "free",
+    "assignment_store": subscription_assignment_store(),
+    "plans": [
+        {"plan_id": "free", "label": "Free", "capabilities": ["feature.module.reports.view_report"]},
+        {"plan_id": "pro", "label": "Pro", "capabilities": [
+            "feature.module.reports.view_report", "feature.module.reports.export_report",
+        ]},
+    ],
+}
+
+
 def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str, Any]) -> dict[str, Any]:
     module_id = str(task.get("capability_pack_id") or "")
     if task_type == "persistence_contract":
@@ -664,36 +682,6 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
                 if path.endswith(".py")
             ]
         }
-    if task_type == "subscription_config":
-        return {
-            "code_files": [
-                {
-                    "filename": "config/subscriptions.yaml",
-                    "content": textwrap.dedent(
-                        """
-                        schema_version: mozaiks.subscriptions.v1
-                        label: Matrix SaaS
-                        default_plan_id: free
-                        assignment_store:
-                          data_alias: billing.subscriptions
-                          app_id_field: app_id
-                          user_id_field: user_id
-                          status_field: status
-                          plan_id_field: plan_id
-                          capabilities_field: granted_capabilities
-                          active_statuses: [active, trialing]
-                        plans:
-                          - plan_id: free
-                            label: Free
-                            capabilities: [feature.module.reports.view_report]
-                          - plan_id: pro
-                            label: Pro
-                            capabilities: [feature.module.reports.view_report, feature.module.reports.export_report]
-                        """
-                    ).lstrip(),
-                }
-            ]
-        }
     if task_type == "page_bundle":
         return {
             "manifest": {
@@ -746,9 +734,7 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
     if spec.archetype_id == "monetized_saas_reports":
         ctx.set("subscription_contract", {
             "contract_required": True,
-            "subscription_config_file": yaml.safe_load(
-                _app_task_output(spec, task_type="subscription_config", task={})["code_files"][0]["content"],
-            ),
+            "subscription_config_file": deepcopy(_MONETIZED_SUBSCRIPTION_CONFIG),
             "selected_features_by_plan": {
                 "free": ["module.reports.view_report"],
                 "pro": ["module.reports.view_report", "module.reports.export_report"],

@@ -49,10 +49,13 @@ def subscription_assignment_store() -> dict[str, Any]:
 
     The store is the contract between the assignment writer and
     ConfiguredEntitlementAdapter, so nothing in an app's design decides it.
-    The designer used to author it, and the recorded corpus holds ten
-    different stores across 27 designs: active_statuses ["active"] or
-    ["active", "trial"] where fulfillment writes the provider's "trialing"
-    and "pending", expiry switched off, tenant scope dropped.
+    The designer used to author it: ten different stores across the 27
+    recorded designs. Their nulls were dropped on save, so the runtime
+    defaults applied and the only effective difference was active_statuses:
+    ["active"], ["active", "trial"] or ["active", "trial", "pending_upgrade"].
+    None entitles "pending", which hosted MozaiksPay sends for Stripe
+    past_due/incomplete/paused (it sends trialing as "active"), or the raw
+    "trialing" a writer forwarding Stripe's vocabulary sends.
 
     Every field is the runtime default except two, both fixed by the writers:
       - data_alias: the alias entitlement_dispatch writes.
