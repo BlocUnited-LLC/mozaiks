@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from unittest.mock import AsyncMock
@@ -67,6 +68,14 @@ def _design() -> dict:
             ],
         },
         "metering_declarations": [],
+    }
+
+
+def _metering_declaration(*, wallet_id: str = "ai_tokens", action_id: str | None = "create_task") -> dict:
+    return {
+        "surface_type": "module_action", "surface_id": "tasks", "action_id": action_id,
+        "wallet_id": wallet_id, "scope": "user", "enforcement": "commit_actual",
+        "estimate": None, "idempotency_key_source": "user_id",
     }
 
 
@@ -196,11 +205,94 @@ def test_workflow_feature_requires_agentic_concept_and_approved_surface() -> Non
 
 def test_approved_workflow_metering_does_not_make_workflow_access_sellable() -> None:
     output = _design()
-    declaration = {"surface_type": "workflow", "surface_id": "TaskAnalysis", "action_id": None}
+    output["subscription_config_file"]["token_wallets"] = [{"wallet_id": "ai_tokens"}]
+    declaration = {
+        **_metering_declaration(), "surface_type": "workflow", "surface_id": "TaskAnalysis",
+        "action_id": None,
+    }
     output["metering_declarations"] = [declaration]
     saved = module.normalize_subscription_contract(output, _context(agentic=True))
     assert saved["metering_declarations"] == [declaration]
     assert saved["workflow_contract_updates"] == []
+
+
+def test_no_wallet_drops_every_metering_declaration_and_explains_each_drop(caplog) -> None:
+    output = _design()
+    output["metering_declarations"] = [
+        _metering_declaration(action_id=None),
+        _metering_declaration(action_id="summarize_tasks"),
+    ]
+    with caplog.at_level(logging.INFO, logger=module.__name__):
+        saved = module.normalize_subscription_contract(output, _context())
+    assert saved["metering_declarations"] == []
+    assert len(saved["validation_notes"]) == 2
+    assert all("token_wallets is empty" in note for note in saved["validation_notes"])
+    assert sum("METERING_DECLARATION_DROPPED" in record.message for record in caplog.records) == 2
+    assert saved["module_contract_updates"] == [{
+        "module_id": "tasks", "action_id": "summarize_tasks",
+        "entitlement_gate": "feature.module.tasks.summarize_tasks", "metering": None,
+    }]
+
+
+def test_single_declared_wallet_rebinds_metering_before_gate_derivation(caplog) -> None:
+    output = _design()
+    output["subscription_config_file"]["token_wallets"] = [{"wallet_id": "actual_wallet"}]
+    output["metering_declarations"] = [_metering_declaration(wallet_id="invented_wallet")]
+    with caplog.at_level(logging.INFO, logger=module.__name__):
+        saved = module.normalize_subscription_contract(output, _context())
+    assert saved["metering_declarations"][0]["wallet_id"] == "actual_wallet"
+    assert any("METERING_DECLARATION_WALLET_BOUND" in record.message for record in caplog.records)
+    assert next(update for update in saved["module_contract_updates"]
+                if update["action_id"] == "create_task") == {
+        "module_id": "tasks", "action_id": "create_task", "entitlement_gate": None,
+        "metering": saved["metering_declarations"][0],
+    }
+
+
+def test_undeclared_wallet_with_multiple_choices_lists_declared_wallets() -> None:
+    output = _design()
+    output["subscription_config_file"]["token_wallets"] = [
+        {"wallet_id": "first_wallet"}, {"wallet_id": "second_wallet"},
+    ]
+    declaration = _metering_declaration(wallet_id="invented_wallet")
+    output["metering_declarations"] = [declaration]
+    with pytest.raises(ValueError) as error:
+        module.normalize_subscription_contract(output, _context())
+    message = str(error.value)
+    assert repr(declaration) in message
+    assert "['first_wallet', 'second_wallet']" in message
+    assert "remove the declaration" in message
+
+
+def test_invalid_module_metering_action_lists_all_approved_pairs() -> None:
+    output = _design()
+    output["subscription_config_file"]["token_wallets"] = [{"wallet_id": "ai_tokens"}]
+    declaration = _metering_declaration(action_id=None)
+    output["metering_declarations"] = [declaration]
+    with pytest.raises(ValueError) as error:
+        module.normalize_subscription_contract(output, _context())
+    message = str(error.value)
+    assert repr(declaration) in message
+    assert "Valid (surface_id, action_id) pairs:" in message
+    assert "('tasks', 'create_task')" in message
+    assert "('tasks', 'summarize_tasks')" in message
+    assert "remove the declaration" in message
+
+
+def test_invalid_workflow_metering_surface_lists_approved_surfaces() -> None:
+    output = _design()
+    output["subscription_config_file"]["token_wallets"] = [{"wallet_id": "ai_tokens"}]
+    declaration = {
+        **_metering_declaration(), "surface_type": "workflow", "surface_id": "unknown_workflow",
+        "action_id": None,
+    }
+    output["metering_declarations"] = [declaration]
+    with pytest.raises(ValueError) as error:
+        module.normalize_subscription_contract(output, _context(agentic=True))
+    message = str(error.value)
+    assert repr(declaration) in message
+    assert "Valid workflow surfaces: ['TaskAnalysis']" in message
+    assert "Remove the declaration" in message
 
 
 def test_distinct_approved_features_cannot_share_a_derived_capability() -> None:

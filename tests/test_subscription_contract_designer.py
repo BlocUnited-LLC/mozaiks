@@ -381,6 +381,8 @@ def test_subscription_contract_designer_exposes_review_ui() -> None:
     assert "Included features" in ui_source
     assert "selected_features_by_plan" in ui_source
     assert "Usage limits (display only)" in ui_source
+    assert "Validation Notes" in ui_source
+    assert "payload.validation_notes" in ui_source
     assert "Request Changes" in ui_source
     assert "canRequestChanges" in ui_source
 

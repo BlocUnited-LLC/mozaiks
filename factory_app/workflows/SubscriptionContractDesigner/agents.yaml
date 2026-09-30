@@ -222,6 +222,9 @@ agents:
                for ordinary subscription tiers that sell access only. Access-only
                SaaS uses plans, capabilities, assignment_store, and
                entitlement_gate without token wallet fields.
+             - For subscription-only designs with no token_wallets, leave
+               metering_declarations empty. Put plan limits in
+               plans[].usage_limits, not metering_declarations.
              - Use top_up_products only when the app lets users buy additional
                token packs or credits outside their recurring allowance. These
                products declare app-owned product ids, wallet ids, token
