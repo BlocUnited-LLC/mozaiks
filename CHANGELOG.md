@@ -62,6 +62,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs no longer blocks a monetized app over two design details it can
+  correct itself. A live run declared the users' plan as a `tier` field
+  (`free`/`pro`) in a `subscriptions` collection, and listed `list_tasks` among
+  its custom reads. Both were rejected, and the model's one retry could not fix
+  both. Now `tier` is treated like `plan` and `plan_type`: while MozaiksPay is
+  active, the collection is removed and billing_portal serves the plan. A
+  newsletter's or alert's own `subscriptions` still stay app data. A custom read
+  that duplicates a module collection's built-in list/get read is dropped and
+  recorded. That run's output now saves, and the replayed corpus saves 88 of 90.
+
 - SubscriptionContractDesigner now presents an approved subscription decision
   before plan design and surfaces requested corrections at the top of retries.
   A supplied plan design is saved as required even when the model labels it a

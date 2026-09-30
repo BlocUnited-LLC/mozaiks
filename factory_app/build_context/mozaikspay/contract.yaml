@@ -64,9 +64,12 @@ surface_ownership:
       - expires_at
       - on_free_plan
       # Names designs give the same provider facts (the plan, its status, its period).
+      # `tier` is the plan as recorded designs name it (tier: [free, pro]): the
+      # plan_id get_subscription_status serves.
       - plan
       - plan_type
       - subscription_type
+      - tier
       - subscription_status
       - start_date
       - end_date

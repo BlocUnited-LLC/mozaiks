@@ -761,14 +761,16 @@ def test_a_provider_named_entity_on_an_app_surface_is_the_designs_call(persisten
     assert "give it an app entity of its own (for example ReportsSubscription)" in result["error"]
 
 
-def test_a_reserved_collection_name_beside_an_app_entity_is_the_designs_call(persistence):
+@pytest.mark.parametrize("kind", ["type", "tier"])
+def test_a_reserved_collection_name_beside_an_app_entity_is_the_designs_call(persistence, kind):
+    # A plan's name (type, tier) is provider state only in records the rule owns; a newsletter's are the design's.
     _, store_factory, _ = persistence
     context = ownership._context(managed=True)
     bundle = inventory._bundle(pricing=False)
     _module(bundle, "newsletter", entities=["NewsletterSubscription"], actions=[], collections=[
         ("subscriptions", "NewsletterSubscription", [
             _field("subscription_id", "string", required=True), _field("user_id", "string", required=True),
-            _field("type", "string"), _field("status", "string"),
+            _field(kind, "string"), _field("status", "string"),
         ]),
     ])
 
@@ -833,6 +835,54 @@ def test_a_bare_type_in_a_billing_subscription_is_provider_state(persistence):
     assert result["outcome"] == "saved", result
     record = next(r for r in _records(summary) if r["surface_id"] == "subscription")
     assert record["removed_collections"] == ["subscriptions"]
+
+
+def test_a_plan_tier_in_a_subscriptions_collection_is_provider_state(persistence):
+    """Live c65f5d0f: the users' plan as tier [free, pro] is the plan_id get_subscription_status serves."""
+    _, _, summary = persistence
+    context = ownership._context(managed=True)
+    bundle = inventory._bundle(pricing=False)
+    bundle["data_contract"]["surfaces"][0]["collections"] = [
+        _records_of("reports", "subscriptions", "UserSubscription", [
+            _field("subscription_id", "string", required=True), _field("user_id", "string", required=True),
+            {**_field("tier", "string", required=True), "enum": ["free", "pro"]},
+            _field("status", "string"), _field("created_at", "datetime", required=True),
+        ]),
+    ]
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert {"surface_id": "reports", "owner": "billing_portal", "removed_collections": ["subscriptions"]} in _records(summary)
+    assert _surface(context, "reports")["owner"] == "app"
+    assert "subscriptions" not in _collection_names(context)
+
+
+# ---------------------------------------------------------------------------
+# Canonical reads listed as custom reads
+# ---------------------------------------------------------------------------
+
+
+def test_a_canonical_read_listed_as_a_custom_read_is_dropped_and_recorded(persistence):
+    """Live c65f5d0f listed list_tasks: code owns each module collection's list/get reads, so only those ids go."""
+    _, _, summary = persistence
+    context = inventory._context(monetized=False)
+    bundle = inventory._bundle(pricing=False)
+    bundle["surface_map"]["surfaces"][0]["custom_reads"] = [
+        "list_reports", "summarize_reports", "get_reports", "list_invoices",
+    ]
+    bundle["data_contract"]["surfaces"][0]["collections"] = [_records_of("reports", "reports", "Report", [
+        _field("user_id", "string", required=True), _field("title", "string", required=True),
+    ])]
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert _surface(context, "reports")["custom_reads"] == ["summarize_reports", "list_invoices"]
+    assert {
+        "surface_id": "reports", "owner": "app", "removed_collections": [],
+        "removed_reads": ["list_reports", "get_reports"],
+    } in _records(summary)
 
 
 def test_an_endpoint_binding_follows_the_alias(persistence):
