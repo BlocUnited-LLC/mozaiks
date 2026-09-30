@@ -445,18 +445,20 @@ records `mapped_actions` (a provider action the facade serves, such as
 `subscribe_user` -> `start_subscription_checkout`, declared by the rule's
 `action_aliases`; an alias never makes a surface billing by itself),
 `rebound_sections` (typed page bindings moved to the facade and its action), and
-`released_pages` (a page an app-owned surface also owns, which stays app-owned). Two design completions share the record: an AI
+`released_pages` (a page an app-owned surface also owns, which stays app-owned). Design completions share the record: an AI
 `workflow` surface the approved concept never asked for is saved as `module`
 when it declares entities, mutations, custom reads, or collections and as
 `ui_only` otherwise (`realized_surface_kind`; with no AI in the app, every
 module-owned collection declared `workflow_write` becomes module-written,
-`module_written_collections`, and a
-custom read equal to a canonical read is dropped, `removed_reads`), a module
+`module_written_collections`), a module
 owning a collection whose entity it does not list gains it (`added_entities`)
 unless another surface declares it or another module's collections hold it too,
 the module lists it under another spelling, or it is a platform identity or
-selected-provider entity, and a collection's `ownership.surface_kind` follows its
-owner's kind (`mirrored_collection_kinds`). These recorded
+selected-provider entity, a collection's `ownership.surface_kind` follows its
+owner's kind (`mirrored_collection_kinds`), and a custom read equal to a
+code-owned canonical read (`list_tasks`, `get_tasks` for a module's `tasks`
+collection, after ownership normalization) is dropped from `custom_reads`
+(`removed_reads`, on the surface's own record). These recorded
 corrections and normalized typed contracts govern any conflicting original prose.
 Normalization works on detached data and does not modify the model's turn-local
 structured output.

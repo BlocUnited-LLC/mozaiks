@@ -287,27 +287,37 @@ def _realize_undeclared_workflow_surfaces(
 
 
 def _drop_canonical_custom_reads(
-    realized: list[dict[str, Any]], surface_map: dict[str, Any], data_contract: dict[str, Any],
+    records: list[dict[str, Any]], surface_map: dict[str, Any], data_contract: dict[str, Any],
 ) -> None:
-    """A surface realized as a module gains code-owned list/get reads; the same ids declared as custom reads go.
+    """Code owns each module collection's list/get reads; the same ids declared as custom reads go.
 
-    A workflow surface may list them as its own reads, since canonical reads
-    exist only for module-owned collections. The removal is recorded on the
-    realized entry.
+    The read exists either way, so a design listing ``list_tasks`` among its
+    custom reads is determined, not a decision: the live model changes a
+    rejected design at most once, and refusing it blocked a run. Canonical reads
+    exist only for module-owned collections, so a workflow or ui_only surface
+    keeps what it lists. Runs after ownership normalization, against the
+    collections each surface still owns. The removal is recorded as
+    ``removed_reads`` on the surface's own record (a workflow surface realized
+    as a module, for one), or on a new one.
     """
-    surfaces = {surface.get("surface_id"): surface for surface in surface_map.get("surfaces") or []}
-    for entry in realized:
-        surface = surfaces.get(entry["surface_id"])
-        if surface is None or (entry.get("realized_surface_kind") or {}).get("to") != "module":
-            continue
+    for surface in surface_map.get("surfaces") or []:
+        reads = surface.get("custom_reads")
+        if not isinstance(reads, list):
+            continue  # the collection checks below name what is wrong with it
         try:
             canonical = set(canonical_read_actions_for_surface(surface, data_contract))
         except ValueError:
             continue  # the collection checks below name what is wrong with the contract
-        duplicates = [read for read in surface.get("custom_reads") or [] if read in canonical]
-        if duplicates:
-            surface["custom_reads"] = [read for read in surface.get("custom_reads") or [] if read not in canonical]
-            entry["removed_reads"] = duplicates
+        duplicates = list(dict.fromkeys(read for read in reads if isinstance(read, str) and read in canonical))
+        if not duplicates:
+            continue
+        surface["custom_reads"] = [read for read in reads if read not in duplicates]
+        surface_id, owner = str(surface.get("surface_id")), str(surface.get("owner") or "app")
+        entry = next((item for item in records if (item["surface_id"], item["owner"]) == (surface_id, owner)), None)
+        if entry is None:
+            entry = {"surface_id": surface_id, "owner": owner, "removed_collections": []}
+            records.append(entry)
+        entry["removed_reads"] = duplicates
 
 
 def _mirror_collection_kinds(data_contract: dict[str, Any], surface_map: dict[str, Any]) -> list[dict[str, Any]]:
@@ -614,12 +624,6 @@ def _validate_design_collections(
         overlap = set(reads) & set(surface.get("owned_mutations") or [])
         if len(reads) != len(set(reads)) or overlap:
             raise ValueError(f"surface {surface['surface_id']!r}.custom_reads must be unique and distinct from owned_mutations")
-        canonical = canonical_read_actions_for_surface(surface, data_contract)
-        if set(reads) & set(canonical):
-            raise ValueError(
-                f"surface {surface['surface_id']!r}.custom_reads must exclude code-owned canonical reads {canonical}; "
-                "declare only additional read action ids"
-            )
     return field_normalizations
 
 
@@ -969,7 +973,7 @@ async def save_design_docs_bundle(
             include_default_subscription=True,
         )
         ownership_normalizations += _mirror_collection_kinds(data_contract, surface_map)
-        _drop_canonical_custom_reads(realized_surfaces, surface_map, data_contract)
+        _drop_canonical_custom_reads(ownership_normalizations, surface_map, data_contract)
         field_normalizations = _validate_design_collections(data_contract, surface_map, context_variables)
         if not frontend_markdown or not backend_markdown or not database_markdown:
             raise ValueError("DesignDocsBundle must include all three Markdown documents")
