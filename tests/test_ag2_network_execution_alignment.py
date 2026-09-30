@@ -36,6 +36,7 @@ import mozaiksai.core.workflow.outputs.structured as structured_outputs_module
 import mozaiksai.core.workflow.task_batches as task_batches_module
 import mozaiksai.core.workflow.workflow_manager as workflow_manager_module
 from mozaiksai.core.adapters.ag2_network_runner import (
+    DEFAULT_IDLE_TIMEOUT_SECONDS,
     AG2NetworkRunner,
     AG2NetworkRunnerRequest,
     _closed_reason_from_wal,
@@ -124,7 +125,7 @@ async def test_durable_resume_revalidates_build_context_before_pending_turn_exec
             transition_rules=[{
                 "source_agent": "Planner", "target_agent": "terminate", "transition_type": "after_turn",
             }],
-            knowledge_store=store, close_timeout_seconds=3.0,
+            knowledge_store=store, idle_timeout_seconds=3.0,
             context_authority_policy=policy,
             context_variables=load_trusted_build_context(policy),
         )
@@ -155,7 +156,7 @@ async def test_live_resume_rejects_build_context_changed_while_paused(tmp_path, 
     result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
         workflow_name="ProjectionResume", chat_id="projection-live", app_id="app",
         agents={"Planner": _DeterministicAgent("Planner", "Approve"), "Worker": worker},
-        initial_agent_name="Planner", initial_message="Start", close_timeout_seconds=3.0,
+        initial_agent_name="Planner", initial_message="Start", idle_timeout_seconds=3.0,
         context_authority_policy=policy, context_variables=load_trusted_build_context(policy),
         transition_rules=[
             {"source_agent": "Planner", "target_agent": "user", "transition_type": "after_turn"},
@@ -255,7 +256,7 @@ async def test_recovered_turn_settles_before_a_new_user_message_is_sent() -> Non
         return AG2NetworkRunnerRequest(
             workflow_name="RecoverPendingSmoke", chat_id="chat-recovered", app_id="app-recovered",
             agents=agents, transition_rules=rules, initial_agent_name="Planner",
-            initial_message=message, knowledge_store=store, close_timeout_seconds=3.0,
+            initial_message=message, knowledge_store=store, idle_timeout_seconds=3.0,
         )
 
     failed = await AG2NetworkRunner().run(request({
@@ -298,7 +299,7 @@ async def test_rejected_reconnect_context_closes_the_new_hub(monkeypatch, messag
                 {"source_agent": "user", "target_agent": "terminate", "transition_type": "after_turn"},
             ],
             initial_agent_name="Worker", initial_message=initial_message,
-            knowledge_store=store, resume_context_updates=updates, close_timeout_seconds=3.0,
+            knowledge_store=store, resume_context_updates=updates, idle_timeout_seconds=3.0,
             context_authority_policy=build_context_authority_policy(
                 workflow_name="RejectedResumeSmoke", definitions={}, transition_rules=[],
             ),
@@ -646,7 +647,7 @@ async def test_ag2_network_runner_executes_mozaiks_transition_rules() -> None:
                 "WorkerAgent": _WorkerOutput,
             },
             max_turns=4,
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
 
@@ -695,7 +696,7 @@ async def test_ag2_network_runner_does_not_complete_failed_or_exhausted_graphs(r
             initial_agent_name="PlannerAgent",
             initial_message="Run the graph.",
             max_turns=1,
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
     assert result.status is RunStatus.FAILED
@@ -719,7 +720,7 @@ async def test_ag2_network_runner_fails_missing_user_return_edge() -> None:
             }],
             initial_agent_name="InterviewAgent",
             initial_message="Start.",
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
     assert result.status is RunStatus.PAUSED
@@ -756,7 +757,7 @@ async def test_ag2_network_runner_serializes_context_variables_for_replay() -> N
             },
             structured_registry={"PlannerAgent": _PlannerOutput},
             max_turns=2,
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
 
@@ -807,7 +808,7 @@ async def test_ag2_network_runner_commits_tool_context_updates_before_routing() 
             ],
             initial_agent_name="PlannerAgent",
             initial_message="Set route then continue.",
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
 
@@ -867,7 +868,7 @@ async def test_ag2_network_runner_commits_agent_text_context_updates_before_rout
             initial_message="Use the existing-app context.",
             context_variables={"interview_complete": False},
             agent_text_context_deriver=_derive_agent_text_context,
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
 
@@ -908,7 +909,7 @@ async def test_ag2_network_runner_pauses_immediately_on_user_handoff() -> None:
             ],
             initial_agent_name="ValueInterviewAgent",
             initial_message="Start the interview.",
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
     elapsed = perf_counter() - started_at
@@ -958,7 +959,7 @@ async def test_ag2_network_runner_continues_paused_channel_with_user_message() -
             ],
             initial_agent_name="ValueInterviewAgent",
             initial_message="Start the interview.",
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
 
@@ -999,11 +1000,13 @@ async def test_initial_timeout_is_failure_and_cancels_waiting_agent() -> None:
         agents={"Waiting": WaitingAgent("Waiting", "")},
         transition_rules=[{"source_agent": "Waiting", "target_agent": "terminate", "transition_type": "after_turn"}],
         initial_agent_name="Waiting", initial_message="Begin.",
-        context_variables={"retained": "evidence"}, close_timeout_seconds=0.05,
+        context_variables={"retained": "evidence"}, idle_timeout_seconds=0.05,
     ))
     assert result.status is RunStatus.FAILED
     assert result.live_run is None
-    assert "did not close" in result.error
+    assert result.error == (
+        "workflow channel made no progress for 0.05 seconds (last progress: ag2.msg.text from user)"
+    )
     assert result.context_variables["retained"] == "evidence"
     await asyncio.wait_for(cancelled.wait(), timeout=1)
 
@@ -1033,7 +1036,7 @@ async def test_interview_correction_is_visible_to_downstream_planner() -> None:
         ],
         agent_text_context_deriver=lambda name, text: {"ready": text == "NEXT"} if name == "Interviewer" else {},
         initial_agent_name="Interviewer", initial_message="Build a customer registry.",
-        close_timeout_seconds=3,
+        idle_timeout_seconds=3,
     ))
     assert result.status is RunStatus.PAUSED
     try:
@@ -1076,17 +1079,19 @@ async def test_continuation_timeout_fails_and_closes_live_run(timeout: float) ->
             ],
             initial_agent_name="Interviewer",
             initial_message="Begin.",
-            close_timeout_seconds=2.0,
+            idle_timeout_seconds=2.0,
         )
     )
     assert result.status is RunStatus.PAUSED
     live_run = result.live_run
     assert live_run is not None
-    live_run._close_timeout_seconds = timeout
+    live_run._idle_timeout_seconds = timeout
     try:
         continued = await asyncio.wait_for(live_run.continue_with_user_message("A tracker."), timeout=3.0)
         assert continued.status is RunStatus.FAILED
-        assert "did not settle" in continued.error
+        assert continued.error == (
+            f"workflow channel made no progress for {timeout} seconds (last progress: ag2.msg.text from user)"
+        )
         assert continued.close_reason != "awaiting_user_input"
         assert continued.live_run is None
         assert live_run._closed
@@ -1130,7 +1135,7 @@ async def test_ag2_network_runner_hydrates_and_continues_same_channel_after_rest
             initial_agent_name="ValueInterviewAgent",
             initial_message="Start the interview.",
             knowledge_store=store,
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
     assert first.status is RunStatus.PAUSED
@@ -1156,7 +1161,7 @@ async def test_ag2_network_runner_hydrates_and_continues_same_channel_after_rest
             knowledge_store=store,
             resume_existing_only=True,
             resume_context_updates={"approved_audience": "founders"},
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
     assert reconnected.status is RunStatus.PAUSED
@@ -1181,7 +1186,7 @@ async def test_ag2_network_runner_hydrates_and_continues_same_channel_after_rest
             initial_agent_name="ValueInterviewAgent",
             initial_message="Founders building agentic software.",
             knowledge_store=store,
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
     assert continued.status is RunStatus.COMPLETED
@@ -1236,7 +1241,7 @@ async def test_ag2_network_runner_commits_multiple_context_updates_and_deletes()
             initial_agent_name="PlannerAgent",
             initial_message="Set route, phase, and delete obsolete.",
             context_variables=context,
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
 
@@ -1283,7 +1288,7 @@ async def test_ag2_network_runner_leaves_noop_context_packet_unchanged() -> None
             initial_agent_name="PlannerAgent",
             initial_message="Do not mutate context.",
             context_variables=context,
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
 
@@ -1329,7 +1334,7 @@ async def test_ag2_network_runner_fails_promptly_and_clears_pending_context_upda
             ],
             initial_agent_name="PlannerAgent",
             initial_message="Fail after mutating local context.",
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
 
@@ -1384,7 +1389,7 @@ async def test_ag2_network_runner_fails_invalid_structured_output_contract() -> 
             initial_agent_name="PlannerAgent",
             initial_message="Plan.",
             structured_registry={"PlannerAgent": _PlannerOutput},
-            close_timeout_seconds=10.0,
+            idle_timeout_seconds=10.0,
         )
     )
 
@@ -1580,8 +1585,14 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(("tools", "idle_timeout_seconds"), [
+    ([], DEFAULT_IDLE_TIMEOUT_SECONDS),
+    ([{"tool_type": "UI_Tool", "function": "ask_user"}], float("inf")),
+])
 async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
     monkeypatch: pytest.MonkeyPatch,
+    tools: list[dict[str, str]],
+    idle_timeout_seconds: float,
 ) -> None:
     class _Persistence:
         def __init__(self) -> None:
@@ -1689,6 +1700,7 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
                 "max_turns": 4,
                 "workflow_startup_mode": "AgentDriven",
                 "initial_agent": "InterviewAgent",
+                "tools": tools,
                 "transition_graph": {
                     "transition_rules": [
                         {
@@ -1753,6 +1765,7 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
     assert result["run_completed"] is True
     assert captured["initial_agent_name"] == "PackBuildCoordinator"
     assert captured["initial_message"] == "Approved, proceed."
+    assert captured["idle_timeout_seconds"] == idle_timeout_seconds
     assert persistence.completed == [("chat-reentry", "app-1")]
 
 

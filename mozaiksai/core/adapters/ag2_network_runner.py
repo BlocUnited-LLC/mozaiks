@@ -23,6 +23,7 @@ from ag2.network import (
     EV_CHANNEL_CLOSED,
     EV_CONTEXT_SET,
     EV_PACKET,
+    EV_TEXT,
     AgentTarget,
     ChannelState,
     Envelope,
@@ -54,6 +55,12 @@ from mozaiksai.core.workflow.execution.network_graph import compile_transition_r
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
 
 _INITIATOR_NAME = "mozaiks_user"
+# A channel fails only after this long without progress; runs stay bounded by
+# max_turns and tool attempt budgets, not by total elapsed time.
+DEFAULT_IDLE_TIMEOUT_SECONDS = 300.0
+# Envelopes that show a channel advancing: a committed agent turn, a
+# checkpointed context write, or a message posted into the channel.
+_PROGRESS_EVENT_TYPES = frozenset({EV_PACKET, EV_CONTEXT_SET, EV_TEXT})
 _context_checkpoint: ContextVar[Callable[[], Awaitable[None]] | None] = ContextVar(
     "ag2_authorized_context_checkpoint", default=None,
 )
@@ -304,7 +311,7 @@ class AG2NetworkRunnerRequest:
     context_variables: Mapping[str, Any] = field(default_factory=dict)
     structured_registry: Mapping[str, Any] = field(default_factory=dict)
     max_turns: int | None = None
-    close_timeout_seconds: float = 120.0
+    idle_timeout_seconds: float = DEFAULT_IDLE_TIMEOUT_SECONDS
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None
     agent_output_handler: Callable[[str, Any], Awaitable[None]] | None = None
     context_authority_policy: ContextAuthorityPolicy | None = None
@@ -390,6 +397,9 @@ class AG2NetworkRunner:
         )
         turn_failure_listener = _TurnFailureListener()
         hub.register_listener(turn_failure_listener)  # type: ignore[arg-type]
+        progress_listener = _ChannelProgressListener()
+        hub.register_listener(progress_listener)  # type: ignore[arg-type]
+        idle_timeout_seconds = float(request.idle_timeout_seconds or DEFAULT_IDLE_TIMEOUT_SECONDS)
         link = LocalLink(hub)
         hub_clients: list[HubClient] = []
         channel_id: str | None = None
@@ -627,8 +637,10 @@ class AG2NetworkRunner:
                     initiator=initiator,
                     channel_id=channel.channel_id,
                     turn_failure_listener=turn_failure_listener,
+                    progress_listener=progress_listener,
+                    agent_name_by_id=_agent_names(),
                     snapshot_result=_snapshot_result,
-                    close_timeout_seconds=float(request.close_timeout_seconds or 120.0),
+                    idle_timeout_seconds=idle_timeout_seconds,
                     context_authority_policy=request.context_authority_policy,
                 )
                 if resumed_pending_turns:
@@ -658,12 +670,18 @@ class AG2NetworkRunner:
                 turn_failure_listener.wait_for_failure(channel.channel_id)
             )
             loop = asyncio.get_running_loop()
-            deadline = loop.time() + float(request.close_timeout_seconds or 120.0)
+            wait_started = loop.time()
 
             while True:
-                remaining = deadline - loop.time()
+                remaining = progress_listener.idle_deadline(
+                    channel.channel_id, since=wait_started, idle_timeout_seconds=idle_timeout_seconds,
+                ) - loop.time()
                 if remaining <= 0:
-                    raise TimeoutError
+                    raise TimeoutError(progress_listener.idle_error(
+                        channel.channel_id,
+                        idle_timeout_seconds=idle_timeout_seconds,
+                        agent_name_by_id=_agent_names(),
+                    ))
 
                 event_task = asyncio.create_task(
                     initiator.wait_for_channel_event(
@@ -705,6 +723,9 @@ class AG2NetworkRunner:
 
                 try:
                     event_env = event_task.result()
+                except TimeoutError:
+                    # Progress recorded during the wait moves the deadline.
+                    continue
                 finally:
                     for task in pending:
                         task.cancel()
@@ -739,13 +760,15 @@ class AG2NetworkRunner:
                         initiator=initiator,
                         channel_id=channel.channel_id,
                         turn_failure_listener=turn_failure_listener,
+                        progress_listener=progress_listener,
+                        agent_name_by_id=_agent_names(),
                         snapshot_result=_snapshot_result,
-                        close_timeout_seconds=float(request.close_timeout_seconds or 120.0),
+                        idle_timeout_seconds=idle_timeout_seconds,
                         context_authority_policy=request.context_authority_policy,
                     )
                     keep_live_run = True
                     return result
-        except TimeoutError:
+        except TimeoutError as exc:
             wal = await hub.read_wal(channel_id) if channel_id else []
             state = hub.adapter_state(channel_id) if channel_id else None
             return AG2NetworkRunnerResult(
@@ -756,7 +779,9 @@ class AG2NetworkRunner:
                 channel_id=channel_id,
                 context_variables=_json_safe_dict(getattr(state, "context_vars", {}) or {}),
                 wal=[_envelope_to_dict(envelope) for envelope in wal],
-                error=f"workflow channel did not close within {request.close_timeout_seconds} seconds",
+                error=str(exc) or progress_listener.idle_error(
+                    channel_id or "", idle_timeout_seconds=idle_timeout_seconds, agent_name_by_id={},
+                ),
             )
         except Exception as exc:
             wal = await hub.read_wal(channel_id) if channel_id else []
@@ -866,8 +891,10 @@ class _AG2LiveWorkflowRun:
         initiator: Any,
         channel_id: str,
         turn_failure_listener: _TurnFailureListener,
+        progress_listener: _ChannelProgressListener,
+        agent_name_by_id: Mapping[str, str],
         snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]],
-        close_timeout_seconds: float,
+        idle_timeout_seconds: float,
         context_authority_policy: ContextAuthorityPolicy | None,
     ) -> None:
         self.workflow_name = workflow_name
@@ -878,8 +905,10 @@ class _AG2LiveWorkflowRun:
         self._hub_clients = tuple(hub_clients)
         self._initiator = initiator
         self._turn_failure_listener = turn_failure_listener
+        self._progress_listener = progress_listener
+        self._agent_name_by_id = dict(agent_name_by_id)
         self._snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]] = snapshot_result
-        self._close_timeout_seconds = close_timeout_seconds
+        self._idle_timeout_seconds = idle_timeout_seconds
         self._closed = False
         self._lock = asyncio.Lock()
         self._wal_cursor = 0
@@ -974,10 +1003,12 @@ class _AG2LiveWorkflowRun:
             self._turn_failure_listener.wait_for_failure(self.channel_id)
         )
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._close_timeout_seconds
+        wait_started = loop.time()
         try:
             while True:
-                remaining = deadline - loop.time()
+                remaining = self._progress_listener.idle_deadline(
+                    self.channel_id, since=wait_started, idle_timeout_seconds=self._idle_timeout_seconds,
+                ) - loop.time()
                 if remaining <= 0:
                     break
 
@@ -1012,7 +1043,8 @@ class _AG2LiveWorkflowRun:
                 try:
                     event_env = event_task.result()
                 except TimeoutError:
-                    break
+                    # Progress recorded during the wait moves the deadline.
+                    continue
                 finally:
                     for task in pending:
                         task.cancel()
@@ -1040,7 +1072,11 @@ class _AG2LiveWorkflowRun:
 
         return await self._snapshot_result(
             status=RunStatus.FAILED,
-            error=f"workflow channel did not settle within {self._close_timeout_seconds} seconds",
+            error=self._progress_listener.idle_error(
+                self.channel_id,
+                idle_timeout_seconds=self._idle_timeout_seconds,
+                agent_name_by_id=self._agent_name_by_id,
+            ),
         )
 
     async def close(self) -> None:
@@ -1288,6 +1324,55 @@ class _TurnFailureListener:
                     return failure
             await self._event.wait()
             self._event.clear()
+
+
+@dataclass(frozen=True, slots=True)
+class _ChannelProgress:
+    at: float
+    event_type: str
+    sender_id: str
+
+
+class _ChannelProgressListener:
+    """Record each channel's latest progress so its deadline measures inactivity.
+
+    The hub reports every posted envelope, including context checkpoints whose
+    empty audience never reaches the initiator.
+    """
+
+    def __init__(self) -> None:
+        self._latest: dict[str, _ChannelProgress] = {}
+
+    async def on_envelope_posted(self, envelope: Any, metadata: Any) -> None:  # noqa: ARG002
+        event_type = str(getattr(envelope, "event_type", "") or "")
+        if event_type in _PROGRESS_EVENT_TYPES:
+            self._latest[str(envelope.channel_id)] = _ChannelProgress(
+                at=asyncio.get_running_loop().time(),
+                event_type=event_type,
+                sender_id=str(getattr(envelope, "sender_id", "") or ""),
+            )
+
+    def idle_deadline(self, channel_id: str, *, since: float, idle_timeout_seconds: float) -> float:
+        latest = self._latest.get(channel_id)
+        return max(since, latest.at if latest is not None else since) + idle_timeout_seconds
+
+    def idle_error(
+        self,
+        channel_id: str,
+        *,
+        idle_timeout_seconds: float,
+        agent_name_by_id: Mapping[str, str],
+    ) -> str:
+        latest = self._latest.get(channel_id)
+        last_progress = (
+            "none"
+            if latest is None
+            else f"{latest.event_type} from {agent_name_by_id.get(latest.sender_id, latest.sender_id)}"
+        )
+        return (
+            f"workflow channel made no progress for {idle_timeout_seconds} seconds "
+            f"(last progress: {last_progress})"
+        )
 
 
 def _envelope_to_dict(envelope: Any) -> dict[str, Any]:

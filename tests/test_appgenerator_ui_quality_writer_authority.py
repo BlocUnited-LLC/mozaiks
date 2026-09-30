@@ -106,7 +106,7 @@ async def test_unset_status_fails_on_complete_compiled_appgenerator_graph(contra
         agents={name: ReplyAgent(name) for name in contract.names},
         transition_rules=contract.rules, initial_agent_name=AGENT, initial_message="Review UI",
         context_variables=bridge.snapshot(), context_authority_policy=contract.policy,
-        close_timeout_seconds=5,
+        idle_timeout_seconds=5,
     ))
     assert result.status is RunStatus.FAILED
     assert result.close_reason == result.error == "no_transition_matched"

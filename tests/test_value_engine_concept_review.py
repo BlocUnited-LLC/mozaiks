@@ -156,7 +156,7 @@ async def test_review_outcome_drives_native_ag2_graph_and_resumes(review, action
         workflow_name="ValueEngine", app_id="build-app", chat_id="chat-review", agents=agents,
         transition_rules=config["transition_graph"]["transition_rules"], initial_agent_name="GapAnalysisAgent",
         initial_message="Propose a customer tracker.", context_variables=bridge.snapshot(),
-        context_authority_policy=policy, max_turns=6, close_timeout_seconds=float("inf"),
+        context_authority_policy=policy, max_turns=6, idle_timeout_seconds=float("inf"),
         agent_output_handler=before_packet,
     ))
     live_run = result.live_run

@@ -50,7 +50,7 @@ async def _continue(fixture, *, status: RunStatus, error: str | None = None):
 @pytest.mark.parametrize("error", [
     "AG2 turn failed for AppPlanAgent: structured output validation failed: truncated JSON",
     "AG2 turn failed for AppPlanAgent: provider unavailable",
-    "workflow channel did not settle within 120.0 seconds",
+    "workflow channel made no progress for 300.0 seconds (last progress: ag2.packet from AppPlanAgent)",
 ])
 async def test_live_failure_runs_declared_lifecycle_and_target_scoped_revision_cleanup(live_settlement, error):
     fixture = live_settlement

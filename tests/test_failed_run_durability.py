@@ -160,7 +160,7 @@ async def test_closed_failed_wal_cannot_open_another_channel_after_restart(resum
         transition_rules=[{
             "source_agent": "Worker", "target_agent": "terminate", "transition_type": "after_turn",
             "termination_reason": "workflow_failed",
-        }], knowledge_store=store, close_timeout_seconds=3.0,
+        }], knowledge_store=store, idle_timeout_seconds=3.0,
     )
     first = await AG2NetworkRunner().run(request)
     assert first.status is RunStatus.FAILED

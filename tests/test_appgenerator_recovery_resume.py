@@ -108,7 +108,7 @@ async def test_readiness_user_reply_materializes_auth_before_real_validation(con
             agents=agents, initial_agent_name="IntegrationReadinessAgent", initial_message=message,
             transition_rules=rules, context_variables=initial, knowledge_store=store,
             agent_output_handler=output_hook,
-            context_authority_policy=policy, resume_existing_only=reopen, close_timeout_seconds=30.0,
+            context_authority_policy=policy, resume_existing_only=reopen, idle_timeout_seconds=30.0,
         )
 
     result = await AG2NetworkRunner().run(request("Check integration readiness"))
@@ -278,7 +278,7 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
             transition_rules=rules, context_variables=initial_context,
             agent_output_handler=output_hook, knowledge_store=store,
             context_authority_policy=policy,
-            resume_existing_only=reopen, close_timeout_seconds=3.0,
+            resume_existing_only=reopen, idle_timeout_seconds=3.0,
         )
 
     result = await AG2NetworkRunner().run(request("Build the app"))
