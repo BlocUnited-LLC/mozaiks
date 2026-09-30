@@ -6,6 +6,8 @@ ContextVariablesBridge, the same way the task worker supplies it.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from copy import deepcopy
 from pathlib import Path
@@ -17,6 +19,7 @@ from factory_app.workflows.AppGenerator.tools.app_validation import _wiring_repa
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
     _apply_planned_page_contracts,
 )
+from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 from mozaiksai.core.runtime.app.page_schema import validate_page_schema
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
@@ -225,9 +228,11 @@ def test_invented_create_and_edit_workflow_buttons_become_modal_forms_for_the_co
     actions = _section(dashboard, "task-table")["config"]["actions"]
     # Opener ids are constructed so they cannot collide with an authored action
     # (the recorded run reused `create_task` for the empty-state action too).
+    # The shared canonical delete has no authored button at all, so it gets its own.
     assert [(a["id"], a["label"], a["action_type"], a["event_type"], a["payload"]["modal_id"], a["requires_selection"]) for a in actions] == [
         ("open-create_task", "Create Task", "event", "ui.modal.open", "create_task-modal", False),
         ("open-update_task", "Edit Task", "event", "ui.modal.open", "update_task-modal", True),
+        ("open-delete_task", "Delete", "event", "ui.modal.open", "delete_task-modal", True),
     ]
     assert all("workflow_id" not in action for action in actions)
     edit_form = _section(dashboard, "update_task-modal")["config"]["children"][0]["config"]
@@ -276,9 +281,11 @@ def test_workflow_button_is_kept_when_the_bundle_declares_that_workflow():
     actions = _section(compiled["ui/pages/dashboard.yaml"], "task-table")["config"]["actions"]
     assert actions[0]["action_type"] == "workflow" and actions[0]["workflow_id"] == "Triage"
     # The real workflow button is not a create/edit replacement candidate; only
-    # the gated update action's missing entry point is constructed.
-    assert [action["id"] for action in actions] == ["triage", "open-update_task"]
-    assert [s["id"] for s in compiled["ui/pages/dashboard.yaml"]["sections"] if s["primitive"] == "Modal"] == ["update_task-modal"]
+    # the canonical writes' missing entry points are constructed.
+    assert [action["id"] for action in actions] == ["triage", "open-update_task", "open-create_task", "open-delete_task"]
+    assert [s["id"] for s in compiled["ui/pages/dashboard.yaml"]["sections"] if s["primitive"] == "Modal"] == [
+        "update_task-modal", "create_task-modal", "delete_task-modal",
+    ]
 
 
 def _tasks_page(actions: list[dict] | None = None, *, selection: str | None = "single") -> dict:
@@ -297,11 +304,12 @@ def test_gated_update_action_on_a_listed_collection_gets_an_edit_entry_point(sel
     validate_page_schema(tasks)
     table = _section(tasks, "task-table")["config"]
     assert table["selection"] == "single"
-    assert table["actions"] == [{
+    assert table["actions"][0] == {
         "id": "open-update_task", "label": "Edit", "variant": "secondary", "action_type": "event",
         "event_type": "ui.modal.open", "payload": {"modal_id": "update_task-modal"},
         "requires_selection": True, "closes_modal": False,
-    }]
+    }
+    assert [action["id"] for action in table["actions"]] == ["open-update_task", "open-create_task", "open-delete_task"]
     assert "task_management/update_task" in reachable_page_action_keys([tasks])
     lines = [record.getMessage() for record in caplog.records if "constructed" in record.getMessage()]
     assert any("gated action task_management/update_task (task.edit) has no page entry point" in line for line in lines)
@@ -328,8 +336,11 @@ def test_no_edit_entry_point_is_added_when_the_page_already_reaches_the_gated_ac
     ]}})
     compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(page)}, _context())
     tasks = compiled["ui/pages/tasks.yaml"]
-    assert [s["id"] for s in tasks["sections"]] == ["task-table", "edit-task"]
-    assert [a["id"] for a in _section(tasks, "task-table")["config"]["actions"]] == ["edit"]
+    # No second edit modal or opener; only the shared create/delete entry points are added.
+    assert [s["id"] for s in tasks["sections"]] == ["task-table", "edit-task", "create_task-modal", "delete_task-modal"]
+    assert [a["id"] for a in _section(tasks, "task-table")["config"]["actions"]] == [
+        "edit", "open-create_task", "open-delete_task",
+    ]
 
 
 def test_every_page_in_the_task_is_reported_in_one_rejection():
@@ -464,7 +475,7 @@ def test_assembly_re_derives_the_constructions_from_the_raw_typed_page():
         "id": "tasks_completed", "label": "Done", "value_key": "tasks_completed", "trend_key": None,
     }
     assert [a["id"] for a in _section(dashboard, "task-table")["config"]["actions"]] == [
-        "open-create_task", "open-update_task",
+        "open-create_task", "open-update_task", "open-delete_task",
     ]
     assert {"task_management/create_task", "task_management/update_task"} <= reachable_page_action_keys([dashboard])
 
@@ -481,8 +492,9 @@ def test_an_authored_modal_with_the_constructed_id_is_not_reused_and_no_opener_i
     caplog.set_level(logging.INFO, logger="mozaiksai.core.workflow.generator_support.page_binding_construction")
     compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(page)}, _context())
     tasks = compiled["ui/pages/tasks.yaml"]
-    assert "actions" not in _section(tasks, "task-table")["config"]
-    assert [s["id"] for s in tasks["sections"]] == ["task-table", "update_task-modal"]
+    # The edit entry point is refused; the shared create/delete still get theirs.
+    assert [a["id"] for a in _section(tasks, "task-table")["config"]["actions"]] == ["open-create_task", "open-delete_task"]
+    assert [s["id"] for s in tasks["sections"]] == ["task-table", "update_task-modal", "create_task-modal", "delete_task-modal"]
     assert any("not constructed" in r.getMessage() and "is not a Modal form submitting" in r.getMessage() for r in caplog.records)
     # A second pass over the same page adds nothing either.
     context = _context()
@@ -499,9 +511,11 @@ def test_an_existing_opener_is_not_duplicated_when_only_the_selection_was_missin
                          "requires_selection": True, "payload": {"modal_id": "update_task-modal"}}], selection="none")
     compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(page)}, _context())
     table = _section(compiled["ui/pages/tasks.yaml"], "task-table")["config"]
-    assert [a["id"] for a in table["actions"]] == ["edit"]
+    assert [a["id"] for a in table["actions"]] == ["edit", "open-create_task", "open-delete_task"]
     assert table["selection"] == "single"
-    assert [s["id"] for s in compiled["ui/pages/tasks.yaml"]["sections"]] == ["task-table", "update_task-modal"]
+    assert [s["id"] for s in compiled["ui/pages/tasks.yaml"]["sections"]] == [
+        "task-table", "update_task-modal", "create_task-modal", "delete_task-modal",
+    ]
 
 
 def test_an_invented_edit_workflow_in_the_empty_state_is_left_for_the_author():
@@ -610,7 +624,9 @@ def test_constructions_survive_a_collection_without_a_search_key(stripped, caplo
     page = _dashboard([{"id": "tasks_completed", "label": "Done", "value_key": "tasks_completed"}], _workflow_actions())
     compiled = _compile({"ui/pages/dashboard.yaml": yaml.safe_dump(page)}, context, caplog)
     dashboard = compiled["ui/pages/dashboard.yaml"]
-    assert [a["id"] for a in _section(dashboard, "task-table")["config"]["actions"]] == ["open-create_task", "open-update_task"]
+    assert [a["id"] for a in _section(dashboard, "task-table")["config"]["actions"]] == [
+        "open-create_task", "open-update_task", "open-delete_task",
+    ]
     edit_form = _section(dashboard, "update_task-modal")["config"]["children"][0]["config"]
     assert edit_form["submit_action"]["payload"][0] == {"key": "task_id", "value": "{selected_row.task_id}"}
     assert {"task_management/create_task", "task_management/update_task"} <= reachable_page_action_keys([dashboard])
@@ -776,3 +792,246 @@ def test_an_authored_section_holding_the_confirmation_id_is_never_overwritten(ca
     refused = [record.getMessage() for record in caplog.records if "not constructed" in record.getMessage()]
     assert any("no delete entry point for gated task_management/delete_task: section 'delete_task-modal' exists"
                in line for line in refused)
+
+
+def _shared_module_yaml() -> str:
+    """The module with no gate at all: every write is in every plan (or the app sells no plans)."""
+    manifest = yaml.safe_load(_module_yaml())
+    for action in manifest["actions"]:
+        action.pop("entitlement_gate", None)
+    return yaml.safe_dump(manifest, sort_keys=False)
+
+
+def _constructed(caplog) -> list[str]:
+    return [record.getMessage() for record in caplog.records if ": constructed " in record.getMessage()]
+
+
+def test_shared_canonical_create_and_delete_get_the_same_entry_points_as_gated_ones(caplog):
+    """Replay of fdfa818e at 92190318: #768 left only update_task gated, and create/delete lost their buttons."""
+    context = _context()  # only update_task is gated, as in the replayed pricing contract
+    compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(_tasks_page(selection=None))}, context, caplog)
+    tasks = compiled["ui/pages/tasks.yaml"]
+    validate_page_schema(deepcopy(tasks))
+    table = _section(tasks, "task-table")["config"]
+    assert table["selection"] == "single"
+    assert [(a["id"], a["label"], a["variant"], a["requires_selection"], a["payload"]["modal_id"]) for a in table["actions"]] == [
+        ("open-update_task", "Edit", "secondary", True, "update_task-modal"),
+        ("open-create_task", "New Task", "primary", False, "create_task-modal"),
+        ("open-delete_task", "Delete", "danger", True, "delete_task-modal"),
+    ]
+    create_form = _section(tasks, "create_task-modal")["config"]["children"][0]["config"]
+    assert create_form["submit_action"]["href"] == "/api/modules/task_management/create_task"
+    assert [(field["name"], field["required"]) for field in create_form["fields"]] == [("title", True), ("description", False)]
+    confirm = _section(tasks, "delete_task-modal")["config"]["actions"][0]
+    assert (confirm["action_type"], confirm["href"], confirm["payload"]) == (
+        "delete", "/api/modules/task_management/delete_task", {"task_id": "{selected_row.task_id}"},
+    )
+    assert {f"task_management/{name}" for name in ("list_tasks", "create_task", "update_task", "delete_task")} <= (
+        reachable_page_action_keys([tasks])
+    )
+    lines = _constructed(caplog)
+    assert any(line.endswith(
+        "tasks/task-table: gated action task_management/update_task (task.edit) has no page entry point; "
+        "added an Edit row action and a modal form that submits it") for line in lines)
+    assert any(line.endswith(
+        "tasks/task-table: shared action task_management/create_task has no page entry point; "
+        "added a 'New Task' toolbar action and a modal form that submits it") for line in lines)
+    assert any(line.endswith(
+        "tasks/task-table: shared action task_management/delete_task has no page entry point; "
+        "added a Delete row action and a confirmation dialog that deletes the selected Task") for line in lines)
+    again = normalize_planned_page_content(
+        yaml.safe_dump(tasks, sort_keys=False, allow_unicode=True), path="ui/pages/tasks.yaml",
+        modules=module_action_index_from_context(context),
+        data_contract=detach(context.get("data_contract")), design_surface_map=detach(context.get("design_surface_map")),
+    )
+    assert yaml.safe_load(again) == tasks
+
+
+def test_a_shared_canonical_update_gets_an_edit_entry_point(caplog):
+    context = _context(module_yaml=_shared_module_yaml())
+    compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(_tasks_page())}, context, caplog)
+    tasks = compiled["ui/pages/tasks.yaml"]
+    assert [a["id"] for a in _section(tasks, "task-table")["config"]["actions"]] == [
+        "open-update_task", "open-create_task", "open-delete_task",
+    ]
+    edit_form = _section(tasks, "update_task-modal")["config"]["children"][0]["config"]
+    assert edit_form["initial_values_key"] == "selected_row"
+    assert edit_form["submit_action"]["payload"][0] == {"key": "task_id", "value": "{selected_row.task_id}"}
+    assert any(line.endswith(
+        "shared action task_management/update_task has no page entry point; "
+        "added an Edit row action and a modal form that submits it") for line in _constructed(caplog))
+    assert not any("gated action" in line for line in _constructed(caplog))
+
+
+def test_an_internal_canonical_write_gets_no_entry_point():
+    manifest = yaml.safe_load(_shared_module_yaml())
+    for action in manifest["actions"]:
+        if action["id"] == "delete_task":
+            action["api_surface"] = "internal"
+    context = _context(module_yaml=yaml.safe_dump(manifest, sort_keys=False))
+    tasks = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(_tasks_page())}, context)["ui/pages/tasks.yaml"]
+    assert [a["id"] for a in _section(tasks, "task-table")["config"]["actions"]] == ["open-update_task", "open-create_task"]
+    assert "delete_task-modal" not in {section["id"] for section in tasks["sections"]}
+
+
+def _authored_modals() -> list[dict]:
+    """Modal forms the page author wrote for each canonical write, under the author's own ids."""
+    def form(form_id: str, action_id: str, *, edit: bool) -> dict:
+        config = {
+            "fields": [{"name": "title", "label": "Title", "type": "text", "required": not edit}],
+            "submit_action": {"id": f"save-{form_id}", "label": "Save", "action_type": "submit",
+                              "data_source": {"module_id": "task_management", "action_id": action_id}},
+        }
+        if edit:
+            config["initial_values_key"] = "selected_row"
+            config["submit_action"]["payload"] = [
+                {"key": "task_id", "value": "{selected_row.task_id}"}, {"key": "title", "value": "{form.title}"},
+            ]
+        return {"id": form_id, "primitive": "Form", "config": config}
+
+    return [
+        {"id": "new-task", "primitive": "Modal", "title": "New task", "config": {
+            "title": "New task", "children": [form("new-task-form", "create_task", edit=False)]}},
+        {"id": "edit-task", "primitive": "Modal", "title": "Edit task", "config": {
+            "title": "Edit task", "children": [form("edit-task-form", "update_task", edit=True)]}},
+        {"id": "remove-task", "primitive": "Modal", "title": "Remove task", "config": {
+            "title": "Remove task", "children": [], "actions": [
+                {"id": "confirm-remove", "label": "Remove", "variant": "danger", "action_type": "delete",
+                 "data_source": {"module_id": "task_management", "action_id": "delete_task"},
+                 "payload": {"task_id": "{selected_row.task_id}"}},
+            ]}},
+    ]
+
+
+def test_an_authored_modal_for_the_write_gets_the_opener_instead_of_a_second_modal(caplog):
+    page = _tasks_page(selection=None)
+    page["sections"].extend(_authored_modals())
+    context = _context(module_yaml=_shared_module_yaml())
+    compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(page)}, context, caplog)
+    tasks = compiled["ui/pages/tasks.yaml"]
+    validate_page_schema(deepcopy(tasks))
+    assert [section["id"] for section in tasks["sections"]] == ["task-table", "new-task", "edit-task", "remove-task"]
+    table = _section(tasks, "task-table")["config"]
+    assert [(a["id"], a["label"], a["payload"]["modal_id"], a["requires_selection"]) for a in table["actions"]] == [
+        ("open-update_task", "Edit", "edit-task", True),
+        ("open-create_task", "New Task", "new-task", False),
+        ("open-delete_task", "Delete", "remove-task", True),
+    ]
+    assert table["selection"] == "single"
+    assert {f"task_management/{name}" for name in ("create_task", "update_task", "delete_task")} <= (
+        reachable_page_action_keys([tasks])
+    )
+    lines = _constructed(caplog)
+    assert any(line.endswith(
+        "shared action task_management/create_task has no page entry point; added a 'New Task' toolbar action "
+        "opening the page's existing modal form 'new-task' that submits it") for line in lines)
+    assert any(line.endswith(
+        "shared action task_management/update_task has no page entry point; added an Edit row action "
+        "opening the page's existing modal form 'edit-task' that submits it") for line in lines)
+    assert any(line.endswith(
+        "shared action task_management/delete_task has no page entry point; added a Delete row action "
+        "opening the page's existing confirmation dialog 'remove-task' that deletes the selected Task") for line in lines)
+
+
+def test_a_formless_authored_modal_is_not_opened_and_the_write_gets_a_working_form(caplog):
+    """The replayed tasks.yaml: create-task-modal posts {form.title} from its footer with no Form to fill it."""
+    page = _tasks_page()
+    formless = {"id": "create-task-modal", "primitive": "Modal", "title": "New Task", "config": {
+        "title": "Create a New Task", "size": "medium", "children": [], "actions": [
+            {"id": "submit-create-task", "label": "Create", "variant": "primary", "action_type": "submit",
+             "data_source": {"module_id": "task_management", "action_id": "create_task"},
+             "payload": [{"key": "title", "value": "{form.title}"}, {"key": "description", "value": "{form.description}"}]},
+        ]}}
+    page["sections"].append(formless)
+    compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(page)}, _context(), caplog)
+    tasks = compiled["ui/pages/tasks.yaml"]
+    table = _section(tasks, "task-table")["config"]
+    opener = next(action for action in table["actions"] if action["id"] == "open-create_task")
+    assert opener["payload"] == {"modal_id": "create_task-modal"}
+    assert _section(tasks, "create_task-modal")["config"]["children"][0]["primitive"] == "Form"
+    assert _section(tasks, "create-task-modal")["config"]["children"] == []  # the author's section is untouched
+    assert any(line.endswith(
+        "added a 'New Task' toolbar action and a modal form that submits it; modal 'create-task-modal' submits it "
+        "from footer actions without a Form, so it collects no input and is left unopened") for line in _constructed(caplog))
+
+
+def _wiring_files(tasks_page: dict, module_yaml: str | None = None) -> dict[str, str]:
+    if module_yaml is None:  # only update_task stays gated; the dashboard's summarize_tasks is not on this bundle
+        manifest = yaml.safe_load(_module_yaml())
+        next(action for action in manifest["actions"] if action["id"] == "summarize_tasks").pop("entitlement_gate")
+        module_yaml = yaml.safe_dump(manifest, sort_keys=False)
+    return {
+        "modules/task_management/module.yaml": module_yaml,
+        "data/contract.json": json.dumps(_data_contract()),
+        "ui/pages/tasks.yaml": yaml.safe_dump(tasks_page, sort_keys=False),
+    }
+
+
+def _bundle_tasks_page() -> dict:
+    """A final bundle page that lists tasks and binds none of its writes."""
+    page = _tasks_page(selection="single")
+    config = _section(page, "task-table")["config"]
+    config.pop("data_source")
+    config["api_endpoint"] = "/api/modules/task_management/list_tasks"
+    return page
+
+
+def test_the_wiring_gate_fails_an_unreachable_shared_canonical_write_naming_the_action_and_page():
+    files = _wiring_files(_bundle_tasks_page())
+    report = asyncio.run(validate_wiring({"generated_files": files}))
+    assert report["passed"] is False
+    failures = {
+        (failure["test"], failure["action"]): failure for failure in report["failed_tests"]
+        if failure["test"].startswith("wiring_unreachable_")
+    }
+    # update_task is gated: the gated check reports it once, and the canonical check does not repeat it.
+    assert sorted(failures) == [
+        ("wiring_unreachable_canonical_write", "task_management/create_task"),
+        ("wiring_unreachable_canonical_write", "task_management/delete_task"),
+        ("wiring_unreachable_gated_action", "task_management/update_task"),
+    ]
+    create = failures[("wiring_unreachable_canonical_write", "task_management/create_task")]
+    assert create["page"] == "tasks" and create["pages"] == ["tasks"]
+    assert create["error"] == (
+        "Canonical create action 'task_management/create_task' has no reachable page entry point, "
+        "but page 'tasks' lists its collection 'tasks'."
+    )
+    assert create["fix_suggestion"].startswith("Give the 'tasks' table on page 'tasks' a toolbar action")
+    assert "/api/modules/task_management/create_task" in create["fix_suggestion"]
+    delete = failures[("wiring_unreachable_canonical_write", "task_management/delete_task")]
+    assert "Delete row action" in delete["fix_suggestion"]
+    assert report["checks"][0]["details"]["unreachable_canonical_writes"] == [
+        "task_management/create_task", "task_management/delete_task",
+    ]
+    # The repair loop receives one message per failure, prefixed with the page that lists the collection.
+    errors = _wiring_repair_errors(report, files, {"capability_packs": []})
+    assert [error for error in errors if "Canonical" in error] == [
+        f"ui/pages/tasks.yaml: {failure['error']} {failure['fix_suggestion']}"
+        for failure in (create, delete)
+    ]
+
+
+def test_the_wiring_gate_passes_once_construction_supplies_every_canonical_write():
+    compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(_tasks_page())}, _context())
+    report = asyncio.run(validate_wiring({"generated_files": _wiring_files(compiled["ui/pages/tasks.yaml"])}))
+    assert report["passed"] is True, report["failed_tests"]
+    details = report["checks"][0]["details"]
+    assert details["unreachable_canonical_writes"] == [] and details["unreachable_gated_actions"] == []
+
+
+def test_the_wiring_gate_ignores_internal_and_unlisted_canonical_writes():
+    manifest = yaml.safe_load(_shared_module_yaml())
+    for action in manifest["actions"]:
+        if action["id"] in {"create_task", "update_task", "delete_task"}:
+            action["api_surface"] = "internal"
+    internal = asyncio.run(validate_wiring({"generated_files": _wiring_files(
+        _bundle_tasks_page(), yaml.safe_dump(manifest, sort_keys=False))}))
+    assert internal["checks"][0]["details"]["unreachable_canonical_writes"] == []
+    # A page that only counts tasks in a KPI does not list the collection, so it owes no entry point.
+    kpi_only = {"schema_version": "mozaiks.app_page.v1", "name": "tasks", "route": "/tasks", "title": "Tasks",
+                "page_type": "record_list", "layout": "full-width", "shell_mode": "workspace", "sections": [
+                    {"id": "count", "primitive": "SummaryStrip", "title": "Tasks", "config": {
+                        "api_endpoint": "/api/modules/task_management/list_tasks",
+                        "items": [{"id": "total", "label": "Tasks", "value_key": "total"}]}}]}
+    unlisted = asyncio.run(validate_wiring({"generated_files": _wiring_files(kpi_only, _shared_module_yaml())}))
+    assert unlisted["checks"][0]["details"]["unreachable_canonical_writes"] == []

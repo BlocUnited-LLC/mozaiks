@@ -12,13 +12,19 @@ and the surface map determine the correct binding, code writes it:
 - a create/edit ``workflow`` action that names no generated workflow is
   replaced by a modal form submitting the collection's one create/update
   action when the bundle has no workflows at all;
-- a gated update action on a collection a list table shows gets an Edit row
+- the canonical update of a collection a list table shows gets an Edit row
   action and a modal form that submits the typed action with the selected
   row's identifier and the action's editable fields;
-- a gated canonical create on that collection gets a toolbar action and a modal
-  form submitting the create's fields, and a gated canonical delete gets a
-  Delete row action opening a confirmation dialog that posts the selected
-  row's identifier.
+- the canonical create of that collection gets a toolbar action and a modal
+  form submitting the create's fields, and the canonical delete gets a Delete
+  row action opening a confirmation dialog that posts the selected row's
+  identifier.
+
+Canonical writes get these entry points whether or not a plan gates them: a
+write every plan includes is still a write the user must be able to make. A
+gated write outside the canonical set gets the same entry point. When the page
+already holds a modal form (or confirmation dialog) for the write, the entry
+point opens it instead of adding a second one.
 
 Every construction, and every construction the contracts do not permit, is
 returned as a note and logged, so a build can be read back to see what the
@@ -233,6 +239,37 @@ def _modal_id(action_id: str) -> str:
     return f"{action_id}-modal"
 
 
+def _user_facing(action: Mapping[str, Any]) -> bool:
+    return action.get("api_surface") not in {"internal", "admin_internal"}
+
+
+def _kind(action: Mapping[str, Any]) -> str:
+    return "gated" if action.get("entitlement_gate") else "shared"
+
+
+def _subject(module_id: str, action_id: str, action: Mapping[str, Any]) -> str:
+    """Name the write in a note: a gated action quotes its gate, any other is a shared action."""
+    gate = action.get("entitlement_gate")
+    return f"gated action {module_id}/{action_id} ({gate})" if gate else f"shared action {module_id}/{action_id}"
+
+
+def _iter_sections(sections: Any) -> Iterator[dict[str, Any]]:
+    for section in sections if isinstance(sections, list) else []:
+        if isinstance(section, dict):
+            yield section
+            config = section.get("config")
+            if isinstance(config, dict):
+                yield from _iter_sections(config.get("children"))
+
+
+def _existing_modal(sections: Any, matches: Callable[[Mapping[str, Any]], bool]) -> str | None:
+    """The id of the first Modal on the page, at any depth, that ``matches``."""
+    for section in _iter_sections(sections):
+        if section.get("primitive") == "Modal" and isinstance(section.get("id"), str) and matches(section):
+            return str(section["id"])
+    return None
+
+
 def _action_modal(
     *, module_id: str, action_id: str, action: Mapping[str, Any], identifier: str, entity: str, edit: bool,
 ) -> dict[str, Any] | None:
@@ -288,29 +325,57 @@ def _modal_submits(section: Mapping[str, Any], endpoint: str) -> bool:
     return False
 
 
-def _ensure_modal(document: dict[str, Any], **modal_args: Any) -> tuple[str | None, str | None]:
-    """Return the id of a modal submitting the action, building it when absent.
+def _modal_footer_submits(section: Mapping[str, Any], endpoint: str) -> bool:
+    """True when a Modal's own footer actions submit to the endpoint.
 
-    A section that already carries the constructed id is reused only when it is
-    a Modal that submits the action; anything else is the author's, and the
+    Footer actions run without form state, so such a modal collects none of the
+    action's inputs and is not a form for it.
+    """
+    config = section.get("config")
+    actions = config.get("actions") if isinstance(config, Mapping) else None
+    return isinstance(actions, list) and any(
+        isinstance(action, Mapping) and action.get("action_type") == "submit" and action.get("href") == endpoint
+        for action in actions
+    )
+
+
+def _ensure_modal(document: dict[str, Any], **modal_args: Any) -> tuple[str | None, str | None, bool]:
+    """Return ``(modal id, refusal, existing)`` for a modal form submitting the action.
+
+    A Modal already on the page whose Form submits the action is reused whatever
+    its id, so the page never carries two forms for one write. Otherwise a
+    section that carries the constructed id is the author's, and the
     construction is refused with a reason rather than layered on top of it.
     """
     sections = document.get("sections")
     if not isinstance(sections, list):
-        return None, "the page declares no sections list"
+        return None, "the page declares no sections list", False
     action_id = str(modal_args["action_id"])
     modal_id = _modal_id(action_id)
     endpoint = f"/api/modules/{modal_args['module_id']}/{action_id}"
-    for section in sections:
-        if isinstance(section, dict) and section.get("id") == modal_id:
-            if section.get("primitive") == "Modal" and _modal_submits(section, endpoint):
-                return modal_id, None
-            return None, f"section '{modal_id}' exists but is not a Modal form submitting {endpoint}"
+    existing = _existing_modal(sections, lambda section: _modal_submits(section, endpoint))
+    if existing is not None:
+        return existing, None, True
+    if any(section.get("id") == modal_id for section in _iter_sections(sections)):
+        return None, f"section '{modal_id}' exists but is not a Modal form submitting {endpoint}", False
     modal = _action_modal(**modal_args)
     if modal is None:
-        return None, f"{endpoint} takes an input the Form primitive cannot render (object or array)"
+        return None, f"{endpoint} takes an input the Form primitive cannot render (object or array)", False
     sections.append(modal)
-    return modal_id, None
+    return modal_id, None, False
+
+
+def _modal_form_clause(document: dict[str, Any], modal_id: str, existing: bool, endpoint: str) -> str:
+    """Finish a note: which modal form the new entry point opens."""
+    if existing:
+        return f"opening the page's existing modal form '{modal_id}' that submits it"
+    formless = _existing_modal(document.get("sections"), lambda section: _modal_footer_submits(section, endpoint))
+    if formless is None:
+        return "and a modal form that submits it"
+    return (
+        f"and a modal form that submits it; modal '{formless}' submits it from footer actions without a Form, "
+        "so it collects no input and is left unopened"
+    )
 
 
 def _confirm_modal(*, module_id: str, action_id: str, identifier: str, entity: str) -> dict[str, Any]:
@@ -352,20 +417,24 @@ def _modal_deletes(section: Mapping[str, Any], endpoint: str) -> bool:
     )
 
 
-def _ensure_confirm_modal(document: dict[str, Any], **modal_args: str) -> tuple[str | None, str | None]:
-    """Return the id of a confirmation modal deleting through the action, building it when absent."""
+def _ensure_confirm_modal(document: dict[str, Any], **modal_args: str) -> tuple[str | None, str | None, bool]:
+    """Return ``(modal id, refusal, existing)`` for a confirmation modal deleting through the action.
+
+    A Modal already on the page that deletes through the action is reused
+    whatever its id; otherwise one is built unless the constructed id is taken.
+    """
     sections = document.get("sections")
     if not isinstance(sections, list):
-        return None, "the page declares no sections list"
+        return None, "the page declares no sections list", False
     modal_id = _modal_id(modal_args["action_id"])
     endpoint = f"/api/modules/{modal_args['module_id']}/{modal_args['action_id']}"
-    for section in sections:
-        if isinstance(section, dict) and section.get("id") == modal_id:
-            if section.get("primitive") == "Modal" and _modal_deletes(section, endpoint):
-                return modal_id, None
-            return None, f"section '{modal_id}' exists but is not a Modal confirming a delete through {endpoint}"
+    existing = _existing_modal(sections, lambda section: _modal_deletes(section, endpoint))
+    if existing is not None:
+        return existing, None, True
+    if any(section.get("id") == modal_id for section in _iter_sections(sections)):
+        return None, f"section '{modal_id}' exists but is not a Modal confirming a delete through {endpoint}", False
     sections.append(_confirm_modal(**modal_args))
-    return modal_id, None
+    return modal_id, None, False
 
 
 def _opener(
@@ -433,12 +502,12 @@ def _enable_selection(config: dict[str, Any], location: str, notes: list[str]) -
         notes.append(f"{location}.selection: set to single so the row action can be used")
 
 
-def _construct_gated_create_delete(
+def _construct_create_delete(
     document: dict[str, Any], config: dict[str, Any], location: str, *, module_id: str,
     actions: Mapping[str, Mapping[str, Any]], shapes: Mapping[str, list[str]], canonical_ids: Mapping[str, str],
-    identifier: str | None, entity: str, notes: list[str], refused: list[str],
+    canonical: set[str], identifier: str | None, entity: str, notes: list[str], refused: list[str],
 ) -> None:
-    """Give an unreachable gated canonical create/delete of a listed collection its entry point.
+    """Give an unreachable canonical create/delete of a listed collection its entry point.
 
     A create gets a toolbar action opening a modal form; a delete gets a row
     action opening a confirmation dialog that posts the selected row's identifier.
@@ -447,44 +516,51 @@ def _construct_gated_create_delete(
     for operation in ("create", "delete"):
         target = canonical_ids.get(operation)
         action = actions.get(target or "")
-        if target is None or action is None or not action.get("entitlement_gate"):
+        if target is None or action is None or not _user_facing(action):
             continue
+        if not action.get("entitlement_gate") and target not in canonical:
+            continue  # an ungated write is determined only when it is the collection's canonical write
         if f"{module_id}/{target}" in reachable_page_action_keys([document]):
             continue
-        gate = action["entitlement_gate"]
+        kind = _kind(action)
         if target not in shapes[operation]:
             refused.append(
-                f"{location}: no {operation} entry point for gated {module_id}/{target}: its inputs are not the "
+                f"{location}: no {operation} entry point for {kind} {module_id}/{target}: its inputs are not the "
                 f"collection's declared fields{'' if identifier else ' and the collection declares no record identity'}"
             )
             continue
+        endpoint = f"/api/modules/{module_id}/{target}"
         if operation == "create":
-            modal_id, reason = _ensure_modal(
+            modal_id, reason, existing = _ensure_modal(
                 document, module_id=module_id, action_id=target, action=action,
                 identifier=identifier or "", entity=label, edit=False,
             )
             if modal_id is None:
-                refused.append(f"{location}: no create entry point for gated {module_id}/{target}: {reason}")
+                refused.append(f"{location}: no create entry point for {kind} {module_id}/{target}: {reason}")
                 continue
             opener = _opener(modal_id=modal_id, action_id=target, label=f"New {label}", edit=False, base=None)
             if _add_opener(config, opener, modal_id):
                 notes.append(
-                    f"{location}: gated action {module_id}/{target} ({gate}) has no page entry point; added a "
-                    f"'New {label}' toolbar action and a modal form that submits it"
+                    f"{location}: {_subject(module_id, target, action)} has no page entry point; added a "
+                    f"'New {label}' toolbar action {_modal_form_clause(document, modal_id, existing, endpoint)}"
                 )
             continue
         assert identifier is not None  # a delete-shaped action is classified only against a record identity
-        modal_id, reason = _ensure_confirm_modal(
+        modal_id, reason, existing = _ensure_confirm_modal(
             document, module_id=module_id, action_id=target, identifier=identifier, entity=label,
         )
         if modal_id is None:
-            refused.append(f"{location}: no delete entry point for gated {module_id}/{target}: {reason}")
+            refused.append(f"{location}: no delete entry point for {kind} {module_id}/{target}: {reason}")
             continue
         opener = _opener(modal_id=modal_id, action_id=target, label="Delete", edit=True, base=None, variant="danger")
         if _add_opener(config, opener, modal_id):
+            dialog = (
+                f"opening the page's existing confirmation dialog '{modal_id}'" if existing
+                else "and a confirmation dialog"
+            )
             notes.append(
-                f"{location}: gated action {module_id}/{target} ({gate}) has no page entry point; added a Delete "
-                f"row action and a confirmation dialog that deletes the selected {label}"
+                f"{location}: {_subject(module_id, target, action)} has no page entry point; added a Delete "
+                f"row action {dialog} that deletes the selected {label}"
             )
         _enable_selection(config, location, notes)
 
@@ -596,7 +672,7 @@ def construct_page_bindings(
                         )
                         continue
                     target = shapes[shape][0]
-                    modal_id, reason = _ensure_modal(
+                    modal_id, reason, _ = _ensure_modal(
                         document, module_id=module_id, action_id=target, action=actions[target],
                         identifier=identifier or "", entity=entity, edit=shape == "update",
                     )
@@ -613,38 +689,46 @@ def construct_page_bindings(
                     )
                     if shape == "update":
                         _enable_selection(config, location, notes)
-            gated = [
-                candidate for candidate in shapes["update"] if actions[candidate].get("entitlement_gate")
+            # The canonical update always needs an Edit entry point; a gated update-shaped write does too.
+            editable = [
+                candidate for candidate in shapes["update"]
+                if actions[candidate].get("entitlement_gate")
+                or (candidate == canonical_ids.get("update") and candidate in canonical)
             ]
             if identifier is None:
-                gated_writes = sorted(
+                unaddressable = sorted(
                     action_id for action_id, action in actions.items()
-                    if action.get("entitlement_gate")
+                    if (action.get("entitlement_gate") or action_id in canonical) and _user_facing(action)
                     and action_id in ((_owned_mutations(surface_map, module_id) or set()) | canonical)
                     and action_id != canonical_ids.get("create")  # a create needs no record identity
                     and f"{module_id}/{action_id}" not in reachable_page_action_keys([document])
                 )
-                for action_id in gated_writes:
-                    refused.append(f"{location}: no edit entry point for gated {module_id}/{action_id}: {no_identity}")
-            if identifier and len(gated) == 1 and f"{module_id}/{gated[0]}" not in reachable_page_action_keys([document]):
-                target = gated[0]
-                modal_id, reason = _ensure_modal(
+                for action_id in unaddressable:
+                    refused.append(
+                        f"{location}: no edit entry point for {_kind(actions[action_id])} {module_id}/{action_id}: "
+                        f"{no_identity}"
+                    )
+            if identifier and len(editable) == 1 and f"{module_id}/{editable[0]}" not in reachable_page_action_keys([document]):
+                target = editable[0]
+                modal_id, reason, existing = _ensure_modal(
                     document, module_id=module_id, action_id=target, action=actions[target],
                     identifier=identifier, entity=entity, edit=True,
                 )
                 if modal_id is None:
-                    refused.append(f"{location}: no edit entry point for gated {module_id}/{target}: {reason}")
+                    refused.append(f"{location}: no edit entry point for {_kind(actions[target])} {module_id}/{target}: {reason}")
                 else:
                     edit = _opener(modal_id=modal_id, action_id=target, label="Edit", edit=True, base=None)
                     if _add_opener(config, edit, modal_id):
+                        clause = _modal_form_clause(document, modal_id, existing, f"/api/modules/{module_id}/{target}")
                         notes.append(
-                            f"{location}: gated action {module_id}/{target} ({actions[target]['entitlement_gate']}) "
-                            f"has no page entry point; added an Edit row action and a modal form that submits it"
+                            f"{location}: {_subject(module_id, target, actions[target])} has no page entry point; "
+                            f"added an Edit row action {clause}"
                         )
                     _enable_selection(config, location, notes)
-            _construct_gated_create_delete(
+            _construct_create_delete(
                 document, config, location, module_id=module_id, actions=actions, shapes=shapes,
-                canonical_ids=canonical_ids, identifier=identifier, entity=entity, notes=notes, refused=refused,
+                canonical_ids=canonical_ids, canonical=canonical, identifier=identifier, entity=entity,
+                notes=notes, refused=refused,
             )
     for note in notes:
         logger.info("[pages] %s: constructed %s", page, note)

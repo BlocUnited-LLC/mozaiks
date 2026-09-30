@@ -1884,7 +1884,10 @@ def _wiring_repair_errors(
     template_paths = _template_owned_paths(context_variables)
     for failure in wiring_result.get("failed_tests") or []:
         kind = failure.get("test")
-        if kind not in {"wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action"}:
+        if kind not in {
+            "wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action",
+            "wiring_unreachable_canonical_write",
+        }:
             continue
         if kind == "wiring_unreachable_gated_action":
             # The page bundle owns placement across its pages; do not route this

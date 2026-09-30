@@ -97,6 +97,16 @@ This project follows a practical pre-1.0 changelog format:
   assigned a plan without an expiry (hosted `assign_plan`) kept the
   cancellation's past `expires_at` and was denied as expired indefinitely.
 
+- Generated apps can again create, edit and delete records from every table
+  that lists a collection, whether or not a plan gates those actions. Since
+  subscription pricing stopped gating features every plan includes, a
+  task-tracker build shipped with no New or Delete button, and all ten
+  validation gates still passed. Code now adds the missing New, Edit and
+  Delete entry points for a listed collection's canonical writes, reusing a
+  modal form the page already has for that action instead of adding a second
+  one. The wiring gate now fails when any such write has no entry point and
+  names the action and the page that lists the collection.
+
 - SubscriptionContractDesigner now presents an approved subscription decision
   before plan design and surfaces requested corrections at the top of retries.
   A supplied plan design is saved as required even when the model labels it a

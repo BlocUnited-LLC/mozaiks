@@ -131,7 +131,9 @@ def test_an_orphan_without_a_page_is_skipped_not_mislabelled() -> None:
     assert errors == []
 
 
-@pytest.mark.parametrize("kind", ["wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action"])
+@pytest.mark.parametrize("kind", [
+    "wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action", "wiring_unreachable_canonical_write",
+])
 def test_page_contract_failures_reach_the_page_bundle_without_changing_module_gates(kind) -> None:
     # The auth scaffold always writes ui/route_manifest.json and no task owns
     # it; a diagnostic attributed there could never be repaired.
