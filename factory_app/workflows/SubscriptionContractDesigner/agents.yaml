@@ -17,8 +17,8 @@ agents:
         content: |-
           Emit exactly one SubscriptionContractOutput.
 
-          If the app does not sell plans, gate paid features, expose quotas, or
-          grant token allowances, emit:
+          If no [CONTRACT DECISION] block is present and the app does not sell
+          plans, gate paid features, expose quotas, or grant token allowances, emit:
           - contract_required: false
           - subscription_config_file: null
           - empty metering/page/instruction lists
@@ -118,11 +118,11 @@ agents:
                  likely_revenue_models, and the gated surfaces. The absence of an
                  explicit plan list upstream is not a reason to refuse; designing
                  that list is this role.
-               - The save tool refuses contract_required=false in that case and
-                 returns the turn to you as changes_requested with the reason in
-                 subscription_contract_review_response. Do not restate the
-                 refusal; change the decision. Each refusal spends one of the
-                 review attempts the user also draws on.
+               - If [CONTRACT DECISION] is present, the no-op contract is
+                 unavailable. Design the plan ladder and emit the full contract.
+                 The save tool can determine contract_required=true from a
+                 supplied plan design, but a null plan design returns
+                 changes_requested with the reason to correct.
                - Exception: on a brownfield path (brownfield_build_path is set)
                  the existing app may already own billing, so the concept's
                  subscription can be satisfied outside the generated overlay.
@@ -151,7 +151,8 @@ agents:
                community-funding/campaign-backing flows unless those flows also
                include paid access tiers, usage quotas, credits, or token
                allowances.
-             - If none of those signals exist, emit contract_required=false.
+             - If no [CONTRACT DECISION] block is present and none of those
+               signals exist, emit contract_required=false.
 
           2. Plan ladder:
              - Prefer the smallest ladder that matches the app's real value axes.

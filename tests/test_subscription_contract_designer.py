@@ -1103,6 +1103,82 @@ async def test_a_contradicted_no_contract_is_returned_to_the_designer(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_a_determined_contract_saves_a_supplied_plan_despite_a_false_flag(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    saved: dict = {}
+
+    async def _fake_persist(**kwargs):
+        saved.update(kwargs["summary_payload"])
+        return SimpleNamespace(id="av_determined")
+
+    async def _fake_review(*args, **kwargs):
+        assert args[1]["contract_required"] is True
+        return {"action": "confirm", "approved": True, "status": "approved"}
+
+    monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist)
+    monkeypatch.setattr(module, "use_ui_tool", _fake_review)
+    output = _sample_contract()
+    output["contract_required"] = False
+    context = _live_designer_context(
+        blueprint=_monetized_blueprint(), monetization_enabled=True, output=output,
+    )
+
+    with caplog.at_level("INFO", logger=module.__name__):
+        result = await module.save_subscription_contract(context)
+
+    assert result["success"] is True and result["review_status"] == "confirmed"
+    assert result["contract_required"] is True
+    assert output["contract_required"] is False, "the model output is not mutated"
+    assert saved["contract_required"] is True
+    assert saved["subscription_config_file"]["plans"]
+    assert context.get("subscription_contract")["contract_required"] is True
+    assert any("CONTRACT_REQUIRED_DETERMINED" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_4582201a_recorded_null_plan_still_requests_a_design(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import MappingProxyType
+
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+    from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+
+    starting_context = json.loads(
+        (REPO_ROOT / "tests/fixtures/subscription_contract_designer_4582201a_context.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    outputs = json.loads(
+        (REPO_ROOT / "tests/fixtures/subscription_contract_designer_4582201a_outputs.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(outputs) == 4 and all(output == outputs[0] for output in outputs)
+    assert starting_context["chat_id"] == "4582201a-cc4c-4845-90e3-5232952cc391"
+    assert outputs[0]["contract_required"] is False
+    assert outputs[0]["subscription_config_file"] is None
+
+    _refuse_review_and_persistence(monkeypatch, module)
+    bridge = ContextVariablesBridge(starting_context)
+    assert isinstance(bridge.get("concept_blueprint"), MappingProxyType)
+    result = await module.save_subscription_contract(StructuredOutputOverlay(bridge, outputs[0]))
+
+    assert result["success"] is False and result["review_status"] == "changes_requested"
+    assert "subscription_contract_likely=true" in result["requested_changes"]
+    assert "paid Pro version" in result["requested_changes"]
+    assert bridge.get("subscription_contract_review_response")["source"] == "concept_monetization_intent"
+
+
+@pytest.mark.asyncio
 async def test_the_guard_fires_headless_too(monkeypatch: pytest.MonkeyPatch) -> None:
     """No chat means no review card; the contradiction is still refused."""
     from factory_app.workflows.SubscriptionContractDesigner.tools import (

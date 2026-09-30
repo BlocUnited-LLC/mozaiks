@@ -1,0 +1,58 @@
+[
+ {
+  "agent_message": "No subscription contract is required as the app does not sell plans, gate paid features, or need token allowances.",
+  "contract_required": false,
+  "rationale": "Although monetization_enabled is true, the app does not offer distinct subscription plans or gate features with subscriptions. Instead, it provides a free access tier alongside a Pro tier without additional quota or token management requirements.",
+  "plan_design_rationale": [],
+  "app_id": null,
+  "app_name": "TaskTracker Pro",
+  "subscription_config_file": null,
+  "metering_declarations": [],
+  "page_surface_requirements": [],
+  "app_generator_instructions": [],
+  "validation_notes": [],
+  "forbidden_outputs": []
+ },
+ {
+  "agent_message": "No subscription contract is required as the app does not sell plans, gate paid features, or need token allowances.",
+  "contract_required": false,
+  "rationale": "Although monetization_enabled is true, the app does not offer distinct subscription plans or gate features with subscriptions. Instead, it provides a free access tier alongside a Pro tier without additional quota or token management requirements.",
+  "plan_design_rationale": [],
+  "app_id": null,
+  "app_name": "TaskTracker Pro",
+  "subscription_config_file": null,
+  "metering_declarations": [],
+  "page_surface_requirements": [],
+  "app_generator_instructions": [],
+  "validation_notes": [],
+  "forbidden_outputs": []
+ },
+ {
+  "agent_message": "No subscription contract is required as the app does not sell plans, gate paid features, or need token allowances.",
+  "contract_required": false,
+  "rationale": "Although monetization_enabled is true, the app does not offer distinct subscription plans or gate features with subscriptions. Instead, it provides a free access tier alongside a Pro tier without additional quota or token management requirements.",
+  "plan_design_rationale": [],
+  "app_id": null,
+  "app_name": "TaskTracker Pro",
+  "subscription_config_file": null,
+  "metering_declarations": [],
+  "page_surface_requirements": [],
+  "app_generator_instructions": [],
+  "validation_notes": [],
+  "forbidden_outputs": []
+ },
+ {
+  "agent_message": "No subscription contract is required as the app does not sell plans, gate paid features, or need token allowances.",
+  "contract_required": false,
+  "rationale": "Although monetization_enabled is true, the app does not offer distinct subscription plans or gate features with subscriptions. Instead, it provides a free access tier alongside a Pro tier without additional quota or token management requirements.",
+  "plan_design_rationale": [],
+  "app_id": null,
+  "app_name": "TaskTracker Pro",
+  "subscription_config_file": null,
+  "metering_declarations": [],
+  "page_surface_requirements": [],
+  "app_generator_instructions": [],
+  "validation_notes": [],
+  "forbidden_outputs": []
+ }
+]
