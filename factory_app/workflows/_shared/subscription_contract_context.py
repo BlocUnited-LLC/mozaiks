@@ -6,6 +6,7 @@ features each plan includes; this module names capabilities and action gates.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -34,6 +35,55 @@ _TARGET_AGENTS = {
     "PatternAgent",
     "WorkflowBundleBuilderAgent",
 }
+
+
+def _context_value(context_variables: Any, key: str) -> Any:
+    if context_variables is None:
+        return None
+    getter = getattr(context_variables, "get", None)
+    if callable(getter):
+        try:
+            return detach(getter(key))
+        except Exception:
+            return None
+    data = getattr(context_variables, "data", None)
+    if isinstance(data, dict):
+        return detach(data.get(key))
+    return None
+
+
+def _is_enabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def concept_requires_contract(context_variables: Any) -> str | None:
+    """Explain when the approved concept has already decided a contract is required."""
+    if not _is_enabled(_context_value(context_variables, "monetization_enabled")):
+        return None
+    if str(_context_value(context_variables, "brownfield_build_path") or "").strip():
+        # The existing app may already own billing; preserve the brownfield exception.
+        return None
+    blueprint = _context_value(context_variables, "concept_blueprint")
+    if not isinstance(blueprint, Mapping):
+        return None
+    intent = blueprint.get("monetization_intent")
+    if not isinstance(intent, Mapping):
+        return None
+    if intent.get("monetized") is not True or intent.get("subscription_contract_likely") is not True:
+        return None
+    summary = str(intent.get("money_flow_summary") or "").strip()
+    return (
+        "The approved concept records monetization_intent.monetized=true and "
+        "monetization_intent.subscription_contract_likely=true"
+        + (f" ({summary})" if summary else "")
+        + ", and monetization is enabled for this build. That is the concept's own "
+        "determination that the app sells recurring access, gated features, quotas, "
+        "or credits, so contract_required must be true. Design the plan ladder from "
+        "money_flow_summary, likely_revenue_models, and the gated surfaces; the "
+        "absence of an explicit plan list upstream is not a reason to refuse."
+    )
 
 
 def approved_module_actions(context_variables: Any) -> dict[str, list[str]]:
@@ -219,9 +269,9 @@ def _render_contract(contract: Mapping[str, Any]) -> str:
     )
 
 
-def _apply_text(agent: Any, text: str) -> None:
+def _apply_text(agent: Any, text: str, *, prepend: bool = False) -> None:
     current = getattr(agent, "_system_message", None) or getattr(agent, "system_message", "") or ""
-    updated = f"{current}\n\n{text}".strip()
+    updated = (f"{text}\n\n{current}" if prepend else f"{current}\n\n{text}").strip()
     if hasattr(agent, "update_system_message"):
         agent.update_system_message(updated)
     elif hasattr(agent, "_system_message"):
@@ -238,7 +288,8 @@ def inject_subscription_action_inventory(agent: Any, messages: list[dict[str, An
     """Give the designer the finite feature choices its save validator accepts."""
     if getattr(agent, "name", None) != "ContractDesignerAgent":
         return
-    inventory = approved_feature_inventory(_context_data(agent))
+    data = _context_data(agent)
+    inventory = approved_feature_inventory(data)
     rendered = yaml.safe_dump(inventory, sort_keys=True).strip()
     _apply_text(agent, "\n".join([
         "[APPROVED PRICING FEATURE INVENTORY]",
@@ -253,6 +304,24 @@ def inject_subscription_action_inventory(agent: Any, messages: list[dict[str, An
         "If a desired feature is missing, remove it from a plan or have DesignDocs approve its action.",
         rendered,
     ]))
+    context = getattr(agent, "context_variables", None) or getattr(agent, "_context_variables", None)
+    leading: list[str] = []
+    review = data.get("subscription_contract_review_response")
+    if isinstance(review, Mapping) and review.get("action") == "request_changes":
+        requested_changes = str(review.get("requested_changes") or "").strip()
+        leading.append("[REQUIRED CORRECTION]\n" + (requested_changes or "Revise the subscription contract."))
+    if concept_requires_contract(context):
+        blueprint = data["concept_blueprint"]
+        summary = str(blueprint["monetization_intent"].get("money_flow_summary") or "").strip()
+        leading.append("\n".join([
+            "[CONTRACT DECISION]",
+            "The approved concept requires a subscription contract for this build.",
+            f"Approved money_flow_summary: {json.dumps(summary, ensure_ascii=False)}",
+            "Emit contract_required=true and a subscription_config_file plan design.",
+            "The no-op contract is unavailable.",
+        ]))
+    if leading:
+        _apply_text(agent, "\n\n".join(leading), prepend=True)
     logger.info("SUBSCRIPTION_FEATURE_INVENTORY injected features=%d", len(inventory))
 
 
@@ -308,6 +377,7 @@ __all__ = [
     "approved_feature_inventory",
     "approved_module_actions",
     "capability_id_for_feature",
+    "concept_requires_contract",
     "inject_subscription_action_inventory",
     "inject_subscription_contract_context",
     "selected_feature_gates",

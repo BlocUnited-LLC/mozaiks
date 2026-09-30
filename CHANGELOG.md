@@ -62,6 +62,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- SubscriptionContractDesigner now presents an approved subscription decision
+  before plan design and surfaces requested corrections at the top of retries.
+  A supplied plan design is saved as required even when the model labels it a
+  no-op; a missing plan design still receives a correction request.
+
 - Subscription-only pricing now saves when a generated metering declaration
   references a wallet the design did not declare: the declaration is dropped
   with an explanation in the review. Invalid metering targets for declared

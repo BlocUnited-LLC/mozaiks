@@ -17,6 +17,7 @@ import yaml
 from factory_app.workflows._shared.subscription_contract_context import (
     approved_feature_inventory,
     capability_id_for_feature,
+    concept_requires_contract,
     selected_feature_gates,
     validate_module_contract_updates,
 )
@@ -84,47 +85,6 @@ def _extract_output(context_variables: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     return raw
-
-
-def _is_enabled(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _concept_requires_contract(context_variables: Any) -> str | None:
-    """Why the approved concept already answered the contract question, or None.
-
-    Reads the frozen context the way it arrives: every live container returns
-    a read-only mapping, so this tests Mapping, never dict, and detaches first.
-    A `dict` test here would silently disarm the guard on every real build,
-    which is exactly how DesignDocs' surface guard was dead until #708.
-    """
-    if not _is_enabled(_cv_get(context_variables, "monetization_enabled")):
-        return None
-    if str(_cv_get(context_variables, "brownfield_build_path") or "").strip():
-        # The existing app may already own billing; the prompt asks the designer
-        # to name that surface in rationale instead of being forced here.
-        return None
-    blueprint = detach(_cv_get(context_variables, "concept_blueprint"))
-    if not isinstance(blueprint, Mapping):
-        return None
-    intent = blueprint.get("monetization_intent")
-    if not isinstance(intent, Mapping):
-        return None
-    if intent.get("monetized") is not True or intent.get("subscription_contract_likely") is not True:
-        return None
-    summary = str(intent.get("money_flow_summary") or "").strip()
-    return (
-        "The approved concept records monetization_intent.monetized=true and "
-        "monetization_intent.subscription_contract_likely=true"
-        + (f" ({summary})" if summary else "")
-        + ", and monetization is enabled for this build. That is the concept's own "
-        "determination that the app sells recurring access, gated features, quotas, "
-        "or credits, so contract_required must be true. Design the plan ladder from "
-        "money_flow_summary, likely_revenue_models, and the gated surfaces; the "
-        "absence of an explicit plan list upstream is not a reason to refuse."
-    )
 
 
 def _request_changes(context_variables: Any, requested_changes: str | None, *, source: str) -> dict[str, Any]:
@@ -702,6 +662,15 @@ async def save_subscription_contract(
     if not app_id:
         return {"success": False, "review_status": "blocked", "error": "app_id required in context or output"}
 
+    required_by_concept = concept_requires_contract(context_variables)
+    if (
+        required_by_concept
+        and output.get("contract_required") is False
+        and output.get("subscription_config_file") is not None
+    ):
+        logger.info("CONTRACT_REQUIRED_DETERMINED app=%s", app_id)
+        output = {**output, "contract_required": True}
+
     try:
         normalized = normalize_subscription_contract(output, context_variables)
         validate_module_contract_updates(normalized, context_variables)
@@ -718,14 +687,15 @@ async def save_subscription_contract(
         return _request_changes(context_variables, page_conflict, source="approved_page_inventory")
 
     if not bool(normalized.get("contract_required")):
-        contradiction = _concept_requires_contract(context_variables)
-        if contradiction:
+        if required_by_concept:
             logger.warning(
                 "[SubscriptionContractDesigner] contract_required=false contradicts the approved "
                 "concept's monetization_intent for app=%s; returning the turn to the designer",
                 app_id,
             )
-            return _request_changes(context_variables, contradiction, source="concept_monetization_intent")
+            return _request_changes(
+                context_variables, required_by_concept, source="concept_monetization_intent",
+            )
 
     review_status = "not_requested_headless"
     review_response: dict[str, Any] | None = None
