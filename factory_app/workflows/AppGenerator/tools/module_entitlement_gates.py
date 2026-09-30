@@ -1,4 +1,4 @@
-"""Compile approved subscription gates on initial assembly and repaired manifests."""
+"""Compile derived subscription gates on initial assembly and repaired manifests."""
 
 from __future__ import annotations
 
@@ -33,21 +33,21 @@ def apply_entitlement_gates(
     require_all_modules: bool = True,
     failed_task_ids: set[str] | None = None,
 ) -> list[dict[str, str]]:
-    """Compile the approved gate decisions after all module files are merged."""
+    """Compile gates derived from approved plan features after module files merge."""
     if context_variables is None:
         return code_files
     contract = resolve_subscription_contract({
         key: detach(context_variables.get(key))
         for key in ("subscription_contract", "subscription_contract_artifact")
     })
-    gates_by_module = validate_module_contract_updates(contract, context_variables) if contract is not None else None
+    derived_gates = validate_module_contract_updates(contract, context_variables) if contract is not None else None
     approved_modules = all_module_actions(context_variables)
 
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
     existing = dict(detach(context_variables.get("generated_files")) or {})
     existing.update(extract_code_file_map_from_payload({"code_files": detach(context_variables.get("code_files"))}))
     file_map = compile_module_entitlement_gates(
-        file_map, gates_by_module=gates_by_module, approved_actions=approved_modules,
+        file_map, gates_by_module=derived_gates, approved_actions=approved_modules,
         ungated_actions=ungated_module_actions(context_variables),
         existing_files=existing,
     )
@@ -56,7 +56,7 @@ def apply_entitlement_gates(
         if len((pure := PurePosixPath(path)).parts) == 3
         and pure.parts[0] == "modules" and pure.parts[2] == "module.yaml"
     }
-    remaining = set(gates_by_module or {}) - present if require_all_modules else set()
+    remaining = set(derived_gates or {}) - present if require_all_modules else set()
     if remaining:
         failed_tasks = failed_task_ids or set()
         plan = detach(context_variables.get("app_build_plan")) or {}

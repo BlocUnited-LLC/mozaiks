@@ -194,6 +194,25 @@ def all_module_actions(context_variables: Any) -> dict[str, list[str]]:
     }
 
 
+def approved_workflow_surface_ids(context_variables: Any) -> list[str]:
+    """Return selectable app workflow surfaces when the concept has agentic capabilities."""
+    if context_variables is None:
+        return []
+    concept = detach(context_variables.get("concept_blueprint"))
+    if not isinstance(concept, Mapping) or not concept.get("agentic_capabilities"):
+        return []
+    surface_map = detach(context_variables.get("design_surface_map"))
+    if not isinstance(surface_map, Mapping):
+        return []
+    return sorted({
+        surface["surface_id"]
+        for surface in surface_map.get("surfaces") or []
+        if isinstance(surface, Mapping) and surface.get("surface_kind") == "workflow"
+        and surface.get("owner") == "app" and isinstance(surface.get("surface_id"), str)
+        and surface["surface_id"]
+    })
+
+
 def managed_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
     """Resolve selected managed contracts through their declared build-context assets."""
     if context_variables is None:

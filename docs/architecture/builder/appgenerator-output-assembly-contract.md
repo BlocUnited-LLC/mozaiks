@@ -199,24 +199,39 @@ checkout to the managed provider; `/api/me/usage` and token endpoints supply
 runtime usage and balances, not the app's public plan catalog. No additional
 billing module or platform catalog endpoint is needed.
 
-Subscription action gates follow the same closed inventory. Before subscription
-design, the factory injects approved app-owned module `surface_id` values and
-their `owned_mutations` action IDs from `design_surface_map`. The designer makes
-the product decision in typed `module_contract_updates` entries (`module_id`,
-`action_id`, `entitlement_gate`, optional `metering`); `module_id` is exactly the
-approved `surface_id`. Every capability whose grants differ between plans must
-gate at least one approved action. Any nonempty plan capability catalog requires
-at least one gate. Unknown references, conflicting choices for one action, or
-missing product decisions return revision feedback with the valid IDs.
+Subscription action gates follow a closed feature inventory. Before subscription
+design, the factory injects feature IDs for approved app-owned mutations, custom
+reads, and canonical writes. Feature IDs are
+`module.<module_id>.<action_id>`. Workflow features are excluded until workflow
+launch enforces plan grants (#770). The designer chooses each plan's `included_features` from
+that inventory and may set `usage_limits[].feature_id` to a selected feature.
+It does not author capability IDs or action gates. The compiler derives stable
+`feature.<feature_id>` capability IDs (normalizing each ID segment to lowercase
+snake case when needed), runtime `plans[].capabilities`, and
+`module_contract_updates` only for features absent from at least one plan. An
+action shared by every plan has no entitlement gate, including after a plan is
+cancelled. It records `selected_features_by_plan` in the
+persisted contract. Unknown selections return one revision message with the
+valid IDs and the option to remove the feature from the plan.
+The designer still declares metering intent in
+`metering_declarations` when applicable. Generated add-ons may select an
+inventory `required_feature`; code derives the runtime `required_capability`.
 
-AppGenerator preserves these surface IDs as module IDs and stamps `module.id`
+Canonical collection list/get reads and managed-pack facade actions are never
+selectable gate targets. A limited Free plan that promises core task management
+selects approved create/update/delete features and sets a limit on task creation;
+a Pro plan may add an approved custom read such as `summarize_tasks`.
+Usage limits are display-only until quota enforcement is implemented (#770).
+
+AppGenerator preserves approved module surface IDs as module IDs and stamps `module.id`
 from the approved module path when the file writer drifts. After merging generated
 files and managed templates, assembly writes the approved `entitlement_gate`
 values into `actions[]`, replacing conflicting model-written values and clearing
 unmapped gates on approved modules. Missing module/action implementations require
 repair; assembly does not invent their behavior. Subscription configuration and
-gate mappings remain authoritative across real immutable context reads. The
-bundle scanner's entitlement closure rule is unchanged.
+derived gate mappings remain authoritative across real immutable context reads. The
+bundle scanner also verifies that every derived `feature.module.*` grant resolves
+to the matching module action entitlement gate.
 
 Agents return structured JSON responses. This transport format does not determine
 the format of generated files. App schemas, module contracts, and build plans

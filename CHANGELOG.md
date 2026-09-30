@@ -50,6 +50,16 @@ This project follows a practical pre-1.0 changelog format:
   required array/object fields an empty default; the generated record id is
   `<entity>_id`, never a natural `search_by` key.
 
+### Changed
+
+- Generated subscription plans now select approved module actions from a closed
+  inventory. The factory derives capability IDs and gates only for actions that
+  differ between plans, so actions included in every plan remain available after
+  cancellation. Workflow features cannot be sold until workflow launch checks
+  plan grants (#770). Usage limits are display-only and do not cap dispatch or
+  consumption yet (#770); unavailable selections receive valid choices and a
+  removal path.
+
 ### Fixed
 
 - DesignDocs saves the model's natural variation instead of rejecting

@@ -10,6 +10,10 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    MISSING_FEATURE_SELECTION_MESSAGE,
+    resolve_subscription_contract,
+)
 
 CONTRACT_VERSION = "1.0"
 EVENT_PREFIXES = ("domain.", "platform.", "hosted.")
@@ -139,12 +143,41 @@ def _normalize_workflow_item(raw: Mapping[str, Any]) -> dict[str, Any] | None:
         )
         if event is not None
     ]
-    return {
+    workflow = {
         "workflow_name": workflow_name,
         "capability_id": capability_id,
         "startup_mode": startup_mode,
         "trigger_events": trigger_events,
     }
+    design_surface_id = _text(raw.get("design_surface_id"))
+    if design_surface_id:
+        workflow["design_surface_id"] = design_surface_id
+    return workflow
+
+
+def validate_pricing_workflow_features(context_variables: Any | None) -> None:
+    """Reject workflow pricing selections until launch enforces plan grants."""
+    contract = resolve_subscription_contract({
+        key: _context_get(context_variables, key)
+        for key in ("subscription_contract", "subscription_contract_artifact")
+    })
+    if not contract or not contract.get("contract_required"):
+        return
+    selections = contract.get("selected_features_by_plan")
+    if not isinstance(selections, Mapping):
+        raise ValueError(MISSING_FEATURE_SELECTION_MESSAGE)
+    selected_workflows = sorted({
+        feature
+        for features in selections.values()
+        for feature in (features if isinstance(features, (list, tuple)) else [])
+        if isinstance(feature, str) and feature.startswith("workflow.")
+    })
+    if selected_workflows or contract.get("workflow_contract_updates"):
+        raise ValueError(
+            "Workflow features are unavailable for pricing until workflow launch enforces plan "
+            f"grants (issue #770): {selected_workflows}. Re-run SubscriptionContractDesigner "
+            "without workflow pricing features."
+        )
 
 
 def _primary_workflow(workflows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -200,7 +233,9 @@ def extract_workflow_integration_metadata_from_bundle_entries(
     bundle_entries: list[dict[str, Any]],
     *,
     bundle_name: str | None = None,
+    context_variables: Any | None = None,
 ) -> dict[str, Any] | None:
+    validate_pricing_workflow_features(context_variables)
     workflows: list[dict[str, Any]] = []
     for entry in bundle_entries:
         if not isinstance(entry, Mapping):
@@ -219,14 +254,13 @@ def extract_workflow_integration_metadata_from_bundle_entries(
             )
             if event is not None
         ]
-        workflows.append(
-            {
+        workflow = {
                 "workflow_name": workflow_name,
                 "capability_id": capability_id,
                 "startup_mode": startup_mode,
                 "trigger_events": trigger_events,
             }
-        )
+        workflows.append(workflow)
 
     if bundle_entries and len(workflows) != len(bundle_entries):
         return None
@@ -389,6 +423,7 @@ __all__ = [
     "extract_workflow_integration_metadata_from_bundle_entries",
     "hydrate_workflow_integration_context_from_latest_artifact",
     "normalize_workflow_integration_metadata",
+    "validate_pricing_workflow_features",
     "workflow_integration_metadata_from_artifact",
     "workflow_integration_metadata_from_context",
     "workflow_name_to_capability_id",

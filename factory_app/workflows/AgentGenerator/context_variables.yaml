@@ -634,7 +634,7 @@ definitions:
     type: array
     description: >
       Array of WorkflowInPack items from PatternAgent's PatternSelection output.
-      Each item includes name, role, pattern_id, pattern_name, description,
+      Each item includes name, design_surface_id, role, pattern_id, pattern_name, description,
       initial_agent, and initial_message. Consumed by the task_batches.yaml executor
       to fan out WorkflowBundleBuilderAgent workers in parallel.
     source:

@@ -73,6 +73,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     data_contract_requires_auth,
 )
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    capability_id_for_feature,
+)
 from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     managed_data_owners,
     materialize_data_migrations,
@@ -1320,7 +1323,29 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
     )
     if subscriptions_error:
         return [subscriptions_error]
+    assert subscriptions_config is not None
     plan_capabilities = _capability_ids_from_subscriptions_config(subscriptions_config)
+    shared_capabilities: set[str] = set()
+    if subscriptions_config.schema_version == "mozaiks.subscriptions.v1" and subscriptions_config.plans:
+        shared_capabilities = set.intersection(*(
+            set(plan.capabilities) for plan in subscriptions_config.plans
+        ))
+    plan_specific_capabilities = plan_capabilities - shared_capabilities
+    workflow_capabilities = sorted(
+        capability for capability in plan_capabilities
+        if capability.startswith("feature.workflow.")
+    )
+    if workflow_capabilities:
+        return [
+            "config/subscriptions.yaml grants workflow features "
+            f"{workflow_capabilities}, but workflow launch does not enforce plan grants "
+            "(issue #770). Remove these features from the approved plan selections "
+            "and rerun SubscriptionContractDesigner."
+        ]
+    derived_module_capabilities = {
+        capability for capability in plan_specific_capabilities
+        if capability.startswith("feature.module.")
+    }
 
     # Collect (module_path, action_id, gate) for every gated action.
     gate_contexts: list[tuple[str, str, str]] = []
@@ -1337,24 +1362,37 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
             for path in normalized_files
             if path.startswith("modules/") and path.endswith("/module.yaml")
         )
-        if plan_capabilities and module_paths:
-            # The bundle sells plan capabilities but gates nothing, so every
-            # declared capability is unenforceable at dispatch time and the
-            # subscription contract is decorative.
+        if plan_specific_capabilities and (module_paths or derived_module_capabilities):
+            # A capability that differs by plan needs an enforced action gate.
             return [
-                "config/subscriptions.yaml grants plan capabilities "
-                f"{sorted(plan_capabilities)} but no module action declares an "
+                "config/subscriptions.yaml grants plan-specific capabilities "
+                f"{sorted(plan_specific_capabilities)} but no module action declares an "
                 "entitlement_gate. A SaaS bundle that sells capabilities must "
                 "enforce at least one of them: correct the approved subscription "
-                "contract's module_contract_updates mapping to an approved write "
-                "or declared custom read, then rerun deterministic gate compilation "
+                "plan's feature selections for an approved write or declared custom "
+                "read, then rerun deterministic gate compilation "
                 f"for {module_paths}. Do not author entitlement_gate in model output; "
                 "canonical list/get and managed facade actions cannot be gated."
             ]
         return []
 
     errors: list[str] = []
+    matched_module_capabilities: set[str] = set()
     for module_path, action_id, gate in gate_contexts:
+        module_id = PurePosixPath(module_path).parts[1]
+        try:
+            derived_gate = capability_id_for_feature(f"module.{module_id}.{action_id}")
+        except ValueError:
+            derived_gate = None  # The module contract validator reports invalid action ids.
+        if gate == derived_gate:
+            matched_module_capabilities.add(gate)
+        if gate.startswith("feature.module.") and gate in shared_capabilities:
+            errors.append(
+                f"{module_path}: action '{action_id}' declares entitlement_gate '{gate}' "
+                "for a feature included in every plan. Remove the derived gate so "
+                "cancelled or unsubscribed users retain this shared feature."
+            )
+            continue
         if gate in plan_capabilities:
             continue
 
@@ -1364,9 +1402,10 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
             f"config/subscriptions.yaml. "
             f"Actions with an unresolvable gate permanently deny all callers "
             f"regardless of subscription tier. "
-            f"Add '{gate}' to at least one plan's capabilities[], or correct "
-            f"the capability_id. "
-            f"Expected location: config/subscriptions.yaml → "
+            "Correct the approved plan's selected features, then regenerate "
+            "derived plan capabilities and module gates from that contract. "
+            "Do not edit generated capabilities or author entitlement_gate in model output. "
+            f"Derived plan capability location: config/subscriptions.yaml → "
             f"plans[].capabilities[] (v1) or "
             f"products[].plans[].capabilities[] (v2)."
         )
@@ -1377,6 +1416,15 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
         else:
             msg += " No plan currently grants any capabilities."
         errors.append(msg)
+
+    missing_module_capabilities = sorted(derived_module_capabilities - matched_module_capabilities)
+    if missing_module_capabilities:
+        errors.append(
+            "config/subscriptions.yaml grants derived module capabilities "
+            f"{missing_module_capabilities} without matching module action entitlement_gate values. "
+            "Correct the approved plan's selected features and rerun deterministic gate compilation; "
+            "do not edit generated plan capabilities or author entitlement_gate in model output."
+        )
 
     return sorted(errors)
 

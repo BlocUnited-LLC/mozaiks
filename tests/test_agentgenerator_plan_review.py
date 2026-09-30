@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach, freeze
 from mozaiksai.core.workflow.declarative.contracts import ToolOutcomeSpec
 from mozaiksai.core.workflow.outputs.structured import build_models_from_config
@@ -63,6 +64,27 @@ def workflow():
     }
 
 
+def priced_workflow_contract():
+    return {
+        "contract_required": True,
+        "selected_features_by_plan": {"free": [], "pro": ["workflow.customers"]},
+        "subscription_config_file": {
+            "schema_version": "mozaiks.subscriptions.v1",
+            "label": "Customer plans",
+            "default_plan_id": "free",
+            "plans": [
+                {"plan_id": "free", "label": "Free", "capabilities": []},
+                {"plan_id": "pro", "label": "Pro", "capabilities": ["feature.workflow.customers"]},
+            ],
+        },
+        "workflow_contract_updates": [{
+            "design_surface_id": "customers",
+            "capability_id": "feature.workflow.customers",
+            "workflow_name": None,
+        }],
+    }
+
+
 def surface_map(kind):
     return {"surfaces": [{
         "surface_id": "customers", "label": "Customers", "surface_kind": kind, "owner": "app",
@@ -104,6 +126,46 @@ def test_partition_cannot_contradict_canonical_surface_map(kind, workflows):
     ctx = Context({"design_surface_map": surface_map(kind)})
     with pytest.raises(ValueError, match="surface map"):
         partition.validate_selection(selection(workflows), ctx)
+
+
+def test_workflow_pricing_selection_requires_designer_rerun():
+    ctx = Context({
+        "design_surface_map": surface_map("workflow"),
+        "concept_blueprint": {"agentic_capabilities": ["Classify requests"]},
+        "subscription_contract": priced_workflow_contract(),
+    })
+    with pytest.raises(ValueError, match="Re-run SubscriptionContractDesigner"):
+        partition.validate_selection(
+            selection([{**workflow(), "design_surface_id": "customers"}]), ctx,
+        )
+
+
+def test_module_pricing_selection_does_not_revalidate_without_data_contract():
+    design = surface_map("module")
+    design["surfaces"][0]["surface_id"] = "tasks"
+    design["surfaces"][0]["owned_mutations"] = ["complete_task"]
+    context = ContextVariablesBridge(factory_context({
+        "design_surface_map": design,
+        "subscription_contract": {
+            "contract_required": True,
+            "selected_features_by_plan": {"free": [], "pro": ["module.tasks.create_task"]},
+            "subscription_config_file": {"plans": [
+                {"plan_id": "free", "capabilities": []},
+                {"plan_id": "pro", "capabilities": ["feature.module.tasks.create_task"]},
+            ]},
+            "module_contract_updates": [{
+                "module_id": "tasks", "action_id": "create_task",
+                "entitlement_gate": "feature.module.tasks.create_task",
+            }],
+            "workflow_contract_updates": [],
+        },
+    }))
+
+    assert context.get("data_contract") is None
+    assert partition.pattern_selection(
+        PatternSelection=selection([]), context_variables=context,
+    ) == {"outcome": "selected", "workflow_count": 0}
+    assert detach(context.get("workflows_spec")) == []
 
 
 def test_unknown_design_surface_kind_is_rejected():

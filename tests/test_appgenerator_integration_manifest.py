@@ -72,7 +72,18 @@ async def test_save_integration_manifest_does_not_default_mozaikspay_for_require
             {
                 "app_id": "app_contract_required",
                 "integration_needs": [],
-                "subscription_contract": {"contract_required": True},
+                "subscription_contract": {
+                    "contract_required": True,
+                    "subscription_config_file": {
+                        "schema_version": "mozaiks.subscriptions.v1",
+                        "label": "Free plan",
+                        "default_plan_id": "free",
+                        "plans": [{"plan_id": "free", "label": "Free", "capabilities": []}],
+                    },
+                    "selected_features_by_plan": {"free": []},
+                    "module_contract_updates": [],
+                    "workflow_contract_updates": [],
+                },
             }
         )
     )

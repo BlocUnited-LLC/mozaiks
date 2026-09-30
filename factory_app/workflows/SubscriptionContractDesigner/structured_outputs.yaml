@@ -224,10 +224,10 @@ models:
         type: union
         variants: [AddOnProductPrice, 'null']
         description: Optional provider-neutral cash price used by app facades to start checkout.
-      required_capability:
+      required_feature:
         type: union
         variants: [str, 'null']
-        description: Optional capability required to request or manage this add-on; does not grant that capability.
+        description: Optional exact id from the injected approved pricing feature inventory required to request this add-on; code derives its capability id and this does not grant it.
       capability_groups:
         type: list
         items: str
@@ -291,10 +291,10 @@ models:
         type: union
         variants: [int, 'null']
         description: Monthly limit, or null.
-      capability_id:
+      feature_id:
         type: union
         variants: [str, 'null']
-        description: Optional capability this limit corresponds to.
+        description: Optional exact approved feature id this limit corresponds to; code derives the capability id.
 
   SubscriptionPlan:
     type: model
@@ -309,10 +309,10 @@ models:
         type: union
         variants: [str, 'null']
         description: Short plan description.
-      capabilities:
+      included_features:
         type: list
         items: str
-        description: Capability ids granted by this plan.
+        description: Exact feature ids selected from the injected approved pricing feature inventory. Code derives runtime capability grants and gates.
       usage_limits:
         type: list
         items: UsageLimit
@@ -364,7 +364,7 @@ models:
         items: PricingCatalogGroup
         description: Pricing display groups for tabs or service selectors.
 
-  SubscriptionConfigFile:
+  SubscriptionConfigDesign:
     type: model
     fields:
       schema_version:
@@ -404,7 +404,7 @@ models:
       plans:
         type: list
         items: SubscriptionPlan
-        description: Subscription plans.
+        description: Subscription plans with closed feature selections; code compiles runtime plans.
 
   MeteringDeclaration:
     type: model
@@ -415,11 +415,11 @@ models:
         description: Surface being metered.
       surface_id:
         type: str
-        description: Module id or workflow name.
+        description: Exact approved DesignDocs module or workflow surface_id; workflow names are resolved after AgentGenerator.
       action_id:
         type: union
         variants: [str, 'null']
-        description: Module action id or workflow capability id.
+        description: Approved module action id, or null for a workflow surface meter.
       wallet_id:
         type: str
         description: Token wallet to charge.
@@ -438,40 +438,6 @@ models:
       idempotency_key_source:
         type: str
         description: Field/source that yields a stable idempotency key.
-
-  ModuleContractUpdate:
-    type: model
-    fields:
-      module_id:
-        type: str
-        description: Exact app-owned module surface_id from the injected approved DesignDocs action inventory; never an invented module name. AppGenerator preserves this id.
-      action_id:
-        type: str
-        description: Exact owned_mutations or custom_reads action id belonging to module_id in the injected approved DesignDocs gate inventory. Canonical collection list/get and managed-pack facade actions are never gate targets. A paid view requires a custom read; no free-text action descriptions.
-      entitlement_gate:
-        type: union
-        variants: [str, 'null']
-        description: Exact capability id granted by subscription_config_file.plans, or null for a metering-only update. This is the product decision; AppGenerator deterministically writes actions[].entitlement_gate. One action may select only one capability.
-      metering:
-        type: union
-        variants: [MeteringDeclaration, 'null']
-        description: Optional metering declaration for this module action.
-
-  WorkflowContractUpdate:
-    type: model
-    fields:
-      workflow_name:
-        type: str
-        description: Generated workflow name.
-      capability_id:
-        type: str
-        description: Stable workflow capability id.
-      metering:
-        type: MeteringDeclaration
-        description: Metering declaration for this workflow.
-      notes:
-        type: str
-        description: Implementation notes for AgentGenerator.
 
   PageSurfaceRequirement:
     type: model
@@ -500,16 +466,6 @@ models:
       instruction:
         type: str
         description: Concrete implementation instruction.
-
-  CodeFile:
-    type: model
-    fields:
-      filename:
-        type: str
-        description: App-bundle-relative path to generate.
-      content:
-        type: str
-        description: Complete file contents.
 
   PlanDesignRationale:
     type: model
@@ -568,20 +524,12 @@ models:
         description: App name.
       subscription_config_file:
         type: union
-        variants: [SubscriptionConfigFile, 'null']
-        description: app/config/subscriptions.yaml data, or null.
+        variants: [SubscriptionConfigDesign, 'null']
+        description: Provider-neutral plan design with included_features selections; code derives app/config/subscriptions.yaml, or null.
       metering_declarations:
         type: list
         items: MeteringDeclaration
         description: Metering declarations across module/workflow surfaces.
-      module_contract_updates:
-        type: list
-        items: ModuleContractUpdate
-        description: Closed capability-to-approved-action mapping and optional metering. Every capability differing between plans must gate at least one approved action. Nonempty plan capability grants require at least one gate even if all plans grant identical capabilities.
-      workflow_contract_updates:
-        type: list
-        items: WorkflowContractUpdate
-        description: Workflow-level metering updates for AgentGenerator.
       page_surface_requirements:
         type: list
         items: PageSurfaceRequirement
@@ -593,12 +541,8 @@ models:
       validation_notes:
         type: list
         items: str
-        description: Notes and assumptions for downstream review. Notes never waive missing action mappings; a feature without an approved action requires its custom read or write to be declared upstream in DesignDocs.
+        description: Notes and assumptions for downstream review. A feature absent from the approved inventory must be removed from a plan or approved upstream in DesignDocs.
       forbidden_outputs:
         type: list
         items: str
         description: Outputs that downstream generators must not create.
-      code_files:
-        type: list
-        items: CodeFile
-        description: Generated contract files. The save tool rewrites this list after validation.

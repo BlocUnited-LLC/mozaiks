@@ -40,6 +40,8 @@ from scripts.appgenerator_fixture_replay import execute_file_replay
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_CONTEXT_ROOT = REPO_ROOT / "factory_app" / "build_context" / "mozaikspay"
+RESEARCH_ACTION_FEATURE = "module.research.execute_research"
+RESEARCH_ACTION_GATE = "feature.module.research.execute_research"
 
 
 def _subscription_contract() -> dict[str, Any]:
@@ -47,14 +49,14 @@ def _subscription_contract() -> dict[str, Any]:
         "meter_id": "research_executions",
         "label": "Research executions",
         "unit": "requests",
-        "capability_id": "research.execute",
+        "feature_id": RESEARCH_ACTION_FEATURE,
     }
     return {
         "agent_message": "AI Research Workspace subscription contract ready.",
         "contract_required": True,
         "rationale": (
-            "The workspace offers plan-gated AI research with declared monthly "
-            "execution limits. The limits are contract metadata, not proof of runtime counting."
+            "Free users can browse saved results, while Pro adds AI research. "
+            "The Pro execution limit is display metadata, not runtime enforcement."
         ),
         "app_id": "research",
         "app_name": "AI Research Workspace",
@@ -78,14 +80,14 @@ def _subscription_contract() -> dict[str, Any]:
                     "plan_id": "free",
                     "label": "Free",
                     "description": "Explore the research workspace.",
-                    "capabilities": ["research.view", "research.execute"],
-                    "usage_limits": [{**usage_limit, "monthly_limit": 20}],
+                    "included_features": [],
+                    "usage_limits": [],
                 },
                 {
                     "plan_id": "pro",
                     "label": "Pro",
-                    "description": "Higher-volume AI research.",
-                    "capabilities": ["research.view", "research.execute"],
+                    "description": "AI research access.",
+                    "included_features": [RESEARCH_ACTION_FEATURE],
                     "usage_limits": [{**usage_limit, "monthly_limit": 500}],
                 },
             ],
@@ -93,37 +95,13 @@ def _subscription_contract() -> dict[str, Any]:
         "plan_design_rationale": [
             {
                 "source_context": "product_request",
-                "signal": "The requested Free and Pro tiers declare 20 and 500 monthly research executions.",
-                "decision": "Preserve both limits on the research_executions meter.",
+                "signal": "The requested Free tier browses results and Pro adds AI research.",
+                "decision": "Gate the research action to Pro and display its proposed 500-execution limit.",
                 "affected_plan_ids": ["free", "pro"],
                 "affected_pricing_group_ids": [],
             }
         ],
-        "metering_declarations": [
-            {
-                "surface_type": "workflow",
-                "surface_id": "ResearchWorkflow",
-                "action_id": "research.execute",
-                "scope": "user",
-                "enforcement": "declaration_only",
-                "idempotency_key_source": "workflow_run_id",
-            }
-        ],
-        "module_contract_updates": [
-            {
-                "module_id": "research",
-                "action_id": "execute_research",
-                "entitlement_gate": "research.execute",
-                "metering": None,
-            }
-        ],
-        "workflow_contract_updates": [
-            {
-                "workflow_id": "ResearchWorkflow",
-                "capability_id": "research.execute",
-                "metering": {"meter_id": "research_executions", "unit": "requests"},
-            }
-        ],
+        "metering_declarations": [],
         "page_surface_requirements": [
             {
                 "page_id": "usage",
@@ -137,7 +115,6 @@ def _subscription_contract() -> dict[str, Any]:
             "Execution-count enforcement is not currently implemented by the OSS runtime."
         ],
         "forbidden_outputs": [],
-        "code_files": [],
     }
 
 
@@ -154,7 +131,7 @@ def _subscription_task() -> dict[str, Any]:
         "initial_message": "Write config/subscriptions.yaml from the confirmed contract.",
         "owned_paths": ["config/subscriptions.yaml"],
         "depends_on": [],
-        "acceptance_criteria": ["Free and Pro research execution limits are preserved."],
+        "acceptance_criteria": ["Pro research access and its display-only limit are preserved."],
     }
 
 
@@ -174,7 +151,7 @@ def _research_module_task() -> dict[str, Any]:
             "modules/research/contracts/reactions.yaml",
         ],
         "depends_on": ["research.subscription_config", "research.persistence"],
-        "acceptance_criteria": ["execute_research is gated by research.execute."],
+        "acceptance_criteria": [f"execute_research is gated by {RESEARCH_ACTION_GATE}."],
     }
 
 
@@ -615,7 +592,7 @@ async def test_ai_research_workspace_offline_golden_path(
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     product_request = (
         "Build an AI Research Workspace with saved results, Free and Pro plans, "
-        "MozaiksPay billing, gated AI research, usage visibility, and deployment output."
+        "MozaiksPay billing, Pro-only AI research, usage visibility, and deployment output."
     )
     pack_config = load_build_context(MOZAIKSPAY_CONTEXT_ROOT / "context.yaml")
     provider_values = build_provider_values(root=MOZAIKSPAY_CONTEXT_ROOT, config=pack_config)
@@ -634,10 +611,13 @@ async def test_ai_research_workspace_offline_golden_path(
             "chat_id": "golden",
             "user_id": "offline-test-user",
             "product_request": product_request,
+            "concept_blueprint": {"agentic_capabilities": ["Run AI research"]},
             "design_surface_map": {"surfaces": [{
                 "surface_id": "research", "surface_kind": "module", "owner": "app",
                 "owned_mutations": ["execute_research"],
                 "primary_entities": ["ResearchResult"], "custom_reads": ["list_results"],
+            }, {
+                "surface_id": "ResearchWorkflow", "surface_kind": "workflow", "owner": "app",
             }]},
             "data_contract": json.loads(_research_files()["data/contract.json"]),
             "structured_output": _subscription_contract(),
@@ -709,14 +689,17 @@ async def test_ai_research_workspace_offline_golden_path(
     files = {entry["filename"]: entry["content"] for entry in assembled["code_files"]}
 
     subscriptions = yaml.safe_load(files["config/subscriptions.yaml"])
-    limits = {
-        plan["plan_id"]: plan["usage_limits"][0]["monthly_limit"]
-        for plan in subscriptions["plans"]
+    limits = {plan["plan_id"]: plan.get("usage_limits", []) for plan in subscriptions["plans"]}
+    assert limits["free"] == []
+    assert limits["pro"][0]["monthly_limit"] == 500
+    assert {plan["plan_id"]: plan["capabilities"] for plan in subscriptions["plans"]} == {
+        "free": [],
+        "pro": [RESEARCH_ACTION_GATE],
     }
-    assert limits == {"free": 20, "pro": 500}
     research_module = yaml.safe_load(files["modules/research/module.yaml"])
     execute_action = next(action for action in research_module["actions"] if action["id"] == "execute_research")
-    assert execute_action["entitlement_gate"] == "research.execute"
+    assert execute_action["entitlement_gate"] == RESEARCH_ACTION_GATE
+    assert detach(context["subscription_contract"])["workflow_contract_updates"] == []
     assert "services/integrations/mozaikspay_client.py" in files
     assert {"ui/pages/billing.yaml", "ui/pages/pricing.yaml", "ui/pages/usage.yaml"} <= set(files)
 
@@ -796,10 +779,10 @@ async def test_ai_research_workspace_offline_golden_path(
     assert loaded.definition.workflows == []
     assert loaded.subscriptions_config is not None
     loaded_limits = {
-        plan.plan_id: plan.usage_limits[0].monthly_limit
+        plan.plan_id: [limit.monthly_limit for limit in plan.usage_limits]
         for plan in loaded.subscriptions_config.plans
     }
-    assert loaded_limits == {"free": 20, "pro": 500}
+    assert loaded_limits == {"free": [], "pro": [500]}
 
     # This proof deliberately stops at declared contract preservation. The OSS
     # runtime does not yet count or enforce generic monthly research executions.

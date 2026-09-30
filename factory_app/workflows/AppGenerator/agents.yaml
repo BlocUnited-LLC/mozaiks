@@ -206,8 +206,8 @@ agents:
         SubscriptionContractDesigner when the app sells plans, grants token
         allowances, gates paid features, or meters generated workflows/actions.
         Treat it as the source of truth for `config/subscriptions.yaml`,
-        usage/billing page requirements, and metering declarations. Code compiles
-        the approved `module_contract_updates` into action gates; do not instruct
+        usage/billing page requirements, and metering declarations. Code derives
+        action gates from the approved plan feature selections; do not instruct
         downstream agents to copy gates or invent paid feature ids. Do
         not implement a custom token ledger, usage ledger, or module-local
         subscription extension file.
@@ -390,7 +390,7 @@ agents:
          - Keep the fixture plan deterministic and no-spend: do not turn it into runtime module behavior, production data, or provider-side provisioning.
          - If the brief does not need preview data, leave `demo_fixture_sets` empty.
       10. If agent-backend context exists (`agent_api_url` or `agent_websocket_url` is non-null), set `agent_backend_required` to true and include the required integration surfaces in `frontend_scope`, `service_scope`, `external_integrations`, and `capability_packs`.
-         - Use `generated_workflow_capability_id` (not the raw workflow name) in every `workflow_capability_ids` field in event flows and module contract task `initial_message`s. If `generated_workflow_capability_id` is null but `generated_workflow_name` is set, derive it as lowercase hyphen-separated (e.g. `CustomerSupport` → `customer-support`).
+         - Use `generated_workflow_capability_id` (not the raw workflow name) in every `workflow_capability_ids` field in event flows and module contract task `initial_message`s. If this id is null while `generated_workflow_name` is set, derive the ordinary lowercase hyphen-separated workflow id (e.g. `CustomerSupport` → `customer-support`). Workflow features are unavailable for subscription pricing until launch enforces plan grants (#770).
          - Use `generated_workflow_name` (not the capability id) when defining persistent page workflow launch affordances such as `workflow_touchpoints` and page actions with `action_type: workflow`.
          - Use `generated_workflow_startup_mode` only to shape page copy and user expectations. The runtime owns whether the workflow speaks first after launch.
          - Emit `workflow_touchpoints` whenever a persistent app page should launch or resume a workflow session from the product UI.
@@ -438,7 +438,7 @@ agents:
           `initial_message` must require serialization of only
           `subscription_contract.subscription_config_file` and to emit no module,
           service, payment-provider, host-owned billing, or token ledger code.
-          Code compiles approved action mappings into module manifests during
+          Code compiles derived action gates into module manifests during
           task admission, repair, and assembly. Module task messages must not
           instruct agents to copy or author gates. Canonical list/get and managed
           facade actions are never gate targets; paid views use declared custom reads.
@@ -1662,11 +1662,11 @@ agents:
       - Settings and feature flags
       - Python stubs required to implement the contract
       - `app_backend_url`: null = schema-only; non-null = active backend
-      - `generated_workflow_capability_id`: stable hyphenated capability id of the AgentGenerator-produced workflow (e.g. `customer-support`). Use this as the target capability id in `contracts/reactions.yaml` workflow reaction entries — never the raw workflow name. Null when no AgentGenerator workflow exists.
+      - `generated_workflow_capability_id`: stable capability id of the AgentGenerator-produced workflow, such as `customer-support`. Use this as the target capability id in `contracts/reactions.yaml` workflow reaction entries — never the raw workflow name. Null when no AgentGenerator workflow exists.
       - `generated_workflow_trigger_events`: trigger event contracts from the AgentGenerator workflow's orchestrator.yaml triggers block. Each entry carries an event type (and optional capability_id) that should fire the workflow. Generate one `contracts/reactions.yaml` entry per trigger event routing the matching domain event to the workflow via `generated_workflow_capability_id`. Empty array when no trigger events are declared.
       - Workflow trigger metadata is authoritative. If a trigger event entry includes `capability_id`, it must match `generated_workflow_capability_id`; do not substitute another id, derive a new id, or add a second workflow capability route for the same trigger event unless that route is present in the upstream workflow metadata.
-      - Code compiles `subscription_contract.module_contract_updates` into module action
-        gates on every write, including repair. Omit `entitlement_gate` from model
+      - Code derives module action gates from approved subscription plan features
+        on every write, including repair. Omit `entitlement_gate` from model
         output. Do not make new gating decisions or copy capability values here.
       - Declare DesignDocs `owned_mutations` and `custom_reads` exactly. Code constructs
         canonical `create_<entity>`, `update_<entity>` and `delete_<entity>` actions for

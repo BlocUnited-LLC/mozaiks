@@ -1,13 +1,27 @@
 """Compile approved action gates into generated module manifests."""
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
 
+from mozaiksai.core.taxonomy import SemanticCategory, validate_identifier_grammar
 from mozaiksai.core.workflow.context.frozen import detach
+
+
+def capability_id_for_feature(feature_id: str) -> str:
+    """Name a selected pricing feature once for plans and entitlement gates."""
+    def component(value: str) -> str:
+        snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", value)
+        return re.sub(r"[^a-z0-9_]+", "_", snake.lower()).strip("_")
+
+    parts = [component(part) for part in feature_id.split(".")]
+    if any(not part for part in parts):
+        raise ValueError(f"Feature id {feature_id!r} cannot form a capability id.")
+    return validate_identifier_grammar(SemanticCategory.CAPABILITY, "feature." + ".".join(parts))
 
 
 def subscription_contract_payload(value: Any) -> dict[str, Any] | None:
@@ -44,23 +58,97 @@ def resolve_subscription_contract(data: Any) -> dict[str, Any] | None:
     return None
 
 
-def approved_subscription_gates(subscription_contract: Any) -> dict[str, dict[str, str]] | None:
-    """Project already validated subscription decisions supplied by trusted context.
+MISSING_FEATURE_SELECTION_MESSAGE = (
+    "selected_features_by_plan is required on a derived subscription contract. "
+    "Re-run SubscriptionContractDesigner to rebuild and approve this contract before generation."
+)
 
-    Factory validates capability grants, action inventory, and facade exclusions
-    before this contract crosses the task boundary. This projection never chooses
-    a feature or derives gates from generated module source.
-    """
+
+def features_requiring_gate(selections: Mapping[str, list[str]]) -> set[str]:
+    """Only features absent from at least one plan need runtime plan checks."""
+    by_plan = [set(features) for features in selections.values()]
+    if not by_plan:
+        return set()
+    selected: set[str] = set()
+    common = by_plan[0].copy()
+    for features in by_plan:
+        selected.update(features)
+        common.intersection_update(features)
+    return selected - common
+
+
+def approved_subscription_gates(
+    subscription_contract: Any, *, approved_actions: Mapping[str, list[str]],
+    ungated_actions: Mapping[str, list[str]], approved_workflows: list[str],
+) -> dict[str, dict[str, str]] | None:
+    """Project gates from persisted plan selections for task batch compilation."""
     contract = subscription_contract_payload(subscription_contract)
     if contract is None:
         return None
     if not contract.get("contract_required"):
         return {}
+    selections = contract.get("selected_features_by_plan")
+    if not isinstance(selections, Mapping):
+        raise ValueError(MISSING_FEATURE_SELECTION_MESSAGE)
+    plans = (contract.get("subscription_config_file") or {}).get("plans") or []
+    if set(selections) != {plan.get("plan_id") for plan in plans}:
+        raise ValueError("selected_features_by_plan must contain exactly the declared plan ids.")
+    if any(not isinstance(features, (list, tuple)) or any(not isinstance(feature, str) for feature in features)
+           for features in selections.values()):
+        raise ValueError("selected_features_by_plan must map plan ids to feature id lists.")
+    gated_features = features_requiring_gate(selections)
     result: dict[str, dict[str, str]] = {}
+    expected_workflows: dict[str, str] = {}
+    for plan in plans:
+        features = selections[plan["plan_id"]]
+        if len(features) != len(set(features)):
+            raise ValueError(f"Plan {plan['plan_id']!r} repeats a selected feature.")
+        expected = sorted({capability_id_for_feature(feature) for feature in features})
+        if sorted(plan.get("capabilities") or []) != expected:
+            raise ValueError(f"Plan {plan['plan_id']!r} capabilities differ from its selected features.")
+        for feature in features:
+            kind, separator, reference = feature.partition(".")
+            if not separator or kind not in {"module", "workflow"}:
+                raise ValueError(f"Invalid selected feature id {feature!r}.")
+            if kind == "workflow":
+                if reference not in approved_workflows:
+                    valid = [f"workflow.{surface_id}" for surface_id in sorted(set(approved_workflows))]
+                    raise ValueError(
+                        f"Selected workflow feature {feature!r} is not an approved workflow surface. "
+                        f"Valid workflow features: {valid}. Remove the feature from the plan or have "
+                        "DesignDocs approve an app-owned workflow surface with agentic capabilities."
+                    )
+                expected_workflows[reference] = capability_id_for_feature(feature)
+                continue
+            module_id, separator, action_id = reference.partition(".")
+            if not separator or not module_id or not action_id:
+                raise ValueError(f"Invalid selected module feature id {feature!r}.")
+            if action_id not in approved_actions.get(module_id, []) or action_id in ungated_actions.get(module_id, []):
+                raise ValueError(
+                    f"Selected module feature {feature!r} is not an approved gate target. "
+                    f"Valid actions for {module_id!r}: {sorted(set(approved_actions.get(module_id, [])) - set(ungated_actions.get(module_id, [])))}. "
+                    "Remove the feature from the plan or approve its action in DesignDocs."
+                )
+            if feature in gated_features:
+                result.setdefault(module_id, {})[action_id] = capability_id_for_feature(feature)
+    supplied: dict[str, dict[str, str]] = {}
+    seen_updates: set[tuple[str, str]] = set()
     for update in contract.get("module_contract_updates") or []:
+        action = (update["module_id"], update["action_id"])
+        if action in seen_updates:
+            raise ValueError(f"module_contract_updates repeats derived action {action!r}.")
+        seen_updates.add(action)
         gate = update.get("entitlement_gate")
         if gate is not None:
-            result.setdefault(update["module_id"], {})[update["action_id"]] = gate
+            supplied.setdefault(update["module_id"], {})[update["action_id"]] = gate
+    if supplied != result:
+        raise ValueError("module_contract_updates differ from gates derived from selected features.")
+    workflow_updates = contract.get("workflow_contract_updates") or []
+    actual_workflows = {
+        update["design_surface_id"]: update["capability_id"] for update in workflow_updates
+    }
+    if len(actual_workflows) != len(workflow_updates) or actual_workflows != expected_workflows:
+        raise ValueError("workflow_contract_updates differ from selected workflow features.")
     return result
 
 

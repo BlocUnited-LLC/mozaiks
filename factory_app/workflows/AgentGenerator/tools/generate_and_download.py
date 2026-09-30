@@ -252,6 +252,7 @@ async def _record_context_and_artifacts(
     workflow_integration_metadata = extract_workflow_integration_metadata_from_bundle_entries(
         bundle_entries,
         bundle_name=pack_name,
+        context_variables=context_variables,
     )
     primary_workflow = (
         workflow_integration_metadata.get("primary_workflow")

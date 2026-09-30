@@ -1,7 +1,7 @@
 # AgentGenerator Output Assembly Contract
 
 **Status:** CANONICAL — describes what actually exists
-**Last verified:** 2026-09-11
+**Last verified:** 2026-09-29
 **Source files:**
 - `factory_app/workflows/AgentGenerator/tools/generate_and_download.py`
 - `factory_app/workflows/AgentGenerator/tools/workflow_converter.py`
@@ -20,12 +20,18 @@
 
 AgentGenerator first validates and reviews the workflow partition:
 
-1. `PatternAgent` emits `PatternSelection`. Its tool validates the typed selection against the canonical DesignDocs surface map before writing `workflows_spec`.
+1. `PatternAgent` emits `PatternSelection`. Its tool validates the typed selection against the canonical DesignDocs workflow surface map before writing `workflows_spec`. Module pricing selections are validated by the subscription designer and AppGenerator with their data contract; AgentGenerator does not revalidate them.
 2. Invalid selections return validation feedback to `PatternAgent`. Three total selection attempts are permitted per run; exhausted attempts fail rather than dispatching an invalid plan.
 3. `ProjectOverviewAgent` presents `WorkflowPlanReview`. Approval, request-changes, and cancellation are structured UI responses correlated by `review_id` and the exact selection hash. Chat keywords cannot approve a plan.
 4. For an approved non-empty partition, `PackBuildCoordinator` starts `workflow_generation_tasks`: one `WorkflowBundleBuilderAgent` per workflow.
 5. Each worker emits `WorkflowBundleBuilderOutput` containing `CodeFile` entries. The runtime collects results in `workflow_bundle_results`, keyed by task ID.
-6. `generate_and_download` validates the resulting contracts, writes accepted bundles, creates the ZIP, and presents the download UI.
+6. `generate_and_download` validates the resulting workflow contracts before writing accepted bundles, creating the ZIP, or presenting the download UI.
+
+Workflow features are excluded from generated pricing until workflow launch
+enforces plan grants (#770). AgentGenerator rejects a saved contract that still
+selects a workflow pricing feature and asks for SubscriptionContractDesigner to
+rerun. Unpriced workflows continue using the workflow name capability
+convention for event routing.
 
 ### Apps Without AI Workflows
 
@@ -91,7 +97,8 @@ result:
   status_key: workflow_bundle_status
 ```
 
-Each task receives one `WorkflowInPack` entry from `workflows_spec`.
+Each task receives one `WorkflowInPack` entry from `workflows_spec`. Its optional
+`design_surface_id` references the approved DesignDocs workflow surface.
 The runtime injects it as `context_variables["structured_output"]` for the worker.
 
 ---

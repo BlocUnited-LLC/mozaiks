@@ -117,14 +117,17 @@ def _saas_subscription_config_file() -> dict:
             {
                 "plan_id": "pro",
                 "label": "Pro",
-                "capabilities": ["analytics.view", "exports.download"],
+                "capabilities": [
+                    "feature.module.analytics.view_dashboard",
+                    "feature.module.exports.download_export",
+                ],
                 "usage_limits": [
                     {
                         "meter_id": "exports",
                         "label": "Exports",
                         "unit": "requests",
                         "monthly_limit": 500,
-                        "capability_id": "exports.download",
+                        "capability_id": "feature.module.exports.download_export",
                     }
                 ],
                 "token_allowances": [
@@ -179,6 +182,30 @@ def _saas_subscription_config_file() -> dict:
     }
 
 
+def _persisted_v1_subscription_contract(cfg: dict) -> dict:
+    return {
+        "contract_required": True,
+        "subscription_config_file": cfg,
+        "selected_features_by_plan": {
+            "free": [],
+            "pro": ["module.analytics.view_dashboard", "module.exports.download_export"],
+        },
+        "module_contract_updates": [
+            {
+                "module_id": "analytics",
+                "action_id": "view_dashboard",
+                "entitlement_gate": "feature.module.analytics.view_dashboard",
+            },
+            {
+                "module_id": "exports",
+                "action_id": "download_export",
+                "entitlement_gate": "feature.module.exports.download_export",
+            },
+        ],
+        "workflow_contract_updates": [],
+    }
+
+
 def test_materialize_subscriptions_yaml_returns_none_for_non_saas() -> None:
     """No subscription contract → returns None (NoOpEntitlementAdapter wired at runtime)."""
     context = _Context({})
@@ -207,7 +234,7 @@ def test_materialize_subscriptions_yaml_rejects_unknown_schema() -> None:
 def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app(frozen: bool) -> None:
     cfg = _saas_subscription_config_file()
     original = deepcopy(cfg)
-    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": _persisted_v1_subscription_contract(cfg)})
     if frozen:
         context = ContextVariablesBridge(context.data)
 
@@ -222,7 +249,10 @@ def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app(frozen: bo
     assert doc["assignment_store"]["active_statuses"] == ["active", "trialing"]
     assert len(doc["plans"]) == 2
     assert doc["plans"][1]["plan_id"] == "pro"
-    assert doc["plans"][1]["capabilities"] == ["analytics.view", "exports.download"]
+    assert doc["plans"][1]["capabilities"] == [
+        "feature.module.analytics.view_dashboard",
+        "feature.module.exports.download_export",
+    ]
     assert doc["plans"][1]["usage_limits"][0]["monthly_limit"] == 500
     assert doc["plans"][1]["token_allowances"][0]["amount"] == 1000
     assert doc["add_on_products"][0]["add_on_id"] == "priority_review"
@@ -239,12 +269,13 @@ def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app(frozen: bo
 
     reordered = dict(reversed(list(cfg.items())))
     reordered_context = _Context(
-        {"subscription_contract": {"contract_required": True, "subscription_config_file": reordered}}
+        {"subscription_contract": _persisted_v1_subscription_contract(reordered)}
     )
     assert _materialize_subscriptions_yaml(context_variables=reordered_context) == result
 
 
 def test_materialize_subscriptions_yaml_preserves_v2_multi_product_plans() -> None:
+    # This tests direct v2 config serialization; the designer currently persists v1 selections.
     cfg = {
         "schema_version": "mozaiks.subscriptions.v2",
         "label": "Workspace Products",
@@ -346,7 +377,7 @@ def test_materialize_subscriptions_yaml_preserves_explicit_false_and_zero() -> N
             "minimum_charge_usd": 0,
         }
     ]
-    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": _persisted_v1_subscription_contract(cfg)})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -360,7 +391,7 @@ def test_materialize_subscriptions_yaml_preserves_explicit_false_and_zero() -> N
 def test_materialize_subscriptions_yaml_preserves_explicit_null_over_default() -> None:
     cfg = _saas_subscription_config_file()
     cfg["assignment_store"]["tenant_id_field"] = None
-    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": _persisted_v1_subscription_contract(cfg)})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -373,7 +404,7 @@ def test_materialize_subscriptions_yaml_preserves_explicit_null_over_default() -
 def test_materialize_subscriptions_yaml_preserves_explicit_empty_mapping() -> None:
     cfg = _saas_subscription_config_file()
     cfg["assignment_store"] = {}
-    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": _persisted_v1_subscription_contract(cfg)})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -386,7 +417,7 @@ def test_materialize_subscriptions_yaml_preserves_explicit_empty_mapping() -> No
 def test_materialize_subscriptions_yaml_rejects_unknown_plan_fields() -> None:
     cfg = _saas_subscription_config_file()
     cfg["plans"][0]["future_allowance"] = {"amount": 12}
-    context = _Context({"subscription_contract": {"contract_required": True, "subscription_config_file": cfg}})
+    context = _Context({"subscription_contract": _persisted_v1_subscription_contract(cfg)})
 
     with pytest.raises(ValidationError, match="future_allowance") as exc_info:
         _materialize_subscriptions_yaml(context_variables=context)
@@ -397,7 +428,7 @@ def test_materialize_subscriptions_yaml_rejects_unknown_plan_fields() -> None:
 def test_materialize_subscriptions_yaml_reads_artifact_fallback() -> None:
     """Falls back to subscription_contract_artifact when live contract absent."""
     cfg = _saas_subscription_config_file()
-    context = _Context({"subscription_contract_artifact": {"contract_required": True, "subscription_config_file": cfg}})
+    context = _Context({"subscription_contract_artifact": _persisted_v1_subscription_contract(cfg)})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
 
@@ -411,7 +442,7 @@ def test_materialize_app_config_contracts_includes_subscriptions_for_saas_app() 
     cfg = _saas_subscription_config_file()
     context = _Context(
         {
-            "subscription_contract": {"contract_required": True, "subscription_config_file": cfg},
+            "subscription_contract": _persisted_v1_subscription_contract(cfg),
             "app_build_plan": {},
         }
     )

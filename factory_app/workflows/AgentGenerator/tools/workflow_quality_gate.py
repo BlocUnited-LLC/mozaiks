@@ -17,7 +17,10 @@ from typing import Any
 
 import yaml
 
-from factory_app.workflows._shared.workflow_integration import workflow_name_to_capability_id
+from factory_app.workflows._shared.workflow_integration import (
+    extract_workflow_integration_metadata_from_bundle_entries,
+    workflow_name_to_capability_id,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 
 from .outcome_materialization import materialize_workflow_outcomes
@@ -805,6 +808,15 @@ def run_workflow_bundle_quality_gate(
         context_variables=context_variables,
     )
     errors = list(structure.get("errors") or []) + list(semantic_drift.get("errors") or [])
+    if not errors:
+        try:
+            extract_workflow_integration_metadata_from_bundle_entries(
+                bundle_entries,
+                bundle_name=None,
+                context_variables=context_variables,
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
     warnings = list(semantic_drift.get("warnings") or [])
     result = {
         "status": "passed" if not errors else "failed",
