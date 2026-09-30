@@ -7,25 +7,13 @@ from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
 
 
-def _subscription_task() -> dict[str, object]:
-    return {
-        "task_id": "task_subscription_config",
-        "task_type": "subscription_config",
-        "capability_pack_id": None,
-        "surface_id": "subscription_contract",
-        "surface_kind": "app_policy",
-        "initial_agent": "ConfigMiddlewareAgent",
-        "owned_paths": ["config/subscriptions.yaml"],
-    }
-
-
 def _base_plan(**overrides: object) -> dict[str, object]:
     plan: dict[str, object] = {
         "agent_message": "Plan ready.",
         "app_kind": "saas",
         "pages": [{"name": "Home", "route": "/", "purpose": "Home"}],
         "capability_packs": [],
-        "build_tasks": [_subscription_task()],
+        "build_tasks": [],
     }
     plan.update(overrides)
     return plan
@@ -48,15 +36,21 @@ def _entitlement_dispatch_pack() -> dict[str, object]:
     }
 
 
-def _run_plan(plan: dict[str, object]) -> ContextVariablesBridge:
-    context = ContextVariablesBridge({})
+def _run_plan(plan: dict[str, object], *, contract_required: bool = True) -> ContextVariablesBridge:
+    # The approved contract, not a planned task, makes this a subscription build.
+    context = ContextVariablesBridge({"subscription_contract": {"contract_required": contract_required}})
     app_build_plan(AppBuildPlan=plan, context_variables=context)
     return context
 
 
-def test_subscription_config_requires_an_explicit_or_selected_provider() -> None:
+def test_a_required_contract_requires_an_explicit_or_selected_provider() -> None:
     with pytest.raises(ValueError, match="monetization_provider is required"):
         _run_plan(_base_plan())
+
+
+def test_a_provider_without_a_required_contract_is_rejected() -> None:
+    with pytest.raises(ValueError, match="only valid when the approved subscription contract"):
+        _run_plan(_base_plan(monetization_provider="mozaiks_pay"), contract_required=False)
 
 
 def test_unknown_monetization_provider_fails_before_materialization() -> None:

@@ -221,8 +221,7 @@ agents:
                pricing-display metadata; do not claim they enforce quotas.
              - Do not emit token_wallets, token_allowances, or top_up_products
                for ordinary subscription tiers that sell access only. Access-only
-               SaaS uses plans, capabilities, assignment_store, and
-               entitlement_gate without token wallet fields.
+               SaaS uses plans and included_features without token wallet fields.
              - For subscription-only designs with no token_wallets, leave
                metering_declarations empty. Put plan limits in
                plans[].usage_limits, not metering_declarations.
@@ -275,15 +274,10 @@ agents:
              the save tool compiles the runtime file. Use schema_version:
              mozaiks.subscriptions.v1.
           2. Non-SaaS apps must omit config/subscriptions.yaml.
-          3. SaaS apps should default assignment_store to:
-             data_alias: billing.subscriptions
-             app_id_field: app_id
-             tenant_id_field: tenant_id
-             user_id_field: user_id
-             plan_id_field: plan_id
-             status_field: status
-             capabilities_field: granted_capabilities
-             plan_snapshot_field: plan_snapshot
+          3. Code writes the assignment store: where subscription assignments
+             live and which statuses count as active are the contract between
+             the billing writer and the runtime entitlement reader, not a
+             design decision. Do not emit assignment_store.
           4. Plan ids must be stable snake_case. Prefer a small ladder such as
              free, pro, enterprise unless the concept provides a better domain fit.
           5. The model chooses only included_features from the injected closed
@@ -338,7 +332,7 @@ agents:
               add_on_products, pricing_catalog.groups[].add_on_ids must
               reference declared add_on_products[].add_on_id. pricing_catalog
               must not replace derived plans[].capabilities, usage_limits,
-              token_allowances, add_on_products, or assignment_store.
+              token_allowances, or add_on_products.
           13. The contract must not reference concrete hosted products, operator
               billing admin actions, payment-provider product ids, price ids,
               API keys, secrets, invoices, or settlement.

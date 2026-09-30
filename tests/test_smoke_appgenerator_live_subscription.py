@@ -5,16 +5,19 @@ import json
 import pytest
 import yaml
 
+from factory_app.workflows._shared.subscription_contract_context import (
+    subscription_assignment_store,
+)
 from scripts.smoke_appgenerator_live_subscription import (
     REPORT_GATE_ID,
     WORKFLOWS_ROOT,
+    assembled_subscription_yaml,
     deterministic_module_contract_output,
-    deterministic_subscription_output,
     run_deterministic_appgenerator_subscription_smoke,
     sample_subscription_contract,
+    validate_assembled_subscription_yaml,
     validate_module_contract_output,
     validate_subscription_acceptance_handoff,
-    validate_subscription_output,
 )
 from tests.import_utils import import_module_directly
 
@@ -33,16 +36,15 @@ def _load_appgenerator_structured_registry():
     return registry
 
 
-def test_subscription_output_validator_rejects_provider_specific_drift() -> None:
+def test_assembled_subscription_yaml_is_the_contract_with_the_constructed_store() -> None:
     contract = sample_subscription_contract()
-    output = deterministic_subscription_output()
-    output["code_files"][0]["content"] += "\npayment_provider_price_id: price_123\n"
-    output["subscription_config_bundle"]["files"][0]["content"] = output["code_files"][0]["content"]
+    content = assembled_subscription_yaml(contract)
 
-    _content, errors = validate_subscription_output(output, contract)
+    assert validate_assembled_subscription_yaml(content, contract) == []
+    assert yaml.safe_load(content)["assignment_store"] == subscription_assignment_store()
 
-    assert errors
-    assert any("payment_provider" in error for error in errors)
+    drifted = content.replace("default_plan_id: free", "default_plan_id: pro")
+    assert validate_assembled_subscription_yaml(drifted, contract)
 
 
 def test_module_contract_validator_compiles_the_exact_approved_entitlement_gate() -> None:
@@ -72,7 +74,13 @@ def test_module_contract_validator_rejects_structured_output_schema_drift() -> N
 
 def test_config_middleware_schema_defaults_omitted_deleted_files() -> None:
     registry = _load_appgenerator_structured_registry()
-    output = deterministic_subscription_output()
+    output = {
+        "mode": "service_foundation",
+        "module_contract": None,
+        "service_foundation_bundle": {"files": []},
+        "code_files": [],
+        "agent_message": "No service foundation files are needed.",
+    }
 
     assert "deleted_files" not in output
 
@@ -193,7 +201,7 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
     assert acceptance["failed_tasks"] == {}
     assert acceptance["accepted_task_ids"] == [
         "entitlement_contract", "entitlement_services", "reports_models", "reports_services",
-        "subscription_pages", "subscription_persistence", "task_reports_module_contract", "task_subscription_config",
+        "subscription_pages", "subscription_persistence", "task_reports_module_contract",
     ]
     assert {
         f"modules/reports/contracts/{name}.yaml"
@@ -206,7 +214,9 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
 
     generated = acceptance["context"]["generated_files"]
     assert acceptance["context"]["app_assembly_status"] == "passed"
-    plans = yaml.safe_load(generated["config/subscriptions.yaml"])["plans"]
+    subscriptions = yaml.safe_load(generated["config/subscriptions.yaml"])
+    assert subscriptions["assignment_store"] == subscription_assignment_store()
+    plans = subscriptions["plans"]
     assert [plan["capabilities"] for plan in plans] == [[], [REPORT_GATE_ID]]
     assert "usage_limits" not in plans[0]
     assert plans[1]["usage_limits"][0]["monthly_limit"] == 1000
@@ -225,10 +235,7 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
 
 @pytest.mark.asyncio
 async def test_subscription_handoff_retains_invalid_companion_for_acceptance() -> None:
-    subscription = deterministic_subscription_output()
     module = deterministic_module_contract_output()
-    subscription_yaml, errors = validate_subscription_output(subscription, sample_subscription_contract())
-    assert not errors and subscription_yaml is not None
     module_yaml, errors = validate_module_contract_output(module)
     assert not errors and module_yaml is not None
     module["module_contract"]["notifications_yaml"] = {
@@ -236,8 +243,8 @@ async def test_subscription_handoff_retains_invalid_companion_for_acceptance() -
     }
 
     result = await validate_subscription_acceptance_handoff(
-        subscription_yaml=subscription_yaml, module_yaml=module_yaml,
-        task_outputs={"task_subscription_config": subscription, "task_reports_module_contract": module},
+        module_yaml=module_yaml,
+        task_outputs={"task_reports_module_contract": module},
     )
 
     assert result["task_batch_status"] == "completed"

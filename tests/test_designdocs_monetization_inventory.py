@@ -421,15 +421,6 @@ def _monetized_plan(context: ContextVariablesBridge, *, subscription: bool = Fal
         next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")["owned_paths"].append(
             "ui/pages/pricing.yaml"
         )
-    plan["build_tasks"].append({
-        "task_id": "subscription.config", "task_type": "subscription_config",
-        "capability_pack_id": None, "surface_id": "subscription_contract", "surface_kind": "app_policy",
-        "execution_target": "AppGenerator", "initial_agent": "ConfigMiddlewareAgent",
-        "description": "Serialize approved subscriptions",
-        "initial_message": "Emit config/subscriptions.yaml from the subscription contract.",
-        "owned_paths": ["config/subscriptions.yaml"], "depends_on": [],
-    })
-    plan["generation_order"].append("subscription.config")
     if subscription:
         pack_root = ROOT / "factory_app/build_context/mozaikspay"
         config = yaml.safe_load((pack_root / "context.yaml").read_text(encoding="utf-8"))
@@ -486,7 +477,8 @@ def test_saved_pricing_inventory_passes_planner_coverage_and_full_review(persist
         ("Reports", "/reports"), (pricing_name, "/pricing"),
         ("Billing", "/billing"), ("Usage", "/usage"),
     }
-    assert any(task["task_type"] == "subscription_config" for task in cached["build_tasks"])
+    # Assembly writes config/subscriptions.yaml from the approved contract.
+    assert all("config/subscriptions.yaml" not in task["owned_paths"] for task in cached["build_tasks"])
     validate_plan_coverage(cached, context)
 
 

@@ -167,8 +167,8 @@ agents:
       - Keep the plan concise without weakening behavior. Preserve explicit behavioral qualifiers from the approved request in each relevant owned task's initial_message and acceptance_criteria; workers must not need a sibling task or older design document to recover them. Do not embed generated source code, full page schemas, copied catalogs, design documents, or repeated runtime manuals in task initial_message or config_hint fields. Downstream workers receive their own canonical implementation context.
       - Turn requested distinctions into concrete acceptance_criteria: literal versus regex search and the allowed fields; pagination reaching later records under the same filters; defaults versus prefilled edits; and denied/no-op mutations producing no mutation-success events. Do not compress them to "works as required" or merely matching an output schema. When a requirement needs multiple layers, assign its relevant part to every owning task with the needed dependencies. The request cannot override runtime/operator contracts or authorization boundaries; report conflicts or missing supported contracts instead of silently dropping a qualifier or inventing an API.
       - Explicit interview corrections and approved scope exclusions override category defaults. Do not expand an approved surface map or page inventory with inferred table-stakes features.
-      - Every capability and task surface_id must exist in design_surface_map or the trusted selected capability_packs provider/facade inventory. The approved required subscription contract additionally permits surface_id=subscription_contract only for its subscription_config task. Aggregate page work may use surface_id=page_bundle only with task_type=page_bundle, surface_kind=ui_only, and capability_pack_id=null, scoped to the approved experience_spec pages; this structural scope grants no module or capability authority. If review names an unapproved surface, remove its capability and tasks rather than relabeling them to an approved capability. Authentication is platform-provided and needs no generated module.
-      - Review constructs omitted greenfield page and module tasks, approved subscription tasks, canonical workers, required files, and prerequisite edges from the same requirements used by validation. Preserve judgment content: action semantics, optional outputs, user_data_scope, integrations, and explicit dependencies. Missing behavior needs bounded feedback; do not invent read actions from entity spelling.
+      - Every capability and task surface_id must exist in design_surface_map or the trusted selected capability_packs provider/facade inventory. Aggregate page work may use surface_id=page_bundle only with task_type=page_bundle, surface_kind=ui_only, and capability_pack_id=null, scoped to the approved experience_spec pages; this structural scope grants no module or capability authority. If review names an unapproved surface, remove its capability and tasks rather than relabeling them to an approved capability. Authentication is platform-provided and needs no generated module.
+      - Review constructs omitted greenfield page and module tasks, canonical workers, required files, and prerequisite edges from the same requirements used by validation. Preserve judgment content: action semantics, optional outputs, user_data_scope, integrations, and explicit dependencies. Missing behavior needs bounded feedback; do not invent read actions from entity spelling.
       - If app_plan_feedback is non-empty, correct every listed error and emit a complete replacement AppBuildPlanOutput, not a patch or a prose explanation.
       - Page owned_paths are case-sensitive. Copy the exact paths supplied by FILE CONTRACTS CONTEXT. Display name Books at route /books owns ui/pages/books.yaml, never ui/pages/Books.yaml. Keep the approved display name unchanged in pages[].name; it is not a filename.
       - In a revision, pages and capability_packs are complete retained inventories, not generation requests. Read all baseline ui/pages/*.yaml and module.yaml files before emitting them. A backend-only change must still include every existing page; put only changed files in build_tasks.
@@ -253,7 +253,7 @@ agents:
       - Creator platform: Free creator → Pro creator ($9–29/mo) — gate monetization tools, advanced analytics, scheduling
       - AI-native product: Free (limited tokens/runs) → Pro ($20–50/mo with token allowance) → usage top-up packs
       - Developer tools: Free tier → Starter ($29/mo) → Growth ($99/mo) → Enterprise — gate rate limits, webhooks, team access
-      These are last-resort defaults. When `subscription_contract.subscription_config_file` exists, serialize that and do not re-derive tiers from this list.
+      These are last-resort defaults. When `subscription_contract.subscription_config_file` exists, it is the ladder; do not re-derive tiers from this list.
 
       **Feature set defaults by category** (apply only within approved scope when requirements are otherwise unspecified):
       - Creator platform → draft content, scheduled publishing, analytics dashboard, subscriber management, tipping/monetization toggle
@@ -337,7 +337,7 @@ agents:
            Use this profile as the deterministic handoff for any downstream build-context readiness pack. Do not infer it from freeform prose later in the pipeline.
       4a. Resolve monetization before deriving monetization build tasks.
          - `monetization_enabled=true`, `builder_options.monetization.enabled=true`, or `builder_options.provider_backed_capabilities[].intent_id == "monetization"` means only that a revenue model is desired. It does not mean subscriptions.
-         - **`subscription_contract.subscription_config_file` is the authoritative tier structure.** Feed it into your `subscription_config` build task initial_message unchanged. The concept never carries prices; do not re-derive or simplify the tier structure — the recommendation was already validated against industry patterns.
+         - **`subscription_contract.subscription_config_file` is the authoritative tier structure.** Assembly writes it to `config/subscriptions.yaml`; no build task owns that file. The concept never carries prices; do not re-derive or simplify the tier structure — the recommendation was already validated against industry patterns.
          - Set `revenue_model` to one concrete core OSS value: `free`, `subscriptions`, `usage_based`, `custom`, or `hybrid`. Never set it to `monetized`.
          - Populate `monetization_plan` whenever `revenue_model` is not `free`. Include payer, payee, money_flow_summary, required_capability_routes, subscription_contract_requirement, and rationale.
          - Use `subscriptions` only for recurring access, seats, paid feature gates, account-level quotas, AI credits, or token allowances.
@@ -430,14 +430,10 @@ agents:
           `contract_required: true` means the contract exists, not that there is
           none. `assemble_app_tasks` and `materialize_app_config_contracts`
           already read both keys.
-        - If the resolved contract's `contract_required` is true, include exactly one
-          app-level build task with `task_type: subscription_config`,
-          `capability_pack_id: null`, `surface_id: "subscription_contract"`,
-          `surface_kind: "app_policy"`, `initial_agent: "ConfigMiddlewareAgent"`,
-          and `owned_paths: ["config/subscriptions.yaml"]`. Its
-          `initial_message` must require serialization of only
-          `subscription_contract.subscription_config_file` and to emit no module,
-          service, payment-provider, host-owned billing, or token ledger code.
+        - If the resolved contract's `contract_required` is true, set
+          `monetization_provider` and plan no task for `config/subscriptions.yaml`:
+          assembly writes that file from the approved contract, and plan review
+          releases it from any task that lists it.
           Code compiles derived action gates into module manifests during
           task admission, repair, and assembly. Module task messages must not
           instruct agents to copy or author gates. Canonical list/get and managed
@@ -445,8 +441,8 @@ agents:
           Usage/billing page requirements may read the platform-owned endpoints
           `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger`; do
           not plan generated modules or custom ledgers just to back those pages.
-          When `subscription_contract.subscription_config_file` declares an
-          `assignment_store` and the build does NOT include a managed capability
+          Every required contract declares an `assignment_store`. When the build
+          does NOT include a managed capability
           pack that owns subscription assignment writes, the app owns the
           subscription assignment write path. The current default managed
           assignment writer is the `mozaikspay` pack, but that default is
@@ -485,12 +481,12 @@ agents:
           present without either this module or a managed assignment writer.
         - If the resolved contract's `contract_required` is false, or neither
           `subscription_contract` nor `subscription_contract_artifact` carries a
-          contract at all, do not plan a `subscription_config` task and do not emit
+          contract at all, leave `monetization_provider` null; assembly emits no
           config/subscriptions.yaml. A null `subscription_contract` on its own is
           not "absent": check the artifact before concluding there is no contract.
-        - Never set `monetization_provider` without planning that task. The two are
-          validated against each other, and a plan that names a provider it has no
-          task for is rejected outright.
+        - Set `monetization_provider` exactly when the resolved contract's
+          `contract_required` is true. The two are validated against each other,
+          and a plan that disagrees with the contract is rejected outright.
       11a. Treat persistent application UI as schema-first:
         - `AppBuildPlan.pages[]` is the authoritative persistent page inventory. The page_bundle task enriches and materializes that inventory through the schema lane.
         - Ordinary app pages must compile into `app.json` + `ui/pages/*.yaml`, with visual deltas in `theme_config_patch`, shell content in `shell_config`, and media inventory in `asset_manifest` when non-default assets are required.
@@ -574,7 +570,7 @@ agents:
         - Generated app deployment packaging is not a `service_foundation` or `api_surface` task. When deployment artifacts are requested, export uses the provider-neutral deployment contract fields (`deployment_profile`, `include_dockerfiles`, `include_workflow`, `include_compose`) so `generate_and_download` emits `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`, and `deployment.manifest.json`.
         - If an app needs durable runtime secrets, plan `security/secrets.yaml` as a names-only contract validated by mozaiksai.core.secrets.AppSecretContract: version: 1 and secrets entries with env (never string entries), optional azure_key_vault.secret_name, and optional provider policy. Unknown fields and raw values are forbidden. Never put raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets into generated files.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
-        - `surface_kind = app_policy` packs describe app-level declarative policy/config files such as `config/subscriptions.yaml`; they are not refinement harness surfaces and must not generate modules.
+        - `surface_kind = app_policy` packs describe app-level policy such as subscription assignments; they are not refinement harness surfaces, must not generate modules, and get no build task.
         - `surface_kind = refinement` packs are optional app-local harness packs. Do not invent a refinement surface inside AppGenerator; only materialize one when DesignDocs resolved an explicit app-owned `surface_kind = refinement` surface.
         - Use `task_type: refinement_harness` only when the product explicitly needs harnessed lifecycle/refinement/session behavior beyond `extension_registry.json` transitions and workflow_sequences.
         - Plan `refinement_harness` only when at least two of these signals are present, or one governance-critical signal is dominant: semantic request intake across multiple valid execution paths, checkpointed revision/session continuity, policy/approval/escalation gating, scoped coding or contract-surface planning after route selection, or artifact routing that depends on request meaning rather than fixed `workflow_sequence` wiring.
@@ -1591,8 +1587,8 @@ agents:
       and follow the matching mode exclusively.
 
       **Mode BSR — bundle_scan_repair** (`bundle_repair_target == "ConfigMiddlewareAgent"`):
-        Repair generated-bundle scanner failures in configuration, subscription,
-        module contract, or service-foundation files only.
+        Repair generated-bundle scanner failures in configuration, module
+        contract, or service-foundation files only.
 
       **Mode A — module_contract** (`current_build_task_type == "module_contract"`):
         Produce the typed canonical module contract bundle for one capability pack.
@@ -1600,10 +1596,6 @@ agents:
       **Mode B — service_foundation** (`current_build_task_type == "service_foundation"` or no task_run_mode):
         Generate app scaffold, configuration, database connection, and middleware files.
 
-      **Mode S — subscription_config** (`current_build_task_type == "subscription_config"`):
-        Materialize provider-neutral `config/subscriptions.yaml` from
-        SubscriptionContractDesigner. Emit no modules, backend Python, services,
-        host-owned billing behavior, payment-provider resources, or ledgers.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
@@ -1620,22 +1612,11 @@ agents:
       - Emit only integration glue — do not build a standalone platform.
       - Produce a typed service foundation bundle plus serialized files.
 
-      **Mode S (subscription_config)**:
-      - Read the injected [SUBSCRIPTION CONTRACT CONTEXT] and `subscription_contract`.
-      - Emit exactly one typed subscription_config_bundle and serialized
-        `config/subscriptions.yaml` file.
-      - The file declares app plans, capabilities, assignment_store,
-        token_wallets, token_wallets[].depleted_balance recovery metadata,
-        top_up_products with provider-neutral price.amount_cents/currency,
-        add_on_products with provider-neutral price.amount_cents/currency,
-        usage_limits, token_allowances, usage_charge_policies, and
-        pricing_catalog display metadata only.
-
       **Mode BSR (bundle_scan_repair)**:
       - Read `bundle_repair_request` and `bundle_repair_errors`.
       - Use `generated_files` as the current source of truth.
       - Emit only ConfigMiddleware-owned files required by the request:
-        `config/subscriptions.yaml`, module contract YAML under `modules/*/`,
+        module contract YAML under `modules/*/`,
         service-foundation files under `services/`, `security/secrets.yaml`,
         `.env.example`, `.env.staging.example`, `.env.production.example`, or provider-neutral deployment contract files.
       - Keep MozaiksPay as a managed facade/client boundary when selected. Do
@@ -1646,10 +1627,10 @@ agents:
     content: |-
       **Task context** (always read first):
       - `task_run_mode`: true when executing a specific build task via task batch execution.
-      - `current_build_task_type`: `module_contract` → Mode A, `service_foundation` → Mode B, `subscription_config` → Mode S.
+      - `current_build_task_type`: `module_contract` → Mode A, `service_foundation` → Mode B.
       - `current_build_task`: full task spec including `capability_pack_id`, `initial_message`, `owned_paths`.
       - `[FILE CONTRACTS CONTEXT]` and `[MODULE ARCHETYPES CONTEXT]` are injected into your system message. Use them as the prompt-time source for file-family boundaries and module.type conventions instead of inventing extra files.
-      - `[SUBSCRIPTION CONTRACT CONTEXT]` is injected when SubscriptionContractDesigner produced a contract. Use it as the source of truth in Mode S. Code compiles action gates; do not author entitlement_gate in Mode A.
+      - `[SUBSCRIPTION CONTRACT CONTEXT]` is injected when SubscriptionContractDesigner produced a contract. Assembly writes `config/subscriptions.yaml` from it; never emit that file. Code compiles action gates; do not author entitlement_gate in Mode A.
 
       **Mode A inputs** (from `current_build_task.initial_message`):
       - Capability pack name (= `capability_pack_id`)
@@ -1722,12 +1703,11 @@ agents:
 
       1. Read `bundle_repair_request`, `bundle_repair_errors`, and `generated_files`.
       2. Identify the named files from the scanner errors and repair only those ConfigMiddleware-owned paths.
-      3. For `config/subscriptions.yaml`, emit `mode: "subscription_config"` and serialize exactly that file.
-      4. For module contract YAML, emit `mode: "module_contract_bundle"` with a complete corrected module contract for the affected module.
+      3. For module contract YAML, emit `mode: "module_contract_bundle"` with a complete corrected module contract for the affected module.
          When an accepted action emits an undeclared custom event, preserve that action's approved `emits` and declare the event through `module_contract.events_yaml` under its `domain.`-prefixed type within the repair request's allowed paths. Read the accepted module and supplied event requirements to determine the exact type, producer, version, and payload contract; do not remove an approved event to silence validation. Canonical create/update/delete events (`domain.<entity>.<created|updated|deleted>`) are declared and emitted by code; never author them.
-      5. For service-foundation, env, security, or deployment contract files, emit `mode: "service_foundation"` with only the corrected file entries.
-      6. If the only valid repair is removing a stale ConfigMiddleware-owned artifact, include that relative path in `deleted_files`; do not leave an empty placeholder file.
-      7. Do not emit backend module Python, React/JS page code, app-owned business logic, raw payment providers, local ledgers, or hosted-product policy.
+      4. For service-foundation, env, security, or deployment contract files, emit `mode: "service_foundation"` with only the corrected file entries.
+      5. If the only valid repair is removing a stale ConfigMiddleware-owned artifact, include that relative path in `deleted_files`; do not leave an empty placeholder file.
+      6. Do not emit `config/subscriptions.yaml`, backend module Python, React/JS page code, app-owned business logic, raw payment providers, local ledgers, or hosted-product policy. Assembly writes `config/subscriptions.yaml` from the approved subscription contract.
       8. If the scanner request names a file outside your output lane, fail clearly in `agent_message` instead of broadening scope.
 
       **If `current_build_task_type == "module_contract"` (Mode A)**:
@@ -1848,31 +1828,6 @@ agents:
       7. Mirror those files into `code_files`.
       8. Set `module_contract` to null in service_foundation mode.
 
-      **If `current_build_task_type == "subscription_config"` (Mode S)**:
-
-      1. Read `subscription_contract.subscription_config_file` from context, or, when
-         `subscription_contract` is null, from
-         `subscription_contract_artifact.metadata.summary_payload.subscription_config_file`,
-         or the injected [SUBSCRIPTION CONTRACT CONTEXT].
-      2. If neither source reports `contract_required: true`, fail clearly; do not emit an
-         empty or placeholder config. A null `subscription_contract` alone is not a
-         missing contract — check the artifact first.
-      3. Emit `mode: "subscription_config"`.
-      4. Emit `subscription_config_bundle.files` with exactly one file:
-         - `filename: "config/subscriptions.yaml"`
-         - `content`: YAML serialization of subscription_config_file
-      5. The YAML root must contain only OSS subscription config fields:
-         `schema_version`, `label`, `default_plan_id`, `assignment_store`,
-         `token_wallets`, `top_up_products`, `usage_charge_policies`,
-         `pricing_catalog`, and `plans`.
-      6. Do not emit `contracts/subscriptions.yaml`, module files, backend Python,
-         service adapters, host-owned billing actions, payment-provider product ids,
-         price ids, checkout behavior, invoice logic, or token ledger code.
-         Runtime token usage and wallet reads are platform-owned through
-         `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger`.
-      7. Set `module_contract` and `service_foundation_bundle` to null.
-      8. Mirror the same single file into `code_files`.
-
       **If `current_build_task_type` is anything else**:
 
       1. Fail the task — do not guess a fallback mode unless Mode R is active.
@@ -1969,7 +1924,6 @@ agents:
           "runtime_extensions_yaml": null
         },
         "service_foundation_bundle": null,
-        "subscription_config_bundle": null,
         "code_files": [
           { "filename": "modules/{module_id}/module.yaml", "content": "..." }
         ],
@@ -1983,7 +1937,6 @@ agents:
         "mode": "service_foundation",
         "module_contract": null,
         "service_foundation_bundle": { "files": [{ "path": "backend/...", "kind": "...", "purpose": "...", "contract_refs": ["..."], "content": "..." }] },
-        "subscription_config_bundle": null,
         "code_files": [
           { "filename": "backend/...", "content": "..." }
         ],
@@ -1991,31 +1944,7 @@ agents:
       }
       ```
 
-      **Mode S (`subscription_config`)**:
-      ```json
-      {
-        "mode": "subscription_config",
-        "module_contract": null,
-        "service_foundation_bundle": null,
-        "subscription_config_bundle": {
-          "files": [
-            {
-              "filename": "config/subscriptions.yaml",
-              "content": "schema_version: mozaiks.subscriptions.v1\n..."
-            }
-          ]
-        },
-        "code_files": [
-          {
-            "filename": "config/subscriptions.yaml",
-            "content": "schema_version: mozaiks.subscriptions.v1\n..."
-          }
-        ],
-        "agent_message": "Generated provider-neutral subscription config."
-      }
-      ```
-
-      Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, `BackendFoundationBundle`, and `SubscriptionConfigBundle` in `structured_outputs.yaml`.
+      Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`.
 
       **CRITICAL**: Output ONLY the raw JSON object.
   - id: self_validation

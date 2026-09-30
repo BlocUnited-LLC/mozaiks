@@ -15,7 +15,7 @@ What it does:
     5. Parses the AppBuildPlan JSON output.
     6. Validates with app_build_plan.py.
     7. Checks plan shape:
-       - subscription_config task present (config/subscriptions.yaml)
+       - no task owns config/subscriptions.yaml (assembly writes it)
        - entitlement_dispatch module_contract task present
        - entitlement_dispatch business_services task present
        - No mozaikspay managed_capability pack
@@ -48,6 +48,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 import yaml
 
+from factory_app.workflows._shared.subscription_contract_context import (  # noqa: E402
+    subscription_assignment_store,
+)
+
 _AGENTS_YAML = _REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "agents.yaml"
 _TOOLS_DIR = _REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "tools"
 _SHARED_DIR = _REPO_ROOT / "factory_app" / "workflows" / "_shared"
@@ -65,11 +69,7 @@ _SUBSCRIPTION_CONTRACT: dict[str, Any] = {
         "schema_version": "mozaiks.subscriptions.v1",
         "label": "Analytics SaaS Plans",
         "default_plan_id": "free",
-        "assignment_store": {
-            "data_alias": "billing.subscriptions",
-            "user_id_field": "user_id",
-            "active_statuses": ["active"],
-        },
+        "assignment_store": subscription_assignment_store(),
         "plans": [
             {
                 "plan_id": "free",
@@ -247,6 +247,7 @@ class _Context:
 
 def _validate_plan(plan: dict[str, Any], validation_mod) -> tuple[dict[str, Any], str]:
     ctx = _Context()
+    ctx.set("subscription_contract", _SUBSCRIPTION_CONTRACT)
     result = validation_mod.app_build_plan(AppBuildPlan=plan, context_variables=ctx)
     return ctx.data, str(result)
 
@@ -268,21 +269,13 @@ def _check_plan_shape(plan: dict[str, Any]) -> list[str]:
             "covers self-hosted SaaS, which should not use the mozaikspay pack."
         )
 
-    # 2. subscription_config task must be present
-    sub_config_tasks = [
-        t for t in build_tasks
-        if isinstance(t, dict) and t.get("task_type") == "subscription_config"
-    ]
-    if not sub_config_tasks:
-        violations.append("MISSING: subscription_config task (config/subscriptions.yaml)")
-    else:
-        for t in sub_config_tasks:
-            paths = t.get("owned_paths") or []
-            if not any("subscriptions.yaml" in str(p) for p in paths):
-                violations.append(
-                    f"DRIFT: subscription_config task '{t.get('task_id')}' "
-                    f"owned_paths do not include config/subscriptions.yaml: {paths}"
-                )
+    # 2. No task owns config/subscriptions.yaml: assembly writes it from the contract
+    for t in build_tasks:
+        if isinstance(t, dict) and "config/subscriptions.yaml" in (t.get("owned_paths") or []):
+            violations.append(
+                f"DRIFT: task '{t.get('task_id')}' owns config/subscriptions.yaml, "
+                "which assembly writes from the approved subscription contract"
+            )
 
     # 3. entitlement_dispatch module_contract task must be present
     dispatch_contract_tasks = [

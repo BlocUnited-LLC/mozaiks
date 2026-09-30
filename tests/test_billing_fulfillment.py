@@ -1564,43 +1564,20 @@ def test_fencing_requires_both_command_and_store_authority() -> None:
 # ── designer literal matches the runtime contract exactly ────────────────────
 
 
-def test_designer_revision_field_compiles_to_the_runtime_literal() -> None:
-    """A `str | null` schema could generate a value the runtime rejects, so the
-    designer declares the same finite literal — and it must actually COMPILE
-    through the canonical structured-output builder, not merely parse as YAML."""
-    from pathlib import Path
-
-    import yaml as _yaml
-
-    from mozaiksai.core.workflow.outputs.structured import build_models_from_config
-
-    schema = _yaml.safe_load(
-        (
-            Path(__file__).resolve().parents[1]
-            / "factory_app/workflows/SubscriptionContractDesigner/structured_outputs.yaml"
-        ).read_text(encoding="utf-8")
+def test_generated_assignment_store_keeps_revision_fencing_on() -> None:
+    """The factory constructs every generated store with the fence enabled."""
+    from factory_app.workflows._shared.subscription_contract_context import (
+        subscription_assignment_store,
     )
-    field = schema["models"]["AssignmentStore"]["fields"]["revision_field"]
-    assert field["type"] == "union"
-    assert field["variants"] == ["BillingRevisionField", "null"]
-    assert schema["models"]["BillingRevisionField"] == {
-        "type": "literal",
-        "values": ["billing_revision"],
-    }
+    from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionAssignmentStoreDef
 
-    models = build_models_from_config(schema["models"])
-    store = models["AssignmentStore"]
-    base = {
-        "data_alias": "billing.subscriptions",
-        "app_id_field": "app_id",
-        "plan_id_field": "plan_id",
-        "status_field": "status",
-        "active_statuses": ["active"],
-    }
-    assert store(**base, revision_field="billing_revision").revision_field is not None
-    assert store(**base, revision_field=None).revision_field is None
-    with pytest.raises(ValidationError):
-        store(**base, revision_field="other_field")
+    store = SubscriptionAssignmentStoreDef.model_validate(subscription_assignment_store())
+    assert store.revision_field == "billing_revision"
+    config = SubscriptionsConfig.model_validate(
+        {**_subscriptions_config().model_dump(mode="json"), "assignment_store": subscription_assignment_store()}
+    )
+    service = BillingFulfillmentService(config=config, ledger=None)
+    assert service._fencing_enabled(_subscription_command("cmd_f", plan_id="pro", subject_revision=3)) is True
 
 
 @pytest.mark.parametrize("value", ["other_field", "billing_revisions", "", "  "])

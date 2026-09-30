@@ -49,7 +49,7 @@ def _schema():
 def _output():
     return {
         "mode": "module_contract_bundle", "agent_message": "Declared records.",
-        "service_foundation_bundle": None, "subscription_config_bundle": None, "code_files": [],
+        "service_foundation_bundle": None, "code_files": [],
         "module_contract": {
             "module_id": "records",
             "module_yaml": {

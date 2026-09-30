@@ -229,7 +229,6 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
             "mode": "module_contract_bundle",
             "module_contract": None,
             "service_foundation_bundle": None,
-            "subscription_config_bundle": None,
             "code_files": [
                 {
                     "filename": "modules/reports/module.yaml",

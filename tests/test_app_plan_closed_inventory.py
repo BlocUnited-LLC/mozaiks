@@ -75,13 +75,9 @@ def _assert_auth_feedback(error):
     assert "must name exactly one of" not in message
 
 
-@pytest.mark.parametrize("shape", ["module_replay", "live_app_policy"])
-def test_unapproved_auth_review_returns_actionable_feedback_before_capability_ids(shape):
+def test_unapproved_auth_review_returns_actionable_feedback_before_capability_ids():
     plan, context = _approved_plan()
-    _add_auth(
-        plan, surface_kind="module" if shape == "module_replay" else "app_policy",
-        capability=shape == "module_replay",
-    )
+    _add_auth(plan)
     original = deepcopy(plan)
     context.set("app_plan_ready", True)
     context.set("app_build_plan", {"stale": True})
@@ -112,15 +108,17 @@ def test_every_capability_and_task_requires_an_approved_surface(capability, task
     assert plan == original
 
 
-def test_auth_replay_and_live_shape_have_the_same_surface_feedback():
-    errors = []
-    for surface_kind, capability in (("module", True), ("app_policy", False)):
-        plan, context = _approved_plan()
-        _add_auth(plan, surface_kind=surface_kind, capability=capability)
-        result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
-        assert result["outcome"] == "needs_revision", result
-        errors.append(result["error"])
-    assert errors[0] == errors[1]
+def test_a_task_cannot_claim_the_app_policy_surface_kind():
+    """app_policy tasks existed only to write config/subscriptions.yaml.
+
+    Assembly writes that file from the approved contract, so the planner's
+    schema no longer offers the kind for a task; surfaces keep it.
+    """
+    plan, context = _approved_plan()
+    _add_auth(plan, surface_kind="app_policy", capability=False)
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "needs_revision", result
+    assert "surface_kind" in result["error"] and "app_policy" in result["error"]
 
 
 def test_unapproved_surface_remains_feedback_until_review_budget_is_exhausted():
@@ -140,7 +138,7 @@ def test_unapproved_surface_remains_feedback_until_review_budget_is_exhausted():
 
 
 @pytest.mark.parametrize("provider_surface", ["mozaikspay", "mozaikspay_managed"])
-def test_selected_provider_facade_and_subscription_surfaces_pass_unchanged(provider_surface):
+def test_selected_provider_and_facade_surfaces_pass_unchanged(provider_surface):
     plan, context = _approved_plan()
     for item in [*plan["capability_packs"], *plan["build_tasks"]]:
         if item.get("capability_pack_id") == "mozaikspay":
@@ -204,10 +202,6 @@ def test_approved_plan_remains_unchanged_on_repeated_review():
 def test_cache_normalization_cannot_introduce_an_unselected_provider_surface():
     plan, context = _approved_plan(monetized=False)
     plan["revenue_model"] = "subscription"
-    plan["build_tasks"].append({
-        **_task("subscription_config", "subscription_config", "ConfigMiddlewareAgent", None, ["config/subscriptions.yaml"]),
-        "surface_id": "subscription_contract", "surface_kind": "app_policy",
-    })
     context.set("subscription_contract", {
         "contract_required": True,
         "subscription_config_file": {"plans": [{"plan_id": "free"}, {"plan_id": "pro"}]},
@@ -226,7 +220,8 @@ def test_cache_normalization_cannot_introduce_an_unselected_provider_surface():
     assert plan == original
 
 
-def test_subscription_surface_accepts_the_approved_artifact_fallback():
+def test_the_contract_artifact_fallback_makes_it_a_subscription_build():
+    """The provider is validated against the approved contract, read from either key."""
     plan, context = _approved_plan()
     contract = detach(context.get("subscription_contract"))
     context.set("subscription_contract", None)
@@ -238,32 +233,34 @@ def test_subscription_surface_accepts_the_approved_artifact_fallback():
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
 
     assert result["outcome"] == "ready", result
-    subscription = [
-        task for task in detach(context.get("app_build_plan"))["build_tasks"]
-        if task["surface_id"] == "subscription_contract"
-    ]
-    assert len(subscription) == 1
-    assert subscription[0]["task_type"] == "subscription_config"
+    cached = detach(context.get("app_build_plan"))
+    assert cached["monetization_provider"] == "mozaiks_pay"
+    assert all("config/subscriptions.yaml" not in task["owned_paths"] for task in cached["build_tasks"])
 
 
-def test_subscription_surface_requires_approved_subscription_contract():
+def test_a_provider_without_an_approved_contract_is_feedback():
     plan, context = _approved_plan()
     context.set("subscription_contract", None)
 
-    with pytest.raises(ValueError, match="subscription_contract"):
-        validate_plan_origins(plan, context)
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "needs_revision", result
+    assert "only valid when the approved subscription contract" in result["error"]
 
 
-@pytest.mark.parametrize("unapproved_use", ["capability", "other_task"])
-def test_subscription_contract_does_not_approve_arbitrary_capabilities_or_tasks(unapproved_use):
+@pytest.mark.parametrize("unapproved_use", ["capability", "task"])
+def test_subscription_contract_is_not_an_approved_surface(unapproved_use):
     plan, context = _approved_plan()
     if unapproved_use == "capability":
         plan["capability_packs"].append({
             **_capability("subscription_contract"), "surface_kind": "app_policy",
         })
     else:
-        task = next(task for task in plan["build_tasks"] if task["task_type"] == "subscription_config")
-        task["task_type"] = "service_foundation"
+        plan["build_tasks"].append({
+            **_task("subscription_contract.service_foundation", "service_foundation", "ConfigMiddlewareAgent",
+                    None, ["services/config.py"]),
+            "surface_id": "subscription_contract",
+        })
 
     with pytest.raises(ValueError, match="subscription_contract"):
         validate_plan_origins(plan, context)

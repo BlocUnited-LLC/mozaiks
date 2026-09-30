@@ -791,7 +791,6 @@ def test_empty_provider_actions_produces_no_rules():
 # 14. _validate_monetization_provider_selection
 # ---------------------------------------------------------------------------
 
-_SUBSCRIPTION_CONFIG_TASK = {"task_type": "subscription_config", "task_id": "sub_cfg"}
 _MOZAIKSPAY_DESCRIPTOR = {
     "capability_pack_id": "mozaikspay",
     "capability_source": "managed_capability",
@@ -805,26 +804,26 @@ _ENTITLEMENT_DISPATCH_DESCRIPTOR = {
 
 
 class TestValidateMonetizationProviderSelection:
-    def test_no_subscription_config_rejects_provider_value(self):
-        with pytest.raises(ValueError, match="only valid when build_tasks include"):
+    def test_no_required_contract_rejects_provider_value(self):
+        with pytest.raises(ValueError, match="only valid when the approved subscription contract"):
             _validate_monetization_provider_selection(
                 [],
-                [{"task_type": "module_contract"}],
+                contract_required=False,
                 monetization_provider="mozaiks_pay",
             )
 
-    def test_subscription_config_requires_provider(self):
+    def test_required_contract_requires_provider(self):
         with pytest.raises(ValueError, match="monetization_provider is required"):
             _validate_monetization_provider_selection(
                 [_MOZAIKSPAY_DESCRIPTOR],
-                [_SUBSCRIPTION_CONFIG_TASK],
+                contract_required=True,
                 monetization_provider=None,
             )
 
     def test_mozaiks_pay_with_selected_pack_passes(self):
         _validate_monetization_provider_selection(
             [_MOZAIKSPAY_DESCRIPTOR],
-            [_SUBSCRIPTION_CONFIG_TASK],
+            contract_required=True,
             monetization_provider="mozaiks_pay",
         )
 
@@ -832,14 +831,14 @@ class TestValidateMonetizationProviderSelection:
         with pytest.raises(ValueError, match="requires the mozaikspay managed capability pack"):
             _validate_monetization_provider_selection(
                 [],
-                [_SUBSCRIPTION_CONFIG_TASK],
+                contract_required=True,
                 monetization_provider="mozaiks_pay",
             )
 
     def test_entitlement_dispatch_with_selected_pack_passes(self):
         _validate_monetization_provider_selection(
             [_ENTITLEMENT_DISPATCH_DESCRIPTOR],
-            [_SUBSCRIPTION_CONFIG_TASK],
+            contract_required=True,
             monetization_provider="entitlement_dispatch",
         )
 
@@ -847,7 +846,7 @@ class TestValidateMonetizationProviderSelection:
         with pytest.raises(ValueError, match="must not both be selected"):
             _validate_monetization_provider_selection(
                 [_ENTITLEMENT_DISPATCH_DESCRIPTOR, _MOZAIKSPAY_DESCRIPTOR],
-                [_SUBSCRIPTION_CONFIG_TASK],
+                contract_required=True,
                 monetization_provider="entitlement_dispatch",
             )
 
@@ -860,6 +859,6 @@ class TestValidateMonetizationProviderSelection:
         with pytest.raises(ValueError, match="Multiple managed capability packs"):
             _validate_monetization_provider_selection(
                 [_MOZAIKSPAY_DESCRIPTOR, custom],
-                [_SUBSCRIPTION_CONFIG_TASK],
+                contract_required=True,
                 monetization_provider="mozaiks_pay",
             )

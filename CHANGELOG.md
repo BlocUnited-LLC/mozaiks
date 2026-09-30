@@ -80,6 +80,18 @@ This project follows a practical pre-1.0 changelog format:
   run started. Workflows with interactive UI tools still wait for the user
   without a deadline.
 
+- Generated SaaS apps entitle subscribers whose payment provider reports them
+  as trialing or pending. `config/subscriptions.yaml` is now fully code-owned:
+  the factory constructs its `assignment_store` from the runtime defaults
+  (`active_statuses: [active, pending, trialing]`, revision fencing and expiry
+  on), keyed by the subscribing user, instead of letting the pricing designer
+  author it. Designers had written stores such as `[active, trial]` that denied
+  every trial subscriber. AppGenerator no longer schedules a model task for the
+  file: assembly writes it from the approved contract, and
+  `AppBuildPlan.monetization_provider` is validated against that contract.
+  Removed usage-metering entries are explained in the review as plain
+  sentences.
+
 - SubscriptionContractDesigner now presents an approved subscription decision
   before plan design and surfaces requested corrections at the top of retries.
   A supplied plan design is saved as required even when the model labels it a

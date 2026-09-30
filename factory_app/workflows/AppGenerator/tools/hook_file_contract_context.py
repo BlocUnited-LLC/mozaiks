@@ -36,7 +36,6 @@ _PLANNING_CONTRACT_ORDER = (
     "persistence_contract",
     "service_foundation",
     "refinement_harness",
-    "subscription_config",
     "api_surface",
 )
 

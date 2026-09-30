@@ -23,7 +23,7 @@ To generate the fixture for CI replay:
 Validated invariants (fixture replay):
     1. Plan validates with app_build_plan.py without raising.
     2. No managed assignment writer such as the mozaikspay managed_capability pack.
-    3. subscription_config task present with config/subscriptions.yaml path.
+    3. No task owns config/subscriptions.yaml; assembly writes it from the contract.
     4. entitlement_dispatch module_contract task present.
     5. entitlement_dispatch module_contract task owns modules/entitlement_dispatch/module.yaml.
     6. entitlement_dispatch business_services task present.
@@ -120,7 +120,7 @@ class TestAppPlanAgentSaasLiveRun:
         python scripts/smoke_appplan_saas_entitlement_dispatch.py --model gpt-4o --save-fixture
 
     Expected output:
-        - subscription_config task with config/subscriptions.yaml.
+        - no task owning config/subscriptions.yaml.
         - entitlement_dispatch module_contract + business_services tasks.
         - No managed assignment writer such as the mozaikspay managed_capability pack.
         - Validation: PASSED.
@@ -165,6 +165,8 @@ class TestAppPlanAgentSaasFixtureReplay:
             f"tests.saas_dispatch_fixture_validation.{id(self)}",
         )
         ctx = _Context()
+        # The approved contract, not a planned task, makes this a subscription build.
+        ctx.set("subscription_contract", {"contract_required": True})
         result = mod.app_build_plan(AppBuildPlan=self.plan, context_variables=ctx)
         assert ctx.data.get("app_plan_ready") is True, (
             f"app_plan_ready expected True, got {ctx.data.get('app_plan_ready')!r}. "
@@ -194,35 +196,17 @@ class TestAppPlanAgentSaasFixtureReplay:
             f"Found: {[p.get('capability_pack_id') for p in bad]}"
         )
 
-    # --- subscription_config task ---
+    # --- config/subscriptions.yaml ---
 
-    def test_subscription_config_task_present(self) -> None:
-        tasks = _get_tasks_by_type(self.build_tasks, "subscription_config")
-        assert tasks, (
-            "Missing subscription_config task. "
-            "AppPlanAgent must plan config/subscriptions.yaml when contract_required is true."
+    def test_no_task_owns_subscriptions_yaml(self) -> None:
+        owners = [
+            t.get("task_id") for t in self.build_tasks
+            if isinstance(t, dict) and "config/subscriptions.yaml" in (t.get("owned_paths") or [])
+        ]
+        assert not owners, (
+            f"Tasks {owners} own config/subscriptions.yaml; assembly writes it from the "
+            "approved subscription contract."
         )
-
-    def test_subscription_config_task_owns_subscriptions_yaml(self) -> None:
-        tasks = _get_tasks_by_type(self.build_tasks, "subscription_config")
-        if not tasks:
-            pytest.skip("subscription_config task not present")
-        for t in tasks:
-            paths = t.get("owned_paths") or []
-            assert any("subscriptions.yaml" in str(p) for p in paths), (
-                f"subscription_config task '{t.get('task_id')}' must own "
-                f"config/subscriptions.yaml. Got: {paths}"
-            )
-
-    def test_subscription_config_task_initial_agent_is_config_middleware(self) -> None:
-        tasks = _get_tasks_by_type(self.build_tasks, "subscription_config")
-        if not tasks:
-            pytest.skip("subscription_config task not present")
-        for t in tasks:
-            assert t.get("initial_agent") == "ConfigMiddlewareAgent", (
-                f"subscription_config task initial_agent={t.get('initial_agent')!r}, "
-                "expected 'ConfigMiddlewareAgent'"
-            )
 
     # --- entitlement_dispatch module_contract ---
 

@@ -1,7 +1,8 @@
 """Closed pricing features and derived subscription entitlements.
 
 DesignDocs owns the feature inventory. The designer chooses which approved
-features each plan includes; this module names capabilities and action gates.
+features each plan includes; this module names capabilities, action gates, and
+the assignment store.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionAssignmentStoreDef
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
@@ -35,6 +37,37 @@ _TARGET_AGENTS = {
     "PatternAgent",
     "WorkflowBundleBuilderAgent",
 }
+
+# The alias the self-managed writer hardcodes (entitlement_dispatch
+# backend/repo.py). The managed writer applies fulfillment into whatever alias
+# the file names, so this one serves both.
+ASSIGNMENT_DATA_ALIAS = "billing.subscriptions"
+
+
+def subscription_assignment_store() -> dict[str, Any]:
+    """The assignment store every generated subscriptions.yaml declares.
+
+    The store is the contract between the assignment writer and
+    ConfiguredEntitlementAdapter, so nothing in an app's design decides it.
+    The designer used to author it, and the recorded corpus holds ten
+    different stores across 27 designs: active_statuses ["active"] or
+    ["active", "trial"] where fulfillment writes the provider's "trialing"
+    and "pending", expiry switched off, tenant scope dropped.
+
+    Every field is the runtime default except two, both fixed by the writers:
+      - data_alias: the alias entitlement_dispatch writes.
+      - user_id_field: both writers key an assignment by the subscribing user
+        (the MozaiksPay facade sends ctx.user_id as the checkout subject;
+        entitlement_dispatch upserts on app_id and user_id). The runtime
+        default of null would key the unique assignment index on app and
+        tenant alone, so one subscriber's upsert would replace another's.
+
+    workspace_id_field stays null. Data tenancy says who owns app records,
+    not who pays. A user-keyed record is found from every workspace, which is
+    what all 27 recorded designs chose.
+    """
+    store = SubscriptionAssignmentStoreDef(data_alias=ASSIGNMENT_DATA_ALIAS, user_id_field="user_id")
+    return store.model_dump(mode="json", exclude_none=True)
 
 
 def _context_value(context_variables: Any, key: str) -> Any:
@@ -261,9 +294,9 @@ def _render_contract(contract: Mapping[str, Any]) -> str:
             "Use this provider-neutral contract as the source of truth for generated SaaS plans, entitlement gates, token wallets, depleted-balance recovery metadata, top-up products with price.amount_cents/currency, add-on products with price.amount_cents/currency, token allowances, usage pages, and workflow metering declarations.",
             "Do not implement a custom usage ledger or token wallet. Use the OSS runtime subscription/token primitives.",
             "Do not add hosted-product provider behavior here; payment checkout, invoices, and settlement are app-owned or host-provided integration concerns.",
-            "Since contract_required is true, AppBuildPlan must include a build task with task_type='subscription_config', capability_pack_id=null, surface_id='subscription_contract', surface_kind='app_policy', initial_agent='ConfigMiddlewareAgent', owned_paths=['config/subscriptions.yaml']. That task serializes this contract's subscription_config_file.",
+            "AppGenerator assembly writes config/subscriptions.yaml from this contract's subscription_config_file. No build task owns config/subscriptions.yaml, and no agent authors it.",
             "AppGenerator deterministically declares every assignment_store.data_alias, its local assignment collection, and lookup index in data/contract.json from this approved subscription contract, including product stores. This applies to managed and self-hosted writers. Managed billing facades still own no app collections; assignment storage belongs to the subscription_assignments app_policy surface. Do not declare aliases inside migrations or generate provider-owned plans and billing records.",
-            "If this contract's subscription_config_file declares assignment_store and the build does not include any managed capability pack that provides the subscription_write_path capability, AppBuildPlan must also include three entitlement_dispatch tasks: (1) one data_migrations task (capability_pack_id: 'entitlement_dispatch', owned_paths: ['data/migrations/001_entitlement_dispatch_collections.json'], initial_agent: 'DatabaseAgent') using the versioned pack template with operations: [] because data/contract.json owns assignment storage, (2) one module_contract task (capability_pack_id: 'entitlement_dispatch', owned_paths: ['modules/entitlement_dispatch/module.yaml'], initial_agent: 'ConfigMiddlewareAgent'), and (3) one business_services task (capability_pack_id: 'entitlement_dispatch', owned_paths: ['modules/entitlement_dispatch/backend/handler.py', 'modules/entitlement_dispatch/backend/service.py', 'modules/entitlement_dispatch/backend/repo.py'], initial_agent: 'ServiceAgent'). Any managed capability pack selected for this build that declares provides_capabilities: [subscription_write_path] in its contract is the write-path owner — entitlement_dispatch must not be included alongside it. The module writes the configured assignment_store.data_alias and is the write-side partner for ConfiguredEntitlementAdapter (the runtime read side). The bundle scanner rejects apps that declare assignment_store without either entitlement_dispatch or a managed assignment writer.",
+            "This contract's subscription_config_file declares assignment_store. If the build does not include any managed capability pack that provides the subscription_write_path capability, AppBuildPlan must also include three entitlement_dispatch tasks: (1) one data_migrations task (capability_pack_id: 'entitlement_dispatch', owned_paths: ['data/migrations/001_entitlement_dispatch_collections.json'], initial_agent: 'DatabaseAgent') using the versioned pack template with operations: [] because data/contract.json owns assignment storage, (2) one module_contract task (capability_pack_id: 'entitlement_dispatch', owned_paths: ['modules/entitlement_dispatch/module.yaml'], initial_agent: 'ConfigMiddlewareAgent'), and (3) one business_services task (capability_pack_id: 'entitlement_dispatch', owned_paths: ['modules/entitlement_dispatch/backend/handler.py', 'modules/entitlement_dispatch/backend/service.py', 'modules/entitlement_dispatch/backend/repo.py'], initial_agent: 'ServiceAgent'). Any managed capability pack selected for this build that declares provides_capabilities: [subscription_write_path] in its contract is the write-path owner — entitlement_dispatch must not be included alongside it. The module writes the configured assignment_store.data_alias and is the write-side partner for ConfiguredEntitlementAdapter (the runtime read side). The bundle scanner rejects apps that declare assignment_store without either entitlement_dispatch or a managed assignment writer.",
             body,
         ]
     )
@@ -381,5 +414,6 @@ __all__ = [
     "inject_subscription_action_inventory",
     "inject_subscription_contract_context",
     "selected_feature_gates",
+    "subscription_assignment_store",
     "validate_module_contract_updates",
 ]

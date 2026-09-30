@@ -102,6 +102,20 @@ offending field, and what the contract allows: the accepted fields for an
 unknown key, the allowed values for a literal, the rule text for a contract
 rule. It never echoes a rejected value.
 
+`config/subscriptions.yaml` is never model work either. Assembly writes it
+from the approved subscription contract (`materialize_app_config_contracts`,
+reading `subscription_contract` or its artifact fallback) and omits it when no
+contract is required. There is no `subscription_config` task type and no
+ConfigMiddleware mode for it; plan review and the plan cache release the path
+from any task that lists it (`release_subscriptions_config`) and drop a task left
+empty. `AppBuildPlan.monetization_provider` is validated against the approved
+contract's `contract_required`, not against a planned task. The file's
+`assignment_store` is constructed by code (`subscription_assignment_store`): the
+runtime `SubscriptionAssignmentStoreDef` defaults, including `active_statuses`
+`[active, pending, trialing]`, with `data_alias: billing.subscriptions` and
+`user_id_field: user_id`, which both assignment writers key on. The designer does
+not author it.
+
 Pack-owned outputs are never model work. Every path a selected pack declares in
 `required_outputs` with `owner: templates`, and every `owner: workspace` path
 the pack ships a template for in a genesis build, is written from the pack's
@@ -274,9 +288,7 @@ an approved surface. The inventory comes from `design_surface_map` and trusted
 selected `capability_packs` provider/facade descriptors, never the proposed plan
 or a descriptive catalog. Selected managed providers retain the surface IDs used
 by existing materializers: the pack ID, its declared `surface_id`, and
-`{pack_id}_managed`. Facades use their declared module IDs. The required approved
-subscription contract (including the artifact fallback) additionally permits
-`subscription_contract` for its `subscription_config` task only. An aggregate
+`{pack_id}_managed`. Facades use their declared module IDs. An aggregate
 page task may use the structural scope `page_bundle` with type `page_bundle`,
 kind `ui_only`, and a null capability ID when approved ExperienceSpec pages
 exist. This scope never authorizes a capability or module task.

@@ -3,67 +3,6 @@ registry:
   ContractDesignerAgent: SubscriptionContractOutput
 
 models:
-  BillingRevisionField:
-    type: literal
-    values: [billing_revision]
-
-  AssignmentStore:
-    type: model
-    fields:
-      data_alias:
-        type: str
-        description: App data alias containing active subscription assignments.
-      app_id_field:
-        type: str
-        description: Field carrying app scope.
-      tenant_id_field:
-        type: union
-        variants: [str, 'null']
-        description: Field carrying tenant scope, or null.
-      workspace_id_field:
-        type: union
-        variants: [str, 'null']
-        description: Field carrying workspace scope, or null.
-      user_id_field:
-        type: union
-        variants: [str, 'null']
-        description: Field carrying user scope, or null.
-      plan_id_field:
-        type: str
-        description: Field carrying active plan id.
-      status_field:
-        type: str
-        description: Field carrying assignment status.
-      starts_at_field:
-        type: union
-        variants: [str, 'null']
-        description: Field carrying assignment start timestamp, or null.
-      expires_at_field:
-        type: union
-        variants: [str, 'null']
-        description: Field carrying assignment expiration timestamp, or null.
-      capabilities_field:
-        type: union
-        variants: [str, 'null']
-        description: Field carrying granted capabilities, or null.
-      plan_snapshot_field:
-        type: union
-        variants: [str, 'null']
-        description: Field carrying the plan snapshot, or null.
-      revision_field:
-        type: union
-        variants: [BillingRevisionField, 'null']
-        description: >
-          Field storing the last committed entitlement revision, which fences
-          out-of-order fulfillment commands. Use "billing_revision" to enable
-          fencing (the default) or null to opt out. The runtime accepts only
-          those two values, so no other string may be generated. Explicit null
-          is meaning-bearing and is preserved end to end.
-      active_statuses:
-        type: list
-        items: str
-        description: Status values that count as active.
-
   TokenWallet:
     type: model
     fields:
@@ -377,10 +316,6 @@ models:
       default_plan_id:
         type: str
         description: Default plan id.
-      assignment_store:
-        type: union
-        variants: [AssignmentStore, 'null']
-        description: Assignment store backing EntitlementPort, or null.
       token_wallets:
         type: list
         items: TokenWallet
@@ -525,7 +460,7 @@ models:
       subscription_config_file:
         type: union
         variants: [SubscriptionConfigDesign, 'null']
-        description: Provider-neutral plan design with included_features selections; code derives app/config/subscriptions.yaml, or null.
+        description: Provider-neutral plan design with included_features selections, or null. Code derives app/config/subscriptions.yaml, including its assignment_store.
       metering_declarations:
         type: list
         items: MeteringDeclaration

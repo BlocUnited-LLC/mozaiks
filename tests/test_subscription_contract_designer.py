@@ -63,20 +63,6 @@ def _sample_contract() -> dict:
             "schema_version": "mozaiks.subscriptions.v1",
             "label": "AI Reports Plans",
             "default_plan_id": "free",
-            "assignment_store": {
-                "data_alias": "billing.subscriptions",
-                "app_id_field": "app_id",
-                "tenant_id_field": "tenant_id",
-                "workspace_id_field": None,
-                "user_id_field": "user_id",
-                "plan_id_field": "plan_id",
-                "status_field": "status",
-                "starts_at_field": "starts_at",
-                "expires_at_field": "expires_at",
-                "capabilities_field": "granted_capabilities",
-                "plan_snapshot_field": "plan_snapshot",
-                "active_statuses": ["active", "trialing"],
-            },
             "token_wallets": [
                 {
                     "wallet_id": "ai_tokens",
@@ -436,27 +422,23 @@ def test_subscription_context_injection_preserves_plan_design_reasoning() -> Non
     }
 
 
-def test_appgenerator_declares_subscription_config_task_contract() -> None:
+def test_appgenerator_writes_subscriptions_yaml_without_a_task() -> None:
     file_contracts = _read_yaml(REPO_ROOT / "factory_app" / "build_context" / "AppGenerator" / "file_contracts.yaml")
     structured_outputs = _read_yaml(WORKFLOWS_ROOT / "AppGenerator" / "structured_outputs.yaml")
     agents_text = (WORKFLOWS_ROOT / "AppGenerator" / "agents.yaml").read_text(encoding="utf-8")
 
-    contract = file_contracts["task_contracts"]["subscription_config"]
-    assert contract["required_outputs"] == ["config/subscriptions.yaml"]
-    assert any("contracts/subscriptions.yaml" in rule for rule in contract["hard_constraints"])
-
+    # Assembly writes config/subscriptions.yaml from the approved contract; no agent authors it.
+    assert "subscription_config" not in file_contracts["task_contracts"]
     task_types = structured_outputs["models"]["AppBuildTask"]["fields"]["task_type"]["values"]
-    assert "subscription_config" in task_types
+    assert "subscription_config" not in task_types
     modes = structured_outputs["models"]["ConfigMiddlewareOutput"]["fields"]["mode"]["values"]
-    assert "subscription_config" in modes
-
-    assert "task_type: subscription_config" in agents_text
-    assert 'owned_paths: ["config/subscriptions.yaml"]' in agents_text
-    assert "current_build_task_type == \"subscription_config\"" in agents_text
-    assert "usage_charge_policies" in agents_text
+    assert "subscription_config" not in modes
+    assert "task_type: subscription_config" not in agents_text
+    assert "current_build_task_type == \"subscription_config\"" not in agents_text
+    assert "plan no task for `config/subscriptions.yaml`" in agents_text
+    # The planner still reads these contract fields to plan billing surfaces.
     assert "top_up_products" in agents_text
     assert "add_on_products" in agents_text
-    assert "depleted_balance" in agents_text
     assert "action gates from the approved plan feature selections" in agents_text
     assert "Omit `entitlement_gate`; deterministic code applies approved subscription decisions." in agents_text
     assert "entitlement_gate" not in structured_outputs["models"]["ModuleAction"]["fields"]
@@ -479,12 +461,13 @@ def test_appgenerator_declares_subscription_config_task_contract() -> None:
     assert "/api/modules/billing_portal/*" in agents_text
 
 
-def test_app_build_plan_accepts_subscription_config_task() -> None:
+def test_app_build_plan_releases_a_task_that_owns_subscriptions_yaml() -> None:
+    """Assembly writes the file, so a task that lists it loses the path; one left empty is dropped."""
     from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 
     class Context:
         def __init__(self) -> None:
-            self.data = {}
+            self.data = {"subscription_contract": {"contract_required": True}}
 
         def set(self, key: str, value) -> None:
             self.data[key] = value
@@ -492,60 +475,38 @@ def test_app_build_plan_accepts_subscription_config_task() -> None:
         def get(self, key: str, default=None):
             return self.data.get(key, default)
 
+    def task(task_id: str, owned_paths: list[str], depends_on: list[str]) -> dict:
+        return {
+            "task_id": task_id, "task_type": "service_foundation", "capability_pack_id": None,
+            "surface_id": "app_services", "surface_kind": "external_integration",
+            "execution_target": "app_bundle", "initial_agent": "ConfigMiddlewareAgent",
+            "description": "Emit app service config.", "initial_message": "Emit services/config.py.",
+            "owned_paths": owned_paths, "depends_on": depends_on, "acceptance_criteria": [],
+        }
+
     context = Context()
-    result = app_build_plan(
+    app_build_plan(
         AppBuildPlan={
             "agent_message": "Plan ready.",
             "app_kind": "saas",
-            "pages": [
-                {
-                    "name": "Usage",
-                    "route": "/usage",
-                    "purpose": "Review usage and token balances.",
-                }
-            ],
-            "entities": [],
-            "roles": ["user"],
-            "auth_strategy": "basic",
-                "service_scope": [],
-                "frontend_scope": [],
-                "monetization_provider": "entitlement_dispatch",
-                "capability_packs": [
-                    {
-                        "capability_pack_id": "entitlement_dispatch",
-                        "capability_source": "generated_module",
-                    }
-                ],
-                "external_integrations": [],
-            "agent_backend_required": False,
+            "pages": [{"name": "Usage", "route": "/usage", "purpose": "Review usage and token balances."}],
+            "monetization_provider": "entitlement_dispatch",
+            "capability_packs": [{"capability_pack_id": "entitlement_dispatch", "capability_source": "generated_module"}],
             "build_tasks": [
-                {
-                    "task_id": "task_subscription_config",
-                    "task_type": "subscription_config",
-                    "capability_pack_id": None,
-                    "surface_id": "subscription_contract",
-                    "surface_kind": "app_policy",
-                    "execution_target": "app_bundle",
-                    "initial_agent": "ConfigMiddlewareAgent",
-                    "description": "Emit provider-neutral subscription config.",
-                    "initial_message": "Serialize subscription_contract.subscription_config_file only.",
-                    "owned_paths": ["config/subscriptions.yaml"],
-                    "depends_on": [],
-                    "acceptance_criteria": [
-                        "config/subscriptions.yaml exists and contains no provider internals."
-                    ],
-                }
+                task("only_subscriptions", ["config/subscriptions.yaml"], []),
+                task("services", ["services/config.py", "config/subscriptions.yaml"], ["only_subscriptions"]),
             ],
-            "generation_order": ["task_subscription_config"],
+            "generation_order": ["only_subscriptions", "services"],
         },
         context_variables=context,
     )
 
-    assert "Task batch items: 1" in result
     assert context.get("app_plan_ready") is True
-    task = context.get("app_task_batch_items")[0]
-    assert task["current_build_task_type"] == "subscription_config"
-    assert task["current_build_task"]["owned_paths"] == ["config/subscriptions.yaml"]
+    plan = context.get("app_build_plan")
+    assert [(t["task_id"], t["owned_paths"], t["depends_on"]) for t in plan["build_tasks"]] == [
+        ("services", ["services/config.py"], []),
+    ]
+    assert plan["generation_order"] == ["services"]
 
 
 def test_agentgenerator_preserves_workflow_metering_without_selling_workflow_features() -> None:
@@ -869,83 +830,72 @@ def _normalize(config: dict) -> dict:
     )["subscription_config_file"]
 
 
-def test_assignment_store_schema_declares_the_revision_field() -> None:
-    """The designer must be able to express the fence opt-out at all.
+def test_designer_schema_does_not_offer_an_assignment_store() -> None:
+    """The store is the writer/reader contract, not a design decision.
 
-    Structured outputs are exact: an agent emitting an undeclared nested field
-    is rejected before normalization, so an undeclared `revision_field` means
-    the opt-out has no way into the pipeline.
+    Structured outputs are exact, so a field missing from the schema cannot be
+    generated at all.
     """
     structured_outputs = _read_yaml(SUBSCRIPTION_WORKFLOW / "structured_outputs.yaml")
-    schema = structured_outputs["models"]["AssignmentStore"]["fields"]
-    assert "revision_field" in schema
-    # The finite literal the runtime accepts, not an open string — a `str`
-    # variant could generate a value the runtime would reject at load. The
-    # compiler resolves union variants by name, so the literal is declared as
-    # its own alias and referenced; an inline `values` list beside `variants`
-    # is not a shape it compiles.
-    assert schema["revision_field"]["variants"] == ["BillingRevisionField", "null"]
-    assert structured_outputs["models"]["BillingRevisionField"] == {
-        "type": "literal",
-        "values": ["billing_revision"],
-    }
+    assert "assignment_store" not in structured_outputs["models"]["SubscriptionConfigDesign"]["fields"]
+    assert "AssignmentStore" not in structured_outputs["models"]
+    assert "BillingRevisionField" not in structured_outputs["models"]
 
 
-def test_explicit_null_revision_field_survives_normalization() -> None:
-    """`revision_field: null` is meaning-bearing: it opts a store out of
-    revision fencing. Dropping it as "just a null" would silently restore the
-    default on the next reload, turning an opt-out into an opt-in."""
+def test_normalization_writes_the_constructed_store() -> None:
+    from factory_app.workflows._shared.subscription_contract_context import (
+        subscription_assignment_store,
+    )
+
     contract = _sample_contract()
-    contract["subscription_config_file"]["assignment_store"]["revision_field"] = None
-
     normalized = _normalize(contract["subscription_config_file"])
 
-    assert "revision_field" in normalized["assignment_store"]
-    assert normalized["assignment_store"]["revision_field"] is None
-
-
-def test_absent_revision_field_normalizes_to_the_explicit_default() -> None:
-    """Absence means "use the default", so the normalized contract states it
-    explicitly. That is the same semantics, just no longer implicit — and it
-    stays clearly distinguishable from the explicit null opt-out."""
-    contract = _sample_contract()
-    contract["subscription_config_file"]["assignment_store"].pop("revision_field", None)
-
-    normalized = _normalize(contract["subscription_config_file"])
-
+    assert normalized["assignment_store"] == subscription_assignment_store()
+    assert normalized["assignment_store"]["active_statuses"] == ["active", "pending", "trialing"]
     assert normalized["assignment_store"]["revision_field"] == "billing_revision"
 
 
-def test_null_revision_field_survives_the_full_generator_roundtrip() -> None:
-    """design -> normalize -> materialize -> reload, with no default sneaking
-    back in at any hop."""
+def test_a_recorded_designer_store_is_replaced() -> None:
+    """Outputs recorded before the store was code-owned still carry one; it never survives."""
+    from factory_app.workflows._shared.subscription_contract_context import (
+        subscription_assignment_store,
+    )
+
+    contract = _sample_contract()
+    contract["subscription_config_file"]["assignment_store"] = {
+        "data_alias": "billing.subscriptions", "user_id_field": "user_id",
+        "revision_field": None, "active_statuses": ["active", "trial"],
+    }
+
+    normalized = _normalize(contract["subscription_config_file"])
+
+    assert normalized["assignment_store"] == subscription_assignment_store()
+
+
+def test_constructed_store_survives_the_full_generator_roundtrip() -> None:
+    """design -> normalize -> materialize -> reload yields the constructed store unchanged."""
     import yaml
 
+    from factory_app.workflows._shared.subscription_contract_context import (
+        subscription_assignment_store,
+    )
     from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
         _materialize_subscriptions_yaml,
     )
-    from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
-
-    contract = _sample_contract()
-    contract["subscription_config_file"]["assignment_store"]["revision_field"] = None
     from factory_app.workflows.SubscriptionContractDesigner.tools.save_subscription_contract import (
         normalize_subscription_contract,
     )
+    from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 
     normalized = normalize_subscription_contract(
-        contract, {"design_surface_map": _sample_design_surface_map()},
+        _sample_contract(), {"design_surface_map": _sample_design_surface_map()},
     )
+    rendered = _materialize_subscriptions_yaml(context_variables={"subscription_contract": normalized})
 
-    rendered = _materialize_subscriptions_yaml(
-        context_variables={"subscription_contract": normalized}
-    )
-    assert "revision_field: null" in rendered
-
+    assert yaml.safe_load(rendered)["assignment_store"] == subscription_assignment_store()
     reloaded = SubscriptionsConfig.model_validate(yaml.safe_load(rendered))
     assert reloaded.assignment_store is not None
-    assert reloaded.assignment_store.revision_field is None, (
-        "the opt-out must survive the roundtrip"
-    )
+    assert reloaded.assignment_store.model_dump(mode="json", exclude_none=True) == subscription_assignment_store()
 
 
 # ---------------------------------------------------------------------------

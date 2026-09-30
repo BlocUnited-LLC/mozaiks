@@ -13,6 +13,9 @@ from factory_app.workflows.AppGenerator.tools.app_validation import (
 )
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
+    materialize_app_config_contracts,
+)
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
@@ -468,11 +471,7 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
     if "data/contract.json" in files:
         add("persistence", "persistence_contract", "DatabaseAgent", ["data/contract.json"], [])
         prerequisites.append("persistence")
-    if saas:
-        add("subscriptions", "subscription_config", "ConfigMiddlewareAgent", ["config/subscriptions.yaml"], [],
-            surface_kind="app_policy")
-        prerequisites.append("subscriptions")
-    else:
+    if not saas:
         add("secrets", "service_foundation", "ConfigMiddlewareAgent", ["security/secrets.yaml"], [],
             surface_kind="external_integration")
     for module_id in module_actions:
@@ -535,6 +534,15 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         context.set(key, value)
     admitted_files = {file["filename"]: file["content"] for key, output in accepted.items()
                       if not key.startswith("_") for file in output["code_files"]}
+    # No task owns config/subscriptions.yaml; assembly writes it from the approved contract.
+    assembly_owned = {"config/subscriptions.yaml"} if saas else set()
+    assert set(admitted_files) == set(files) - assembly_owned
+    for file in materialize_app_config_contracts(
+        app_id=str(context.get("app_id")), app_build_plan=detach(context.get("app_build_plan")),
+        context_variables=context,
+    ):
+        if file["filename"] in assembly_owned:
+            admitted_files[file["filename"]] = file["content"]
     assert set(admitted_files) == set(files)
     context.set("generated_files", admitted_files)
     return admitted_files, accepted

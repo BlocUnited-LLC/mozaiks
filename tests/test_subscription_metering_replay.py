@@ -10,6 +10,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from factory_app.workflows._shared.subscription_contract_context import (
+    subscription_assignment_store,
+)
 from factory_app.workflows.SubscriptionContractDesigner.tools import save_subscription_contract
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
@@ -57,6 +60,9 @@ async def test_5d930588_undeclared_wallet_metering_is_dropped_before_gate_deriva
     assert result["success"] is True and result["review_status"] == "confirmed", result
     assert output == recorded, "normalization must not edit the recorded model output"
     saved = detach(context.get("subscription_contract"))
+    # The recorded store (active_statuses ["active", "trial"]) is replaced by the constructed one.
+    assert recorded["subscription_config_file"]["assignment_store"]["active_statuses"] == ["active", "trial"]
+    assert saved["subscription_config_file"]["assignment_store"] == subscription_assignment_store()
     assert saved["metering_declarations"] == []
     assert saved["module_contract_updates"] == [{
         "module_id": "task_management_module",
@@ -64,12 +70,11 @@ async def test_5d930588_undeclared_wallet_metering_is_dropped_before_gate_deriva
         "entitlement_gate": "feature.module.task_management_module.summarize_tasks",
         "metering": None,
     }]
-    assert any(
-        "task_management_module" in note
-        and "ai_tokens" in note
-        and "token_wallets is empty" in note
-        for note in saved["validation_notes"]
+    assert saved["validation_notes"][-1] == (
+        "Removed a usage-metering entry for task_management_module: this design sells no token "
+        "wallets, so there is nothing to charge."
     )
+    assert not any("{'surface_type'" in note for note in saved["validation_notes"])
     review.assert_awaited_once()
     assert review.await_args.args[1]["validation_notes"] == saved["validation_notes"]
     persist.assert_awaited_once()

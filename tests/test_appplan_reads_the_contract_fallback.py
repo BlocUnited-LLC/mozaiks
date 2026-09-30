@@ -86,20 +86,19 @@ def test_null_state_is_not_treated_as_no_contract(appgen_prompts: str) -> None:
     )
 
 
-def test_the_provider_and_task_are_tied_together(appgen_prompts: str) -> None:
-    """The validator pairs them; the prompt now says so before the plan is written."""
+def test_the_provider_and_contract_are_tied_together(appgen_prompts: str) -> None:
+    """The validator pairs them; the prompt says so before the plan is written."""
     assert "monetization_provider" in appgen_prompts
     lowered = appgen_prompts.lower()
-    assert "never set `monetization_provider` without planning that task" in lowered, (
-        "the agent set a provider with no task; stating the pairing up front is cheaper "
-        "than a rejection the agent cannot act on"
+    assert "set `monetization_provider` exactly when the resolved contract's" in lowered, (
+        "stating the pairing up front is cheaper than a rejection the agent cannot act on"
     )
 
 
 def test_the_tools_still_read_both_keys() -> None:
     """Every consumer shares artifact fallback and explicit live-decision precedence."""
     from factory_app.workflows.AppGenerator.tools import (
-        app_plan_review,
+        app_build_plan,
         assemble_app_tasks,
         code_file_utils,
         materialize_app_config_contracts,
@@ -126,7 +125,7 @@ def test_the_tools_still_read_both_keys() -> None:
         "subscription_contract": None,
         "subscription_contract_artifact": {"metadata": {"summary_payload": approved}},
     })
-    for consumer in (app_plan_review, assemble_app_tasks, code_file_utils,
+    for consumer in (app_build_plan, assemble_app_tasks, code_file_utils,
                      materialize_app_config_contracts, module_entitlement_gates):
         assert consumer.resolve_subscription_contract is resolve_subscription_contract
         assert consumer.resolve_subscription_contract(context) == approved
