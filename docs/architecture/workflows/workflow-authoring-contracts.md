@@ -499,11 +499,15 @@ agent, and incoming envelope's causation identity; collected output history is
 not dispatched again after the run. The runtime retains the existing auto-tool
 execution checkpoints for duplicate delivery within a process.
 
-Workflows declaring interactive `UI_Tool` bindings do not use the adapter's
-whole-channel settlement deadline: user response waits remain unbounded, as
+Noninteractive workflow channels fail after 300 seconds without progress, not
+after a fixed total duration. Each agent packet, checkpointed context write, or
+message posted to the channel restarts the idle deadline, so a retry that keeps
+advancing is not cut off by the time earlier turns used. A single turn that
+records nothing for 300 seconds fails the run with an error naming the idle
+budget and the last progress event. Workflows declaring interactive `UI_Tool`
+bindings have no idle deadline: user response waits remain unbounded, as
 required by the UI tool contract. Provider-call timeouts, graph turn limits,
-and operation attempt budgets remain in effect. Noninteractive channels retain
-the adapter's settlement deadline.
+and operation attempt budgets bound every run.
 
 These graph-bound operations belong to network agents, not task-batch triggers
 or workers. Task batches retain their existing `failure_policy` and

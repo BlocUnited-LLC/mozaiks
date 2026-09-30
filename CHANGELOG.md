@@ -72,6 +72,14 @@ This project follows a practical pre-1.0 changelog format:
   that duplicates a module collection's built-in list/get read is dropped and
   recorded. That run's output now saves, and the replayed corpus saves 88 of 90.
 
+- A noninteractive workflow no longer fails while it is still making progress.
+  Its deadline now measures inactivity instead of total run time: the run fails
+  only after 300 seconds without an agent turn, context checkpoint, or message,
+  and the error names the idle time and the last progress event. Previously a
+  DesignDocs retry that was still streaming was cancelled 120 seconds after the
+  run started. Workflows with interactive UI tools still wait for the user
+  without a deadline.
+
 - SubscriptionContractDesigner now presents an approved subscription decision
   before plan design and surfaces requested corrections at the top of retries.
   A supplied plan design is saved as required even when the model labels it a

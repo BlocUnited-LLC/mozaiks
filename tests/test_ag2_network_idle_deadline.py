@@ -23,7 +23,10 @@ from mozaiksai.core.adapters.ag2_network_runner import (
 )
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _workflow_tool_invocation
-from mozaiksai.core.workflow.context.authority import TASK_BATCH_WRITER, build_context_authority_policy
+from mozaiksai.core.workflow.context.authority import (
+    TASK_BATCH_WRITER,
+    build_context_authority_policy,
+)
 from tests.test_ag2_network_execution_alignment import _DeterministicAgent, _Reply
 
 

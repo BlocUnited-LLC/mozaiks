@@ -95,7 +95,8 @@ not a replacement scheduler or network implementation. The installed AG2
 default handler still runs without the plugin. Recheck this boundary when
 upgrading AG2.
 
-A settlement timeout, including initial execution, is a failed run, not a human-input pause.
+An idle timeout (no channel progress within the idle budget), including during
+initial execution, is a failed run, not a human-input pause.
 The adapter returns a failed result and closes its live clients; transport
 then uses the existing failure event path. A timeout must not leave a reusable
 live-run handle or claim that the workflow is waiting for the user.
