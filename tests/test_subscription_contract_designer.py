@@ -380,7 +380,7 @@ def test_subscription_contract_designer_exposes_review_ui() -> None:
     assert "Add-on products" in ui_source
     assert "Included features" in ui_source
     assert "selected_features_by_plan" in ui_source
-    assert "design_surface_id" in ui_source
+    assert "Usage limits (display only)" in ui_source
     assert "Request Changes" in ui_source
     assert "canRequestChanges" in ui_source
 
@@ -546,13 +546,12 @@ def test_app_build_plan_accepts_subscription_config_task() -> None:
     assert task["current_build_task"]["owned_paths"] == ["config/subscriptions.yaml"]
 
 
-def test_agentgenerator_preserves_workflow_metering_contract_without_runtime_logic() -> None:
+def test_agentgenerator_preserves_workflow_metering_without_selling_workflow_features() -> None:
     agents_text = (WORKFLOWS_ROOT / "AgentGenerator" / "agents.yaml").read_text(encoding="utf-8")
 
-    assert "workflow_contract_updates and authored" in agents_text
-    assert "design_surface_id and derived capability_id" in agents_text
-    assert "workflow_name is null until" in agents_text
-    assert "resolves the concrete" in agents_text
+    assert "read its authored metering_declarations" in agents_text
+    assert "Workflow features are unavailable for" in agents_text
+    assert "do not invent a" in agents_text
     assert "must not implement reserve/commit logic" in agents_text
     assert "OSS runtime token wallet primitives" in agents_text
 
@@ -622,7 +621,7 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     ]
     assert context["subscription_contract"]["module_contract_updates"] == [{
         "module_id": "reports", "action_id": "generate_report",
-        "entitlement_gate": "feature.module.reports.generate_report",
+        "entitlement_gate": None,
         "metering": _sample_contract()["metering_declarations"][0],
     }]
     assert review_payload["selected_features_by_plan"] == context["subscription_contract"]["selected_features_by_plan"]

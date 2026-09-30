@@ -27,6 +27,6 @@ def subscription_contract(
         },
         "module_contract_updates": [
             {"module_id": module_id, "action_id": action, "entitlement_gate": f"feature.{feature}"}
-            for action, feature in selected.items()
+            for action, feature in selected.items() if action not in free_actions
         ],
     }

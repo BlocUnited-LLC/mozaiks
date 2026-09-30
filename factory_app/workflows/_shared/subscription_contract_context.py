@@ -15,12 +15,13 @@ import yaml
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
-    approved_workflow_surface_ids,
     managed_facade_actions,
     ungated_module_actions,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    MISSING_FEATURE_SELECTION_MESSAGE,
     capability_id_for_feature,
+    features_requiring_gate,
     resolve_subscription_contract,
 )
 
@@ -53,10 +54,6 @@ def approved_feature_inventory(context_variables: Any) -> dict[str, dict[str, st
         for module_id, actions in approved_module_actions(context_variables).items()
         for action_id in actions
     }
-    for surface_id in approved_workflow_surface_ids(context_variables):
-        features[f"workflow.{surface_id}"] = {
-            "surface_kind": "workflow", "surface_id": surface_id,
-        }
     return dict(sorted(features.items()))
 
 
@@ -74,7 +71,7 @@ def selected_feature_gates(
             "or have DesignDocs approve its action before pricing design."
         )
     gates: dict[str, dict[str, str]] = {}
-    for feature_id in sorted(selected):
+    for feature_id in sorted(features_requiring_gate(selected_features_by_plan)):
         feature = inventory[feature_id]
         if feature["surface_kind"] == "module":
             gates.setdefault(feature["module_id"], {})[feature["action_id"]] = capability_id_for_feature(feature_id)
@@ -90,7 +87,7 @@ def validate_module_contract_updates(
         return {}
     selected_by_plan = contract.get("selected_features_by_plan")
     if not isinstance(selected_by_plan, Mapping):
-        raise ValueError("selected_features_by_plan is required on a derived subscription contract.")
+        raise ValueError(MISSING_FEATURE_SELECTION_MESSAGE)
     if not all(isinstance(features, list) and all(isinstance(feature, str) for feature in features)
                for features in selected_by_plan.values()):
         raise ValueError("selected_features_by_plan must map plan ids to feature id lists.")
@@ -247,7 +244,7 @@ def inject_subscription_action_inventory(agent: Any, messages: list[dict[str, An
         "[APPROVED PRICING FEATURE INVENTORY]",
         "Select plans[].included_features only from these exact feature ids.",
         "Module features project approved app-owned writes, canonical writes, and declared custom_reads.",
-        "Workflow features appear only when the concept declares agentic capabilities and DesignDocs approves the workflow surface.",
+        "Workflow features cannot be sold until workflow launch enforces subscription grants.",
         "Canonical collection list/get actions and managed-pack facades are excluded and always remain ungated.",
         "A paid view requires a declared custom read; never gate the base collection list/get to sell a dashboard.",
         "Plans, upgrade, checkout, portal, usage, and token access stay ungated.",

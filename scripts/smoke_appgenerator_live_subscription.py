@@ -128,19 +128,7 @@ def sample_subscription_contract() -> dict[str, Any]:
                 {
                     "plan_id": "free",
                     "label": "Free",
-                    "capabilities": [REPORT_GATE_ID],
-                    "usage_limits": [
-                        {
-                            "meter_id": "ai_tokens",
-                            "label": "AI tokens",
-                            "unit": "tokens",
-                            "monthly_limit": 10,
-                            "capability_id": REPORT_GATE_ID,
-                        }
-                    ],
-                    "token_allowances": [
-                        {"wallet_id": "ai_tokens", "amount": 10, "cadence": "monthly", "label": "Monthly AI tokens"},
-                    ],
+                    "capabilities": [],
                 },
                 {
                     "plan_id": "pro",
@@ -166,7 +154,7 @@ def sample_subscription_contract() -> dict[str, Any]:
                 },
             ],
         },
-        "selected_features_by_plan": {"free": [REPORT_FEATURE_ID], "pro": [REPORT_FEATURE_ID]},
+        "selected_features_by_plan": {"free": [], "pro": [REPORT_FEATURE_ID]},
         "module_contract_updates": [
             {
                 "module_id": "reports",

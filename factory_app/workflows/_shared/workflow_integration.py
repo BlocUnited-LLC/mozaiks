@@ -10,14 +10,8 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.module_action_inventory import (
-    all_module_actions,
-    approved_workflow_surface_ids,
-    ungated_module_actions,
-)
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
-    approved_subscription_gates,
-    capability_id_for_feature,
+    MISSING_FEATURE_SELECTION_MESSAGE,
     resolve_subscription_contract,
 )
 
@@ -161,59 +155,29 @@ def _normalize_workflow_item(raw: Mapping[str, Any]) -> dict[str, Any] | None:
     return workflow
 
 
-def selected_pricing_workflow_bindings(
-    context_variables: Any | None,
-    workflow_specs: list[dict[str, Any]],
-) -> dict[str, dict[str, str]]:
-    """Resolve selected DesignDocs workflow features to reviewed workflow names."""
+def validate_pricing_workflow_features(context_variables: Any | None) -> None:
+    """Reject workflow pricing selections until launch enforces plan grants."""
     contract = resolve_subscription_contract({
         key: _context_get(context_variables, key)
         for key in ("subscription_contract", "subscription_contract_artifact")
     })
     if not contract or not contract.get("contract_required"):
-        return {}
-
-    approved_subscription_gates(
-        contract,
-        approved_actions=all_module_actions(context_variables),
-        ungated_actions=ungated_module_actions(context_variables),
-        approved_workflows=approved_workflow_surface_ids(context_variables),
-    )
+        return
     selections = contract.get("selected_features_by_plan")
-    assert isinstance(selections, Mapping)
-    selected = {
+    if not isinstance(selections, Mapping):
+        raise ValueError(MISSING_FEATURE_SELECTION_MESSAGE)
+    selected_workflows = sorted({
         feature
         for features in selections.values()
-        for feature in features
-        if feature.startswith("workflow.")
-    }
-    expected = {
-        feature.removeprefix("workflow."): capability_id_for_feature(feature)
-        for feature in selected
-    }
-    bindings: dict[str, dict[str, str]] = {}
-    for surface_id, capability_id in sorted(expected.items()):
-        matches = [
-            spec for spec in workflow_specs
-            if isinstance(spec, Mapping) and _text(spec.get("design_surface_id")) == surface_id
-        ]
-        if len(matches) != 1:
-            raise ValueError(
-                f"Selected pricing workflow feature 'workflow.{surface_id}' requires exactly one "
-                f"WorkflowInPack.design_surface_id={surface_id!r}; found {len(matches)}. "
-                "Correct the AgentGenerator workflow plan against the approved DesignDocs surface."
-            )
-        workflow_name = _text(matches[0].get("name") or matches[0].get("workflow_name"))
-        if not workflow_name or workflow_name in bindings:
-            raise ValueError(
-                f"Selected pricing workflow feature 'workflow.{surface_id}' does not resolve "
-                "to a unique generated workflow name. Correct the AgentGenerator workflow plan."
-            )
-        bindings[workflow_name] = {
-            "design_surface_id": surface_id,
-            "capability_id": capability_id,
-        }
-    return bindings
+        for feature in (features if isinstance(features, (list, tuple)) else [])
+        if isinstance(feature, str) and feature.startswith("workflow.")
+    })
+    if selected_workflows or contract.get("workflow_contract_updates"):
+        raise ValueError(
+            "Workflow features are unavailable for pricing until workflow launch enforces plan "
+            f"grants (issue #770): {selected_workflows}. Re-run SubscriptionContractDesigner "
+            "without workflow pricing features."
+        )
 
 
 def _primary_workflow(workflows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -269,8 +233,9 @@ def extract_workflow_integration_metadata_from_bundle_entries(
     bundle_entries: list[dict[str, Any]],
     *,
     bundle_name: str | None = None,
-    pricing_bindings: Mapping[str, Mapping[str, str]] | None = None,
+    context_variables: Any | None = None,
 ) -> dict[str, Any] | None:
+    validate_pricing_workflow_features(context_variables)
     workflows: list[dict[str, Any]] = []
     for entry in bundle_entries:
         if not isinstance(entry, Mapping):
@@ -280,11 +245,7 @@ def extract_workflow_integration_metadata_from_bundle_entries(
         if not workflow_name:
             continue
         startup_mode = _text(orchestrator.get("workflow_startup_mode"))
-        pricing_binding = (pricing_bindings or {}).get(workflow_name)
-        capability_id = (
-            pricing_binding["capability_id"]
-            if pricing_binding else workflow_name_to_capability_id(workflow_name)
-        )
+        capability_id = workflow_name_to_capability_id(workflow_name)
         trigger_events = [
             event
             for event in (
@@ -293,22 +254,12 @@ def extract_workflow_integration_metadata_from_bundle_entries(
             )
             if event is not None
         ]
-        if pricing_binding:
-            mismatched = [event for event in trigger_events if event["capability_id"] != capability_id]
-            if mismatched:
-                raise ValueError(
-                    f"Generated workflow {workflow_name!r} uses an event trigger capability_id "
-                    f"different from selected pricing feature {pricing_binding['design_surface_id']!r} "
-                    f"({capability_id!r}). Regenerate its orchestrator.yaml with the derived capability_id."
-                )
         workflow = {
                 "workflow_name": workflow_name,
                 "capability_id": capability_id,
                 "startup_mode": startup_mode,
                 "trigger_events": trigger_events,
             }
-        if pricing_binding:
-            workflow["design_surface_id"] = pricing_binding["design_surface_id"]
         workflows.append(workflow)
 
     if bundle_entries and len(workflows) != len(bundle_entries):
@@ -322,34 +273,6 @@ def extract_workflow_integration_metadata_from_bundle_entries(
         },
         bundle_name=bundle_name,
     )
-
-
-def extract_pricing_workflow_integration_metadata(
-    bundle_entries: list[dict[str, Any]],
-    *,
-    bundle_name: str | None,
-    context_variables: Any | None,
-) -> dict[str, Any] | None:
-    """Close selected pricing features against generated workflow bundle metadata."""
-    workflow_specs = _context_get(context_variables, "workflows_spec", [])
-    bindings = selected_pricing_workflow_bindings(
-        context_variables,
-        workflow_specs if isinstance(workflow_specs, list) else [],
-    )
-    metadata = extract_workflow_integration_metadata_from_bundle_entries(
-        bundle_entries, bundle_name=bundle_name, pricing_bindings=bindings,
-    )
-    if bindings:
-        generated_names = [
-            item.get("workflow_name") for item in (metadata or {}).get("workflows") or []
-        ]
-        unresolved = sorted(name for name in bindings if generated_names.count(name) != 1)
-        if unresolved:
-            raise ValueError(
-                f"Selected pricing workflow feature(s) have no unique generated workflow bundle: "
-                f"{unresolved}. Regenerate the missing workflow bundle before download."
-            )
-    return metadata
 
 
 def workflow_integration_metadata_from_context(context_variables: Any | None) -> dict[str, Any] | None:
@@ -497,11 +420,10 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
 __all__ = [
     "CONTRACT_VERSION",
     "apply_workflow_integration_context",
-    "extract_pricing_workflow_integration_metadata",
     "extract_workflow_integration_metadata_from_bundle_entries",
     "hydrate_workflow_integration_context_from_latest_artifact",
     "normalize_workflow_integration_metadata",
-    "selected_pricing_workflow_bindings",
+    "validate_pricing_workflow_features",
     "workflow_integration_metadata_from_artifact",
     "workflow_integration_metadata_from_context",
     "workflow_name_to_capability_id",

@@ -207,8 +207,9 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
     generated = acceptance["context"]["generated_files"]
     assert acceptance["context"]["app_assembly_status"] == "passed"
     plans = yaml.safe_load(generated["config/subscriptions.yaml"])["plans"]
-    assert [plan["capabilities"] for plan in plans] == [[REPORT_GATE_ID], [REPORT_GATE_ID]]
-    assert [plan["usage_limits"][0]["monthly_limit"] for plan in plans] == [10, 1000]
+    assert [plan["capabilities"] for plan in plans] == [[], [REPORT_GATE_ID]]
+    assert "usage_limits" not in plans[0]
+    assert plans[1]["usage_limits"][0]["monthly_limit"] == 1000
     assert json.loads(generated["app.json"])["authRequired"] is True
     assert {"config/auth.yaml", "ui/auth/authAdapter.js"} <= generated.keys()
     report_collection = json.loads(generated["data/contract.json"])["surfaces"][0]["collections"][0]

@@ -5,6 +5,9 @@ from copy import deepcopy
 import pytest
 import yaml
 
+from factory_app.workflows._shared.subscription_contract_context import (
+    validate_module_contract_updates,
+)
 from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assembly
 from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
@@ -13,6 +16,7 @@ from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
 )
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
@@ -24,6 +28,7 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     compile_module_entitlement_gates,
     resolve_subscription_contract,
 )
+from tests.module_authority_test_helpers import enforce_authority
 
 MODULE_PATH = "modules/task_management/module.yaml"
 GATES = {
@@ -33,6 +38,7 @@ GATES = {
     "view_dashboard": "feature.module.task_management.view_dashboard",
 }
 FREE_ACTIONS = {"create_task", "edit_task", "delete_task"}
+DERIVED_GATES = {"view_dashboard": GATES["view_dashboard"]}
 
 
 def _context(source="subscription_contract"):
@@ -58,7 +64,7 @@ def _context(source="subscription_contract"):
         },
         "module_contract_updates": [
             {"module_id": "task_management", "action_id": action, "entitlement_gate": gate, "metering": None}
-            for action, gate in GATES.items()
+            for action, gate in DERIVED_GATES.items()
         ],
     }
     return ContextVariablesBridge({
@@ -127,7 +133,8 @@ async def test_selected_free_core_and_pro_dashboard_assemble_gates_and_pass_scan
     files = {file["filename"]: file["content"] for file in result["code_files"]}
     assert scan_generated_bundle(files) == []
     actions = _actions(result["code_files"])
-    assert {action: actions[action]["entitlement_gate"] for action in GATES} == GATES
+    assert {action: actions[action]["entitlement_gate"] for action in DERIVED_GATES} == DERIVED_GATES
+    assert all("entitlement_gate" not in actions[action] for action in FREE_ACTIONS)
     assert "entitlement_gate" not in actions["health"]
     assert "entitlement_gate" not in actions["list_tasks"]
     assert yaml.safe_load(files[MODULE_PATH])["module"]["id"] == "task_management"
@@ -135,9 +142,114 @@ async def test_selected_free_core_and_pro_dashboard_assemble_gates_and_pass_scan
     adapter = ConfiguredEntitlementAdapter(config=SubscriptionsConfig.model_validate(
         yaml.safe_load(files["config/subscriptions.yaml"]),
     ))
-    for action in GATES:
+    for action in DERIVED_GATES:
         grant = await adapter.check(actions[action]["entitlement_gate"], app_id="task-app", user_id="free-user")
-        assert grant.granted is (action in FREE_ACTIONS)
+        assert grant.granted is False
+
+
+@pytest.mark.asyncio
+async def test_cancelled_pro_can_dispatch_shared_task_writes_but_not_paid_summary():
+    core_actions = ("create_task", "update_task", "delete_task")
+    paid_action = "summarize_tasks"
+    capabilities = {action: f"feature.module.tasks.{action}" for action in (*core_actions, paid_action)}
+    selected_core = [f"module.tasks.{action}" for action in core_actions]
+    config = {
+        "schema_version": "mozaiks.subscriptions.v1", "label": "Task Plans", "default_plan_id": "free",
+        "assignment_store": {"data_alias": "billing.subscriptions", "user_id_field": "user_id",
+                             "active_statuses": ["active"]},
+        "plans": [
+            {"plan_id": "free", "label": "Free", "capabilities": [capabilities[action] for action in core_actions]},
+            {"plan_id": "pro", "label": "Pro", "capabilities": sorted(capabilities.values())},
+        ],
+    }
+    contract = {
+        "contract_required": True,
+        "subscription_config_file": config,
+        "selected_features_by_plan": {
+            "free": selected_core, "pro": [*selected_core, f"module.tasks.{paid_action}"],
+        },
+        "module_contract_updates": [
+            {"module_id": "tasks", "action_id": paid_action,
+             "entitlement_gate": capabilities[paid_action], "metering": None},
+        ],
+    }
+    context = ContextVariablesBridge({
+        "subscription_contract": contract,
+        "design_surface_map": {"surfaces": [{
+            "surface_id": "tasks", "surface_kind": "module", "owner": "app",
+            "owned_mutations": list(core_actions), "custom_reads": [paid_action],
+        }]},
+    })
+    expected_gates = {"tasks": {paid_action: capabilities[paid_action]}}
+    assert validate_module_contract_updates(contract, context) == expected_gates
+    assert approved_subscription_gates(
+        contract, approved_actions=all_module_actions(context),
+        ungated_actions=ungated_module_actions(context), approved_workflows=[],
+    ) == expected_gates
+
+    manifest = {"module": {"id": "tasks"}, "actions": [
+        {"id": action, "handler_method": action, "permissions": []}
+        for action in (*core_actions, paid_action)
+    ]}
+    compiled = compile_module_entitlement_gates(
+        {"modules/tasks/module.yaml": yaml.safe_dump(manifest)},
+        gates_by_module=expected_gates,
+        approved_actions=all_module_actions(context),
+        ungated_actions=ungated_module_actions(context),
+    )
+    actions = {action["id"]: action for action in yaml.safe_load(compiled["modules/tasks/module.yaml"])["actions"]}
+    assert all("entitlement_gate" not in actions[action] for action in core_actions)
+    assert actions[paid_action]["entitlement_gate"] == capabilities[paid_action]
+
+    class CancelledAssignment:
+        async def find_one(self, query, projection=None):
+            if query.get("app_id") == "task-app" and query.get("user_id") == "cancelled-user":
+                return {"app_id": "task-app", "user_id": "cancelled-user", "plan_id": "pro",
+                        "status": "cancelled", "granted_capabilities": sorted(capabilities.values())}
+            return None
+
+    class TaskHandler:
+        def create_task(self, ctx):
+            return {"action": "create_task"}
+
+        def update_task(self, ctx):
+            return {"action": "update_task"}
+
+        def delete_task(self, ctx):
+            return {"action": "delete_task"}
+
+        def summarize_tasks(self, ctx):
+            raise AssertionError("paid action must be blocked before handler dispatch")
+
+    adapter = ConfiguredEntitlementAdapter(
+        config=SubscriptionsConfig.model_validate(config),
+        collection_resolver=lambda alias: CancelledAssignment(),
+    )
+    denied_grant = await adapter.check(
+        capabilities[paid_action], app_id="task-app", user_id="cancelled-user",
+    )
+    assert denied_grant.granted is False
+
+    executor = ModuleExecutor(entitlement_checker=adapter)
+    executor.register(
+        "tasks", TaskHandler(),
+        action_method_map={action: action for action in actions},
+        action_permissions={action: [] for action in actions},
+        action_entitlements={action: details.get("entitlement_gate") for action, details in actions.items()},
+    )
+    for action in core_actions:
+        result = await executor.execute(ModuleRequest(
+            module="tasks", action=action, params={}, app_id="task-app", user_id="cancelled-user",
+            authority=enforce_authority(),
+        ))
+        assert result.success is True
+        assert result.data == {"action": action}
+    denied = await executor.execute(ModuleRequest(
+        module="tasks", action=paid_action, params={}, app_id="task-app", user_id="cancelled-user",
+        authority=enforce_authority(),
+    ))
+    assert denied.success is False
+    assert denied.error_code == "ENTITLEMENT_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -147,7 +259,8 @@ async def test_approved_mapping_applies_after_template_overlay(monkeypatch):
     monkeypatch.setattr(assembly, "_apply_managed_capability_templates", lambda files, **kwargs: _files("wrong.template"))
     result = await assembly.assemble_app_tasks(context_variables=context)
     actions = _actions(result["code_files"])
-    assert {action: actions[action]["entitlement_gate"] for action in GATES} == GATES
+    assert {action: actions[action]["entitlement_gate"] for action in DERIVED_GATES} == DERIVED_GATES
+    assert all("entitlement_gate" not in actions[action] for action in FREE_ACTIONS)
 
 
 def test_contract_overrides_are_idempotent_and_do_not_mutate_frozen_context():
@@ -171,6 +284,19 @@ def test_legacy_mapping_without_selected_features_cannot_authorize_assembly():
     with pytest.raises(ValueError, match="selected_features_by_plan is required"):
         apply_entitlement_gates(files, context_variables=context)
     assert files == _files()
+
+
+def test_saved_contract_without_feature_selections_names_designer_rerun():
+    context = _context()
+    contract = context.snapshot()["subscription_contract"]
+    del contract["selected_features_by_plan"]
+    with pytest.raises(ValueError, match="Re-run SubscriptionContractDesigner"):
+        validate_module_contract_updates(contract, context)
+    with pytest.raises(ValueError, match="Re-run SubscriptionContractDesigner"):
+        approved_subscription_gates(
+            contract, approved_actions=all_module_actions(context),
+            ungated_actions=ungated_module_actions(context), approved_workflows=[],
+        )
 
 
 def test_task_batch_projection_rejects_duplicate_selected_feature():
@@ -226,13 +352,14 @@ def test_approved_surface_id_overrides_writer_module_identity():
     files[0]["content"] = yaml.safe_dump(data)
     result = apply_entitlement_gates(files, context_variables=_context())
     assert yaml.safe_load(result[0]["content"])["module"]["id"] == "task_management"
-    assert {action: _actions(result)[action]["entitlement_gate"] for action in GATES} == GATES
+    assert {action: _actions(result)[action]["entitlement_gate"] for action in DERIVED_GATES} == DERIVED_GATES
+    assert all("entitlement_gate" not in _actions(result)[action] for action in FREE_ACTIONS)
 
 
 @pytest.mark.parametrize("fault,expected", [
     ("missing_module", "Missing module.yaml"),
-    ("missing_action", "missing=['edit_task']"),
-    ("duplicate_action", "duplicate=['edit_task']"),
+    ("missing_action", "missing=['view_dashboard']"),
+    ("duplicate_action", "duplicate=['view_dashboard']"),
 ])
 def test_unresolved_implementation_lists_valid_targets(fault, expected):
     files = _files()
@@ -241,9 +368,9 @@ def test_unresolved_implementation_lists_valid_targets(fault, expected):
     else:
         data = yaml.safe_load(files[0]["content"])
         if fault == "missing_action":
-            data["actions"] = [action for action in data["actions"] if action["id"] != "edit_task"]
+            data["actions"] = [action for action in data["actions"] if action["id"] != "view_dashboard"]
         else:
-            data["actions"].append(next(action for action in data["actions"] if action["id"] == "edit_task"))
+            data["actions"].append(next(action for action in data["actions"] if action["id"] == "view_dashboard"))
         files[0]["content"] = yaml.safe_dump(data)
     with pytest.raises(ValueError) as exc:
         apply_entitlement_gates(files, context_variables=_context())
@@ -382,7 +509,8 @@ def test_repaired_manifest_recompiles_approved_gates_with_real_context_bridge():
     result = save_generated_code(context)
     assert MODULE_PATH in result["saved_files"]
     actions = _actions(context.get("code_files"))
-    assert {action: actions[action]["entitlement_gate"] for action in GATES} == GATES
+    assert {action: actions[action]["entitlement_gate"] for action in DERIVED_GATES} == DERIVED_GATES
+    assert all("entitlement_gate" not in actions[action] for action in FREE_ACTIONS)
     assert context.snapshot()["subscription_contract"] == before["subscription_contract"]
     assert context.snapshot()["data_contract"] == before["data_contract"]
 

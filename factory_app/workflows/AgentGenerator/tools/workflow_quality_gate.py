@@ -18,7 +18,7 @@ from typing import Any
 import yaml
 
 from factory_app.workflows._shared.workflow_integration import (
-    extract_pricing_workflow_integration_metadata,
+    extract_workflow_integration_metadata_from_bundle_entries,
     workflow_name_to_capability_id,
 )
 from mozaiksai.core.workflow.context.frozen import detach
@@ -810,7 +810,7 @@ def run_workflow_bundle_quality_gate(
     errors = list(structure.get("errors") or []) + list(semantic_drift.get("errors") or [])
     if not errors:
         try:
-            extract_pricing_workflow_integration_metadata(
+            extract_workflow_integration_metadata_from_bundle_entries(
                 bundle_entries,
                 bundle_name=None,
                 context_variables=context_variables,

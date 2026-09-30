@@ -303,7 +303,7 @@ def test_app_wide_protected_siblings_block_open_canonical_writes(sibling, expect
 
 def test_app_wide_gate_from_the_subscription_contract_is_protection_too():
     output = _output([{"id": "archive_task", "handler_method": "archive_task"}])
-    subscription = subscription_contract(MODULE, "archive_task", free_actions=("archive_task",))
+    subscription = subscription_contract(MODULE, "archive_task")
     with pytest.raises(ValueError, match="archive_task \\(entitlement_gate='feature.module.task_management.archive_task'\\)"):
         _closed(output, _contract("app_wide"), subscription_contract=subscription)
 
@@ -816,7 +816,7 @@ def test_real_context_save_renders_owned_schemas_and_writes():
 
 
 @pytest.mark.asyncio
-async def test_task_batch_builds_writes_from_empty_model_output_and_applies_approved_gates(monkeypatch):
+async def test_task_batch_builds_writes_from_empty_model_output_and_keeps_shared_write_ungated(monkeypatch):
     tasks = [{
         "task_id": "contract", "task_type": "module_contract", "capability_pack_id": MODULE,
         "initial_agent": "ConfigMiddlewareAgent", "initial_message": "Declare custom actions.",
@@ -910,7 +910,7 @@ async def test_task_batch_builds_writes_from_empty_model_output_and_applies_appr
         for path, source in extract_code_file_map_from_payload(candidate).items()
     }
     actions = {action["id"]: action for action in yaml.safe_load(task_files[MANIFEST])["actions"]}
-    assert actions["update_task"]["entitlement_gate"] == "feature.module.task_management.update_task"
+    assert "entitlement_gate" not in actions["update_task"]
     assert "entitlement_gate" not in actions["create_task"] and actions["create_task"]["permissions"] == []
     assert "async def before_create_task" in task_files[f"{BACKEND}/service.py"]
     assert "async def complete_task" in task_files[f"{BACKEND}/handler.py"]
@@ -1226,7 +1226,7 @@ def test_fully_declared_but_unrestricted_app_wide_writes_are_still_rejected(decl
     assert "canonical writes ['create_task', 'update_task', 'delete_task'] are not constructed open" in message
     assert "restricted by api_surface internal or admin_internal, an approved entitlement gate, or permissions declared in config/auth.yaml" in message
     gated = deepcopy(output)
-    subscription = subscription_contract(MODULE, *WRITES, free_actions=WRITES)
+    subscription = subscription_contract(MODULE, *WRITES)
     reads = [action for action in _actions(_closed()).values() if action["id"] in {"get_tasks", "list_tasks"}]
     gated["module_contract"]["module_yaml"]["actions"].extend(reads)
     closed = _closed(gated, _contract("app_wide"), subscription_contract=subscription)

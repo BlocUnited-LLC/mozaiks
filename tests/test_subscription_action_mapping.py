@@ -12,7 +12,6 @@ import yaml
 from factory_app.workflows._shared.subscription_contract_context import (
     approved_feature_inventory,
     approved_module_actions,
-    capability_id_for_feature,
     inject_subscription_action_inventory,
     validate_module_contract_updates,
 )
@@ -103,7 +102,7 @@ def test_inventory_excludes_canonical_reads_facades_and_unapproved_workflows() -
         "module.tasks.create_task", "module.tasks.delete_task",
         "module.tasks.summarize_tasks", "module.tasks.update_task",
     }
-    assert "workflow.TaskAnalysis" in approved_feature_inventory(_context(agentic=True))
+    assert "workflow.TaskAnalysis" not in approved_feature_inventory(_context(agentic=True))
     agent = SimpleNamespace(name="ContractDesignerAgent", context_variables=context, system_message="base")
     inject_subscription_action_inventory(agent, [])
     assert "[APPROVED PRICING FEATURE INVENTORY]" in agent.system_message
@@ -125,12 +124,7 @@ async def test_free_core_actions_and_pro_custom_read_are_derived_before_review(s
                 "module.tasks.summarize_tasks"],
     }
     gates = validate_module_contract_updates(saved, context)
-    assert gates == {"tasks": {
-        "create_task": "feature.module.tasks.create_task",
-        "delete_task": "feature.module.tasks.delete_task",
-        "summarize_tasks": "feature.module.tasks.summarize_tasks",
-        "update_task": "feature.module.tasks.update_task",
-    }}
+    assert gates == {"tasks": {"summarize_tasks": "feature.module.tasks.summarize_tasks"}}
     plans = saved["subscription_config_file"]["plans"]
     assert "included_features" not in plans[0]
     assert plans[0]["usage_limits"][0]["capability_id"] == "feature.module.tasks.create_task"
@@ -157,7 +151,7 @@ async def test_unknown_feature_returns_complete_actionable_message_before_review
     assert "workflow.run" in result["error"]
     assert "Valid features:" in result["error"]
     assert "module.tasks.summarize_tasks" in result["error"]
-    assert "Remove an unavailable feature from the plan" in result["error"]
+    assert "Remove the unavailable feature reference" in result["error"]
     assert context.get("subscription_contract") is None
     review, persist = side_effects
     review.assert_not_awaited()
@@ -196,22 +190,50 @@ def test_workflow_feature_requires_agentic_concept_and_approved_surface() -> Non
     output["subscription_config_file"]["plans"][1]["included_features"].append("workflow.TaskAnalysis")
     with pytest.raises(ValueError, match="unavailable features"):
         module.normalize_subscription_contract(output, _context())
+    with pytest.raises(ValueError, match="unavailable features"):
+        module.normalize_subscription_contract(output, _context(agentic=True))
+
+
+def test_approved_workflow_metering_does_not_make_workflow_access_sellable() -> None:
+    output = _design()
+    declaration = {"surface_type": "workflow", "surface_id": "TaskAnalysis", "action_id": None}
+    output["metering_declarations"] = [declaration]
     saved = module.normalize_subscription_contract(output, _context(agentic=True))
-    assert saved["workflow_contract_updates"][0]["design_surface_id"] == "TaskAnalysis"
-    assert saved["workflow_contract_updates"][0]["capability_id"] == capability_id_for_feature("workflow.TaskAnalysis")
+    assert saved["metering_declarations"] == [declaration]
+    assert saved["workflow_contract_updates"] == []
 
 
 def test_distinct_approved_features_cannot_share_a_derived_capability() -> None:
     output = _design()
     output["subscription_config_file"]["plans"][1]["included_features"].extend(
-        ["workflow.TaskAnalysis", "workflow.task_analysis"],
+        ["module.Tasks.create_task"],
     )
     surfaces = _surface_map()
     surfaces["surfaces"].append({
-        "surface_id": "task_analysis", "surface_kind": "workflow", "owner": "app",
+        "surface_id": "Tasks", "surface_kind": "module", "owner": "app",
+        "owned_mutations": ["create_task"],
     })
     with pytest.raises(ValueError, match="derive the same capability id"):
-        module.normalize_subscription_contract(output, _context(agentic=True, surface_map=surfaces))
+        module.normalize_subscription_contract(output, _context(surface_map=surfaces))
+
+
+def test_usage_limit_names_unavailable_feature_instead_of_missing_plan_selection() -> None:
+    output = _design()
+    output["subscription_config_file"]["plans"][0]["usage_limits"][0]["feature_id"] = "workflow.TaskAnalysis"
+    with pytest.raises(ValueError, match="usage limit references unavailable feature 'workflow.TaskAnalysis'") as error:
+        module.normalize_subscription_contract(output, _context(agentic=True))
+    assert "that it does not include" not in str(error.value)
+    assert "Valid features:" in str(error.value)
+    assert "from the plan, usage limit, or add-on" in str(error.value)
+
+
+def test_usage_limit_feature_must_belong_to_its_plan() -> None:
+    output = _design()
+    output["subscription_config_file"]["plans"][0]["usage_limits"][0]["feature_id"] = (
+        "module.tasks.summarize_tasks"
+    )
+    with pytest.raises(ValueError, match="that it does not include"):
+        module.normalize_subscription_contract(output, _context())
 
 
 def test_noop_contract_does_not_require_action_inventory() -> None:

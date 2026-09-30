@@ -118,9 +118,11 @@ def test_fixture_translation_preserves_only_actions_backed_by_old_gates(entry: d
         (update["module_id"], update["action_id"])
         for update in entry["expected"]["module_gates"]
     }
+    selections = [set(plan["included_features"]) for plan in plans]
+    differential = set.union(*selections) - set.intersection(*selections)
     assert expected_gates == {
         tuple(feature.split(".")[1:])
-        for plan in plans for feature in plan["included_features"]
+        for feature in differential
     }
 
 
@@ -151,33 +153,38 @@ def test_recorded_design_derives_pinned_plans_and_gates(entry: dict) -> None:
 def test_product_incoherence_flags_are_advisory() -> None:
     recorded_empty: list[str] = []
     translated_empty: list[str] = []
-    top_only_create: list[str] = []
+    paid_only_core_write: list[str] = []
     for entry in CORPUS["fixtures"]:
+        if not any(update.get("entitlement_gate") for update in entry["recorded"]["module_contract_updates"]):
+            continue
         recorded_plans = entry["recorded"]["plans"]
         plans = entry["designer_output"]["subscription_config_file"]["plans"]
         if not recorded_plans[0]["capabilities"]:
             recorded_empty.append(entry["id"])
         if not plans[0]["included_features"]:
             translated_empty.append(entry["id"])
-        non_top = {feature for plan in plans[:-1] for feature in plan["included_features"]}
-        top_creates = {feature for feature in plans[-1]["included_features"]
-                       if feature.startswith("module.") and feature.split(".")[-1].startswith("create_")}
-        if top_creates - non_top:
-            top_only_create.append(entry["id"])
-    assert len(recorded_empty) == 3
-    assert len(translated_empty) == 25  # Most old names had no approved action mapping.
-    assert len(top_only_create) == 1
-    assert top_only_create[0].startswith("ec56c080-")
+        cheapest = set(plans[0]["included_features"])
+        paid = {feature for plan in plans[1:] for feature in plan["included_features"]}
+        if any(feature.startswith("module.") and feature.rsplit(".", 1)[-1].startswith(
+            ("create_", "update_", "delete_")
+        ) for feature in paid - cheapest):
+            paid_only_core_write.append(entry["id"])
+    assert len(recorded_empty) == 1
+    assert recorded_empty[0].startswith("ec56c080-")
+    assert translated_empty == recorded_empty
+    assert len(paid_only_core_write) == 2
+    assert any(entry_id.startswith("0d620f75-") for entry_id in paid_only_core_write)
+    assert any(entry_id.startswith("ec56c080-") for entry_id in paid_only_core_write)
     warnings.warn(
         "Pricing corpus advisory: recorded cheapest plan empty in " + ", ".join(recorded_empty)
         + "; mechanically translated cheapest plan empty in " + ", ".join(translated_empty)
-        + "; core create available only to top plan in " + ", ".join(top_only_create),
+        + "; core write available only to paid plans in " + ", ".join(paid_only_core_write),
         UserWarning,
         stacklevel=1,
     )
 
 
-def test_57c78c5f_good_design_keeps_its_action_gate_set() -> None:
+def test_57c78c5f_shared_actions_are_ungated_and_paid_update_is_gated() -> None:
     entry = next(item for item in CORPUS["fixtures"] if item["chat_id"] == "0d620f75-828d-4a66-ad1e-b8b18dd293e7")
     context = ContextVariablesBridge(deepcopy(entry["context"]))
     normalized = save_subscription_contract.normalize_subscription_contract(
@@ -186,11 +193,12 @@ def test_57c78c5f_good_design_keeps_its_action_gate_set() -> None:
     old = {(update["module_id"], update["action_id"])
            for update in entry["recorded"]["module_contract_updates"] if update.get("entitlement_gate")}
     new = {(update["module_id"], update["action_id"]) for update in normalized["module_contract_updates"]}
-    assert old == new == {
+    assert old == {
         ("task_management", "create_task"),
         ("task_management", "delete_task"),
         ("task_management", "update_task"),
     }
+    assert new == {("task_management", "update_task")}
     assert normalized["selected_features_by_plan"] == {
         "free": ["module.task_management.create_task", "module.task_management.delete_task"],
         "pro": ["module.task_management.create_task", "module.task_management.delete_task",
@@ -232,14 +240,9 @@ async def test_ec56c080_labelled_concept_repair_saves_and_app_plan_accepts(monke
     saved = detach(context.get("subscription_contract"))
     assert persist.await_args.kwargs["summary_payload"] == saved
     assert saved["selected_features_by_plan"] == {"free": core, "pro": sorted([*core, advanced])}
-    assert {update["action_id"] for update in saved["module_contract_updates"]} == {
-        "create_task", "update_task", "delete_task", "summarize_tasks",
-    }
+    assert {update["action_id"] for update in saved["module_contract_updates"]} == {"summarize_tasks"}
     assert validate_module_contract_updates(saved, context) == {
-        "task_management": {
-            action: f"feature.module.task_management.{action}"
-            for action in ("create_task", "update_task", "delete_task", "summarize_tasks")
-        },
+        "task_management": {"summarize_tasks": "feature.module.task_management.summarize_tasks"},
     }
     config = yaml.safe_load(context.get("subscription_contract_files")[0]["content"])
     assert config == saved["subscription_config_file"]

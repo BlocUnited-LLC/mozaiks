@@ -28,18 +28,18 @@ For generated apps, SubscriptionContractDesigner selects plan features from the
 injected approved pricing feature inventory. Module feature IDs have the form
 `module.<module_id>.<action_id>` and identify approved `owned_mutations`,
 code-constructed canonical `create_<entity>` / `update_<entity>` /
-`delete_<entity>` writes, or declared `custom_reads`. Workflow feature IDs have
-the form `workflow.<approved_surface_id>` and appear only when the approved
-concept has an agentic capability. The model selects these IDs in
+`delete_<entity>` writes, or declared `custom_reads`. Workflow features are
+excluded from the selectable inventory until workflow launch enforces plan
+grants ([#770](https://github.com/BlocUnited-LLC/mozaiks/issues/770)). The model selects module IDs in
 `subscription_config_file.plans[].included_features`; it does not invent
 capability IDs or action gate mappings. The factory derives stable
 `feature.<feature_id>` capability IDs (normalizing each ID segment to lowercase
 snake case when needed), runtime `plans[].capabilities`, and
-`module_contract_updates`, then applies the gates to `module.yaml` during task
-admission, assembly, and repair. The persisted contract also records
-`selected_features_by_plan` for downstream review. It derives
-`workflow_contract_updates` for selected workflow features; AgentGenerator
-resolves the concrete workflow name later. Generated add-ons may select
+`module_contract_updates` for features that differ between plans, then applies
+those gates to `module.yaml` during task admission, assembly, and repair. An
+action included in every plan has no entitlement gate, so cancellation does not
+remove access to that shared action. The persisted contract also records
+`selected_features_by_plan` for downstream review. Generated add-ons may select
 `required_feature` from the same inventory, which code translates to the
 runtime `required_capability` field.
 
@@ -48,7 +48,10 @@ For example, when the approved `tasks` module has `create_task`, `update_task`,
 the three core write features and sets a usage limit with
 `feature_id: module.tasks.create_task`. Pro selects those features plus
 `module.tasks.summarize_tasks`. Canonical `list_tasks` and `get_tasks` reads are
-available to both plans without a gate. A paid view needs a declared custom
+available to both plans without a gate. The shared writes also have no gate;
+only `summarize_tasks` does. **Usage limits are display-only:** the runtime does
+not enforce a task count or other quota yet
+([#770](https://github.com/BlocUnited-LLC/mozaiks/issues/770)). A paid view needs a declared custom
 read; canonical collection list/get actions and managed-pack facade actions
 are excluded from the feature inventory. Plan browsing, checkout, upgrades,
 the billing portal, usage, and token access remain available to free users.

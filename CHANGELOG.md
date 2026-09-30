@@ -52,10 +52,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
-- Generated subscription plans now select approved module and workflow features
-  from a closed inventory. The factory derives capability IDs and action gates,
-  so a limited Free plan can include core actions while Pro adds distinct paid
-  features; unavailable selections receive the valid choices and a removal path.
+- Generated subscription plans now select approved module actions from a closed
+  inventory. The factory derives capability IDs and gates only for actions that
+  differ between plans, so actions included in every plan remain available after
+  cancellation. Workflow features cannot be sold until workflow launch checks
+  plan grants (#770). Usage limits are display-only and do not cap dispatch or
+  consumption yet (#770); unavailable selections receive valid choices and a
+  removal path.
 
 ### Fixed
 

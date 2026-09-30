@@ -58,6 +58,25 @@ def resolve_subscription_contract(data: Any) -> dict[str, Any] | None:
     return None
 
 
+MISSING_FEATURE_SELECTION_MESSAGE = (
+    "selected_features_by_plan is required on a derived subscription contract. "
+    "Re-run SubscriptionContractDesigner to rebuild and approve this contract before generation."
+)
+
+
+def features_requiring_gate(selections: Mapping[str, list[str]]) -> set[str]:
+    """Only features absent from at least one plan need runtime plan checks."""
+    by_plan = [set(features) for features in selections.values()]
+    if not by_plan:
+        return set()
+    selected: set[str] = set()
+    common = by_plan[0].copy()
+    for features in by_plan:
+        selected.update(features)
+        common.intersection_update(features)
+    return selected - common
+
+
 def approved_subscription_gates(
     subscription_contract: Any, *, approved_actions: Mapping[str, list[str]],
     ungated_actions: Mapping[str, list[str]], approved_workflows: list[str],
@@ -70,16 +89,18 @@ def approved_subscription_gates(
         return {}
     selections = contract.get("selected_features_by_plan")
     if not isinstance(selections, Mapping):
-        raise ValueError("selected_features_by_plan is required on a derived subscription contract.")
+        raise ValueError(MISSING_FEATURE_SELECTION_MESSAGE)
     plans = (contract.get("subscription_config_file") or {}).get("plans") or []
     if set(selections) != {plan.get("plan_id") for plan in plans}:
         raise ValueError("selected_features_by_plan must contain exactly the declared plan ids.")
+    if any(not isinstance(features, (list, tuple)) or any(not isinstance(feature, str) for feature in features)
+           for features in selections.values()):
+        raise ValueError("selected_features_by_plan must map plan ids to feature id lists.")
+    gated_features = features_requiring_gate(selections)
     result: dict[str, dict[str, str]] = {}
     expected_workflows: dict[str, str] = {}
     for plan in plans:
         features = selections[plan["plan_id"]]
-        if not isinstance(features, (list, tuple)) or any(not isinstance(feature, str) for feature in features):
-            raise ValueError("selected_features_by_plan must map plan ids to feature id lists.")
         if len(features) != len(set(features)):
             raise ValueError(f"Plan {plan['plan_id']!r} repeats a selected feature.")
         expected = sorted({capability_id_for_feature(feature) for feature in features})
@@ -108,7 +129,8 @@ def approved_subscription_gates(
                     f"Valid actions for {module_id!r}: {sorted(set(approved_actions.get(module_id, [])) - set(ungated_actions.get(module_id, [])))}. "
                     "Remove the feature from the plan or approve its action in DesignDocs."
                 )
-            result.setdefault(module_id, {})[action_id] = capability_id_for_feature(feature)
+            if feature in gated_features:
+                result.setdefault(module_id, {})[action_id] = capability_id_for_feature(feature)
     supplied: dict[str, dict[str, str]] = {}
     seen_updates: set[tuple[str, str]] = set()
     for update in contract.get("module_contract_updates") or []:

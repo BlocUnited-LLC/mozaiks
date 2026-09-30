@@ -1323,9 +1323,28 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
     )
     if subscriptions_error:
         return [subscriptions_error]
+    assert subscriptions_config is not None
     plan_capabilities = _capability_ids_from_subscriptions_config(subscriptions_config)
+    shared_capabilities: set[str] = set()
+    if subscriptions_config.schema_version == "mozaiks.subscriptions.v1" and subscriptions_config.plans:
+        shared_capabilities = set.intersection(*(
+            set(plan.capabilities) for plan in subscriptions_config.plans
+        ))
+    plan_specific_capabilities = plan_capabilities - shared_capabilities
+    workflow_capabilities = sorted(
+        capability for capability in plan_capabilities
+        if capability.startswith("feature.workflow.")
+    )
+    if workflow_capabilities:
+        return [
+            "config/subscriptions.yaml grants workflow features "
+            f"{workflow_capabilities}, but workflow launch does not enforce plan grants "
+            "(issue #770). Remove these features from the approved plan selections "
+            "and rerun SubscriptionContractDesigner."
+        ]
     derived_module_capabilities = {
-        capability for capability in plan_capabilities if capability.startswith("feature.module.")
+        capability for capability in plan_specific_capabilities
+        if capability.startswith("feature.module.")
     }
 
     # Collect (module_path, action_id, gate) for every gated action.
@@ -1343,17 +1362,11 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
             for path in normalized_files
             if path.startswith("modules/") and path.endswith("/module.yaml")
         )
-        module_gate_capabilities = {
-            capability for capability in plan_capabilities
-            if not capability.startswith("feature.workflow.")
-        }
-        if module_gate_capabilities and (module_paths or derived_module_capabilities):
-            # The bundle sells plan capabilities but gates nothing, so every
-            # declared capability is unenforceable at dispatch time and the
-            # subscription contract is decorative.
+        if plan_specific_capabilities and (module_paths or derived_module_capabilities):
+            # A capability that differs by plan needs an enforced action gate.
             return [
-                "config/subscriptions.yaml grants plan capabilities "
-                f"{sorted(module_gate_capabilities)} but no module action declares an "
+                "config/subscriptions.yaml grants plan-specific capabilities "
+                f"{sorted(plan_specific_capabilities)} but no module action declares an "
                 "entitlement_gate. A SaaS bundle that sells capabilities must "
                 "enforce at least one of them: correct the approved subscription "
                 "plan's feature selections for an approved write or declared custom "
@@ -1373,6 +1386,13 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
             derived_gate = None  # The module contract validator reports invalid action ids.
         if gate == derived_gate:
             matched_module_capabilities.add(gate)
+        if gate.startswith("feature.module.") and gate in shared_capabilities:
+            errors.append(
+                f"{module_path}: action '{action_id}' declares entitlement_gate '{gate}' "
+                "for a feature included in every plan. Remove the derived gate so "
+                "cancelled or unsubscribed users retain this shared feature."
+            )
+            continue
         if gate in plan_capabilities:
             continue
 

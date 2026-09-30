@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach, freeze
 from mozaiksai.core.workflow.declarative.contracts import ToolOutcomeSpec
 from mozaiksai.core.workflow.outputs.structured import build_models_from_config
@@ -127,37 +128,44 @@ def test_partition_cannot_contradict_canonical_surface_map(kind, workflows):
         partition.validate_selection(selection(workflows), ctx)
 
 
-def test_selected_pricing_workflow_must_reference_exact_approved_surface():
+def test_workflow_pricing_selection_requires_designer_rerun():
     ctx = Context({
         "design_surface_map": surface_map("workflow"),
         "concept_blueprint": {"agentic_capabilities": ["Classify requests"]},
         "subscription_contract": priced_workflow_contract(),
     })
-    with pytest.raises(ValueError, match="WorkflowInPack.design_surface_id='customers'"):
-        partition.validate_selection(selection([workflow()]), ctx)
-
-    selected = partition.validate_selection(
-        selection([{**workflow(), "design_surface_id": "customers"}]), ctx,
-    )
-    assert selected["workflows"][0]["design_surface_id"] == "customers"
+    with pytest.raises(ValueError, match="Re-run SubscriptionContractDesigner"):
+        partition.validate_selection(
+            selection([{**workflow(), "design_surface_id": "customers"}]), ctx,
+        )
 
 
-def test_selected_pricing_workflow_rechecks_current_design_inventory():
-    contract = priced_workflow_contract()
-    mapped = selection([{**workflow(), "design_surface_id": "customers"}])
-    ctx = Context({"design_surface_map": surface_map("workflow"), "subscription_contract": contract})
-    with pytest.raises(ValueError, match="not an approved workflow surface"):
-        partition.validate_selection(mapped, ctx)
+def test_module_pricing_selection_does_not_revalidate_without_data_contract():
+    design = surface_map("module")
+    design["surfaces"][0]["surface_id"] = "tasks"
+    design["surfaces"][0]["owned_mutations"] = ["complete_task"]
+    context = ContextVariablesBridge(factory_context({
+        "design_surface_map": design,
+        "subscription_contract": {
+            "contract_required": True,
+            "selected_features_by_plan": {"free": [], "pro": ["module.tasks.create_task"]},
+            "subscription_config_file": {"plans": [
+                {"plan_id": "free", "capabilities": []},
+                {"plan_id": "pro", "capabilities": ["feature.module.tasks.create_task"]},
+            ]},
+            "module_contract_updates": [{
+                "module_id": "tasks", "action_id": "create_task",
+                "entitlement_gate": "feature.module.tasks.create_task",
+            }],
+            "workflow_contract_updates": [],
+        },
+    }))
 
-    changed_map = surface_map("workflow")
-    changed_map["surfaces"][0]["surface_id"] = "other_surface"
-    ctx = Context({
-        "design_surface_map": changed_map,
-        "concept_blueprint": {"agentic_capabilities": ["Classify requests"]},
-        "subscription_contract": contract,
-    })
-    with pytest.raises(ValueError, match="not an approved workflow surface"):
-        partition.validate_selection(mapped, ctx)
+    assert context.get("data_contract") is None
+    assert partition.pattern_selection(
+        PatternSelection=selection([]), context_variables=context,
+    ) == {"outcome": "selected", "workflow_count": 0}
+    assert detach(context.get("workflows_spec")) == []
 
 
 def test_unknown_design_surface_kind_is_rejected():

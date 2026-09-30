@@ -19,7 +19,7 @@ from typing import Annotated, Any
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows._shared.workflow_integration import (
     apply_workflow_integration_context,
-    extract_pricing_workflow_integration_metadata,
+    extract_workflow_integration_metadata_from_bundle_entries,
 )
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.workflow.context.frozen import detach
@@ -249,7 +249,7 @@ async def _record_context_and_artifacts(
 
     # Synthesize minimal workflow config from bundle entries.
     workflow_names = [e.get("workflow_name", "") for e in bundle_entries if e.get("workflow_name")]
-    workflow_integration_metadata = extract_pricing_workflow_integration_metadata(
+    workflow_integration_metadata = extract_workflow_integration_metadata_from_bundle_entries(
         bundle_entries,
         bundle_name=pack_name,
         context_variables=context_variables,

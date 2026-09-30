@@ -161,7 +161,7 @@ agents:
 
       **Output Contract**:
       - `PatternSelection.workflows[]` defines the proposed workflow topology. Its entries are projected into `workflows_spec` for plan review, bundle-generation tasks, and pack registry assembly.
-      - Each workflow entry carries the exact approved DesignDocs `design_surface_id`. Selected pricing workflow features must each resolve to exactly one entry before plan review.
+      - Each workflow entry carries the exact approved DesignDocs `design_surface_id`. Workflow pricing features are unavailable until workflow launch enforces plan grants.
       - Required dispatch field: `initial_agent: WorkflowBundleBuilderAgent`. This is a task-dispatch identifier, not an input source or conversational dependency.
       - `initial_message` is the scoped generation brief each independent task receives.
       - The `pattern_selection` tool validates the response and publishes `is_multi_workflow`, `pack_name`, `pack_partition_reason`, and `workflows_spec` after your turn.
@@ -299,7 +299,7 @@ agents:
       Assemble the final JSON with all fields populated. Double-check:
       - `workflows[]` contains exactly the workflows that should be built.
       - Every workflow has a valid `pattern_id` (1–9).
-      - Every selected pricing workflow feature has exactly one workflow entry with the matching DesignDocs `design_surface_id`; use null only when no approved workflow surface applies.
+      - Every workflow uses the matching DesignDocs `design_surface_id`; use null only when no approved workflow surface applies.
       - Every workflow has the required `initial_agent` dispatch value.
       - Every workflow has a concrete `initial_message`.
       - Every workflow has a `depends_on` list (empty `[]` if no prerequisites).
@@ -645,7 +645,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Your task brief** (from `initial_message`): Contains workflow_name, pattern, role, description, workflow_startup_mode, HITL flag, key integrations.
-      The task's `design_surface_id` names the exact approved DesignDocs workflow surface; preserve its selected pricing feature's derived capability_id in event triggers.
+      The task's `design_surface_id` names the exact approved DesignDocs workflow surface; keep workflow behavior within that surface.
 
       **Concept context** (from context_variables):
       - `concept_overview`: Overall product intent — use to ensure your workflow fits the product design.
@@ -656,16 +656,11 @@ agents:
       **Pattern guidance**: Injected at runtime by Mozaiks prompt middleware. Contains the full patternbook entry for your assigned pattern — agent archetypes, AG2 Network primitives, transition graph strategy, required context variables, required tools, and generator notes. Use this as your structural template.
 
       **Subscription/token contract guidance**: When [SUBSCRIPTION CONTRACT CONTEXT]
-      is injected, read its derived workflow_contract_updates and authored
-      metering_declarations. Each workflow update names the approved
-      design_surface_id and derived capability_id; workflow_name is null until
-      this workflow is generated. Match the approved design surface to the
-      current task's `design_surface_id`; AgentGenerator resolves the concrete
-      workflow name in generated workflow metadata. Preserve the derived capability_id; do not
-      copy a null workflow_name or invent a workflow feature. When metering
+      is injected, read its authored metering_declarations. When metering
       applies, preserve wallet id, enforcement mode, estimate, and idempotency
-      key source from the declaration. A missing or ambiguous surface match
-      requires correction before generation.
+      key source from the declaration. Workflow features are unavailable for
+      pricing until workflow launch enforces plan grants; do not invent a
+      workflow pricing capability or entitlement gate.
       Generated workflows may declare metering context and idempotency fields,
       but must not implement reserve/commit logic, a custom token ledger, custom
       usage ledger, payment checkout, invoices, or hosted billing internals.

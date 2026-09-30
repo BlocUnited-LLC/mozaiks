@@ -58,10 +58,10 @@ function PlanCard({ plan, includedFeatures }) {
       <div className="grid gap-3 md:grid-cols-3">
         <div>
           <p className="mb-1 text-xs font-semibold text-muted-foreground">Included features</p>
-          <TextList items={features} empty="No gated features selected." />
+          <TextList items={features} empty="No features selected." />
         </div>
         <div>
-          <p className="mb-1 text-xs font-semibold text-muted-foreground">Usage Limits</p>
+          <p className="mb-1 text-xs font-semibold text-muted-foreground">Usage limits (display only)</p>
           {limits.length ? (
             <ul className="flex flex-col gap-1">
               {limits.map((limit, index) => (
@@ -147,7 +147,6 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
   const usagePolicies = asList(payload.usage_charge_policies);
   const moduleUpdates = asList(payload.module_contract_updates);
   const moduleGates = moduleUpdates.filter((update) => Boolean(update?.entitlement_gate));
-  const workflowUpdates = asList(payload.workflow_contract_updates);
   const pages = asList(payload.page_surface_requirements);
   const forbiddenOutputs = asList(payload.forbidden_outputs);
   const contractRequired = Boolean(payload.contract_required);
@@ -285,20 +284,8 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
             </Section>
           </div>
 
-          <Section title="Derived Entitlement And Workflow Mappings">
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div>
-                <p className="mb-2 text-xs font-semibold text-muted-foreground">Module action gates</p>
-                <UpdateList updates={moduleGates} />
-              </div>
-              <div>
-                <p className="mb-2 text-xs font-semibold text-muted-foreground">Workflow feature mappings</p>
-                <TextList
-                  items={workflowUpdates.map((update) => `${update?.design_surface_id}: ${update?.capability_id}`)}
-                  empty="No workflow features selected."
-                />
-              </div>
-            </div>
+          <Section title="Derived Module Action Gates">
+            <UpdateList updates={moduleGates} />
           </Section>
 
           <Section title="Traceable Plan Reasoning">

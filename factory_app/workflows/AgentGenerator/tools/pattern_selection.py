@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from factory_app.workflows._shared.workflow_integration import selected_pricing_workflow_bindings
+from factory_app.workflows._shared.workflow_integration import validate_pricing_workflow_features
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
@@ -33,7 +33,7 @@ def validate_selection(raw_selection: Any, context_variables: Any) -> dict[str, 
         if bool(workflows) != has_workflows:
             expected = "at least one declared AI workflow" if has_workflows else "workflows: [] (no AI workflows)"
             raise ValueError(f"The canonical design surface map requires {expected}")
-    selected_pricing_workflow_bindings(context_variables, workflows)
+    validate_pricing_workflow_features(context_variables)
     return selection
 
 

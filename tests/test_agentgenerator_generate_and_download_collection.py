@@ -170,6 +170,22 @@ def _priced_workflow_contract() -> dict:
     }
 
 
+def _module_pricing_contract() -> dict:
+    return {
+        "contract_required": True,
+        "selected_features_by_plan": {"free": [], "pro": ["module.tasks.create_task"]},
+        "subscription_config_file": {"plans": [
+            {"plan_id": "free", "capabilities": []},
+            {"plan_id": "pro", "capabilities": ["feature.module.tasks.create_task"]},
+        ]},
+        "module_contract_updates": [{
+            "module_id": "tasks", "action_id": "create_task",
+            "entitlement_gate": "feature.module.tasks.create_task",
+        }],
+        "workflow_contract_updates": [],
+    }
+
+
 def _priced_workflow_design() -> dict:
     return {
         "concept_blueprint": {"agentic_capabilities": ["Process premium reports"]},
@@ -280,14 +296,14 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     assert asyncio.run(loaded_tools["PlannerAgent"][0](values=[2, 3, 5])) == {"total": 10}
 
 
-def test_priced_workflow_export_resolves_approved_surface_into_appgenerator_metadata(
+def test_module_pricing_contract_does_not_change_workflow_metadata(
     monkeypatch, tmp_path: Path,
 ) -> None:
     from factory_app.workflows.AppGenerator.tools.hook_workflow_integration_contract import (
         inject_workflow_integration_contract,
     )
 
-    contract = _priced_workflow_contract()
+    contract = _module_pricing_contract()
     context = _Context({
         **_priced_workflow_design(),
         "chat_id": "chat-priced", "app_id": "app-priced", "user_id": "user-priced",
@@ -318,14 +334,12 @@ def test_priced_workflow_export_resolves_approved_surface_into_appgenerator_meta
     metadata = context.get("workflow_integration_metadata")
     assert metadata["workflows"] == [{
         "workflow_name": "PricedWorkflow",
-        "capability_id": "feature.workflow.premium_report",
+        "capability_id": "priced-workflow",
         "startup_mode": "AgentDriven",
         "trigger_events": [],
-        "design_surface_id": "premium_report",
     }]
     assert registration.await_args.kwargs["workflow_integration_metadata"] == metadata
-    assert context.get("generated_workflow_capability_id") == "feature.workflow.premium_report"
-    assert contract["workflow_contract_updates"][0]["workflow_name"] is None
+    assert context.get("generated_workflow_capability_id") == "priced-workflow"
 
     class AppPlanAgent:
         name = "AppPlanAgent"
@@ -337,31 +351,21 @@ def test_priced_workflow_export_resolves_approved_surface_into_appgenerator_meta
 
     agent = AppPlanAgent()
     inject_workflow_integration_contract(agent, [])
-    assert "capability_id  : feature.workflow.premium_report" in agent.system_message
+    assert "capability_id  : priced-workflow" in agent.system_message
     assert "workflow_name  : PricedWorkflow" in agent.system_message
 
 
-@pytest.mark.parametrize(("design_surface_id", "trigger_capability_id", "expected_error"), [
-    (None, None, "WorkflowInPack.design_surface_id='premium_report'"),
-    ("premium_report", "invented-capability", "different from selected pricing feature"),
-])
-def test_priced_workflow_export_blocks_unresolved_mapping_before_ui(
-    monkeypatch, tmp_path: Path, design_surface_id, trigger_capability_id, expected_error,
+def test_workflow_pricing_contract_blocks_export_before_ui(
+    monkeypatch, tmp_path: Path,
 ) -> None:
-    triggers = ([{
-        "type": "event",
-        "event": "domain.reports.premium_requested",
-        "capability_id": trigger_capability_id,
-        "description": "Processes premium report requests for queued customer analysis.",
-    }] if trigger_capability_id else None)
     context = _Context({
         **_priced_workflow_design(),
         "chat_id": "chat-priced-blocked", "app_id": "app-priced-blocked", "user_id": "user-priced",
         "pack_name": "PricedWorkflow", "subscription_contract": _priced_workflow_contract(),
-        "workflows_spec": [{"name": "PricedWorkflow", "design_surface_id": design_surface_id}],
+        "workflows_spec": [{"name": "PricedWorkflow", "design_surface_id": "premium_report"}],
         "workflow_bundle_results": _make_bundle_results([{
             "workflow_name": "PricedWorkflow",
-            "files": _minimal_workflow_files("PricedWorkflow", triggers=triggers),
+            "files": _minimal_workflow_files("PricedWorkflow"),
         }]),
     })
     ui = AsyncMock()
@@ -377,46 +381,11 @@ def test_priced_workflow_export_blocks_unresolved_mapping_before_ui(
     ))
 
     assert result["status"] == "blocked"
-    assert expected_error in "\n".join(result["validation_errors"])
+    assert "Re-run SubscriptionContractDesigner" in "\n".join(result["validation_errors"])
     assert context.get("workflow_bundle_validation_status") == "failed"
     assert not generated_root.exists()
     ui.assert_not_awaited()
     registration.assert_not_awaited()
-
-
-@pytest.mark.parametrize("bundle_count", [0, 2])
-def test_priced_workflow_binding_requires_exactly_one_generated_bundle(bundle_count):
-    from factory_app.workflows._shared.workflow_integration import (
-        extract_pricing_workflow_integration_metadata,
-    )
-
-    context = _Context({
-        **_priced_workflow_design(),
-        "subscription_contract": _priced_workflow_contract(),
-        "workflows_spec": [{"name": "PricedWorkflow", "design_surface_id": "premium_report"}],
-    })
-    entries = [{
-        "workflow_name": "PricedWorkflow",
-        "files": _minimal_workflow_files("PricedWorkflow"),
-    } for _ in range(bundle_count)]
-    with pytest.raises(ValueError, match="no unique generated workflow bundle"):
-        extract_pricing_workflow_integration_metadata(
-            entries, bundle_name="PricedWorkflow", context_variables=context,
-        )
-
-
-def test_priced_workflow_binding_rejects_plan_grant_drift():
-    from factory_app.workflows._shared.workflow_integration import (
-        selected_pricing_workflow_bindings,
-    )
-
-    contract = _priced_workflow_contract()
-    contract["subscription_config_file"]["plans"][1]["capabilities"] = ["invented-capability"]
-    context = _Context({**_priced_workflow_design(), "subscription_contract": contract})
-    with pytest.raises(ValueError, match="capabilities differ from its selected features"):
-        selected_pricing_workflow_bindings(
-            context, [{"name": "PricedWorkflow", "design_surface_id": "premium_report"}],
-        )
 
 
 @pytest.mark.parametrize("filename", ["orchestrator.yaml", "structured_outputs.yaml"])

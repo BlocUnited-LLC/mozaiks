@@ -23,6 +23,9 @@ from factory_app.workflows._shared.subscription_contract_context import (
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    approved_workflow_surface_ids,
+)
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 logger = logging.getLogger(__name__)
@@ -347,7 +350,9 @@ def _compile_feature_selections(
             feature_id = limit.get("feature_id")
             if "capability_id" in limit:
                 errors.append(f"Plan {plan_id!r} usage limit writes capability_id; select feature_id instead")
-            if feature_id is not None and (not isinstance(feature_id, str) or feature_id not in features):
+            if feature_id is not None and (not isinstance(feature_id, str) or feature_id not in inventory):
+                errors.append(f"Plan {plan_id!r} usage limit references unavailable feature {feature_id!r}")
+            elif feature_id is not None and feature_id not in features:
                 errors.append(f"Plan {plan_id!r} usage limit references feature {feature_id!r} that it does not include")
             resolved = {key: value for key, value in limit.items() if key not in {"feature_id", "capability_id"}}
             resolved["capability_id"] = capability_id_for_feature(feature_id) if feature_id in features and feature_id in inventory else None
@@ -381,8 +386,9 @@ def _compile_feature_selections(
     if errors:
         raise ValueError(
             "Invalid pricing feature selection: " + "; ".join(errors) + ". "
-            f"Valid features: {valid_features}. Remove an unavailable feature from the plan "
-            "or have DesignDocs approve its action before pricing design."
+            f"Valid features: {valid_features}. Remove the unavailable feature reference "
+            "from the plan, usage limit, or add-on, or have DesignDocs approve its action "
+            "before pricing design."
         )
     return config, selections
 
@@ -390,20 +396,22 @@ def _compile_feature_selections(
 def _derive_contract_updates(
     selected_features_by_plan: dict[str, list[str]], output: dict[str, Any], context_variables: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Build module gates and pending workflow mappings from selected features."""
+    """Build module gates while keeping workflow metering separate from pricing."""
     inventory = approved_feature_inventory(context_variables)
     gates = selected_feature_gates(selected_features_by_plan, context_variables)
+    approved_workflows = set(approved_workflow_surface_ids(context_variables))
     metering: dict[tuple[str, str], dict[str, Any]] = {}
     for declaration in output.get("metering_declarations") or []:
         if not isinstance(declaration, dict):
             raise ValueError("metering_declarations entries must be objects.")
         if declaration.get("surface_type") == "workflow":
-            feature_id = f"workflow.{declaration.get('surface_id')}"
-            if feature_id not in inventory or declaration.get("action_id") is not None:
+            surface_id = declaration.get("surface_id")
+            if surface_id not in approved_workflows or declaration.get("action_id") is not None:
                 raise ValueError(
-                    f"Workflow metering declaration references unavailable feature {feature_id!r} "
+                    f"Workflow metering declaration references unavailable workflow surface {surface_id!r} "
                     "or specifies an action_id before workflow generation. "
-                    f"Valid features: {sorted(inventory)}. Remove the feature or have DesignDocs approve its workflow surface."
+                    f"Valid workflow surfaces: {sorted(approved_workflows)}. "
+                    "Remove the declaration or have DesignDocs approve its workflow surface."
                 )
             continue
         if declaration.get("surface_type") != "module_action":
@@ -428,17 +436,7 @@ def _derive_contract_updates(
         {"module_id": module_id, "action_id": action_id, "entitlement_gate": None, "metering": declaration}
         for (module_id, action_id), declaration in sorted(metering.items())
     )
-    selected = set().union(*(set(features) for features in selected_features_by_plan.values()))
-    workflow_updates = [
-        {"design_surface_id": inventory[feature_id]["surface_id"],
-         "capability_id": capability_id_for_feature(feature_id),
-         "workflow_name": None,
-         "metering": next((declaration for declaration in output.get("metering_declarations") or []
-                           if declaration.get("surface_type") == "workflow"
-                           and declaration.get("surface_id") == inventory[feature_id]["surface_id"]), None)}
-        for feature_id in sorted(selected) if inventory[feature_id]["surface_kind"] == "workflow"
-    ]
-    return module_updates, workflow_updates
+    return module_updates, []
 
 
 def _token_wallet_usage_intent_present(

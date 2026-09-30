@@ -125,7 +125,7 @@ _SUBS_V2_NO_STORE = textwrap.dedent("""\
               - tasks.create
 """)
 
-_SUBS_DERIVED_MODULE_AND_WORKFLOW = textwrap.dedent("""\
+_SUBS_DERIVED_MODULE = textwrap.dedent("""\
     schema_version: mozaiks.subscriptions.v1
     label: Derived feature plans
     default_plan_id: free
@@ -138,7 +138,6 @@ _SUBS_DERIVED_MODULE_AND_WORKFLOW = textwrap.dedent("""\
         capabilities:
           - feature.module.tasks.create_task
           - feature.module.tasks.delete_task
-          - feature.workflow.task_analysis
 """)
 
 
@@ -291,30 +290,110 @@ class TestPlanDefDuplicateCapabilities:
 class TestEntitlementGateClosurePositive:
     """Valid bundles must produce zero errors."""
 
-    def test_workflow_only_feature_does_not_require_a_module_gate(self) -> None:
+    def test_all_plan_shared_module_feature_does_not_require_a_gate(self) -> None:
         subscriptions = textwrap.dedent("""\
             schema_version: mozaiks.subscriptions.v1
-            label: Workflow plans
+            label: Shared feature plans
             default_plan_id: free
             plans:
               - plan_id: free
                 label: Free
-                capabilities: []
+                capabilities: [feature.module.tasks.create_task]
               - plan_id: pro
                 label: Pro
-                capabilities: [feature.workflow.task_analysis]
+                capabilities: [feature.module.tasks.create_task]
         """)
         bundle = _bundle(
             subs=subscriptions,
             modules={"modules/tasks/module.yaml": _module_yaml(
-                "tasks", actions=[{"id": "list_tasks"}],
+                "tasks", actions=[{"id": "create_task"}],
             )},
+        )
+        assert _scan_entitlement_gate_capability_alignment(bundle) == []
+
+    def test_shared_core_write_stays_ungated_when_paid_feature_is_gated(self) -> None:
+        subscriptions = textwrap.dedent("""\
+            schema_version: mozaiks.subscriptions.v1
+            label: Task plans
+            default_plan_id: free
+            plans:
+              - plan_id: free
+                label: Free
+                capabilities: [feature.module.tasks.create_task]
+              - plan_id: pro
+                label: Pro
+                capabilities:
+                  - feature.module.tasks.create_task
+                  - feature.module.tasks.summarize_tasks
+        """)
+        bundle = _bundle(
+            subs=subscriptions,
+            modules={"modules/tasks/module.yaml": _module_yaml(
+                "tasks", actions=[
+                    {"id": "create_task"},
+                    {
+                        "id": "summarize_tasks",
+                        "entitlement_gate": "feature.module.tasks.summarize_tasks",
+                    },
+                ],
+            )},
+        )
+
+        assert _scan_entitlement_gate_capability_alignment(bundle) == []
+
+    def test_v2_catalog_requires_exact_derived_gates_across_products(self) -> None:
+        subscriptions = textwrap.dedent("""\
+            schema_version: mozaiks.subscriptions.v2
+            label: Task products
+            default_product_id: core
+            products:
+              - product_id: core
+                label: Core
+                default_plan_id: free
+                plans:
+                  - plan_id: free
+                    label: Free
+                    capabilities: [feature.module.tasks.create_task]
+                  - plan_id: pro
+                    label: Pro
+                    capabilities:
+                      - feature.module.tasks.create_task
+                      - feature.module.tasks.summarize_tasks
+              - product_id: extras
+                label: Extras
+                default_plan_id: free
+                plans:
+                  - plan_id: free
+                    label: Free
+                    capabilities: []
+                  - plan_id: pro
+                    label: Pro
+                    capabilities: []
+        """)
+        bundle = _bundle(
+            subs=subscriptions,
+            modules={"modules/tasks/module.yaml": _module_yaml(
+                "tasks", actions=[
+                    {"id": "create_task"},
+                    {"id": "summarize_tasks", "entitlement_gate": "feature.module.tasks.summarize_tasks"},
+                ],
+            )},
+        )
+
+        errors = _scan_entitlement_gate_capability_alignment(bundle)
+        assert any("feature.module.tasks.create_task" in error
+                   and "without matching module action" in error for error in errors)
+        bundle["modules/tasks/module.yaml"] = _module_yaml(
+            "tasks", actions=[
+                {"id": "create_task", "entitlement_gate": "feature.module.tasks.create_task"},
+                {"id": "summarize_tasks", "entitlement_gate": "feature.module.tasks.summarize_tasks"},
+            ],
         )
         assert _scan_entitlement_gate_capability_alignment(bundle) == []
 
     def test_every_derived_module_capability_has_its_action_gate(self) -> None:
         bundle = _bundle(
-            subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW,
+            subs=_SUBS_DERIVED_MODULE,
             modules={"modules/tasks/module.yaml": _module_yaml(
                 "tasks",
                 actions=[
@@ -433,6 +512,54 @@ class TestEntitlementGateClosurePositive:
 class TestEntitlementGateClosureNegative:
     """Invalid bundles must produce at least one error."""
 
+    def test_workflow_feature_is_rejected_until_launch_checks_grants(self) -> None:
+        subscriptions = textwrap.dedent("""\
+            schema_version: mozaiks.subscriptions.v1
+            label: Workflow plans
+            default_plan_id: free
+            plans:
+              - plan_id: free
+                label: Free
+                capabilities: []
+              - plan_id: pro
+                label: Pro
+                capabilities: [feature.workflow.task_analysis]
+        """)
+        bundle = _bundle(subs=subscriptions)
+
+        errors = _scan_entitlement_gate_capability_alignment(bundle)
+        assert len(errors) == 1
+        assert "feature.workflow.task_analysis" in errors[0]
+        assert "issue #770" in errors[0]
+        assert "rerun SubscriptionContractDesigner" in errors[0]
+
+    def test_all_plan_shared_module_feature_must_not_have_a_gate(self) -> None:
+        subscriptions = textwrap.dedent("""\
+            schema_version: mozaiks.subscriptions.v1
+            label: Shared feature plans
+            default_plan_id: free
+            plans:
+              - plan_id: free
+                label: Free
+                capabilities: [feature.module.tasks.create_task]
+              - plan_id: pro
+                label: Pro
+                capabilities: [feature.module.tasks.create_task]
+        """)
+        bundle = _bundle(
+            subs=subscriptions,
+            modules={"modules/tasks/module.yaml": _module_yaml(
+                "tasks", actions=[{
+                    "id": "create_task",
+                    "entitlement_gate": "feature.module.tasks.create_task",
+                }],
+            )},
+        )
+
+        errors = _scan_entitlement_gate_capability_alignment(bundle)
+        assert len(errors) == 1
+        assert "included in every plan" in errors[0]
+
     def test_sold_capabilities_with_zero_gated_actions_fails(self) -> None:
         """Plan capabilities with no gated action anywhere = unenforceable monetization."""
         bundle = _bundle(
@@ -452,7 +579,7 @@ class TestEntitlementGateClosureNegative:
 
     def test_one_gate_does_not_cover_another_derived_module_capability(self) -> None:
         bundle = _bundle(
-            subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW,
+            subs=_SUBS_DERIVED_MODULE,
             modules={"modules/tasks/module.yaml": _module_yaml(
                 "tasks",
                 actions=[
@@ -464,12 +591,11 @@ class TestEntitlementGateClosureNegative:
         errors = _scan_entitlement_gate_capability_alignment(bundle)
         assert len(errors) == 1
         assert "feature.module.tasks.delete_task" in errors[0]
-        assert "feature.workflow.task_analysis" not in errors[0]
         assert "selected features" in errors[0]
 
     def test_partial_derived_gate_omission_reaches_full_bundle_scan(self) -> None:
         bundle = _bundle(
-            subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW,
+            subs=_SUBS_DERIVED_MODULE,
             modules={"modules/tasks/module.yaml": _module_yaml(
                 "tasks",
                 actions=[
@@ -486,7 +612,7 @@ class TestEntitlementGateClosureNegative:
 
     def test_derived_gate_must_bind_the_corresponding_action(self) -> None:
         bundle = _bundle(
-            subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW,
+            subs=_SUBS_DERIVED_MODULE,
             modules={"modules/tasks/module.yaml": _module_yaml(
                 "tasks",
                 actions=[
@@ -502,7 +628,7 @@ class TestEntitlementGateClosureNegative:
 
     def test_derived_module_capabilities_without_module_files_fail(self) -> None:
         errors = _scan_entitlement_gate_capability_alignment(
-            _bundle(subs=_SUBS_DERIVED_MODULE_AND_WORKFLOW)
+            _bundle(subs=_SUBS_DERIVED_MODULE)
         )
         assert len(errors) == 1
         assert "no module action declares an entitlement_gate" in errors[0]

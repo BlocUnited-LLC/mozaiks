@@ -754,8 +754,6 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
                 "pro": ["module.reports.view_report", "module.reports.export_report"],
             },
             "module_contract_updates": [
-                {"module_id": "reports", "action_id": "view_report",
-                 "entitlement_gate": "feature.module.reports.view_report"},
                 {"module_id": "reports", "action_id": "export_report",
                  "entitlement_gate": "feature.module.reports.export_report"},
             ],

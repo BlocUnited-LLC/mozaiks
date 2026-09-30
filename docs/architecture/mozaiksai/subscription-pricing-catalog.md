@@ -19,7 +19,11 @@ entitlement files unless they are genuinely separate apps.
 In generated apps, SubscriptionContractDesigner selects approved
 `included_features` per plan. The factory derives the capability IDs and
 `plans[].capabilities` written to this runtime file; the designer does not
-author free-text capability IDs. Pricing groups remain display metadata.
+author free-text capability IDs. Only approved module actions are selectable;
+workflow features cannot be sold until launch enforces plan grants
+([#770](https://github.com/BlocUnited-LLC/mozaiks/issues/770)). A feature included in every plan gets no
+action gate. Pricing groups and usage limits are display-only; usage limits do
+not currently enforce quotas ([#770](https://github.com/BlocUnited-LLC/mozaiks/issues/770)).
 
 ## Contract Shape
 
@@ -145,13 +149,14 @@ context from `concept_overview`, `concept_blueprint`, `backend_design_document`,
   entitlement, quota, and pricing group decisions
 
 The saved contract includes derived `selected_features_by_plan`, capability
-grants, module action gates, and pending workflow feature mappings. The model
-does not author those derived fields.
+grants, and gates for module actions that differ between plans. The model does
+not author those derived fields. A saved contract predating this selection
+format must be rebuilt by rerunning SubscriptionContractDesigner.
 
 When a chat UI is available, the workflow presents the normalized output as a
 `SubscriptionContractReview` artifact before downstream generators consume it.
 The review surface shows the subscription plans, token wallets, token
-allowances, add-on products, derived gated module actions, workflow metering
+allowances, add-on products, derived gated module actions, metering
 declarations, generated file preview, and guardrails. The user must confirm
 that the subscription plan contract matches what they want; requesting changes
 leaves downstream `subscription_contract` context empty until the agent revises

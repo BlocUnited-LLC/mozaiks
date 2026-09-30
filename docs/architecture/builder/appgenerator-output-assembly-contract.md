@@ -201,20 +201,19 @@ billing module or platform catalog endpoint is needed.
 
 Subscription action gates follow a closed feature inventory. Before subscription
 design, the factory injects feature IDs for approved app-owned mutations, custom
-reads, canonical writes, and eligible AI workflow surfaces. Module feature IDs
-are `module.<module_id>.<action_id>`; workflow feature IDs are
-`workflow.<approved_surface_id>` and exist only for agentic capabilities in the
-approved concept. The designer chooses each plan's `included_features` from
+reads, and canonical writes. Feature IDs are
+`module.<module_id>.<action_id>`. Workflow features are excluded until workflow
+launch enforces plan grants (#770). The designer chooses each plan's `included_features` from
 that inventory and may set `usage_limits[].feature_id` to a selected feature.
 It does not author capability IDs or action gates. The compiler derives stable
 `feature.<feature_id>` capability IDs (normalizing each ID segment to lowercase
 snake case when needed), runtime `plans[].capabilities`, and
-`module_contract_updates`. It records `selected_features_by_plan` in the
+`module_contract_updates` only for features absent from at least one plan. An
+action shared by every plan has no entitlement gate, including after a plan is
+cancelled. It records `selected_features_by_plan` in the
 persisted contract. Unknown selections return one revision message with the
 valid IDs and the option to remove the feature from the plan.
-Selected workflow features produce derived `workflow_contract_updates` with
-the approved design surface and capability ID; AgentGenerator resolves the
-concrete workflow name later. The designer still declares metering intent in
+The designer still declares metering intent in
 `metering_declarations` when applicable. Generated add-ons may select an
 inventory `required_feature`; code derives the runtime `required_capability`.
 
@@ -222,6 +221,7 @@ Canonical collection list/get reads and managed-pack facade actions are never
 selectable gate targets. A limited Free plan that promises core task management
 selects approved create/update/delete features and sets a limit on task creation;
 a Pro plan may add an approved custom read such as `summarize_tasks`.
+Usage limits are display-only until quota enforcement is implemented (#770).
 
 AppGenerator preserves approved module surface IDs as module IDs and stamps `module.id`
 from the approved module path when the file writer drifts. After merging generated
