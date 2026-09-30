@@ -22,9 +22,11 @@ and the surface map determine the correct binding, code writes it:
 
 Canonical writes get these entry points whether or not a plan gates them: a
 write every plan includes is still a write the user must be able to make. A
-gated write outside the canonical set gets the same entry point. When the page
-already holds a modal form (or confirmation dialog) for the write, the entry
-point opens it instead of adding a second one.
+single gated update-shaped write outside the canonical set gets its own row
+action and modal form beside the canonical Edit, named after the write; a gated
+write named like a canonical create or delete gets that entry point. When the
+page already holds a modal form (or confirmation dialog) for the write, the
+entry point opens it instead of adding a second one.
 
 Every construction, and every construction the contracts do not permit, is
 returned as a note and logged, so a build can be read back to see what the
@@ -272,12 +274,13 @@ def _existing_modal(sections: Any, matches: Callable[[Mapping[str, Any]], bool])
 
 def _action_modal(
     *, module_id: str, action_id: str, action: Mapping[str, Any], identifier: str, entity: str, edit: bool,
+    title: str | None = None,
 ) -> dict[str, Any] | None:
     fields = _form_fields(action_input_fields(action), identifier if edit else None)
     if fields is None:
         return None
     modal_id = _modal_id(action_id)
-    verb = "Edit" if edit else "Create"
+    heading = title or f"{'Edit' if edit else 'Create'} {entity}"
     payload = [{"key": identifier, "value": "{selected_row." + identifier + "}"}] if edit else []
     payload.extend({"key": field["name"], "value": "{form." + field["name"] + "}"} for field in fields)
     form_config: dict[str, Any] = {
@@ -299,12 +302,12 @@ def _action_modal(
         form_config = {"initial_values_key": "selected_row", **form_config}
     description = action.get("description")
     return {
-        "id": modal_id, "primitive": "Modal", "title": f"{verb} {entity}",
+        "id": modal_id, "primitive": "Modal", "title": heading,
         "config": {
-            "title": f"{verb} {entity}", "description": description if isinstance(description, str) else None,
+            "title": heading, "description": description if isinstance(description, str) else None,
             "size": "medium",
             "children": [{
-                "id": f"{action_id}-form", "primitive": "Form", "title": f"{verb} {entity}", "config": form_config,
+                "id": f"{action_id}-form", "primitive": "Form", "title": heading, "config": form_config,
             }],
         },
     }
@@ -689,12 +692,23 @@ def construct_page_bindings(
                     )
                     if shape == "update":
                         _enable_selection(config, location, notes)
-            # The canonical update always needs an Edit entry point; a gated update-shaped write does too.
-            editable = [
+            # The canonical update gets an Edit entry point, gated or not; a single gated update-shaped
+            # write beside it gets its own. Two gated update-shaped writes leave the choice to the author.
+            canonical_update = canonical_ids.get("update")
+            edits = [canonical_update] if canonical_update in canonical and canonical_update in shapes["update"] else []
+            gated_updates = [
                 candidate for candidate in shapes["update"]
-                if actions[candidate].get("entitlement_gate")
-                or (candidate == canonical_ids.get("update") and candidate in canonical)
+                if candidate not in edits and actions[candidate].get("entitlement_gate")
             ]
+            if len(gated_updates) == 1:
+                edits.append(gated_updates[0])
+            elif identifier:
+                for candidate in gated_updates:
+                    if f"{module_id}/{candidate}" not in reachable_page_action_keys([document]):
+                        refused.append(
+                            f"{location}: no edit entry point for gated {module_id}/{candidate}: "
+                            f"{len(gated_updates)} gated update-shaped writes {gated_updates} for {module_id}"
+                        )
             if identifier is None:
                 unaddressable = sorted(
                     action_id for action_id, action in actions.items()
@@ -708,23 +722,27 @@ def construct_page_bindings(
                         f"{location}: no edit entry point for {_kind(actions[action_id])} {module_id}/{action_id}: "
                         f"{no_identity}"
                     )
-            if identifier and len(editable) == 1 and f"{module_id}/{editable[0]}" not in reachable_page_action_keys([document]):
-                target = editable[0]
+            for target in edits if identifier else []:
+                if f"{module_id}/{target}" in reachable_page_action_keys([document]):
+                    continue
+                # Beside the canonical Edit, a custom write's row action carries its own name.
+                label = "Edit" if len(edits) == 1 or target == canonical_update else _label(target)
                 modal_id, reason, existing = _ensure_modal(
                     document, module_id=module_id, action_id=target, action=actions[target],
-                    identifier=identifier, entity=entity, edit=True,
+                    identifier=identifier, entity=entity, edit=True, title=None if label == "Edit" else label,
                 )
                 if modal_id is None:
                     refused.append(f"{location}: no edit entry point for {_kind(actions[target])} {module_id}/{target}: {reason}")
-                else:
-                    edit = _opener(modal_id=modal_id, action_id=target, label="Edit", edit=True, base=None)
-                    if _add_opener(config, edit, modal_id):
-                        clause = _modal_form_clause(document, modal_id, existing, f"/api/modules/{module_id}/{target}")
-                        notes.append(
-                            f"{location}: {_subject(module_id, target, actions[target])} has no page entry point; "
-                            f"added an Edit row action {clause}"
-                        )
-                    _enable_selection(config, location, notes)
+                    continue
+                edit = _opener(modal_id=modal_id, action_id=target, label=label, edit=True, base=None)
+                if _add_opener(config, edit, modal_id):
+                    clause = _modal_form_clause(document, modal_id, existing, f"/api/modules/{module_id}/{target}")
+                    row_action = "an Edit row action" if label == "Edit" else f"a '{label}' row action"
+                    notes.append(
+                        f"{location}: {_subject(module_id, target, actions[target])} has no page entry point; "
+                        f"added {row_action} {clause}"
+                    )
+                _enable_selection(config, location, notes)
             _construct_create_delete(
                 document, config, location, module_id=module_id, actions=actions, shapes=shapes,
                 canonical_ids=canonical_ids, canonical=canonical, identifier=identifier, entity=entity,

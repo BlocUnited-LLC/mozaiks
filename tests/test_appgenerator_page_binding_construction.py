@@ -863,6 +863,80 @@ def test_a_shared_canonical_update_gets_an_edit_entry_point(caplog):
     assert not any("gated action" in line for line in _constructed(caplog))
 
 
+def _complete_action(action_id: str = "complete_task", gate: str | None = "task.complete") -> dict:
+    """A custom update-shaped write: it addresses the record by task_id and sets a declared field."""
+    action = {"id": action_id, "handler_method": action_id, "api_surface": None, "permissions": [],
+              "input_schema": {"type": "object", "properties": {
+                  "task_id": {"type": "string"}, "is_completed": {"type": "boolean"}},
+                  "additionalProperties": False, "required": ["task_id", "is_completed"]},
+              "output_schema": {"type": "object", "properties": {"success": {"type": "boolean"}}, "required": ["success"]}}
+    if gate:
+        action["entitlement_gate"] = gate
+    return action
+
+
+def _shared_update_with(*extra: dict) -> str:
+    """update_task in every plan; the dashboard-only summarize_tasks gate is dropped, as no tasks bundle shows it."""
+    manifest = yaml.safe_load(_module_yaml(list(extra)))
+    for action in manifest["actions"]:
+        if action["id"] in {"update_task", "summarize_tasks"}:
+            action.pop("entitlement_gate")
+    return yaml.safe_dump(manifest, sort_keys=False)
+
+
+def test_the_canonical_update_and_a_gated_custom_update_each_get_their_own_row_action(caplog):
+    """Verifier probe P1: a shared update_task beside a gated complete_task used to build an Edit for neither."""
+    owned = ["create_task", "update_task", "delete_task", "complete_task"]
+    context = _context(module_yaml=_shared_update_with(_complete_action()), owned_mutations=owned)
+    compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(_tasks_page())}, context, caplog)
+    tasks = compiled["ui/pages/tasks.yaml"]
+    validate_page_schema(deepcopy(tasks))
+    table = _section(tasks, "task-table")["config"]
+    assert [(a["id"], a["label"], a["payload"]["modal_id"], a["requires_selection"]) for a in table["actions"]] == [
+        ("open-update_task", "Edit", "update_task-modal", True),
+        ("open-complete_task", "Complete Task", "complete_task-modal", True),
+        ("open-create_task", "New Task", "create_task-modal", False),
+        ("open-delete_task", "Delete", "delete_task-modal", True),
+    ]
+    complete = _section(tasks, "complete_task-modal")
+    assert complete["title"] == "Complete Task"
+    form = complete["config"]["children"][0]["config"]
+    assert form["submit_action"]["href"] == "/api/modules/task_management/complete_task"
+    assert [(field["name"], field["type"]) for field in form["fields"]] == [("is_completed", "checkbox")]
+    assert _section(tasks, "update_task-modal")["title"] == "Edit Task"
+    lines = _constructed(caplog)
+    assert any(line.endswith(
+        "shared action task_management/update_task has no page entry point; "
+        "added an Edit row action and a modal form that submits it") for line in lines)
+    assert any(line.endswith(
+        "gated action task_management/complete_task (task.complete) has no page entry point; "
+        "added a 'Complete Task' row action and a modal form that submits it") for line in lines)
+    files = _wiring_files(tasks, _shared_update_with(_complete_action()))
+    report = asyncio.run(validate_wiring({"generated_files": files}))
+    assert report["passed"] is True, report["failed_tests"]
+    again = normalize_planned_page_content(
+        yaml.safe_dump(tasks, sort_keys=False, allow_unicode=True), path="ui/pages/tasks.yaml",
+        modules=module_action_index_from_context(context),
+        data_contract=detach(context.get("data_contract")), design_surface_map=detach(context.get("design_surface_map")),
+    )
+    assert yaml.safe_load(again) == tasks
+
+
+def test_two_gated_custom_updates_are_refused_but_the_canonical_edit_is_still_built(caplog):
+    owned = ["create_task", "update_task", "delete_task", "complete_task", "reopen_task"]
+    module_yaml = _shared_update_with(_complete_action(), _complete_action("reopen_task", "task.reopen"))
+    compiled = _compile({"ui/pages/tasks.yaml": yaml.safe_dump(_tasks_page())},
+                        _context(module_yaml=module_yaml, owned_mutations=owned), caplog)
+    actions = _section(compiled["ui/pages/tasks.yaml"], "task-table")["config"]["actions"]
+    assert [(a["id"], a["label"]) for a in actions] == [
+        ("open-update_task", "Edit"), ("open-create_task", "New Task"), ("open-delete_task", "Delete"),
+    ]
+    refused = [record.getMessage() for record in caplog.records if "not constructed" in record.getMessage()]
+    for action_id in ("complete_task", "reopen_task"):
+        assert any(f"no edit entry point for gated task_management/{action_id}: 2 gated update-shaped writes" in line
+                   for line in refused)
+
+
 def test_an_internal_canonical_write_gets_no_entry_point():
     manifest = yaml.safe_load(_shared_module_yaml())
     for action in manifest["actions"]:
@@ -1009,6 +1083,34 @@ def test_the_wiring_gate_fails_an_unreachable_shared_canonical_write_naming_the_
         f"ui/pages/tasks.yaml: {failure['error']} {failure['fix_suggestion']}"
         for failure in (create, delete)
     ]
+
+
+def test_an_unreachable_canonical_write_listed_only_by_a_template_page_goes_to_an_authored_page():
+    packs = [{"id": "mozaikspay", "capability_source": "managed_capability", "status": "active",
+              "pack_source_path": str(MOZAIKSPAY_PACK)}]
+    files = {
+        "ui/route_manifest.json": "{}",
+        "ui/pages/billing.yaml": yaml.safe_dump({"name": "billing", "sections": [{"id": "t", "primitive": "ResourceTable", "config": {
+            "api_endpoint": "/api/modules/task_management/list_tasks", "columns": ["title"]}}]}),
+        "ui/pages/dashboard.yaml": yaml.safe_dump({"name": "dashboard", "sections": [{"id": "s", "primitive": "SummaryStrip", "config": {
+            "api_endpoint": "/api/modules/task_management/summarize_tasks", "items": []}}]}),
+        "modules/task_management/module.yaml": _module_yaml(),
+    }
+    failure = {
+        "test": "wiring_unreachable_canonical_write", "action": "task_management/create_task",
+        "page": "billing", "pages": ["billing"],
+        "error": "Canonical create action 'task_management/create_task' has no reachable page entry point, "
+                 "but page 'billing' lists its collection 'tasks'.",
+        "fix_suggestion": "Give the 'tasks' table on page 'billing' a toolbar action.",
+    }
+    errors = _wiring_repair_errors({"passed": False, "failed_tests": [failure]}, files, {"capability_packs": packs})
+    # billing.yaml is a pack template page and cannot be repaired; the authored reader of the module can.
+    assert len(errors) == 1 and errors[0].startswith("ui/pages/dashboard.yaml: Canonical create action")
+    # An authored listing page is the target itself.
+    failure = {**failure, "page": "tasks", "pages": ["billing", "tasks"]}
+    files["ui/pages/tasks.yaml"] = files["ui/pages/billing.yaml"].replace("name: billing", "name: tasks")
+    errors = _wiring_repair_errors({"passed": False, "failed_tests": [failure]}, files, {"capability_packs": packs})
+    assert errors[0].startswith("ui/pages/tasks.yaml: Canonical create action")
 
 
 def test_the_wiring_gate_passes_once_construction_supplies_every_canonical_write():

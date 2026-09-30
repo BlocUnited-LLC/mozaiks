@@ -54,17 +54,33 @@ output, so it constructs from the same approved inputs):
 - a create/edit `workflow` action that names no generated workflow is replaced
   by a modal form submitting the collection's one create-shaped or
   update-shaped mutation, when the bundle declares no workflows at all;
-- a gated update-shaped mutation on a collection that a list table shows gets
-  an Edit row action (with `selection: single`) and a modal form that submits
-  the typed action with `{selected_row.<identifier>}` and `{form.<field>}`
-  payload entries;
-- a gated canonical create (`create_<entity>`) on that collection gets a
+- the canonical update (`update_<entity>`) of a collection that a list table
+  shows gets an Edit row action (with `selection: single`) and a modal form
+  that submits the typed action with `{selected_row.<identifier>}` and
+  `{form.<field>}` payload entries, gated or not. A single gated
+  update-shaped mutation beside it gets its own row action and modal form,
+  labelled with the mutation's name when the canonical Edit is also built
+  (`open-<action>` and `<action>-modal` keep the two apart); two gated
+  update-shaped mutations are the author's choice;
+- the canonical create (`create_<entity>`) of that collection gets a
   `New <Entity>` toolbar action and a modal form submitting the create's
-  fields, and a gated canonical delete (`delete_<entity>`) gets a Delete row
+  fields, and the canonical delete (`delete_<entity>`) gets a Delete row
   action opening a confirmation dialog whose Delete button posts
-  `{selected_row.<identifier>}` (Cancel closes it). Only the canonical ids
-  qualify, so a custom delete-shaped mutation such as an archive action is
-  never presented as Delete.
+  `{selected_row.<identifier>}` (Cancel closes it), gated or not. Only the
+  canonical ids qualify, so a custom delete-shaped mutation such as an archive
+  action is never presented as Delete. Internal and `admin_internal` actions
+  get no entry point.
+
+A write every plan includes is ungated and still needs its entry point, so
+these constructions do not depend on `entitlement_gate`; notes name an
+ungated write `shared action <module>/<action>` and a gated one
+`gated action <module>/<action> (<gate>)`. When the page already holds a Modal
+(at any depth, under any id) whose enabled Form submits the write, or whose
+actions delete through it, the constructed opener opens that Modal instead of
+adding a second one. A Modal that submits the write only from its footer
+actions is not reused: footer actions carry no form state, so it collects no
+input. Code builds its own modal form and the note names the footer-only
+modal that stays unopened.
 
 The collection is the approved data-contract collection whose canonical list
 read the table binds; its identifier is the `search_by` field the canonical
@@ -137,7 +153,10 @@ every `owner: templates` output must ship a template. An acceptance diagnostic
 for an unreachable gated action is attributed to the authored page that reads
 the action's module, never to `ui/route_manifest.json` or a template page, so
 the page owner can repair it; with no authored page at all it is recorded
-unowned rather than dropped.
+unowned rather than dropped. An unreachable canonical write
+(`wiring_unreachable_canonical_write`) is attributed to the authored page that
+lists its collection. When only a template page lists it, the diagnostic is
+attributed the way a gated action's is.
 
 Canonical list/get response schemas declare the collection fields their existing
 read implementations project. This enriches the response declaration without
@@ -151,8 +170,15 @@ or its artifact-backed integration metadata. A proposed workflow name alone
 cannot authorize a button. CRUD actions use typed module references, including
 submit actions in create/edit forms, instead of invented workflow names.
 
-Every gated HTTP action must be reachable from a page. Internal actions remain
-outside this requirement, and ordinary ungated unused actions remain advisory.
+Every gated HTTP action must be reachable from a page
+(`wiring_unreachable_gated_action`). So must the canonical create, update and
+delete of every collection a page's DataTable or ResourceTable lists through
+its canonical list read, gated or not (`wiring_unreachable_canonical_write`,
+read against the bundle's `data/contract.json`). Each such failure is one
+message naming the action, the page or pages that list the collection, and
+the entry point to add. An action the gated check already reports is not
+repeated. Internal and `admin_internal` actions remain outside both
+requirements, and other ungated unused actions remain advisory.
 These checks cover declarative app pages under `ui/pages/` and run through the
 existing wiring acceptance gate and page repair
 path; they do not introduce a new runtime dispatcher or authorization policy.

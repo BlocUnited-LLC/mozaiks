@@ -1895,6 +1895,14 @@ def _wiring_repair_errors(
             path = _gated_action_owner_page(
                 str(failure.get("action") or ""), page_paths, generated_files, template_paths, context_variables,
             )
+        elif kind == "wiring_unreachable_canonical_write":
+            # The authored page that lists the collection carries it; a pack template
+            # page cannot be repaired, so then it goes where a gated action would.
+            listing = [page_paths.get(str(name)) for name in failure.get("pages") or [failure.get("page")]]
+            authored = [candidate for candidate in listing if candidate and candidate not in template_paths]
+            path = authored[0] if authored else _gated_action_owner_page(
+                str(failure.get("action") or ""), page_paths, generated_files, template_paths, context_variables,
+            )
         else:
             path = page_paths.get(str(failure.get("page") or ""))
         # With no authored page to carry it, the diagnostic is still recorded;
