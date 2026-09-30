@@ -1,10 +1,10 @@
 """Replay recorded pricing choices through the closed DesignDocs feature inventory.
 
 The fixture holds 27 distinct paid designs from 35 SubscriptionContractDesigner
-WAL packets in 26 chats. ``recorded`` records only the old model-authored
-capability and module gate fields. ``designer_output`` is their mechanical
-translation: each old capability maps to the approved module actions it gated;
-each plan selects the union of those actions. Unmapped names disappear. This
+WAL packets in 26 chats. ``recorded`` retains the old model-authored
+capability, module gate, and metering fields. ``designer_output`` is their
+mechanical translation: each old capability maps to the approved module actions
+it gated; each plan selects the union of those actions. Unmapped names disappear. This
 deliberately does not repair a product decision or invent a feature.
 
 The source DesignDocs chat and its saved design projection travel with every
@@ -102,9 +102,18 @@ def test_corpus_provenance_and_worktree_origins() -> None:
 
 
 @pytest.mark.parametrize("entry", CORPUS["fixtures"], ids=lambda entry: entry["id"])
-def test_fixture_translation_preserves_only_actions_backed_by_old_gates(entry: dict) -> None:
+def test_fixture_translation_preserves_actions_and_metering_declarations(entry: dict) -> None:
     output = entry["designer_output"]
     assert not {"module_contract_updates", "workflow_contract_updates", "code_files"} & output.keys()
+    recorded_metering = entry["recorded"]["metering_declarations"]
+    translated_metering = output["metering_declarations"]
+    assert translated_metering == recorded_metering
+    for original, translated in zip(recorded_metering, translated_metering, strict=True):
+        # The derivation reads surface_type, surface_id, and action_id. Wallet
+        # normalization reads wallet_id before derivation; preserve the entire
+        # declaration so future nonempty recordings exercise both checks.
+        for field in ("surface_type", "surface_id", "action_id", "wallet_id"):
+            assert translated[field] == original[field]
     mapping = _mapped_features(entry)
     plans = output["subscription_config_file"]["plans"]
     for original, plan in zip(entry["recorded"]["plans"], plans, strict=True):

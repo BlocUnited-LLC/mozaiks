@@ -422,7 +422,7 @@ models:
         description: Approved module action id, or null for a workflow surface meter.
       wallet_id:
         type: str
-        description: Token wallet to charge.
+        description: Must name a declared subscription_config_file.token_wallets[].wallet_id to charge.
       scope:
         type: literal
         values: [user, tenant]

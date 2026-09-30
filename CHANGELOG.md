@@ -62,6 +62,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Subscription-only pricing now saves when a generated metering declaration
+  references a wallet the design did not declare: the declaration is dropped
+  with an explanation in the review. Invalid metering targets for declared
+  wallets receive the valid choices in one correction.
+
 - DesignDocs saves the model's natural variation instead of rejecting
   corrections the contract determines. The live model changes a rejected design
   at most once and then resubmits it unchanged until the run is blocked, so each

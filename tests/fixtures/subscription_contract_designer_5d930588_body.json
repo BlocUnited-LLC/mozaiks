@@ -1,0 +1,131 @@
+{
+ "agent_message": "The app concept indicates a need for subscription management due to different feature sets in free and Pro tiers.",
+ "contract_required": true,
+ "rationale": "The concept features subscription plans with clear distinctions in functionalities, necessitating a subscription contract.",
+ "plan_design_rationale": [
+  {
+   "source_context": "monetization_enabled",
+   "signal": "true",
+   "decision": "Subscription contract required due to monetization enabled with distinct tiers.",
+   "affected_plan_ids": [
+    "free",
+    "pro"
+   ],
+   "affected_pricing_group_ids": []
+  },
+  {
+   "source_context": "concept_blueprint",
+   "signal": "monetization_intent.subscription_contract_likely=true",
+   "decision": "Validated necessity of a subscription contract based on monetization intent.",
+   "affected_plan_ids": [
+    "free",
+    "pro"
+   ],
+   "affected_pricing_group_ids": []
+  }
+ ],
+ "app_id": null,
+ "app_name": "TaskTracker Pro",
+ "subscription_config_file": {
+  "schema_version": "mozaiks.subscriptions.v1",
+  "label": "TaskTracker Pro Subscription Plans",
+  "default_plan_id": "free",
+  "assignment_store": {
+   "data_alias": "billing.subscriptions",
+   "app_id_field": "app_id",
+   "tenant_id_field": "tenant_id",
+   "workspace_id_field": null,
+   "user_id_field": "user_id",
+   "plan_id_field": "plan_id",
+   "status_field": "status",
+   "starts_at_field": null,
+   "expires_at_field": null,
+   "capabilities_field": "granted_capabilities",
+   "plan_snapshot_field": "plan_snapshot",
+   "revision_field": "billing_revision",
+   "active_statuses": [
+    "active",
+    "trial"
+   ]
+  },
+  "token_wallets": [],
+  "top_up_products": [],
+  "add_on_products": [],
+  "usage_charge_policies": [],
+  "pricing_catalog": null,
+  "plans": [
+   {
+    "plan_id": "free",
+    "label": "Free Plan",
+    "description": "A free plan with limited access to core features.",
+    "included_features": [
+     "module.task_management_module.create_task",
+     "module.task_management_module.update_task",
+     "module.task_management_module.delete_task"
+    ],
+    "usage_limits": [
+     {
+      "meter_id": "task_creation",
+      "label": "Task Creation Limit",
+      "unit": "requests",
+      "monthly_limit": 10,
+      "feature_id": "module.task_management_module.create_task"
+     }
+    ],
+    "token_allowances": []
+   },
+   {
+    "plan_id": "pro",
+    "label": "Pro Plan",
+    "description": "Access to advanced features with no limits.",
+    "included_features": [
+     "module.task_management_module.create_task",
+     "module.task_management_module.update_task",
+     "module.task_management_module.delete_task",
+     "module.task_management_module.summarize_tasks"
+    ],
+    "usage_limits": [],
+    "token_allowances": []
+   }
+  ]
+ },
+ "metering_declarations": [
+  {
+   "surface_type": "module_action",
+   "surface_id": "task_management_module",
+   "action_id": null,
+   "wallet_id": "ai_tokens",
+   "scope": "user",
+   "enforcement": "commit_actual",
+   "estimate": null,
+   "idempotency_key_source": "user_id"
+  }
+ ],
+ "page_surface_requirements": [
+  {
+   "page_id": "billing",
+   "route": "/billing",
+   "purpose": "Manage user subscription and billing status.",
+   "required_runtime_endpoints": [
+    "/api/subscriptions",
+    "/api/modules/billing_portal/list_plans"
+   ]
+  },
+  {
+   "page_id": "pricing",
+   "route": "/pricing",
+   "purpose": "Display available subscription plans and information.",
+   "required_runtime_endpoints": [
+    "/api/modules/billing_portal/list_plans"
+   ]
+  }
+ ],
+ "app_generator_instructions": [
+  {
+   "target": "AppPlanAgent",
+   "instruction": "Reuse the app-owned billing_portal facade's public_readonly list_plans action (no permissions) to fetch available subscription plans."
+  }
+ ],
+ "validation_notes": [],
+ "forbidden_outputs": []
+}

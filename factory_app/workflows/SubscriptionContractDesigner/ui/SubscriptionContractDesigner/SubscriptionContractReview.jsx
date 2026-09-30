@@ -149,6 +149,7 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
   const moduleGates = moduleUpdates.filter((update) => Boolean(update?.entitlement_gate));
   const pages = asList(payload.page_surface_requirements);
   const forbiddenOutputs = asList(payload.forbidden_outputs);
+  const validationNotes = asList(payload.validation_notes);
   const contractRequired = Boolean(payload.contract_required);
   const canRequestChanges = changeText.trim().length > 0 && submitted !== 'changes_requested';
 
@@ -313,6 +314,12 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
             Downstream generation should not create subscription settings, billing facades,
             token wallets, entitlement gates, or usage-metered workflow changes for this build.
           </p>
+        </Section>
+      )}
+
+      {validationNotes.length > 0 && (
+        <Section title="Validation Notes">
+          <TextList items={validationNotes} />
         </Section>
       )}
 

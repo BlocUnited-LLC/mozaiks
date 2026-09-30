@@ -400,15 +400,20 @@ def _derive_contract_updates(
     inventory = approved_feature_inventory(context_variables)
     gates = selected_feature_gates(selected_features_by_plan, context_variables)
     approved_workflows = set(approved_workflow_surface_ids(context_variables))
+    valid_module_actions = sorted({
+        (feature["module_id"], feature["action_id"])
+        for feature in inventory.values() if feature["surface_kind"] == "module"
+    })
     metering: dict[tuple[str, str], dict[str, Any]] = {}
     for declaration in output.get("metering_declarations") or []:
         if not isinstance(declaration, dict):
-            raise ValueError("metering_declarations entries must be objects.")
+            raise ValueError(f"Metering declaration {declaration!r} must be an object.")
         if declaration.get("surface_type") == "workflow":
             surface_id = declaration.get("surface_id")
             if surface_id not in approved_workflows or declaration.get("action_id") is not None:
                 raise ValueError(
-                    f"Workflow metering declaration references unavailable workflow surface {surface_id!r} "
+                    f"Workflow metering declaration {declaration!r} references unavailable workflow surface "
+                    f"{surface_id!r} "
                     "or specifies an action_id before workflow generation. "
                     f"Valid workflow surfaces: {sorted(approved_workflows)}. "
                     "Remove the declaration or have DesignDocs approve its workflow surface."
@@ -418,13 +423,15 @@ def _derive_contract_updates(
             continue
         module_id = declaration.get("surface_id")
         action_id = declaration.get("action_id")
-        if not isinstance(module_id, str) or not isinstance(action_id, str):
-            raise ValueError("Module metering declaration requires approved surface_id and action_id strings.")
-        feature_id = f"module.{module_id}.{action_id}"
-        if feature_id not in inventory:
+        if (
+            not isinstance(module_id, str)
+            or not isinstance(action_id, str)
+            or (module_id, action_id) not in valid_module_actions
+        ):
             raise ValueError(
-                f"Metering declaration references unavailable feature {feature_id!r}. "
-                f"Valid features: {sorted(inventory)}. Remove the feature or have DesignDocs approve its action."
+                f"Metering declaration {declaration!r} must reference an approved module action. "
+                f"Valid (surface_id, action_id) pairs: {valid_module_actions}. "
+                "Choose one pair or remove the declaration."
             )
         metering[(module_id, action_id)] = declaration
     module_updates = [
@@ -437,6 +444,44 @@ def _derive_contract_updates(
         for (module_id, action_id), declaration in sorted(metering.items())
     )
     return module_updates, []
+
+
+def _normalize_metering_declarations(
+    output: dict[str, Any], config: SubscriptionsConfig,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Keep only metering that can name a declared token wallet."""
+    declarations = output.get("metering_declarations") or []
+    wallet_ids = sorted(wallet.wallet_id for wallet in config.token_wallets)
+    if not wallet_ids:
+        notes: list[str] = []
+        for declaration in declarations:
+            reason = "subscription_config_file.token_wallets is empty; no wallet can execute metering"
+            logger.warning("METERING_DECLARATION_DROPPED declaration=%r reason=%s", declaration, reason)
+            notes.append(f"Dropped metering declaration {declaration!r}: {reason}.")
+        return [], notes
+
+    normalized: list[dict[str, Any]] = []
+    for declaration in declarations:
+        if not isinstance(declaration, dict):
+            raise ValueError(
+                f"Metering declaration {declaration!r} must be an object. "
+                f"Declared wallet ids: {wallet_ids}. Remove the declaration."
+            )
+        resolved = dict(declaration)
+        wallet_id = resolved.get("wallet_id")
+        if wallet_id not in wallet_ids:
+            if len(wallet_ids) != 1:
+                raise ValueError(
+                    f"Metering declaration {declaration!r} references undeclared wallet_id {wallet_id!r}. "
+                    f"Declared wallet ids: {wallet_ids}. Choose one or remove the declaration."
+                )
+            resolved["wallet_id"] = wallet_ids[0]
+            logger.info(
+                "METERING_DECLARATION_WALLET_BOUND declaration=%r wallet_id=%s reason=only declared wallet",
+                declaration, wallet_ids[0],
+            )
+        normalized.append(resolved)
+    return normalized, []
 
 
 def _token_wallet_usage_intent_present(
@@ -586,13 +631,14 @@ def _normalize_required(output: dict[str, Any], context_variables: Any) -> dict[
         raise ValueError("subscription_config_file must be an object when contract_required=true")
     compiled_config, selections = _compile_feature_selections(raw_config, context_variables)
     config = _normalize_subscription_config(compiled_config)
+    validated_config = SubscriptionsConfig.model_validate(config)
     normalized["selected_features_by_plan"] = selections
+    metering, notes = _normalize_metering_declarations(output, validated_config)
+    normalized["metering_declarations"] = metering
+    normalized["validation_notes"] = [*list(normalized.get("validation_notes") or []), *notes]
+    _validate_token_wallet_scope(normalized, validated_config)
     normalized["module_contract_updates"], normalized["workflow_contract_updates"] = _derive_contract_updates(
-        selections, output, context_variables,
-    )
-    _validate_token_wallet_scope(
-        normalized,
-        SubscriptionsConfig.model_validate(config),
+        selections, normalized, context_variables,
     )
     normalized["subscription_config_file"] = config
     normalized["plan_design_rationale"] = list(normalized.get("plan_design_rationale") or [])
