@@ -318,12 +318,14 @@ by existing materializers: the pack ID, its declared `surface_id`, and
 page task may use the structural scope `page_bundle` with type `page_bundle`,
 kind `ui_only`, and a null capability ID when approved ExperienceSpec pages
 exist. This scope never authorizes a capability or module task.
-What a page task owns determines that scope: a `page_bundle` task with a null
-capability ID whose every owned path is an approved page artifact is labelled
-`page_bundle` (kind `ui_only`) before the surface check, whatever surface_id
-the planner wrote (a live planner named one task per page after the page, and
-rejecting those labels told it to remove an approved page). This never applies
-to a task that owns anything else.
+What a page task owns determines that scope. Before the surface check, a
+`page_bundle` task with a null capability ID that owns at least one path, every
+one an approved page artifact (an approved page file or `app.json`), is labelled
+`page_bundle` with kind `ui_only` when its surface_id is not an approved surface,
+or when it is `page_bundle` with another kind. A live planner named one task per
+page after the page and resubmitted the rejected plan unchanged until its
+attempts ran out. A task under an approved surface keeps its label; a task that
+owns nothing, owns anything else, or carries a capability ID keeps the check.
 Any other unapproved surface rejects the plan without dropping or relabeling work. The
 normal `app_plan_feedback` revision loop names each surface and instructs the
 planner to remove its capability and tasks. Authentication feedback also states

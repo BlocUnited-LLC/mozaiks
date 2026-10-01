@@ -1178,23 +1178,30 @@ def _label_page_tasks(plan: dict[str, Any], context: Any) -> list[str]:
 
     Chat 64dbe4b9 at 95ad6325 planned one page_bundle task per approved page and
     gave each the page's name as its surface_id (dashboard, pricing, billing,
-    usage). The approved design already says who owns those pages, and review
-    accepts a page_bundle task owning only approved pages under the
-    ``page_bundle`` label. Review instead rejected the four labels as unapproved
-    surfaces and told the planner to remove the tasks, which would have dropped
-    an approved page; the model resubmitted the same plan until its attempts ran
-    out. The label is determined by what the task owns, so code sets it.
+    usage). Review accepts a page_bundle task owning only approved page
+    artifacts under the structural ``page_bundle`` label (kind ``ui_only``), but
+    it rejected the four page-name labels as unapproved surfaces, and the model
+    resubmitted the same plan until its three attempts ran out. The label is
+    determined by what the task owns, so code sets it: for a task under no
+    approved surface, or under ``page_bundle`` with another kind. A task owning
+    nothing has nothing to label it by and keeps its check.
     """
     approved = _approved_surface_ids(context)
     repairs: list[str] = []
     for task in plan.get("build_tasks") or []:
-        surface_id = str(task.get("surface_id") or "")
-        if surface_id == "page_bundle" or surface_id in approved or not _owns_only_approved_pages(task, context):
+        surface_id, surface_kind = str(task.get("surface_id") or ""), task.get("surface_kind")
+        if (
+            (surface_id == "page_bundle" and surface_kind == "ui_only")
+            or surface_id in approved
+            or not _normalized_owned_paths(task)
+            or not _owns_only_approved_pages(task, context)
+        ):
             continue
         task["surface_id"], task["surface_kind"] = "page_bundle", "ui_only"
         repairs.append(
-            f"{task.get('task_id')}: surface {surface_id!r} -> 'page_bundle'; a page_bundle task owning only "
-            f"approved pages {sorted(_normalized_owned_paths(task))} is not a surface of its own"
+            f"{task.get('task_id')}: surface {surface_id!r} ({surface_kind}) -> 'page_bundle' (ui_only); a "
+            f"page_bundle task owning only approved page artifacts {sorted(_normalized_owned_paths(task))} "
+            "is not a surface of its own"
         )
     return repairs
 

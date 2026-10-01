@@ -2,9 +2,9 @@
 
 The live release run at 95ad6325 (AppGenerator chat 64dbe4b9) planned one
 page_bundle task per approved page and gave each the page's name as its
-surface_id. Review rejected the four labels as unapproved surfaces, told the
-planner to remove the tasks (which would have dropped the approved Dashboard),
-and the model resubmitted the same plan until its three attempts ran out.
+surface_id. Review rejected the four labels as unapproved surfaces although
+what each task owns determines its label, and the model resubmitted the same
+plan until its three attempts ran out.
 
 ``fixtures/appplan_review_live_95ad6325.json`` holds that plan exactly as the
 model submitted it (read from the AG2 WAL) and the chat's starting context,
@@ -92,8 +92,9 @@ def test_the_live_plan_is_ready_and_dispatch_accepts_it(caplog):
     for label in PAGE_LABELS:
         task_id = f"page_bundle_tasks_{label}"
         assert (
-            f"[AppGenerator] plan repaired: {task_id}: surface {label!r} -> 'page_bundle'; a page_bundle task "
-            f"owning only approved pages ['ui/pages/{label}.yaml'] is not a surface of its own"
+            f"[AppGenerator] plan repaired: {task_id}: surface {label!r} (ui_only) -> 'page_bundle' (ui_only); "
+            f"a page_bundle task owning only approved page artifacts ['ui/pages/{label}.yaml'] is not a surface "
+            "of its own"
         ) in repairs
 
 
@@ -114,9 +115,60 @@ def test_a_page_task_under_an_approved_surface_keeps_its_label(caplog):
     page = next(task for task in plan["build_tasks"] if task["task_id"] == "page_bundle_tasks_dashboard")
     page["surface_id"] = "tasks"
 
-    app_plan_review._label_page_tasks(plan, _live_context())
+    repairs = app_plan_review._label_page_tasks(plan, _live_context())
 
     assert page["surface_id"] == "tasks"
+    assert not [repair for repair in repairs if repair.startswith("page_bundle_tasks_dashboard:")]
+
+
+def test_a_page_bundle_label_with_another_kind_is_given_the_ui_only_kind():
+    plan = _plan()
+    for task in plan["build_tasks"]:
+        if task["task_type"] == "page_bundle":
+            task["surface_id"], task["surface_kind"] = "page_bundle", "module"
+
+    result, context = _review(plan)
+
+    assert result == {"outcome": "ready", "task_count": 5}
+    (page,) = [task for task in detach(context.get("app_task_batch_items")) if task["task_type"] == "page_bundle"]
+    assert (page["surface_id"], page["surface_kind"]) == ("page_bundle", "ui_only")
+
+
+@pytest.mark.parametrize("owned_paths", [[], None])
+def test_a_page_task_owning_nothing_keeps_its_rejection(owned_paths):
+    plan = _plan()
+    plan["build_tasks"].append({
+        **deepcopy(next(task for task in plan["build_tasks"] if task["task_id"] == "page_bundle_tasks_dashboard")),
+        "task_id": "analytics_pages", "surface_id": "analytics", "owned_paths": owned_paths,
+        "initial_message": "Build an analytics module with revenue charts and a reports API.",
+    })
+
+    result, _context = _review(plan)
+
+    assert result["outcome"] == "needs_revision"
+    assert "unapproved surface 'analytics'" in result["error"]
+
+
+def test_a_page_task_owning_more_than_pages_keeps_its_rejection():
+    plan = _plan()
+    page = next(task for task in plan["build_tasks"] if task["task_id"] == "page_bundle_tasks_dashboard")
+    page["owned_paths"] = ["ui/pages/dashboard.yaml", "modules/dashboard/module.yaml"]
+
+    result, _context = _review(plan)
+
+    assert result["outcome"] == "needs_revision"
+    assert "unapproved surface 'dashboard'" in result["error"]
+
+
+def test_a_page_task_carrying_a_capability_keeps_its_rejection():
+    plan = _plan()
+    page = next(task for task in plan["build_tasks"] if task["task_id"] == "page_bundle_tasks_dashboard")
+    page["capability_pack_id"] = "dashboard"
+
+    result, _context = _review(plan)
+
+    assert result["outcome"] == "needs_revision"
+    assert "unapproved surface 'dashboard'" in result["error"]
 
 
 def test_a_non_page_task_with_an_invented_surface_is_still_rejected():
