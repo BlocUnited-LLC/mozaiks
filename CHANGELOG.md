@@ -69,8 +69,8 @@ This project follows a practical pre-1.0 changelog format:
   the same type for the same capability and surface that share a file are now
   merged into one, and references to the absorbed tasks follow it. Files other
   steps already assign (shared `app.json`, `config/subscriptions.yaml`, pack
-  outputs, pages) never trigger a merge, so plans that were accepted before are
-  unchanged; tasks of different types sharing a file are still rejected.
+  outputs, pages) never trigger a merge, and a plan that was accepted before is
+  still accepted; tasks of different types sharing a file are still rejected.
 
 - AppGenerator plan review no longer rejects a page task for being named after
   its page. A live planner gave its four page tasks the surface ids

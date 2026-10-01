@@ -247,3 +247,20 @@ def test_integration_needs_and_task_context_follow_the_keeper():
         {"key": "extra", "value": "1", "value_type": "string"},
     ]
     assert by_id["client"]["integration_needs"][0]["required_by"] == {"kind": "task", "id": "svc_a"}
+
+
+def test_references_with_stray_whitespace_follow_the_keeper():
+    plan = {"build_tasks": [
+        _task("svc_a", "business_services", [SERVICE]),
+        _task("svc_b ", "business_services", [SERVICE]),
+        _task("pages", "page_bundle", ["ui/pages/tasks.yaml"], depends_on=["svc_b "]),
+        _task("client", "api_surface", ["services/integrations/crm_client.py"],
+              integration_needs=[{"service": "crm", "required_by": {"kind": "task", "id": "svc_b "}}]),
+    ]}
+
+    app_plan_review._merge_split_tasks(plan, None)
+
+    by_id = {task["task_id"]: task for task in plan["build_tasks"]}
+    assert set(by_id) == {"svc_a", "pages", "client"}
+    assert by_id["pages"]["depends_on"] == ["svc_a"]
+    assert by_id["client"]["integration_needs"][0]["required_by"] == {"kind": "task", "id": "svc_a"}

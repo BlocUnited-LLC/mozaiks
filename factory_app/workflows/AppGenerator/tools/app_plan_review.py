@@ -1286,7 +1286,7 @@ def _merge_split_tasks(plan: dict[str, Any], context: Any) -> list[str]:
         return []
 
     def rename(refs: Any) -> list[str]:
-        return _dedupe_preserving_order(renamed.get(str(ref), str(ref)) for ref in refs or [])
+        return _dedupe_preserving_order(renamed.get(str(ref).strip(), str(ref)) for ref in refs or [])
 
     kept = [task for index, task in enumerate(tasks) if index not in absorbed]
     for task in kept:
@@ -1294,8 +1294,8 @@ def _merge_split_tasks(plan: dict[str, Any], context: Any) -> list[str]:
             task["depends_on"] = [ref for ref in rename(task.get("depends_on")) if ref != task.get("task_id")]
         for need in task.get("integration_needs") or []:
             required_by = need.get("required_by") if isinstance(need, dict) else None
-            if isinstance(required_by, dict) and required_by.get("kind") == "task" and required_by.get("id") in renamed:
-                required_by["id"] = renamed[required_by["id"]]
+            if isinstance(required_by, dict) and required_by.get("kind") == "task" and str(required_by.get("id") or "").strip() in renamed:
+                required_by["id"] = renamed[str(required_by["id"]).strip()]
     if plan.get("generation_order"):
         plan["generation_order"] = rename(plan["generation_order"])
     for decision in plan.get("carry_forward_decisions") or []:
