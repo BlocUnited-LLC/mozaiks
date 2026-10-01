@@ -62,6 +62,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator plan review no longer rejects a page task for being named after
+  its page. A live planner gave its four page tasks the surface ids
+  `dashboard`, `pricing`, `billing` and `usage`; review rejected them as
+  unapproved surfaces and told the planner to remove them, which would have
+  dropped the approved Dashboard, and the run ended after three identical
+  attempts. A page task that owns only approved pages is now labelled
+  `page_bundle` by code; pages a selected pack provides are then released as
+  before. Any other invented surface is still rejected.
+
 - AppGenerator plan review now accepts only plans that task dispatch can run.
   A live run's plan owned `modules/billing_portal/contracts/*.yaml`; review
   accepted it, task dispatch refused the pattern, and the run ended with no
