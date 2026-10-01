@@ -18,7 +18,9 @@ Algorithm
      orphaned_pages   — endpoints with no matching module action or platform endpoint (BLOCKING)
      orphaned_actions — module actions with no page referencing them (advisory warning)
 5. Check page output fields and workflow targets, and require reachable page
-   bindings for entitlement-gated, user-facing module actions.
+   bindings for entitlement-gated, user-facing module actions and for the
+   user-facing canonical create/update/delete of every collection a page
+   table lists, gated or not.
 
 Unresolved endpoints and missing input are blocking. A static/custom UI bundle
 may legitimately have no declarative page API references.
@@ -40,13 +42,21 @@ from mozaiksai.core.runtime.app.page_schema import (
     validate_ask_context_references,
 )
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    collection_has_canonical_writes,
+)
 from mozaiksai.core.workflow.generator_support.page_action_bindings import (
     PAGE_ACTION_FIELDS,
     generated_workflow_names,
     page_workflow_binding_errors,
     reachable_page_action_keys,
 )
+from mozaiksai.core.workflow.generator_support.page_binding_construction import (
+    canonical_write_ids,
+    listed_collections,
+)
 from mozaiksai.core.workflow.generator_support.page_data_bindings import (
+    iter_data_bound_sections,
     page_data_binding_errors,
     schema_field_paths,
 )
@@ -447,6 +457,67 @@ def _ask_context_binding_errors(pages: list[Any], contracts: dict[str, dict[str,
     return failures
 
 
+_TABLE_PRIMITIVES = frozenset({"DataTable", "ResourceTable"})
+_CANONICAL_WRITE_ENTRY_POINTS = {
+    "create": "a toolbar action (requires_selection: false) opening a modal Form whose submit_action posts to {endpoint}",
+    "update": (
+        "an Edit row action (requires_selection: true, table selection single) opening a modal Form with "
+        "initial_values_key: selected_row whose submit_action posts the row's identifier and fields to {endpoint}"
+    ),
+    "delete": (
+        "a Delete row action (requires_selection: true, table selection single) that posts the selected row's "
+        "identifier to {endpoint}, directly or from a confirmation modal"
+    ),
+}
+
+
+def _unreachable_canonical_write_errors(
+    pages: list[Any], contracts: dict[str, dict[str, Any]], data_contract: Any, reachable: set[str], reported: set[str],
+) -> list[dict[str, Any]]:
+    """Require an entry point for every user-facing canonical write of a collection a page table lists.
+
+    Page construction adds these whether or not a plan gates the write, so one
+    still unreachable is a construction the contracts did not determine; the
+    page that lists the collection must supply it. Actions in ``reported``
+    already failed the gated-action check and are not reported twice.
+    """
+    listed = listed_collections(data_contract)
+    writes: dict[str, tuple[str, str, list[str]]] = {}
+    for page in pages:
+        page_name = str(page.get("name") or "<unnamed>") if isinstance(page, dict) else "<unnamed>"
+        for section, key, _ in iter_data_bound_sections(page):
+            module_id, _, list_action = (key or "").partition("/")
+            collection = listed.get((module_id, list_action))
+            if section.get("primitive") not in _TABLE_PRIMITIVES or collection is None:
+                continue
+            if not collection_has_canonical_writes(collection):
+                continue
+            for operation, write_id in canonical_write_ids(collection).items():
+                write_key = f"{module_id}/{write_id}"
+                action = contracts.get(write_key)
+                if (
+                    action is None or write_key in reachable or write_key in reported
+                    or action.get("api_surface") in ("internal", "admin_internal")
+                ):
+                    continue
+                listing = writes.setdefault(write_key, (operation, str(collection.get("name")), []))[2]
+                if page_name not in listing:
+                    listing.append(page_name)
+    failures: list[dict[str, Any]] = []
+    for write_key, (operation, collection_name, listing) in sorted(writes.items()):
+        where = f"page '{listing[0]}'" if len(listing) == 1 else "pages " + ", ".join(f"'{name}'" for name in listing)
+        entry_point = _CANONICAL_WRITE_ENTRY_POINTS[operation].format(endpoint=f"/api/modules/{write_key}")
+        failures.append({
+            "test": "wiring_unreachable_canonical_write", "action": write_key, "page": listing[0], "pages": listing,
+            "error": (
+                f"Canonical {operation} action '{write_key}' has no reachable page entry point, but {where} "
+                f"lists its collection '{collection_name}'."
+            ),
+            "fix_suggestion": f"Give the '{collection_name}' table on page '{listing[0]}' {entry_point}.",
+        })
+    return failures
+
+
 # ---------------------------------------------------------------------------
 # Main tool function
 # ---------------------------------------------------------------------------
@@ -521,9 +592,9 @@ async def validate_wiring(
                 contract_files[path.relative_to(app_dir).as_posix()] = path.read_text(encoding="utf-8")
             except (OSError, UnicodeError):
                 _logger.warning("validate_wiring: module contract could not be read: %s", path)
-        manifest_path = app_dir / "ui/route_manifest.json"
-        if manifest_path.is_file():
-            contract_files["ui/route_manifest.json"] = manifest_path.read_text(encoding="utf-8")
+        for relative in ("ui/route_manifest.json", "data/contract.json"):
+            if (app_dir / relative).is_file():
+                contract_files[relative] = (app_dir / relative).read_text(encoding="utf-8")
         if not app_pages:
             app_pages = [
                 yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -569,6 +640,14 @@ async def validate_wiring(
             "error": f"Gated user-facing action '{key}' ({action_contracts[key]['entitlement_gate']}) has no reachable page binding.",
             "fix_suggestion": "Bind the action to a page read or typed submit/delete action; modal forms need a reachable opener.",
         })
+    try:
+        data_contract = json.loads(contract_files.get("data/contract.json") or "null")
+    except json.JSONDecodeError:
+        data_contract = None  # The bundle scanner owns malformed contract diagnostics.
+    canonical_write_failures = _unreachable_canonical_write_errors(
+        app_pages, action_contracts, data_contract, reachable_actions, set(unreachable_gated_actions),
+    )
+    page_binding_failures.extend(canonical_write_failures)
 
     # Collect endpoint references after standalone disk pages have been resolved.
     endpoint_refs = _extract_endpoint_refs(app_pages)
@@ -734,6 +813,7 @@ async def validate_wiring(
             "ask_context_failures": ask_context_failures,
             "page_binding_failures": page_binding_failures,
             "unreachable_gated_actions": unreachable_gated_actions,
+            "unreachable_canonical_writes": [failure["action"] for failure in canonical_write_failures],
             "total_endpoints_referenced": len(endpoint_refs),
             "wired_count": len(wired),
             "platform_endpoint_count": len(platform_endpoints),

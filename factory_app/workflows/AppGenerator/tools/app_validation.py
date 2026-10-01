@@ -1884,12 +1884,23 @@ def _wiring_repair_errors(
     template_paths = _template_owned_paths(context_variables)
     for failure in wiring_result.get("failed_tests") or []:
         kind = failure.get("test")
-        if kind not in {"wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action"}:
+        if kind not in {
+            "wiring_page_output", "wiring_page_workflow", "wiring_unreachable_gated_action",
+            "wiring_unreachable_canonical_write",
+        }:
             continue
         if kind == "wiring_unreachable_gated_action":
             # The page bundle owns placement across its pages; do not route this
             # to the module owner or remove the gate to silence the diagnostic.
             path = _gated_action_owner_page(
+                str(failure.get("action") or ""), page_paths, generated_files, template_paths, context_variables,
+            )
+        elif kind == "wiring_unreachable_canonical_write":
+            # The authored page that lists the collection carries it; a pack template
+            # page cannot be repaired, so then it goes where a gated action would.
+            listing = [page_paths.get(str(name)) for name in failure.get("pages") or [failure.get("page")]]
+            authored = [candidate for candidate in listing if candidate and candidate not in template_paths]
+            path = authored[0] if authored else _gated_action_owner_page(
                 str(failure.get("action") or ""), page_paths, generated_files, template_paths, context_variables,
             )
         else:
