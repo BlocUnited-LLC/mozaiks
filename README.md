@@ -58,24 +58,38 @@ Five steps from a checkout to your first app in Studio.
 ### Prerequisites
 
 - Python 3.11+
-- Node.js 18+
+- Node.js 20.19+ or 22.12+ (the Studio frontend builds with Vite 8, which
+  requires Node.js `^20.19.0 || >=22.12.0`)
 - A reachable MongoDB database for workspace state
 
 Docker Desktop is not required; use MongoDB Atlas, a local MongoDB install, or
 Docker only if that is how you prefer to run MongoDB.
 
+Commands below are shown for Windows PowerShell and for macOS / Linux shells
+(bash or zsh) wherever the two differ.
+
 ### 1. Install
 
 Mozaiks is not published as a public PyPI package yet. Install it from a local
-checkout in editable mode:
+checkout in editable mode. These commands are the same in every shell:
 
-```powershell
+```bash
+git clone https://github.com/BlocUnited-LLC/mozaiks.git
+cd mozaiks
 python -m pip install -e ".[dev]"
 ```
+
+On macOS and Linux, use `python3` wherever these steps say `python` if your
+system has no `python` command. If pip refuses with an
+`externally-managed-environment` error, create and activate a virtual
+environment first, as shown in
+[Local Setup](https://docs.mozaiks.ai/local-setup/#manual-editable-setup).
 
 ### 2. Point Mozaiks at MongoDB
 
 Studio stores workspace state in MongoDB, so configure it before opening Studio:
+
+**Windows (PowerShell)**
 
 ```powershell
 # Local MongoDB
@@ -85,14 +99,32 @@ $env:MONGO_URI="mongodb://localhost:27017/mozaiks"
 $env:MONGO_URI="<your MongoDB connection string>"
 ```
 
+**macOS / Linux (bash or zsh)**
+
+```bash
+# Local MongoDB
+export MONGO_URI="mongodb://localhost:27017/mozaiks"
+
+# Or MongoDB Atlas
+export MONGO_URI="<your MongoDB connection string>"
+```
+
 ### 3. Set an LLM key
 
 Builds call an LLM, but you do not need to begin with a paid provider. The
 default example uses Google Gemini because the Gemini API offers a free tier
 ([current pricing and limits](https://ai.google.dev/gemini-api/docs/pricing)):
 
+**Windows (PowerShell)**
+
 ```powershell
 $env:GEMINI_API_KEY="your-key-here"
+```
+
+**macOS / Linux (bash or zsh)**
+
+```bash
+export GEMINI_API_KEY="your-key-here"
 ```
 
 Mozaiks is not tied to Gemini. OpenAI and Anthropic work too — set
@@ -100,15 +132,26 @@ Mozaiks is not tied to Gemini. OpenAI and Anthropic work too — set
 Studio or via `--provider`. Each provider sets its own pricing and usage
 limits.
 
+Variables set this way last only for the current terminal session. Run
+step 4 in the same terminal, or set them again in a new one.
+
 ### 4. Create your workspace and open Studio
+
+**Windows (PowerShell)**
 
 ```powershell
 python -m mozaiks quickstart --dir .\mozaiks-workspace
 ```
 
-This creates `.\mozaiks-workspace` and starts the local Studio.
+**macOS / Linux (bash or zsh)**
 
-`.\mozaiks-workspace` is the local workspace folder Mozaiks uses for generated
+```bash
+python -m mozaiks quickstart --dir ./mozaiks-workspace
+```
+
+This creates the `mozaiks-workspace` folder and starts the local Studio.
+
+`mozaiks-workspace` is the local workspace folder Mozaiks uses for generated
 output, config, and launch scripts. It is not the app itself. The app is
 created later from inside Studio.
 
@@ -240,7 +283,10 @@ BlocUnited's hosted platform to run.
 - [Workflow Authoring Contracts](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/architecture/workflows/workflow-authoring-contracts.md) — Canonical strict YAML contract
 - [Contributing](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CONTRIBUTING.md) — Development workflow
 
-Build the docs locally with `pip install -r requirements-docs.txt` and `./scripts/build-docs.ps1`.
+Preview the docs locally with `python -m pip install -e ".[docs]"` followed by
+`python -m mkdocs serve` (the same commands in every shell). See
+[Contributing](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CONTRIBUTING.md#what-you-can-contribute-without-extra-setup)
+for details.
 
 ---
 
