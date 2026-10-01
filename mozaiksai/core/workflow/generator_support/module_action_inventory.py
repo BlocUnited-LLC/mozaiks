@@ -391,6 +391,53 @@ def pack_owned_output_paths(context_variables: Any) -> frozenset[str]:
     return frozenset(pack_owned_outputs(context_variables))
 
 
+class PackFacadeDirectory(NamedTuple):
+    """A selected pack's facade module directory and the declared files in it a pack leaves to others."""
+
+    pack_id: str
+    path: str
+    exempt: frozenset[str]
+
+    def owns(self, path: str) -> bool:
+        """Owning the directory itself claims every file in it, the pack's included."""
+        return path == self.path or (path.startswith(f"{self.path}/") and path not in self.exempt)
+
+
+def pack_facade_directories(context_variables: Any) -> list[PackFacadeDirectory]:
+    """The module directory of every facade a selected pack declares.
+
+    A facade module belongs to its pack: the templates ship the module and the
+    contract declares every file the pack wants in it, so a path under
+    ``modules/<facade>/`` the contract does not declare is never model work. A
+    declared path keeps the owner :func:`pack_owned_outputs` gives it: a
+    ``generator`` output, or a ``workspace`` file outside genesis, is exempt.
+    """
+    if context_variables is None:
+        return []
+    owned = pack_owned_output_paths(context_variables)
+    directories: dict[str, tuple[str, set[str]]] = {}
+    for pack in _selected_packs(context_variables):
+        for contract in pack.contracts:
+            declared = {
+                _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
+                for entry in contract.get("required_outputs") or []
+            }
+            for facade in contract.get("facades") or []:
+                module_id = facade.get("module_id") if isinstance(facade, Mapping) else None
+                if not isinstance(module_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", module_id):
+                    continue
+                path = f"modules/{module_id}"
+                _, exempt = directories.setdefault(path, (pack.pack_id, set()))
+                exempt.update(
+                    declared_path for declared_path in declared
+                    if declared_path and declared_path.startswith(f"{path}/") and declared_path not in owned
+                )
+    return [
+        PackFacadeDirectory(pack_id, path, frozenset(exempt))
+        for path, (pack_id, exempt) in sorted(directories.items())
+    ]
+
+
 def pack_template_module_contracts(context_variables: Any) -> dict[str, str]:
     """``module.yaml`` contracts the selected packs' templates provide, by bundle path.
 

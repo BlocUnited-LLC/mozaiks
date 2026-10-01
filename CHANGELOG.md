@@ -62,6 +62,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator plan review now accepts only plans that task dispatch can run.
+  A live run's plan owned `modules/billing_portal/contracts/*.yaml`; review
+  accepted it, task dispatch refused the pattern, and the run ended with no
+  chance to correct it. Review now checks every owned path with dispatch's own
+  rules. A pattern is removed and logged: the module's contract task can
+  already write any companion manifest. Any other path dispatch refuses
+  (absolute, traversal, or a secret term) is sent back to the planner with
+  dispatch's message. Before declaring a plan ready, review runs dispatch's
+  owned-path and collision check on the exact tasks it will hand over, and
+  lists every problem in one message. A selected pack's facade module, such as
+  MozaiksPay's `modules/billing_portal/`, is now entirely the pack's: no task
+  is planned for any file in it unless the pack asks for one.
+
 - AppGenerator no longer plans a page section on an action that does not
   exist. A live run's plan bound its Dashboard KPI strip to
   `tasks/get_kpi_stats`, which no approved module declares; review accepted it

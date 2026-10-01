@@ -738,9 +738,12 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
 
     tasks = {task["task_id"]: task for task in cached_plan["build_tasks"]}
     # Pack-owned outputs are never model work: the plan keeps only what the pack does not ship.
+    # The facade module is the pack's entirely, so the package marker a task added beside its
+    # declared files is released too, and the emptied task goes with its edges.
     assert "mozaikspay.billing_facade_contract" not in tasks and "mozaikspay.billing_models" not in tasks
+    assert "mozaikspay.billing_services" not in tasks
+    assert "mozaikspay.billing_services" not in tasks["mozaikspay.pages"]["depends_on"]
     assert tasks["mozaikspay.adapter"]["owned_paths"] == ["services/integrations/__init__.py"]
-    assert tasks["mozaikspay.billing_services"]["owned_paths"] == ["modules/billing_portal/backend/__init__.py"]
     assert tasks["mozaikspay.pages"]["owned_paths"] == [
         "app.json", "config/ai.json", "config/shell.json", "ui/pages/reports.yaml",
     ]
