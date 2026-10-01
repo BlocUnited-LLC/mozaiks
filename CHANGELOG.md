@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Updated the AG2 runtime dependency to `1.1.1` for every AG2 extra. AG2
+  `1.0.5` is affected by six AG2 security advisories: GHSA-hf3x-42qp-4rq6,
+  GHSA-qrjx-72xx-xhmh, GHSA-fxhh-6rm2-v2pp and GHSA-2h3q-9p6m-4hm4 (fixed in
+  `1.1.0`), and GHSA-2h4w-29cv-2cmv and GHSA-rppm-w5cw-6qcg (fixed in
+  `1.1.1`). Mozaiks pins AG2 exactly, so installations could not take the fixes
+  on their own. No Mozaiks code or configuration changes are required.
+
 - JWT and Keycloak authentication now require an audience at startup and
   verify it and an access-token type on every bearer token (`AUTH_AUDIENCE` for JWT,
   `KEYCLOAK_CLIENT_ID` for Keycloak). Deployments that left these unset must
