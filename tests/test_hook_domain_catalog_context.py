@@ -353,7 +353,8 @@ class TestInjectModuleFileManifestGuard:
         msg = agent.system_message
         assert "Optional files listed above are an ownership boundary" in msg
         assert "populated typed module_contract field" in msg
-        assert "Never mirror a null typed field into code_files" in msg
+        assert "Never write a companion contract as a raw code_files entry" in msg
+        assert "module_contract.reactions_yaml, optional - null emits no file" in msg
         assert "Generate ONLY the YAML files listed above" not in msg
 
         agents_text = (_APPGEN_DIR / "agents.yaml").read_text(encoding="utf-8")

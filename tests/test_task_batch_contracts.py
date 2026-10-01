@@ -1128,10 +1128,10 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
         error = "outside owned_paths"
     elif failure_kind == "null_manifest":
         invalid = {
-            "module_contract": {"module_id": "profiles", "events_yaml": None},
-            "code_files": [{"filename": "modules/profiles/contracts/events.yaml", "content": "events: []"}],
+            "module_contract": {"module_id": "profiles", "module_yaml": None},
+            "code_files": [{"filename": "modules/profiles/module.yaml", "content": "id: profiles"}],
         }
-        error = "events_yaml is null"
+        error = "module_yaml is null"
     elif failure_kind == "task_identity":
         invalid = {**valid, "task_id": "another_task"}
         error = "mismatched task_id"

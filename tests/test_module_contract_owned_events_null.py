@@ -24,6 +24,10 @@ complaint. The optional set was hand-listed and missed three.
 The dependents were drained with it: ``app.json`` and both planned pages
 depend on every module contract for visibility, so one module with nothing
 to declare produced no app at all.
+
+The raw-file guard itself has since stopped rejecting: a null typed companion
+field means the module declares none, so code drops the raw duplicate and
+logs it. The live output of this build is now admitted, without the file.
 """
 
 from __future__ import annotations
@@ -151,11 +155,13 @@ def test_null_reactions_with_no_reactions_file_passes():
     assert REACTIONS not in files
 
 
-def test_null_reactions_with_raw_file_remains_rejected():
+def test_null_reactions_with_raw_file_is_dropped_and_admitted():
     output = _output(None, raw_events_file=False)
     output["code_files"].append({"filename": REACTIONS, "content": "schema_version: mozaiks.reactions.v1\nreactions: []\n"})
-    with pytest.raises(ValueError, match=f"module_contract.reactions_yaml is null but raw output emits {REACTIONS}"):
-        _admit(output)
+    files = _admit(output)
+
+    assert MANIFEST in files
+    assert REACTIONS not in files
 
 
 def test_typed_reactions_materialize_without_raw_mirror():
@@ -176,17 +182,15 @@ def test_typed_reactions_materialize_without_raw_mirror():
 
 
 # --------------------------------------------------------------------------
-# 2. The live output is still rejected - the guard is untouched
+# 2. The live output is admitted: the null typed field wins over the raw file
 # --------------------------------------------------------------------------
 
 
-def test_null_events_with_raw_events_file_is_still_rejected():
-    with pytest.raises(ValueError) as error:
-        _admit(_output(None, raw_events_file=True))
+def test_null_events_with_raw_events_file_is_admitted_without_the_file():
+    files = _admit(_output(None, raw_events_file=True))
 
-    message = str(error.value)
-    assert f"module_contract.events_yaml is null but raw output emits {EVENTS}" in message
-    assert "omit contracts/events.yaml from code_files" in message
+    assert MANIFEST in files
+    assert EVENTS not in files, "the raw copy of a null typed field is dropped, never shipped"
 
 
 # --------------------------------------------------------------------------

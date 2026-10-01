@@ -16,6 +16,12 @@ had the same gap from the other direction: it said "do not mirror null
 manifests into code_files" and, separately, "plus code_files for the corrected
 YAML files only". Neither states the invariant the guard enforces, which is
 directional - a file in code_files requires its field, not merely the reverse.
+
+The typed side still wins, but a null companion field is now resolved by code
+rather than by rejection: it means the module declares none, so the raw
+duplicate is dropped (tests/test_module_contract_raw_companions.py has the
+live replay). Only module.yaml, the one required output, is still rejected
+when its typed field is null.
 """
 
 from __future__ import annotations
@@ -46,26 +52,28 @@ def _payload(events_yaml, include_raw_file: bool) -> dict:
     return payload
 
 
-def test_a_raw_contract_file_with_a_null_field_is_rejected() -> None:
-    with pytest.raises(ValueError, match="is null but raw output emits"):
-        extract_code_file_map_from_payload(_payload(None, include_raw_file=True))
+def test_a_raw_contract_file_with_a_null_field_is_dropped() -> None:
+    files = extract_code_file_map_from_payload(_payload(None, include_raw_file=True))
+
+    assert "modules/habits/contracts/events.yaml" not in files
+    assert "modules/habits/module.yaml" in files
 
 
-def test_the_error_says_what_to_do_instead_of_only_what_is_wrong() -> None:
-    """Three identical retries suggest the message was not actionable."""
+def test_a_raw_module_yaml_with_a_null_field_says_what_to_do() -> None:
+    """module.yaml is required, so its null field is still an error, and the
+    message must be actionable: three identical retries followed one that was
+    not."""
+    payload = {
+        "module_contract": {"module_id": "habits", "module_yaml": None},
+        "code_files": [{"path": "modules/habits/module.yaml", "content": "module: {id: habits}\n"}],
+    }
     with pytest.raises(ValueError) as error:
-        extract_code_file_map_from_payload(_payload(None, include_raw_file=True))
+        extract_code_file_map_from_payload(payload)
 
     message = str(error.value)
-    assert "Set module_contract.events_yaml" in message
+    assert "module_contract.module_yaml is null but raw output emits modules/habits/module.yaml" in message
+    assert "set it there" in message
     assert "skips schema materialization" in message
-    # A module with no events is told to set the field, which its prompt says
-    # to leave null. Without the second branch it retries the same output until
-    # the budget ends - a live build did exactly that. The advice must say what
-    # the null case does instead.
-    assert "when module_contract.events_yaml is null" in message
-    assert "omit contracts/events.yaml from code_files" in message
-    assert "a null field emits nothing" in message
 
 
 def test_the_typed_field_alone_is_accepted() -> None:
@@ -107,5 +115,5 @@ def test_an_absent_field_is_treated_as_null() -> None:
         "module_contract": {"module_id": "habits", "module_yaml": {"module": {"id": "habits"}}},
         "code_files": [{"path": "modules/habits/contracts/events.yaml", "content": "events: []\n"}],
     }
-    with pytest.raises(ValueError, match="is null but raw output emits"):
-        extract_code_file_map_from_payload(payload)
+
+    assert "modules/habits/contracts/events.yaml" not in extract_code_file_map_from_payload(payload)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from copy import deepcopy
 from pathlib import PurePosixPath
@@ -26,6 +27,8 @@ from .persistence_artifacts import (
     normalize_data_contract_indexes,
 )
 from .subscription_data_contract import ensure_subscription_assignment_stores
+
+logger = logging.getLogger(__name__)
 
 _MODULE_CONTRACT_FILENAMES = {
     "admin.yaml",
@@ -352,6 +355,19 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
     return file_map
 
 
+def _is_empty_contract(content: str) -> bool:
+    """Whether a raw contract file declares nothing beyond its schema_version."""
+    try:
+        document = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return False
+    if document in (None, [], {}):
+        return True
+    return isinstance(document, dict) and not any(
+        value for key, value in document.items() if key != "schema_version"
+    )
+
+
 def _normalize_code_file_entries(raw_entries: Any) -> dict[str, str]:
     file_map: dict[str, str] = {}
     if not isinstance(raw_entries, list):
@@ -469,23 +485,32 @@ def extract_code_file_map_from_payload(
             # An absent key is treated as null. The strict structured output
             # always carries every key, so only a hand-built bundle can omit
             # one, and a raw companion file must not slip past on that alone.
-            if bundle.get(key) is None and path in file_map:
-                # Not a consistency nicety. Typed fields are materialized above -
-                # action schemas compiled, event entries normalized - and a raw
-                # file in code_files bypasses every bit of that. Accepting the
-                # raw file would ship a contract that never went through the
-                # typed pipeline, so the disagreement has to be an error and the
-                # typed field is the side that must win.
-                # The advice has to cover both cases or a module with nothing
-                # to declare is told to set a field its prompt says to leave
-                # null, and retries with the same output until the budget ends.
+            if bundle.get(key) is not None or path not in file_map:
+                continue
+            # Not a consistency nicety. Typed fields are materialized above -
+            # action schemas compiled, event entries normalized - and a raw
+            # file in code_files bypasses every bit of that. A raw file never
+            # ships: the typed field is the side that wins.
+            if key == "module_yaml":
+                # module.yaml is the one required output, so a null field here
+                # determines nothing and the raw file cannot stand in for it.
                 raise ValueError(
-                    f"module_contract.{key} is null but raw output emits {path}. "
-                    f"Set module_contract.{key} to the contract when the module declares one; "
-                    f"when module_contract.{key} is null, omit {relative_path} from code_files "
-                    "entirely, since a null field emits nothing and a raw contract file "
-                    "skips schema materialization."
+                    f"module_contract.module_yaml is null but raw output emits {path}. "
+                    "module.yaml is required and is emitted only through module_contract.module_yaml; "
+                    "set it there, since a raw contract file skips schema materialization."
                 )
+            # A null companion field is determined: the module declares none.
+            # Code removes the raw duplicate instead of failing the task on an
+            # optional detail - rejecting it cost a live build its contract
+            # task while the worker followed a guard that listed the owned
+            # companion files.
+            empty = _is_empty_contract(file_map.pop(path))
+            logger.log(
+                logging.INFO if empty else logging.WARNING,
+                "MODULE_CONTRACT_RAW_COMPANION_DROPPED: path=%s empty_contract=%s; "
+                "module_contract.%s is null, so the module declares none and the typed field wins",
+                path, empty, key,
+            )
 
     return materialize_collection_auth(file_map, data_contract=payload.get("data_contract"))
 

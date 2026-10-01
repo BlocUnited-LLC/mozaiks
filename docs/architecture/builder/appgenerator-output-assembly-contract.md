@@ -1124,6 +1124,14 @@ Materialization rule:
   nullable: null means no file. Tasks must explicitly own any companion they
   generate; ordinary CRUD does not automatically create admin/settings/events
   manifests. Do not serialize null manifests as empty YAML or raw file mirrors.
+- A companion contract comes only from its typed `module_contract.<name>_yaml`
+  field. Extraction overwrites a raw `code_files` copy of a populated field
+  with the typed serialization, and removes a raw companion whose typed field
+  is null, logging `MODULE_CONTRACT_RAW_COMPANION_DROPPED` with the path and
+  whether the file declared nothing. A null field means the module declares
+  none, so the raw duplicate is dropped rather than rejecting the task. A raw
+  `module.yaml` with a null `module_yaml` is rejected, because module.yaml is
+  required.
 
 - typed agent outputs such as `app_backend_admin_config`, `python_files`, and
   `js_files` are the source of truth for their owned lanes
