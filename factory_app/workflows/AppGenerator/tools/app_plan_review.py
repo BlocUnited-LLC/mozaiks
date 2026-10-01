@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Annotated, Any
 
 import yaml
@@ -22,7 +24,9 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _normalized_owned_paths,
     _pack_facades,
     _pack_id_from_descriptor,
+    _release_owned_paths,
     app_build_plan,
+    release_pack_facade_paths,
     release_pack_owned_paths,
     release_subscriptions_config,
 )
@@ -36,11 +40,24 @@ from mozaiksai.core.workflow.dependency_graph import deterministic_topological_o
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    PackFacadeDirectory,
+    pack_facade_directories,
     pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
+# Dispatch's own owned-path rules, not copies: review must accept exactly what
+# task dispatch will run.
+from mozaiksai.core.workflow.path_ownership import _GLOB_CHARS, normalize_owned_path
+from mozaiksai.core.workflow.task_batches import (
+    _normalize_task_items,
+    _validate_batch_owned_paths,
+    load_task_batches_config,
+)
+
 logger = logging.getLogger(__name__)
+
+_WORKFLOWS_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _clear_plan(context: Any) -> None:
@@ -458,9 +475,59 @@ def _repair_user_data_scope(plan: dict[str, Any], context: Any) -> list[str]:
     return repairs
 
 
-def _authored_module_paths(pack: dict[str, Any], context: Any, pack_paths: frozenset[str]) -> dict[str, set[str]]:
-    """The required module files a task authors: those no selected pack ships from its templates."""
-    return {kind: paths - pack_paths for kind, paths in _required_module_paths(pack, context).items()}
+def _authored_module_paths(
+    pack: dict[str, Any], context: Any, pack_paths: frozenset[str], facades: Sequence[PackFacadeDirectory],
+) -> dict[str, set[str]]:
+    """The required module files a task authors: those no selected pack ships or holds in its facade module."""
+    return {
+        kind: {path for path in paths if not _pack_owns(path, pack_paths, facades)}
+        for kind, paths in _required_module_paths(pack, context).items()
+    }
+
+
+def _pack_owns(path: str, pack_paths: frozenset[str], facades: Sequence[PackFacadeDirectory]) -> bool:
+    return path in pack_paths or any(facade.owns(path) for facade in facades)
+
+
+def _is_glob_pattern(path: str) -> bool:
+    return bool(_GLOB_CHARS.intersection(path))
+
+
+def _apply_dispatch_path_rules(plan: dict[str, Any]) -> list[str]:
+    """Hold every owned path to task dispatch's rules before anything else reads it.
+
+    Review checked owned paths with is_safe_app_path, which accepts a pattern;
+    dispatch normalizes each with normalize_owned_path, which refuses one.
+    Chat e67150d7 at 49c69860 passed review owning
+    modules/billing_portal/contracts/*.yaml and
+    modules/task_registry/contracts/*.yaml, and dispatch ended the run in
+    AppPlanAgent's turn: "glob characters not allowed in owned path".
+
+    A pattern names no file. The companion manifests it reaches for are
+    already optional outputs of the module's module_contract task
+    (optional_task_output_paths), so it is released; a task left with nothing
+    to build is dropped with its dependency edges. Any other path dispatch
+    refuses (absolute, traversal, a secret term) needs the planner, so the
+    plan is rejected with dispatch's own message for each.
+    """
+    refused: list[str] = []
+    for task in plan.get("build_tasks") or []:
+        for path in task.get("owned_paths") or []:
+            try:
+                normalize_owned_path(path)
+            except ValueError as error:
+                if not _is_glob_pattern(str(path)):
+                    refused.append(f"{task.get('task_id')}: {error}")
+    if refused:
+        raise ValueError(
+            "Task dispatch refuses these owned paths; every owned path is one exact "
+            "app-bundle-relative file:\n- " + "\n- ".join(refused)
+        )
+    return _release_owned_paths(
+        plan, _is_glob_pattern, owner="a pattern, not a file",
+        provider="task dispatch refuses patterns, and a module's contracts/ companions "
+        "are optional outputs of its module_contract task",
+    )
 
 
 def _repair_selected_pack_sources(plan: dict[str, Any], context: Any) -> list[str]:
@@ -623,7 +690,8 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
 
     # 3. Every generated module needs its required files owned by a task of the
     #    right type. The required set is derived exactly as the validator does;
-    #    files a selected pack ships (a facade's template module) need no task.
+    #    files a selected pack owns (its templates, its facade module) need no task.
+    facades = pack_facade_directories(context)
     path_owners: dict[str, list[str]] = {}
     for task in tasks:
         for path in _normalized_owned_paths(task):
@@ -633,7 +701,7 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             continue
         module_id = _pack_id_from_descriptor(pack)
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
-        required = _authored_module_paths(pack, context, pack_paths)
+        required = _authored_module_paths(pack, context, pack_paths, facades)
 
         for kind, paths in required.items():
             typed = [t for t in module_tasks if t.get("task_type") == kind]
@@ -710,13 +778,14 @@ def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list
         and "data/contract.json" in _normalized_owned_paths(task)
     ]
     pack_paths = pack_owned_output_paths(context)
+    facades = pack_facade_directories(context)
     for pack in plan.get("capability_packs") or []:
         if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
             continue
         module_id = _pack_id_from_descriptor(pack)
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
         prerequisites: dict[str, str] = {}
-        required_paths = _authored_module_paths(pack, context, pack_paths)
+        required_paths = _authored_module_paths(pack, context, pack_paths, facades)
         for kind in ("module_contract", "data_models"):
             if not required_paths[kind]:
                 continue  # the selected pack's template is the contract input
@@ -1246,13 +1315,15 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
     if not tasks:
         raise ValueError("A build plan must declare materializing build_tasks, not just a page or capability inventory")
     pack_paths = pack_owned_output_paths(context)
+    facades = pack_facade_directories(context)
     pack_owned = {
-        str(task.get("task_id")): sorted(set(_normalized_owned_paths(task)) & pack_paths)
-        for task in tasks if set(_normalized_owned_paths(task)) & pack_paths
+        str(task.get("task_id")): claimed
+        for task in tasks
+        if (claimed := sorted(path for path in _normalized_owned_paths(task) if _pack_owns(path, pack_paths, facades)))
     }
     if pack_owned:
         raise ValueError(
-            "Selected packs write these paths from their templates, so no task may own them: "
+            "Selected packs own these paths (template outputs and facade modules), so no task may own them: "
             + "; ".join(f"{task_id} owns {paths}" for task_id, paths in sorted(pack_owned.items()))
         )
     if context.get("build_mode") == "revision" or context.get("brownfield_build_path"):
@@ -1289,13 +1360,48 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
             continue
         module_id = _pack_id_from_descriptor(pack)
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
-        required = _authored_module_paths(pack, context, pack_paths)
+        required = _authored_module_paths(pack, context, pack_paths, facades)
         for kind, paths in required.items():
             owned = {path for task in module_tasks if task.get("task_type") == kind for path in _normalized_owned_paths(task)}
             if paths - owned:
                 errors.append(f"{module_id}/{kind} is incomplete; missing {sorted(paths - owned)}")
     if errors:
         raise ValueError("Incomplete build plan:\n- " + "\n- ".join(errors))
+
+
+def validate_plan_dispatch(context: Any) -> None:
+    """Run task dispatch's owned-path preflight on the items review hands to it.
+
+    Dispatch reads the batch items app_build_plan cached and refuses the whole
+    batch on one unusable owned path or collision. It raises inside
+    AppPlanAgent's turn, where no revision path exists, so the run dies. The
+    same refusal here is a review rejection the planner can correct. The check
+    is dispatch's own (_validate_batch_owned_paths over _normalize_task_items)
+    for every batch AppPlanAgent triggers, so review and dispatch cannot
+    disagree. Each task is checked alone and then together for collisions, so
+    one message names every refusal.
+    """
+    config = load_task_batches_config("AppGenerator", _WORKFLOWS_ROOT)
+    if config is None:
+        raise RuntimeError("AppGenerator task batch contract not found; plan dispatch cannot be preflighted")
+    errors: list[str] = []
+    for batch in config.batches:
+        if batch.trigger_agent != "AppPlanAgent" or batch.source.kind != "context_variable":
+            continue
+        dispatchable: list[dict[str, Any]] = []
+        for item in _normalize_task_items(detach(context.get(batch.source.path))):
+            try:
+                _validate_batch_owned_paths(batch, [item])
+            except ValueError as error:
+                errors.append(f"{item['task_id']}: {error}")
+            else:
+                dispatchable.append(item)
+        try:
+            _validate_batch_owned_paths(batch, dispatchable)
+        except ValueError as error:
+            errors.append(str(error))
+    if errors:
+        raise ValueError("Task dispatch would refuse this plan:\n- " + "\n- ".join(errors))
 
 
 def _plan_validation_feedback(error: ValueError, payload: dict[str, Any] | None) -> str:
@@ -1343,6 +1449,8 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
+        for repair in _apply_dispatch_path_rules(plan):
+            logger.info("[AppGenerator] plan repaired: %s", repair)
         _validate_plan_surface_inventory(plan, context_variables)
         plan["capability_packs"] = _ensure_context_selected_capability_packs(
             plan.get("capability_packs") or [], context_variables=context_variables,
@@ -1355,6 +1463,7 @@ def review_app_build_plan(
             *_repair_plan(plan, context_variables),
             *_repair_selected_pack_inventory(plan, context_variables),
             *release_pack_owned_paths(plan, context_variables),
+            *release_pack_facade_paths(plan, context_variables),
             *release_subscriptions_config(plan),
             *_repair_user_data_scope(plan, context_variables),
             *_repair_coverage(plan, context_variables),
@@ -1376,6 +1485,7 @@ def review_app_build_plan(
         validate_plan_origins(cached, context_variables)
         validate_plan_dependencies(cached, context_variables)
         validate_plan_coverage(cached, context_variables)
+        validate_plan_dispatch(context_variables)
     except ValueError as error:
         _clear_plan(context_variables)
         feedback = _plan_validation_feedback(error, AppBuildPlan)

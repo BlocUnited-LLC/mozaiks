@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 
@@ -20,6 +20,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_facade_directories,
     pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
@@ -191,16 +192,16 @@ def _construct_task_requirements(plan: dict[str, Any], context_variables: Any) -
     return repairs
 
 
-def _release_owned_paths(plan: dict[str, Any], paths: frozenset[str], *, owner: str, provider: str) -> list[str]:
-    """Release `paths` from every task; drop a task left with nothing to build."""
-    if not paths:
-        return []
+def _release_owned_paths(
+    plan: dict[str, Any], releases: Callable[[str], bool], *, owner: str, provider: str,
+) -> list[str]:
+    """Release every owned path `releases` selects; drop a task left with nothing to build."""
     repairs: list[str] = []
     kept: list[dict[str, Any]] = []
     dropped: set[str] = set()
     for task in plan.get("build_tasks") or []:
         owned = list(task.get("owned_paths") or [])
-        released = [path for path in owned if normalize_app_path(str(path)) in paths]
+        released = [path for path in owned if releases(normalize_app_path(str(path)))]
         if not released:
             kept.append(task)
             continue
@@ -212,6 +213,9 @@ def _release_owned_paths(plan: dict[str, Any], paths: frozenset[str], *, owner: 
         else:
             dropped.add(str(task.get("task_id")))
             repairs.append(f"dropped task {task.get('task_id')!r}: every owned path {released} is {owner}")
+    # A draft may repeat a task_id until identity repair qualifies it; an edge
+    # to a surviving task of that id is not an edge to the dropped one.
+    dropped -= {str(task.get("task_id")) for task in kept}
     for task in kept:
         depends = [dep for dep in task.get("depends_on") or [] if str(dep) not in dropped]
         if len(depends) != len(task.get("depends_on") or []):
@@ -233,9 +237,31 @@ def release_pack_owned_paths(plan: dict[str, Any], context: Any) -> list[str]:
     build is dropped with its dependency edges.
     """
     return _release_owned_paths(
-        plan, pack_owned_output_paths(context),
+        plan, pack_owned_output_paths(context).__contains__,
         owner="pack-owned", provider="selected pack templates provide them",
     )
+
+
+def release_pack_facade_paths(plan: dict[str, Any], context: Any) -> list[str]:
+    """A selected pack's facade module directory is never model work.
+
+    release_pack_owned_paths releases the files a pack declares. A planner
+    also adds files beside them: chat e67150d7 at 49c69860 kept tasks owning
+    modules/billing_portal/backend/repo.py and contracts/events.yaml after the
+    declared billing_portal files were released. The mozaikspay contract owns
+    every declared file in that directory and asks a model for none, and
+    assembly applies the pack's module, so those tasks built nothing that ships.
+    Every path the pack does not leave to a model or the workspace is released
+    (pack_facade_directories); a task left with nothing to build is dropped
+    with its dependency edges.
+    """
+    repairs: list[str] = []
+    for facade in pack_facade_directories(context):
+        repairs.extend(_release_owned_paths(
+            plan, facade.owns,
+            owner="pack-owned", provider=f"the {facade.pack_id} pack owns its facade module {facade.path}/",
+        ))
+    return repairs
 
 
 def release_subscriptions_config(plan: dict[str, Any]) -> list[str]:
@@ -247,7 +273,7 @@ def release_subscriptions_config(plan: dict[str, Any]) -> list[str]:
     in another task's owned_paths.
     """
     return _release_owned_paths(
-        plan, frozenset({SUBSCRIPTIONS_CONFIG_PATH}),
+        plan, lambda path: path == SUBSCRIPTIONS_CONFIG_PATH,
         owner="assembly-owned", provider="assembly writes it from the approved subscription contract",
     )
 
@@ -2219,10 +2245,11 @@ def app_build_plan(
         build_tasks=build_tasks,
         context_variables=context_variables,
     )
-    # The cached plan never schedules model work for an output a selected pack writes.
+    # The cached plan never schedules model work for an output or facade module a selected pack owns.
     released: dict[str, Any] = {"build_tasks": build_tasks, "generation_order": generation_order}
     for repair in (
         *release_pack_owned_paths(released, context_variables),
+        *release_pack_facade_paths(released, context_variables),
         *release_subscriptions_config(released),
     ):
         _logger.info("[AppGenerator] plan normalized: %s", repair)

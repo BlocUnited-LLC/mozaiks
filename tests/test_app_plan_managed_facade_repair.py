@@ -271,8 +271,12 @@ def test_facade_descriptor_display_entities_do_not_invent_app_persistence():
     _assert_reviewed_facade(plan, context)
 
 
-def test_conflicting_task_ownership_remains_rejected():
-    """Two tasks claiming one facade file the pack does not ship still conflict after consolidation."""
+def test_tasks_claiming_one_undeclared_facade_file_both_lose_it():
+    """Consolidation retargets the alias into the facade module, which the pack owns entirely.
+
+    Neither claim is model work, so there is no conflict to adjudicate: both
+    tasks are released and dropped, and nothing under the facade is dispatched.
+    """
     plan, context = _plan_and_context()
     alias = _capability("billing_module")
     alias["surface_id"] = "billing_portal"
@@ -283,10 +287,10 @@ def test_conflicting_task_ownership_remains_rejected():
         {**_task("conflicting.contract", "module_contract", "ConfigMiddlewareAgent", "billing_module",
                  ["modules/billing_module/contracts/events.yaml"]), "surface_id": "billing_portal"},
     ]
-    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
-    assert result["outcome"] == "needs_revision", result
-    assert "own" in result["error"].lower()
-    assert not context.get("app_task_batch_items")
+    cached = _assert_reviewed_facade(plan, context)
+    assert not {"facade.events", "conflicting.contract"} & {task["task_id"] for task in cached["build_tasks"]}
+    items = detach(context.get("app_task_batch_items"))
+    assert not [path for task in items for path in task["owned_paths"] if path.startswith("modules/billing_")]
 
 
 def test_ambiguous_app_capabilities_claiming_one_facade_remain_rejected():
