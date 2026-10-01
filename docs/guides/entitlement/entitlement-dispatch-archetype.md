@@ -149,57 +149,72 @@ than re-reading the catalog at check time.
 
 - Returns: `{ plan_id, status, granted_capabilities }` for the requesting user
 - No entitlement gate — this action is itself free to call
-- Safe to expose as `api_surface: user` for authenticated UI callers
+- Omit `api_surface` so authenticated UI callers can invoke it
 
 ---
 
 ## Minimal `module.yaml` Example
 
 ```yaml
-module_id: entitlement_dispatch
-label: Entitlement Dispatch
-version: 1
-description: >
-  Self-hosted write path for subscription entitlement grants.
-  Writes assignment records that ConfiguredEntitlementAdapter reads.
+schema_version: mozaiks.module.v1
+module:
+  id: entitlement_dispatch
+  display_name: Entitlement Dispatch
+  version: 1.0.0
+  type: entitlement_dispatch
+  description: >
+    Self-hosted write path for subscription entitlement grants.
+    Writes assignment records that ConfiguredEntitlementAdapter reads.
+  handler: backend.handler:EntitlementDispatchHandler
+
+permissions: []
 
 actions:
-  - action_id: activate_subscription
-    api_surface: internal
+  - id: activate_subscription
     description: >
       Activates a subscription grant. Called via reactions.yaml when
       a subscription.activated event is received.
-    inputs:
-      - name: user_id
-        type: string
-        required: true
-      - name: plan_id
-        type: string
-        required: true
-      - name: external_subscription_id
-        type: string
-        required: false
-      - name: expires_at
-        type: string
-        required: false
-
-  - action_id: deactivate_subscription
+    handler_method: activate_subscription
     api_surface: internal
+    permissions: []
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [user_id, plan_id]
+      properties:
+        user_id: { type: string }
+        plan_id: { type: string }
+        external_subscription_id: { type: string }
+        expires_at: { type: string }
+
+  - id: deactivate_subscription
     description: >
       Cancels an active subscription grant. Called via reactions.yaml when
       a subscription.cancelled or subscription.expired event is received.
-    inputs:
-      - name: user_id
-        type: string
-        required: true
-      - name: reason
-        type: string
-        required: false
+    handler_method: deactivate_subscription
+    api_surface: internal
+    permissions: []
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [user_id]
+      properties:
+        user_id: { type: string }
+        reason: { type: string }
 
-  - action_id: get_entitlement_status
-    api_surface: user
+  - id: get_entitlement_status
     description: Read-only status check for the requesting user. No entitlement gate.
+    handler_method: get_entitlement_status
 ```
+
+Every action needs `id`, `description`, and `handler_method`; inputs are a JSON
+Schema under `input_schema`. `api_surface` accepts `public`, `public_readonly`,
+`internal`, or `admin_internal`; omit it for actions that authenticated UI and
+API callers invoke. The shipped pack template at
+`factory_app/build_context/entitlement_dispatch/templates/modules/entitlement_dispatch/module.yaml`
+is the generator's source of truth for this module. It declares only
+`activate_subscription` and `deactivate_subscription`, with different inputs
+from this example.
 
 ---
 

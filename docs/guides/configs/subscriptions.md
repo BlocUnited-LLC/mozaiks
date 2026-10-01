@@ -175,13 +175,20 @@ pricing_catalog:
 
 ```yaml
 actions:
-  - action_id: summarize_tasks
+  - id: summarize_tasks
+    description: Summarize the caller's tasks.
     handler_method: summarize_tasks
     entitlement_gate: feature.module.tasks.summarize_tasks
 ```
 
 The factory derives this gate from the selected `module.tasks.summarize_tasks`
 feature. Any active plan that grants it allows the action to run.
+
+Every action entry in `module.yaml` requires `id`, `description`, and
+`handler_method`; `entitlement_gate` is optional. The module loader rejects
+unknown action fields, so an entry keyed `action_id` fails validation. See
+[Minimum `module.yaml`](../adding-modules/01-overview.md#minimum-moduleyaml)
+for the full action shape.
 
 ## Custom Money Rules
 

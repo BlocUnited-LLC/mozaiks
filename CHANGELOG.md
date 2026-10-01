@@ -107,6 +107,12 @@ This project follows a practical pre-1.0 changelog format:
   plan grants (#770). Usage limits are display-only and do not cap dispatch or
   consumption yet (#770); unavailable selections receive valid choices and a
   removal path.
+- Setup docs now state the real Node.js requirement, 20.19+ or 22.12+ (Vite 8),
+  instead of 18+. The README and `web_shell/README.md` show macOS / Linux
+  commands next to the PowerShell ones. `pip install -e ".[docs]"` with
+  `python -m mkdocs serve` is the one documented docs recipe. CONTRIBUTING
+  documents the ruff and mypy commands CI runs. The CLI reference covers every
+  command.
 
 ### Fixed
 

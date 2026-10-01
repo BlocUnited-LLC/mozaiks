@@ -86,6 +86,12 @@ key. Most first contributions need none of that:
   python -m mkdocs serve
   ```
 
+  This is the canonical docs recipe; the commands are the same in PowerShell,
+  bash, and zsh. `python -m mkdocs build` is the build command the docs deploy
+  workflow runs. On Windows, `scripts/build-docs.ps1` (with `-Serve` or
+  `-Strict`) is an optional wrapper around these commands that uses the repo
+  `.venv`.
+
 - **Most Python tests** run with no external services. `tests/conftest.py`
   automatically skips the tests that need a real app workspace
   (`MOZAIKS_APP_WORKSPACE_PATH` or `PLATFORM_PATH`) — you do not need to set
@@ -93,7 +99,8 @@ key. Most first contributions need none of that:
 - **Many `mozaiks_cli` changes** can be developed and verified through the
   CLI's own unit tests without MongoDB, Node.js, or a running Studio instance.
 
-You only need Docker/MongoDB, Node.js 18+, and an LLM API key when you are
+You only need Docker/MongoDB, Node.js 20.19+ or 22.12+ (required by the Vite 8
+frontend toolchain), and an LLM API key when you are
 changing or manually verifying behavior that talks to a real database, a real
 frontend build, or a real LLM call. See [Local Setup](docs/local-setup.md) when
 you get there.
@@ -128,6 +135,39 @@ python -m pytest tests/test_your_file.py -q --no-cov
 iteration on a narrow slice. It does not weaken what is enforced in CI — the
 full test suite runs in CI with the 70% coverage gate enforced, and your pull
 request must pass CI regardless of what you ran locally.
+
+## Linting and Type Checking
+
+CI's `lint` job (`.github/workflows/ci.yml`) runs ruff and mypy, and either one
+can fail a pull request. Both come from the `dev` extra, so
+`pip install -e ".[dev]"` already installed them. Run them from the repo root
+before you push; the commands are the same in every shell:
+
+```bash
+ruff check .
+mypy mozaiksai/ factory_app/ --ignore-missing-imports --disable-error-code=import-untyped
+```
+
+- `ruff check --fix .` fixes much of what ruff reports, such as unsorted
+  imports. CI runs `ruff check . --output-format=github`; that flag changes
+  only how findings are printed, not which ones are reported. Rules and
+  excluded paths are configured in `pyproject.toml` under `[tool.ruff]`.
+- mypy's CI scope is `mozaiksai/` and `factory_app/` only. `mozaiks_cli/` and
+  `tests/` are not type-checked in CI. Per-module overrides live in
+  `pyproject.toml` under `[tool.mypy]`. CI runs Python 3.11, so check type
+  errors that only appear under another interpreter against 3.11 before
+  chasing them.
+
+The same job also runs the repository governance checks. To reproduce them
+locally:
+
+```bash
+python scripts/governance_guardrails.py --all --errors-only
+python -m pytest tests/test_production_readiness_gate.py -q --no-cov -k source_hygiene
+```
+
+The second command runs the source hygiene scan, which only reads files git
+tracks. Run it after `git add` so new files are included.
 
 ## Working With an AI Coding Agent (Optional)
 

@@ -33,7 +33,7 @@ set `MONGO_URI` and launch repo scripts with `-SkipInfra`.
 ## Prerequisites
 
 - Python 3.11+
-- Node.js 18+
+- Node.js 20.19+ or 22.12+ (required by the Vite 8 frontend toolchain)
 - MongoDB Atlas or a local MongoDB server
 - one LLM provider key — `GEMINI_API_KEY` (free, default), `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`
 
