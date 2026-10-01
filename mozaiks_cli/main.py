@@ -17,7 +17,7 @@ Commands:
     mozaiks serve [path]      Start the Mozaiks runtime for an app workspace
     mozaiks onboard           Guide setup for an existing scaffold
     mozaiks studio          Print workspace status or open Studio
-    mozaiks add <feature>     Add feature to existing project
+    mozaiks add <feature>     Add feature to existing project (or --preset <tier>)
     mozaiks gen <mode>        Convenience shortcut: generate from a prompt
     mozaiks migrations status Read-only generated-app migration health
     mozaiks context index    Index local workspace App Intelligence
@@ -302,16 +302,23 @@ def create_parser():
     add_parser = subparsers.add_parser(
         "add",
         help="Add feature to existing project",
-        description="Enable a feature in your Mozaiks project.",
+        description=(
+            "Enable one feature in your Mozaiks project, or switch it to a tier "
+            "preset with --preset. Give exactly one of the two."
+        ),
     )
-    add_parser.add_argument(
+    add_target = add_parser.add_mutually_exclusive_group(required=True)
+    add_target.add_argument(
         "feature",
+        nargs="?",
+        default=None,
         choices=["modules", "event_bus", "auth", "admin", "chat_ui"],
         help="Feature to enable",
     )
-    add_parser.add_argument(
+    add_target.add_argument(
         "--preset",
-        help="Upgrade to a preset instead of individual feature",
+        choices=["engine", "chat", "integrated", "full"],
+        help="Switch to a tier preset instead of enabling one feature (clears feature overrides)",
     )
 
     # mozaiks gen
@@ -526,9 +533,13 @@ def main():
         elif args.command == "onboard":
             onboard_command.run(args)
         elif args.command == "studio":
-            studio_command.run(args)
+            result = studio_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "add":
-            add_command.run(args)
+            result = add_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "gen":
             # Interactive mode if no mode or prompt provided
             if not args.mode or not args.prompt:
@@ -550,7 +561,9 @@ def main():
             if result:
                 sys.exit(result)
         elif args.command == "info":
-            info_command.run(args)
+            result = info_command.run(args)
+            if result:
+                sys.exit(result)
         else:
             parser.print_help()
             sys.exit(1)

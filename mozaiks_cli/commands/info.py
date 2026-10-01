@@ -55,15 +55,19 @@ TIER_PRESETS = {
 }
 
 
-def run(args):
-    """Execute the info command."""
+def run(args) -> int:
+    """Execute the info command.
+
+    Returns the process exit code: 0 on success, 1 when the current
+    configuration cannot be read.
+    """
     if args.available:
         _show_available_tiers()
-    else:
-        _show_current_config()
+        return 0
+    return _show_current_config()
 
 
-def _show_available_tiers():
+def _show_available_tiers() -> None:
     """Show all available tier presets."""
     print("Available Tier Presets:\n")
 
@@ -81,8 +85,8 @@ def _show_available_tiers():
         print()
 
 
-def _show_current_config():
-    """Show current project configuration."""
+def _show_current_config() -> int:
+    """Show current project configuration; return the process exit code."""
     app_root = resolve_active_app_root(Path(".").resolve())
     app_root_label = app_root.name if app_root.name in {"app", "platform"} else "."
     app_json_path = app_root / "app.json"
@@ -90,14 +94,14 @@ def _show_current_config():
     if not app_json_path.exists():
         print(f"No {app_root_label}/app.json found.")
         print("Run 'mozaiks init <preset>' to create a new project.")
-        return
+        return 1
 
     try:
         with open(app_json_path, encoding="utf-8") as f:
             app_config = json.load(f)
     except Exception as e:
         print(f"Error reading {app_json_path}: {e}")
-        return
+        return 1
 
     # Extract current preset
     preset = app_config.get("preset", "full")
@@ -128,3 +132,4 @@ def _show_current_config():
         print("\nTo enable more features, run:")
         print("  mozaiks add <feature>")
         print("  mozaiks add --preset <higher-tier>")
+    return 0
