@@ -2,9 +2,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 def resolve_workspace_root(explicit_directory: str | None) -> Path:
     return Path(explicit_directory or ".").resolve()
+
+
+def load_workspace_dotenv(workspace_root: Path) -> Path | None:
+    """Load ``<workspace_root>/.env`` into the process environment.
+
+    The CLI is a process entry point, so it is where a local ``.env`` is read:
+    explicitly at CLI entry points, from the workspace they operate on, and never
+    overriding a variable the process already has. Library imports never read a
+    ``.env`` (issue #778), and nothing here searches parent directories.
+
+    Returns the file that was loaded, or ``None`` when the workspace has none.
+    """
+    env_file = workspace_root.resolve() / ".env"
+    if not env_file.is_file():
+        return None
+    load_dotenv(dotenv_path=env_file, override=False)
+    return env_file
 
 
 def is_framework_repo_root(path: Path) -> bool:

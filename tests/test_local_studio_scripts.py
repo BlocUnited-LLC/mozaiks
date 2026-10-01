@@ -47,6 +47,9 @@ def test_run_backend_surfaces_infra_and_python_setup_failures() -> None:
     assert '.venv/Scripts/python.exe' in script
     assert "Get-Command python" in script
     assert 'python -m pip install -e ".[dev]"' in script
+    # Importing mozaiksai never reads a .env (#778); the launcher passes it.
+    assert '$uvicornArgs += @("--env-file", $repoEnvFile)' in script
+    assert script.index('"--env-file"') < script.index("& $pythonCmd @uvicornArgs")
 
 
 def test_run_frontend_requires_node_dependencies_before_vite() -> None:

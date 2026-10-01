@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
+
+from mozaiks_cli.workspace import load_workspace_dotenv
 
 _HOST_MODULES = {
     "runtime": "mozaiksai.hosts.runtime:app",
@@ -39,21 +42,15 @@ def run(args) -> None:
     os.environ.setdefault("MOZAIKS_HOST", host)
 
     # Load .env from the workspace directory so the app bundle owns its config,
-    # regardless of which directory the CLI is invoked from.
+    # regardless of which directory the CLI is invoked from. This is the only
+    # .env the served host sees: library imports never read one (issue #778).
     # If .env doesn't exist but .env.example does, create it automatically.
-    try:
-        import shutil
-
-        from dotenv import load_dotenv
-        env_file = workspace / ".env"
-        env_example = workspace / ".env.example"
-        if not env_file.exists() and env_example.exists():
-            shutil.copy(env_example, env_file)
-            print(f"Created {env_file} from .env.example — fill in your OPENAI_API_KEY and MONGO_URI before use.")
-        if env_file.exists():
-            load_dotenv(dotenv_path=env_file, override=False)
-    except ImportError:
-        pass
+    env_file = workspace / ".env"
+    env_example = workspace / ".env.example"
+    if not env_file.exists() and env_example.exists():
+        shutil.copy(env_example, env_file)
+        print(f"Created {env_file} from .env.example — fill in your OPENAI_API_KEY and MONGO_URI before use.")
+    load_workspace_dotenv(workspace)
 
     try:
         import uvicorn

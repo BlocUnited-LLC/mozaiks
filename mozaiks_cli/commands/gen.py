@@ -32,7 +32,7 @@ from typing import Any
 
 import yaml
 
-from mozaiks_cli.workspace import resolve_active_app_root
+from mozaiks_cli.workspace import load_workspace_dotenv, resolve_active_app_root
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     APP_VALIDATION_STRATEGIES,
     default_app_validation_strategy,
@@ -725,6 +725,10 @@ def _report_run_outcome(result: dict[str, Any], output_dir: Path, mode: str) -> 
 
 def run(args):
     """Execute the gen command."""
+    # gen runs in the current workspace (its output defaults to ./generated),
+    # so that workspace's .env supplies provider keys and MONGO_URI.
+    load_workspace_dotenv(Path.cwd())
+
     mode = args.mode
     prompt = args.prompt
     output_dir = Path(args.output) if args.output else Path.cwd() / "generated"

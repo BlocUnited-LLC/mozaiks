@@ -5,13 +5,18 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
+from mozaiks_cli.workspace import load_workspace_dotenv
 from mozaiksai.core.runtime.persistence import get_migration_health_report
 
 
 def run(args) -> int:
     """Execute migration diagnostic commands."""
+
+    # The report reads the current workspace's Mongo configuration.
+    load_workspace_dotenv(Path.cwd())
 
     action = getattr(args, "migrations_action", None)
     if action != "status":

@@ -8,6 +8,12 @@ from mozaiks_cli.commands import migrations as migrations_command
 from mozaiks_cli.main import create_parser
 
 
+@pytest.fixture(autouse=True)
+def _empty_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Run from an empty workspace: the command loads ./.env as its configuration."""
+    monkeypatch.chdir(tmp_path)
+
+
 def _report(*, blockers: bool = False, unknown: bool = False) -> dict:
     status = "failed" if blockers else ("paused" if unknown else "applied")
     return {

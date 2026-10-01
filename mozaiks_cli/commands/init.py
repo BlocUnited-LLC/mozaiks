@@ -647,6 +647,12 @@ $uvicornArgs = @(
 if ($Reload) {
   $uvicornArgs += "--reload"
 }
+# Importing mozaiksai never reads a .env. This launcher hands the workspace .env
+# to uvicorn, which loads it without overriding values already set here.
+$workspaceEnvFile = Join-Path $Workspace ".env"
+if (Test-Path -LiteralPath $workspaceEnvFile) {
+  $uvicornArgs += @("--env-file", $workspaceEnvFile)
+}
 
 Write-Host "[backend] Workspace: $Workspace" -ForegroundColor DarkCyan
 Write-Host "[backend] Command: $pythonCmd $($uvicornArgs -join ' ')" -ForegroundColor Cyan

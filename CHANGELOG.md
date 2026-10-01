@@ -52,6 +52,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Importing `mozaiksai` no longer reads a `.env` file (#778).
+  `mozaiksai.core.core_config` used to call `load_dotenv()` on import, which
+  searched upward from the installed package (or the working directory) and set
+  every variable missing from the process. A release run unset
+  `MOZAIKS_FACTORY_APP_PATH` on purpose; a later lazy import put it back from an
+  enclosing project's `.env` and the run built from a stale checkout.
+  Configuration now comes from the process environment, loaded explicitly at the
+  entry point and never overriding a variable that is already set:
+  - `mozaiks serve`, Studio launches (`studio --open`, `onboard`,
+    `quickstart`), `gen`, `migrations status` and `context index` load the
+    `.env` of the workspace they operate on (the workspace or `--dir`
+    argument, or the current directory for `gen` and `migrations`). `gen`,
+    `migrations`, `context` and the quickstart environment warnings did not
+    load one explicitly before.
+  - A direct `uvicorn mozaiksai.hosts.<host>:app` launch reads no `.env`. Pass
+    `--env-file .env` or set the variables in the shell. `scripts/run-backend.ps1`,
+    `start-dev.ps1` and the `scripts/run-backend.ps1` that `mozaiks init`
+    scaffolds now pass `--env-file` when the `.env` exists.
+  - App-local hosts that compose `mozaiksai.hosts.studio` (App Zero) must load
+    their own `.env` in their launcher before upgrading. See
+    `docs/architecture/hosts/host-composition-contract.md`.
+
 - Generated subscription plans now select approved module actions from a closed
   inventory. The factory derives capability IDs and gates only for actions that
   differ between plans, so actions included in every plan remain available after

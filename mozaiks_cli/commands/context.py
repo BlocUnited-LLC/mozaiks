@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from mozaiks_cli.workspace import load_workspace_dotenv
 from mozaiksai.control_plane.app_intelligence import (
     APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
     index_workspace_app_intelligence,
@@ -27,6 +28,7 @@ async def _run_index(args: Any) -> int:
     workspace = Path(str(getattr(args, "workspace", ".") or ".")).expanduser().resolve()
     if not workspace.exists() or not workspace.is_dir():
         raise ValueError(f"workspace does not exist or is not a directory: {workspace}")
+    load_workspace_dotenv(workspace)
 
     result = await index_workspace_app_intelligence(
         app_id=app_id,

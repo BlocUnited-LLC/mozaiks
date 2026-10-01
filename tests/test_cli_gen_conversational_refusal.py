@@ -153,6 +153,9 @@ def staged_recorder(monkeypatch, tmp_path: Path):
         (out / "orchestrator.yaml").write_text("workflow_name: Y\n", encoding="utf-8")
         return {"success": True, "result": {"run_completed": True, "agent_turns": 1}}
 
+    # gen loads ./.env as its workspace configuration; run it from an empty
+    # workspace so a developer's checkout .env cannot leak into the process.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(gen_module, "_stage_workflow", fake_stage)
     monkeypatch.setattr(gen_module, "_run_generator", fake_run_generator)
     monkeypatch.setattr(gen_module, "_find_generator_source", lambda: tmp_path / "src")
