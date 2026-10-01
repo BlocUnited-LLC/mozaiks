@@ -335,6 +335,18 @@ task file requirements are also shared with validation. Explicit approved action
 names reach module workers. Module materialization constructs canonical reads and, for module-written collections, canonical create/update/delete actions with their implementations and schemas from declared collection ownership and typed list/detail intent. The generated record id is the declared `<entity>_id` field (else `id`, else `_id`); `search_by` is only the get lookup and a natural key there is never replaced by a generated id.
 Subscription providers must be explicit or already selected, and facade/client
 dependencies follow registered bindings rather than task prose.
+Section hints bind only to actions that exist. A `sections_hint[].data_source`
+outside the approved action inventory (`all_module_actions`: approved
+mutations, custom reads, code-built canonical reads and writes, selected facade
+actions) is removed by code rather than rejected; the section keeps its
+primitive, intent and title, and the page_bundle task owning the page is told
+which binding was removed and which actions its module declares. No action is
+constructed to satisfy a hint. A provider pair is checked at the facade its
+registered route rebinds it to, and a page a selected pack writes keeps the
+bindings its template fixes. Without an approved `design_surface_map` the
+inventory is open and nothing is removed. Page compilation enforces the same
+inventory; its unknown module/action error lists the valid action ids, or the
+valid module ids when the module itself is unknown.
 See the [construction requirement inventory](app-build-plan-construction.md) for
 the construction/judgment boundary and downstream requirements.
 The existing plan cache preserves all typed plan fields. Frozen context values

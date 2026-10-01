@@ -74,6 +74,25 @@ def test_data_source_has_one_closed_shape(source):
         compile_page_data_sources(document, _index())
 
 
+def test_unknown_reference_names_the_valid_choices_in_one_message():
+    # Live run 0b1b740d: the page task failed twice on a message that listed no
+    # valid action, so its one bounded correction had nothing to choose from.
+    with pytest.raises(ValueError) as unknown_action:
+        compile_page_data_sources(_page("habits_registry", "get_kpi_stats"), _index())
+    assert str(unknown_action.value) == (
+        "dashboard.sections[0].config.data_source references unknown module/action "
+        "'habits_registry/get_kpi_stats'; valid action ids for module 'habits_registry': "
+        "['create_habit', 'list_habits']"
+    )
+
+    with pytest.raises(ValueError) as unknown_module:
+        compile_page_data_sources(_page("habits", "list_habits"), _index())
+    assert str(unknown_module.value) == (
+        "dashboard.sections[0].config.data_source references unknown module/action "
+        "'habits/list_habits'; module 'habits' is unknown; valid module ids: ['habits_registry']"
+    )
+
+
 def test_no_inventory_is_not_permission_to_guess():
     with pytest.raises(ValueError, match="unknown module/action"):
         compile_page_data_sources(_page(), {})
