@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Sequence
@@ -16,9 +17,11 @@ from factory_app.workflows._shared.surface_ownership import validate_surface_own
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _CANONICAL_INITIAL_AGENTS,
     _MODULE_LOCAL_TASK_TYPES,
+    _SHARED_OWNED_PATHS,
     _apply_selected_pack_files,
     _construct_task_requirements,
     _context_available_pack_map,
+    _dedupe_preserving_order,
     _ensure_context_selected_capability_packs,
     _facade_pack_descriptor,
     _normalized_owned_paths,
@@ -1206,6 +1209,102 @@ def _label_page_tasks(plan: dict[str, Any], context: Any) -> list[str]:
     return repairs
 
 
+def _merge_split_tasks(plan: dict[str, Any]) -> list[str]:
+    """One unit of work split across tasks that claim the same files is merged back into one task.
+
+    Chat 0d442d1f at c8b9ea2e planned the tasks module's business_services as
+    four tasks, one per action (create_task, update_task, delete_task,
+    list_tasks), each owning modules/tasks/backend/service.py. A file has one
+    owner, so review rejected the plan as overlapping ownership and the model
+    resubmitted the split until its attempts ran out. Tasks of the same type for
+    the same capability and surface that share an owned file are one task by
+    construction: the first in plan order keeps its id and absorbs the others'
+    owned paths, criteria and instructions, and every reference to an absorbed
+    id now names it. Tasks of different types sharing a file are a real conflict
+    and are left for the ownership check, and a group that repeats a task_id is
+    left for identity repair.
+    """
+    tasks = [task for task in plan.get("build_tasks") or [] if isinstance(task, dict)]
+    parent = list(range(len(tasks)))
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    first_owner: dict[tuple[Any, ...], int] = {}
+    for index, task in enumerate(tasks):
+        unit = (task.get("task_type"), task.get("capability_pack_id"), task.get("surface_id"), task.get("surface_kind"))
+        for path in _normalized_owned_paths(task):
+            if path in _SHARED_OWNED_PATHS:
+                continue
+            owner = first_owner.setdefault((*unit, path), index)
+            if owner != index:
+                left, right = root(owner), root(index)
+                parent[max(left, right)] = min(left, right)
+
+    groups: dict[int, list[int]] = {}
+    for index in range(len(tasks)):
+        groups.setdefault(root(index), []).append(index)
+    renamed: dict[str, str] = {}
+    absorbed: set[int] = set()
+    repairs: list[str] = []
+    for members in groups.values():
+        ids = [str(tasks[index].get("task_id")) for index in members]
+        # A repeated task_id is an identity question, which identity repair and
+        # its rejection own; only distinct tasks are merged here.
+        if len(members) < 2 or len(set(ids)) < len(ids):
+            continue
+        keeper, others = tasks[members[0]], [tasks[index] for index in members[1:]]
+        keeper_id = str(keeper.get("task_id"))
+        for other in others:
+            for key, value in other.items():
+                if key == "task_id":
+                    continue
+                current = keeper.get(key)
+                if key == "initial_message":
+                    parts = [str(part).strip() for part in (current, value) if str(part or "").strip()]
+                    keeper[key] = "\n\n".join(dict.fromkeys(parts))
+                elif isinstance(value, list):
+                    merged = list(current or [])
+                    seen = {json.dumps(item, sort_keys=True, default=str) for item in merged}
+                    for item in value:
+                        marker = json.dumps(item, sort_keys=True, default=str)
+                        if marker not in seen:
+                            seen.add(marker)
+                            merged.append(item)
+                    keeper[key] = merged
+                elif isinstance(value, dict):
+                    keeper[key] = {**value, **(current or {})}
+                elif current is None:
+                    keeper[key] = value
+            renamed[str(other.get("task_id"))] = keeper_id
+        absorbed.update(members[1:])
+        repairs.append(
+            f"merged {[keeper_id, *(str(other.get('task_id')) for other in others)]} into {keeper_id!r}: "
+            f"one {keeper.get('task_type')} task for {keeper.get('capability_pack_id')!r} split across tasks "
+            "that claim the same files"
+        )
+    if not renamed:
+        return []
+
+    def rename(refs: Any) -> list[str]:
+        return _dedupe_preserving_order(renamed.get(str(ref), str(ref)) for ref in refs or [])
+
+    kept = [task for index, task in enumerate(tasks) if index not in absorbed]
+    for task in kept:
+        if "depends_on" in task:
+            task["depends_on"] = [ref for ref in rename(task.get("depends_on")) if ref != task.get("task_id")]
+    if plan.get("generation_order"):
+        plan["generation_order"] = rename(plan["generation_order"])
+    for decision in plan.get("carry_forward_decisions") or []:
+        if isinstance(decision, dict) and decision.get("affected_build_tasks"):
+            decision["affected_build_tasks"] = rename(decision["affected_build_tasks"])
+    plan["build_tasks"] = kept
+    return repairs
+
+
 def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
     """Reject invented scope before repairs or identity advice can obscure it."""
     validate_surface_ownership(
@@ -1495,7 +1594,11 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
-        for repair in (*_apply_dispatch_path_rules(plan), *_label_page_tasks(plan, context_variables)):
+        for repair in (
+            *_apply_dispatch_path_rules(plan),
+            *_label_page_tasks(plan, context_variables),
+            *_merge_split_tasks(plan),
+        ):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         _validate_plan_surface_inventory(plan, context_variables)
         plan["capability_packs"] = _ensure_context_selected_capability_packs(

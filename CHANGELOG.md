@@ -62,6 +62,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator plan review merges one unit of work that the planner split
+  across tasks claiming the same files. A live plan made one business_services
+  task per action (create, update, delete, list), all owning the module's
+  `service.py`; review rejected every attempt as overlapping ownership. Tasks of
+  the same type for the same capability and surface that share a file are now
+  merged into one, and references to the absorbed tasks follow it. Tasks of
+  different types sharing a file are still rejected.
+
 - AppGenerator plan review no longer rejects a page task for being named after
   its page. A live planner gave its four page tasks the surface ids
   `dashboard`, `pricing`, `billing` and `usage`; review rejected them as
