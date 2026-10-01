@@ -80,6 +80,37 @@ export function isShellItemVisible(item, roles = []) {
   return roleMatches(getRequiredRoles(item), roles);
 }
 
+const PERSONAL_ACCOUNT_ACTIONS = new Set(['signin', 'signout']);
+const PERSONAL_ACCOUNT_ROUTE_RE = /^\/me(?:[/?#]|$)/;
+
+/**
+ * Whether anyone can sign in to this shell, read from the host's verified
+ * `/api/shell-config` auth projection. Only an explicit
+ * `auth.runtime.enabled === false` means the host has no sign-in system.
+ */
+export function isSignInAvailable(shellAuth) {
+  return shellAuth?.runtime?.enabled !== false;
+}
+
+/** An entry that only means something for a signed-in person: `/me` and sign in/out. */
+export function isPersonalAccountItem(item) {
+  if (!item || typeof item !== 'object') return false;
+  if (PERSONAL_ACCOUNT_ACTIONS.has(item.action) || PERSONAL_ACCOUNT_ACTIONS.has(item.id)) return true;
+  return [item.path, item.href].some(
+    (target) => typeof target === 'string' && PERSONAL_ACCOUNT_ROUTE_RE.test(target.trim())
+  );
+}
+
+/**
+ * Shell entries the current auth mode can honor. With no sign-in system there
+ * is no person to show an account for, so personal account entries drop out.
+ */
+export function filterPersonalAccountItems(items, shellAuth) {
+  if (!Array.isArray(items)) return [];
+  if (isSignInAvailable(shellAuth)) return items;
+  return items.filter((item) => !isPersonalAccountItem(item));
+}
+
 const firstSearchValue = (searchParams, keys) => {
   for (const key of keys) {
     const value = searchParams.get(key);

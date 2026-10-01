@@ -30,8 +30,21 @@ async function mockBackend(page, config = shellConfig()) {
   });
 }
 
-test('Factory login follows discovery and PKCE callback, restores a protected route, and exposes the exchanged token', async ({ page }) => {
-  await mockBackend(page);
+// Studio's resolved profile menu: shell.json profile shortcuts plus the injected Admin Portal entry.
+const studioProfileMenu = [
+  { id: 'profile', label: 'Profile', action: 'navigate', path: '/me' },
+  { id: 'admin-portal', label: 'Admin Portal', action: 'navigate', path: '/apps', requiresRole: 'admin' },
+  { id: 'signout', label: 'Sign Out', action: 'signout' },
+];
+
+function localModeShellConfig() {
+  const config = shellConfig();
+  config.auth.frontend = null;
+  config.auth.runtime = { enabled: false, provider: 'none', local_development: true, user: { id: 'configured-local-user', name: 'Local User', roles: ['admin', 'user'] } };
+  return config;
+}
+
+async function mockIdentityProvider(page) {
   let authorization;
   let exchanges = 0;
   await page.route(`${issuer}/**`, async route => {
@@ -60,13 +73,56 @@ test('Factory login follows discovery and PKCE callback, restores a protected ro
     }
     throw new Error(`Unexpected identity request: ${url.pathname}`);
   });
+  return { exchanges: () => exchanges };
+}
+
+test('Factory login follows discovery and PKCE callback, restores a protected route, and exposes the exchanged token', async ({ page }) => {
+  await mockBackend(page);
+  const identity = await mockIdentityProvider(page);
   await page.goto('/apps?tab=build');
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page).toHaveURL(`${appOrigin}/apps?tab=build`);
   await expect.poll(() => page.evaluate(async () => (await window.mozaiksAuth.getCurrentUser())?.id)).toBe('browser-user');
   expect(await page.evaluate(() => window.mozaiksAuth.getAccessToken())).toBe('browser-access-token');
-  expect(exchanges).toBe(1);
+  expect(identity.exchanges()).toBe(1);
+});
+
+test('a signed-in person gets Profile and Sign Out in the account menu', async ({ page }) => {
+  const config = shellConfig();
+  config.profile = { show: true, menu: studioProfileMenu };
+  await mockBackend(page, config);
+  await mockIdentityProvider(page);
+  await page.goto('/apps');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByTitle('Browser User').click();
+  for (const label of ['Profile', 'Admin Portal', 'Sign Out']) {
+    await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+});
+
+test('with authentication disabled the account menu offers no Profile or Sign Out', async ({ page }) => {
+  const config = localModeShellConfig();
+  config.profile = { show: true, menu: studioProfileMenu };
+  await mockBackend(page, config);
+  await page.goto('/apps');
+  await page.getByTitle('Local User').click();
+  await expect(page.getByRole('button', { name: 'Admin Portal', exact: true })).toBeVisible();
+  for (const label of ['Profile', 'Account', 'Sign Out', 'Sign In']) {
+    await expect(page.getByRole('button', { name: label, exact: true })).toHaveCount(0);
+  }
+});
+
+test('with authentication disabled and only personal entries there is no account menu', async ({ page }) => {
+  await mockBackend(page, localModeShellConfig());
+  await page.goto('/apps');
+  const banner = page.getByRole('banner');
+  await expect(banner.getByRole('button', { name: 'Notifications' })).toBeVisible();
+  await expect.poll(() => page.evaluate(async () => (await window.mozaiksAuth?.getCurrentUser())?.id)).toBe('configured-local-user');
+  await expect(banner.getByTitle('Local User')).toHaveCount(0);
+  for (const label of ['Profile', 'Account', 'Sign Out', 'Sign In']) {
+    await expect(page.getByRole('button', { name: label, exact: true })).toHaveCount(0);
+  }
 });
 
 test('a forged callback shows failure without authenticated identity', async ({ page }) => {
@@ -86,10 +142,7 @@ test('failed auth bootstrap does not expose a demo adapter', async ({ page }) =>
 });
 
 test('explicit local mode uses the canonical backend user and sends no invented token', async ({ page }) => {
-  const config = shellConfig();
-  config.auth.frontend = null;
-  config.auth.runtime = { enabled: false, provider: 'none', local_development: true, user: { id: 'configured-local-user', name: 'Local User', roles: ['admin', 'user'] } };
-  await mockBackend(page, config);
+  await mockBackend(page, localModeShellConfig());
   await page.goto('/apps');
   await expect.poll(() => page.evaluate(async () => (await window.mozaiksAuth?.getCurrentUser())?.id)).toBe('configured-local-user');
   expect(await page.evaluate(() => window.mozaiksAuth.getAccessToken())).toBeNull();

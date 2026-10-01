@@ -214,6 +214,15 @@ links.
 framework into the profile menu for all admin users. App config and generated
 output must never declare it.
 
+Personal account entries follow the host's sign-in mode, read from the
+`auth.runtime` projection in `/api/shell-config`. When the host reports
+`auth.runtime.enabled: false` (authentication disabled, including local
+development), there is no signed-in person, so the shell drops every entry that
+targets the `/me` route family (`profile`, `account`, `support`) and every
+`signin` or `signout` action from the profile menu and the mobile bar. If no
+profile menu entry remains, the header shows no account menu. With
+authentication enabled, every configured entry renders unchanged.
+
 Use page `navigation` for page-owned routes. Use `navigation.items` only for
 app-level entries that are not owned by a page schema. Do not define custom
 shortcut catalogs inside `shortcuts`.

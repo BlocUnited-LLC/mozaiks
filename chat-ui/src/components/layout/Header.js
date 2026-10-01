@@ -5,9 +5,11 @@ import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
 import {
   deriveShellActionContext,
+  filterPersonalAccountItems,
   getNavigationTargetKey,
   getUserRoles,
   isShellItemVisible,
+  isSignInAvailable,
   resolveShellAction,
   resolveShellActions,
 } from "../../navigation/shellActions";
@@ -157,6 +159,7 @@ const Header = ({
     header: navHeader,
     profile: navProfile,
     notifications: navNotifications,
+    auth: shellAuth,
   } = useNavigation();
   const handleNavigationItem = useNavigationActions();
   const { login, logout } = useChatUI();
@@ -200,9 +203,12 @@ const Header = ({
     [headerActions]
   );
   const profileMenu = useMemo(
-    () => mergeProfileMenu(getDefaultProfileMenu(currentUser), profileConfig.menu)
-      .filter((item) => isShellItemVisible(item, userRoles)),
-    [currentUser, profileConfig.menu, userRoles]
+    () => filterPersonalAccountItems(
+      mergeProfileMenu(getDefaultProfileMenu(currentUser), profileConfig.menu)
+        .filter((item) => isShellItemVisible(item, userRoles)),
+      shellAuth,
+    ),
+    [currentUser, profileConfig.menu, userRoles, shellAuth]
   );
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -330,7 +336,8 @@ const Header = ({
   const notificationsIconSrc = resolveAssetSource(notificationsConfig.icon);
   const profileLabel = getUserLabel(currentUser, profileConfig.defaultLabel || "User");
   const profileSubLabel = getUserSubLabel(currentUser, profileConfig.sublabel || "");
-  const showProfile = profileConfig.show !== false;
+  // Without a sign-in system the menu keeps only non-personal entries; with none left there is nothing to open.
+  const showProfile = profileConfig.show !== false && (isSignInAvailable(shellAuth) || profileMenu.length > 0);
   const showNotifications = notificationsConfig.show !== false;
   const notificationsPath = notificationsConfig.path;
   const primaryActionLabel = primaryAction?.label || primaryAction?.id || "Action";

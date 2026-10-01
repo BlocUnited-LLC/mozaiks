@@ -111,6 +111,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
+  in. A fresh Studio runs with authentication disabled, yet its account menu
+  showed Profile, Sign Out, and Sign In, and the mobile bar showed Profile, all
+  for an anonymous visitor. The header and mobile bar now read
+  `auth.runtime.enabled` from `/api/shell-config`. When it is `false`, they drop
+  entries that target `/me` and sign-in or sign-out actions, and the header
+  hides the account menu if nothing else remains. Any app's shell behaves this
+  way with authentication disabled; with authentication enabled every entry
+  renders as before.
+
 - App fonts and colors declared in `theme_config.json` remain active when the
   standalone theme endpoint returns that same config. Only saved custom
   overrides for the matching app can replace them. Partial brand tokens inherit
