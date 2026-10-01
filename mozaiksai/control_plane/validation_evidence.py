@@ -10,6 +10,9 @@ class ValidationEvidence(BaseModel):
 
     completed: list[str] = Field(default_factory=list)
     failed: list[str] = Field(default_factory=list)
+    # Checks that did not run (for example the runtime smoke without a
+    # database): neither a pass nor a failure.
+    skipped: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     artifacts: list[str] = Field(default_factory=list)
     checked_at: str | None = None
@@ -20,6 +23,9 @@ class ValidationEvidence(BaseModel):
 
     def failed_names(self) -> set[str]:
         return {_normalize_name(name) for name in self.failed if _normalize_name(name)}
+
+    def skipped_names(self) -> set[str]:
+        return {_normalize_name(name) for name in self.skipped if _normalize_name(name)}
 
     def artifact_names(self) -> set[str]:
         return {_normalize_artifact_name(name) for name in self.artifacts if _normalize_artifact_name(name)}

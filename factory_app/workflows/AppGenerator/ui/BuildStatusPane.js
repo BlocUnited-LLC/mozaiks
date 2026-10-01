@@ -49,13 +49,20 @@ const BuildStatusPane = ({
     return integrationTestResult;
   }, [integrationTestResult]);
 
+  // Checks that did not run (for example the runtime smoke without a
+  // database) are never shown as passed.
+  const integrationSkipped = useMemo(() => {
+    const skipped = integration?.skipped_checks || integration?.skippedChecks || [];
+    return Array.isArray(skipped) ? skipped.filter((item) => item && typeof item === 'object') : [];
+  }, [integration]);
+
   const integrationStatus = useMemo(() => {
     if (!integration) return null;
     const passed = integrationPassed ?? integration.passed ?? integration.success ?? null;
     if (passed == null) return null;
-    if (passed) return 'success';
-    return 'error';
-  }, [integration, integrationPassed]);
+    if (!passed) return 'error';
+    return integrationSkipped.length ? 'warning' : 'success';
+  }, [integration, integrationPassed, integrationSkipped]);
 
   const integrationChecks = useMemo(() => {
     const c = integration?.checks || integration?.Checks || null;
@@ -178,22 +185,38 @@ const BuildStatusPane = ({
               <div className="flex items-center gap-2">
                 {integrationStatus === 'success' ? (
                   <CheckCircle2 className="w-4 h-4 text-[var(--color-success)]" />
+                ) : integrationStatus === 'warning' ? (
+                  <AlertTriangle className="w-4 h-4 text-[var(--color-accent)]" />
                 ) : (
                   <XCircle className="w-4 h-4 text-[var(--color-error)]" />
                 )}
                 <div className="text-xs font-semibold text-white">Integration checks</div>
               </div>
               <div className="text-[10px] text-[var(--color-text-muted)]">
-                {integration?.passed_tests != null && integration?.total_tests != null
-                  ? `${integration.passed_tests}/${integration.total_tests} passed`
-                  : integrationChecks
-                    ? `${integrationChecks.filter((c) => c?.passed === true).length}/${integrationChecks.length} passed`
-                  : null}
+                {[
+                  integration?.passed_tests != null && integration?.total_tests != null
+                    ? `${integration.passed_tests}/${integration.total_tests} passed`
+                    : integrationChecks
+                      ? `${integrationChecks.filter((c) => c?.passed === true).length}/${integrationChecks.length} passed`
+                      : null,
+                  integrationSkipped.length > 0 ? `${integrationSkipped.length} skipped` : null,
+                ].filter(Boolean).join(' · ')}
               </div>
             </div>
             <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
               {integration?.note || 'Offline wiring checks only (does not verify live connectivity).'}
             </div>
+
+            {integrationSkipped.length > 0 && (
+              <div className="mt-2 space-y-1" data-testid="integration-skipped-checks">
+                {integrationSkipped.map((s, idx) => (
+                  <div key={idx} className="text-[10px] font-mono text-[var(--color-text-secondary)]">
+                    <span className="text-[var(--color-accent)]">{s.id || 'check'} skipped</span>
+                    <span className="ml-2">{s.reason || ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {integrationFailures.length > 0 && (
               <div className="mt-2 space-y-1">

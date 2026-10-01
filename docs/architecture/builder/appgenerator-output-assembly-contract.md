@@ -1047,14 +1047,16 @@ load. The check persists `app_runtime_load_passed` and
 `app_runtime_load_result` into workflow context and includes `app_runtime_load`
 in `app_bundle_acceptance_result.validation_evidence`.
 
-After it, the gate runs `app_runtime_smoke`: the bundle is booted in-process on
-a disposable database and its module actions are called as two signed-in users
-(see [Runtime Smoke Gate](../app/generated-app-functional-acceptance.md#runtime-smoke-gate)).
-Its result is persisted as `app_runtime_smoke_result` and inside
-`app_bundle_acceptance_result`, which the downloaded bundle's metadata carries.
-Failures join the bundle repair diagnostics with the file each one names. A
-check with no database reports `skipped`; `validation_evidence.skipped` lists
-it, and it is neither completed nor failed.
+After it, the gate runs `app_runtime_smoke`: in a child process with a scrubbed
+environment and a hard time limit, the bundle is booted on a disposable
+database and its module actions are called as two signed-in users (see
+[Runtime Smoke Gate](../app/generated-app-functional-acceptance.md#runtime-smoke-gate)).
+Generated code does not run in the factory process. The result is persisted as
+`app_runtime_smoke_result` and inside `app_bundle_acceptance_result`, which the
+downloaded bundle's metadata carries. Failures join the bundle repair
+diagnostics with the file each one names. A check with no database reports
+`skipped`: `validation_evidence.skipped` and `skipped_checks` list it with the
+reason, and it is neither completed nor failed.
 
 Modules declaring `user_data_scope` must provide a loadable account-data class
 whose constructor takes `db` or `persistence` (the account routes inject what it

@@ -103,11 +103,11 @@ def _no_runtime_smoke_database(monkeypatch):
     CI shards configure a real MONGO_URI, so without this every test that runs
     the app-bundle acceptance gate would boot its fixture bundle against that
     Mongo. The gate then reports ``skipped: no database configured``. Tests of
-    the runtime smoke itself patch ``resolve_smoke_mongo_client`` back to a
-    real client (see tests/test_app_runtime_smoke.py).
+    the runtime smoke itself pass the URI explicitly or patch
+    ``resolve_smoke_mongo_uri`` back (see tests/test_app_runtime_smoke.py).
     """
     # app_runtime_smoke imports no host configuration, so this stays env-inert.
     from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 
-    monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_client", lambda: None)
+    monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: None)
     yield

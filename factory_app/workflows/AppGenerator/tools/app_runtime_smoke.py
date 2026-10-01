@@ -2,8 +2,8 @@
 
 The static acceptance checks read files. This gate runs the bundle: it loads
 it with the platform host's ``AppLoader``, applies its declared indexes and
-migrations to a disposable database on the host's configured Mongo, starts its
-runtime extensions, and calls its module actions through the real module
+migrations to a disposable database on the host's configured Mongo, mounts its
+API router extensions, and calls its module actions through the real module
 router over an in-process ASGI client as synthetic signed-in principals.
 
 Every check is derived from the bundle's own contracts: ``data/contract.json``
@@ -11,24 +11,30 @@ collections and their canonical action ids, ``module.yaml`` schemas, gates and
 surfaces, ``config/subscriptions.yaml`` plans and assignment store, and the
 token scopes ``config/auth.yaml`` grants. Nothing is configured per app.
 
-The composed app never reaches the factory host's process collaborators. It
-is dispatched in enforce mode with its own (empty) platform hook registry, an
-in-memory audit log, a local event recorder and no usage metering, and its
-module persistence, entitlement reads and migration history all live in the
-disposable database, which is dropped afterwards.
+Generated code never runs in the factory process. ``run_app_runtime_smoke``
+(the parent, called by acceptance) creates the disposable database, starts
+``python -m`` this module as a child process and drops the database however
+the child ends. The child's environment holds only what a Python process needs
+to start on this OS (no host secrets, provider keys or Mongo URI; the database
+URI arrives on stdin), it is killed at a hard total time limit, and it streams
+each check result back as one JSON line so a killed run still reports what it
+finished. Inside the child the composed app is dispatched in enforce mode with
+its own (empty) platform hook registry, an in-memory audit log, a local event
+recorder and no usage metering; module persistence, entitlement reads and
+migration history all use the disposable database. Startup services are not
+started: they run outside module dispatch with their own clients.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-import shutil
+import os
+import subprocess
 import sys
-import tempfile
 import time
 import traceback
-from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
-from contextvars import ContextVar
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -39,13 +45,19 @@ from fastapi import FastAPI, Request
 logger = logging.getLogger(__name__)
 
 SMOKE_CONTRACT_VERSION = "1.0"
+SMOKE_TIMEOUT_SECONDS = 60.0
+_CHILD_MODULE = "factory_app.workflows.AppGenerator.tools.app_runtime_smoke"
+_EVENT_PREFIX = "@@mozaiks-runtime-smoke@@ "
 _SMOKE_DATABASE_PREFIX = "mozaiks_runtime_smoke_"
 _PING_TIMEOUT_SECONDS = 5.0
 _STEP_TIMEOUT_SECONDS = 20.0
-_REQUEST_TIMEOUT_SECONDS = 15.0
+_REQUEST_TIMEOUT_SECONDS = 10.0
 _UNREACHABLE_SURFACES = frozenset({"internal", "admin_internal"})
 _RUNTIME_LOGGER = "mozaiks.workflow"
-_ACTIVE_RUN: ContextVar[str | None] = ContextVar("mozaiks_runtime_smoke_run", default=None)
+# The child's environment: what a Python process needs to start on this OS. No
+# other host variable (secrets, provider keys, MONGO_URI, MOZAIKS_*) is passed.
+_CHILD_ENVIRONMENT = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR",
+                      "LANG", "LC_ALL", "LC_CTYPE")
 
 _FIX_SUGGESTION = (
     "Fix the named generated file so the app boots and its declared module actions behave as the "
@@ -53,75 +65,162 @@ _FIX_SUGGESTION = (
 )
 
 
-# --------------------------------------------------------------------------- bundle materialization
+# --------------------------------------------------------------------------- parent: database and child process
 
 
-def write_bundle_files(app_root: Path, files: Mapping[str, str]) -> None:
-    """Write a generated file map as an importable app directory."""
-    for relpath, content in files.items():
-        target = app_root / relpath
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-    # Every Python package directory gets an __init__.py so it resolves as a
-    # regular package from this root, never as a namespace package merged
-    # with stale sys.path entries from an earlier load in this process.
-    # Bottom-up, so `services/` inherits a marker from `services/integrations/`.
-    for dir_path in sorted(app_root.rglob("*"), reverse=True):
-        if not dir_path.is_dir() or dir_path == app_root:
-            continue
-        init_file = dir_path / "__init__.py"
-        if init_file.exists():
-            continue
-        has_py = any(item.suffix == ".py" for item in dir_path.iterdir() if item.is_file())
-        has_pkg_child = any((child / "__init__.py").exists() for child in dir_path.iterdir() if child.is_dir())
-        if has_py or has_pkg_child:
-            init_file.write_text("", encoding="utf-8")
-
-
-@asynccontextmanager
-async def materialized_app_bundle(files: Mapping[str, str], *, prefix: str) -> AsyncIterator[Path]:
-    """Yield a temporary ``app/`` root holding ``files``; undo its imports afterwards."""
-    tmp = tempfile.mkdtemp(prefix=prefix)
-    app_root = Path(tmp) / "app"
-    write_bundle_files(app_root, files)
-    modules_before = dict(sys.modules)
-    try:
-        yield app_root
-    finally:
-        # Remove only this bundle's imports; other workflows may import while we await.
-        roots = {str(app_root.resolve()), str(app_root.parent.resolve())}
-        sys.path[:] = [entry for entry in sys.path if entry not in roots]
-        for key, value in list(sys.modules.items()):
-            filename = getattr(value, "__file__", None)
-            if isinstance(filename, str) and Path(filename).is_relative_to(app_root):
-                if key in modules_before:
-                    sys.modules[key] = modules_before[key]
-                else:
-                    sys.modules.pop(key, None)
-        for key, value in modules_before.items():
-            if key not in sys.modules and (
-                key == "services" or key.startswith(("services.", "mozaiks_runtime_module_"))
-            ):
-                sys.modules[key] = value
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-# --------------------------------------------------------------------------- database target
-
-
-def resolve_smoke_mongo_client() -> Any | None:
-    """The host's configured Mongo client, or None when no database is configured."""
-    from mozaiksai.core.secrets import inspect_secret_config
+def resolve_smoke_mongo_uri() -> str | None:
+    """The host's configured Mongo URI, or None when no database is configured."""
+    from mozaiksai.core.secrets import inspect_secret_config, resolve_secret
 
     try:
         if not inspect_secret_config("MONGO_URI").configured:
             return None
-        from mozaiksai.core.core_config import get_mongo_client
-
-        return get_mongo_client()
-    except Exception as exc:  # secret policy or client construction failure
-        logger.warning("APP_RUNTIME_SMOKE_DATABASE_UNAVAILABLE: %s", exc)
+        return str(resolve_secret("MONGO_URI") or "").strip() or None
+    except Exception as exc:  # secret policy failure; never log the value
+        logger.warning("APP_RUNTIME_SMOKE_DATABASE_UNAVAILABLE: %s", type(exc).__name__)
         return None
+
+
+def child_environment() -> dict[str, str]:
+    """The child's whole environment: OS essentials plus the import roots of this very code."""
+    environment = {name: os.environ[name] for name in _CHILD_ENVIRONMENT if os.environ.get(name)}
+    roots: list[str] = []
+    for package_name in ("mozaiksai", "factory_app", "logs"):
+        package = sys.modules.get(package_name) or __import__(package_name)
+        root = str(Path(str(package.__file__)).resolve().parents[1])
+        if root not in roots:
+            roots.append(root)
+    environment.update({
+        "PYTHONPATH": os.pathsep.join(roots),
+        "PYTHON_DOTENV_DISABLED": "1",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    })
+    return environment
+
+
+@dataclass
+class _ChildRun:
+    stdout: str
+    stderr: str
+    returncode: int | None
+    timed_out: bool
+
+
+class _ChildProcess:
+    """One child run; ``kill`` is safe to call from another thread."""
+
+    def __init__(self) -> None:
+        self.process: subprocess.Popen[str] | None = None
+        self.cancelled = False
+
+    def run(self, app_root: Path, request: dict[str, Any], timeout_seconds: float) -> _ChildRun:
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", _CHILD_MODULE],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+            env=child_environment(), cwd=str(app_root.parent),
+        )
+        if self.cancelled:  # the gate was cancelled while the process was being created
+            self.process.kill()
+        try:
+            stdout, stderr = self.process.communicate(input=json.dumps(request), timeout=timeout_seconds)
+            return _ChildRun(stdout, stderr, self.process.returncode, False)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            stdout, stderr = self.process.communicate()
+            return _ChildRun(stdout, stderr, None, True)
+
+    def kill(self) -> None:
+        self.cancelled = True
+        if self.process is not None and self.process.poll() is None:
+            self.process.kill()
+            self.process.wait()
+
+
+async def run_app_runtime_smoke(
+    app_root: Path, *, mongo_uri: str | None, timeout_seconds: float = SMOKE_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Boot the bundle at ``app_root`` in a child process on a disposable database and use it as two users."""
+    started = time.monotonic()
+    if not mongo_uri:
+        return _skipped("no database configured", started=started)
+    if not (app_root / "app.json").is_file():
+        return _skipped("the bundle has no app.json to boot", started=started)
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    client: Any = AsyncIOMotorClient(mongo_uri, serverSelectionTimeoutMS=int(_PING_TIMEOUT_SECONDS * 1000))
+    try:
+        try:
+            await asyncio.wait_for(client.admin.command("ping"), timeout=_PING_TIMEOUT_SECONDS)
+        except Exception as exc:
+            reason = _redact(f"database unreachable ({type(exc).__name__}: {exc})", mongo_uri)
+            return _skipped(reason, started=started)
+        database_name = f"{_SMOKE_DATABASE_PREFIX}{uuid4().hex[:20]}"
+        request = {"app_root": str(app_root), "mongo_uri": mongo_uri, "database_name": database_name}
+        child = _ChildProcess()
+        try:
+            run = await asyncio.to_thread(child.run, app_root, request, timeout_seconds)
+        except BaseException:
+            await asyncio.to_thread(child.kill)
+            raise
+        finally:
+            try:
+                await client.drop_database(database_name)
+            except Exception as exc:
+                logger.warning("APP_RUNTIME_SMOKE_DROP_FAILED: database=%s error=%s", database_name, type(exc).__name__)
+        return _child_result(run, mongo_uri=mongo_uri, timeout_seconds=timeout_seconds, started=started)
+    finally:
+        client.close()
+
+
+def _redact(text: str, mongo_uri: str) -> str:
+    return text.replace(mongo_uri, "<database uri>") if mongo_uri else text
+
+
+def _events(stdout: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        if not line.startswith(_EVENT_PREFIX):
+            continue
+        try:
+            event = json.loads(line[len(_EVENT_PREFIX):])
+        except ValueError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
+
+
+def _child_result(run: _ChildRun, *, mongo_uri: str, timeout_seconds: float, started: float) -> dict[str, Any]:
+    events = _events(run.stdout)
+    outcomes = [{key: value for key, value in event.items() if key != "event"} for event in events
+                if event.get("event") == "outcome"]
+    done = next((event for event in reversed(events) if event.get("event") == "done"), None)
+    activity = next((event for event in reversed(events) if event.get("event") in {"calling", "step"}), None)
+    where, path = "", None
+    if activity is not None and activity.get("event") == "calling":
+        where = f" while {activity['module']}.{activity['action']} was running as user {activity['principal']}"
+        path = f"modules/{activity['module']}/backend/service.py"
+    elif activity is not None:
+        where = f" during {activity['name']}"
+    if run.timed_out:
+        outcomes.append({
+            "check": "smoke.timeout", "status": "failed", "path": path,
+            "message": f"The runtime smoke was stopped at its {timeout_seconds:.0f}s limit{where}. Generated code "
+                       "must not block or wait on unreachable services when its actions are called.",
+        })
+    elif done is None:
+        tail = " ".join(run.stderr.strip().splitlines()[-3:])[-600:]
+        outcomes.append({
+            "check": "smoke.process", "status": "failed", "path": path,
+            "message": f"The runtime smoke process exited with code {run.returncode}{where} before finishing: "
+                       f"{tail or 'no output'}",
+        })
+    for outcome in outcomes:
+        outcome["message"] = _redact(str(outcome.get("message") or ""), mongo_uri)
+    return _summary(outcomes, done or {}, started=started)
 
 
 # --------------------------------------------------------------------------- result records
@@ -170,16 +269,14 @@ class _Entity:
 
 
 class _RunLogCapture(logging.Handler):
-    """Keep runtime log records emitted while this smoke run's context is active."""
+    """Keep the runtime's warning and error records (the child runs one smoke)."""
 
-    def __init__(self, run_id: str) -> None:
+    def __init__(self) -> None:
         super().__init__(logging.WARNING)
-        self.run_id = run_id
         self.records: list[logging.LogRecord] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        if _ACTIVE_RUN.get() == self.run_id:
-            self.records.append(record)
+        self.records.append(record)
 
 
 def _skipped(reason: str, *, started: float) -> dict[str, Any]:
@@ -187,13 +284,14 @@ def _skipped(reason: str, *, started: float) -> dict[str, Any]:
     return {
         "contract_version": SMOKE_CONTRACT_VERSION,
         "status": "skipped",
-        "passed": False,
+        "passed": None,
         "skipped_reason": reason,
         "duration_ms": int((time.monotonic() - started) * 1000),
         "results": [],
         "checks": [{
             "id": "app_runtime_smoke",
-            "passed": False,
+            "passed": None,
+            "status": "skipped",
             "message": message,
             "details": {"status": "skipped", "skipped_reason": reason, "blocking": False},
         }],
@@ -206,20 +304,18 @@ def _skipped(reason: str, *, started: float) -> dict[str, Any]:
 
 
 class _SmokeRun:
-    def __init__(self, files: Mapping[str, str], client: Any, database_name: str) -> None:
-        self.files = files
+    def __init__(self, app_root: Path, client: Any, database_name: str, emit: Callable[..., None]) -> None:
+        self.app_root = app_root
         self.client = client
         self.database_name = database_name
-        self.run_id = uuid4().hex
+        self.emit = emit
         self.outcomes: list[_Outcome] = []
-        self.capture = _RunLogCapture(self.run_id)
-        self.app_root: Path | None = None
+        self.capture = _RunLogCapture()
         self.app: Any = None
         self.load: Any = None
         self.app_id = "mozaiks-runtime-smoke"
         self.scopes: list[str] = []
         self.principals: dict[str, _Principal] = {}
-        self.services: list[Any] = []
         self.events: list[str] = []
         self.http: Any = None
         self.workspace_claims = False
@@ -231,11 +327,18 @@ class _SmokeRun:
         return self.client[self.database_name]
 
     def record(self, check: str, passed: bool, message: str, *, path: str | None = None, **details: Any) -> bool:
-        self.outcomes.append(_Outcome(check, passed, message, path, details))
+        outcome = _Outcome(check, passed, message, path, details)
+        self.outcomes.append(outcome)
+        self.emit("outcome", **outcome.to_dict())
         return passed
 
     def not_run(self, check: str, reason: str) -> None:
-        self.outcomes.append(_Outcome(check, None, f"Not run: {reason}"))
+        outcome = _Outcome(check, None, f"Not run: {reason}")
+        self.outcomes.append(outcome)
+        self.emit("outcome", **outcome.to_dict())
+
+    def step(self, name: str) -> None:
+        self.emit("step", name=name)
 
     async def record_event(self, event_type: str, envelope: dict[str, Any]) -> None:
         self.events.append(str(event_type))
@@ -261,14 +364,13 @@ class _SmokeRun:
             exc = record.exc_info[1]
             text = f"{type(exc).__name__}: {exc}"
             path = None
-            if self.app_root is not None:
-                root = str(self.app_root.resolve())
-                for frame in reversed(traceback.extract_tb(record.exc_info[2])):
-                    filename = str(Path(frame.filename).resolve())
-                    if filename.startswith(root):
-                        path = PurePosixPath(Path(filename).relative_to(root)).as_posix()
-                        text += f" (at {path}:{frame.lineno})"
-                        break
+            root = str(self.app_root.resolve())
+            for frame in reversed(traceback.extract_tb(record.exc_info[2])):
+                filename = str(Path(frame.filename).resolve())
+                if filename.startswith(root):
+                    path = PurePosixPath(Path(filename).relative_to(root)).as_posix()
+                    text += f" (at {path}:{frame.lineno})"
+                    break
             return text, path
         return None, None
 
@@ -314,6 +416,7 @@ class _SmokeRun:
         self, method: str, module: str, action: str, principal: _Principal, params: dict[str, Any],
     ) -> tuple[int, Any, str]:
         since = len(self.capture.records)
+        self.emit("calling", module=module, action=action, principal=principal.label)
         url = f"/api/modules/{module}/{action}"
         headers = {"Authorization": f"Bearer {principal.token}"}
         try:
@@ -370,7 +473,7 @@ def _alias_collection_name(alias: str, contract: Mapping[str, Any] | None) -> st
     return collection_name_for_alias(alias, contract=contract or {})
 
 
-async def _boot(run: _SmokeRun) -> bool:
+async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     """Compose the generated app the way the platform host does. False when nothing can be called."""
     from httpx import ASGITransport, AsyncClient
 
@@ -380,10 +483,7 @@ async def _boot(run: _SmokeRun) -> bool:
     from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
     from mozaiksai.core.runtime.app.loader import AppLoader
     from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
-    from mozaiksai.core.runtime.composition.extensions import (
-        mount_module_routers,
-        start_module_services,
-    )
+    from mozaiksai.core.runtime.composition.extensions import mount_module_routers
     from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
     from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
     from mozaiksai.core.runtime.persistence import (
@@ -396,7 +496,15 @@ async def _boot(run: _SmokeRun) -> bool:
     from mozaiksai.core.workflow.generator_support.module_write_actions import auth_contract_scopes
     from mozaiksai.hosts.routers import modules as module_router
 
-    assert run.app_root is not None
+    gained = sorted(set(os.environ) - initial_environment)
+    if gained:
+        run.record(
+            "smoke.environment", False,
+            f"Loading the Mozaiks runtime added environment variables {gained} to the smoke process (a .env "
+            "file was read), so generated code was not run: it must never see host configuration.",
+        )
+        return False
+    run.step("boot.app_load")
     try:
         load = await asyncio.wait_for(AppLoader.load(str(run.app_root)), timeout=_STEP_TIMEOUT_SECONDS)
     except Exception as exc:
@@ -428,6 +536,7 @@ async def _boot(run: _SmokeRun) -> bool:
         return MongoPersistenceContext(app_id=run.app_id, database_name=run.database_name, client=run.client)
 
     if contract:
+        run.step("boot.indexes")
         try:
             result = await asyncio.wait_for(
                 apply_database_indexes(contract, app_id=run.app_id, persistence=persistence()),
@@ -441,6 +550,7 @@ async def _boot(run: _SmokeRun) -> bool:
                 f"with persistence enabled: {exc}",
                 path="data/contract.json",
             )
+    run.step("boot.migrations")
     try:
         migrations = load_data_migrations(run.app_root)
         if migrations:
@@ -494,7 +604,10 @@ async def _boot(run: _SmokeRun) -> bool:
     app.state.failed_module_names = sorted(load.failed_module_names)
     app.state.data_contract = contract
     app.include_router(module_router.router)
-    run.scopes = sorted(auth_contract_scopes(run.files))
+    auth_yaml = run.app_root / "config" / "auth.yaml"
+    run.scopes = sorted(auth_contract_scopes(
+        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {}
+    ))
 
     async def resolve_principal(request: Request) -> UserPrincipal | None:
         header = request.headers.get("authorization") or ""
@@ -540,28 +653,13 @@ async def _boot(run: _SmokeRun) -> bool:
             run.record("boot.runtime_extensions", True, f"{mounted} api_router extension(s) mounted.")
     declared_services = _declared_extensions(load.modules, "startup_service")
     if declared_services:
-        since = len(run.capture.records)
-        try:
-            run.services = await asyncio.wait_for(start_module_services(load.modules), timeout=_STEP_TIMEOUT_SECONDS)
-        except TimeoutError:
-            run.services = []
-            run.record(
-                "boot.startup_services", False,
-                f"Startup services did not start within {_STEP_TIMEOUT_SECONDS:.0f}s.",
-                path=f"modules/{declared_services[0][0]}/runtime_extensions.yaml",
-            )
-        else:
-            if len(run.services) < len(declared_services):
-                failures = [record.getMessage() for record in run.capture.records[since:]
-                            if "MODULE_EXTENSIONS" in record.getMessage()]
-                run.record(
-                    "boot.startup_services", False,
-                    f"{len(declared_services) - len(run.services)} of {len(declared_services)} declared "
-                    f"startup_service extension(s) did not start: {'; '.join(failures) or 'no service returned'}",
-                    path=f"modules/{declared_services[0][0]}/runtime_extensions.yaml",
-                )
-            else:
-                run.record("boot.startup_services", True, f"{len(run.services)} startup service(s) started.")
+        modules = sorted({name for name, _ in declared_services})
+        run.not_run(
+            "boot.startup_services",
+            f"{len(declared_services)} startup_service extension(s) declared by {modules} are not started. They "
+            "run outside module dispatch with their own clients, so the smoke cannot keep them inside its "
+            "disposable database; only the deployed app starts them.",
+        )
 
     run.app = app
     run.http = AsyncClient(transport=ASGITransport(app=app), base_url="http://runtime-smoke")
@@ -856,8 +954,10 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     owned = entity.tenancy in {"per_user", "per_workspace"}
     a, b = run.principal("A"), run.principal("B")
     # A and B hold the same plan, so any refusal of B is ownership, never entitlement.
+    # Without config/subscriptions.yaml the host wires no entitlement adapter and
+    # every gate allows, exactly as in production.
     gates = {module.action_entitlement_map.get(action) for action in actions.values()} - {None, ""}
-    if gates:
+    if gates and run.load.subscriptions_config is not None:
         choice = _granting_plan(run.load.subscriptions_config, set(gates))
         if choice is None:
             run.record(f"{tag}.plan", False, f"{entity.label} actions gate on {sorted(gates)} but no plan grants them.",
@@ -1145,11 +1245,11 @@ async def _entitlements(run: _SmokeRun, entities: list[_Entity]) -> None:
 # --------------------------------------------------------------------------- entry point
 
 
-def _result(run: _SmokeRun, *, started: float) -> dict[str, Any]:
-    failures = [outcome for outcome in run.outcomes if outcome.passed is False]
-    not_run = sum(outcome.passed is None for outcome in run.outcomes)
+def _summary(outcomes: list[dict[str, Any]], meta: Mapping[str, Any], *, started: float) -> dict[str, Any]:
+    failures = [outcome for outcome in outcomes if outcome.get("status") == "failed"]
+    not_run = sum(outcome.get("status") == "not_run" for outcome in outcomes)
     passed = not failures
-    ran = len(run.outcomes) - not_run
+    ran = len(outcomes) - not_run
     message = (
         f"Generated app booted and passed {ran} runtime check(s) as two signed-in users."
         if passed else
@@ -1162,16 +1262,14 @@ def _result(run: _SmokeRun, *, started: float) -> dict[str, Any]:
         "passed": passed,
         "skipped_reason": None,
         "duration_ms": int((time.monotonic() - started) * 1000),
-        "app_id": run.app_id,
-        "principals": {
-            label: {"user_id": principal.user_id, "workspace_id": principal.workspace_id, "scopes": run.scopes}
-            for label, principal in run.principals.items()
-        },
-        "results": [outcome.to_dict() for outcome in run.outcomes],
-        "events_emitted": sorted(set(run.events)),
+        "app_id": meta.get("app_id"),
+        "principals": meta.get("principals") or {},
+        "results": outcomes,
+        "events_emitted": meta.get("events_emitted") or [],
         "checks": [{
             "id": "app_runtime_smoke",
             "passed": passed,
+            "status": "passed" if passed else "failed",
             "message": message,
             "details": {
                 "status": "passed" if passed else "failed",
@@ -1183,9 +1281,9 @@ def _result(run: _SmokeRun, *, started: float) -> dict[str, Any]:
         "failed_tests": [
             {
                 "test": "app_runtime_smoke",
-                "check": outcome.check,
-                **({"path": outcome.path} if outcome.path else {}),
-                "error": outcome.message,
+                "check": outcome.get("check"),
+                **({"path": outcome["path"]} if outcome.get("path") else {}),
+                "error": outcome.get("message"),
                 "fix_suggestion": _FIX_SUGGESTION,
             }
             for outcome in failures
@@ -1194,54 +1292,64 @@ def _result(run: _SmokeRun, *, started: float) -> dict[str, Any]:
     }
 
 
-async def run_app_runtime_smoke(files: Mapping[str, str], *, mongo_client: Any | None) -> dict[str, Any]:
-    """Boot ``files`` in-process on a disposable database and exercise it as two signed-in users."""
-    started = time.monotonic()
-    if mongo_client is None:
-        return _skipped("no database configured", started=started)
-    try:
-        await asyncio.wait_for(mongo_client.admin.command("ping"), timeout=_PING_TIMEOUT_SECONDS)
-    except Exception as exc:
-        return _skipped(f"database unreachable ({type(exc).__name__}: {exc})", started=started)
-    if "app.json" not in files:
-        return _skipped("the bundle has no app.json to boot", started=started)
+__all__ = [
+    "SMOKE_TIMEOUT_SECONDS",
+    "child_environment",
+    "resolve_smoke_mongo_uri",
+    "run_app_runtime_smoke",
+]
 
-    run = _SmokeRun(files, mongo_client, f"{_SMOKE_DATABASE_PREFIX}{uuid4().hex[:20]}")
-    token = _ACTIVE_RUN.set(run.run_id)
+
+# --------------------------------------------------------------------------- child process
+
+
+async def _child_run(request: Mapping[str, Any], emit: Callable[..., None], initial_environment: set[str]) -> None:
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    client: Any = AsyncIOMotorClient(str(request["mongo_uri"]), serverSelectionTimeoutMS=int(_PING_TIMEOUT_SECONDS * 1000))
+    run = _SmokeRun(Path(str(request["app_root"])), client, str(request["database_name"]), emit)
     runtime_logger = logging.getLogger(_RUNTIME_LOGGER)
     runtime_logger.addHandler(run.capture)
     try:
-        async with materialized_app_bundle(files, prefix="mozaiks-app-runtime-smoke-") as app_root:
-            run.app_root = app_root
-            try:
-                if await _boot(run):
-                    entities = _contract_entities(run)
-                    for entity in entities:
-                        await _crud(run, entity)
-                    await _entitlements(run, entities)
-            finally:
-                if run.http is not None:
-                    await run.http.aclose()
-                if run.services:
-                    from mozaiksai.core.runtime.composition.extensions import stop_services
-
-                    await stop_services(run.services)
-    except Exception as exc:  # the gate itself must report, never crash validation
-        logger.exception("APP_RUNTIME_SMOKE_ERROR")
+        if await _boot(run, initial_environment):
+            entities = _contract_entities(run)
+            for entity in entities:
+                await _crud(run, entity)
+            await _entitlements(run, entities)
+    except Exception as exc:  # report the gate's own failure as a check, never a silent pass
         run.record("smoke.error", False, f"The runtime smoke could not complete: {type(exc).__name__}: {exc}")
     finally:
+        if run.http is not None:
+            await run.http.aclose()
         runtime_logger.removeHandler(run.capture)
-        _ACTIVE_RUN.reset(token)
-        try:
-            await mongo_client.drop_database(run.database_name)
-        except Exception as exc:
-            logger.warning("APP_RUNTIME_SMOKE_DROP_FAILED: database=%s error=%s", run.database_name, exc)
-    return _result(run, started=started)
+        client.close()
+    emit(
+        "done",
+        app_id=run.app_id,
+        principals={
+            label: {"user_id": principal.user_id, "workspace_id": principal.workspace_id,
+                    "scopes": [*run.scopes, *principal.extra_scopes]}
+            for label, principal in run.principals.items()
+        },
+        events_emitted=sorted(set(run.events)),
+    )
 
 
-__all__ = [
-    "materialized_app_bundle",
-    "resolve_smoke_mongo_client",
-    "run_app_runtime_smoke",
-    "write_bundle_files",
-]
+def _child_main() -> int:
+    """Entry point of ``python -m`` this module: one smoke run, results as JSON lines on stdout."""
+    initial_environment = set(os.environ)
+    request = json.loads(sys.stdin.read() or "{}")
+    channel = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
+    sys.stdout = sys.stderr  # generated code's prints never reach the result channel
+
+    def emit(kind: str, **data: Any) -> None:
+        channel.write(_EVENT_PREFIX + json.dumps({"event": kind, **data}, default=str) + "\n")
+        channel.flush()
+
+    asyncio.run(_child_run(request, emit, initial_environment))
+    channel.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_child_main())

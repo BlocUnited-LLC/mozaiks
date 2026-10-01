@@ -132,33 +132,62 @@ enabled, crashed on every write and denied paying users. `app_runtime_smoke`
 (`factory_app/workflows/AppGenerator/tools/app_runtime_smoke.py`) runs the
 bundle instead.
 
-**Boot.** The bundle is written to a temporary `app/` root and loaded with
-`AppLoader.load()`. Its declared indexes and data migrations are applied, its
-modules are registered with `ModuleExecutor.register_loaded_module` (the same
-call the platform host makes), its `api_router` extensions are mounted and its
-`startup_service` extensions are started, then stopped. Persistence uses a
-uniquely named disposable database on the host's configured Mongo
-(`mozaiks_runtime_smoke_*`), which is dropped afterwards. Requests go through
-the real module router over an in-process ASGI client: no port, no subprocess.
+**Process boundary.** Generated code never runs in the factory process.
+Acceptance writes the bundle to a temporary `app/` root and the gate starts
+`python -m factory_app.workflows.AppGenerator.tools.app_runtime_smoke`:
+
+- The child's environment holds only what a Python process needs to start on
+  the operating system: `PATH`, `SYSTEMROOT`, temp directories, locale. It also
+  gets `PYTHONPATH` for the factory's own code and `PYTHON_DOTENV_DISABLED=1`.
+  No host secret, provider key, `MOZAIKS_*` setting or `MONGO_URI` is passed.
+- The disposable database URI and name arrive on stdin.
+- If loading the runtime still adds an environment variable (a `.env` file
+  read), the child refuses to run generated code. Mozaiks requires
+  python-dotenv 1.2 or later, which honors `PYTHON_DOTENV_DISABLED`.
+- The parent kills the child at a hard total limit (60 s by default) and drops
+  the database whether the child finished, crashed, timed out or the gate was
+  cancelled.
+- The child streams each check result as one JSON line, so a killed run still
+  reports every check it finished. The timeout failure names the action that
+  was running.
+- Every message is redacted of the database URI before it is returned.
+
+**Boot.** The child loads the bundle with `AppLoader.load()` and applies the
+declared indexes and data migrations to the disposable database
+(`mozaiks_runtime_smoke_*` on the host's configured Mongo). It registers modules
+with `ModuleExecutor.register_loaded_module`, the same call the platform host
+makes, and mounts the `api_router` extensions. **Startup services are not
+started.** They run outside module dispatch with their own clients and
+credentials, so the smoke cannot keep them inside the disposable database. They
+are reported `not_run`, and only the deployed app starts them. Requests go
+through the real module router over an in-process ASGI client inside the child:
+no port.
 
 **Two-user CRUD.** For every collection whose canonical create action
 (`create_<entity>`) is declared, signed-in users A and B, holding the same plan,
-exercise the canonical actions that exist. A creates a record. The stored
-document must carry the returned id and A as owner. A lists and reads it, and a
-read of a missing id returns 404. B neither lists nor reads it, and B's update
-and delete leave the stored record unchanged. A's update changes the stored
-field, and A's delete removes the record. Payloads come from each action's
-declared input schema and the collection's field types. `app_wide` collections
-get A's round trip only. Steps that need A's record report `not_run` when the
-create produced none; they never pass vacuously.
+exercise the canonical actions that exist:
+
+- A creates a record. The stored document must carry the returned id and A as
+  owner.
+- A lists and reads it, and a read of a missing id returns 404.
+- B neither lists nor reads it, and B's update and delete leave the stored
+  record unchanged.
+- A's update changes the stored field, and A's delete removes it.
+
+Payloads come from each action's declared input schema and the collection's
+field types. `app_wide` collections get A's round trip only. Steps that need A's
+record report `not_run` when the create produced none; they never pass
+vacuously.
 
 **Entitlements.** For every action with an `entitlement_gate`, a user on the
 default plan without the capability must receive 402. A user with an active
 assignment granting it must not be refused. The assignment is written through
 `config/subscriptions.yaml` `assignment_store.data_alias`, resolved against
 `data/contract.json` aliases exactly as `ConfiguredEntitlementAdapter` resolves
-it. A store that cannot hold assignments is one failure: no store, no
-`user_id_field`, no active status, or an undeclared alias.
+it. A store that cannot hold assignments is reported once: no store, no
+`user_id_field`, no active status, or an undeclared alias. Without
+`config/subscriptions.yaml` the host wires no entitlement adapter and every gate
+allows, so the smoke expects exactly that.
 
 **Permissions.** Users carry the token scopes `config/auth.yaml`
 `frontend.default_scopes` grants. A module.yaml permission outside them denies
@@ -166,41 +195,75 @@ every signed-in user. That is reported once per action. The call is then
 repeated for the same user with exactly the missing permissions, so the defects
 behind it are reported in the same pass.
 
-**Isolation from the host.** The gate runs inside the factory process, so the
-composed app gets its own collaborators. It has an empty `PlatformHookRegistry`
-and an in-memory audit log, and its events are recorded locally. It is
-dispatched in enforce mode with no usage metering, through a
-`ModuleDispatchEnvironment` dependency override on that app only. The executor's
-persistence database and client, entitlement reads and migration history all
-point at the disposable database. The factory's auth mode, platform hooks (App
-Zero registers module scope, permission, policy and audit hooks), audit log and
-system database are never used.
+**Dispatch collaborators.** Inside the child, the composed app is dispatched in
+enforce mode through a `ModuleDispatchEnvironment` dependency override:
 
-**Results.** Each check passes or fails with one message naming the action,
-the user, the expected response and the actual one. A 5xx carries the exception
-and the generated file and line it was raised from. The result is persisted as
-`app_runtime_smoke_result` and inside `app_bundle_acceptance_result`. Failures
-join the bundle repair diagnostics with the file each one names: the frame's
-file, `repo.py` for id, owner and isolation defects, `module.yaml` for
-permissions and gates, `data/contract.json` for indexes and aliases, and
-`config/subscriptions.yaml` for plans. With no configured database, or an
-unreachable one, the check reports `skipped` with the reason. It is listed in
-`validation_evidence.skipped`, and it is never a pass.
+- an empty `PlatformHookRegistry`, an in-memory audit log, local event
+  recording and no usage metering;
+- module persistence, entitlement reads and migration history in the disposable
+  database.
 
-**Not covered.** Module reactions, workflow triggers, pages and custom actions
-without an entitlement gate are not exercised. Public surfaces and
-`internal`/`admin_internal` actions are out of scope, because signed-in users
-cannot call them over HTTP.
+The host's auth mode, platform hooks, audit log, usage metering and system
+database are never used. A hosted factory may register module scope, permission,
+policy and audit hooks. With the database dropped, nothing the smoke wrote
+remains on the host's Mongo.
 
-**Proof.** `tests/test_app_runtime_smoke.py` runs the gate on real Mongo
-against two recorded bundles (`tests/fixtures/runtime_smoke_*.json`). The 93a7
-replay fails for its known reasons: null index name, migration without a
-version, undeclared assignment alias, ungrantable permissions, a crash on every
-create and on a missing id, and paying users denied. With the create crash
-repaired, the stored record shows the wrong id and owner fields. The fdfa818e
-run replayed at c8b9ea2e passes every check. The suite-wide conftest gives every
-other test no smoke database, so acceptance tests that do not opt in report
-`skipped`.
+**Results.** Each check passes, fails or did not run, with one message naming
+the action, the user, the expected response and the actual one. A 5xx carries
+the exception and the generated file and line it was raised from. The result is
+persisted as `app_runtime_smoke_result` and inside
+`app_bundle_acceptance_result`. Failures join the bundle repair diagnostics with
+the file each one names:
+
+| Failure | Repair path |
+| --- | --- |
+| Exception raised in a generated file | that file |
+| Wrong id or owner, isolation breach | `repo.py` |
+| Ungranted permission or unenforced gate | `module.yaml` |
+| Index or alias defect | `data/contract.json` |
+| Plan or assignment defect | `config/subscriptions.yaml` |
+
+With no configured database, or an unreachable one, the check reports
+`skipped` with the reason (`passed: null`, `status: "skipped"`). Acceptance
+lists it in `validation_evidence.skipped` and `skipped_checks` with that reason.
+It is neither completed nor failed, so acceptance can still pass. The build
+status pane shows the integration checks as skipped (amber), not as a clean
+pass.
+
+**Not covered.** Module reactions, workflow triggers, pages and startup services
+are not exercised. Custom actions are called only when they carry an entitlement
+gate. Actions on the `internal` and `admin_internal` surfaces are out of scope:
+signed-in users cannot call them over HTTP. `public` and `public_readonly`
+actions are called like any other, as a signed-in user.
+
+**Known follow-ups.** These are not handled by the gate yet:
+
+- Outbound calls to unconfigured integrations run in the child and fail or wait
+  until the time limit.
+- Pack-owned permissions outside `config/auth.yaml` default scopes (commerce)
+  are reported as ungrantable.
+- The host's Mongo credentials are not yet scoped to the disposable database.
+- Stale `mozaiks_runtime_smoke_*` databases left by a killed factory process are
+  not swept.
+- Failures on code-rendered files (no owning task) are blocked for repair rather
+  than routed.
+- Generated code runs as the factory's operating-system user without a
+  filesystem sandbox.
+
+**Proof.** `tests/test_app_runtime_smoke.py` runs the gate through the child
+process on real Mongo against two recorded bundles
+(`tests/fixtures/runtime_smoke_*.json`):
+
+- The 93a7 replay fails for its known reasons: null index name, migration
+  without a version, undeclared assignment alias, ungrantable permissions, a
+  crash on every create and on a missing id, and paying users denied. With the
+  create crash repaired, the stored record shows the wrong id and owner fields.
+- The fdfa818e run replayed at c8b9ea2e passes every check.
+- Further tests cover the hard timeout, the child environment, startup services
+  and the no-subscriptions case.
+
+The suite-wide conftest gives every other test no smoke database, so acceptance
+tests that do not opt in report `skipped`.
 
 ## Representative Archetypes
 
