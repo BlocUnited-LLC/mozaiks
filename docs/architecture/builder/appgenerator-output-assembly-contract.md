@@ -337,7 +337,18 @@ Review constructs omitted genesis page and module tasks even when the proposed
 task list is empty. Construction and validation share required page/module path
 computations, including route-derived casing. Existing correct ownership is
 preserved; missing required paths are filled and conflicting non-page owners
-still fail. Selected pack inventory is resolved before coverage construction.
+still fail. Tasks of the same type for the same capability and surface that
+share an owned file are one unit of work split by the planner (for example one
+business_services task per action, each owning the module's service.py): review
+merges them into the first one in plan order, unions their owned paths,
+criteria and instructions (the first task wins any conflicting field), and
+renames absorbed ids in depends_on, generation_order,
+carry_forward_decisions and integration_needs. Ownership another step settles
+is not a reason to merge: app.json, config/subscriptions.yaml, a selected pack's
+outputs and facade module, and page_bundle work. Tasks of different types
+sharing a file still fail, and a split that repeats or reuses a task_id, has a
+blank id, or would close a dependency cycle is left to those checks.
+Selected pack inventory is resolved before coverage construction.
 Canonical worker mapping and selected subscription, refinement, and split-admin
 task file requirements are also shared with validation. Explicit approved action
 names reach module workers. Module materialization constructs canonical reads and, for module-written collections, canonical create/update/delete actions with their implementations and schemas from declared collection ownership and typed list/detail intent. The generated record id is the declared `<entity>_id` field (else `id`, else `_id`); `search_by` is only the get lookup and a natural key there is never replaced by a generated id.
