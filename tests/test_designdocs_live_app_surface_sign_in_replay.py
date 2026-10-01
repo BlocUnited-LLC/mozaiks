@@ -1,4 +1,4 @@
-"""Replay the live 4da11a24 DesignDocs output: a sign-in page on an app surface is the platform's.
+"""Replay the live 4da11a24 DesignDocs output: an app page at the platform login route is removed.
 
 DesignDocs chat 4da11a24 (OSS c8b9ea2e, 2026-10-01) saved, on its first attempt,
 an approved ``Authentication`` page at ``/login`` whose only section is an

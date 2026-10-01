@@ -239,13 +239,15 @@ def _at_sign_in_route(page: dict[str, Any], sign_in_routes: set[str]) -> bool:
 
 
 def _is_credential_form(section: dict[str, Any], rule: SurfaceOwnershipRule) -> bool:
-    """A Form that only signs a user in or up: a secret input beside an account key, nothing else.
+    """A Form collecting only sign-in or sign-up input: a secret beside an account key, nothing else.
 
     The secret is a ``password``-type field or a field the rule lists as identity
     evidence (password, tokens); the account key is one of the rule's
     ``account_key_fields`` (email, username). Every other field is a secret or an
-    identity claim the rule declares. A field with no typed name, or any other
-    field, is something the platform does not collect, so the form is not sign-in.
+    identity claim the rule declares; a field with no typed name, or any other
+    field, keeps the form the app's. The same fields also make an app's own
+    "connect your account" form, so this is only evidence at an auth contract
+    route (``_only_platform_authentication``).
     """
     if section.get("primitive") != "Form":
         return False
@@ -266,30 +268,32 @@ def _is_credential_form(section: dict[str, Any], rule: SurfaceOwnershipRule) -> 
 def _only_platform_authentication(
     page: dict[str, Any], rule: SurfaceOwnershipRule, *, sign_in_routes: set[str], app_modules: set[str],
 ) -> bool:
-    """A page that is entirely the platform's authentication, whichever surface files it.
+    """A page at a route the platform serves sign-in on, holding nothing but authentication.
 
-    Recognized by content, never by its name or intent: no section binds an
-    app-owned module through a typed reference, and either the page sits at an
-    auth contract route (``_at_sign_in_route``) with every section a credential
-    form or naming no typed record field beyond the rule's identity claims and
-    credentials, or every section is a credential form (``_is_credential_form``).
-    A page with app data beside a form, a login link, or an account-settings
-    section is not sign-in.
+    The platform owns its auth contract routes (``_at_sign_in_route``: login,
+    callback, logout, or a route one nests under), so an app page there can
+    never be served. Such a page is entirely authentication when no section
+    binds an app-owned module through a typed reference and every section is a
+    credential form (``_is_credential_form``) or names no typed record field
+    beyond the rule's identity claims and credentials; app content keeps it.
+    Away from those routes the page is never recognized, whatever it holds: an
+    email and password form there cannot be told apart from an app's own
+    "connect your account" form.
     """
+    if not _at_sign_in_route(page, sign_in_routes):
+        return False
     sections = page.get("sections") or []
     if any(
         module in app_modules
         for section in sections for module in _typed_section_bindings(section.get("config_hint"))
     ):
         return False
-    if _at_sign_in_route(page, sign_in_routes):
-        claims = _keys(rule.state_field_names) | _keys(rule.identity_evidence_fields)
-        return all(
-            _is_credential_form(section, rule)
-            or _typed_record_fields(section.get("config_hint"), section.get("primitive"))[0] <= claims
-            for section in sections
-        )
-    return bool(sections) and all(_is_credential_form(section, rule) for section in sections)
+    claims = _keys(rule.state_field_names) | _keys(rule.identity_evidence_fields)
+    return all(
+        _is_credential_form(section, rule)
+        or _typed_record_fields(section.get("config_hint"), section.get("primitive"))[0] <= claims
+        for section in sections
+    )
 
 
 def _is_sign_in_page(page: dict[str, Any], *, sign_in_routes: set[str], credential_fields: set[str]) -> bool:
@@ -1623,9 +1627,9 @@ def normalize_surface_ownership(
     sign-in pages (typed navigation to them points at the auth contract login
     route) and pages listing the surface's user accounts (typed navigation to
     them is removed, as the admin portal's users panel is not served end to end).
-    A page an app-owned surface owns that is entirely the platform's
-    authentication (``_only_platform_authentication``) is removed the same way
-    and recorded on that surface, which keeps everything else it owns.
+    A page an app-owned surface owns at an auth contract route, holding nothing
+    but authentication (``_only_platform_authentication``), is removed the same
+    way and recorded on that surface, which keeps everything else it owns.
     """
     rules, facades = _ownership_rules(context_variables, include_default_subscription=include_default_subscription)
     normalized_map, normalized_data = deepcopy(surface_map), deepcopy(data_contract)
@@ -2434,9 +2438,9 @@ def normalize_surface_ownership(
     # or split out, loses its sign-in actions (login_user) and sign-in events
     # (user_logged_in), and a page section bound to such an action goes with it.
     # Its app data and other actions stay. On every app-owned surface, whatever it
-    # declares, a page that is entirely the platform's authentication is the auth
-    # contract's (``_only_platform_authentication``): removed and recorded, with
-    # typed navigation to it pointed at the login route.
+    # declares, a page at an auth contract route holding nothing but authentication
+    # is the auth contract's (``_only_platform_authentication``): removed and
+    # recorded. Elsewhere a credential form stays the app's.
     everything = [collection for _, collections in groups for collection in collections]
     app_modules = {str(surface["surface_id"]) for surface in surfaces if surface.get("owner") == "app"}
     for rule in auth_rules:
@@ -2524,8 +2528,10 @@ def normalize_surface_ownership(
             for sign_in_page in owned_sign_in_pages:
                 if normalized_spec is not None:
                     normalized_spec["pages"].remove(sign_in_page)
+                # Matched as owned_pages is matched above: however the entry is cased.
+                removed_name = str(sign_in_page.get("name") or "").strip().casefold()
                 surface["owned_pages"] = [
-                    name for name in surface.get("owned_pages") or [] if name != sign_in_page.get("name")
+                    name for name in surface.get("owned_pages") or [] if str(name).strip().casefold() != removed_name
                 ]
                 entry.setdefault("removed_pages", []).append(
                     {"name": sign_in_page.get("name"), "route": sign_in_page.get("route")},
