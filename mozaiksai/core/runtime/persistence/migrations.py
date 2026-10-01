@@ -103,8 +103,13 @@ async def apply_data_migrations(
     migrations: list[DatabaseMigration],
     persistence: MongoPersistenceContext | None = None,
     history_client: Any | None = None,
+    history_database: str | None = None,
 ) -> int:
-    """Apply additive app data migrations and record migration history."""
+    """Apply additive app data migrations and record migration history.
+
+    History defaults to the host's system database; ``history_database`` keeps
+    a disposable app run (the AppGenerator runtime smoke) out of it.
+    """
 
     resolved_app_id = str(app_id or "").strip()
     if not resolved_app_id:
@@ -113,7 +118,7 @@ async def apply_data_migrations(
         return 0
 
     context = persistence or MongoPersistenceContext(app_id=resolved_app_id)
-    history = _history_collection(history_client)
+    history = _history_collection(history_client, database_name=history_database)
     await _ensure_history_indexes(history)
 
     applied_count = 0

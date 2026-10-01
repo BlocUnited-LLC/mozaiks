@@ -421,21 +421,7 @@ async def _platform_startup() -> None:
             for loaded_module in load_result.modules:
                 module_action_surfaces[loaded_module.name] = loaded_module.action_api_surface_map
                 module_ask_context_actions[loaded_module.name] = loaded_module.action_ask_context_map
-                module_executor.register(
-                    loaded_module.name,
-                    loaded_module.handler,
-                    action_method_map=loaded_module.action_method_map,
-                    settings=(
-                        loaded_module.manifests.settings.settings
-                        if loaded_module.manifests.settings is not None
-                        else None
-                    ),
-                    action_permissions=loaded_module.action_permissions_map,
-                    action_schemas=loaded_module.action_schemas_map,
-                    action_entitlements=loaded_module.action_entitlement_map,
-                    action_emits=loaded_module.action_emits_map,
-                    event_payload_schemas=loaded_module.event_payload_schemas_map,
-                )
+                module_executor.register_loaded_module(loaded_module)
             executor_registry.register(module_executor)
             app.state.module_action_surfaces = module_action_surfaces
             app.state.module_ask_context_actions = module_ask_context_actions

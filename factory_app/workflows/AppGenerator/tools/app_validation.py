@@ -31,6 +31,7 @@ import yaml
 from factory_app.workflows._shared.workflow_integration import (
     workflow_integration_metadata_from_context,
 )
+from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
 )
@@ -1427,6 +1428,16 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
     }
 
 
+async def _app_runtime_smoke_result(generated_files: dict[str, str]) -> dict[str, Any]:
+    """Boot the bundle in the runtime smoke's child process; generated code never runs here."""
+    with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-smoke-", ignore_cleanup_errors=True) as tmp:
+        app_root = Path(tmp) / "app"
+        _write_files_to_dir(app_root, generated_files)
+        return await app_runtime_smoke.run_app_runtime_smoke(
+            app_root, mongo_uri=app_runtime_smoke.resolve_smoke_mongo_uri(),
+        )
+
+
 async def _agent_backend_integration_result(context_variables: Any | None) -> dict[str, Any]:
     if _context_has_agent_backend(context_variables):
         from .integration_tests import run_integration_tests
@@ -2091,6 +2102,7 @@ async def run_app_bundle_acceptance_gate(
         context_variables,
     )
     app_runtime_load_result = await _app_runtime_load_result(generated_files)
+    runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
 
     completeness_result = {
         "passed": not planned_diagnostics,
@@ -2123,10 +2135,17 @@ async def run_app_bundle_acceptance_gate(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_smoke": runtime_smoke_result,
     }
+    # A skipped check is reported as skipped: never a pass, and not a failure to
+    # repair. Acceptance can still pass; skipped_checks says what did not run.
+    skipped = sorted(name for name, result in subresults.items() if result.get("status") == "skipped")
+    skipped_checks = [
+        {"id": name, "reason": subresults[name].get("skipped_reason") or "skipped"} for name in skipped
+    ]
     passed_by_check = {
         name: bool(result.get("passed"))
-        for name, result in subresults.items()
+        for name, result in subresults.items() if name not in skipped
     }
     failed = sorted(name for name, passed in passed_by_check.items() if not passed)
     completed = sorted(name for name, passed in passed_by_check.items() if passed)
@@ -2169,11 +2188,14 @@ async def run_app_bundle_acceptance_gate(
             _result_check(functional_result, default_id="functional_completeness", default_message="Functional completeness check completed."),
             _result_check(workflow_integration_result, default_id="workflow_integration", default_message="Workflow integration check completed."),
             _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
+            _result_check(runtime_smoke_result, default_id="app_runtime_smoke", default_message="App runtime smoke completed."),
         ],
         "validation_evidence": {
             "completed": completed,
             "failed": failed,
+            "skipped": skipped,
         },
+        "skipped_checks": skipped_checks,
         "failed_tests": failed_tests,
         "warnings": warnings,
         **subresults,
@@ -2187,6 +2209,11 @@ async def run_app_bundle_acceptance_gate(
             {**item, "error": f"{item.get('test', 'validation')}: {item['error']}"}
             for check in (module_implementation_result, app_runtime_load_result, functional_result, workflow_integration_result, schema_quality_result)
             for item in check.get("failed_tests", [])
+        ],
+        *[
+            {**item, "error": f"app_runtime_smoke: {item['error']}"}
+            for item in runtime_smoke_result.get("failed_tests", [])
+            if not (item.get("check") == "boot.app_load" and not app_runtime_load_result.get("passed"))
         ],
     ]
     recovery_request = prepare_task_recovery(context_variables)
@@ -2214,10 +2241,12 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "workflow_integration_validation_result", workflow_integration_result)
     _context_set(context_variables, "app_runtime_load_passed", app_runtime_load_result.get("passed"))
     _context_set(context_variables, "app_runtime_load_result", app_runtime_load_result)
+    _context_set(context_variables, "app_runtime_smoke_result", runtime_smoke_result)
     _context_set(context_variables, "integration_tests_passed", acceptance_passed)
     _context_set(context_variables, "integration_test_result", {
         **subresults,
         "bundle_repair": bundle_repair,
+        "skipped_checks": skipped_checks,
         "passed": acceptance_passed,
     })
     _context_set(context_variables, "app_bundle_acceptance_status", result["status"])
@@ -2411,6 +2440,7 @@ async def validate_app_bundle_from_request(
     functional_result = acceptance_result["functional_completeness"]
     workflow_integration_result = acceptance_result["workflow_integration"]
     app_runtime_load_result = acceptance_result["app_runtime_load"]
+    runtime_smoke_result = acceptance_result["app_runtime_smoke"]
     bundle_repair = acceptance_result.get("bundle_repair")
     validation_passed = str(validation.get("validation_status") or "").strip().lower() in {"passed", "skipped"}
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
@@ -2424,7 +2454,9 @@ async def validate_app_bundle_from_request(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_smoke": runtime_smoke_result,
         "bundle_repair": bundle_repair,
+        "skipped_checks": acceptance_result["skipped_checks"],
         "passed": combined_passed,
     }
     _context_set(context_variables, "integration_test_result", integration_test_result)
@@ -2442,6 +2474,7 @@ async def validate_app_bundle_from_request(
         "generated_app_functional_completeness_result": functional_result,
         "workflow_integration_validation_result": workflow_integration_result,
         "app_runtime_load_result": app_runtime_load_result,
+        "app_runtime_smoke_result": runtime_smoke_result,
         "bundle_repair": bundle_repair,
         "integration_tests_passed": combined_passed,
     }

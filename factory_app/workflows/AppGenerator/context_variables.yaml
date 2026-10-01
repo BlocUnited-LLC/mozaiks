@@ -39,6 +39,14 @@ definitions:
     source:
       type: state
       default: null
+  app_runtime_smoke_result:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
   bundle_scan_passed:
     type: boolean
     authority_class: closed_writer_quality_state
