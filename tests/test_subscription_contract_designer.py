@@ -453,8 +453,9 @@ def test_appgenerator_writes_subscriptions_yaml_without_a_task() -> None:
     assert "Never set an action's `input_schema` or `output_schema` to null" in agents_text
     assert "`permissions`, `actions`, and `capabilities` are top-level siblings" in agents_text
     assert "Capabilities do not use `id` or `grants`" in agents_text
-    assert "YAML `code_files[].content` must be valid YAML serialized from the same typed object" in agents_text
-    assert "must be indented inside that action's `actions:` list item" in agents_text
+    assert "Leave `code_files` empty in module_contract mode" in agents_text
+    assert "Also serialize the typed contract to `code_files`" not in agents_text
+    assert "belongs inside that action's `actions` entry" in agents_text
     assert "Always include `agent_message` as a required top-level string in every mode" in agents_text
     assert "/api/me/usage" in agents_text
     assert "/api/me/tokens" in agents_text
