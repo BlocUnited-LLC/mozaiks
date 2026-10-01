@@ -62,6 +62,25 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs no longer approves a sign-in page that an ordinary app surface
+  places at the platform's own sign-in routes. A live run filed an `Authentication` page at `/login`, holding only an
+  email/password form, under its `tasks` module; nothing in the design signs
+  anyone in, so AppGenerator was asked to build `ui/pages/login.yaml`, a dead
+  form at the route the platform serves sign-in on. The save now removes such a
+  page from any app-owned surface, the way it already did on auth surfaces, but
+  only at a route the platform owns: the generated auth contract's login,
+  callback, and logout routes, or a route one nests under such as `/auth`. A
+  page there is removed when no section has a typed binding to an app module
+  and every section is a credential form (a password beside an email or
+  username) or names nothing beyond identity claims. The removal is recorded as
+  `removed_pages` on that surface, navigation to the page points at the login
+  route, and the surface keeps everything else it owns. A page at one of those
+  routes with app content stays approved. Known false negative: a sign-in page
+  an ordinary app surface designs at any other route (`/signin`) also stays
+  approved, because an email and password form there cannot be told apart from
+  an app's own "connect your account" page (Jira, IMAP), which must never be
+  removed.
+
 - AppGenerator plan review merges one unit of work that the planner split
   across tasks claiming the same files. A live plan made one business_services
   task per action (create, update, delete, list), all owning the module's

@@ -995,6 +995,162 @@ def test_a_sign_in_page_on_a_surface_keeping_app_data_is_the_auth_contracts(pers
     assert _surface(context, "gamification")["owned_pages"] == []
 
 
+# Sign-in pages on ordinary app surfaces. The platform owns its auth contract routes, so
+# an app page there that holds nothing but authentication is removed. Anywhere else an
+# email and password form is the app's: the live model writes "connect your account"
+# forms (Jira, IMAP) with the same fields, and its sections carry api_endpoint strings,
+# never typed bindings, so content cannot tell them apart from sign-in.
+_EMAIL = {"label": "Email", "type": "text", "name": "email"}
+_PASSWORD = {"label": "Password", "type": "password", "name": "password"}
+_APP_MODULES = {
+    "jira_sync": ("JiraConnection", ["connect_jira", "sync_issues"], "jira_connections", ["site_url"]),
+    "mailboxes": ("Mailbox", ["connect_mailbox"], "mailboxes", ["address", "provider"]),
+}
+
+
+def _tasks(bundle: dict, *pages: dict) -> dict:
+    """An ordinary app module: no identity entity, no sign-in action, nothing the platform owns."""
+    surface = _module(bundle, "tasks", entities=["Task"], actions=["create_task", "update_task"], collections=[
+        ("tasks", "Task", [_field("user_id", "string", required=True), _field("title", "string", required=True)]),
+    ])
+    surface["owned_pages"] = [page["name"] for page in pages]
+    bundle["experience_spec"]["pages"].extend(pages)
+    return surface
+
+
+def _cta(bundle: dict, route: str) -> None:
+    """A call to action on the first app page (Reports) linking to ``route``, as the live model writes one."""
+    bundle["experience_spec"]["pages"][0]["sections"].append({
+        "id": "cta", "primitive": "ActionButton", "intent": "Open it",
+        "config_hint": json.dumps({"label": "Open", "href": route}),
+    })
+
+
+def _saved_page(context, name: str) -> dict | None:
+    return next((page for page in detach(context.get("experience_spec"))["pages"] if page["name"] == name), None)
+
+
+def _cta_href(context) -> str:
+    return json.loads(_saved_page(context, "Reports")["sections"][-1]["config_hint"])["href"]
+
+
+@pytest.mark.parametrize("page", [
+    pytest.param(_page("Authentication", "/login", ("login-form", "Form", {"fields": [_EMAIL, _PASSWORD]})),
+                 id="live_shape_at_login"),
+    pytest.param(_page(
+        "Authentication", "/login", ("welcome", "Hero", {"title": "Welcome back"}), ("form", "Form", {"fields": [
+            {"name": "name"}, {"name": "email", "type": "email"},
+            {"name": "password", "type": "password"}, {"name": "confirm_password", "type": "password"},
+        ], "api_endpoint": "/api/login"}),
+    ), id="hero_and_sign_up_form_at_login"),
+    pytest.param(_page("Signing In", "/auth/callback", ("status", "Markdown", {"text": "Signing you in..."})),
+                 id="prose_at_the_callback_route"),
+])
+def test_an_authentication_page_at_a_platform_auth_route_on_an_app_surface_is_removed(persistence, page):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    board = _page("Board", "/board", ("tasks", "DataTable", {"columns": ["title"], "api_endpoint": "/api/tasks"}))
+    _tasks(bundle, board, page)
+    _cta(bundle, page["route"])
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert _saved_page(context, page["name"]) is None
+    surface = _surface(context, "tasks")
+    assert (surface["owner"], surface["owned_pages"]) == ("app", ["Board"])
+    assert surface["owned_mutations"] == ["create_task", "update_task"]
+    record = normalization._record(summary, "tasks")
+    assert record["removed_pages"] == [{"name": page["name"], "route": page["route"]}]
+    assert record["removed_collections"] == [] and "removed_mutations" not in record
+    assert _cta_href(context) == "/login"
+    if page["route"] == "/login":
+        assert "redirected_navigation" not in record, "a page at the login route needs no redirect"
+    else:
+        assert record["redirected_navigation"] == [
+            {"page": "Reports", "section": "cta", "from": page["route"], "to": "/login"},
+        ]
+
+
+@pytest.mark.parametrize("surface_id,page", [
+    pytest.param("jira_sync", _page("Connect Jira", "/integrations/jira", ("connect", "Form", {
+        "fields": [_EMAIL, {"label": "API token", "type": "password", "name": "api_token"}],
+        "api_endpoint": "/api/jira/connect",
+    })), id="connect_jira"),
+    pytest.param("mailboxes", _page("Email Settings", "/settings/email", ("imap", "Form", {
+        "fields": [_EMAIL, _PASSWORD, {"label": "Provider", "type": "text", "name": "provider"}],
+        "api_endpoint": "/api/mailboxes/connect",
+    })), id="imap_mailbox"),
+    pytest.param("tasks", _page("Account", "/account", ("account", "Form", {
+        "fields": [_EMAIL, {"name": "current_password", "type": "password"}, {"name": "new_password", "type": "password"}],
+        "api_endpoint": "/api/account",
+    })), id="account_settings"),
+    # A known false negative: sign-in designed away from the platform routes stays approved.
+    pytest.param("tasks", _page("Sign In", "/signin", ("login-form", "Form", {
+        "fields": [_EMAIL, _PASSWORD], "api_endpoint": "/api/login",
+    })), id="sign_in_away_from_the_platform_routes"),
+])
+def test_a_credential_page_away_from_the_platform_auth_routes_stays_the_apps(persistence, surface_id, page):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    if surface_id == "tasks":
+        _tasks(bundle, page)
+    else:
+        entity, actions, collection, fields = _APP_MODULES[surface_id]
+        _module(bundle, surface_id, entities=[entity], actions=actions, page=page, collections=[
+            (collection, entity, [_field("user_id", "string", required=True), *(_field(name, "string") for name in fields)]),
+        ])
+    _cta(bundle, page["route"])
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert _saved_page(context, page["name"]) == page
+    assert _surface(context, surface_id)["owned_pages"] == [page["name"]]
+    assert _cta_href(context) == page["route"]
+    assert surface_id not in {entry["surface_id"] for entry in _records(summary)}
+    assert not any(entry.get("removed_pages") or entry.get("redirected_navigation") for entry in _records(summary))
+
+
+@pytest.mark.parametrize("section", [
+    pytest.param(("tasks", "DataTable", {"columns": ["title", "status"], "api_endpoint": "/api/tasks"}),
+                 id="app_records"),
+    pytest.param(("new-task", "Form", {"fields": [_EMAIL, _PASSWORD],
+                                       "data_source": {"module_id": "tasks", "action_id": "create_task"}}),
+                 id="a_typed_binding_to_an_app_action"),
+])
+def test_a_page_at_the_login_route_with_app_content_stays_the_apps(persistence, section):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    page = _page("Welcome", "/login", ("login-form", "Form", {"fields": [_EMAIL, _PASSWORD]}), section)
+    _tasks(bundle, page)
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert _saved_page(context, "Welcome") == page
+    assert _surface(context, "tasks")["owned_pages"] == ["Welcome"]
+    assert "tasks" not in {entry["surface_id"] for entry in _records(summary)}
+
+
+def test_a_removed_page_leaves_no_owned_pages_entry_however_it_is_cased(persistence):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    board = _page("Board", "/board", ("tasks", "DataTable", {"columns": ["title"]}))
+    surface = _tasks(bundle, board, _page("Authentication", "/login", ("login-form", "Form", {"fields": [_EMAIL, _PASSWORD]})))
+    surface["owned_pages"] = ["Board", "authentication"]
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert _surface(context, "tasks")["owned_pages"] == ["Board"]
+    assert normalization._record(summary, "tasks")["removed_pages"] == [{"name": "Authentication", "route": "/login"}]
+
+
 def test_sign_in_leaves_a_surface_whose_identity_store_was_removed(persistence):
     _, _, summary = persistence
     context = ownership._context(managed=False)
