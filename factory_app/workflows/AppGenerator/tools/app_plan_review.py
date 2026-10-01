@@ -1136,12 +1136,9 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
     return repairs
 
 
-def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
-    """Reject invented scope before repairs or identity advice can obscure it."""
+def _approved_surface_ids(context: Any) -> set[str]:
+    """Surfaces the approved design and the selected packs' registry declarations name."""
     design = detach(context.get("design_surface_map")) or {}
-    validate_surface_ownership(
-        design, context_variables=context, data_contract=detach(context.get("data_contract")),
-    )
     approved = {
         surface["surface_id"] for surface in design.get("surfaces") or []
         if surface.get("surface_id")
@@ -1160,7 +1157,62 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
             for key in ("module_id", "provider_module"):
                 if facade.get(key):
                     approved.add(facade[key])
+    return approved
 
+
+def _owns_only_approved_pages(task: dict[str, Any], context: Any) -> bool:
+    """A page_bundle task whose every owned path is an approved page artifact."""
+    pages = _approved_page_inventory(context)
+    return bool(
+        task.get("task_type") == "page_bundle"
+        and task.get("capability_pack_id") is None
+        and pages
+        and all(is_safe_app_path(path) for path in task.get("owned_paths") or [])
+        and {path.lower() for path in _normalized_owned_paths(task)}
+        <= {path.lower() for path in _required_page_paths({"pages": pages})}
+    )
+
+
+def _label_page_tasks(plan: dict[str, Any], context: Any) -> list[str]:
+    """A page task is labelled by what it builds, not by the page it is named after.
+
+    Chat 64dbe4b9 at 95ad6325 planned one page_bundle task per approved page and
+    gave each the page's name as its surface_id (dashboard, pricing, billing,
+    usage). Review accepts a page_bundle task owning only approved page
+    artifacts under the structural ``page_bundle`` label (kind ``ui_only``), but
+    it rejected the four page-name labels as unapproved surfaces, and the model
+    resubmitted the same plan until its three attempts ran out. The label is
+    determined by what the task owns, so code sets it: for a task under no
+    approved surface, or under ``page_bundle`` with another kind. A task owning
+    nothing has nothing to label it by and keeps its check.
+    """
+    approved = _approved_surface_ids(context)
+    repairs: list[str] = []
+    for task in plan.get("build_tasks") or []:
+        surface_id, surface_kind = str(task.get("surface_id") or ""), task.get("surface_kind")
+        if (
+            (surface_id == "page_bundle" and surface_kind == "ui_only")
+            or surface_id in approved
+            or not _normalized_owned_paths(task)
+            or not _owns_only_approved_pages(task, context)
+        ):
+            continue
+        task["surface_id"], task["surface_kind"] = "page_bundle", "ui_only"
+        repairs.append(
+            f"{task.get('task_id')}: surface {surface_id!r} ({surface_kind}) -> 'page_bundle' (ui_only); a "
+            f"page_bundle task owning only approved page artifacts {sorted(_normalized_owned_paths(task))} "
+            "is not a surface of its own"
+        )
+    return repairs
+
+
+def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
+    """Reject invented scope before repairs or identity advice can obscure it."""
+    validate_surface_ownership(
+        detach(context.get("design_surface_map")) or {},
+        context_variables=context, data_contract=detach(context.get("data_contract")),
+    )
+    approved = _approved_surface_ids(context)
     unapproved: set[str] = set()
     for entries, is_task in (
         (plan.get("capability_packs") or [], False),
@@ -1172,14 +1224,8 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
                 continue
             if (
                 is_task and surface_id == "page_bundle"
-                and entry.get("task_type") == "page_bundle"
                 and entry.get("surface_kind") == "ui_only"
-                and entry.get("capability_pack_id") is None
-                and _approved_page_inventory(context)
-                and all(is_safe_app_path(path) for path in entry.get("owned_paths") or [])
-                and {path.lower() for path in _normalized_owned_paths(entry)} <= {
-                    path.lower() for path in _required_page_paths({"pages": _approved_page_inventory(context)})
-                }
+                and _owns_only_approved_pages(entry, context)
             ):
                 continue
             if (
@@ -1449,7 +1495,7 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
-        for repair in _apply_dispatch_path_rules(plan):
+        for repair in (*_apply_dispatch_path_rules(plan), *_label_page_tasks(plan, context_variables)):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         _validate_plan_surface_inventory(plan, context_variables)
         plan["capability_packs"] = _ensure_context_selected_capability_packs(
