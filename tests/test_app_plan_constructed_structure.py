@@ -153,9 +153,8 @@ def _assert_complete_review(plan, context):
     assert not [task for task in tasks if task["capability_pack_id"] == "billing_portal"]
     assert not set(paths) & pack_owned_output_paths(context)
     assert any(pack["capability_pack_id"] == "billing_portal" for pack in cached["capability_packs"])
-    subscription = [task for task in tasks if task["task_type"] == "subscription_config"]
-    assert len(subscription) == 1
-    assert subscription[0]["owned_paths"] == ["config/subscriptions.yaml"]
+    # Assembly writes config/subscriptions.yaml from the approved contract.
+    assert "config/subscriptions.yaml" not in paths
     queued = detach(context.get("app_task_batch_items"))
     assert {task["task_id"] for task in queued} == set(ids)
     assert all(set(task["depends_on"]) <= set(ids) for task in tasks)
@@ -202,7 +201,7 @@ def test_minimal_judgment_plan_constructs_all_omitted_structure(omit_capabilitie
             plan["capability_packs"].append(capability)
 
     # Four authored pages retain judgment about layout and purpose. The other
-    # two approved pages, every worker task, module trio, subscription task,
+    # two approved pages, every worker task, module trio,
     # managed-provider entry, and all dependency edges are absent.
     assert len(plan["pages"]) == 4
     cached = _assert_complete_review(plan, context)
@@ -278,7 +277,7 @@ def test_explicit_custom_operations_are_preserved_without_inventing_read_actions
 def test_selected_module_lane_constructs_missing_paths_and_labels():
     plan, context = _domain_inputs()
     task = next(task for task in plan["build_tasks"] if task["surface_id"] == "tasks")
-    task.update(capability_pack_id="wrong_label", surface_kind="app_policy", owned_paths=[])
+    task.update(capability_pack_id="wrong_label", surface_kind="external_integration", owned_paths=[])
 
     cached = _assert_complete_review(plan, context)
 

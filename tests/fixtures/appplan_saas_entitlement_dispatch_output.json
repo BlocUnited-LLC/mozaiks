@@ -132,9 +132,7 @@
         "owned_paths": [
           "modules/entitlement_dispatch/module.yaml"
         ],
-        "depends_on": [
-          "task_subscription_config"
-        ],
+        "depends_on": [],
         "acceptance_criteria": [
           "module.yaml declares entitlement dispatch actions"
         ]
@@ -276,25 +274,6 @@
           "handler.py remains thin dispatch",
           "service.py publishes declared domain events when present"
         ]
-      },
-      {
-        "task_id": "task_subscription_config",
-        "task_type": "subscription_config",
-        "capability_pack_id": null,
-        "surface_id": "subscription_contract",
-        "surface_kind": "app_policy",
-        "execution_target": "AppGenerator",
-        "initial_agent": "ConfigMiddlewareAgent",
-        "description": "Generate the subscription configuration for the app.",
-        "initial_message": "Serialize the subscription contract to config/subscriptions.yaml. Ensure that the export_report action is gated by the pro plan entitlement.",
-        "owned_paths": [
-          "config/subscriptions.yaml"
-        ],
-        "depends_on": [],
-        "acceptance_criteria": [
-          "subscriptions.yaml reflects the provided contract",
-          "export_report action is gated by pro plan"
-        ]
       }
     ],
     "pending_schema_migration": {
@@ -328,7 +307,6 @@
       "task_reports_models",
       "task_reports_services",
       "task_report_pages",
-      "task_subscription_config",
       "task_entitlement_dispatch_module",
       "task_entitlement_dispatch_services"
     ],

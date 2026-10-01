@@ -80,6 +80,23 @@ This project follows a practical pre-1.0 changelog format:
   run started. Workflows with interactive UI tools still wait for the user
   without a deadline.
 
+- `config/subscriptions.yaml` is now fully code-owned. The factory constructs
+  its `assignment_store` from the runtime defaults, keyed by the subscribing
+  user, instead of letting the pricing designer author it. The designer's
+  stores differed from the default only in `active_statuses` (`[active]` or
+  `[active, trial]`), so generated apps now entitle the `pending` status hosted
+  MozaiksPay sends for past-due, incomplete, and paused subscriptions, and the
+  raw `trialing` status a Stripe-vocabulary writer sends. AppGenerator no longer
+  schedules a model task for the file: assembly writes it from the approved
+  contract, and `AppBuildPlan.monetization_provider` is validated against that
+  contract. Removed usage-metering entries are explained in the review as plain
+  sentences.
+
+- Billing fulfillment clears a subscription assignment's stored expiry when a
+  non-cancellation command carries none. A user who cancelled and was later
+  assigned a plan without an expiry (hosted `assign_plan`) kept the
+  cancellation's past `expires_at` and was denied as expired indefinitely.
+
 - SubscriptionContractDesigner now presents an approved subscription decision
   before plan design and surfaces requested corrections at the top of retries.
   A supplied plan design is saved as required even when the model labels it a

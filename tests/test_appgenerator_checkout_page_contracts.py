@@ -77,7 +77,7 @@ def _page_bundle_section(text: str) -> str:
     start = text.find("  page_bundle:")
     if start == -1:
         return text
-    next_key = text.find("\n  subscription_config:", start + 1)
+    next_key = text.find("\n  module_contract:", start + 1)
     return text[start:next_key] if next_key != -1 else text[start:]
 
 

@@ -22,9 +22,9 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _normalized_owned_paths,
     _pack_facades,
     _pack_id_from_descriptor,
-    _required_selected_task_paths,
     app_build_plan,
     release_pack_owned_paths,
+    release_subscriptions_config,
 )
 from mozaiksai.core.runtime.app.paths import is_safe_app_path, normalize_app_path
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
@@ -34,9 +34,6 @@ from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
-)
-from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
-    resolve_subscription_contract,
 )
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
@@ -1000,77 +997,6 @@ def _repair_managed_facade_capabilities(plan: dict[str, Any], context: Any) -> l
     return repairs
 
 
-def _repair_subscription_config_task(plan: dict[str, Any], context: Any) -> list[str]:
-    """Add the subscription_config task when the contract requires one.
-
-    Every field of this task is dictated by the contract. There is no planning
-    decision in it:
-
-        task_type  subscription_config     capability_pack_id  null
-        surface_id subscription_contract   surface_kind        app_policy
-        initial_agent ConfigMiddlewareAgent
-        owned_paths   ['config/subscriptions.yaml']
-
-    The planner is told to emit it, in its own prompt and again in the injected
-    [SUBSCRIPTION CONTRACT CONTEXT]. On the 2026-09-25 acceptance run at OSS
-    27ebdedc the injection is logged, three times, against the agent that
-    needed it:
-
-        SUBSCRIPTION_CONTRACT_CONTEXT injected agent=AppPlanAgent
-          contract_required=True plans=2 chars=5510
-
-    The plan omitted the task anyway, on all three attempts, and was rejected
-    each time for declaring a monetization_provider with no task to justify it.
-    Four earlier runs failed the same way for four different reasons; this is
-    the first where the instruction is provably in front of the agent.
-
-    A structure with no degrees of freedom is not a reasoning task. Asking a
-    model to reproduce one and failing the build when it does not is a
-    templating job dressed as planning, so the repair lane materializes it --
-    the same thing _repair_coverage and _repair_contract_task_operations
-    already do for tasks the planner should have emitted and did not.
-
-    The contract is read from `subscription_contract`, falling back to
-    `subscription_contract_artifact`, matching the injector and the build
-    tools. Nothing is synthesized when no contract requires it.
-    """
-    contract = resolve_subscription_contract(context)
-    if not contract or contract.get("contract_required") is not True:
-        return []
-
-    tasks = plan.get("build_tasks") or []
-    if any(str(task.get("task_type") or "").strip() == "subscription_config" for task in tasks):
-        return []
-
-    plan["build_tasks"] = [
-        *tasks,
-        {
-            "task_id": _available_task_id("subscription_config", {str(task.get("task_id")) for task in tasks}),
-            "task_type": "subscription_config",
-            "capability_pack_id": None,
-            "surface_id": "subscription_contract",
-            "surface_kind": "app_policy",
-            "initial_agent": _CANONICAL_INITIAL_AGENTS["subscription_config"],
-            "execution_target": "AppGenerator",
-            "description": "Serialize the approved subscription contract to config/subscriptions.yaml.",
-            "initial_message": (
-                "Serialize subscription_contract.subscription_config_file to "
-                "config/subscriptions.yaml exactly as approved. Emit no module, service, "
-                "payment-provider, host-owned billing, or token ledger code."
-            ),
-            "owned_paths": sorted(_required_selected_task_paths({"task_type": "subscription_config"})),
-            "depends_on": [],
-            "context_variables": [],
-            "integration_needs": [],
-            "domain_context": None,
-        },
-    ]
-    return [
-        "added the subscription_config task the approved contract requires "
-        "(owned_paths=['config/subscriptions.yaml'])"
-    ]
-
-
 def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list[str]:
     """Name the planner's operations in the task the contract agent reads.
 
@@ -1163,7 +1089,6 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
                 if facade.get(key):
                     approved.add(facade[key])
 
-    subscription = resolve_subscription_contract(context) or {}
     unapproved: set[str] = set()
     for entries, is_task in (
         (plan.get("capability_packs") or [], False),
@@ -1186,12 +1111,6 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
             ):
                 continue
             if (
-                is_task and surface_id == "subscription_contract"
-                and entry.get("task_type") == "subscription_config"
-                and subscription.get("contract_required") is True
-            ):
-                continue
-            if (
                 is_task and surface_id == "data_contract"
                 and entry.get("task_type") == "persistence_contract"
                 and entry.get("surface_kind") == "module"
@@ -1206,9 +1125,8 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
         for surface_id in sorted(unapproved):
             message = (
                 f"unapproved surface {surface_id!r}: remove its capability and tasks "
-                "rather than relabel them. Use only surfaces from design_surface_map, "
-                "selected pack provider/facade contracts, or the required subscription "
-                "contract for subscription_config. "
+                "rather than relabel them. Use only surfaces from design_surface_map "
+                "or selected pack provider/facade contracts. "
                 f"Valid approved surface_ids: {sorted(approved)}."
             )
             if re.search(r"(?:^|[_-])(?:auth|authentication|login|signin)(?:$|[_-])", surface_id.lower()):
@@ -1434,9 +1352,9 @@ def review_app_build_plan(
             *_repair_plan(plan, context_variables),
             *_repair_selected_pack_inventory(plan, context_variables),
             *release_pack_owned_paths(plan, context_variables),
+            *release_subscriptions_config(plan),
             *_repair_user_data_scope(plan, context_variables),
             *_repair_coverage(plan, context_variables),
-            *_repair_subscription_config_task(plan, context_variables),
             *_construct_task_requirements(plan, context_variables),
             *_repair_contract_task_operations(plan, context_variables),
             *_repair_page_contract_dependencies(plan, context_variables),

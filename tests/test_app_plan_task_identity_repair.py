@@ -24,10 +24,7 @@ def _live_plan(*, monetized=True, repeated_ids=True):
         ["data/contract.json"],
     ))
     if monetized:
-        plan["build_tasks"].append({
-            **_task("subscription_config", "subscription_config", "ConfigMiddlewareAgent", None, ["config/subscriptions.yaml"]),
-            "surface_id": "subscription_contract", "surface_kind": "app_policy",
-        })
+        # Assembly writes config/subscriptions.yaml from the contract; no task plans it.
         provider = next(task for task in plan["build_tasks"] if task["task_type"] == "api_surface")
         provider["surface_id"] = "billing_portal"
     if repeated_ids:

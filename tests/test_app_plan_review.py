@@ -253,8 +253,9 @@ def test_planner_guidance_separates_billing_category_provider_and_subscription_t
     assert "Never emit a category such as `billing_pack` as a managed `capability_pack_id`" in guidance
     assert "canonical managed capability identity is `mozaikspay`" in guidance
     assert "exactly one `generated_module` capability" in guidance
-    assert "task_type: subscription_config" in guidance
-    assert 'owned_paths: ["config/subscriptions.yaml"]' in guidance
+    # Assembly writes config/subscriptions.yaml; the planner is told not to plan it.
+    assert "plan no task for `config/subscriptions.yaml`" in guidance
+    assert "task_type: subscription_config" not in guidance
 
 
 def test_mozaikspay_is_the_canonical_managed_subscription_identity():

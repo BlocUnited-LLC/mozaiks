@@ -21,10 +21,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from factory_app.workflows._shared.subscription_contract_context import (
+    subscription_assignment_store,
+)
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
+from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
+    materialize_app_config_contracts,
+)
 from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
     apply_entitlement_gates,
 )
@@ -102,17 +108,7 @@ def sample_subscription_contract() -> dict[str, Any]:
             "schema_version": "mozaiks.subscriptions.v1",
             "label": "Subscription Reporting Plans",
             "default_plan_id": "free",
-            "assignment_store": {
-                "data_alias": "billing.subscriptions",
-                "app_id_field": "app_id",
-                "tenant_id_field": "tenant_id",
-                "user_id_field": "user_id",
-                "plan_id_field": "plan_id",
-                "status_field": "status",
-                "capabilities_field": "granted_capabilities",
-                "plan_snapshot_field": "plan_snapshot",
-                "active_statuses": ["active", "trialing"],
-            },
+            "assignment_store": subscription_assignment_store(),
             "token_wallets": [
                 {
                     "wallet_id": "ai_tokens",
@@ -182,36 +178,12 @@ def sample_subscription_contract() -> dict[str, Any]:
             }
         ],
         "app_generator_instructions": [
-            "Emit one config/subscriptions.yaml file from subscription_config_file.",
+            "Assembly writes config/subscriptions.yaml from subscription_config_file; no task owns it.",
             "Code derives the generate_report gate from the selected report feature; omit model-authored gates.",
             "Usage pages read platform-owned /api/me/usage and /api/me/tokens endpoints.",
         ],
         "validation_notes": [
             "No MozaiksPay resources, checkout routes, invoices, or custom token ledgers belong in the generated app bundle.",
-        ],
-    }
-
-
-def _subscription_task() -> dict[str, Any]:
-    return {
-        "task_id": "task_subscription_config",
-        "task_type": "subscription_config",
-        "capability_pack_id": None,
-        "surface_id": "subscription_contract",
-        "surface_kind": "app_policy",
-        "execution_target": "AppGenerator",
-        "initial_agent": "ConfigMiddlewareAgent",
-        "description": "Materialize the provider-neutral subscription plan catalog.",
-        "initial_message": (
-            "Serialize only subscription_contract.subscription_config_file to "
-            "config/subscriptions.yaml. Emit no module files, backend Python, "
-            "MozaiksPay resources, checkout behavior, invoice logic, or token ledger code."
-        ),
-        "owned_paths": [SUBSCRIPTION_PATH],
-        "depends_on": [],
-        "acceptance_criteria": [
-            "config/subscriptions.yaml validates as mozaiks.subscriptions.v1.",
-            "The generated file contains no provider-specific payment or ledger implementation.",
         ],
     }
 
@@ -252,7 +224,7 @@ def _module_contract_task() -> dict[str, Any]:
             "modules/reports/contracts/settings.yaml",
             "modules/reports/contracts/admin.yaml",
         ],
-        "depends_on": ["task_subscription_config"],
+        "depends_on": [],
         "acceptance_criteria": [
             f"modules/reports/module.yaml declares generate_report entitlement_gate: {REPORT_GATE_ID}.",
             "No backend Python files are emitted by the module_contract task.",
@@ -309,7 +281,7 @@ def _build_plan(tasks: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _task_context(task: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
-    tasks = [_subscription_task(), _module_contract_task()]
+    tasks = [_module_contract_task()]
     return {
         "workflow_name": "AppGenerator",
         "app_id": DEFAULT_APP_ID,
@@ -350,9 +322,6 @@ def _collect_file_map(payload: dict[str, Any]) -> dict[str, str]:
                 files[name] = str(item.get("content") or "")
 
     add_items(payload.get("code_files"))
-    bundle = payload.get("subscription_config_bundle")
-    if isinstance(bundle, dict):
-        add_items(bundle.get("files"))
     service_bundle = payload.get("service_foundation_bundle")
     if isinstance(service_bundle, dict):
         add_items(service_bundle.get("files"))
@@ -440,63 +409,29 @@ async def _render_agent_system_prompt(agent: Any, context: Any) -> str:
     return capture._captured or capture.system_message or base_message
 
 
-def validate_subscription_output(
-    output: dict[str, Any],
-    contract: dict[str, Any],
-) -> tuple[str | None, list[str]]:
-    errors: list[str] = _structured_output_errors(output, mode_label="subscription_config")
-    if output.get("mode") != "subscription_config":
-        errors.append(f"Expected subscription_config mode, got {output.get('mode')!r}.")
-    if output.get("module_contract") is not None:
-        errors.append("subscription_config mode must not emit module_contract.")
-    if output.get("service_foundation_bundle") is not None:
-        errors.append("subscription_config mode must not emit service_foundation_bundle.")
+def assembled_subscription_yaml(contract: dict[str, Any]) -> str:
+    """config/subscriptions.yaml exactly as AppGenerator assembly writes it from the contract."""
+    files = materialize_app_config_contracts(
+        app_id=DEFAULT_APP_ID, app_build_plan={}, context_variables={"subscription_contract": contract},
+    )
+    return next(file["content"] for file in files if file["filename"] == SUBSCRIPTION_PATH)
 
-    files = _collect_file_map(output)
-    errors.extend(_forbidden_drift_errors(files))
-    content = files.get(SUBSCRIPTION_PATH)
+
+def validate_assembled_subscription_yaml(content: str | None, contract: dict[str, Any]) -> list[str]:
+    """The assembled file must be the approved contract with the constructed assignment store."""
     if not content:
-        errors.append(f"Missing {SUBSCRIPTION_PATH}.")
-        return None, errors
-
-    bundle = output.get("subscription_config_bundle")
-    bundle_files = []
-    if isinstance(bundle, dict) and isinstance(bundle.get("files"), list):
-        bundle_files = bundle["files"]
-    if len(bundle_files) != 1:
-        errors.append("subscription_config_bundle.files must contain exactly one file.")
-
-    try:
-        parsed = yaml.safe_load(content)
-    except Exception as exc:
-        errors.append(f"{SUBSCRIPTION_PATH} is not valid YAML: {exc}")
-        return content, errors
-    if not isinstance(parsed, dict):
-        errors.append(f"{SUBSCRIPTION_PATH} must parse to a YAML object.")
-        return content, errors
-
-
-    allowed = {
-        "schema_version",
-        "label",
-        "default_plan_id",
-        "assignment_store",
-        "token_wallets",
-        "plans",
-    }
-    extra = sorted(set(parsed) - allowed)
-    if extra:
-        errors.append(f"{SUBSCRIPTION_PATH} contains non-OSS subscription keys: {extra}.")
-
-    expected = contract.get("subscription_config_file")
-    if parsed != expected:
-        errors.append("Generated subscription config drifted from subscription_contract.subscription_config_file.")
-
+        return [f"Assembly did not write {SUBSCRIPTION_PATH}."]
+    errors: list[str] = []
+    parsed = yaml.safe_load(content)
+    if parsed != contract.get("subscription_config_file"):
+        errors.append("Assembled subscription config drifted from subscription_contract.subscription_config_file.")
+    if not isinstance(parsed, dict) or parsed.get("assignment_store") != subscription_assignment_store():
+        errors.append("Assembled assignment_store is not the constructed store.")
     try:
         SubscriptionsConfig.model_validate(parsed)
     except Exception as exc:
         errors.append(f"{SUBSCRIPTION_PATH} failed SubscriptionsConfig validation: {exc}")
-    return content, errors
+    return errors
 
 
 def _module_yaml_from_output(output: dict[str, Any], files: dict[str, str]) -> str | None:
@@ -517,8 +452,6 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
         errors.append(f"Expected module_contract_bundle mode, got {output.get('mode')!r}.")
     if output.get("service_foundation_bundle") is not None:
         errors.append("module_contract_bundle mode must not emit service_foundation_bundle.")
-    if output.get("subscription_config_bundle") is not None:
-        errors.append("module_contract_bundle mode must not emit subscription_config_bundle.")
 
     files = _collect_file_map(output)
     errors.extend(_forbidden_drift_errors(files))
@@ -587,30 +520,6 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
                 )
 
     return content, errors
-
-
-def deterministic_subscription_output() -> dict[str, Any]:
-    content = _yaml_text(sample_subscription_contract()["subscription_config_file"])
-    return {
-        "mode": "subscription_config",
-        "module_contract": None,
-        "service_foundation_bundle": None,
-        "subscription_config_bundle": {
-            "files": [
-                {
-                    "filename": SUBSCRIPTION_PATH,
-                    "content": content,
-                }
-            ]
-        },
-        "code_files": [
-            {
-                "filename": SUBSCRIPTION_PATH,
-                "content": content,
-            }
-        ],
-        "agent_message": "Generated provider-neutral subscription config.",
-    }
 
 
 def deterministic_module_contract_output() -> dict[str, Any]:
@@ -708,7 +617,6 @@ def deterministic_module_contract_output() -> dict[str, Any]:
             "runtime_extensions_yaml": None,
         },
         "service_foundation_bundle": None,
-        "subscription_config_bundle": None,
         "code_files": [{"filename": MODULE_PATH, "content": module_yaml}],
         "agent_message": "Generated module contract.",
     }
@@ -1089,13 +997,13 @@ def _write_files(root: Path, files: dict[str, str]) -> None:
 
 async def validate_subscription_acceptance_handoff(
     *,
-    subscription_yaml: str,
     module_yaml: str,
     task_outputs: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    files = build_acceptance_files(subscription_yaml, module_yaml)
-    tasks = [_subscription_task(), _module_contract_task()]
-    contract = tasks[1]
+    subscription_contract = sample_subscription_contract()
+    files = build_acceptance_files(assembled_subscription_yaml(subscription_contract), module_yaml)
+    tasks = [_module_contract_task()]
+    contract = tasks[0]
     tasks.extend([
         {
             **contract, "task_id": "subscription_persistence", "task_type": "persistence_contract",
@@ -1114,7 +1022,7 @@ async def validate_subscription_acceptance_handoff(
         {
             **contract, "task_id": "entitlement_contract", "capability_pack_id": "entitlement_dispatch",
             "surface_id": "entitlement_dispatch", "owned_paths": ["modules/entitlement_dispatch/module.yaml"],
-            "depends_on": ["task_subscription_config", "subscription_persistence"],
+            "depends_on": ["subscription_persistence"],
         },
         {
             **contract, "task_id": "entitlement_services", "task_type": "business_services", "initial_agent": "ServiceAgent",
@@ -1127,7 +1035,7 @@ async def validate_subscription_acceptance_handoff(
             "capability_pack_id": None, "surface_kind": "ui_only", "surface_id": "reporting",
             "owned_paths": ["app.json", "config/ai.json", "config/shell.json", "ui/route_manifest.json",
                             "ui/pages/reports.yaml", "ui/pages/usage.yaml"],
-            "depends_on": ["reports_services", "entitlement_services", "task_subscription_config"],
+            "depends_on": ["reports_services", "entitlement_services"],
         },
     ])
     context = ContextVariablesBridge(
@@ -1143,7 +1051,7 @@ async def validate_subscription_acceptance_handoff(
             "generated_files": files,
             "data_contract": _data_contract(),
             "design_surface_map": _design_surface_map(),
-            "subscription_contract": sample_subscription_contract(),
+            "subscription_contract": subscription_contract,
             "app_validation_status": "skipped",
             "app_validation_strategy_used": "skip",
         }
@@ -1218,7 +1126,7 @@ async def validate_subscription_acceptance_handoff(
     except Exception as exc:
         loader_result = {"loaded": False, "error": str(exc)}
 
-    errors: list[str] = []
+    errors: list[str] = validate_assembled_subscription_yaml(files.get(SUBSCRIPTION_PATH), subscription_contract)
     if not wiring.get("passed"):
         errors.append("App page wiring did not pass.")
     platform_count = int(((wiring.get("checks") or [{}])[0].get("details") or {}).get("platform_endpoint_count") or 0)
@@ -1258,30 +1166,22 @@ async def validate_subscription_acceptance_handoff(
 
 
 async def run_deterministic_appgenerator_subscription_smoke() -> dict[str, Any]:
-    contract = sample_subscription_contract()
-    subscription_output = deterministic_subscription_output()
     module_output = deterministic_module_contract_output()
-
-    subscription_yaml, subscription_errors = validate_subscription_output(subscription_output, contract)
-    module_yaml, module_errors = validate_module_contract_output(module_output)
-    validation_errors = [*subscription_errors, *module_errors]
-    if validation_errors or subscription_yaml is None or module_yaml is None:
+    module_yaml, validation_errors = validate_module_contract_output(module_output)
+    if validation_errors or module_yaml is None:
         return {
             "success": False,
             "validation_errors": validation_errors,
-            "subscription_output": subscription_output,
             "module_output": module_output,
         }
 
     acceptance = await validate_subscription_acceptance_handoff(
-        subscription_yaml=subscription_yaml,
         module_yaml=module_yaml,
-        task_outputs={"task_subscription_config": subscription_output, "task_reports_module_contract": module_output},
+        task_outputs={"task_reports_module_contract": module_output},
     )
     return {
         "success": bool(acceptance.get("success")),
         "validation_errors": list(acceptance.get("validation_errors") or []),
-        "subscription_validation": {"passed": True},
         "module_contract_validation": {"passed": True},
         "appgenerator_acceptance": acceptance,
     }
@@ -1386,26 +1286,7 @@ async def run_live_appgenerator_subscription_smoke(
     load_dotenv(REPO_ROOT / ".env")
     contract = sample_subscription_contract()
 
-    subscription_live = await _run_config_task(
-        task=_subscription_task(),
-        contract=contract,
-        timeout_seconds=timeout_seconds,
-        prompt=(
-            "Run the current subscription_config build task. "
-            "Emit only ConfigMiddlewareOutput JSON for config/subscriptions.yaml."
-        ),
-    )
-    subscription_output = subscription_live.get("structured_output") or {}
-    subscription_yaml, subscription_errors = validate_subscription_output(subscription_output, contract)
-    if subscription_errors or subscription_yaml is None:
-        return _json_safe(
-            {
-                "success": False,
-                "validation_errors": subscription_errors,
-                "live_subscription": subscription_live,
-            }
-        )
-
+    # config/subscriptions.yaml is assembly-written; the module contract is the only model task here.
     module_live = await _run_config_task(
         task=_module_contract_task(),
         contract=contract,
@@ -1422,20 +1303,13 @@ async def run_live_appgenerator_subscription_smoke(
             {
                 "success": False,
                 "validation_errors": module_errors,
-                "live_subscription": {
-                    "success": subscription_live.get("success"),
-                    "event_count": subscription_live.get("event_count"),
-                    "observed_event_types": subscription_live.get("observed_event_types"),
-                    "structured_output": subscription_output,
-                },
                 "live_module_contract": module_live,
             }
         )
 
     acceptance = await validate_subscription_acceptance_handoff(
-        subscription_yaml=subscription_yaml,
         module_yaml=module_yaml,
-        task_outputs={"task_subscription_config": subscription_output, "task_reports_module_contract": module_output},
+        task_outputs={"task_reports_module_contract": module_output},
     )
     errors = list(acceptance.get("validation_errors") or [])
 
@@ -1443,14 +1317,6 @@ async def run_live_appgenerator_subscription_smoke(
         {
             "success": not errors,
             "validation_errors": errors,
-            "live_subscription": {
-                "success": subscription_live.get("success"),
-                "app_id": subscription_live.get("app_id"),
-                "chat_id": subscription_live.get("chat_id"),
-                "event_count": subscription_live.get("event_count"),
-                "observed_event_types": subscription_live.get("observed_event_types"),
-                "structured_output": subscription_output,
-            },
             "live_module_contract": {
                 "success": module_live.get("success"),
                 "app_id": module_live.get("app_id"),
@@ -1467,7 +1333,7 @@ async def run_live_appgenerator_subscription_smoke(
 def main() -> int:
     _configure_event_loop_policy()
     parser = argparse.ArgumentParser(
-        description="Run the AppGenerator subscription-config live smoke and deterministic acceptance gate."
+        description="Run the AppGenerator subscription live smoke and deterministic acceptance gate."
     )
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
     parser.add_argument(

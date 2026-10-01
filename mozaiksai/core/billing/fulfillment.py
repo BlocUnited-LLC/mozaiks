@@ -1147,6 +1147,11 @@ class BillingFulfillmentService:
                 updates[store.expires_at_field] = _iso(command.expires_at)
             elif command.event_type == "subscription_cancelled":
                 updates[store.expires_at_field] = _iso(command.occurred_at or now)
+            else:
+                # An assignment that carries no expiry has none. Keeping the stored
+                # one would let an earlier cancellation's past expires_at deny the
+                # new plan as "expired" indefinitely (hosted assign_plan sends none).
+                updates[store.expires_at_field] = None
         if store.capabilities_field:
             updates[store.capabilities_field] = _capability_entries(capabilities)
         if store.plan_snapshot_field:

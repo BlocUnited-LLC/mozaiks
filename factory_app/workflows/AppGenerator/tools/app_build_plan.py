@@ -22,6 +22,9 @@ from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
+from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+    resolve_subscription_contract,
+)
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
@@ -87,7 +90,6 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
 )
 _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)
 _CANONICAL_INITIAL_AGENTS = {
-    "subscription_config": "ConfigMiddlewareAgent",
     "service_foundation": "ConfigMiddlewareAgent",
     "module_contract": "ConfigMiddlewareAgent",
     "persistence_contract": "DatabaseAgent",
@@ -101,7 +103,6 @@ _CANONICAL_INITIAL_AGENTS = {
 # AppGenerator materialization authority is narrower than generic assignment kinds.
 _ALLOWED_TASK_TYPES = frozenset(_CANONICAL_INITIAL_AGENTS)
 _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
-    "app_policy": frozenset({"subscription_config"}),
     "external_integration": frozenset({"api_surface", "service_foundation"}),
     "refinement": frozenset({"refinement_harness"}),
     "ui_only": frozenset({"page_bundle"}),
@@ -118,13 +119,14 @@ _REFINEMENT_CONFIG_PATHS = _REFINEMENT_REQUIRED_PATHS | {
     "refinement_harness/config/tools.yaml",
     "refinement_harness/config/policies.yaml",
 }
+# Assembly writes this from the approved subscription contract
+# (materialize_app_config_contracts); a task's copy would be overwritten.
+SUBSCRIPTIONS_CONFIG_PATH = "config/subscriptions.yaml"
 
 
 def _required_selected_task_paths(task: dict[str, Any]) -> frozenset[str]:
     """Required file closure once the planner has selected an optional task."""
     task_type = task.get("task_type")
-    if task_type == "subscription_config":
-        return frozenset({"config/subscriptions.yaml"})
     if task_type == "refinement_harness":
         return _REFINEMENT_REQUIRED_PATHS
     if task_type == "api_surface" and _APP_SERVICE_ADMIN_PATHS.intersection(_normalized_owned_paths(task)):
@@ -168,9 +170,7 @@ def _construct_task_requirements(plan: dict[str, Any], context_variables: Any) -
                 paths = _normalized_owned_paths(task)
                 repairs.append(f"{task_id}: removed policies for modules without collections {sorted(policy_paths)}")
         fixed: dict[str, Any] = {}
-        if task_type == "subscription_config" and set(paths) <= _required_selected_task_paths(task):
-            fixed = {"capability_pack_id": None, "surface_kind": "app_policy"}
-        elif task_type == "refinement_harness" and all(
+        if task_type == "refinement_harness" and all(
             path in _REFINEMENT_CONFIG_PATHS
             or (path.startswith("refinement_harness/prompts/") and PurePosixPath(path).suffix == ".yaml")
             for path in paths
@@ -191,6 +191,37 @@ def _construct_task_requirements(plan: dict[str, Any], context_variables: Any) -
     return repairs
 
 
+def _release_owned_paths(plan: dict[str, Any], paths: frozenset[str], *, owner: str, provider: str) -> list[str]:
+    """Release `paths` from every task; drop a task left with nothing to build."""
+    if not paths:
+        return []
+    repairs: list[str] = []
+    kept: list[dict[str, Any]] = []
+    dropped: set[str] = set()
+    for task in plan.get("build_tasks") or []:
+        owned = list(task.get("owned_paths") or [])
+        released = [path for path in owned if normalize_app_path(str(path)) in paths]
+        if not released:
+            kept.append(task)
+            continue
+        remaining = [path for path in owned if path not in released]
+        if remaining:
+            task["owned_paths"] = remaining
+            kept.append(task)
+            repairs.append(f"{task.get('task_id')}: released {owner} {released}; {provider}")
+        else:
+            dropped.add(str(task.get("task_id")))
+            repairs.append(f"dropped task {task.get('task_id')!r}: every owned path {released} is {owner}")
+    for task in kept:
+        depends = [dep for dep in task.get("depends_on") or [] if str(dep) not in dropped]
+        if len(depends) != len(task.get("depends_on") or []):
+            task["depends_on"] = depends
+    if dropped and plan.get("generation_order"):
+        plan["generation_order"] = [ref for ref in plan["generation_order"] if str(ref) not in dropped]
+    plan["build_tasks"] = kept
+    return repairs
+
+
 def release_pack_owned_paths(plan: dict[str, Any], context: Any) -> list[str]:
     """Pack-owned outputs are never model work; no task keeps one.
 
@@ -201,34 +232,24 @@ def release_pack_owned_paths(plan: dict[str, Any], context: Any) -> list[str]:
     discarded. Its pack-owned paths are released; a task left with nothing to
     build is dropped with its dependency edges.
     """
-    pack_paths = pack_owned_output_paths(context)
-    if not pack_paths:
-        return []
-    repairs: list[str] = []
-    kept: list[dict[str, Any]] = []
-    dropped: set[str] = set()
-    for task in plan.get("build_tasks") or []:
-        owned = list(task.get("owned_paths") or [])
-        released = [path for path in owned if normalize_app_path(str(path)) in pack_paths]
-        if not released:
-            kept.append(task)
-            continue
-        remaining = [path for path in owned if path not in released]
-        if remaining:
-            task["owned_paths"] = remaining
-            kept.append(task)
-            repairs.append(f"{task.get('task_id')}: released pack-owned {released}; selected pack templates provide them")
-        else:
-            dropped.add(str(task.get("task_id")))
-            repairs.append(f"dropped task {task.get('task_id')!r}: every owned path {released} is pack-owned")
-    for task in kept:
-        depends = [dep for dep in task.get("depends_on") or [] if str(dep) not in dropped]
-        if len(depends) != len(task.get("depends_on") or []):
-            task["depends_on"] = depends
-    if dropped and plan.get("generation_order"):
-        plan["generation_order"] = [ref for ref in plan["generation_order"] if str(ref) not in dropped]
-    plan["build_tasks"] = kept
-    return repairs
+    return _release_owned_paths(
+        plan, pack_owned_output_paths(context),
+        owner="pack-owned", provider="selected pack templates provide them",
+    )
+
+
+def release_subscriptions_config(plan: dict[str, Any]) -> list[str]:
+    """config/subscriptions.yaml is never model work; no task keeps it.
+
+    Assembly writes it from the approved subscription contract, or omits it
+    when no contract is required, so a task's copy is always discarded. The
+    planner's schema has no task type for it; this covers the path appearing
+    in another task's owned_paths.
+    """
+    return _release_owned_paths(
+        plan, frozenset({SUBSCRIPTIONS_CONFIG_PATH}),
+        owner="assembly-owned", provider="assembly writes it from the approved subscription contract",
+    )
 
 
 def _normalize_string_list(value: Any) -> list[str]:
@@ -854,19 +875,23 @@ def _default_mozaikspay_descriptor(context_variables: Any | None) -> dict[str, A
     return descriptor
 
 
+def _subscription_contract_required(context_variables: Any | None) -> bool:
+    """Whether the approved subscription contract makes this a subscription build."""
+    if context_variables is None:
+        return False
+    contract = resolve_subscription_contract(context_variables)
+    return contract is not None and contract.get("contract_required") is True
+
+
 def _resolve_monetization_provider(
     capability_packs: list[dict[str, Any]],
-    build_tasks: list[dict[str, Any]],
     *,
+    contract_required: bool,
     monetization_provider: str | None,
     context_variables: Any | None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Resolve the provider from an explicit choice or selected provider pack."""
-    has_subscription_config = any(
-        isinstance(task, dict) and str(task.get("task_type") or "").strip() == "subscription_config"
-        for task in build_tasks
-    )
-    if not has_subscription_config:
+    if not contract_required:
         return capability_packs, monetization_provider
 
     selected_ids = {
@@ -890,20 +915,16 @@ def _resolve_monetization_provider(
 
 def _validate_monetization_provider_selection(
     capability_packs: list[dict[str, Any]],
-    build_tasks: list[dict[str, Any]],
     *,
+    contract_required: bool,
     monetization_provider: str | None,
 ) -> None:
     """Validate the resolved SaaS subscription-assignment provider selection."""
-    has_subscription_config = any(
-        isinstance(task, dict) and str(task.get("task_type") or "").strip() == "subscription_config"
-        for task in build_tasks
-    )
-    if not has_subscription_config:
+    if not contract_required:
         if monetization_provider:
             raise ValueError(
-                "AppBuildPlan.monetization_provider is only valid when build_tasks include "
-                "task_type='subscription_config'."
+                "AppBuildPlan.monetization_provider is only valid when the approved "
+                "subscription contract has contract_required=true."
             )
         return
 
@@ -926,7 +947,8 @@ def _validate_monetization_provider_selection(
 
     if not monetization_provider:
         raise ValueError(
-            "AppBuildPlan.monetization_provider is required for subscription_config builds. "
+            "AppBuildPlan.monetization_provider is required when the approved subscription "
+            "contract has contract_required=true. "
             "Choose 'mozaiks_pay' for the managed MozaiksPay connector or "
             "'entitlement_dispatch' for the self-managed OSS assignment path."
         )
@@ -1920,26 +1942,6 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                     f"services/routes/, and {APP_SECURITY_SECRETS_PATH}."
                 )
 
-        if task_type == "subscription_config":
-            if normalized_capability_pack_id:
-                raise ValueError(
-                    "Build task "
-                    f"'{task_id}' uses task_type 'subscription_config' but capability_pack_id is not null. "
-                    "Subscription config is an app-level policy artifact, not a capability-pack module."
-                )
-            if surface_kind_raw != "app_policy":
-                raise ValueError(
-                    "Build task "
-                    f"'{task_id}' uses task_type 'subscription_config' but surface_kind is "
-                    f"'{surface_kind_raw}'. Use surface_kind='app_policy'."
-                )
-            if owned_paths != sorted(_required_selected_task_paths(task)):
-                raise ValueError(
-                    "Build task "
-                    f"'{task_id}' uses task_type 'subscription_config' but owns {owned_paths}. "
-                    "Subscription config tasks may only own config/subscriptions.yaml."
-                )
-
         if task_type == "refinement_harness":
             if normalized_capability_pack_id:
                 raise ValueError(
@@ -2167,9 +2169,10 @@ def app_build_plan(
         ],
         key=_task_sort_key,
     ))
+    contract_required = _subscription_contract_required(context_variables)
     capability_packs, monetization_provider = _resolve_monetization_provider(
         capability_packs,
-        build_tasks,
+        contract_required=contract_required,
         monetization_provider=monetization_provider,
         context_variables=context_variables,
     )
@@ -2218,7 +2221,10 @@ def app_build_plan(
     )
     # The cached plan never schedules model work for an output a selected pack writes.
     released: dict[str, Any] = {"build_tasks": build_tasks, "generation_order": generation_order}
-    for repair in release_pack_owned_paths(released, context_variables):
+    for repair in (
+        *release_pack_owned_paths(released, context_variables),
+        *release_subscriptions_config(released),
+    ):
         _logger.info("[AppGenerator] plan normalized: %s", repair)
     build_tasks, generation_order = released["build_tasks"], released["generation_order"]
     pages = _normalize_page_config_hints(pages)
@@ -2260,7 +2266,7 @@ def app_build_plan(
     )
     _validate_monetization_provider_selection(
         capability_packs,
-        build_tasks,
+        contract_required=contract_required,
         monetization_provider=monetization_provider,
     )
 

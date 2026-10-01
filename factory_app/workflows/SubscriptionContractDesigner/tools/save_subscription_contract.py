@@ -19,6 +19,7 @@ from factory_app.workflows._shared.subscription_contract_context import (
     capability_id_for_feature,
     concept_requires_contract,
     selected_feature_gates,
+    subscription_assignment_store,
     validate_module_contract_updates,
 )
 from mozaiksai.core.artifacts import persist_summary_artifact
@@ -147,24 +148,6 @@ def _contains_proprietary_term(value: Any) -> str | None:
     return None
 
 
-# assignment_store fields whose explicit null is meaning-bearing rather than
-# merely absent. `exclude_none=True` keeps the normalized contract compact,
-# but for these it would turn a deliberate opt-out into a silent opt-in on the
-# next reload, because an absent key falls back to the model default.
-_NULL_MEANING_ASSIGNMENT_FIELDS = ("revision_field",)
-
-
-def _restore_explicit_nulls(validated: Any, normalized: dict[str, Any]) -> None:
-    """Re-add assignment-store nulls the caller set on purpose."""
-    store = getattr(validated, "assignment_store", None)
-    if store is None or not isinstance(normalized.get("assignment_store"), dict):
-        return
-    explicitly_set: set[str] = getattr(store, "model_fields_set", set())
-    for field in _NULL_MEANING_ASSIGNMENT_FIELDS:
-        if field in explicitly_set and getattr(store, field, None) is None:
-            normalized["assignment_store"][field] = None
-
-
 def _degraded_pricing_catalog(config: Mapping[str, Any]) -> dict[str, Any] | None:
     """Reduce an optional pricing catalog to the part that is actually valid.
 
@@ -252,14 +235,12 @@ def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
         raise ValueError("subscription_config_file must be an object when contract_required=true")
     config = dict(raw)
     config.setdefault("schema_version", "mozaiks.subscriptions.v1")
-    config.setdefault("assignment_store", None)
     config.setdefault("token_wallets", [])
     config.setdefault("add_on_products", [])
     config.setdefault("plans", [])
     config["pricing_catalog"] = _degraded_pricing_catalog(config)
     validated = SubscriptionsConfig.model_validate(config)
     normalized = validated.model_dump(mode="python", exclude_none=True)
-    _restore_explicit_nulls(validated, normalized)
     for key in ("token_wallets", "top_up_products", "add_on_products", "usage_charge_policies"):
         if normalized.get(key) == []:
             normalized.pop(key, None)
@@ -406,6 +387,16 @@ def _derive_contract_updates(
     return module_updates, []
 
 
+def _metered_surface(declaration: Any) -> str:
+    """Name a metering declaration's surface the way a reviewer reads it."""
+    if not isinstance(declaration, dict) or not declaration.get("surface_id"):
+        return "an unnamed surface"
+    surface = str(declaration["surface_id"])
+    if declaration.get("action_id"):
+        surface = f"{surface}.{declaration['action_id']}"
+    return f"the {surface} workflow" if declaration.get("surface_type") == "workflow" else surface
+
+
 def _normalize_metering_declarations(
     output: dict[str, Any], config: SubscriptionsConfig,
 ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -415,9 +406,15 @@ def _normalize_metering_declarations(
     if not wallet_ids:
         notes: list[str] = []
         for declaration in declarations:
-            reason = "subscription_config_file.token_wallets is empty; no wallet can execute metering"
-            logger.warning("METERING_DECLARATION_DROPPED declaration=%r reason=%s", declaration, reason)
-            notes.append(f"Dropped metering declaration {declaration!r}: {reason}.")
+            logger.warning(
+                "METERING_DECLARATION_DROPPED declaration=%r reason=subscription_config_file.token_wallets is empty",
+                declaration,
+            )
+            # The review UI shows these notes to a person; a dict repr is not a sentence.
+            notes.append(
+                f"Removed a usage-metering entry for {_metered_surface(declaration)}: this design sells "
+                "no token wallets, so there is nothing to charge."
+            )
         return [], notes
 
     normalized: list[dict[str, Any]] = []
@@ -589,6 +586,11 @@ def _normalize_required(output: dict[str, Any], context_variables: Any) -> dict[
     raw_config = normalized.get("subscription_config_file")
     if not isinstance(raw_config, dict):
         raise ValueError("subscription_config_file must be an object when contract_required=true")
+    if raw_config.get("assignment_store") is not None:
+        # The designer's schema no longer has this field; only an output recorded
+        # before the store became code-owned still carries one.
+        logger.info("ASSIGNMENT_STORE_CONSTRUCTED discarded=%r", raw_config["assignment_store"])
+    raw_config = {**raw_config, "assignment_store": subscription_assignment_store()}
     compiled_config, selections = _compile_feature_selections(raw_config, context_variables)
     config = _normalize_subscription_config(compiled_config)
     validated_config = SubscriptionsConfig.model_validate(config)

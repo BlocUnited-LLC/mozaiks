@@ -118,7 +118,6 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "CiSecretRequirement",
         "CiWorkflowInputRequirement",
         "CiSecretRequirements",
-        "SubscriptionConfigBundle",
         "DeployTargetSpec",
         "DeploymentHealthcheck",
         "DeploymentBuildOutput",
@@ -177,16 +176,14 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["ConfigMiddlewareOutput"]["fields"]["mode"]["values"] == [
         "module_contract_bundle",
         "service_foundation",
-        "subscription_config",
     ]
     assert models["ConfigMiddlewareOutput"]["fields"]["service_foundation_bundle"]["variants"] == [
         "BackendFoundationBundle",
         "null",
     ]
-    assert models["ConfigMiddlewareOutput"]["fields"]["subscription_config_bundle"]["variants"] == [
-        "SubscriptionConfigBundle",
-        "null",
-    ]
+    # Assembly writes config/subscriptions.yaml from the approved contract; no agent mode emits it.
+    assert "subscription_config_bundle" not in models["ConfigMiddlewareOutput"]["fields"]
+    assert "SubscriptionConfigBundle" not in models
     assert models["RefinementHarnessOutput"]["fields"]["refinement_harness"]["type"] == "RefinementHarnessBundle"
     assert models["ModuleJsStub"]["fields"]["surface"]["values"] == ["admin_component", "profile_component"]
     assert models["AppSchemaOutput"]["fields"]["custom_route_bundle"]["variants"] == ["AppCustomRouteBundle", "null"]
@@ -402,7 +399,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
         assert "policy_hooks.yaml" in optional_family, f"{archetype_name} archetype missing policy_hooks.yaml in optional family"
     assert "Use one of these exact top-level shapes:" in source
     assert "Use one of these exact bounded shapes:" in source
-    assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, `BackendFoundationBundle`, and `SubscriptionConfigBundle` in `structured_outputs.yaml`." in source
+    assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `RefinementHarnessOutput` and `RefinementHarnessBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`." in source
 

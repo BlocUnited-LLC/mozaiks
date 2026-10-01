@@ -17,6 +17,10 @@ died with the whole attempt budget spent:
 `TestFileContractsIntegrity` already asserts these contracts exist in the data
 file. Nothing asserted they reach the agent told to copy from them, which is
 why a five-week-old gap surfaced in a live run instead of in CI.
+
+The subscription_config task has since been removed outright: assembly writes
+config/subscriptions.yaml from the approved contract, so there is no task to
+surface. The generic guards below still hold for every remaining contract.
 """
 
 from __future__ import annotations
@@ -51,22 +55,6 @@ def _planner_body() -> str:
     """The file-contract context as AppPlanAgent actually receives it."""
     agent = SimpleNamespace(name="AppPlanAgent", context_variables={})
     return _build_file_contracts_body(agent, _file_contracts())
-
-
-def _subscription_task(owned_paths: list[str]) -> dict:
-    return {
-        "task_id": "6",
-        "task_type": "subscription_config",
-        "surface_kind": "app_policy",
-        "capability_pack_id": None,
-        "initial_agent": "ConfigMiddlewareAgent",
-        "execution_target": "generator",
-        "description": "Generate the app subscription contract.",
-        "initial_message": "Generate config/subscriptions.yaml.",
-        "owned_paths": owned_paths,
-        "depends_on": [],
-        "acceptance_criteria": [],
-    }
 
 
 # --------------------------------------------------------------------------
@@ -105,61 +93,27 @@ def test_each_contract_required_outputs_reach_the_planner(contract_name: str):
 
 
 # --------------------------------------------------------------------------
-# The specific regression
+# config/subscriptions.yaml is not model work
 # --------------------------------------------------------------------------
 
 
-def test_subscription_config_is_surfaced_with_its_path():
-    body = _planner_body()
-    assert "subscription_config" in body
-    assert SUBSCRIPTION_PATH in body, (
-        "the planner is told subscription_config is legal vocabulary; without this "
-        "path it plans the task owning nothing and the run dies at admission"
-    )
+def test_subscription_config_is_no_longer_a_task_type():
+    assert "subscription_config" not in _ALLOWED_TASK_TYPES
+    assert "subscription_config" not in _task_contracts()
+    assert "subscription_config" not in _planner_body()
 
 
-def test_subscription_config_was_already_legal_vocabulary():
-    """Why the omission was silent: the task type was always offered.
-
-    The planner had every reason to plan the task and no way to path it.
-    """
-    assert "subscription_config" in _ALLOWED_TASK_TYPES
-
-
-def test_contract_declares_exactly_the_path_admission_requires():
-    """The data and the validator already agreed; only delivery was missing."""
-    assert _task_contracts()["subscription_config"]["required_outputs"] == [SUBSCRIPTION_PATH]
+def test_no_remaining_contract_offers_the_subscriptions_path():
+    """The planner copies owned_paths from these contracts; none may offer this one."""
+    for name, contract in _task_contracts().items():
+        outputs = [*(contract.get("required_outputs") or []), *(contract.get("optional_outputs") or [])]
+        assert SUBSCRIPTION_PATH not in outputs, name
 
 
-# --------------------------------------------------------------------------
-# Admission is unchanged — this PR surfaces a contract, it does not relax a gate
-# --------------------------------------------------------------------------
-
-
-def test_task_owning_the_contract_path_passes_admission():
-    required = _task_contracts()["subscription_config"]["required_outputs"]
-    _validate_build_tasks([_subscription_task(list(required))])
-
-
-def test_task_owning_nothing_is_still_rejected():
-    """The live failure, reproduced. Surfacing the contract must not soften this."""
-    with pytest.raises(ValueError) as excinfo:
-        _validate_build_tasks([_subscription_task([])])
-    message = str(excinfo.value)
-    assert "owns []" in message
-    assert SUBSCRIPTION_PATH in message
-
-
-@pytest.mark.parametrize(
-    "owned_paths",
-    [
-        pytest.param(["app/config/subscriptions.yaml"], id="app-prefixed"),
-        pytest.param(["config/subscriptions.yml"], id="wrong-extension"),
-        pytest.param([SUBSCRIPTION_PATH, "config/targets.json"], id="extra-path"),
-        pytest.param(["modules/billing/contracts/subscriptions.yaml"], id="module-local"),
-    ],
-)
-def test_near_miss_paths_remain_rejected(owned_paths: list[str]):
-    """Ownership validation stays exactly as narrow as it was."""
-    with pytest.raises(ValueError):
-        _validate_build_tasks([_subscription_task(owned_paths)])
+def test_a_subscription_config_task_is_rejected_at_admission():
+    task = {
+        "task_id": "6", "task_type": "subscription_config", "capability_pack_id": None,
+        "initial_agent": "ConfigMiddlewareAgent", "owned_paths": [SUBSCRIPTION_PATH], "depends_on": [],
+    }
+    with pytest.raises(ValueError, match="unsupported task_type 'subscription_config'"):
+        _validate_build_tasks([task])

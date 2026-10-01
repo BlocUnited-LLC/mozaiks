@@ -225,8 +225,14 @@ def test_no_wallet_drops_every_metering_declaration_and_explains_each_drop(caplo
     with caplog.at_level(logging.INFO, logger=module.__name__):
         saved = module.normalize_subscription_contract(output, _context())
     assert saved["metering_declarations"] == []
-    assert len(saved["validation_notes"]) == 2
-    assert all("token_wallets is empty" in note for note in saved["validation_notes"])
+    # Review notes are read by a person: plain sentences, never a dict repr.
+    assert saved["validation_notes"] == [
+        "Removed a usage-metering entry for tasks: this design sells no token wallets, "
+        "so there is nothing to charge.",
+        "Removed a usage-metering entry for tasks.summarize_tasks: this design sells no token wallets, "
+        "so there is nothing to charge.",
+    ]
+    assert not any("{" in note for note in saved["validation_notes"])
     assert sum("METERING_DECLARATION_DROPPED" in record.message for record in caplog.records) == 2
     assert saved["module_contract_updates"] == [{
         "module_id": "tasks", "action_id": "summarize_tasks",

@@ -171,14 +171,6 @@ def _plan_from_saved_design(context: ContextVariablesBridge) -> dict:
               [f"modules/task_management/backend/{name}.py" for name in ("handler", "service", "repo", "policy")],
               dependencies=["task_management.module_contract", "task_management.data_models"]),
         {
-            "task_id": "subscription.config", "task_type": "subscription_config", "capability_pack_id": None,
-            "surface_id": "subscription_contract", "surface_kind": "app_policy",
-            "execution_target": "AppGenerator", "initial_agent": "ConfigMiddlewareAgent",
-            "description": "Serialize approved subscriptions",
-            "initial_message": "Emit config/subscriptions.yaml from the subscription contract.",
-            "owned_paths": ["config/subscriptions.yaml"], "depends_on": [],
-        },
-        {
             **_task("page_bundle", "page_bundle", "AppSchemaAgent", None, page_paths,
                     dependencies=["task_management.business_services"]),
             "surface_id": "task_management", "surface_kind": "module",

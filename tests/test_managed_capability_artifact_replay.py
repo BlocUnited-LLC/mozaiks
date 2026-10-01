@@ -395,20 +395,6 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
         ],
         build_tasks=[
             {
-                "task_id": "subscriptions.config",
-                "task_type": "subscription_config",
-                "capability_pack_id": None,
-                "surface_id": "subscriptions",
-                "surface_kind": "app_policy",
-                "execution_target": "AppGenerator",
-                "initial_agent": "ConfigMiddlewareAgent",
-                "description": "Generate SaaS subscription config.",
-                "initial_message": "Generate config/subscriptions.yaml.",
-                "owned_paths": ["config/subscriptions.yaml"],
-                "depends_on": [],
-                "acceptance_criteria": [],
-            },
-            {
                 "task_id": "mozaikspay.adapter",
                 "task_type": "api_surface",
                 "capability_pack_id": None,
@@ -462,7 +448,7 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
         "app.json", "config/ai.json", "config/shell.json", "ui/pages/pricing.yaml", "ui/pages/reports.yaml",
     ])
     tasks["mozaikspay.pages"]["depends_on"].extend([
-        "mozaikspay.billing_services", "reports.services", "reports.contract", "subscriptions.config",
+        "mozaikspay.billing_services", "reports.services", "reports.contract",
     ])
     module_task = tasks["mozaikspay.billing_facade_contract"]
     plan["build_tasks"].extend([
@@ -486,7 +472,7 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
         },
         {
             **module_task, "task_id": "reports.contract", "capability_pack_id": "reports", "surface_id": "reports",
-            "owned_paths": ["modules/reports/module.yaml"], "depends_on": ["subscriptions.config"],
+            "owned_paths": ["modules/reports/module.yaml"], "depends_on": [],
             "description": "Declare the subscription-gated report action.",
             "initial_message": "Emit the approved reports action; code compiles its subscription gate.",
         },
@@ -540,11 +526,6 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
                 {"filename": "services/integrations/__init__.py", "content": ""},
                 {"filename": "modules/billing_portal/backend/__init__.py", "content": ""},
                 {"filename": "modules/reports/backend/__init__.py", "content": ""},
-            ]
-        },
-        "subscriptions": {
-            "code_files": [
-                {"filename": "config/subscriptions.yaml", "content": _subscriptions_yaml()},
             ]
         },
         "adapter": {

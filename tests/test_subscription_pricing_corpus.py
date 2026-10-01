@@ -291,7 +291,9 @@ async def test_ec56c080_labelled_concept_repair_saves_and_app_plan_accepts(monke
     reviewed = review_app_build_plan(AppBuildPlan=plan, context_variables=app_context)
     assert reviewed["outcome"] == "ready", reviewed
     cached = detach(app_context.get("app_build_plan"))
-    assert any(task["task_type"] == "subscription_config" for task in cached["build_tasks"])
+    # Assembly writes config/subscriptions.yaml from the saved contract; no task plans it.
+    assert all("config/subscriptions.yaml" not in task["owned_paths"] for task in cached["build_tasks"])
+    assert cached["monetization_provider"] == "mozaiks_pay"
     reviewed_pack = next(
         pack for pack in cached["capability_packs"] if pack["capability_pack_id"] == "task_management"
     )

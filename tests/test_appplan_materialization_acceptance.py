@@ -9,6 +9,9 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+from factory_app.workflows._shared.subscription_contract_context import (
+    subscription_assignment_store,
+)
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     run_app_bundle_acceptance_gate,
@@ -229,37 +232,6 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                     )
                     + "\n",
                 },
-            ],
-        }
-
-    if task_type == "subscription_config":
-        return {
-            "agent_message": "Materialized the SaaS subscription contract.",
-            "code_files": [
-                {
-                    "filename": "config/subscriptions.yaml",
-                    "content": (
-                        "schema_version: mozaiks.subscriptions.v1\n"
-                        "label: Generated SaaS Plan\n"
-                        "default_plan_id: free\n"
-                        "assignment_store:\n"
-                        "  data_alias: billing.subscriptions\n"
-                        "  app_id_field: app_id\n"
-                        "  user_id_field: user_id\n"
-                        "  status_field: status\n"
-                        "  plan_id_field: plan_id\n"
-                        "  capabilities_field: granted_capabilities\n"
-                        "  plan_snapshot_field: plan_snapshot\n"
-                        "  active_statuses: [active, trialing]\n"
-                        "plans:\n"
-                        "  - plan_id: free\n"
-                        "    label: Free\n"
-                        "    capabilities: [feature.module.reports.view_report]\n"
-                        "  - plan_id: pro\n"
-                        "    label: Pro\n"
-                        "    capabilities: [feature.module.reports.view_report, feature.module.reports.export_report]\n"
-                    ),
-                }
             ],
         }
 
@@ -587,9 +559,23 @@ def _assignment_docs(app_id: str) -> list[dict[str, Any]]:
     ]
 
 
+# The approved contract's runtime file; assembly writes config/subscriptions.yaml from it.
+_SUBSCRIPTION_CONFIG_FILE = {
+    "schema_version": "mozaiks.subscriptions.v1",
+    "label": "Generated SaaS Plan",
+    "default_plan_id": "free",
+    "assignment_store": subscription_assignment_store(),
+    "plans": [
+        {"plan_id": "free", "label": "Free", "capabilities": ["feature.module.reports.view_report"]},
+        {"plan_id": "pro", "label": "Pro", "capabilities": [
+            "feature.module.reports.view_report", "feature.module.reports.export_report",
+        ]},
+    ],
+}
+
+
 def _approved_context_values() -> dict[str, Any]:
     persistence_fixture = _task_output(task_id="persistence", task_type="persistence_contract", task={})
-    subscription_fixture = _task_output(task_id="subscription", task_type="subscription_config", task={})
     return {
         "data_contract": json.loads(persistence_fixture["code_files"][0]["content"]),
         "design_surface_map": {"surfaces": [{
@@ -599,7 +585,7 @@ def _approved_context_values() -> dict[str, Any]:
         }]},
         "subscription_contract": {
             "contract_required": True,
-            "subscription_config_file": yaml.safe_load(subscription_fixture["code_files"][0]["content"]),
+            "subscription_config_file": deepcopy(_SUBSCRIPTION_CONFIG_FILE),
             "selected_features_by_plan": {
                 "free": ["module.reports.view_report"],
                 "pro": ["module.reports.view_report", "module.reports.export_report"],
