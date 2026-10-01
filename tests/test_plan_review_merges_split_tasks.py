@@ -68,7 +68,7 @@ def _task(task_id: str, task_type: str, paths: list[str], **extra) -> dict:
 
 
 def test_without_the_merge_review_reproduces_the_live_rejection(monkeypatch):
-    monkeypatch.setattr(app_plan_review, "_merge_split_tasks", lambda plan: [])
+    monkeypatch.setattr(app_plan_review, "_merge_split_tasks", lambda plan, context: [])
 
     result, _context = _review(_plan())
 
@@ -111,7 +111,7 @@ def test_every_reference_to_an_absorbed_task_names_the_survivor():
         "carry_forward_decisions": [{"module_id": "tasks", "affected_build_tasks": ["update_task"]}],
     }
 
-    repairs = app_plan_review._merge_split_tasks(plan)
+    repairs = app_plan_review._merge_split_tasks(plan, None)
 
     assert len(repairs) == 1
     by_id = {task["task_id"]: task for task in plan["build_tasks"]}
@@ -132,7 +132,7 @@ def test_tasks_of_different_types_sharing_a_file_are_not_merged():
         _task("services", "business_services", ["modules/tasks/module.yaml", SERVICE]),
     ]}
 
-    assert app_plan_review._merge_split_tasks(plan) == []
+    assert app_plan_review._merge_split_tasks(plan, None) == []
     assert [task["task_id"] for task in plan["build_tasks"]] == ["contract", "services"]
 
 
@@ -142,7 +142,7 @@ def test_same_type_tasks_of_different_capabilities_are_not_merged():
         {**_task("other_services", "business_services", [SERVICE]), "capability_pack_id": "other"},
     ]}
 
-    assert app_plan_review._merge_split_tasks(plan) == []
+    assert app_plan_review._merge_split_tasks(plan, None) == []
     assert len(plan["build_tasks"]) == 2
 
 
@@ -152,7 +152,7 @@ def test_tasks_sharing_only_app_json_are_not_merged():
         _task("tasks_page", "page_bundle", ["app.json", "ui/pages/tasks.yaml"]),
     ]}
 
-    assert app_plan_review._merge_split_tasks(plan) == []
+    assert app_plan_review._merge_split_tasks(plan, None) == []
     assert len(plan["build_tasks"]) == 2
 
 
@@ -163,7 +163,7 @@ def test_overlaps_chain_into_one_task():
         _task("c", "business_services", [SERVICE, "modules/tasks/backend/repo.py"]),
     ]}
 
-    app_plan_review._merge_split_tasks(plan)
+    app_plan_review._merge_split_tasks(plan, None)
 
     (task,) = plan["build_tasks"]
     assert task["task_id"] == "a"
@@ -176,5 +176,74 @@ def test_a_repeated_task_id_is_left_for_identity_repair():
         _task("services", "business_services", [SERVICE]),
     ]}
 
-    assert app_plan_review._merge_split_tasks(plan) == []
+    assert app_plan_review._merge_split_tasks(plan, None) == []
     assert len(plan["build_tasks"]) == 2
+
+
+def test_page_tasks_sharing_a_page_are_left_to_coverage():
+    plan = {"build_tasks": [
+        {**_task("pages_a", "page_bundle", ["ui/pages/tasks.yaml"]), "surface_id": "page_bundle", "surface_kind": "ui_only",
+         "capability_pack_id": None},
+        {**_task("pages_b", "page_bundle", ["ui/pages/tasks.yaml"]), "surface_id": "page_bundle", "surface_kind": "ui_only",
+         "capability_pack_id": None},
+    ]}
+
+    assert app_plan_review._merge_split_tasks(plan, None) == []
+    assert len(plan["build_tasks"]) == 2
+
+
+def test_files_a_pack_or_assembly_owns_are_not_a_reason_to_merge():
+    context = _live_context()
+    for shared in ("services/integrations/mozaikspay_client.py", "config/subscriptions.yaml"):
+        plan = {"build_tasks": [
+            _task("svc_a", "business_services", [shared, SERVICE]),
+            _task("svc_b", "business_services", [shared, "modules/tasks/backend/repo.py"]),
+        ]}
+
+        assert app_plan_review._merge_split_tasks(plan, context) == [], shared
+        assert len(plan["build_tasks"]) == 2
+
+
+def test_a_merge_that_would_close_a_dependency_cycle_is_left_to_the_checks():
+    plan = {"build_tasks": [
+        _task("svc_a", "business_services", [SERVICE]),
+        _task("pages", "page_bundle", ["ui/pages/tasks.yaml"], depends_on=["svc_a"]),
+        _task("svc_b", "business_services", [SERVICE], depends_on=["pages"]),
+    ]}
+
+    assert app_plan_review._merge_split_tasks(plan, None) == []
+    assert len(plan["build_tasks"]) == 3
+
+
+@pytest.mark.parametrize("keeper_id", ["", "contract"])
+def test_a_blank_or_reused_id_is_left_for_identity_repair(keeper_id):
+    plan = {"build_tasks": [
+        _task(keeper_id, "business_services", [SERVICE]),
+        _task("svc_b", "business_services", [SERVICE]),
+        _task("contract", "module_contract", ["modules/tasks/module.yaml"]),
+        _task("pages", "page_bundle", ["ui/pages/tasks.yaml"], depends_on=["svc_b"]),
+    ]}
+
+    assert app_plan_review._merge_split_tasks(plan, None) == []
+    assert next(task for task in plan["build_tasks"] if task["task_id"] == "pages")["depends_on"] == ["svc_b"]
+
+
+def test_integration_needs_and_task_context_follow_the_keeper():
+    plan = {"build_tasks": [
+        _task("svc_a", "business_services", [SERVICE],
+              context_variables=[{"key": "action_name", "value": "create_task", "value_type": "string"}]),
+        _task("svc_b", "business_services", [SERVICE],
+              context_variables=[{"key": "action_name", "value": "update_task", "value_type": "string"},
+                                 {"key": "extra", "value": "1", "value_type": "string"}]),
+        _task("client", "api_surface", ["services/integrations/crm_client.py"],
+              integration_needs=[{"service": "crm", "required_by": {"kind": "task", "id": "svc_b"}}]),
+    ]}
+
+    app_plan_review._merge_split_tasks(plan, None)
+
+    by_id = {task["task_id"]: task for task in plan["build_tasks"]}
+    assert by_id["svc_a"]["context_variables"] == [
+        {"key": "action_name", "value": "create_task", "value_type": "string"},
+        {"key": "extra", "value": "1", "value_type": "string"},
+    ]
+    assert by_id["client"]["integration_needs"][0]["required_by"] == {"kind": "task", "id": "svc_a"}

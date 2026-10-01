@@ -341,8 +341,13 @@ still fail. Tasks of the same type for the same capability and surface that
 share an owned file are one unit of work split by the planner (for example one
 business_services task per action, each owning the module's service.py): review
 merges them into the first one in plan order, unions their owned paths,
-criteria and instructions, and points every reference to an absorbed task id at
-it. Tasks of different types sharing a file are a real conflict and still fail.
+criteria and instructions (the first task wins any conflicting field), and
+renames absorbed ids in depends_on, generation_order,
+carry_forward_decisions and integration_needs. Ownership another step settles
+is not a reason to merge: app.json, config/subscriptions.yaml, a selected pack's
+outputs and facade module, and page_bundle work. Tasks of different types
+sharing a file still fail, and a split that repeats or reuses a task_id, has a
+blank id, or would close a dependency cycle is left to those checks.
 Selected pack inventory is resolved before coverage construction.
 Canonical worker mapping and selected subscription, refinement, and split-admin
 task file requirements are also shared with validation. Explicit approved action
