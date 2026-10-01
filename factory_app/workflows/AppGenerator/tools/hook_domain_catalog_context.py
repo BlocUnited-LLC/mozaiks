@@ -33,6 +33,7 @@ from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import _MODULE_CONTRACT_OUTPUT_PATHS
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 
 logger = logging.getLogger(__name__)
@@ -259,9 +260,10 @@ def _build_manifest_guard_body(
         return filename if filename in {"module.yaml", "runtime_extensions.yaml"} else f"contracts/{filename}"
 
     def typed_field(filename: str) -> str:
-        if filename not in _ALL_MODULE_YAML_FILES:
+        field = f"{Path(filename).stem}_yaml"
+        if field not in _MODULE_CONTRACT_OUTPUT_PATHS:
             return "no module_contract field (not a module contract file)"
-        return f"module_contract.{Path(filename).stem}_yaml"
+        return f"module_contract.{field}"
 
     lines = [
         f"Module: {module_id}",

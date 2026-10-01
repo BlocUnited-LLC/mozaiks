@@ -293,3 +293,31 @@ def test_the_manifest_guard_names_the_typed_field_for_each_owned_file():
     for name in ("events", "reactions", "notifications", "settings", "admin", "profile", "relationships",
                  "policy_hooks", "runtime_extensions"):
         assert name in guard.split("Companion contracts (", 1)[1].split(")", 1)[0]
+
+
+def test_the_guard_labels_every_typed_companion_from_a_file_manifest():
+    from factory_app.workflows.AppGenerator.tools.hook_domain_catalog_context import (
+        inject_module_file_manifest_guard,
+    )
+
+    class Agent:
+        name = "ConfigMiddlewareAgent"
+        system_message = ""
+
+        def __init__(self, context_variables: dict):
+            self.context_variables = context_variables
+
+        def update_system_message(self, message: str) -> None:
+            self.system_message = message
+
+    task = {**copy.deepcopy(_plan_task()), "file_manifest": {
+        "yaml_files": ["module.yaml", "profile.yaml", "runtime_extensions.yaml"],
+    }}
+    agent = Agent({"current_build_task": task})
+    inject_module_file_manifest_guard(agent, [])
+    guard = agent.system_message.split("[MODULE FILE MANIFEST GUARD]", 1)[1]
+
+    assert "module_contract.profile_yaml" in guard
+    assert "module_contract.runtime_extensions_yaml" in guard
+    assert "no module_contract field" not in guard
+
