@@ -259,6 +259,8 @@ def _build_manifest_guard_body(
         return filename if filename in {"module.yaml", "runtime_extensions.yaml"} else f"contracts/{filename}"
 
     def typed_field(filename: str) -> str:
+        if filename not in _ALL_MODULE_YAML_FILES:
+            return "no module_contract field (not a module contract file)"
         return f"module_contract.{Path(filename).stem}_yaml"
 
     lines = [
@@ -281,7 +283,7 @@ def _build_manifest_guard_body(
         "  1. Generate module.yaml through module_contract.module_yaml. Optional files listed above are an ownership boundary, not a requirement to invent content.",
         "  2. Companion contracts (events, reactions, notifications, settings, admin, profile, relationships, policy_hooks, runtime_extensions) are emitted ONLY through their typed module_contract.<name>_yaml fields. Code serializes each populated typed module_contract field to its file; populate one only when approved feature scope requires it.",
         "  3. Leave module_contract.<name>_yaml null when the module declares none of that contract. A null field emits no file.",
-        "  4. Never write a companion contract as a raw code_files entry. Code removes a raw companion file whose typed field is null and overwrites one whose typed field is set; raw files cannot substitute for typed manifests.",
+        "  4. Never write a companion contract as a raw code_files entry. Code removes an empty raw companion whose typed field is null, rejects one that carries content (put that content in the typed field), and overwrites one whose typed field is set; raw files cannot substitute for typed manifests.",
         "  5. Leave events_yaml null if the module publishes no events.",
         "  6. Leave reactions_yaml null if approved scope declares no incoming, self, platform, or workflow-triggered reaction.",
         "  7. Leave notifications_yaml null if no events warrant user notifications.",

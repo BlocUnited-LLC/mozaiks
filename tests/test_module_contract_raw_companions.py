@@ -109,8 +109,8 @@ def test_recorded_output_extracts_module_yaml_from_the_typed_field_and_drops_raw
 
     messages = sorted(record.getMessage() for record in _dropped(caplog))
     assert len(messages) == 2, messages
-    assert messages[0].startswith(f"{DROPPED}: path={EVENTS} empty_contract=True;")
-    assert messages[1].startswith(f"{DROPPED}: path={REACTIONS} empty_contract=True;")
+    assert messages[0].startswith(f"{DROPPED}: path={EVENTS};")
+    assert messages[1].startswith(f"{DROPPED}: path={REACTIONS};")
     assert "module_contract.reactions_yaml is null" in messages[1]
 
 
@@ -158,8 +158,8 @@ def test_recorded_output_is_accepted_by_the_task_batch(monkeypatch, caplog):
 
     messages = [record.getMessage() for record in _dropped(caplog)]
     assert messages == [
-        f"{DROPPED}: path={REACTIONS} empty_contract=True; module_contract.reactions_yaml is null, "
-        "so the module declares none and the typed field wins"
+        f"{DROPPED}: path={REACTIONS}; module_contract.reactions_yaml is null and the raw "
+        "file declares nothing, so the module declares none"
     ]
 
 
@@ -192,15 +192,16 @@ RAW_REACTION = (
 )
 
 
-def test_null_typed_field_with_non_empty_raw_companion_is_dropped_and_warned(caplog):
-    with caplog.at_level(logging.INFO):
-        files = extract_code_file_map_from_payload(_payload(None, RAW_REACTION))
+def test_null_typed_field_with_a_raw_companion_that_declares_something_is_rejected(caplog):
+    """A raw reaction is a contract the model meant to declare; dropping it would lose it silently."""
+    with caplog.at_level(logging.INFO), pytest.raises(ValueError) as rejected:
+        extract_code_file_map_from_payload(_payload(None, RAW_REACTION))
 
-    assert "modules/orders/contracts/reactions.yaml" not in files
-    assert "modules/orders/module.yaml" in files
-    [record] = _dropped(caplog)
-    assert record.levelno == logging.WARNING, "a dropped non-empty contract is visible"
-    assert "path=modules/orders/contracts/reactions.yaml empty_contract=False" in record.getMessage()
+    message = str(rejected.value)
+    assert "module_contract.reactions_yaml is null but raw output emits modules/orders/contracts/reactions.yaml" in message
+    assert "Put that contract in module_contract.reactions_yaml" in message
+    assert "omit contracts/reactions.yaml from code_files" in message
+    assert _dropped(caplog) == []
 
 
 def test_null_typed_field_with_empty_raw_companion_is_dropped_at_info(caplog):
@@ -210,16 +211,15 @@ def test_null_typed_field_with_empty_raw_companion_is_dropped_at_info(caplog):
     assert "modules/orders/contracts/reactions.yaml" not in files
     [record] = _dropped(caplog)
     assert record.levelno == logging.INFO
-    assert "empty_contract=True" in record.getMessage()
+    assert record.getMessage().startswith(f"{DROPPED}: path=modules/orders/contracts/reactions.yaml;")
 
 
-def test_unparseable_raw_companion_is_dropped_as_not_empty(caplog):
-    with caplog.at_level(logging.INFO):
-        files = extract_code_file_map_from_payload(_payload(None, "reactions: [\n"))
+def test_an_unparseable_raw_companion_is_rejected_not_dropped(caplog):
+    """Content that cannot be read cannot be shown to declare nothing."""
+    with caplog.at_level(logging.INFO), pytest.raises(ValueError, match="module_contract.reactions_yaml is null"):
+        extract_code_file_map_from_payload(_payload(None, "reactions: [\n"))
 
-    assert "modules/orders/contracts/reactions.yaml" not in files
-    [record] = _dropped(caplog)
-    assert "empty_contract=False" in record.getMessage()
+    assert _dropped(caplog) == []
 
 
 def test_set_typed_field_still_wins_over_a_raw_duplicate(caplog):
@@ -289,7 +289,7 @@ def test_the_manifest_guard_names_the_typed_field_for_each_owned_file():
     assert "emitted ONLY through their typed module_contract.<name>_yaml fields" in guard
     assert "Leave module_contract.<name>_yaml null when the module declares none" in guard
     assert "Never write a companion contract as a raw code_files entry" in guard
-    assert "Code removes a raw companion file whose typed field is null" in guard
+    assert "Code removes an empty raw companion whose typed field is null, rejects one that carries content" in guard
     for name in ("events", "reactions", "notifications", "settings", "admin", "profile", "relationships",
                  "policy_hooks", "runtime_extensions"):
         assert name in guard.split("Companion contracts (", 1)[1].split(")", 1)[0]

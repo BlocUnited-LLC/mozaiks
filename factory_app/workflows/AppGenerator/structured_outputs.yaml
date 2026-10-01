@@ -3409,7 +3409,7 @@ models:
       code_files:
         type: list
         items: CodeFileEntry
-        description: Serialized files. In typed modes, these mirror module_contract or service_foundation_bundle.
+        description: Serialized files. In service_foundation mode they mirror service_foundation_bundle. In module_contract_bundle mode, module.yaml and every companion contract come only from module_contract's typed fields; never repeat them here.
       deleted_files:
         type: optional_list
         items: str

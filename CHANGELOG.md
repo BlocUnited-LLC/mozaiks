@@ -67,14 +67,16 @@ This project follows a practical pre-1.0 changelog format:
   contract set `module_contract.reactions_yaml` to null, as its module declares
   no reactions, and also wrote `contracts/reactions.yaml` with `reactions: []`
   into `code_files`, because its prompt listed every owned file. The task was
-  rejected and deferred to repair. The typed field is the only source of a
-  companion contract, so code now removes a raw companion whose typed field is
-  null and logs `MODULE_CONTRACT_RAW_COMPANION_DROPPED` with the path and
-  whether the file was empty. A populated typed field still replaces any raw
-  copy, and a raw `module.yaml` without `module_contract.module_yaml` is still
-  rejected. The ConfigMiddlewareAgent manifest guard now names the typed field
-  that produces each owned file and says companions never go into
-  `code_files`.
+  rejected and deferred to repair. When the typed field is null and the raw
+  companion declares nothing, the module declares none, so code now removes the
+  duplicate and logs `MODULE_CONTRACT_RAW_COMPANION_DROPPED`. A raw companion
+  that carries content (a real reaction or a runtime router) is still rejected
+  with the fix, so no contract is lost silently. In `code_files` a populated
+  typed field still replaces any raw copy, and a raw `module.yaml` without
+  `module_contract.module_yaml` is still rejected. The ConfigMiddlewareAgent
+  manifest guard now names the typed field that produces each owned file, and
+  the output schema no longer tells the model that `code_files` mirror
+  `module_contract`.
 
 - DesignDocs no longer approves a sign-in page that an ordinary app surface
   places at the platform's own sign-in routes. A live run filed an `Authentication` page at `/login`, holding only an
