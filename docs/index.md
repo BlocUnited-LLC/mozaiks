@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
-[![AG2](https://img.shields.io/badge/AG2-1.0_beta-green)](https://github.com/ag2ai/ag2)
+[![AG2](https://img.shields.io/badge/AG2-1.1.1-green)](https://github.com/ag2ai/ag2)
 
 </div>
 
