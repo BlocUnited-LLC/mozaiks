@@ -197,24 +197,21 @@ def _sign_in_routes(routes: AuthRoutes) -> set[str]:
     return {_route_key(route) for route in (routes.login, routes.callback, routes.logout)}
 
 
-def _typed_form_fields(config_hint: Any) -> set[str]:
-    """Field names a Form section declares through typed ``fields[].name`` entries."""
+def _typed_form_entries(config_hint: Any) -> list[Any]:
+    """Every entry of the typed ``fields[]`` lists a section's config hint declares, as written."""
     if not isinstance(config_hint, str) or not config_hint.strip():
-        return set()
+        return []
     try:
         config = json.loads(config_hint)
     except ValueError:
-        return set()
-    names: set[str] = set()
+        return []
+    entries: list[Any] = []
 
     def walk(node: Any) -> None:
         if isinstance(node, dict):
             fields = node.get("fields")
             if isinstance(fields, list):
-                names.update(
-                    str(field.get("name")).strip().casefold()
-                    for field in fields if isinstance(field, dict) and field.get("name")
-                )
+                entries.extend(fields)
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -222,17 +219,84 @@ def _typed_form_fields(config_hint: Any) -> set[str]:
                 walk(value)
 
     walk(config)
-    return names
+    return entries
+
+
+def _typed_form_fields(config_hint: Any) -> set[str]:
+    """Field names a Form section declares through typed ``fields[].name`` entries."""
+    return {
+        str(field.get("name")).strip().casefold()
+        for field in _typed_form_entries(config_hint) if isinstance(field, dict) and field.get("name")
+    }
+
+
+def _at_sign_in_route(page: dict[str, Any], sign_in_routes: set[str]) -> bool:
+    """The page sits at an auth contract route, or at a route one nests under (/auth for /auth/callback)."""
+    route = _route_key(page.get("route"))
+    return route != "/" and any(
+        candidate == route or candidate.startswith(route + "/") for candidate in sign_in_routes
+    )
+
+
+def _is_credential_form(section: dict[str, Any], rule: SurfaceOwnershipRule) -> bool:
+    """A Form that only signs a user in or up: a secret input beside an account key, nothing else.
+
+    The secret is a ``password``-type field or a field the rule lists as identity
+    evidence (password, tokens); the account key is one of the rule's
+    ``account_key_fields`` (email, username). Every other field is a secret or an
+    identity claim the rule declares. A field with no typed name, or any other
+    field, is something the platform does not collect, so the form is not sign-in.
+    """
+    if section.get("primitive") != "Form":
+        return False
+    entries = _typed_form_entries(section.get("config_hint"))
+    if not entries or not all(isinstance(field, dict) and str(field.get("name") or "").strip() for field in entries):
+        return False
+    evidence = _keys(rule.identity_evidence_fields)
+    fields = [(_key(field["name"]), str(field.get("type") or "").strip().casefold()) for field in entries]
+    secrets = {name for name, kind in fields if kind == "password" or name in evidence}
+    claims = _keys(rule.state_field_names) | evidence
+    return (
+        bool(secrets)
+        and bool({name for name, _ in fields} & _keys(rule.account_key_fields))
+        and all(name in secrets or name in claims for name, _ in fields)
+    )
+
+
+def _only_platform_authentication(
+    page: dict[str, Any], rule: SurfaceOwnershipRule, *, sign_in_routes: set[str], app_modules: set[str],
+) -> bool:
+    """A page that is entirely the platform's authentication, whichever surface files it.
+
+    Recognized by content, never by its name or intent: no section binds an
+    app-owned module through a typed reference, and either the page sits at an
+    auth contract route (``_at_sign_in_route``) with every section a credential
+    form or naming no typed record field beyond the rule's identity claims and
+    credentials, or every section is a credential form (``_is_credential_form``).
+    A page with app data beside a form, a login link, or an account-settings
+    section is not sign-in.
+    """
+    sections = page.get("sections") or []
+    if any(
+        module in app_modules
+        for section in sections for module in _typed_section_bindings(section.get("config_hint"))
+    ):
+        return False
+    if _at_sign_in_route(page, sign_in_routes):
+        claims = _keys(rule.state_field_names) | _keys(rule.identity_evidence_fields)
+        return all(
+            _is_credential_form(section, rule)
+            or _typed_record_fields(section.get("config_hint"), section.get("primitive"))[0] <= claims
+            for section in sections
+        )
+    return bool(sections) and all(_is_credential_form(section, rule) for section in sections)
 
 
 def _is_sign_in_page(page: dict[str, Any], *, sign_in_routes: set[str], credential_fields: set[str]) -> bool:
     """A page the auth contract already serves: one of its routes (or a route
     such as /auth that a contract route nests under), or a form collecting a
     credential field the ownership rule declares as identity evidence."""
-    route = _route_key(page.get("route"))
-    if route != "/" and any(
-        candidate == route or candidate.startswith(route + "/") for candidate in sign_in_routes
-    ):
+    if _at_sign_in_route(page, sign_in_routes):
         return True
     return any(
         section.get("primitive") == "Form"
@@ -1559,6 +1623,9 @@ def normalize_surface_ownership(
     sign-in pages (typed navigation to them points at the auth contract login
     route) and pages listing the surface's user accounts (typed navigation to
     them is removed, as the admin portal's users panel is not served end to end).
+    A page an app-owned surface owns that is entirely the platform's
+    authentication (``_only_platform_authentication``) is removed the same way
+    and recorded on that surface, which keeps everything else it owns.
     """
     rules, facades = _ownership_rules(context_variables, include_default_subscription=include_default_subscription)
     normalized_map, normalized_data = deepcopy(surface_map), deepcopy(data_contract)
@@ -2366,8 +2433,12 @@ def normalize_surface_ownership(
     # declares a platform identity entity, or whose identity records were removed
     # or split out, loses its sign-in actions (login_user) and sign-in events
     # (user_logged_in), and a page section bound to such an action goes with it.
-    # Its app data and other actions stay.
+    # Its app data and other actions stay. On every app-owned surface, whatever it
+    # declares, a page that is entirely the platform's authentication is the auth
+    # contract's (``_only_platform_authentication``): removed and recorded, with
+    # typed navigation to it pointed at the login route.
     everything = [collection for _, collections in groups for collection in collections]
+    app_modules = {str(surface["surface_id"]) for surface in surfaces if surface.get("owner") == "app"}
     for rule in auth_rules:
         identity_entities = _identity_entities(rule, everything)
         account_entities = (
@@ -2376,22 +2447,24 @@ def normalize_surface_ownership(
         sign_in, facts = _keys(rule.sign_in_verbs), _keys(rule.sign_in_facts)
         for surface, claim in claims:
             surface_id = str(surface["surface_id"])
-            if claim is not None or surface.get("owner") != "app" or not (
-                any(_related_entity(_key(entity), identity_entities) for entity in surface.get("primary_entities") or [])
-                or (surface_id, "platform") in records
-            ):
+            if claim is not None or surface.get("owner") != "app":
                 continue
+            # Recorded before this pass: identity records the save removed or split out.
+            gave_up_identity = (surface_id, "platform") in records
+            identity_surface = gave_up_identity or any(
+                _related_entity(_key(entity), identity_entities) for entity in surface.get("primary_entities") or []
+            )
             declared_by = {"removed_mutations": "owned_mutations", "removed_reads": "custom_reads"}
             sign_in_actions = {
                 key: [
                     str(action) for action in surface.get(declared) or []
-                    if _is_lifecycle_action(action, account_entities, sign_in)
+                    if identity_surface and _is_lifecycle_action(action, account_entities, sign_in)
                 ]
                 for key, declared in declared_by.items()
             }
             removed_events = [
                 str(event) for event in surface.get("events_emitted") or []
-                if _is_lifecycle_event(event, account_entities, facts)
+                if identity_surface and _is_lifecycle_event(event, account_entities, facts)
             ]
             # Where the surface gave up sign-in (its sign-in actions, or identity records the save
             # removed), a page that is only sign-in is the auth contract's, as on a platform
@@ -2404,10 +2477,7 @@ def normalize_surface_ownership(
 
             def only_sign_in(page: dict[str, Any], removed_sign_in: set[str] = removed_sign_in,
                              surface_id: str = surface_id, credential_fields: set[str] = credential_fields) -> bool:
-                route = _route_key(page.get("route"))
-                if route != "/" and any(
-                    candidate == route or candidate.startswith(route + "/") for candidate in sign_in_routes
-                ):
+                if _at_sign_in_route(page, sign_in_routes):
                     return True
                 sections = page.get("sections") or []
                 return bool(sections) and all(
@@ -2420,12 +2490,16 @@ def normalize_surface_ownership(
                     for section in sections
                 )
 
-            gave_up_sign_in = bool(removed_sign_in) or (surface_id, "platform") in records
+            gave_up_sign_in = bool(removed_sign_in) or gave_up_identity
             owned_sign_in_pages = [
                 page for page in (normalized_spec or {}).get("pages") or []
-                if gave_up_sign_in
-                and str(page.get("name") or "").strip().casefold() in _identifiers(surface.get("owned_pages"))
-                and only_sign_in(page)
+                if str(page.get("name") or "").strip().casefold() in _identifiers(surface.get("owned_pages"))
+                and (
+                    (gave_up_sign_in and only_sign_in(page))
+                    or _only_platform_authentication(
+                        page, rule, sign_in_routes=sign_in_routes, app_modules=app_modules,
+                    )
+                )
                 and not any(
                     other is not surface
                     and str(page.get("name") or "").strip().casefold() in _identifiers(other.get("owned_pages"))

@@ -72,6 +72,20 @@ This project follows a practical pre-1.0 changelog format:
   outputs, pages) never trigger a merge, and a plan that was accepted before is
   still accepted; tasks of different types sharing a file are still rejected.
 
+- DesignDocs no longer approves a sign-in page on an ordinary app surface. A
+  live run filed an `Authentication` page at `/login`, holding only an
+  email/password form, under its `tasks` module; nothing in the design signs
+  anyone in, so AppGenerator was asked to build `ui/pages/login.yaml`, a dead
+  form at the route the platform serves sign-in on. The save now removes a page
+  that is entirely platform authentication from any app-owned surface, the way
+  it already did on auth surfaces. It recognizes the page by content: it sits
+  at an auth contract route, or every section is a credential form (a password
+  beside an email or username, nothing else). It never removes a page that
+  binds an app action. The removal is recorded as `removed_pages` on that
+  surface, navigation to the page points at the login route, and the surface
+  keeps everything else it owns. A page with app data beside a form, a login
+  link, or an account-settings section stays the app's.
+
 - AppGenerator plan review no longer rejects a page task for being named after
   its page. A live planner gave its four page tasks the surface ids
   `dashboard`, `pricing`, `billing` and `usage`; review rejected them as

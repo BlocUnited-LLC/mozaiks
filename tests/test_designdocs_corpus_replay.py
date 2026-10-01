@@ -4,10 +4,10 @@
 live DesignDocs agent produced up to 2026-09-28 (89 outputs from 85 chats, 95
 with resubmissions), read from the local AG2 network WAL with each chat's
 context reduced to the keys the save path reads, plus later live outputs
-appended when a run exposed a save defect (c65f5d0f, 2026-09-30). Outputs
-recorded before entity/tenancy/owner_field became required carry LABELLED
-defaults: each value the model did not write is listed with the rule that
-chose it.
+appended when a run exposed a save defect (c65f5d0f, 2026-09-30; 4da11a24,
+2026-10-01). Outputs recorded before entity/tenancy/owner_field became required
+carry LABELLED defaults: each value the model did not write is listed with the
+rule that chose it.
 
 The live model changes a rejected design at most once and then resubmits it
 unchanged until the run is blocked, so a rejection is only right when what to
@@ -114,10 +114,10 @@ CORPUS = _corpus()
 
 def test_the_fixture_is_the_recorded_corpus():
     fixtures = CORPUS["fixtures"]
-    assert (CORPUS["outputs_unique"], CORPUS["outputs_total"], CORPUS["chats"]) == (90, 96, 86)
-    assert len(fixtures) == 90 and len({entry["id"] for entry in fixtures}) == 90
-    assert sum(entry["occurrences"] for entry in fixtures) == 96
-    assert len({entry["chat_id"] for entry in fixtures}) == 86
+    assert (CORPUS["outputs_unique"], CORPUS["outputs_total"], CORPUS["chats"]) == (91, 97, 87)
+    assert len(fixtures) == 91 and len({entry["id"] for entry in fixtures}) == 91
+    assert sum(entry["occurrences"] for entry in fixtures) == 97
+    assert len({entry["chat_id"] for entry in fixtures}) == 87
     for entry in fixtures:
         for label in entry["labelled_defaults"]:
             assert set(label) == {"path", "field", "value", "rule"}, label
@@ -127,7 +127,7 @@ def test_the_corpus_saves_all_but_its_judgment_cases():
     outcomes = [entry["expected"] for entry in CORPUS["fixtures"]]
     saved = [expected for expected in outcomes if expected["outcome"] == "saved"]
     judged = [expected for expected in outcomes if expected["outcome"] != "saved"]
-    assert len(saved) >= 88
+    assert len(saved) >= 89
     assert all(expected["outcome"] == "revise" and expected["judgment"] in JUDGMENTS for expected in judged)
 
 

@@ -995,6 +995,105 @@ def test_a_sign_in_page_on_a_surface_keeping_app_data_is_the_auth_contracts(pers
     assert _surface(context, "gamification")["owned_pages"] == []
 
 
+_CREDENTIALS = {"fields": [{"name": "email", "type": "text"}, {"name": "password", "type": "password"}]}
+
+
+def _tasks(bundle: dict, *pages: dict) -> dict:
+    """An ordinary app module: no identity entity, no sign-in action, nothing the platform owns."""
+    surface = _module(bundle, "tasks", entities=["Task"], actions=["create_task", "update_task"], collections=[
+        ("tasks", "Task", [_field("user_id", "string", required=True), _field("title", "string", required=True)]),
+    ])
+    surface["owned_pages"] = [page["name"] for page in pages]
+    bundle["experience_spec"]["pages"].extend(pages)
+    return surface
+
+
+@pytest.mark.parametrize("page", [
+    pytest.param(_page("Sign In", "/signin", ("form", "Form", _CREDENTIALS)), id="only_a_credential_form"),
+    pytest.param(_page(
+        "Authentication", "/login", ("welcome", "Hero", {"title": "Welcome back"}), ("form", "Form", {"fields": [
+            {"name": "name"}, {"name": "email", "type": "email"},
+            {"name": "password", "type": "password"}, {"name": "confirm_password", "type": "password"},
+        ]}),
+    ), id="at_the_login_route"),
+])
+def test_an_authentication_page_on_an_app_surface_is_the_auth_contracts(persistence, page):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    board = _page("Board", "/board", ("tasks", "DataTable", {"columns": ["title"]}))
+    _tasks(bundle, board, page)
+    bundle["experience_spec"]["pages"][0]["sections"][0]["config_hint"] = json.dumps({"href": page["route"]})
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert page["name"] not in {saved["name"] for saved in detach(context.get("experience_spec"))["pages"]}
+    surface = _surface(context, "tasks")
+    assert (surface["owner"], surface["owned_pages"]) == ("app", ["Board"])
+    assert surface["owned_mutations"] == ["create_task", "update_task"]
+    record = normalization._record(summary, "tasks")
+    assert record["removed_pages"] == [{"name": page["name"], "route": page["route"]}]
+    assert record["removed_collections"] == [] and "removed_mutations" not in record
+    if page["route"] == "/login":
+        assert "redirected_navigation" not in record, "a page at the login route needs no redirect"
+    else:
+        assert record["redirected_navigation"] == [
+            {"page": "Reports", "section": "reports", "from": "/signin", "to": "/login"},
+        ]
+
+
+@pytest.mark.parametrize("page", [
+    pytest.param(_page(
+        "Board", "/board", ("tasks", "DataTable", {"columns": ["title", "status"]}),
+        ("sign-in", "ActionButton", {"label": "Sign in", "href": "/login"}),
+    ), id="app_data_with_a_login_link"),
+    pytest.param(_page(
+        "Board", "/board", ("tasks", "DataTable", {"columns": ["title"]}), ("form", "Form", _CREDENTIALS),
+    ), id="app_data_beside_a_credential_form"),
+    pytest.param(_page(
+        "Account", "/account", ("password", "Form", {"fields": [
+            {"name": "current_password", "type": "password"}, {"name": "new_password", "type": "password"},
+        ]}),
+    ), id="an_account_settings_form"),
+    pytest.param(_page(
+        "Sign In", "/signin", ("form", "Form", {"fields": [*_CREDENTIALS["fields"], {"name": "workspace"}]}),
+    ), id="a_form_collecting_app_data"),
+])
+def test_a_page_that_is_not_only_authentication_stays_the_apps(persistence, page):
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    _tasks(bundle, page)
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert page["name"] in {saved["name"] for saved in detach(context.get("experience_spec"))["pages"]}
+    assert _surface(context, "tasks")["owned_pages"] == [page["name"]]
+    assert "tasks" not in {entry["surface_id"] for entry in _records(summary)}
+
+
+def test_a_credential_form_bound_to_an_approved_app_action_stays_the_apps(persistence):
+    """Credentials for another service (a mailbox the app connects) are app data, not sign-in."""
+    _, _, summary = persistence
+    context = ownership._context(managed=False)
+    bundle = inventory._bundle(pricing=False)
+    connect = _page("Connect Mailbox", "/mailbox/connect", ("form", "Form", {
+        **_CREDENTIALS, "data_source": {"module_id": "mailboxes", "action_id": "connect_mailbox"},
+    }))
+    _module(bundle, "mailboxes", entities=["Mailbox"], actions=["connect_mailbox"], page=connect, collections=[
+        ("mailboxes", "Mailbox", [_field("user_id", "string", required=True), _field("address", "string")]),
+    ])
+
+    result = inventory._save(context, bundle)
+
+    assert result["outcome"] == "saved", result
+    assert "Connect Mailbox" in {page["name"] for page in detach(context.get("experience_spec"))["pages"]}
+    assert _surface(context, "mailboxes")["owned_pages"] == ["Connect Mailbox"]
+    assert "mailboxes" not in {entry["surface_id"] for entry in _records(summary)}
+
+
 def test_sign_in_leaves_a_surface_whose_identity_store_was_removed(persistence):
     _, _, summary = persistence
     context = ownership._context(managed=False)

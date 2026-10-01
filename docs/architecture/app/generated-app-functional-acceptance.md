@@ -394,7 +394,20 @@ account entity, such as `login_user` or `register_user`) and sign-in events
 whose typed binding targets a removed action (`removed_sections`) and a sign-in
 page it owns (`removed_pages`, with typed navigation pointed at the login route);
 its app data and other actions stay. A workflow trigger on a removed sign-in event, on any
-surface, is a design decision and is rejected. Field types
+surface, is a design decision and is rejected. On every other app-owned surface,
+whatever it declares, a page that is entirely the platform's authentication is
+removed the same way and recorded in `removed_pages` on that surface, which keeps
+its other pages, actions, and data. The page is recognized by content, never by
+its name: no section has a typed binding (`data_source` or a module action URL) to
+an app-owned module, and either the page sits at an auth contract route (or a
+route one nests under) with every section a credential form or naming no typed
+record field beyond the rule's identity claims and credentials, or every section
+is a credential form. A credential form is a `Form` whose typed fields are a
+secret (a `password`-type field or an identity evidence field) beside one of the
+rule's `account_key_fields` (`email`, `username`), every other field a secret or
+an identity claim. A page with app data beside a form, a login link, an
+account-settings form with no account key, or a form bound to an app action
+(credentials for a service the app connects to) stays the app's. Field types
 are bounded when they are any canonical scalar type (`CANONICAL_FIELD_TYPES`
 minus `STRUCTURED_FIELD_TYPES`, so `date` counts), and structured only where the
 rule declares that shape for the claim.
