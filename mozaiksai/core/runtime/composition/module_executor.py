@@ -37,7 +37,7 @@ from typing import Any
 from uuid import uuid4
 
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.audit.audit_logger import get_audit_logger
+from mozaiksai.core.audit.audit_logger import AuditLogger, get_audit_logger
 from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
 from mozaiksai.core.runtime.app.module_loader import SettingDef
 from mozaiksai.core.runtime.composition.bson_safe import (
@@ -54,7 +54,10 @@ from mozaiksai.core.runtime.composition.module_authority import (
     ModulePermissionCheck,
 )
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
-from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.composition.platform_hooks import (
+    PlatformHookRegistry,
+    get_platform_hooks,
+)
 from mozaiksai.core.runtime.composition.schema_validation import (
     SchemaValidationDiagnostic,
     normalize_nullable_schema,
@@ -267,7 +270,19 @@ class ModuleExecutor:
         event_emitter: Callable[[str, dict[str, Any]], Awaitable[Any] | Any] | None = None,
         entitlement_checker: EntitlementPort | None = None,
         data_contract: dict[str, Any] | None = None,
+        platform_hooks: PlatformHookRegistry | None = None,
+        audit_logger: AuditLogger | None = None,
+        persistence_database: str | None = None,
+        persistence_client: Any | None = None,
     ) -> None:
+        """Create an executor.
+
+        ``platform_hooks``, ``audit_logger`` and the persistence database and
+        client default to the process-wide host collaborators. A host that
+        composes a second app inside its own process (the AppGenerator runtime
+        smoke) passes its own so that app's dispatch never reaches the host's
+        policy hooks, audit log or database.
+        """
         self._modules: dict[str, Any] = {}
         self._action_methods: dict[str, dict[str, str]] = {}
         self._settings: dict[str, list[SettingDef]] = {}
@@ -280,10 +295,35 @@ class ModuleExecutor:
         self._data_contract = data_contract
         # When None, use the no-op adapter — grants everything without a DB check.
         self._entitlement_checker: EntitlementPort = entitlement_checker or NoOpEntitlementAdapter()
+        self._platform_hooks = platform_hooks
+        self._audit_logger = audit_logger
+        self._persistence_database = persistence_database
+        self._persistence_client = persistence_client
+
+    def _hooks(self) -> PlatformHookRegistry:
+        return self._platform_hooks if self._platform_hooks is not None else get_platform_hooks()
 
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
+
+    def register_loaded_module(self, loaded_module: Any) -> None:
+        """Register one AppLoader module with every contract map its manifest declares."""
+        self.register(
+            loaded_module.name,
+            loaded_module.handler,
+            action_method_map=loaded_module.action_method_map,
+            settings=(
+                loaded_module.manifests.settings.settings
+                if loaded_module.manifests.settings is not None
+                else None
+            ),
+            action_permissions=loaded_module.action_permissions_map,
+            action_schemas=loaded_module.action_schemas_map,
+            action_entitlements=loaded_module.action_entitlement_map,
+            action_emits=loaded_module.action_emits_map,
+            event_payload_schemas=loaded_module.event_payload_schemas_map,
+        )
 
     def register(
         self,
@@ -517,7 +557,7 @@ class ModuleExecutor:
             permission_check=permission_check,
             entitlement_check=entitlement_check,
         )
-        policy_decision = await get_platform_hooks().call_before_module_execution(policy_input)
+        policy_decision = await self._hooks().call_before_module_execution(policy_input)
         if not policy_decision.allowed:
             reason = policy_decision.reason or "module execution denied by application policy"
             denied_audit = replace(
@@ -908,7 +948,8 @@ class ModuleExecutor:
         *,
         error: str | None = None,
     ) -> None:
-        await get_audit_logger().log_module_action(
+        audit_logger = self._audit_logger if self._audit_logger is not None else get_audit_logger()
+        await audit_logger.log_module_action(
             actor_id=audit.actor_id or "system",
             app_id=audit.app_id,
             module_id=audit.module,
@@ -920,7 +961,7 @@ class ModuleExecutor:
             workspace_id=audit.workspace_id,
             extra={"dispatch": audit.to_dict()},
         )
-        await get_platform_hooks().call_module_dispatch_audit(audit)
+        await self._hooks().call_module_dispatch_audit(audit)
 
     def _build_context_emitter(
         self,
@@ -1015,6 +1056,8 @@ class ModuleExecutor:
             tenant_id=request.tenant_id,
             workspace_id=request.workspace_id,
             user_id=request.user_id,
+            database_name=self._persistence_database,
+            client=self._persistence_client,
             data_contract=self._data_contract,
             principal=lambda: current_persistence_principal(app_id),
         )

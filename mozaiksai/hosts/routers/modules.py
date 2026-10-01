@@ -10,6 +10,8 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Literal, cast
 from uuid import uuid4
 
@@ -27,6 +29,7 @@ from mozaiksai.core.runtime.composition.module_authority import (
 from mozaiksai.core.runtime.composition.module_executor import ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import (
     ModuleScopeResolutionError,
+    PlatformHookRegistry,
     get_platform_hooks,
 )
 from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
@@ -47,6 +50,32 @@ _RESERVED_CONTEXT_KEYS = ("app_id", "user_id", "tenant_id", "workspace_id", "cor
 # of authentication status so that event-pipeline internal handlers cannot be
 # triggered directly by external callers.
 _INTERNAL_MODULE_API_SURFACES = {"internal", "admin_internal"}
+
+
+@dataclass(frozen=True)
+class ModuleDispatchEnvironment:
+    """The identity and policy collaborators HTTP module dispatch consults.
+
+    The default is the process host's: its auth mode, platform hooks, usage
+    metering and persistence identity. A host that composes a second app in
+    its own process (the AppGenerator runtime smoke) overrides
+    ``module_dispatch_environment`` on that app only, so the composed app is
+    dispatched with its own collaborators instead of the host's.
+    """
+
+    authentication_enabled: bool
+    platform_hooks: PlatformHookRegistry
+    record_invocation: Callable[..., None]
+    persistence_principal: Callable[[UserPrincipal | None], PersistencePrincipal | None]
+
+
+def module_dispatch_environment() -> ModuleDispatchEnvironment:
+    return ModuleDispatchEnvironment(
+        authentication_enabled=is_auth_enabled(),
+        platform_hooks=get_platform_hooks(),
+        record_invocation=record_action_invocation,
+        persistence_principal=PersistencePrincipal.from_authenticated_user,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -233,9 +262,11 @@ async def _resolve_module_dispatch_scope(
     user_id: str | None,
     params: dict[str, Any],
     fail_closed: bool = False,
+    platform_hooks: PlatformHookRegistry | None = None,
 ) -> dict[str, Any]:
     default_permissions = list(principal.scopes) if principal else []
-    return await get_platform_hooks().call_module_scope(
+    hooks = platform_hooks if platform_hooks is not None else get_platform_hooks()
+    return await hooks.call_module_scope(
         principal=principal,
         module_name=module_name,
         action_name=action_name,
@@ -261,6 +292,7 @@ async def _execute_module_action(
     params: dict[str, Any],
     context_overrides: dict[str, Any] | None = None,
     lane: Literal["public", "admin"] = "public",
+    environment: ModuleDispatchEnvironment | None = None,
 ) -> Any:
     if not _MODULE_NAME_RE.fullmatch(module_name):
         raise HTTPException(status_code=400, detail="Invalid module name")
@@ -300,12 +332,14 @@ async def _execute_module_action(
                     and len(value) <= 16):
                 params[key] = int(value)
 
-    if is_auth_enabled() and principal is None and not _is_public_module_action(request, module_name, action_name):
+    environment = environment or module_dispatch_environment()
+    auth_enabled = environment.authentication_enabled
+    if auth_enabled and principal is None and not _is_public_module_action(request, module_name, action_name):
         raise HTTPException(status_code=401, detail="Missing authorization token")
 
     # Snapshot authenticated claims before host scope hooks receive the mutable
     # UserPrincipal. Requested workspace selection remains separate metadata.
-    persistence_principal = PersistencePrincipal.from_authenticated_user(principal)
+    persistence_principal = environment.persistence_principal(principal)
 
     # IDOR gate: when an explicit app_id was supplied (not derived from the token),
     # verify it matches the authenticated principal's token claim. This prevents a
@@ -326,10 +360,10 @@ async def _execute_module_action(
     # principal, and trusted callers that need an explicit execution user pass
     # context_overrides directly instead of relying on external query params.
     requested_user_id = context_overrides.get("user_id")
-    if requested_user_id is None and is_auth_enabled():
+    if requested_user_id is None and auth_enabled:
         requested_user_id = request.query_params.get("user_id")
     if (
-        is_auth_enabled()
+        auth_enabled
         and principal is not None
         and requested_user_id
         and str(requested_user_id).strip() != str(principal.user_id)
@@ -384,6 +418,7 @@ async def _execute_module_action(
             user_id=str(user_id) if user_id else None,
             params=params,
             fail_closed=(lane == "admin"),
+            platform_hooks=environment.platform_hooks,
         )
     except ModuleScopeResolutionError as exc:
         # A crashed narrowing hook must deny privileged dispatch, not widen it.
@@ -413,7 +448,7 @@ async def _execute_module_action(
     # declarations don't block the Studio admin UI. In production
     # (AUTH_ENABLED=true), non-public HTTP callers must carry a token with
     # explicit scopes that become the enforce-mode authority's permissions.
-    elif not is_auth_enabled():
+    elif not auth_enabled:
         authority = ModuleDispatchAuthority(
             kind="local_development",
             permission_mode="trusted_bypass",
@@ -466,12 +501,12 @@ async def _execute_module_action(
             module_request.workspace_id,
             module_request.correlation_id,
             sorted(params.keys()),
-            is_auth_enabled(),
+            auth_enabled,
         )
 
     result = await module_executor.execute(module_request, context=None)
     if result.success:
-        record_action_invocation(
+        environment.record_invocation(
             app_id=str(module_request.app_id or "default"),
             module_id=module_name,
             action_id=action_name,
@@ -537,6 +572,7 @@ async def execute_module_action_get(
     action_name: str,
     request: Request,
     principal: UserPrincipal | None = Depends(optional_user),
+    environment: ModuleDispatchEnvironment = Depends(module_dispatch_environment),
 ):
     # Reserved execution-context words are query-string-only here and are
     # never promoted into the trusted execution context from GET query
@@ -555,6 +591,7 @@ async def execute_module_action_get(
         request=request,
         principal=principal,
         params=params,
+        environment=environment,
     )
 
 
@@ -564,6 +601,7 @@ async def execute_module_action_post(
     action_name: str,
     request: Request,
     principal: UserPrincipal | None = Depends(optional_user),
+    environment: ModuleDispatchEnvironment = Depends(module_dispatch_environment),
 ):
     body: dict[str, Any] = {}
     if request.headers.get("content-type", "").lower().startswith("application/json"):
@@ -583,4 +621,5 @@ async def execute_module_action_post(
         principal=principal,
         params=params,
         context_overrides=context_overrides,
+        environment=environment,
     )

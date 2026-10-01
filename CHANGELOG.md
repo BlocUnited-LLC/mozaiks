@@ -72,6 +72,20 @@ This project follows a practical pre-1.0 changelog format:
   outputs, pages) never trigger a merge, and a plan that was accepted before is
   still accepted; tasks of different types sharing a file are still rejected.
 
+- AppGenerator acceptance now runs the generated app, not only its files. A
+  recorded app passed all ten static acceptance checks while it could not start
+  with persistence enabled, crashed on every write and denied paying users. The
+  new `app_runtime_smoke` check loads the bundle with the platform host's
+  loader, applies its indexes and migrations to a disposable database on the
+  configured Mongo, and calls its module actions as two signed-in users: each
+  user's records stay invisible and unwritable to the other, and each gated
+  action is denied without its capability and allowed with an active plan
+  assignment. Every failure names the action, user, expected and actual
+  response and the file to repair, and goes through the existing bundle repair.
+  Without a configured database the check reports `skipped`, never a pass. The
+  database is dropped afterwards; the composed app never uses the host's
+  platform hooks, audit log, usage metering or migration history.
+
 - AppGenerator plan review no longer rejects a page task for being named after
   its page. A live planner gave its four page tasks the surface ids
   `dashboard`, `pricing`, `billing` and `usage`; review rejected them as

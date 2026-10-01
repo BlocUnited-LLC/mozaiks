@@ -65,6 +65,7 @@ internally declared app route/action/facade must not be missing.
 | Placeholder backend runtime data | `audit_module_runtime_quality` | Static AST/text | Existing, reused in AppGenerator gate |
 | Workflow event/capability integration | `validate_workflow_integration_contract` | Static | Existing, reused when AgentGenerator metadata exists |
 | App startup import/load | `AppLoader.load` via acceptance gate | Runtime smoke | Existing, reused |
+| Boot with persistence, two-user CRUD isolation, entitlement enforcement | `app_runtime_smoke` via acceptance gate | Runtime / HTTP | Added |
 | Route component/schema resolution | `scan_functional_generated_app` | Static | Added |
 | Workflow module-action target resolution | `scan_functional_generated_app` | Static | Added |
 | Managed capability facade completeness | `scan_functional_generated_app` | Static | Added |
@@ -122,6 +123,84 @@ Functional failures are structured diagnostics. Examples:
 These diagnostics are exposed through
 `mozaiksai.core.validation.validate_generated_app_bundle(...)` and through the
 AppGenerator `functional_completeness` acceptance subgate.
+
+## Runtime Smoke Gate
+
+The other acceptance checks read files. A recorded app (AppGenerator chat
+6ebcbc4b) passed every one of them while it could not start with persistence
+enabled, crashed on every write and denied paying users. `app_runtime_smoke`
+(`factory_app/workflows/AppGenerator/tools/app_runtime_smoke.py`) runs the
+bundle instead.
+
+**Boot.** The bundle is written to a temporary `app/` root and loaded with
+`AppLoader.load()`. Its declared indexes and data migrations are applied, its
+modules are registered with `ModuleExecutor.register_loaded_module` (the same
+call the platform host makes), its `api_router` extensions are mounted and its
+`startup_service` extensions are started, then stopped. Persistence uses a
+uniquely named disposable database on the host's configured Mongo
+(`mozaiks_runtime_smoke_*`), which is dropped afterwards. Requests go through
+the real module router over an in-process ASGI client: no port, no subprocess.
+
+**Two-user CRUD.** For every collection whose canonical create action
+(`create_<entity>`) is declared, signed-in users A and B, holding the same plan,
+exercise the canonical actions that exist. A creates a record. The stored
+document must carry the returned id and A as owner. A lists and reads it, and a
+read of a missing id returns 404. B neither lists nor reads it, and B's update
+and delete leave the stored record unchanged. A's update changes the stored
+field, and A's delete removes the record. Payloads come from each action's
+declared input schema and the collection's field types. `app_wide` collections
+get A's round trip only. Steps that need A's record report `not_run` when the
+create produced none; they never pass vacuously.
+
+**Entitlements.** For every action with an `entitlement_gate`, a user on the
+default plan without the capability must receive 402. A user with an active
+assignment granting it must not be refused. The assignment is written through
+`config/subscriptions.yaml` `assignment_store.data_alias`, resolved against
+`data/contract.json` aliases exactly as `ConfiguredEntitlementAdapter` resolves
+it. A store that cannot hold assignments is one failure: no store, no
+`user_id_field`, no active status, or an undeclared alias.
+
+**Permissions.** Users carry the token scopes `config/auth.yaml`
+`frontend.default_scopes` grants. A module.yaml permission outside them denies
+every signed-in user. That is reported once per action. The call is then
+repeated for the same user with exactly the missing permissions, so the defects
+behind it are reported in the same pass.
+
+**Isolation from the host.** The gate runs inside the factory process, so the
+composed app gets its own collaborators. It has an empty `PlatformHookRegistry`
+and an in-memory audit log, and its events are recorded locally. It is
+dispatched in enforce mode with no usage metering, through a
+`ModuleDispatchEnvironment` dependency override on that app only. The executor's
+persistence database and client, entitlement reads and migration history all
+point at the disposable database. The factory's auth mode, platform hooks (App
+Zero registers module scope, permission, policy and audit hooks), audit log and
+system database are never used.
+
+**Results.** Each check passes or fails with one message naming the action,
+the user, the expected response and the actual one. A 5xx carries the exception
+and the generated file and line it was raised from. The result is persisted as
+`app_runtime_smoke_result` and inside `app_bundle_acceptance_result`. Failures
+join the bundle repair diagnostics with the file each one names: the frame's
+file, `repo.py` for id, owner and isolation defects, `module.yaml` for
+permissions and gates, `data/contract.json` for indexes and aliases, and
+`config/subscriptions.yaml` for plans. With no configured database, or an
+unreachable one, the check reports `skipped` with the reason. It is listed in
+`validation_evidence.skipped`, and it is never a pass.
+
+**Not covered.** Module reactions, workflow triggers, pages and custom actions
+without an entitlement gate are not exercised. Public surfaces and
+`internal`/`admin_internal` actions are out of scope, because signed-in users
+cannot call them over HTTP.
+
+**Proof.** `tests/test_app_runtime_smoke.py` runs the gate on real Mongo
+against two recorded bundles (`tests/fixtures/runtime_smoke_*.json`). The 93a7
+replay fails for its known reasons: null index name, migration without a
+version, undeclared assignment alias, ungrantable permissions, a crash on every
+create and on a missing id, and paying users denied. With the create crash
+repaired, the stored record shows the wrong id and owner fields. The fdfa818e
+run replayed at c8b9ea2e passes every check. The suite-wide conftest gives every
+other test no smoke database, so acceptance tests that do not opt in report
+`skipped`.
 
 ## Representative Archetypes
 

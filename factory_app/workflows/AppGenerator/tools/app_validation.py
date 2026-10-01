@@ -31,6 +31,7 @@ import yaml
 from factory_app.workflows._shared.workflow_integration import (
     workflow_integration_metadata_from_context,
 )
+from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
 )
@@ -1312,35 +1313,7 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
     else:
         from mozaiksai.core.runtime.app.loader import AppLoader
 
-        with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-load-") as tmp:
-            app_root = Path(tmp) / "app"
-            _write_files_to_dir(app_root, generated_files)
-            # Ensure every Python package directory under app_root has an
-            # __init__.py so Python treats them as regular packages, not
-            # namespace packages.  Namespace packages aggregate paths from all
-            # sys.path entries; regular packages resolve from the first match.
-            # Missing __init__.py files lead to import failures when sys.path
-            # has stale entries left by previous AppLoader.load() calls in the
-            # same process (common in test suites).
-            # Process bottom-up (reverse sorted) so parent directories like
-            # `services/` inherit the marker from child packages that already
-            # contain .py files (e.g. `services/integrations/`).
-            for dir_path in sorted(app_root.rglob("*"), reverse=True):
-                if not dir_path.is_dir() or dir_path == app_root:
-                    continue
-                init_file = dir_path / "__init__.py"
-                if init_file.exists():
-                    continue
-                has_py = any(f.suffix == ".py" for f in dir_path.iterdir() if f.is_file())
-                has_pkg_child = any(
-                    (child / "__init__.py").exists()
-                    for child in dir_path.iterdir()
-                    if child.is_dir()
-                )
-                if has_py or has_pkg_child:
-                    init_file.write_text("", encoding="utf-8")
-            # Snapshot global import state so this call is test-isolated.
-            _modules_before = dict(sys.modules)
+        async with app_runtime_smoke.materialized_app_bundle(generated_files, prefix="mozaiks-app-runtime-load-") as app_root:
             try:
                 loaded = await AppLoader.load(str(app_root))
                 details = {
@@ -1384,23 +1357,6 @@ async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str,
                         ),
                     }
                 )
-            finally:
-                # Remove only this validation workspace's imports. Other
-                # workflows can legitimately import modules while load awaits.
-                roots = {str(app_root.resolve()), str(app_root.parent.resolve())}
-                sys.path[:] = [entry for entry in sys.path if entry not in roots]
-                for key, value in list(sys.modules.items()):
-                    filename = getattr(value, "__file__", None)
-                    if isinstance(filename, str) and Path(filename).is_relative_to(app_root):
-                        if key in _modules_before:
-                            sys.modules[key] = _modules_before[key]
-                        else:
-                            sys.modules.pop(key, None)
-                for key, value in _modules_before.items():
-                    if key not in sys.modules and (
-                        key == "services" or key.startswith(("services.", "mozaiks_runtime_module_"))
-                    ):
-                        sys.modules[key] = value
 
     passed = not failed_tests
     return {
@@ -2091,6 +2047,9 @@ async def run_app_bundle_acceptance_gate(
         context_variables,
     )
     app_runtime_load_result = await _app_runtime_load_result(generated_files)
+    runtime_smoke_result = await app_runtime_smoke.run_app_runtime_smoke(
+        generated_files, mongo_client=app_runtime_smoke.resolve_smoke_mongo_client(),
+    )
 
     completeness_result = {
         "passed": not planned_diagnostics,
@@ -2123,10 +2082,13 @@ async def run_app_bundle_acceptance_gate(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_smoke": runtime_smoke_result,
     }
+    # A skipped check is reported as skipped: never a pass, and not a failure to repair.
+    skipped = sorted(name for name, result in subresults.items() if result.get("status") == "skipped")
     passed_by_check = {
         name: bool(result.get("passed"))
-        for name, result in subresults.items()
+        for name, result in subresults.items() if name not in skipped
     }
     failed = sorted(name for name, passed in passed_by_check.items() if not passed)
     completed = sorted(name for name, passed in passed_by_check.items() if passed)
@@ -2169,10 +2131,12 @@ async def run_app_bundle_acceptance_gate(
             _result_check(functional_result, default_id="functional_completeness", default_message="Functional completeness check completed."),
             _result_check(workflow_integration_result, default_id="workflow_integration", default_message="Workflow integration check completed."),
             _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
+            _result_check(runtime_smoke_result, default_id="app_runtime_smoke", default_message="App runtime smoke completed."),
         ],
         "validation_evidence": {
             "completed": completed,
             "failed": failed,
+            "skipped": skipped,
         },
         "failed_tests": failed_tests,
         "warnings": warnings,
@@ -2187,6 +2151,11 @@ async def run_app_bundle_acceptance_gate(
             {**item, "error": f"{item.get('test', 'validation')}: {item['error']}"}
             for check in (module_implementation_result, app_runtime_load_result, functional_result, workflow_integration_result, schema_quality_result)
             for item in check.get("failed_tests", [])
+        ],
+        *[
+            {**item, "error": f"app_runtime_smoke: {item['error']}"}
+            for item in runtime_smoke_result.get("failed_tests", [])
+            if not (item.get("check") == "boot.app_load" and not app_runtime_load_result.get("passed"))
         ],
     ]
     recovery_request = prepare_task_recovery(context_variables)
@@ -2214,6 +2183,7 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "workflow_integration_validation_result", workflow_integration_result)
     _context_set(context_variables, "app_runtime_load_passed", app_runtime_load_result.get("passed"))
     _context_set(context_variables, "app_runtime_load_result", app_runtime_load_result)
+    _context_set(context_variables, "app_runtime_smoke_result", runtime_smoke_result)
     _context_set(context_variables, "integration_tests_passed", acceptance_passed)
     _context_set(context_variables, "integration_test_result", {
         **subresults,
@@ -2411,6 +2381,7 @@ async def validate_app_bundle_from_request(
     functional_result = acceptance_result["functional_completeness"]
     workflow_integration_result = acceptance_result["workflow_integration"]
     app_runtime_load_result = acceptance_result["app_runtime_load"]
+    runtime_smoke_result = acceptance_result["app_runtime_smoke"]
     bundle_repair = acceptance_result.get("bundle_repair")
     validation_passed = str(validation.get("validation_status") or "").strip().lower() in {"passed", "skipped"}
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
@@ -2424,6 +2395,7 @@ async def validate_app_bundle_from_request(
         "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
+        "app_runtime_smoke": runtime_smoke_result,
         "bundle_repair": bundle_repair,
         "passed": combined_passed,
     }
@@ -2442,6 +2414,7 @@ async def validate_app_bundle_from_request(
         "generated_app_functional_completeness_result": functional_result,
         "workflow_integration_validation_result": workflow_integration_result,
         "app_runtime_load_result": app_runtime_load_result,
+        "app_runtime_smoke_result": runtime_smoke_result,
         "bundle_repair": bundle_repair,
         "integration_tests_passed": combined_passed,
     }
