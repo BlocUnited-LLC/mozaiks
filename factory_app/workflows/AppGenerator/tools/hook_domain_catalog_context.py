@@ -33,6 +33,7 @@ from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import _MODULE_CONTRACT_OUTPUT_PATHS
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 
 logger = logging.getLogger(__name__)
@@ -246,37 +247,52 @@ def _build_manifest_guard_body(
     declared_yaml_files: set[str],
     owned_paths: list[str],
 ) -> str:
-    """Build the ConfigMiddlewareAgent guard block body."""
+    """Build the ConfigMiddlewareAgent guard block body.
+
+    Owned companion paths are listed with the typed field that produces each,
+    so ownership never reads as an instruction to write the file itself: a raw
+    companion in code_files is removed by code_files extraction.
+    """
     declared_sorted = sorted(declared_yaml_files)
     omitted = sorted(_ALL_MODULE_YAML_FILES - declared_yaml_files)
 
+    def relative(filename: str) -> str:
+        return filename if filename in {"module.yaml", "runtime_extensions.yaml"} else f"contracts/{filename}"
+
+    def typed_field(filename: str) -> str:
+        field = f"{Path(filename).stem}_yaml"
+        if field not in _MODULE_CONTRACT_OUTPUT_PATHS:
+            return "no module_contract field (not a module contract file)"
+        return f"module_contract.{field}"
+
     lines = [
         f"Module: {module_id}",
-        "Allowed YAML files for this module (module.yaml is mandatory; optional files require populated typed fields and approved scope):",
+        "Allowed YAML files for this module, each produced only by the typed field shown "
+        "(module.yaml is mandatory; optional files require populated typed fields and approved scope):",
     ]
     for f in declared_sorted:
-        relative = f if f in {"module.yaml", "runtime_extensions.yaml"} else f"contracts/{f}"
-        lines.append(f"  - modules/{module_id}/{relative}")
+        suffix = "" if f == "module.yaml" else ", optional - null emits no file"
+        lines.append(f"  - modules/{module_id}/{relative(f)}  ← {typed_field(f)}{suffix}")
 
     if omitted:
         lines.append("Files NOT declared for this module (do NOT generate):")
         for f in omitted:
-            relative = f if f in {"module.yaml", "runtime_extensions.yaml"} else f"contracts/{f}"
-            lines.append(f"  - modules/{module_id}/{relative}  ← omit")
+            lines.append(f"  - modules/{module_id}/{relative(f)}  ← omit; leave {typed_field(f)} null")
 
     lines += [
         "",
         "HARD CONSTRAINTS:",
-        "  1. Generate module.yaml. Optional files listed above are an ownership boundary, not a requirement to invent content.",
-        "  2. Every optional file must be serialized from its populated typed module_contract field and required by approved feature scope.",
-        "  3. Never mirror a null typed field into code_files; raw files cannot substitute for typed manifests.",
-        "  4. Do NOT emit events.yaml if the module publishes no events.",
-        "  5. Do NOT emit reactions.yaml if approved scope declares no incoming, self, platform, or workflow-triggered reaction.",
-        "  6. Do NOT emit notifications.yaml if no events warrant user notifications.",
-        "  7. Do NOT emit settings.yaml if the module has no configurable behavior.",
-        "  8. Do NOT emit admin.yaml if the module needs no admin panels.",
-        "  9. Do NOT emit channels.yaml.",
-        "  10. Do NOT emit a file with only an empty array or null object.",
+        "  1. Generate module.yaml through module_contract.module_yaml. Optional files listed above are an ownership boundary, not a requirement to invent content.",
+        "  2. Companion contracts (events, reactions, notifications, settings, admin, profile, relationships, policy_hooks, runtime_extensions) are emitted ONLY through their typed module_contract.<name>_yaml fields. Code serializes each populated typed module_contract field to its file; populate one only when approved feature scope requires it.",
+        "  3. Leave module_contract.<name>_yaml null when the module declares none of that contract. A null field emits no file.",
+        "  4. Never write a companion contract as a raw code_files entry. Code removes an empty raw companion whose typed field is null, rejects one that carries content (put that content in the typed field), and overwrites one whose typed field is set; raw files cannot substitute for typed manifests.",
+        "  5. Leave events_yaml null if the module publishes no events.",
+        "  6. Leave reactions_yaml null if approved scope declares no incoming, self, platform, or workflow-triggered reaction.",
+        "  7. Leave notifications_yaml null if no events warrant user notifications.",
+        "  8. Leave settings_yaml null if the module has no configurable behavior.",
+        "  9. Leave admin_yaml null if the module needs no admin panels.",
+        "  10. Do NOT emit channels.yaml.",
+        "  11. Leave a typed field null rather than populating it with only empty arrays or null objects.",
     ]
 
     return "\n".join(lines)

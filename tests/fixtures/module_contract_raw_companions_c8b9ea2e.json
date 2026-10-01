@@ -1,0 +1,1169 @@
+{
+ "context": {
+  "app_build_plan": {
+   "agent_backend_required": false,
+   "agent_message": "The build plan for TaskTracker Pro establishes the structure needed for a task management platform with authentication, task CRUD operations, and subscription management utilizing MozaiksPay.",
+   "app_kind": "saas",
+   "auth_strategy": "basic-login",
+   "brand_intent": null,
+   "build_tasks": [
+    {
+     "capability_pack_id": null,
+     "depends_on": [],
+     "description": "Serialize the approved DesignDocs data contract.",
+     "execution_target": "AppGenerator",
+     "initial_agent": "DatabaseAgent",
+     "initial_message": "The approved data_contract is final. Code serializes data/contract.json; emit empty database_files and code_files.",
+     "owned_paths": [
+      "data/contract.json"
+     ],
+     "surface_id": "data_contract",
+     "surface_kind": "module",
+     "task_id": "data_contract",
+     "task_type": "persistence_contract"
+    },
+    {
+     "capability_pack_id": null,
+     "depends_on": [
+      "task_management_module_contract"
+     ],
+     "description": "Materialize the approved app manifest and page inventory.",
+     "execution_target": "AppGenerator",
+     "initial_agent": "AppSchemaAgent",
+     "initial_message": "Generate app.json and every approved page in app_build_plan.pages at its route-derived owned path. Preserve each page's approved purpose and design intent. Bind actions using the dependency module contracts.\n\nSelected pack templates provide ui/pages/pricing.yaml, ui/pages/billing.yaml, ui/pages/usage.yaml; do not author those pages. Their routes, names and bound actions are fixed by the pack.",
+     "owned_paths": [
+      "app.json",
+      "ui/pages/dashboard.yaml",
+      "ui/pages/tasks.yaml"
+     ],
+     "surface_id": "page_bundle",
+     "surface_kind": "ui_only",
+     "task_id": "page_bundle",
+     "task_type": "page_bundle"
+    },
+    {
+     "acceptance_criteria": [
+      "Handlers and services are created with correct method signatures and logic."
+     ],
+     "capability_pack_id": "task_management",
+     "context_variables": {},
+     "depends_on": [
+      "task_management_module_contract",
+      "task_management_create_task",
+      "data_contract"
+     ],
+     "description": "Generate business services for Task management.",
+     "domain_context": null,
+     "execution_target": "backend-foundation",
+     "initial_agent": "ServiceAgent",
+     "initial_message": "Creating services for task management module, including handlers and repository methods.",
+     "integration_needs": [],
+     "owned_paths": [
+      "modules/task_management/backend/handler.py",
+      "modules/task_management/backend/service.py",
+      "modules/task_management/backend/repo.py",
+      "modules/task_management/backend/account_data_handler.py",
+      "modules/task_management/backend/policy.py"
+     ],
+     "surface_id": "task_management",
+     "surface_kind": "module",
+     "task_id": "task_management_business_services",
+     "task_type": "business_services"
+    },
+    {
+     "acceptance_criteria": [
+      "Schemas are defined correctly for Task, matching the approved data contract.",
+      "All field types and validations are present."
+     ],
+     "capability_pack_id": "task_management",
+     "context_variables": {},
+     "depends_on": [
+      "task_management_module_contract",
+      "data_contract"
+     ],
+     "description": "Generate Task model schemas for the task management module.",
+     "domain_context": null,
+     "execution_target": "backend-foundation",
+     "initial_agent": "ModelAgent",
+     "initial_message": "Generating data models for Task entity with fields and constraints.",
+     "integration_needs": [],
+     "owned_paths": [
+      "modules/task_management/backend/schemas.py"
+     ],
+     "surface_id": "task_management",
+     "surface_kind": "module",
+     "task_id": "task_management_create_task",
+     "task_type": "data_models"
+    },
+    {
+     "acceptance_criteria": [
+      "Actions and events are correctly defined according to contract specs."
+     ],
+     "capability_pack_id": "task_management",
+     "context_variables": {},
+     "depends_on": [],
+     "description": "Generate the module contract for task management.",
+     "domain_context": null,
+     "execution_target": "backend-foundation",
+     "initial_agent": "ConfigMiddlewareAgent",
+     "initial_message": "Creating module contract for task management, defining actions and events.\n\nActions for this module (authoritative, from the approved plan): `create_task`, `update_task`, `delete_task`, `summarize_tasks`. Every action must appear in the final actions[] exactly once with these ids. Declare approved writes and custom reads; code constructs canonical list/get reads. For app_wide collections with protected writes, explicitly declare the canonical reads and their permissions, API exposure, and handler policy. The prose above describes the module; this list defines it.",
+     "integration_needs": [],
+     "owned_paths": [
+      "modules/task_management/module.yaml",
+      "modules/task_management/contracts/events.yaml",
+      "modules/task_management/contracts/reactions.yaml"
+     ],
+     "surface_id": "task_management",
+     "surface_kind": "module",
+     "task_id": "task_management_module_contract",
+     "task_type": "module_contract"
+    }
+   ],
+   "capability_packs": [
+    {
+     "agentic_extensions": [],
+     "capabilities": [
+      {
+       "capability_id": "mozaikspay.billing_portal",
+       "facade_recommended": "billing_portal"
+      },
+      {
+       "capability_id": "mozaikspay.subscription_status",
+       "facade_recommended": "billing_portal"
+      },
+      {
+       "capability_id": "mozaikspay.subscription_checkout",
+       "facade_recommended": "billing_portal"
+      },
+      {
+       "capability_id": "mozaikspay.usage_status",
+       "facade_recommended": "billing_portal"
+      },
+      {
+       "capability_id": "mozaikspay.token_status",
+       "facade_recommended": "billing_portal"
+      },
+      {
+       "capability_id": "mozaikspay.token_top_up",
+       "facade_recommended": "billing_portal"
+      }
+     ],
+     "capability_pack_id": "mozaikspay",
+     "capability_source": "managed_capability",
+     "facades": [
+      {
+       "module_id": "billing_portal",
+       "pages": [
+        {
+         "name": "Billing",
+         "page_type_hint": "analytics_dashboard",
+         "route": "/billing"
+        },
+        {
+         "name": "Usage",
+         "page_type_hint": "analytics_dashboard",
+         "route": "/usage"
+        }
+       ],
+       "provider_actions": [
+        "billing_portal",
+        "create_billing_portal_session",
+        "subscription_status",
+        "get_subscription_status",
+        "subscription_checkout",
+        "create_subscription_checkout_session",
+        "start_subscription_checkout",
+        "usage_status",
+        "get_usage_status",
+        "token_status",
+        "get_token_status",
+        "token_top_up",
+        "create_token_top_up_session",
+        "start_token_top_up"
+       ],
+       "provider_module": "mozaikspay"
+      }
+     ],
+     "implementation_mode": "external_integration",
+     "label": "MozaiksPay",
+     "operations": [
+      "list_plans",
+      "open_billing_portal",
+      "get_subscription_status",
+      "start_subscription_checkout",
+      "get_usage_status",
+      "get_token_status",
+      "start_token_top_up"
+     ],
+     "pack_source_path": "C:\\Repos\\BlocUnitedRepo\\mozaiks-app\\.local\\worktrees\\release-repin-afbaf\\.venv-release-c8b9ea2e\\Lib\\site-packages\\factory_app\\build_context\\mozaikspay",
+     "pack_type": "billing_pack",
+     "primary_entities": [],
+     "primary_pages": [
+      "Pricing",
+      "Billing",
+      "Usage"
+     ],
+     "required_integrations": [
+      {
+       "allowed_setup_lanes": [
+        "bring_your_own_key",
+        "connect_account",
+        "managed"
+       ],
+       "display_name": "MozaiksPay",
+       "kind": "api_key",
+       "managed_default": null,
+       "optional": false,
+       "preferred_setup_lane": "managed",
+       "provider": "mozaiks_pay",
+       "purpose": "Connect this generated SaaS app to the managed MozaiksPay subscription provider.",
+       "required_at": "runtime",
+       "required_fields": [
+        {
+         "frontend_safe": true,
+         "label": "MozaiksPay API Base URL",
+         "name": "api_base",
+         "options": null,
+         "required": true,
+         "type": "url"
+        },
+        {
+         "frontend_safe": false,
+         "label": "MozaiksPay API Key",
+         "name": "api_key",
+         "options": null,
+         "required": true,
+         "type": "secret"
+        }
+       ],
+       "service": "mozaikspay"
+      }
+     ],
+     "summary": "Manages billing and subscription functionalities for TaskTracker Pro.",
+     "surface_id": "mozaikspay_managed",
+     "surface_kind": "external_integration",
+     "user_data_scope": false
+    },
+    {
+     "capability_pack_id": "billing_portal",
+     "capability_source": "generated_module",
+     "implementation_mode": "declarative_module",
+     "label": "Billing Portal",
+     "operations": [
+      "list_plans",
+      "open_billing_portal",
+      "get_subscription_status",
+      "start_subscription_checkout",
+      "get_usage_status",
+      "get_token_status",
+      "start_token_top_up"
+     ],
+     "pack_type": "custom_domain",
+     "primary_entities": [],
+     "primary_pages": [
+      "pricing",
+      "billing",
+      "usage"
+     ],
+     "required_integrations": [],
+     "summary": "App-owned facade for billing_portal.",
+     "surface_id": "billing_portal",
+     "surface_kind": "module"
+    },
+    {
+     "capability_pack_id": "task_management",
+     "capability_source": "generated_module",
+     "operations": [
+      "create_task",
+      "update_task",
+      "delete_task",
+      "summarize_tasks"
+     ],
+     "primary_entities": [
+      "Task"
+     ],
+     "surface_id": "task_management",
+     "surface_kind": "module",
+     "user_data_scope": true
+    }
+   ],
+   "carry_forward_decisions": [],
+   "demo_fixture_sets": [],
+   "deployment_targets": [],
+   "deployment_template_manifest": null,
+   "entities": [
+    {
+     "name": "Task",
+     "notes": "Handles all CRUD operations related to tasks.",
+     "operations": [
+      "create_task",
+      "update_task",
+      "delete_task",
+      "list_tasks",
+      "summarize_tasks"
+     ]
+    }
+   ],
+   "event_flows": [],
+   "external_integrations": [],
+   "frontend_scope": [
+    "task_management"
+   ],
+   "generation_order": [
+    "backend-foundation",
+    "data-models",
+    "business-services",
+    "api-routes",
+    "app-schema-bundle"
+   ],
+   "monetization_plan": {
+    "monetization_provider": "mozaiks_pay",
+    "monetized": true,
+    "money_flow_summary": "Users can subscribe to a Pro plan for advanced features after experiencing the free tier.",
+    "primary_payee": "TaskTracker Pro",
+    "primary_payer": "customer",
+    "rationale": "A dual-tier model was specified, and the platform requires subscription management.",
+    "required_capability_routes": [
+     "/api/billing/subscription",
+     "/api/billing/subscribe"
+    ],
+    "revenue_model": "subscriptions",
+    "subscription_contract_requirement": "required"
+   },
+   "monetization_provider": "mozaiks_pay",
+   "pages": [
+    {
+     "design_intent": "Designed to provide insights on tasks and recent activities for the user.",
+     "name": "Dashboard",
+     "page_type_hint": "analytics_dashboard",
+     "primary_actions": [
+      "list_tasks"
+     ],
+     "primary_entities": [
+      "Task"
+     ],
+     "purpose": "Landing page showing key performance metrics and recent activity.",
+     "route": "/dashboard",
+     "sections_hint": [
+      {
+       "config_hint": "{\"items\": [{\"label\": \"Total Tasks\", \"value_key\": \"total_tasks\"}, {\"label\": \"Completed Tasks\", \"value_key\": \"completed_tasks\"}]}",
+       "data_source": {
+        "action_id": "summarize_tasks",
+        "module_id": "task_management"
+       },
+       "intent": "Displays key task metrics at a glance.",
+       "primitive": "SummaryStrip",
+       "section_id_hint": "task_summary",
+       "title_hint": "Task Summary"
+      },
+      {
+       "config_hint": "{\"columns\": [\"task_id\", \"title\", \"due_date\", \"status\"], \"selection\": \"single\"}",
+       "data_source": {
+        "action_id": "list_tasks",
+        "module_id": "task_management"
+       },
+       "intent": "Table of recently updated tasks.",
+       "primitive": "DataTable",
+       "section_id_hint": "recent_tasks",
+       "title_hint": "Recent Tasks"
+      }
+     ],
+     "shell_mode_hint": "standard",
+     "ui_layout": "grid",
+     "ui_surface": "declarative_page"
+    },
+    {
+     "name": "Tasks",
+     "route": "/tasks"
+    },
+    {
+     "name": "Pricing",
+     "route": "/pricing"
+    },
+    {
+     "name": "Billing",
+     "page_type_hint": "analytics_dashboard",
+     "route": "/billing"
+    },
+    {
+     "name": "Usage",
+     "page_type_hint": "analytics_dashboard",
+     "route": "/usage"
+    }
+   ],
+   "pending_schema_migration": null,
+   "profile_layout": "top_nav",
+   "readiness_profile": "saas_app",
+   "revenue_model": "subscriptions",
+   "roles": [],
+   "service_scope": [
+    "user_management",
+    "mozaikspay"
+   ],
+   "shell_preset_hint": "product_app",
+   "surface_map": {
+    "surfaces": [
+     {
+      "dependencies": [],
+      "events_emitted": [
+       "tasks.created",
+       "tasks.updated",
+       "tasks.deleted"
+      ],
+      "label": "Task Management",
+      "owned_mutations": [
+       "create_task",
+       "update_task",
+       "delete_task"
+      ],
+      "owned_pages": [
+       "Dashboard",
+       "Tasks"
+      ],
+      "owner": "app",
+      "primary_entities": [
+       "Task"
+      ],
+      "source_capability_packs": [
+       "crud_pack"
+      ],
+      "summary": "Manages task CRUD operations and provides insights into task metrics.",
+      "surface_id": "task_management",
+      "surface_kind": "module",
+      "workflow_triggers": []
+     },
+     {
+      "dependencies": [],
+      "events_emitted": [],
+      "label": "Billing Portal",
+      "owned_mutations": [
+       "list_plans",
+       "open_billing_portal",
+       "get_subscription_status",
+       "start_subscription_checkout",
+       "get_usage_status",
+       "get_token_status",
+       "start_token_top_up"
+      ],
+      "owned_pages": [
+       "Pricing",
+       "Billing",
+       "Usage"
+      ],
+      "owner": "app",
+      "primary_entities": [],
+      "source_capability_packs": [
+       "mozaikspay"
+      ],
+      "summary": "Handles subscription management and billing operations for users.",
+      "surface_id": "billing_portal",
+      "surface_kind": "module",
+      "workflow_triggers": []
+     }
+    ]
+   },
+   "theme_preferences": "user-focused",
+   "workflow_touchpoints": [],
+   "workspace_integration_status": []
+  },
+  "data_contract": {
+   "app_id": "release-greenfield-value-target",
+   "artifact_version_id": null,
+   "policies": {
+    "allow_destructive_migrations": false,
+    "default_scope_field": "user_id"
+   },
+   "shared_collections": [],
+   "surfaces": [
+    {
+     "collections": [
+      {
+       "entity": "Task",
+       "fields": [
+        {
+         "default": null,
+         "enum": null,
+         "name": "task_id",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "user_id",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "title",
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "description",
+         "nullable": true,
+         "required": false,
+         "type": "string"
+        },
+        {
+         "default": "false",
+         "enum": null,
+         "name": "is_completed",
+         "nullable": false,
+         "required": true,
+         "type": "boolean"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "due_date",
+         "nullable": true,
+         "required": false,
+         "type": "date"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "created_at",
+         "nullable": false,
+         "required": true,
+         "type": "datetime"
+        },
+        {
+         "default": null,
+         "enum": null,
+         "name": "updated_at",
+         "nullable": false,
+         "required": true,
+         "type": "datetime"
+        }
+       ],
+       "indexes": [],
+       "lifecycle": {
+        "migration_policy": "additive_only",
+        "write_mode": "module_action"
+       },
+       "name": "tasks",
+       "owner_field": "user_id",
+       "ownership": {
+        "surface_id": "task_management",
+        "surface_kind": "module"
+       },
+       "scope": "app",
+       "search_by": "task_id",
+       "tenancy": "per_user"
+      }
+     ],
+     "surface_id": "task_management",
+     "surface_kind": "module"
+    },
+    {
+     "collections": [],
+     "surface_id": "user_management",
+     "surface_kind": "module"
+    }
+   ],
+   "version": "1"
+  },
+  "design_surface_map": {
+   "surfaces": [
+    {
+     "custom_reads": [
+      "summarize_tasks"
+     ],
+     "events_emitted": [
+      "tasks.created",
+      "tasks.updated",
+      "tasks.deleted"
+     ],
+     "integrations": [],
+     "label": "Task Management",
+     "notes": null,
+     "owned_mutations": [
+      "create_task",
+      "update_task",
+      "delete_task"
+     ],
+     "owned_pages": [
+      "Dashboard",
+      "Tasks"
+     ],
+     "owner": "app",
+     "primary_entities": [
+      "Task"
+     ],
+     "source_capability_packs": [
+      "crud_pack"
+     ],
+     "surface_id": "task_management",
+     "surface_kind": "module",
+     "workflow_triggers": []
+    },
+    {
+     "custom_reads": [],
+     "events_emitted": [],
+     "integrations": [],
+     "label": "User Management",
+     "notes": null,
+     "owned_mutations": [],
+     "owned_pages": [],
+     "owner": "platform",
+     "primary_entities": [],
+     "source_capability_packs": [
+      "user_pack"
+     ],
+     "surface_id": "user_management",
+     "surface_kind": "module",
+     "workflow_triggers": []
+    },
+    {
+     "integrations": [
+      "mozaikspay"
+     ],
+     "label": "Billing Portal",
+     "notes": "App-owned facade; provider records and usage ledgers remain provider/runtime-owned.",
+     "owned_mutations": [
+      "list_plans",
+      "open_billing_portal",
+      "get_subscription_status",
+      "start_subscription_checkout",
+      "get_usage_status",
+      "get_token_status",
+      "start_token_top_up"
+     ],
+     "owned_pages": [
+      "Pricing",
+      "Billing",
+      "Usage"
+     ],
+     "owner": "app",
+     "primary_entities": [],
+     "source_capability_packs": [
+      "mozaikspay"
+     ],
+     "surface_id": "billing_portal",
+     "surface_kind": "module"
+    }
+   ]
+  },
+  "subscription_contract": {
+   "agent_message": "Contract designed based on the provided specifications.",
+   "app_generator_instructions": [
+    {
+     "instruction": "Reuse the app-owned billing_portal facade's public_readonly list_plans action for subscription management.",
+     "target": "AppPlanAgent"
+    }
+   ],
+   "app_id": null,
+   "app_name": "TaskTracker Pro",
+   "code_files": [
+    {
+     "content": "schema_version: mozaiks.subscriptions.v1\nlabel: TaskTracker Pro Subscription\ndefault_plan_id: free\nassignment_store:\n  data_alias: billing.subscriptions\n  app_id_field: app_id\n  tenant_id_field: tenant_id\n  user_id_field: user_id\n  plan_id_field: plan_id\n  status_field: status\n  starts_at_field: starts_at\n  expires_at_field: expires_at\n  capabilities_field: granted_capabilities\n  plan_snapshot_field: plan_snapshot\n  revision_field: billing_revision\n  active_statuses:\n  - active\n  - pending\n  - trialing\nproducts: []\nplans:\n- plan_id: free\n  label: Free Plan\n  description: Access to basic task management features.\n  capabilities:\n  - feature.module.task_management.create_task\n  - feature.module.task_management.delete_task\n  - feature.module.task_management.update_task\n  usage_limits:\n  - meter_id: module.task_management.create_task\n    label: Task Creation Limit\n    unit: requests\n    monthly_limit: 25\n    capability_id: feature.module.task_management.create_task\n- plan_id: pro\n  label: Pro Plan\n  description: Advanced features for task management.\n  capabilities:\n  - feature.module.task_management.create_task\n  - feature.module.task_management.delete_task\n  - feature.module.task_management.summarize_tasks\n  - feature.module.task_management.update_task\n",
+     "filename": "config/subscriptions.yaml"
+    }
+   ],
+   "contract_required": true,
+   "forbidden_outputs": [
+    "contracts/subscriptions.yaml",
+    "custom token ledger",
+    "custom usage ledger",
+    "payment-provider price ids in config/subscriptions.yaml",
+    "payment-provider product ids in config/subscriptions.yaml"
+   ],
+   "metering_declarations": [],
+   "module_contract_updates": [
+    {
+     "action_id": "summarize_tasks",
+     "entitlement_gate": "feature.module.task_management.summarize_tasks",
+     "metering": null,
+     "module_id": "task_management"
+    }
+   ],
+   "page_surface_requirements": [
+    {
+     "page_id": "Pricing",
+     "purpose": "Surface for displaying subscription options.",
+     "required_runtime_endpoints": [
+      "/api/billing/subscription",
+      "/api/billing/subscribe"
+     ],
+     "route": "/pricing"
+    },
+    {
+     "page_id": "Billing",
+     "purpose": "Manage subscription status and upgrades.",
+     "required_runtime_endpoints": [
+      "/api/billing/get_subscription_status"
+     ],
+     "route": "/billing"
+    },
+    {
+     "page_id": "Usage",
+     "purpose": "Show usage stats and limits.",
+     "required_runtime_endpoints": [
+      "/api/billing/get_usage_status"
+     ],
+     "route": "/usage"
+    }
+   ],
+   "plan_design_rationale": [
+    {
+     "affected_plan_ids": [
+      "free",
+      "pro"
+     ],
+     "affected_pricing_group_ids": [],
+     "decision": "Subscription contract is required.",
+     "signal": "monetization_enabled is true and indicates subscription-based features",
+     "source_context": "monetization_enabled"
+    },
+    {
+     "affected_plan_ids": [
+      "free",
+      "pro"
+     ],
+     "affected_pricing_group_ids": [],
+     "decision": "Designing both free and pro plans.",
+     "signal": "The concept mentions a dual-tier monetization model.",
+     "source_context": "concept_blueprint"
+    }
+   ],
+   "rationale": "A subscription contract is required as the monetization context specifies a Pro plan for advanced features, which implies a need for recurring access.",
+   "review_response": {
+    "action": "approve",
+    "approved": true,
+    "rationale": "Approved for acceptance run.",
+    "ui_event_id": "save_subscription_contract_28823aea"
+   },
+   "review_status": "confirmed",
+   "selected_features_by_plan": {
+    "free": [
+     "module.task_management.create_task",
+     "module.task_management.update_task",
+     "module.task_management.delete_task"
+    ],
+    "pro": [
+     "module.task_management.create_task",
+     "module.task_management.update_task",
+     "module.task_management.delete_task",
+     "module.task_management.summarize_tasks"
+    ]
+   },
+   "subscription_config_file": {
+    "assignment_store": {
+     "active_statuses": [
+      "active",
+      "pending",
+      "trialing"
+     ],
+     "app_id_field": "app_id",
+     "capabilities_field": "granted_capabilities",
+     "data_alias": "billing.subscriptions",
+     "expires_at_field": "expires_at",
+     "plan_id_field": "plan_id",
+     "plan_snapshot_field": "plan_snapshot",
+     "revision_field": "billing_revision",
+     "starts_at_field": "starts_at",
+     "status_field": "status",
+     "tenant_id_field": "tenant_id",
+     "user_id_field": "user_id"
+    },
+    "default_plan_id": "free",
+    "label": "TaskTracker Pro Subscription",
+    "plans": [
+     {
+      "capabilities": [
+       "feature.module.task_management.create_task",
+       "feature.module.task_management.delete_task",
+       "feature.module.task_management.update_task"
+      ],
+      "description": "Access to basic task management features.",
+      "label": "Free Plan",
+      "plan_id": "free",
+      "usage_limits": [
+       {
+        "capability_id": "feature.module.task_management.create_task",
+        "label": "Task Creation Limit",
+        "meter_id": "module.task_management.create_task",
+        "monthly_limit": 25,
+        "unit": "requests"
+       }
+      ]
+     },
+     {
+      "capabilities": [
+       "feature.module.task_management.create_task",
+       "feature.module.task_management.delete_task",
+       "feature.module.task_management.summarize_tasks",
+       "feature.module.task_management.update_task"
+      ],
+      "description": "Advanced features for task management.",
+      "label": "Pro Plan",
+      "plan_id": "pro"
+     }
+    ],
+    "products": [],
+    "schema_version": "mozaiks.subscriptions.v1"
+   },
+   "user_confirmed": true,
+   "validation_notes": [
+    "Plan features derived from the approved pricing feature inventory."
+   ],
+   "workflow_contract_updates": []
+  }
+ },
+ "live_failure": {
+  "attempts": 1,
+  "blocked_by": [],
+  "error": "module_contract.reactions_yaml is null but raw output emits modules/task_management/contracts/reactions.yaml. Set module_contract.reactions_yaml to the contract when the module declares one; when module_contract.reactions_yaml is null, omit contracts/reactions.yaml from code_files entirely, since a null field emits nothing and a raw contract file skips schema materialization.",
+  "failure_kind": "output_rejected",
+  "recoverable": true,
+  "status": "failed",
+  "task_id": "task_management_module_contract",
+  "worker_agent": "ConfigMiddlewareAgent"
+ },
+ "rejected_output": {
+  "agent_message": "Generated module contract for task management.",
+  "code_files": [
+   {
+    "content": "schema_version: mozaiks.module.v1\nmodule:\n  id: task_management\n  display_name: Task Management\n  version: '1.0.0'\n  type: standard\n  description: Handles all CRUD operations related to tasks.\n  owner: app\n  visibility: private\n  handler: backend.handler:TaskManagementModule\n  user_data_scope: true\npermissions:\n- id: task_management.create_task\n  description: Create new tasks.\n- id: task_management.update_task\n  description: Update existing tasks.\n- id: task_management.delete_task\n  description: Delete tasks.\n- id: task_management.summarize_tasks\n  description: Summarize tasks.\nactions:\n- id: create_task\n  description: Create a new task.\n  handler_method: create_task\n  api_surface: null\n  input_schema:\n    type: object\n    description: Task creation request.\n    properties:\n      title:\n        name: title\n        type: string\n        description: Title of the task.\n        required: true\n        enum_values: []\n        items_type: null\n      description:\n        name: description\n        type: string\n        description: Description of the task.\n        required: false\n        enum_values: []\n        items_type: null\n      due_date:\n        name: due_date\n        type: string\n        description: Due date for the task.\n        required: false\n        enum_values: []\n        items_type: null\n  output_schema:\n    type: object\n    description: Response of task creation.\n    properties:\n      task_id:\n        name: task_id\n        type: string\n        description: ID of the created task.\n        required: true\n        enum_values: []\n        items_type: null\n  permissions: []\n  emits: []\n- id: update_task\n  description: Update an existing task.\n  handler_method: update_task\n  api_surface: null\n  input_schema:\n    type: object\n    description: Task update request.\n    properties:\n      task_id:\n        name: task_id\n        type: string\n        description: ID of the task to update.\n        required: true\n        enum_values: []\n        items_type: null\n      title:\n        name: title\n        type: string\n        description: New title of the task.\n        required: false\n        enum_values: []\n        items_type: null\n      description:\n        name: description\n        type: string\n        description: New description of the task.\n        required: false\n        enum_values: []\n        items_type: null\n      due_date:\n        name: due_date\n        type: string\n        description: New due date for the task.\n        required: false\n        enum_values: []\n        items_type: null\n  output_schema:\n    type: object\n    description: Response of task update.\n    properties:\n      success:\n        name: success\n        type: boolean\n        description: Indicates if the update was successful.\n        required: true\n        enum_values: []\n        items_type: null\n  permissions: []\n  emits: []\n- id: delete_task\n  description: Delete a task.\n  handler_method: delete_task\n  api_surface: null\n  input_schema:\n    type: object\n    description: Task deletion request.\n    properties:\n      task_id:\n        name: task_id\n        type: string\n        description: ID of the task to delete.\n        required: true\n        enum_values: []\n        items_type: null\n  output_schema:\n    type: object\n    description: Response of task deletion.\n    properties:\n      success:\n        name: success\n        type: boolean\n        description: Indicates if the deletion was successful.\n        required: true\n        enum_values: []\n        items_type: null\n  permissions: []\n  emits: []\n- id: summarize_tasks\n  description: Summarize tasks.\n  handler_method: summarize_tasks\n  api_surface: null\n  input_schema:\n    type: object\n    description: Request to summarize tasks.\n    properties: []\n    items_type: null\n  output_schema:\n    type: object\n    description: Response of task summarization.\n    properties:\n      total_tasks:\n        name: total_tasks\n        type: integer\n        description: Total number of tasks.\n        required: true\n        enum_values: []\n        items_type: null\n      completed_tasks:\n        name: completed_tasks\n        type: integer\n        description: Number of completed tasks.\n        required: true\n        enum_values: []\n        items_type: null\n  permissions: []\n  emits: []\ncapabilities:\n- capability_id: task_management.create_task\n  kind: action\n  target: create_task\n  title: Create Task\n  permissions: []\n  input_schema: null\n- capability_id: task_management.update_task\n  kind: action\n  target: update_task\n  title: Update Task\n  permissions: []\n  input_schema: null\n- capability_id: task_management.delete_task\n  kind: action\n  target: delete_task\n  title: Delete Task\n  permissions: []\n  input_schema: null\n- capability_id: task_management.summarize_tasks\n  kind: action\n  target: summarize_tasks\n  title: Summarize Tasks\n  permissions: []\n  input_schema: null",
+    "filename": "modules/task_management/module.yaml"
+   },
+   {
+    "content": "schema_version: mozaiks.events.v1\nevents: []",
+    "filename": "modules/task_management/contracts/events.yaml"
+   },
+   {
+    "content": "schema_version: mozaiks.reactions.v1\nreactions: []",
+    "filename": "modules/task_management/contracts/reactions.yaml"
+   }
+  ],
+  "deleted_files": null,
+  "mode": "module_contract_bundle",
+  "module_contract": {
+   "admin_yaml": null,
+   "events_yaml": null,
+   "js_stubs": [],
+   "module_id": "task_management",
+   "module_yaml": {
+    "actions": [
+     {
+      "api_surface": null,
+      "ask_context_safe": false,
+      "description": "Create a new task.",
+      "emits": [],
+      "handler_method": "create_task",
+      "id": "create_task",
+      "input_schema": {
+       "description": "Task creation request.",
+       "items_type": null,
+       "properties": [
+        {
+         "description": "Title of the task.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "title",
+         "required": true,
+         "type": "string"
+        },
+        {
+         "description": "Description of the task.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "description",
+         "required": false,
+         "type": "string"
+        },
+        {
+         "description": "Due date for the task.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "due_date",
+         "required": false,
+         "type": "string"
+        }
+       ],
+       "type": "object"
+      },
+      "output_schema": {
+       "description": "Response of task creation.",
+       "items_type": null,
+       "properties": [
+        {
+         "description": "ID of the created task.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "task_id",
+         "required": true,
+         "type": "string"
+        }
+       ],
+       "type": "object"
+      },
+      "permissions": []
+     },
+     {
+      "api_surface": null,
+      "ask_context_safe": false,
+      "description": "Update an existing task.",
+      "emits": [],
+      "handler_method": "update_task",
+      "id": "update_task",
+      "input_schema": {
+       "description": "Task update request.",
+       "items_type": null,
+       "properties": [
+        {
+         "description": "ID of the task to update.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "task_id",
+         "required": true,
+         "type": "string"
+        },
+        {
+         "description": "New title of the task.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "title",
+         "required": false,
+         "type": "string"
+        },
+        {
+         "description": "New description of the task.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "description",
+         "required": false,
+         "type": "string"
+        },
+        {
+         "description": "New due date for the task.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "due_date",
+         "required": false,
+         "type": "string"
+        }
+       ],
+       "type": "object"
+      },
+      "output_schema": {
+       "description": "Response of task update.",
+       "items_type": null,
+       "properties": [
+        {
+         "description": "Indicates if the update was successful.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "success",
+         "required": true,
+         "type": "boolean"
+        }
+       ],
+       "type": "object"
+      },
+      "permissions": []
+     },
+     {
+      "api_surface": null,
+      "ask_context_safe": false,
+      "description": "Delete a task.",
+      "emits": [],
+      "handler_method": "delete_task",
+      "id": "delete_task",
+      "input_schema": {
+       "description": "Task deletion request.",
+       "items_type": null,
+       "properties": [
+        {
+         "description": "ID of the task to delete.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "task_id",
+         "required": true,
+         "type": "string"
+        }
+       ],
+       "type": "object"
+      },
+      "output_schema": {
+       "description": "Response of task deletion.",
+       "items_type": null,
+       "properties": [
+        {
+         "description": "Indicates if the deletion was successful.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "success",
+         "required": true,
+         "type": "boolean"
+        }
+       ],
+       "type": "object"
+      },
+      "permissions": []
+     },
+     {
+      "api_surface": null,
+      "ask_context_safe": false,
+      "description": "Summarize tasks.",
+      "emits": [],
+      "handler_method": "summarize_tasks",
+      "id": "summarize_tasks",
+      "input_schema": {
+       "description": "Request to summarize tasks.",
+       "items_type": null,
+       "properties": [],
+       "type": "object"
+      },
+      "output_schema": {
+       "description": "Response of task summarization.",
+       "items_type": null,
+       "properties": [
+        {
+         "description": "Total number of tasks.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "total_tasks",
+         "required": true,
+         "type": "integer"
+        },
+        {
+         "description": "Number of completed tasks.",
+         "enum_values": [],
+         "items_type": null,
+         "name": "completed_tasks",
+         "required": true,
+         "type": "integer"
+        }
+       ],
+       "type": "object"
+      },
+      "permissions": []
+     }
+    ],
+    "capabilities": [
+     {
+      "capability_id": "task_management.create_task",
+      "input_schema": null,
+      "kind": "action",
+      "permissions": [],
+      "target": "create_task",
+      "title": "Create Task"
+     },
+     {
+      "capability_id": "task_management.update_task",
+      "input_schema": null,
+      "kind": "action",
+      "permissions": [],
+      "target": "update_task",
+      "title": "Update Task"
+     },
+     {
+      "capability_id": "task_management.delete_task",
+      "input_schema": null,
+      "kind": "action",
+      "permissions": [],
+      "target": "delete_task",
+      "title": "Delete Task"
+     },
+     {
+      "capability_id": "task_management.summarize_tasks",
+      "input_schema": null,
+      "kind": "action",
+      "permissions": [],
+      "target": "summarize_tasks",
+      "title": "Summarize Tasks"
+     }
+    ],
+    "module": {
+     "description": "Handles all CRUD operations related to tasks.",
+     "display_name": "Task Management",
+     "handler": "backend.handler:TaskManagementModule",
+     "id": "task_management",
+     "owner": "app",
+     "type": "standard",
+     "user_data_scope": true,
+     "version": "1.0.0",
+     "visibility": "private"
+    },
+    "permissions": [
+     {
+      "description": "Create new tasks.",
+      "id": "task_management.create_task"
+     },
+     {
+      "description": "Update existing tasks.",
+      "id": "task_management.update_task"
+     },
+     {
+      "description": "Delete tasks.",
+      "id": "task_management.delete_task"
+     },
+     {
+      "description": "Summarize tasks.",
+      "id": "task_management.summarize_tasks"
+     }
+    ],
+    "schema_version": "mozaiks.module.v1"
+   },
+   "notifications_yaml": null,
+   "policy_hooks_yaml": null,
+   "profile_yaml": null,
+   "python_stubs": [
+    {
+     "contract_refs": [],
+     "kind": "handler",
+     "path": "backend/handler.py",
+     "purpose": "Task management module handler."
+    },
+    {
+     "contract_refs": [],
+     "kind": "service",
+     "path": "backend/service.py",
+     "purpose": "Business logic for task management."
+    },
+    {
+     "contract_refs": [],
+     "kind": "repo",
+     "path": "backend/repo.py",
+     "purpose": "Data layer for task management."
+    },
+    {
+     "contract_refs": [],
+     "kind": "policy",
+     "path": "backend/policy.py",
+     "purpose": "Authorization and access control for task management."
+    },
+    {
+     "contract_refs": [],
+     "kind": "schemas",
+     "path": "backend/schemas.py",
+     "purpose": "Schema definitions for task models."
+    }
+   ],
+   "reactions_yaml": null,
+   "relationships_yaml": null,
+   "runtime_extensions_yaml": null,
+   "settings_yaml": null
+  },
+  "service_foundation_bundle": null
+ },
+ "source": {
+  "chat_id": "4fa752fa-6a13-4f5e-91be-12ab3383e6a7",
+  "context": "mozaiksai.AG2NetworkKnowledge /channels/18da7114e0bfb0cce986022989cb5e64/wal.jsonl, envelope 38 (ag2.context.set at batch start); only the keys the task-output acceptance path reads",
+  "oss_sha": "c8b9ea2e7ac9667b51b6dba6750f004390efa2f2",
+  "rejected_output": "app_task_batch_results._failed.task_management_module_contract.rejected_output, verbatim",
+  "same_rejection_also_in": "chat 4f2ccf27-adc4-44eb-812a-2f8e82539b47, task user_authentication_module_contract (raw reactions.yaml with reactions: [])",
+  "task_id": "task_management_module_contract",
+  "workflow": "AppGenerator"
+ }
+}

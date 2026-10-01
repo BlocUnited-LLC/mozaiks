@@ -119,11 +119,22 @@ def test_module_only_bundle_round_trips_through_generator_and_runtime_contracts(
     "events", "reactions", "notifications", "settings", "admin", "profile", "relationships", "policy_hooks",
 ])
 def test_null_module_manifest_cannot_be_resurrected_by_raw_output(name: str) -> None:
+    """A null typed companion means the module declares none: the raw copy is dropped."""
     payload = {
         "module_contract": {"module_id": "customers", f"{name}_yaml": None},
         "code_files": [{"filename": f"modules/customers/contracts/{name}.yaml", "content": "{}"}],
     }
-    with pytest.raises(ValueError, match=f"module_contract.{name}_yaml is null"):
+
+    assert f"modules/customers/contracts/{name}.yaml" not in extract_code_file_map_from_payload(payload)
+
+
+def test_null_module_yaml_cannot_be_replaced_by_raw_output() -> None:
+    """module.yaml is required, so a raw copy without its typed field is rejected."""
+    payload = {
+        "module_contract": {"module_id": "customers", "module_yaml": None},
+        "code_files": [{"filename": "modules/customers/module.yaml", "content": "{}"}],
+    }
+    with pytest.raises(ValueError, match="module_contract.module_yaml is null"):
         extract_code_file_map_from_payload(payload)
 
 

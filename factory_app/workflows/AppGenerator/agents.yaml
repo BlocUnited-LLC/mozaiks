@@ -1692,7 +1692,7 @@ agents:
       **Mode A contract boundary**:
       - Use the injected `[FILE CONTRACTS CONTEXT]` as the canonical file-family boundary for `module_contract` tasks.
       - Treat `current_build_task.owned_paths` as the strict output boundary, not as a command to populate every optional path. Emit `module.yaml` always; emit an optional companion only when the approved feature scope requires it and its corresponding typed `module_contract` field is populated.
-      - A contract file in `code_files` requires its `module_contract` field to be set. The typed field is what gets materialized - action schemas compiled, event entries normalized - and a raw `modules/{module_id}/contracts/*.yaml` entry bypasses all of it, so emitting one while its field is null fails the build. Deliver every contract through its typed field; the rule below is the same invariant seen from the other side.
+      - A contract file in `code_files` requires its `module_contract` field to be set. The typed field is what gets materialized - action schemas compiled, event entries normalized - and a raw `modules/{module_id}/contracts/*.yaml` entry bypasses all of it, so code drops one whose field is null and never ships it. Deliver every contract through its typed field; the rule below is the same invariant seen from the other side.
       - Set every unneeded or unowned companion manifest to null, not an empty placeholder object. This includes events_yaml, reactions_yaml, notifications_yaml, settings_yaml, admin_yaml, profile_yaml, relationships_yaml, and policy_hooks_yaml. Do not mirror null manifests into code_files.
       - Use the structured output models as the source of truth for exact field shapes instead of recreating ad hoc YAML examples in the prompt.
       - Keep customization bounded to explicit contract fields and declared `python_stubs` / `js_stubs` entries.
@@ -1813,9 +1813,8 @@ agents:
          - Entrypoints are module-local only. Do not use `modules.*`, `app.modules.*`, or `mozaiksai.*` import paths in runtime_extensions.yaml.
          - Most modules do NOT need runtime_extensions_yaml. Omit (null) unless the build task explicitly requires a webhook receiver or persistent background connection.
          - When emitted, set `schema_version: mozaiks.runtime_extensions.v1` and populate `extensions[]`.
-      14. Also serialize the typed contract to `code_files` entries with YAML content strings at the exact `modules/{capability_pack_id}/...` paths. Include `modules/{capability_pack_id}/runtime_extensions.yaml` in code_files only when `runtime_extensions_yaml` is non-null.
-         - YAML `code_files[].content` must be valid YAML serialized from the same typed object. Preserve indentation under `module:`, `permissions:`, `actions:`, and `capabilities:`; do not flatten nested fields or emit list item markers outside their parent list.
-         - In `modules/{module_id}/module.yaml`, every authored action field (`description`, `handler_method`, `api_surface`, `input_schema`, `output_schema`, `permissions`, and `emits`) must be indented inside that action's `actions:` list item. Never place `api_surface`, `permissions`, or `emits` at the YAML root. Gates are code-owned.
+      14. Leave `code_files` empty in module_contract mode. Code serializes `module_yaml` and every populated companion field to its file at the exact `modules/{capability_pack_id}/...` path; a raw copy of module.yaml or a companion contract in `code_files` is never shipped.
+         - In `module_yaml`, every authored action field (`description`, `handler_method`, `api_surface`, `input_schema`, `output_schema`, `permissions`, and `emits`) belongs inside that action's `actions` entry. Gates are code-owned.
       15. Set `service_foundation_bundle` to null in module_contract mode.
 
       **If `current_build_task_type == "service_foundation"` (Mode B)**:
@@ -1925,9 +1924,7 @@ agents:
           "runtime_extensions_yaml": null
         },
         "service_foundation_bundle": null,
-        "code_files": [
-          { "filename": "modules/{module_id}/module.yaml", "content": "..." }
-        ],
+        "code_files": [],
         "agent_message": "Generated module contract."
       }
       ```
