@@ -518,8 +518,15 @@ def compile_page_data_sources(
                 ):
                     reference_errors.append(f"{location}.data_source requires canonical identifier strings")
                 elif action_id not in modules.get(module_id, {}):
+                    # Name the valid choices: one bounded correction cannot
+                    # find a real action from a message that lists none.
+                    valid = (
+                        f"valid action ids for module '{module_id}': {sorted(modules[module_id]) or 'none'}"
+                        if module_id in modules
+                        else f"module '{module_id}' is unknown; valid module ids: {sorted(modules) or 'none'}"
+                    )
                     reference_errors.append(
-                        f"{location}.data_source references unknown module/action '{module_id}/{action_id}'"
+                        f"{location}.data_source references unknown module/action '{module_id}/{action_id}'; {valid}"
                     )
                 elif endpoint_key in node:
                     reference_errors.append(f"{location}: data_source cannot be combined with {endpoint_key}")

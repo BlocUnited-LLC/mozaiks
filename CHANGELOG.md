@@ -62,6 +62,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator no longer plans a page section on an action that does not
+  exist. A live run's plan bound its Dashboard KPI strip to
+  `tasks/get_kpi_stats`, which no approved module declares; review accepted it
+  and the page task failed both attempts. Plan review now removes a section
+  hint's data source that is not in the approved action inventory, keeps the
+  section, and tells the page task which actions its module does declare. Page
+  compilation's unknown module/action error now lists the valid action ids (or
+  the valid module ids) in the same message.
+
 - DesignDocs no longer blocks a monetized app over two design details it can
   correct itself. A live run declared the users' plan as a `tier` field
   (`free`/`pro`) in a `subscriptions` collection, and listed `list_tasks` among

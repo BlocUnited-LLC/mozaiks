@@ -26,6 +26,9 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     app_build_plan,
     release_pack_owned_paths,
 )
+from factory_app.workflows.AppGenerator.tools.plan_page_data_sources import (
+    drop_unapproved_page_data_sources,
+)
 from mozaiksai.core.runtime.app.paths import is_safe_app_path, normalize_app_path
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
@@ -1441,6 +1444,7 @@ def review_app_build_plan(
             *_repair_contract_task_operations(plan, context_variables),
             *_repair_page_contract_dependencies(plan, context_variables),
             *_note_pack_pages(plan, context_variables),
+            *drop_unapproved_page_data_sources(plan, context_variables),
         ):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         validate_plan_dependencies(plan, context_variables)
