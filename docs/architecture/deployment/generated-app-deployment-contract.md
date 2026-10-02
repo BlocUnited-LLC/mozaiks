@@ -204,9 +204,11 @@ contract in `deployment.manifest.json`:
 
 - `auth.required=true`
 - `auth.provider=jwt` by default
-- backend required env handles: `AUTH_ENABLED`, `AUTH_PROVIDER`
-- backend optional env handles for issuer, JWKS, discovery, audience, scopes,
-  and claim mapping
+- backend required env handles: `AUTH_ENABLED`, `AUTH_PROVIDER`, and
+  `AUTH_AUDIENCE` for the built-in JWT provider or `KEYCLOAK_CLIENT_ID` for
+  the built-in Keycloak provider
+- backend optional env handles for issuer, JWKS, discovery, scopes, and claim
+  mapping
 - public frontend env handles: `VITE_OIDC_AUTHORITY`,
   `VITE_OIDC_DISCOVERY_URL`, `VITE_OIDC_CLIENT_ID`, `VITE_OIDC_SCOPE`, and
   `VITE_OIDC_REDIRECT_URI`
@@ -217,7 +219,8 @@ paths, Entra-only paths, or Mozaiks hosted product auth adapters.
 
 At deploy time, a host or self-host operator configures one real OIDC/JWT
 provider by setting either discovery/authority values or explicit
-`AUTH_ISSUER` plus `AUTH_JWKS_URL`. The OSS runtime validates tokens through the
+`AUTH_ISSUER` plus `AUTH_JWKS_URL`, and the required audience that appears in
+its access tokens. The OSS runtime validates tokens through the
 configured auth adapter; generated app modules continue to enforce permissions
 and entitlement gates through declarative module contracts.
 

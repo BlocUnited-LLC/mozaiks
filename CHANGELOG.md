@@ -19,6 +19,8 @@ This project follows a practical pre-1.0 changelog format:
   `KEYCLOAK_CLIENT_ID` for Keycloak). Deployments that left these unset must
   configure them; local runs with `AUTH_ENABLED=false` are unaffected. The
   unused JWT validator was removed (#523).
+  Generated authenticated deployment manifests and env templates now mark the
+  matching audience setting as required.
 
 - Self-hosted subscription grant and revoke actions are internal-only; HTTP
   callers cannot assign themselves paid entitlements.

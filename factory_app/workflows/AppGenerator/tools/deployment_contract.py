@@ -26,8 +26,8 @@ _TAG_STRATEGIES = {"commit_sha", "timestamp", "manual"}
 _BUILD_STATUSES = {"pending", "running", "succeeded", "failed"}
 _AUTH_PROVIDER_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _AUTH_RUNTIME_REQUIRED_ENV = ["AUTH_ENABLED", "AUTH_PROVIDER"]
+_AUTH_PROVIDER_AUDIENCE_ENV = {"jwt": "AUTH_AUDIENCE", "keycloak": "KEYCLOAK_CLIENT_ID"}
 _AUTH_RUNTIME_OPTIONAL_ENV = [
-    "AUTH_AUDIENCE",
     "AUTH_REQUIRED_SCOPE",
     "AUTH_ISSUER",
     "AUTH_JWKS_URL",
@@ -165,16 +165,25 @@ def _auth_provider_name(value: str | None) -> str:
 
 def _auth_contract(*, auth_required: bool, auth_provider: str | None) -> dict[str, Any]:
     provider = _auth_provider_name(auth_provider)
+    audience_env = _AUTH_PROVIDER_AUDIENCE_ENV.get(provider)
     return {
         "required": bool(auth_required),
         "provider": provider,
-        "runtime_required_variables": list(_AUTH_RUNTIME_REQUIRED_ENV) if auth_required else [],
-        "runtime_optional_variables": list(_AUTH_RUNTIME_OPTIONAL_ENV),
+        "runtime_required_variables": (
+            [*_AUTH_RUNTIME_REQUIRED_ENV, *([audience_env] if audience_env else [])]
+            if auth_required else []
+        ),
+        "runtime_optional_variables": [
+            *_AUTH_RUNTIME_OPTIONAL_ENV,
+            *(["AUTH_AUDIENCE"] if not auth_required or provider not in _AUTH_PROVIDER_AUDIENCE_ENV else []),
+        ],
         "public_variables": list(_AUTH_PUBLIC_ENV),
         "notes": (
             "Auth uses the OSS provider-neutral adapter. For AUTH_PROVIDER=jwt, configure "
             "MOZAIKS_OIDC_DISCOVERY_URL or MOZAIKS_OIDC_AUTHORITY, or provide both "
-            "AUTH_ISSUER and AUTH_JWKS_URL. Frontend OIDC values are public build-time vars."
+            "AUTH_ISSUER and AUTH_JWKS_URL. Built-in JWT requires AUTH_AUDIENCE; "
+            "built-in Keycloak requires KEYCLOAK_CLIENT_ID. Frontend OIDC values "
+            "are public build-time vars."
         ),
     }
 
@@ -310,7 +319,9 @@ def _normalize_ci_secret_requirements(value: Any) -> dict[str, list[dict[str, An
     return normalized
 
 
-def _default_readiness_requirements(*, auth_required: bool = False) -> dict[str, list[dict[str, Any]]]:
+def _default_readiness_requirements(
+    *, auth_required: bool = False, auth_provider: str = "jwt"
+) -> dict[str, list[dict[str, Any]]]:
     checks = [
         {
             "id": "runtime_environment",
@@ -350,13 +361,16 @@ def _default_readiness_requirements(*, auth_required: bool = False) -> dict[str,
                 "category": "auth",
                 "label": "OIDC/JWT auth configured",
                 "implemented_score": 7,
-                "required_env": ["AUTH_ENABLED", "AUTH_PROVIDER"],
+                "required_env": _auth_contract(
+                    auth_required=True, auth_provider=auth_provider
+                )["runtime_required_variables"],
                 "required_evidence": ["APP_AUTH_SMOKE_VERIFIED_AT"],
                 "canonical_paths": [".env.example", "deployment.manifest.json"],
                 "notes": (
                     "Set AUTH_PROVIDER=jwt for the OSS generic adapter and configure "
                     "MOZAIKS_OIDC_DISCOVERY_URL or MOZAIKS_OIDC_AUTHORITY, or set both "
-                    "AUTH_ISSUER and AUTH_JWKS_URL. Verify login and token validation "
+                    "AUTH_ISSUER and AUTH_JWKS_URL. Configure the provider's required "
+                    "token audience. Verify login and token validation "
                     "before production promotion."
                 ),
             }
@@ -778,7 +792,7 @@ def build_deploy_target_spec(
             include_workflow=deploy_workflow
         ),
         "readiness_requirements": _default_readiness_requirements(
-            auth_required=bool(auth["required"])
+            auth_required=bool(auth["required"]), auth_provider=auth["provider"]
         ),
     }
 
@@ -849,7 +863,9 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
                         errors.append(f"auth.{bucket}[{idx}] must be an uppercase env identifier")
             if auth.get("required"):
                 missing_auth_required = sorted(
-                    name for name in _AUTH_RUNTIME_REQUIRED_ENV if name not in required_env
+                    name for name in _auth_contract(
+                        auth_required=True, auth_provider=provider
+                    )["runtime_required_variables"] if name not in required_env
                 )
                 if missing_auth_required:
                     errors.append(
@@ -998,7 +1014,9 @@ def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]
             if auth.get("required"):
                 required_env = set(str(item) for item in manifest.get("required_env") or [])
                 missing_auth_required = sorted(
-                    name for name in _AUTH_RUNTIME_REQUIRED_ENV if name not in required_env
+                    name for name in _auth_contract(
+                        auth_required=True, auth_provider=provider
+                    )["runtime_required_variables"] if name not in required_env
                 )
                 if missing_auth_required:
                     errors.append(

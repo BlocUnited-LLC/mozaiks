@@ -283,15 +283,44 @@ def test_authenticated_deployment_contract_includes_oidc_runtime_env_and_readine
     assert manifest["auth"]["provider"] == "jwt"
     assert "AUTH_ENABLED" in manifest["required_env"]
     assert "AUTH_PROVIDER" in manifest["required_env"]
+    assert "AUTH_AUDIENCE" in manifest["required_env"]
+    assert "AUTH_AUDIENCE" not in result["deploy_target_spec"]["environment"]["optional_variables"]
     assert "VITE_OIDC_DISCOVERY_URL" in manifest["public_env"]
     assert "AUTH_ENABLED=" in env_example
     assert "AUTH_PROVIDER=" in env_example
-    assert "AUTH_AUDIENCE=" in env_example
+    assert "AUTH_AUDIENCE=<required>" in env_example
     assert "MOZAIKS_OIDC_DISCOVERY_URL=" in env_example
     assert "VITE_OIDC_DISCOVERY_URL=" in env_example
     assert "VITE_OIDC_SCOPE=" in env_example
-    assert checks["auth_configuration"]["required_env"] == ["AUTH_ENABLED", "AUTH_PROVIDER"]
+    assert checks["auth_configuration"]["required_env"] == [
+        "AUTH_ENABLED", "AUTH_PROVIDER", "AUTH_AUDIENCE"
+    ]
     assert "APP_AUTH_SMOKE_VERIFIED_AT" in checks["auth_configuration"]["required_evidence"]
+
+
+def test_keycloak_deployment_requires_its_token_audience() -> None:
+    result = generate_deployment_artifacts(app_id="demo_app", auth_required=True, auth_provider="keycloak")
+    manifest = result["deployment_manifest"]
+    assert result["deploy_target_spec_errors"] == []
+    assert result["bundle_errors"] == []
+    assert "KEYCLOAK_CLIENT_ID" in manifest["required_env"]
+    assert "KEYCLOAK_CLIENT_ID" not in result["deploy_target_spec"]["environment"]["optional_variables"]
+    assert "AUTH_AUDIENCE" not in result["deploy_target_spec"]["environment"]["optional_variables"]
+    assert "KEYCLOAK_CLIENT_ID=<required>" in result["artifacts"][".env.example"]
+
+
+def test_authenticated_deployment_rejects_missing_audience_in_spec_and_manifest() -> None:
+    spec = build_deploy_target_spec(app_id="demo_app", auth_required=True)
+    spec["environment"]["required_variables"].remove("AUTH_AUDIENCE")
+    assert any("AUTH_AUDIENCE" in error for error in validate_deploy_target_spec(spec))
+
+    valid_spec = build_deploy_target_spec(app_id="demo_app", auth_required=True)
+    manifest = build_deployment_template_manifest(
+        app_id="demo_app", deployment_profile="generic_container",
+        deploy_target_spec=valid_spec, generated_files={},
+    )
+    manifest["required_env"].remove("AUTH_AUDIENCE")
+    assert any("AUTH_AUDIENCE" in error for error in validate_deployment_template_manifest(manifest))
 
 
 def test_generate_artifacts_accept_extra_capability_env_handles() -> None:
