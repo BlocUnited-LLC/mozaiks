@@ -299,6 +299,22 @@ async def test_platform_boundary_keeps_same_collection_aggregation_and_bounds_al
     await alias.aggregate([{"$match": {"app_id": "app-a"}}]).to_list(length=None)
 
 
+@pytest.mark.parametrize("literal_target", [False, True])
+def test_workspace_literal_share_cannot_grant_another_platform_modules_owned_collection(literal_target):
+    contract = platform_contract()
+    if literal_target:
+        contract["surfaces"][2]["collections"][0]["mongo_collection"] = "private_tour_status"
+    platform = PlatformModuleDeclarations(contract, ["support", "inbox", "tour"])
+    target = "private_tour_status" if literal_target else context("tour").collection_name("tour", "status")
+    workspace = workspace_contract(shared_collections=[{
+        "owner_module": "tasks", "mongo_collection": target,
+        "read_by": [{"module": "support"}],
+    }])
+    ctx = context("support", workspace=workspace, platform=platform)
+    with pytest.raises(PersistenceScopeError):
+        ctx.literal_collection(target)
+
+
 # --------------------------------------------------------------------------- the Studio declarations
 
 

@@ -202,6 +202,8 @@ reject foreign-collection aggregation and aggregation writes, including nested
 stages. Literal aliases use the bounded Mongo facade rather than exposing
 database handles. These protections also apply to `app_wide` collections and
 workspaces with no data contract; they do not depend on per-user ownership.
+Workspace literal grants cannot bypass the reservations of other mounted
+platform modules, including by naming a collection's derived storage name.
 
 ### `documented_alias_exclusions`
 

@@ -167,6 +167,9 @@ class PlatformModuleDeclarations:
         rows = {key: row for key, row in self._collections.items() if key[0] == module_id}
         rows.update({key: self._collections[key] for key in self._grants.get(module_id, ())})
         literals = set(self._literal_grants.get(module_id, ()))
+        platform_literals = literals | {
+            name for _kind, row in rows.values() for name in _literal_names(row)
+        }
         workspace_rows = _owned_collections(workspace)
         granted = {key for key in workspace_rows if key[0] == module_id}
         for grant in _shared_grants(workspace):
@@ -183,7 +186,11 @@ class PlatformModuleDeclarations:
             rows[key] = workspace_rows[key]
         for _kind, row in rows.values():
             literals |= _literal_names(row)
-        return CollectionAccess(data_contract=_contract(rows, self._version), literal_names=frozenset(literals))
+        return CollectionAccess(
+            data_contract=_contract(rows, self._version), literal_names=frozenset(literals),
+            reserved_collections=frozenset(self._collections.keys() - rows.keys()),
+            reserved_literals=self._reserved_literals - platform_literals,
+        )
 
     def validate_workspace(self, workspace: DataContract | None) -> None:
         """Fail app load on an ambiguous composition rather than on a request."""
