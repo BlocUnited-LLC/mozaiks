@@ -28,6 +28,7 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
     validate_repair_candidate,
 )
 from mozaiksai.core.adapters.ag2_network_runner import (
+    CHANNEL_TERMINAL_ERROR,
     AG2NetworkRunner,
     AG2NetworkRunnerRequest,
     checkpoint_agent_context,
@@ -283,7 +284,13 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
 
     result = await AG2NetworkRunner().run(request("Build the app"))
     try:
-        assert result.status is RunStatus.PAUSED, result.error
+        if pause_before_artifact_repairs:
+            assert result.status is RunStatus.PAUSED, result.error
+        else:
+            # Both proposals are spent and repair is blocked: the run ends there.
+            assert result.status is RunStatus.FAILED
+            assert result.close_reason == "workflow_failed"
+            assert result.live_run is None
         assert triggers[:2] == ["AppPlanAgent", "AppValidationAgent"]
         initial_evidence = snapshots[0]["app_task_batch_results"]
         assert initial_evidence["_failed"]["services"]["failure_kind"] == "output_rejected"
@@ -303,29 +310,36 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
             return
 
         channel = result.channel_id
-        before_triggers = len(triggers)
-        if continuation == "reopen":
-            await result.live_run.close()
-            # The same store/channel owns the evidence; stale startup context cannot reset it.
-            result = await AG2NetworkRunner().run(request("Retry the remaining repair", reopen=True))
-        else:
-            result = await result.live_run.continue_with_user_message("Retry the remaining repair")
-        assert result.status is RunStatus.PAUSED, result.error
-        assert result.channel_id == channel
-        validation_turns = 3 if pause_before_artifact_repairs else 1
-        assert triggers[before_triggers:] == ["AppValidationAgent"] * validation_turns
+        if pause_before_artifact_repairs:
+            before_triggers = len(triggers)
+            if continuation == "reopen":
+                await result.live_run.close()
+                # The same store/channel owns the evidence; stale startup context cannot reset it.
+                result = await AG2NetworkRunner().run(request("Retry the remaining repair", reopen=True))
+            else:
+                result = await result.live_run.continue_with_user_message("Retry the remaining repair")
+            # The retry spends the remaining proposals, then blocked repair ends the run.
+            assert result.status is RunStatus.FAILED, result.error
+            assert result.close_reason == "workflow_failed"
+            assert result.channel_id == channel
+            assert triggers[before_triggers:] == ["AppValidationAgent"] * 3
+        ended_context = result.context_variables
+        assert ended_context["app_task_batch_results"] == evidence
+        assert ended_context["app_task_recovery_request"] is None
+        assert ended_context["app_task_recovery_status"] == "idle"
+        assert ended_context["bundle_repair_attempt_count"] == 2
+        assert ended_context["bundle_repair_status"] == "blocked"
 
-        # A repeated user retry must neither reopen accepted tasks nor replenish a budget.
-        result = await result.live_run.continue_with_user_message("Try once more")
-        assert result.status is RunStatus.PAUSED, result.error
+        # A retry after the end neither reopens accepted tasks nor replenishes a budget.
+        before_triggers = len(triggers)
+        result = await AG2NetworkRunner().run(request("Try once more", reopen=True))
+        assert result.status is RunStatus.FAILED
+        assert result.error == CHANNEL_TERMINAL_ERROR
+        assert result.close_reason == "workflow_failed"
+        assert triggers[before_triggers:] == []
         assert agent_calls["AppPlanAgent"] == 1
         assert task_calls == {"models": 1, "services": 2, "page": 1}
         assert len(artifact_repairs) == 2
-        assert result.context_variables["app_task_batch_results"] == evidence
-        assert result.context_variables["app_task_recovery_request"] is None
-        assert result.context_variables["app_task_recovery_status"] == "idle"
-        assert result.context_variables["bundle_repair_attempt_count"] == 2
-        assert result.context_variables["bundle_repair_status"] == "blocked"
     finally:
         if result.live_run is not None:
             await result.live_run.close()

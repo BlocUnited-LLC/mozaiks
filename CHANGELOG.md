@@ -62,6 +62,30 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- An AppGenerator run that cannot continue now ends, once, and says why. In a
+  live acceptance run bundle repair was blocked (no repairable target), and
+  validation handed the turn to the user. Each reply re-ran the same validation
+  on the same bundle, 13 times, until AG2 closed the channel on `max_turns`.
+  The runner had already reported that last turn as a pause, because the hub
+  delivers a packet before it appends the close it decided while accepting it.
+  So no failed `chat.run_complete` was ever sent, the session stayed in
+  progress, and the next message got "An internal error occurred"
+  (`WORKFLOW_EXECUTION_FAILED`).
+  - Blocked repair now ends the run as `workflow_failed`, as does a validation
+    that ran again on an unchanged bundle and failed the same way
+    (`app_validation_no_progress`). The gate writes `app_build_failure_message`
+    listing the blocking errors from the repair diagnostics. `orchestrator.yaml`
+    gains an optional `failure_message_key`, and the runtime reports that text
+    as the failed run's `error` when the graph ends a run as `workflow_failed`.
+  - The runner asks AG2's channel adapter whether the packet it is settling on
+    closes the channel, and settles on the close instead of a pause. A failed
+    `chat.run_complete` now carries the AG2 `close_reason`, and the session is
+    marked failed before the event is sent.
+  - A message for a paused run whose channel AG2 already closed is not
+    delivered. The run's end is announced once, and the caller gets
+    `WORKFLOW_SESSION_TERMINAL` with the reason, as does any later message for
+    a run that ended in this process.
+
 - AppGenerator no longer rejects a module contract task because its output
   repeats a companion contract as a raw file. A live run's `task_management`
   contract set `module_contract.reactions_yaml` to null, as its module declares

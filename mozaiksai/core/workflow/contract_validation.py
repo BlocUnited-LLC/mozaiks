@@ -23,8 +23,15 @@ def validate_workflow_context_contract(
     """Validate context references, including on-disk task batches when supplied."""
 
     context_config = workflow_config.get("context_variables")
-    declared = set((context_config or {}).get("definitions") or {})
+    definitions = (context_config or {}).get("definitions") or {}
+    declared = set(definitions)
     missing: list[str] = []
+
+    failure_message_key = str(workflow_config.get("failure_message_key") or "").strip()
+    if failure_message_key and (definitions.get(failure_message_key) or {}).get("type") != "string":
+        missing.append(
+            f"orchestrator failure_message_key {failure_message_key!r} must name a declared string context variable"
+        )
 
     for agent_name, view in ((context_config or {}).get("agents") or {}).items():
         if not isinstance(view, dict):

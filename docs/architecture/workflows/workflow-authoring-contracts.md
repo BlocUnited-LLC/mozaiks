@@ -161,6 +161,10 @@ Rules:
   - `UserDriven`
   - `BackendOnly`
 - `initial_message` is a hidden AG2/runtime seed. It is not user-facing transcript content and should not be used as visible copy.
+- `failure_message_key` is optional. It names a declared `type: string` context
+  variable whose text the runtime reports to the user as the failed run's
+  `error` when the transition graph ends the run as `workflow_failed`. Only a
+  deterministic tool should write it, when it decides the run cannot continue.
 
 ### `agents.yaml`
 

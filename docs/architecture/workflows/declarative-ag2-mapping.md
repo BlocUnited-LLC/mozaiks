@@ -104,6 +104,19 @@ speaker through AG2 1.0 `WorkflowAdapter`; when that resolution returns AG2
 marks the app-scoped `ChatSessions` run as completed. `max_turns` remains a
 safety cap, not the primary happy-path completion mechanism.
 
+A rule may end the run as failed with `termination_reason: workflow_failed`.
+That close, `max_turns` and `no_transition_matched` end the run as failed: the
+session is marked failed and one `chat.run_complete` with `status: failed`
+carries the close reason. A workflow can explain a `workflow_failed` end to the
+user by naming a declared string context variable in `orchestrator.yaml`:
+
+```yaml
+failure_message_key: app_build_failure_message
+```
+
+A deterministic tool writes that variable when it decides the run cannot
+continue; the runtime reports its text as the failed run's `error`.
+
 ### `context_variables.yaml`
 
 Maps to the shared workflow state container used during execution.

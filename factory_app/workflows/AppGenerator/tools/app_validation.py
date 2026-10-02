@@ -12,6 +12,7 @@ This tool can:
 import ast
 import asyncio
 import builtins
+import hashlib
 import json
 import logging
 import os
@@ -2375,6 +2376,85 @@ def _context_has_agent_backend(context_variables: Any | None) -> bool:
     return False
 
 
+_FAILURE_MESSAGE_ERROR_LIMIT = 10
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+
+
+def _blocking_errors(acceptance: dict[str, Any], validation: dict[str, Any] | None) -> list[str]:
+    """The errors that stop this build, from repair diagnostics, else validation."""
+    diagnostics = (acceptance.get("bundle_repair") or {}).get("diagnostics") or []
+    errors = [str(item.get("error") or "").strip() for item in diagnostics if isinstance(item, dict)]
+    if not any(errors):
+        errors = [str(error).strip() for error in (validation or {}).get("errors") or []]
+    if not any(errors) and acceptance.get("error"):
+        errors = [str(acceptance["error"]).strip()]
+    return list(dict.fromkeys(error for error in errors if error))
+
+
+def _build_failure_message(errors: list[str], *, no_progress: bool) -> str:
+    headline = (
+        "The app build cannot continue: validation ran again on an unchanged bundle "
+        "and failed the same way."
+        if no_progress
+        else "The app build cannot continue: validation found errors that no repair step can fix."
+    )
+    if not errors:
+        return headline
+    shown = errors[:_FAILURE_MESSAGE_ERROR_LIMIT]
+    lines = [headline, "Blocking errors:", *(f"- {error}" for error in shown)]
+    if len(errors) > len(shown):
+        lines.append(f"- and {len(errors) - len(shown)} more")
+    return "\n".join(lines)
+
+
+def _record_validation_outcome(
+    context_variables: Any | None,
+    *,
+    files: dict[str, str],
+    acceptance: dict[str, Any],
+    validation: dict[str, Any] | None,
+    passed: bool,
+) -> None:
+    """Decide whether the run can still progress after this validation.
+
+    A failed validation of the same bundle with the same outcome as the one
+    before it cannot change on its own, and a blocked repair has no owner left
+    to act. Either ends the run, so the gate also writes the message that names
+    the blocking errors.
+    """
+    repair = acceptance.get("bundle_repair") or {}
+    fingerprint = {
+        "bundle": _digest(files),
+        "outcome": _digest({
+            "status": acceptance.get("status"),
+            "evidence": acceptance.get("validation_evidence"),
+            "validation_status": (validation or {}).get("validation_status"),
+            "validation_errors": sorted(str(error) for error in (validation or {}).get("errors") or []),
+            "repair": {
+                key: repair.get(key)
+                for key in ("status", "target_agent", "attempt", "errors", "no_progress")
+            },
+            "recovery_request": (acceptance.get("task_recovery_request") or {}).get("request_id"),
+        }),
+    }
+    no_progress = not passed and _context_get(context_variables, "app_validation_fingerprint") == fingerprint
+    _context_set(context_variables, "app_validation_fingerprint", fingerprint)
+    _context_set(context_variables, "app_validation_no_progress", no_progress)
+    blocked = repair.get("status") == "blocked"
+    _context_set(
+        context_variables,
+        "app_build_failure_message",
+        _build_failure_message(_blocking_errors(acceptance, validation), no_progress=no_progress)
+        if blocked or no_progress
+        else None,
+    )
+
+
 async def validate_app_bundle_from_request(
     AppValidationRequest: dict[str, Any],
     agent_message: str | None = None,
@@ -2397,6 +2477,13 @@ async def validate_app_bundle_from_request(
             await assemble_app_tasks(context_variables=context_variables)
     assembly_failure = _assembly_failure(context_variables, prepare_recovery=True)
     if assembly_failure is not None:
+        _record_validation_outcome(
+            context_variables,
+            files=_context_get(context_variables, "generated_files", {}) or {},
+            acceptance=assembly_failure,
+            validation=None,
+            passed=False,
+        )
         return assembly_failure
 
     request = AppValidationRequest if isinstance(AppValidationRequest, dict) else {}
@@ -2460,6 +2547,13 @@ async def validate_app_bundle_from_request(
         "passed": combined_passed,
     }
     _context_set(context_variables, "integration_test_result", integration_test_result)
+    _record_validation_outcome(
+        context_variables,
+        files=materialized_files,
+        acceptance=acceptance_result,
+        validation=validation,
+        passed=combined_passed,
+    )
 
     return {
         "status": "success" if combined_passed else "failed",

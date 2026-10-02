@@ -13,3 +13,6 @@ initial_message: 'InterviewAgent: read the existing brief, guide the user throug
 # first line, which is why a routing rule alone could never skip the interview:
 # the interview had already opened.
 initial_agent: user
+# A run the graph ends as workflow_failed reports this to the user instead of
+# the bare close reason. The validation gate writes it when the build is blocked.
+failure_message_key: app_build_failure_message

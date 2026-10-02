@@ -111,7 +111,7 @@ async def test_rejected_batch_correction_revalidates_and_selects_independent_art
     assert counts["task_reports_services"] == 2
     assert counts["task_reports_models"] == 1
     assert _next(graph, "AppValidationAgent", app_task_recovery_status="idle",
-                 bundle_repair_status="blocked", bundle_repair_target=None) == "user"
+                 bundle_repair_status="blocked", bundle_repair_target=None) == "terminate"
 
 
 @pytest.mark.parametrize("owner,quality,status_key", [

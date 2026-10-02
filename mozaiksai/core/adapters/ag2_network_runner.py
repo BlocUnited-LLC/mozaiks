@@ -32,6 +32,7 @@ from ag2.network import (
     HumanClient,
     LocalLink,
     Passport,
+    ProtocolError,
     Resume,
     Transition,
     TransitionGraph,
@@ -61,6 +62,11 @@ DEFAULT_IDLE_TIMEOUT_SECONDS = 300.0
 # Envelopes that show a channel advancing: a committed agent turn, a
 # checkpointed context write, or a message posted into the channel.
 _PROGRESS_EVENT_TYPES = frozenset({EV_PACKET, EV_CONTEXT_SET, EV_TEXT})
+# Close reasons that end a run as failed rather than completed.
+_FAILED_CLOSE_REASONS = frozenset({"workflow_failed", "no_transition_matched", "max_turns"})
+_TERMINAL_CHANNEL_STATES = frozenset({ChannelState.CLOSED, ChannelState.EXPIRED})
+# The channel was already closed, so a message for it could not be delivered.
+CHANNEL_TERMINAL_ERROR = "ag2_network_channel_terminal"
 _context_checkpoint: ContextVar[Callable[[], Awaitable[None]] | None] = ContextVar(
     "ag2_authorized_context_checkpoint", default=None,
 )
@@ -262,6 +268,36 @@ def _closed_reason_from_wal(wal: Sequence[Any]) -> tuple[bool, str | None]:
     return True, reason or None
 
 
+async def _accepted_packet_closes_channel(hub: Any, channel_id: str, envelope: Any) -> bool:
+    """Ask AG2's channel adapter whether accepting ``envelope`` closes the channel.
+
+    The hub delivers a packet before it applies the close that accepting the
+    packet decided, and a durable store yields between the two. AG2 can pick
+    the user as next speaker and still close on max_turns in the same accept,
+    so a packet addressed to the user is not a pause until AG2 says so.
+    """
+    metadata = await hub.get_channel(channel_id)
+    if metadata.is_terminal():
+        return True
+    state = hub.adapter_state(channel_id)
+    if state is None:
+        return False
+    decision = hub.adapter_for(channel_id).on_accepted(metadata, envelope, state)
+    return decision.next_state in _TERMINAL_CHANNEL_STATES
+
+
+def _declared_failure_message(
+    context_vars: Mapping[str, Any], *, key: str | None, close_reason: str | None,
+) -> str | None:
+    """Return the workflow's explanation for a graph-declared failure, if it wrote one."""
+    if not key or close_reason != "workflow_failed":
+        return None
+    value = context_vars.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _canonical_build_context_value(value: Any) -> str:
     """Compare immutable views and stored values in the channel's JSON form."""
     return json.dumps(
@@ -345,6 +381,9 @@ class AG2NetworkRunnerRequest:
     knowledge_store: KnowledgeStore | None = None
     resume_existing_only: bool = False
     resume_context_updates: Mapping[str, Any] = field(default_factory=dict)
+    # Declared by orchestrator.yaml: the context key whose text explains why
+    # the transition graph ended the run as workflow_failed.
+    failure_message_key: str | None = None
 
 
 @dataclass(slots=True)
@@ -357,6 +396,9 @@ class AG2NetworkRunnerResult:
     app_id: str
     channel_id: str | None = None
     close_reason: str | None = None
+    # The workflow's own explanation of a workflow_failed close, read from its
+    # declared failure_message_key. ``error`` keeps the runtime diagnostic.
+    failure_message: str | None = None
     context_variables: dict[str, Any] = field(default_factory=dict)
     structured_outputs: list[dict[str, Any]] = field(default_factory=list)
     agent_name_by_id: dict[str, str] = field(default_factory=dict)
@@ -451,7 +493,12 @@ class AG2NetworkRunner:
                             app_id=request.app_id,
                             channel_id=metadata.channel_id,
                             close_reason=reason,
-                            error="ag2_network_channel_terminal",
+                            failure_message=_declared_failure_message(
+                                getattr(hub.adapter_state(metadata.channel_id), "context_vars", {}) or {},
+                                key=request.failure_message_key,
+                                close_reason=reason,
+                            ),
+                            error=CHANNEL_TERMINAL_ERROR,
                         )
             if request.resume_existing_only and existing_channel is None:
                 return AG2NetworkRunnerResult(
@@ -567,9 +614,13 @@ class AG2NetworkRunner:
                     close_reason = persisted_reason
                     if status is not RunStatus.FAILED:
                         status = RunStatus.COMPLETED
-                if close_reason in {"workflow_failed", "no_transition_matched", "max_turns"}:
+                if close_reason in _FAILED_CLOSE_REASONS:
                     status = RunStatus.FAILED
                     error = error or close_reason
+                context_vars = getattr(state, "context_vars", {}) or {}
+                failure_message = _declared_failure_message(
+                    context_vars, key=request.failure_message_key, close_reason=close_reason,
+                )
                 agent_name_by_id = _agent_names()
                 structured_outputs, validation_error = _validate_wal_structured_outputs(
                     wal=wal,
@@ -597,7 +648,8 @@ class AG2NetworkRunner:
                     app_id=request.app_id,
                     channel_id=channel.channel_id,
                     close_reason=close_reason,
-                    context_variables=_json_safe_dict(getattr(state, "context_vars", {}) or {}),
+                    failure_message=failure_message,
+                    context_variables=_json_safe_dict(context_vars),
                     structured_outputs=structured_outputs,
                     agent_name_by_id=agent_name_by_id,
                     wal=[_envelope_to_dict(envelope) for envelope in wal],
@@ -743,6 +795,9 @@ class AG2NetworkRunner:
                 state = hub.adapter_state(channel.channel_id)
                 expected_next_speaker = str(getattr(state, "expected_next_speaker", "") or "").strip()
                 if expected_next_speaker in {"user", initiator.agent_id}:
+                    if await _accepted_packet_closes_channel(hub, channel.channel_id, event_env):
+                        # AG2 is closing the channel on this packet; settle on the close.
+                        continue
                     failure_task.cancel()
                     await asyncio.gather(failure_task, return_exceptions=True)
                     result = await _snapshot_result(
@@ -931,6 +986,10 @@ class _AG2LiveWorkflowRun:
                     error="live_ag2_channel_closed",
                 )
 
+            ended = await self._ended_result()
+            if ended is not None:
+                return ended
+
             try:
                 _require_current_build_context(
                     saved=getattr(self._hub.adapter_state(self.channel_id), "context_vars", {}) or {},
@@ -955,13 +1014,19 @@ class _AG2LiveWorkflowRun:
                 for envelope in prior_wal
             }
 
-            if context_updates:
-                await self._apply_context_updates(context_updates)
-            await self._initiator.send(
-                self.channel_id,
-                str(message or "."),
-                audience=None,
-            )
+            try:
+                if context_updates:
+                    await self._apply_context_updates(context_updates)
+                await self._initiator.send(
+                    self.channel_id,
+                    str(message or "."),
+                    audience=None,
+                )
+            except ProtocolError:
+                ended = await self._ended_result()
+                if ended is None:
+                    raise
+                return ended
 
             result = await self._wait_for_settlement(seen_envelope_ids=seen_envelope_ids)
             result.wal = list(result.wal[self._wal_cursor :])
@@ -971,6 +1036,32 @@ class _AG2LiveWorkflowRun:
             else:
                 await self.close()
             return result
+
+    async def end_if_closed(self) -> AG2NetworkRunnerResult | None:
+        """Return this run's terminal result when AG2 has already closed its channel.
+
+        Releases the handle when it does. ``None`` means the channel is open and
+        still waiting for the user.
+        """
+        async with self._lock:
+            if self._closed:
+                return None
+            return await self._ended_result()
+
+    async def _ended_result(self) -> AG2NetworkRunnerResult | None:
+        metadata = await self._hub.get_channel(self.channel_id)
+        if not metadata.is_terminal():
+            return None
+        # A run waiting for its user did not finish its workflow, whatever closed it.
+        result = await self._snapshot_result(
+            status=RunStatus.FAILED,
+            close_reason=str(metadata.close_reason or "") or None,
+            error=CHANNEL_TERMINAL_ERROR,
+        )
+        result.wal = list(result.wal[self._wal_cursor :])
+        self._wal_cursor += len(result.wal)
+        await self.close()
+        return result
 
     async def apply_context_updates(self, updates: Mapping[str, Any]) -> None:
         async with self._lock:
@@ -1062,6 +1153,9 @@ class _AG2LiveWorkflowRun:
                     getattr(state, "expected_next_speaker", "") or ""
                 ).strip()
                 if expected_next_speaker in {"user", self._initiator.agent_id}:
+                    if await _accepted_packet_closes_channel(self._hub, self.channel_id, event_env):
+                        # AG2 is closing the channel on this packet; settle on the close.
+                        continue
                     return await self._snapshot_result(
                         status=RunStatus.PAUSED,
                         close_reason="awaiting_user_input",
@@ -1435,5 +1529,6 @@ __all__ = [
     "AG2NetworkRunner",
     "AG2NetworkRunnerRequest",
     "AG2NetworkRunnerResult",
+    "CHANNEL_TERMINAL_ERROR",
     "checkpoint_agent_context",
 ]

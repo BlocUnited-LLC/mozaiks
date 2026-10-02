@@ -829,6 +829,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     conn = self.connections.get(chat_id)
                     if isinstance(conn, dict):
                         conn["ui_run_complete_sent"] = True
+                    if isinstance(envelope.get('data'), dict):
+                        self._record_run_end(chat_id, envelope['data'])
             except Exception as _rc_exc:
                 logger.debug("RUN_COMPLETE_REGISTRY_UPDATE_FAILED chat=%s: %s", chat_id, _rc_exc)
             await self._broadcast_to_websockets(envelope, chat_id)
