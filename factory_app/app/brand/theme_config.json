@@ -43,10 +43,10 @@
       "tailwindClass": "font-heading"
     },
     "logo": {
-      "family":      "Fagrak Inline",
+      "family":      "Bungee Inline",
       "fallbacks":   "Rajdhani, ui-sans-serif, system-ui, sans-serif",
       "localFont":   true,
-      "src":         "/fonts/Fagrak Inline.otf",
+      "src":         "/fonts/BungeeInline-Regular.ttf",
       "tailwindClass": "font-logo"
     }
   },

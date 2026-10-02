@@ -115,7 +115,7 @@ export default {
         // Chat shell fonts — resolved from --font-* vars
         'chat-body':    ['var(--font-body,Rajdhani)',          'ui-sans-serif', 'system-ui', 'sans-serif'],
         'chat-heading': ['var(--font-heading,Orbitron)',        'ui-sans-serif', 'system-ui', 'sans-serif'],
-        logo:           ['var(--font-logo,Fagrak Inline)',      'ui-sans-serif', 'system-ui', 'sans-serif'],
+        logo:           ['var(--font-logo,Bungee Inline)',      'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       borderWidth: {
         '3': '3px',

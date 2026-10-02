@@ -25,6 +25,11 @@ Policy design
   Use sparingly; each exemption should be justified.
 * LARGE_DATA_EXTENSIONS — extensions that trigger a size-based review warning
   when the member exceeds LARGE_DATA_SIZE_THRESHOLD_BYTES.
+* FONT_EXTENSIONS / FONT_LICENSE_ALLOWLIST — every shipped font binary must be
+  redistributable: a sibling ``<prefix>-OFL.txt`` or ``<prefix>-LICENSE.txt``
+  ships in the same folder, the font's name table declares a license, and it
+  does not say "All rights reserved" unless the member is allow-listed with a
+  recorded license.  Fonts are copied into every app ``mozaiks init`` creates.
 
 Learned-artifact policy (see OSS_PUBLICATION_POLICY.md)
 ---------------------------------------------------------
@@ -38,9 +43,11 @@ from __future__ import annotations
 
 import argparse
 import re
+import struct
 import sys
 import tarfile
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -134,6 +141,38 @@ LARGE_DATA_SIZE_THRESHOLD_BYTES: int = 100 * 1024  # 100 KB
 # Maximum bytes read from each member for content scanning.
 MAX_CONTENT_SCAN_BYTES: int = 512 * 1024  # 512 KB
 
+# Text members whose content is scanned against PROHIBITED_CONTENT_PATTERNS.
+TEXT_SCAN_SUFFIXES: frozenset[str] = frozenset(
+    {".py", ".yaml", ".yml", ".json", ".md", ".txt", ".js", ".jsx", ".ts", ".tsx", ".env", ".example", ".cfg", ".toml"}
+)
+
+# ---------------------------------------------------------------------------
+# Font licensing policy
+# ---------------------------------------------------------------------------
+# Font binaries ship in the wheel and ``mozaiks init`` copies the brand folder
+# into every new app, so each font must be redistributable.  A font member
+# passes when ALL of these hold:
+#   1. a license file named ``<prefix>-OFL.txt`` or ``<prefix>-LICENSE.txt``
+#      ships in the same folder, where <prefix> is the font file name up to its
+#      first "-" (``ShareTech-Regular.ttf`` -> ``ShareTech-OFL.txt``);
+#   2. its name table declares a license (name ID 13 or 14);
+#   3. its copyright, description and license strings (name IDs 0, 10, 13) do
+#      not say "All rights reserved".
+# An explicit license allowlist can replace the name-table checks, but never
+# the sibling license-file requirement. WOFF2 and EOT name tables need codecs
+# outside the standard library, so those formats must be allow-listed.
+FONT_EXTENSIONS: frozenset[str] = frozenset({".otf", ".ttf", ".woff", ".woff2", ".eot"})
+FONT_LICENSE_FILE_SUFFIXES: tuple[str, ...] = ("-OFL.txt", "-LICENSE.txt")
+FONT_RESTRICTIVE_NAME_IDS: frozenset[int] = frozenset({0, 10, 13})
+FONT_LICENSE_NAME_IDS: frozenset[int] = frozenset({13, 14})
+FONT_RESTRICTIVE_RE = re.compile(r"all\s+rights\s+reserved", re.IGNORECASE)
+
+# Archive-relative font paths exempt from name-table checks, each mapped to the
+# license that permits redistribution (for example an Apache-2.0 font whose
+# copyright string still says "All Rights Reserved"). Every entry must record
+# where that license was verified and still ship its sibling license file.
+FONT_LICENSE_ALLOWLIST: dict[str, str] = {}
+
 # ---------------------------------------------------------------------------
 # Approved package family allowlist
 # ---------------------------------------------------------------------------
@@ -204,20 +243,34 @@ def _normalize_member_path(raw: str) -> str:
     return raw
 
 
+def _is_font(normalized: str) -> bool:
+    return PurePosixPath(normalized).suffix.lower() in FONT_EXTENSIONS
+
+
+def _wants_text_content(normalized: str) -> bool:
+    suffix = PurePosixPath(normalized).suffix.lower()
+    return suffix in TEXT_SCAN_SUFFIXES or normalized.endswith(".env.example")
+
+
 def _iter_wheel(path: Path) -> list[tuple[str, int, bytes | None]]:
-    """Yield (normalized_path, size_bytes, content_or_None) for each wheel member."""
+    """Yield (normalized_path, size_bytes, content_or_None) for each wheel member.
+
+    Text members are read up to MAX_CONTENT_SCAN_BYTES; font members are read
+    whole so their name table can be inspected.
+    """
     members = []
     with zipfile.ZipFile(path) as zf:
         for info in zf.infolist():
             normalized = info.filename  # wheels don't have a top-level dist prefix
             size = info.file_size
             content: bytes | None = None
-            suffix = PurePosixPath(info.filename).suffix.lower()
-            if suffix in {".py", ".yaml", ".yml", ".json", ".md", ".txt", ".js", ".jsx", ".ts", ".tsx", ".env", ".example", ".cfg", ".toml"} or info.filename.endswith(".env.example"):
+            if _is_font(normalized) or _wants_text_content(normalized):
                 try:
-                    content = zf.read(info.filename)[:MAX_CONTENT_SCAN_BYTES]
+                    content = zf.read(info.filename)
                 except Exception:
                     pass
+                if content is not None and not _is_font(normalized):
+                    content = content[:MAX_CONTENT_SCAN_BYTES]
             members.append((normalized, size, content))
     return members
 
@@ -232,12 +285,11 @@ def _iter_sdist(path: Path) -> list[tuple[str, int, bytes | None]]:
             normalized = _normalize_member_path(member.name)
             size = member.size
             content: bytes | None = None
-            suffix = PurePosixPath(normalized).suffix.lower()
-            if suffix in {".py", ".yaml", ".yml", ".json", ".md", ".txt", ".js", ".jsx", ".ts", ".tsx", ".env", ".example", ".cfg", ".toml"} or normalized.endswith(".env.example"):
+            if _is_font(normalized) or _wants_text_content(normalized):
                 try:
                     f = tf.extractfile(member)
                     if f is not None:
-                        content = f.read(MAX_CONTENT_SCAN_BYTES)
+                        content = f.read() if _is_font(normalized) else f.read(MAX_CONTENT_SCAN_BYTES)
                 except Exception:
                     pass
             members.append((normalized, size, content))
@@ -250,6 +302,127 @@ def _iter_archive(path: Path) -> list[tuple[str, int, bytes | None]]:
     if path.suffix in {".gz", ".bz2", ".xz"} or path.name.endswith(".tar.gz"):
         return _iter_sdist(path)
     raise ValueError(f"Unsupported archive format: {path.name}")
+
+
+# ---------------------------------------------------------------------------
+# Font name-table reader (standard library only)
+# ---------------------------------------------------------------------------
+
+
+class FontMetadataError(ValueError):
+    """Raised when a font's name table cannot be read."""
+
+
+def _sfnt_table(data: bytes, tag: bytes) -> bytes | None:
+    """Return the raw bytes of ``tag`` from a TrueType/OpenType or WOFF font."""
+    signature = data[:4]
+    if signature in (b"\x00\x01\x00\x00", b"OTTO", b"true"):
+        (num_tables,) = struct.unpack_from(">H", data, 4)
+        for index in range(num_tables):
+            entry_tag, _checksum, offset, length = struct.unpack_from(">4sLLL", data, 12 + 16 * index)
+            if entry_tag == tag:
+                return data[offset : offset + length]
+        return None
+    if signature == b"wOFF":
+        (num_tables,) = struct.unpack_from(">H", data, 12)
+        for index in range(num_tables):
+            entry_tag, offset, comp_length, orig_length, _checksum = struct.unpack_from(
+                ">4sLLLL", data, 44 + 20 * index
+            )
+            if entry_tag == tag:
+                raw = data[offset : offset + comp_length]
+                return zlib.decompress(raw) if comp_length < orig_length else raw
+        return None
+    raise FontMetadataError(f"unsupported font container signature {signature!r}")
+
+
+def read_font_name_records(data: bytes) -> dict[int, list[str]]:
+    """Return ``{name_id: [decoded strings]}`` from a font's ``name`` table."""
+    try:
+        table = _sfnt_table(data, b"name")
+    except (struct.error, zlib.error) as exc:
+        raise FontMetadataError(f"malformed font: {exc}") from exc
+    if table is None:
+        raise FontMetadataError("font has no name table")
+    try:
+        _format, count, string_offset = struct.unpack_from(">HHH", table, 0)
+        records: dict[int, list[str]] = {}
+        for index in range(count):
+            platform_id, _encoding_id, _language_id, name_id, length, offset = struct.unpack_from(
+                ">HHHHHH", table, 6 + 12 * index
+            )
+            raw = table[string_offset + offset : string_offset + offset + length]
+            codec = "mac_roman" if platform_id == 1 else "utf-16-be"
+            records.setdefault(name_id, []).append(raw.decode(codec, errors="replace"))
+    except struct.error as exc:
+        raise FontMetadataError(f"malformed name table: {exc}") from exc
+    return records
+
+
+def _font_license_prefix(normalized: str) -> str:
+    return PurePosixPath(normalized).stem.split("-", 1)[0]
+
+
+def inspect_font_members(members: list[tuple[str, int, bytes | None]]) -> list[ContentFinding]:
+    """Return errors for missing license evidence on shipped fonts."""
+    member_paths = {member[0] for member in members}
+    errors: list[ContentFinding] = []
+
+    def _error(code: str, member: str, message: str) -> None:
+        errors.append(ContentFinding(level="error", code=code, member=member, message=message))
+
+    for normalized, _size, content in members:
+        if not _is_font(normalized):
+            continue
+
+        parent = PurePosixPath(normalized).parent
+        prefix = _font_license_prefix(normalized)
+        expected = [str(parent / f"{prefix}{suffix}") for suffix in FONT_LICENSE_FILE_SUFFIXES]
+        if not any(candidate in member_paths for candidate in expected):
+            _error(
+                "font_license_file_missing",
+                normalized,
+                f"no license file ships beside this font — add one of {', '.join(PurePosixPath(p).name for p in expected)}",
+            )
+
+        if content is None:
+            _error("font_metadata_unreadable", normalized, "font bytes could not be read from the archive")
+            continue
+        if normalized in FONT_LICENSE_ALLOWLIST:
+            continue
+        try:
+            names = read_font_name_records(content)
+        except FontMetadataError as exc:
+            _error(
+                "font_metadata_unreadable",
+                normalized,
+                f"{exc} — ship TTF/OTF/WOFF, or allow-list this font in FONT_LICENSE_ALLOWLIST with its recorded license",
+            )
+            continue
+
+        if not any(value.strip() for name_id in FONT_LICENSE_NAME_IDS for value in names.get(name_id, [])):
+            _error(
+                "font_license_undeclared",
+                normalized,
+                "name table declares no license (name IDs 13/14) — provenance unknown; ship an openly licensed font",
+            )
+
+        restrictive = sorted(
+            {
+                value.strip()
+                for name_id in FONT_RESTRICTIVE_NAME_IDS
+                for value in names.get(name_id, [])
+                if FONT_RESTRICTIVE_RE.search(value)
+            }
+        )
+        if restrictive:
+            _error(
+                "font_all_rights_reserved",
+                normalized,
+                f"name table says {restrictive[0]!r} — not redistributable unless allow-listed in FONT_LICENSE_ALLOWLIST with its recorded license",
+            )
+
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +548,7 @@ def inspect_archive(path: Path) -> tuple[list[ContentFinding], list[ContentFindi
             )
 
         # Prohibited content patterns (text files only).
-        if content is not None:
+        if content is not None and not _is_font(normalized):
             try:
                 text = content.decode("utf-8", errors="replace")
             except Exception:
@@ -390,6 +563,9 @@ def inspect_archive(path: Path) -> tuple[list[ContentFinding], list[ContentFindi
                             message=f"file content matches '{code}' pattern — must not ship in public release",
                         )
                     )
+
+    # 4. Font licensing — every shipped font must be redistributable.
+    errors.extend(inspect_font_members(members))
 
     return errors, warnings
 

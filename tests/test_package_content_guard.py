@@ -8,8 +8,11 @@ from __future__ import annotations
 import importlib.util
 import io
 import re
+import struct
+import subprocess
 import sys
 import zipfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -480,6 +483,164 @@ class TestRealmExport:
             f"realm-export.json has unexpected keys: {sorted(extra_keys)}. "
             "Review whether these belong in the public OSS template."
         )
+
+
+# ---------------------------------------------------------------------------
+# Font licensing
+# ---------------------------------------------------------------------------
+
+_FONT_DIR = "factory_app/app/brand/fonts"
+_OFL_NAMES = {
+    0: "Copyright 2024 The Example Project Authors",
+    1: "Example Sans",
+    13: "This Font Software is licensed under the SIL Open Font License, Version 1.1.",
+    14: "https://openfontlicense.org",
+}
+
+
+def _name_table(names: dict[int, str]) -> bytes:
+    records = b""
+    strings = b""
+    for name_id, text in sorted(names.items()):
+        raw = text.encode("utf-16-be")
+        records += struct.pack(">HHHHHH", 3, 1, 0x409, name_id, len(raw), len(strings))
+        strings += raw
+    return struct.pack(">HHH", 0, len(names), 6 + 12 * len(names)) + records + strings
+
+
+def _make_font(names: dict[int, str], *, flavor: str = "ttf") -> bytes:
+    """Build a minimal font carrying only a ``name`` table."""
+    table = _name_table(names)
+    if flavor == "woff":
+        packed = zlib.compress(table)
+        header = b"wOFF" + struct.pack(">LLHHLHHLLLLL", 0x00010000, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0)
+        entry = struct.pack(">4sLLLL", b"name", 44 + 20, len(packed), len(table), 0)
+        return header + entry + packed
+    if flavor == "woff2":
+        return b"wOF2" + b"\x00" * 44
+    header = b"\x00\x01\x00\x00" + struct.pack(">HHHH", 1, 16, 0, 0)
+    entry = struct.pack(">4sLLL", b"name", 0, 12 + 16, len(table))
+    return header + entry + table
+
+
+def _font_errors(members: dict[str, bytes | str]) -> list:
+    wheel = _minimal_required_members()
+    wheel.update(members)
+    errors, _ = inspect_archive(_make_wheel(wheel))
+    return [error for error in errors if error.code.startswith("font_")]
+
+
+class TestFontLicensing:
+    def test_open_font_with_sibling_license_passes(self) -> None:
+        errors = _font_errors(
+            {
+                f"{_FONT_DIR}/ExampleSans-Regular.ttf": _make_font(_OFL_NAMES),
+                f"{_FONT_DIR}/ExampleSans-OFL.txt": "SIL Open Font License",
+            }
+        )
+        assert errors == []
+
+    def test_font_without_license_file_fails(self) -> None:
+        errors = _font_errors({f"{_FONT_DIR}/ExampleSans-Regular.ttf": _make_font(_OFL_NAMES)})
+        assert [error.code for error in errors] == ["font_license_file_missing"]
+
+    def test_license_file_for_another_family_does_not_count(self) -> None:
+        errors = _font_errors(
+            {
+                f"{_FONT_DIR}/ExampleSans-Regular.ttf": _make_font(_OFL_NAMES),
+                f"{_FONT_DIR}/OtherFont-OFL.txt": "SIL Open Font License",
+                "factory_app/app/brand/ExampleSans-OFL.txt": "license in a different folder",
+            }
+        )
+        assert [error.code for error in errors] == ["font_license_file_missing"]
+
+    def test_apache_license_file_name_is_accepted(self) -> None:
+        errors = _font_errors(
+            {
+                f"{_FONT_DIR}/ExampleSans.ttf": _make_font(_OFL_NAMES),
+                f"{_FONT_DIR}/ExampleSans-LICENSE.txt": "Apache License 2.0",
+            }
+        )
+        assert errors == []
+
+    @pytest.mark.parametrize("name_id", [0, 10, 13])
+    def test_all_rights_reserved_fails(self, name_id: int) -> None:
+        names = {**_OFL_NAMES, name_id: "Copyright (c) 2021 by Someone. All Rights Reserved."}
+        errors = _font_errors(
+            {
+                f"{_FONT_DIR}/Proprietary-Regular.otf": _make_font(names),
+                f"{_FONT_DIR}/Proprietary-LICENSE.txt": "copied license file does not override the font",
+            }
+        )
+        assert [error.code for error in errors] == ["font_all_rights_reserved"]
+
+    def test_font_without_declared_license_fails(self) -> None:
+        names = {1: "Unknown Display", 10: "This typeface is free for personal and commercial use."}
+        errors = _font_errors(
+            {
+                f"{_FONT_DIR}/Unknown Bold.otf": _make_font(names),
+                f"{_FONT_DIR}/Unknown Bold-LICENSE.txt": "unverified",
+            }
+        )
+        assert [error.code for error in errors] == ["font_license_undeclared"]
+
+    def test_woff_name_table_is_read(self) -> None:
+        names = {**_OFL_NAMES, 0: "Copyright (c) 2019 Someone. All rights reserved."}
+        errors = _font_errors({f"{_FONT_DIR}/Tech.woff": _make_font(names, flavor="woff")})
+        assert sorted(error.code for error in errors) == ["font_all_rights_reserved", "font_license_file_missing"]
+
+    def test_woff2_requires_allowlist(self) -> None:
+        errors = _font_errors(
+            {
+                f"{_FONT_DIR}/ExampleSans-Regular.woff2": _make_font(_OFL_NAMES, flavor="woff2"),
+                f"{_FONT_DIR}/ExampleSans-OFL.txt": "SIL Open Font License",
+            }
+        )
+        assert [error.code for error in errors] == ["font_metadata_unreadable"]
+
+    def test_allowlisted_font_records_its_license(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        member = f"{_FONT_DIR}/Roboto-Regular.ttf"
+        monkeypatch.setitem(
+            _guard.FONT_LICENSE_ALLOWLIST, member, "Apache-2.0, verified at github.com/googlefonts/roboto"
+        )
+        names = {**_OFL_NAMES, 0: "Copyright 2011 Google Inc. All Rights Reserved."}
+        assert _font_errors(
+            {
+                member: _make_font(names),
+                f"{_FONT_DIR}/Roboto-LICENSE.txt": "Apache License 2.0",
+            }
+        ) == []
+
+    def test_allowlisted_font_still_needs_sibling_license(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        member = f"{_FONT_DIR}/Roboto-Regular.ttf"
+        monkeypatch.setitem(
+            _guard.FONT_LICENSE_ALLOWLIST, member, "Apache-2.0, verified at github.com/googlefonts/roboto"
+        )
+        errors = _font_errors({member: _make_font(_OFL_NAMES)})
+        assert [error.code for error in errors] == ["font_license_file_missing"]
+
+    def test_restricted_font_fails_the_cli(self) -> None:
+        members = _minimal_required_members()
+        members[f"{_FONT_DIR}/Brand.otf"] = _make_font({0: "Copyright Brand Foundry. All rights reserved."})
+        assert _guard.main([str(_make_wheel(members))]) == 1
+
+    def test_tracked_repo_fonts_pass_release_guard(self) -> None:
+        """Every font committed to this repo passes the same check the release runs."""
+        repo_root = Path(__file__).resolve().parents[1]
+        try:
+            listed = subprocess.run(
+                ["git", "ls-files", "-z"], cwd=repo_root, capture_output=True, check=True
+            ).stdout
+        except (OSError, subprocess.CalledProcessError):
+            pytest.skip("a git checkout is required to enumerate tracked fonts")
+        tracked = [path for path in listed.decode("utf-8").split("\0") if path]
+        members = [
+            (path, 0, (repo_root / path).read_bytes() if _guard._is_font(path) else None)
+            for path in tracked
+        ]
+        assert any(_guard._is_font(path) for path, _, _ in members), "expected tracked brand fonts"
+        errors = _guard.inspect_font_members(members)
+        assert errors == [], [error.render() for error in errors]
 
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,7 @@ HEX_OR_COLOR_FUNCTION_RE = re.compile(
     r"#[0-9A-Fa-f]{3,8}\b|(?<![\w-])(?:rgb|rgba|hsl|hsla)\(",
 )
 FONT_DECLARATION_RE = re.compile(
-    r"fontFamily|font-family|@font-face|\b(?:Rajdhani|Orbitron|Fagrak|Inter|Montserrat|Poppins)\b",
+    r"fontFamily|font-family|@font-face|\b(?:Rajdhani|Orbitron|Bungee|Inter|Montserrat|Poppins)\b",
 )
 LOCAL_PRIMITIVE_CLONE_RE = re.compile(
     r"\b(?:function|const|class)\s+(?:StatusPill|MetricTile|StatCard)\b",

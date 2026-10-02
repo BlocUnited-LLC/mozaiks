@@ -43,7 +43,7 @@ COPY_FLAGS = (
     "control room",
     "kpi wall",
 )
-FONT_FLAGS = ("rajdhani", "orbitron", "fagrak")
+FONT_FLAGS = ("rajdhani", "orbitron", "bungee")
 DEEP_IMPORT_FLAGS = (
     "@mozaiks/chat-ui/ui/primitives/",
     "chat-ui/src/",

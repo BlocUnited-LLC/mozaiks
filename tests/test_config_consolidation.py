@@ -111,7 +111,7 @@ class TestThemeConfigMerged:
 
     def test_has_logo_font(self, theme):
         logo = theme["fonts"]["logo"]
-        assert logo["family"] == "Fagrak Inline"
+        assert logo["family"] == "Bungee Inline"
         assert logo.get("localFont") is True
 
     def test_has_rich_colors(self, theme):
