@@ -62,6 +62,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- A worker's Python that does not parse is now an output rejection the worker
+  can correct, not a crash. A live run lost its `business_services` task to
+  `invalid syntax. Perhaps you forgot a comma? (<unknown>, line 7)` as
+  `execution_failed`, non-recoverable, with no candidate and nothing logged:
+  the canonical read rendering parsed the model's handler/service/repo with no
+  file name, and only a `ValueError` became a rejection. Batch recovery re-runs
+  only recoverable rejections, so the task was never corrected and the bundle
+  shipped without the model's `summarize_tasks`. Every model-authored `.py`
+  file is now parsed before any transform, and a failure is rejected with one
+  message per file, `<path>:<line>: <message>` and the offending line, keeping
+  the candidate, so recovery gives the worker its one bounded correction.
+  Repository pruning, unused-import removal and emit-literal normalization
+  keep the model's file unchanged and log `REPO_PRUNE_SKIPPED` or
+  `EMIT_LITERAL_NORMALIZATION_SKIPPED` when their result would not parse; a
+  canonical rendering that does not parse fails as a builder error naming the
+  path, line and rendered snippet. These edits now split source only at the
+  line breaks Python counts: a form feed or `\u2028` in a docstring used to
+  shift every edit by a line, leaving a pruned function's last line inside the
+  function above it. Every `execution_failed` task now keeps its candidate as
+  `rejected_output` when there is one and logs `TASK_OUTPUT_PROCESSING_FAILED`
+  or `TASK_EXECUTION_FAILED` at ERROR with the task, chat and traceback.
+
 - AppGenerator no longer rejects a module contract task because its output
   repeats a companion contract as a raw file. A live run's `task_management`
   contract set `module_contract.reactions_yaml` to null, as its module declares

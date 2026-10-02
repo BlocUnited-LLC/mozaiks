@@ -38,6 +38,7 @@ from .generator_support.module_action_inventory import (
     pack_owned_output_paths,
     ungated_module_actions,
 )
+from .generator_support.module_authored_code import reject_unparseable_python
 from .generator_support.module_entitlement_gates import (
     approved_subscription_gates,
     compile_module_entitlement_gates,
@@ -65,6 +66,10 @@ from .path_ownership import detect_owned_path_collisions, normalize_owned_paths
 from .paths import resolve_workflow_path
 
 logger = logging.getLogger(__name__)
+
+# Worker file lanes. Typed fields (module_contract, pages, ...) render YAML and
+# JSON, never Python, so these lanes hold every model-authored .py file.
+_AUTHORED_FILE_LANES = ("code_files", "python_files", "database_files", "model_files", "service_foundation_bundle")
 
 
 class TaskBatchSource(BaseModel):
@@ -820,6 +825,11 @@ async def _execute_one_batch(
                     await persist()
             raise
         except Exception as exc:
+            if not isinstance(exc, _TaskRejected):
+                logger.error(
+                    "TASK_EXECUTION_FAILED: batch=%s task=%s chat=%s: %s",
+                    batch.id, task_id, chat_id, exc, exc_info=exc,
+                )
             outcome = exc
         async with state_lock:
             pending.pop(task_id, None)
@@ -1128,6 +1138,9 @@ async def _run_one_task(
                         "PACK_OWNED_OUTPUT_DISCARDED: task=%s agent=%s paths=%s; selected pack templates provide them",
                         task.get("task_id"), agent_name, discarded,
                     )
+                # Model Python that does not parse is a rejection the worker can
+                # correct, raised before any transform reads it.
+                reject_unparseable_python(_authored_python_files(output))
                 subscription_contract = resolve_subscription_contract(task_context)
                 companion_files = dict(task_context.get("generated_files") or {})
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
@@ -1254,12 +1267,25 @@ async def _run_one_task(
                 last_error = message
                 rejected_output = candidate_json
                 continue
+            except Exception as exc:
+                # Processing a worker output is code, not model work: a failure here
+                # is not a rejection to correct, but it must carry its evidence.
+                logger.error(
+                    "TASK_OUTPUT_PROCESSING_FAILED: batch=%s task=%s agent=%s chat=%s attempt=%d: %s",
+                    batch.id, task.get("task_id"), agent_name, chat_id, _attempt + 1, exc, exc_info=exc,
+                )
+                raise _TaskRejected(TaskBatchFailure(
+                    task_id=str(task["task_id"]), failure_kind="execution_failed",
+                    error=f"{type(exc).__name__}: {exc}", worker_agent=agent_name, attempts=_attempt + 1,
+                    rejected_output=json.loads(candidate_json) if candidate_json is not None else None,
+                )) from exc
             break
         else:
+            error = f"AG2 task lifecycle failed for task {task.get('task_id')!r}: {last_error or 'unknown error'}"
+            logger.error("TASK_EXECUTION_FAILED: batch=%s task=%s chat=%s: %s", batch.id, task.get("task_id"), chat_id, error)
             raise _TaskRejected(TaskBatchFailure(
                 task_id=str(task["task_id"]), failure_kind="execution_failed",
-                error=f"AG2 task lifecycle failed for task {task.get('task_id')!r}: {last_error or 'unknown error'}",
-                worker_agent=agent_name, attempts=stop_at,
+                error=error, worker_agent=agent_name, attempts=stop_at,
             ))
 
     _stamp_task_output_identity(task, output)
@@ -1280,6 +1306,23 @@ async def _run_one_task(
         },
     )
     return output
+
+
+def _authored_python_files(output: dict[str, Any]) -> dict[str, str]:
+    """The worker's own .py files, by path, read from its file lanes before any code touches them."""
+    files: dict[str, str] = {}
+    for lane in _AUTHORED_FILE_LANES:
+        entries = output.get(lane)
+        if lane == "service_foundation_bundle":
+            entries = entries.get("files") if isinstance(entries, dict) else None
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            path = safe_relpath(str(entry.get("filename") or entry.get("path") or ""))
+            content = entry.get("content") if entry.get("content") is not None else entry.get("filecontent")
+            if path and path.endswith(".py") and content is not None:
+                files[path] = str(content)
+    return files
 
 
 def _build_scoped_worker_prompt(prompt: str, task_context: dict[str, Any]) -> str:

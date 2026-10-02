@@ -12,10 +12,17 @@ is reconciled here instead of reaching runtime:
 - a ``ctx.emit`` literal naming a declared event under another spelling is
   rewritten to the declared type, and a write hook emitting the event its
   canonical write already emits is dropped.
+
+Model-authored Python that does not parse is rejected with its path and line
+before any of this runs (``reject_unparseable_python``). These cleanups are
+optional: one whose own result would not parse keeps the model's file
+unchanged and logs a warning. Required renderings parse their result through
+``parse_rendered_python``, which names the path, line and rendered snippet.
 """
 from __future__ import annotations
 
 import ast
+import io
 import logging
 import re
 from collections.abc import Mapping
@@ -35,6 +42,63 @@ PERSISTENCE_COLLECTION_METHODS = (
     "find_one, find_many (returns a list), count, aggregate, insert_one, update_one, delete_one or delete_many"
 )
 _HOOK = re.compile(r"^(before|after)_(create|update|delete)_([A-Za-z0-9_]+)$")
+_SNIPPET_CONTEXT_LINES = 3
+
+
+class RenderedPythonError(RuntimeError):
+    """Code rendering produced Python that does not parse: a builder defect, never model work."""
+
+
+def source_lines(source: str) -> list[str]:
+    """Split ``source`` at the line breaks ``ast`` counts, keeping them.
+
+    ``str.splitlines`` also breaks at form feeds, vertical tabs, ``\\x1c``-``\\x1e``,
+    ``\\x85``, ``\\u2028`` and ``\\u2029``, which Python source treats as ordinary
+    characters. Indexing that list by an AST line number edits the wrong line.
+    """
+    return io.StringIO(source, newline="").readlines()
+
+
+def syntax_error_diagnostic(path: str, source: str, exc: SyntaxError | ValueError) -> str:
+    """``<path>:<line>: <msg>`` followed by the offending source line."""
+    if not isinstance(exc, SyntaxError) or exc.lineno is None:
+        return f"{path}: {exc}"
+    lines = source_lines(source)
+    offending = lines[exc.lineno - 1] if 0 < exc.lineno <= len(lines) else (exc.text or "")
+    message = f"{path}:{exc.lineno}: {exc.msg}"
+    return f"{message}\n    {offending.strip()}" if offending.strip() else message
+
+
+def reject_unparseable_python(files: Mapping[str, str]) -> None:
+    """Reject every ``.py`` file that does not parse, all of them in one message."""
+    errors: list[str] = []
+    for path, source in sorted(files.items()):
+        if not path.endswith(".py"):
+            continue
+        try:
+            ast.parse(source, filename=path)
+        except (SyntaxError, ValueError) as exc:  # ValueError: a null byte on Python 3.11
+            errors.append(syntax_error_diagnostic(path, source, exc))
+    if errors:
+        raise ValueError("\n".join(errors))
+
+
+def parse_rendered_python(path: str, source: str) -> ast.Module:
+    """Parse code-rendered Python; a failure names the path, line and rendered snippet."""
+    try:
+        return ast.parse(source, filename=path)
+    except (SyntaxError, ValueError) as exc:
+        lineno = getattr(exc, "lineno", None) or 1
+        lines = source_lines(source)
+        start = max(1, lineno - _SNIPPET_CONTEXT_LINES)
+        snippet = "".join(
+            f"{number:>5} | {lines[number - 1].rstrip()}\n"
+            for number in range(start, min(len(lines), lineno + _SNIPPET_CONTEXT_LINES) + 1)
+        )
+        raise RenderedPythonError(
+            f"code rendering produced Python that does not parse: "
+            f"{syntax_error_diagnostic(path, source, exc).splitlines()[0]}\n{snippet}".rstrip()
+        ) from exc
 
 
 def _top_level_functions(tree: ast.Module) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
@@ -190,13 +254,22 @@ def prune_repository(
     )
     if not removed:
         return source
-    lines = source.splitlines(keepends=True)
+    lines = source_lines(source)
     spans = [(functions[name].lineno - 1, functions[name].end_lineno or functions[name].lineno) for name in removed]
     for start, end in sorted(spans, reverse=True):
         del lines[start:end]
-    pruned = _drop_unused_imports("".join(lines))
-    pruned = re.sub(r"\n{4,}", "\n\n\n", pruned).lstrip("\n")
-    ast.parse(pruned)
+    try:
+        pruned = _drop_unused_imports("".join(lines))
+        pruned = re.sub(r"\n{4,}", "\n\n\n", pruned).lstrip("\n")
+        ast.parse(pruned, filename=path)
+    except SyntaxError as exc:
+        # Pruning is a cleanup; it must never turn a parseable model file into one that is not.
+        logger.warning(
+            "REPO_PRUNE_SKIPPED: %s: removing %s would leave Python that does not parse (%s); "
+            "the model-authored file is kept unchanged",
+            path, removed, exc,
+        )
+        return source
     logger.warning(
         "REPO_CODE_DISCARDED: %s: removed model-authored definitions %s that no business logic references; "
         "the canonical repository of %s is code-rendered",
@@ -212,7 +285,7 @@ def _drop_unused_imports(source: str) -> str:
         node.value.id for node in ast.walk(tree)
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
     )
-    lines = source.splitlines(keepends=True)
+    lines = source_lines(source)
     for node in reversed(tree.body):
         if isinstance(node, ast.ImportFrom) and node.module == "__future__":
             continue
@@ -241,7 +314,7 @@ def reconcile_emit_literals(
         tree = ast.parse(source)
     except SyntaxError:
         return source
-    lines = source.splitlines(keepends=True)
+    lines = source_lines(source)
     renames: list[tuple[int, int, int, str]] = []
     removals: list[tuple[int, int, str]] = []
     notes: list[str] = []
@@ -310,7 +383,16 @@ def reconcile_emit_literals(
         except SyntaxError:
             lines.insert(start - 1, f"{indent}return None\n")
     rendered = "".join(lines)
-    ast.parse(rendered)
+    try:
+        ast.parse(rendered, filename=path)
+    except SyntaxError as exc:
+        # Normalization is a cleanup; it must never turn a parseable model file into one that is not.
+        logger.warning(
+            "EMIT_LITERAL_NORMALIZATION_SKIPPED: %s: %s would leave Python that does not parse (%s); "
+            "the model-authored file is kept unchanged",
+            path, "; ".join(notes), exc,
+        )
+        return source
     for note in notes:
         logger.info("EMIT_LITERAL_NORMALIZED: %s: %s", path, note)
     return rendered
@@ -319,7 +401,12 @@ def reconcile_emit_literals(
 __all__ = [
     "MOTOR_ONLY_METHODS",
     "PERSISTENCE_COLLECTION_METHODS",
+    "RenderedPythonError",
+    "parse_rendered_python",
     "prune_repository",
     "reconcile_emit_literals",
+    "reject_unparseable_python",
     "repository_references",
+    "source_lines",
+    "syntax_error_diagnostic",
 ]

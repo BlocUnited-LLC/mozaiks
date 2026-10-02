@@ -118,6 +118,24 @@ offending field, and what the contract allows: the accepted fields for an
 unknown key, the allowed values for a literal, the rule text for a contract
 rule. It never echoes a rejected value.
 
+Model-authored Python is parsed before any code reads or rewrites it: every
+`.py` file in the worker's file lanes (`code_files`, `python_files`,
+`model_files`, `database_files`, `service_foundation_bundle.files`) that is
+not pack-owned. A file that does not parse rejects the output with one
+diagnostic per file, `<path>:<line>: <message>` followed by the offending
+line, and the candidate is kept, so the rejection is recoverable like any other
+and batch recovery gives the worker its one bounded correction. The code that
+splices canonical functions into model files, prunes repositories and
+normalizes emit literals edits lines by the numbers `ast` reports, so it splits
+source only at `\n`, `\r\n` and `\r`. Those cleanups never turn a parseable
+model file into one that does not parse; a canonical rendering that does not
+parse is a builder defect (`RenderedPythonError`) naming the path, line and
+rendered snippet. A task failure that is not a rejection is `execution_failed`:
+it keeps the candidate as `rejected_output` when there is one and is logged at
+ERROR with the task, chat and traceback (`TASK_OUTPUT_PROCESSING_FAILED` while
+processing an output, `TASK_EXECUTION_FAILED` otherwise). It is not reclassified
+as a repairable output error.
+
 `config/subscriptions.yaml` is never model work either. Assembly writes it
 from the approved subscription contract (`materialize_app_config_contracts`,
 reading `subscription_contract` or its artifact fallback) and omits it when no
@@ -483,7 +501,10 @@ code, a `ctx.emit` literal naming a declared event under another spelling is
 rewritten to the declared type; a write hook re-emitting the event its
 canonical write already emits is removed; emitting a canonical write event the
 module does not declare is rejected with the site. Every normalization is
-logged as `CANONICAL_EVENTS_NORMALIZED` or `EMIT_LITERAL_NORMALIZED`.
+logged as `CANONICAL_EVENTS_NORMALIZED` or `EMIT_LITERAL_NORMALIZED`. A
+normalization whose result would not parse leaves the model's file unchanged
+and is logged as `EMIT_LITERAL_NORMALIZATION_SKIPPED` with the path and the
+syntax error.
 Runtime undeclared-event diagnostics identify `contracts/events.yaml`, allowing
 the contract worker to author the missing typed custom declarations. For an already
 accepted plan without that explicit path, repair uses the task's existing
@@ -1075,7 +1096,8 @@ module-level functions, and code renders the canonical ones. At task time and
 assembly, a model-authored undecorated top-level function or class in
 `repo.py` that neither business logic nor any import-time statement reaches (a
 leftover repository class, a duplicate CRUD helper) is removed with a
-`REPO_CODE_DISCARDED` warning. Every name a non-definition top-level statement
+`REPO_CODE_DISCARDED` warning; a removal whose result would not parse leaves
+the file unchanged with a `REPO_PRUNE_SKIPPED` warning. Every name a non-definition top-level statement
 uses (an assignment, a `HANDLERS["x"] = f` registration, a module-level `if`)
 and every decorated definition is live. A repository class the handler or
 service uses, or a referenced repo function calling a Motor-only method, is

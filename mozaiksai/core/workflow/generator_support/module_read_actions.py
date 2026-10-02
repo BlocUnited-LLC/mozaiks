@@ -22,6 +22,11 @@ from mozaiksai.core.workflow.generator_support.data_contract_fields import (
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_action_id,
 )
+from mozaiksai.core.workflow.generator_support.module_authored_code import (
+    parse_rendered_python,
+    source_lines,
+    syntax_error_diagnostic,
+)
 from mozaiksai.core.workflow.generator_support.module_policy import render_module_policy
 
 # Every canonical type except the logical date types is also a JSON Schema type.
@@ -262,9 +267,19 @@ def materialize_module_read_actions(
     return changed
 
 
-def _replace_functions(source: str, functions: dict[str, str], *, class_name: str | None = None) -> str:
-    """Replace only compiler-owned functions, preserving authored code and comments."""
-    tree = ast.parse(source)
+def _replace_functions(
+    source: str, functions: dict[str, str], *, path: str, class_name: str | None = None,
+) -> str:
+    """Replace only compiler-owned functions, preserving authored code and comments.
+
+    Authored ``source`` that does not parse is rejected with its path and line;
+    a rendered result that does not parse is a builder defect
+    (``RenderedPythonError``) naming the path, line and rendered snippet.
+    """
+    try:
+        tree = ast.parse(source, filename=path)
+    except (SyntaxError, ValueError) as exc:
+        raise ValueError(syntax_error_diagnostic(path, source, exc)) from exc
     body = tree.body
     class_node = None
     if class_name is not None:
@@ -272,12 +287,14 @@ def _replace_functions(source: str, functions: dict[str, str], *, class_name: st
         if class_node is None:
             if source.strip():
                 raise ValueError(f"Canonical reads require the declared handler class {class_name!r}")
-            return f"class {class_name}:\n" + "\n".join(
+            constructed = f"class {class_name}:\n" + "\n".join(
                 "\n".join("    " + line if line else "" for line in function.splitlines()) + "\n"
                 for function in functions.values()
             )
+            parse_rendered_python(path, constructed)
+            return constructed
         body = class_node.body
-    lines = source.splitlines(keepends=True)
+    lines = source_lines(source)
     edits: list[tuple[int, int, list[str]]] = []
     remaining = dict(functions)
     for node in body:
@@ -304,7 +321,7 @@ def _replace_functions(source: str, functions: dict[str, str], *, class_name: st
     for start, end, replacement in sorted(edits, reverse=True):
         lines[start:end] = replacement
     rendered_source = "".join(lines)
-    ast.parse(rendered_source)
+    parse_rendered_python(path, rendered_source)
     return rendered_source
 
 
@@ -438,7 +455,7 @@ def materialize_module_read_implementations(
                     raise ValueError(f"{module_id}: canonical reads require module.handler=backend.handler:ClassName")
                 class_name = entrypoint.split(":", 1)[1]
             source = files.get(target, "")
-            rendered = _replace_functions(source, functions[index], class_name=class_name)
+            rendered = _replace_functions(source, functions[index], path=target, class_name=class_name)
             if rendered != source:
                 changed[target] = rendered
     return changed
