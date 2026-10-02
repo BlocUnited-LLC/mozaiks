@@ -714,9 +714,8 @@ class AG2NetworkRunner:
                 )
                 if result.status is not RunStatus.PAUSED:
                     return result
-                result.live_run = live_run
                 keep_live_run = True
-                return result
+                return live_run.hand_back(result)
 
             failure_task = asyncio.create_task(
                 turn_failure_listener.wait_for_failure(channel.channel_id)
@@ -806,7 +805,8 @@ class AG2NetworkRunner:
                     )
                     if result.status is not RunStatus.PAUSED:
                         return result
-                    result.live_run = _AG2LiveWorkflowRun(
+                    keep_live_run = True
+                    return _AG2LiveWorkflowRun(
                         workflow_name=request.workflow_name,
                         chat_id=request.chat_id,
                         app_id=request.app_id,
@@ -820,9 +820,7 @@ class AG2NetworkRunner:
                         snapshot_result=_snapshot_result,
                         idle_timeout_seconds=idle_timeout_seconds,
                         context_authority_policy=request.context_authority_policy,
-                    )
-                    keep_live_run = True
-                    return result
+                    ).hand_back(result)
         except TimeoutError as exc:
             wal = await hub.read_wal(channel_id) if channel_id else []
             state = hub.adapter_state(channel_id) if channel_id else None
@@ -1036,6 +1034,17 @@ class _AG2LiveWorkflowRun:
             else:
                 await self.close()
             return result
+
+    def hand_back(self, result: AG2NetworkRunnerResult) -> AG2NetworkRunnerResult:
+        """Attach this run to the paused ``result`` its caller is about to report.
+
+        The caller projects ``result.wal``, so later results from this handle
+        start after it. Without this, the first result after the pause carried
+        the already-reported transcript again.
+        """
+        self._wal_cursor = max(self._wal_cursor, len(result.wal))
+        result.live_run = self
+        return result
 
     async def end_if_closed(self) -> AG2NetworkRunnerResult | None:
         """Return this run's terminal result when AG2 has already closed its channel.

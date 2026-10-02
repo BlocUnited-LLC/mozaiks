@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +37,10 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger("simple_transport.workflow")
+
+# Failed runs whose reason this process keeps for refusing later input. Input
+# for an ended run follows its end closely, so the most recent ones suffice.
+_RUN_END_REASON_LIMIT = 256
 
 
 def _persist_context_kwargs(
@@ -530,14 +535,22 @@ class WorkflowBridgeMixin:
         }
 
     def _record_run_end(self, chat_id: str, data: dict[str, Any]) -> None:
-        """Remember why a run failed so later input for it can say so."""
+        """Remember why a run failed so later input for it can say so.
+
+        Bounded: the oldest reasons are dropped first, and a refusal without
+        one still carries the WORKFLOW_SESSION_TERMINAL code.
+        """
         reason = data.get("error") or data.get("close_reason")
-        if str(data.get("status") or "").lower() == "failed" and reason:
-            registry = getattr(self, "_run_end_reasons", None)
-            if not isinstance(registry, dict):
-                registry = {}
-                self._run_end_reasons = registry
-            registry[chat_id] = str(reason)
+        if str(data.get("status") or "").lower() != "failed" or not reason:
+            return
+        registry = getattr(self, "_run_end_reasons", None)
+        if not isinstance(registry, OrderedDict):
+            registry = OrderedDict()
+            self._run_end_reasons = registry
+        registry[chat_id] = str(reason)
+        registry.move_to_end(chat_id)
+        while len(registry) > _RUN_END_REASON_LIMIT:
+            registry.popitem(last=False)
 
     async def send_session_ended_error(self, *, chat_id: str) -> str | None:
         """Refuse input for an ended run, with the reason it ended when this process saw it."""
@@ -895,12 +908,14 @@ class WorkflowBridgeMixin:
             return {
                 "status": "error", "chat_id": chat_id, "route": "terminal_session",
                 "run_status": "failed", "error_code": "WORKFLOW_SESSION_TERMINAL",
+                "outcome_announced": True,
                 **({"reason": reason} if reason else {}),
             }
 
         return {
             "status": "success" if not run_failed else "error",
             "chat_id": chat_id,
+            "outcome_announced": True,
             "message": (
                 "Input passed to live AG2 workflow channel."
                 if not run_failed
@@ -957,16 +972,16 @@ class WorkflowBridgeMixin:
                         # A rejected start may report a previous run's completed status.
                         run_status = "failed"
                     run_status_value = run_status
-                    # An accepted execution reports its own outcome: the
+                    # An execution that ran reports its own outcome: the
                     # run_complete envelope it sends is dispatched exactly once
                     # by send_event_to_ui. Emitting here as well would make
                     # every journey handoff run twice, and the duplicate start
-                    # is then refused as CHAT_LOCK_BUSY. A start rejected before
-                    # execution sends no envelope, so this is its only outcome
-                    # signal. A live-AG2 continue that fails reports "error"
-                    # after announcing itself; the extra failed event is inert,
-                    # because only a successful completion advances a journey.
-                    if not execution_accepted:
+                    # is then refused as CHAT_LOCK_BUSY. A live-AG2 continue
+                    # that fails, or that finds its channel already closed,
+                    # reports "error" after announcing itself (outcome_announced).
+                    # A start rejected before execution sends no envelope, so
+                    # this is its only outcome signal.
+                    if not execution_accepted and not result.get("outcome_announced"):
                         try:
                             from mozaiksai.core.events.unified_event_dispatcher import (
                                 get_event_dispatcher,

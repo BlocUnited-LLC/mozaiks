@@ -1067,6 +1067,7 @@ definitions:
     persisted: true
     description: >
       User-facing reason the build cannot continue, listing the blocking errors.
+      Written only when the validation outcome ends the run, null otherwise.
       orchestrator.yaml names it as the failure message for workflow_failed ends.
     source:
       type: state

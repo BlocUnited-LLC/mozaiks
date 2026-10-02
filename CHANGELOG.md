@@ -73,18 +73,24 @@ This project follows a practical pre-1.0 changelog format:
   (`WORKFLOW_EXECUTION_FAILED`).
   - Blocked repair now ends the run as `workflow_failed`, as does a validation
     that ran again on an unchanged bundle and failed the same way
-    (`app_validation_no_progress`). The gate writes `app_build_failure_message`
-    listing the blocking errors from the repair diagnostics. `orchestrator.yaml`
-    gains an optional `failure_message_key`, and the runtime reports that text
-    as the failed run's `error` when the graph ends a run as `workflow_failed`.
+    (`app_validation_no_progress`; host temp paths are ignored when comparing).
+    Only then does the gate write `app_build_failure_message`, which lists the
+    blocking errors as single lines of at most 300 characters with host temp
+    paths removed. A validation environment outage is reported as an
+    environment problem the user can retry, not an app defect.
+    `orchestrator.yaml` gains an optional `failure_message_key`, and the
+    runtime reports that text as the failed run's `error` when the graph ends a
+    run as `workflow_failed`.
   - The runner asks AG2's channel adapter whether the packet it is settling on
     closes the channel, and settles on the close instead of a pause. A failed
     `chat.run_complete` now carries the AG2 `close_reason`, and the session is
     marked failed before the event is sent.
   - A message for a paused run whose channel AG2 already closed is not
-    delivered. The run's end is announced once, and the caller gets
-    `WORKFLOW_SESSION_TERMINAL` with the reason, as does any later message for
-    a run that ended in this process.
+    delivered, and what the paused run already reported is not projected
+    again. The run's end is announced once, also when the message arrives
+    through background execution, and the caller gets
+    `WORKFLOW_SESSION_TERMINAL` with the reason, as does a later message for a
+    run that recently ended in this process.
 
 - AppGenerator no longer rejects a module contract task because its output
   repeats a companion contract as a raw file. A live run's `task_management`

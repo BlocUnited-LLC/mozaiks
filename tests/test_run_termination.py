@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -26,6 +27,8 @@ from ag2 import Agent
 from ag2.knowledge import MemoryKnowledgeStore
 
 from factory_app.workflows.AppGenerator.tools.app_validation import (
+    _blocking_errors,
+    _readable_error,
     _record_validation_outcome,
     validate_app_bundle_from_request,
 )
@@ -82,6 +85,7 @@ class _Persistence:
         self.status = 0
         self.failed: list[str] = []
         self.user_messages: list[str] = []
+        self.assistant_messages: list[str] = []
 
     async def chat_session_exists(self, chat_id, app_id, workflow_name=None):  # noqa: ANN001
         return False
@@ -103,7 +107,7 @@ class _Persistence:
         self.user_messages.append(kwargs["content"])
 
     async def append_run_assistant_message(self, **kwargs) -> None:  # noqa: ANN003
-        return None
+        self.assistant_messages.append(kwargs["content"])
 
     async def persist_context_variables(self, **kwargs) -> None:  # noqa: ANN003
         return None
@@ -205,6 +209,9 @@ def test_max_turns_close_after_a_user_bound_packet_settles_once_as_failed(transp
     # The reply that used the last turn ends the run; the next one reaches no agent.
     assert len(validator.ask_calls) == 2
     assert ending["run_status"] == "failed"
+    # Only the reply's own turn is projected, once.
+    assert transport_path.persistence.assistant_messages == ["Running validation checks."]
+    assert len(transport_path.of_type("chat.stream_end")) == 1
     completions = transport_path.of_type("chat.run_complete")
     assert len(completions) == 1, completions
     assert completions[0]["status"] == "failed"
@@ -246,8 +253,12 @@ def test_a_message_to_a_closed_channel_settles_the_run_and_gets_the_reason(trans
     validator, refused, refused_again = _run_on_virtual_clock(scenario())
 
     assert len(validator.ask_calls) == 1
-    # The message could not be delivered, so it is not recorded as run input.
+    # The message could not be delivered, so it is not recorded as run input,
+    # and the turn the paused run already reported is not projected again.
     assert transport_path.persistence.user_messages == []
+    assert transport_path.persistence.assistant_messages == []
+    for event_type in ("chat.stream_chunk", "chat.stream_end", "chat.text"):
+        assert transport_path.of_type(event_type) == [], event_type
     for response in (refused, refused_again):
         assert response["error_code"] == "WORKFLOW_SESSION_TERMINAL"
         assert response["route"] == "terminal_session"
@@ -269,6 +280,44 @@ def test_a_message_to_a_closed_channel_settles_the_run_and_gets_the_reason(trans
     assert transport_path.transport.get_live_ag2_workflow_run(chat_id) is None
 
 
+def test_a_refused_message_through_background_execution_is_announced_once(transport_path) -> None:
+    """A start routed through background execution adds no second outcome event."""
+    chat_id = "chat-closed-background"
+
+    async def scenario() -> dict[str, Any]:
+        _, paused = await _paused_validator_run(chat_id)
+        transport_path.transport.register_live_ag2_workflow_run(chat_id, paused.live_run)
+        await paused.live_run._hub.close_channel(paused.channel_id, reason="max_turns")
+        result = await transport_path.transport._run_workflow_background(
+            chat_id=chat_id, workflow_name=WORKFLOW, app_id=APP_ID, user_id=USER_ID,
+            ws_id=None, initial_message=DRIVER_REPLY,
+        )
+        for _ in range(3):
+            await asyncio.sleep(0)
+        return result
+
+    result = _run_on_virtual_clock(scenario())
+
+    assert result["error_code"] == "WORKFLOW_SESSION_TERMINAL"
+    assert len(transport_path.of_type("chat.run_complete")) == 1
+    assert [payload["status"] for payload in transport_path.dispatched] == ["failed"]
+
+
+def test_run_end_reasons_keep_only_the_most_recent_failures() -> None:
+    from mozaiksai.core.transport.workflow_bridge import _RUN_END_REASON_LIMIT
+
+    transport = SimpleTransport()
+    for index in range(_RUN_END_REASON_LIMIT + 5):
+        transport._record_run_end(f"chat-{index}", {"status": "failed", "error": f"reason {index}"})
+    transport._record_run_end("chat-paused", {"status": "paused"})
+
+    reasons = transport._run_end_reasons
+    assert len(reasons) == _RUN_END_REASON_LIMIT
+    assert "chat-0" not in reasons and "chat-paused" not in reasons
+    last = f"chat-{_RUN_END_REASON_LIMIT + 4}"
+    assert reasons[last] == f"reason {_RUN_END_REASON_LIMIT + 4}"
+
+
 # ---------------------------------------------------------------------------
 # AppGenerator: blocked repair and a validation rerun that cannot progress
 # ---------------------------------------------------------------------------
@@ -284,16 +333,7 @@ def _appgenerator_contract() -> tuple[list[dict[str, Any]], Any, dict[str, Any]]
     return rules, policy, orchestrator
 
 
-def _bundle_missing_a_handler_method() -> dict[str, Any]:
-    """An assembled bundle whose failing module file no approved task owns."""
-    files = _basic_crud_files()
-    files["modules/orders/backend/handler.py"] = (
-        "class OrdersModule:\n"
-        "    def __init__(self):\n"
-        "        pass\n\n"
-        "    async def list_orders(self, ctx, **params):\n"
-        "        return {'orders': []}\n"
-    )
+def _appgen_bundle(files: dict[str, str]) -> dict[str, Any]:
     return {
         "generated_files": files, "coding_participation": "autonomous",
         "app_assembly_status": "passed",
@@ -308,9 +348,51 @@ def _bundle_missing_a_handler_method() -> dict[str, Any]:
     }
 
 
+def _bundle_missing_a_handler_method() -> dict[str, Any]:
+    """An assembled bundle whose failing module file no approved task owns."""
+    files = _basic_crud_files()
+    files["modules/orders/backend/handler.py"] = (
+        "class OrdersModule:\n"
+        "    def __init__(self):\n"
+        "        pass\n\n"
+        "    async def list_orders(self, ctx, **params):\n"
+        "        return {'orders': []}\n"
+    )
+    return _appgen_bundle(files)
+
+
+class _FailingBuildSandbox:
+    """A sandbox whose shell build fails, with stderr naming a fresh temp dir each run."""
+
+    def __init__(self) -> None:
+        self.builds = 0
+
+    async def create_session(self, **kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(session_id=f"sandbox-{self.builds}", provider="docker")
+
+    async def write_files(self, **kwargs: Any) -> None:
+        return None
+
+    async def run_command(self, *, command: str, **kwargs: Any) -> SimpleNamespace:
+        self.builds += 1
+        workdir = Path(tempfile.gettempdir()) / f"mozaiks-app-validation-{self.builds}x7f"
+        stderr = (
+            f"error during build:\n[vite]: Rollup failed to resolve import \"./Orders\" from "
+            f"\"{workdir / 'src' / 'main.jsx'}\".\n" + "    at resolve (node_modules/vite/dist/chunk.js)\n" * 40
+        )
+        return SimpleNamespace(success=False, stdout="", stderr=stderr)
+
+    async def terminate_session(self, **kwargs: Any) -> bool:
+        return True
+
+
 async def _run_appgenerator_validation(
-    initial: dict[str, Any], *, chat_id: str, on_validation: Any = None,
-) -> tuple[AG2NetworkRunnerResult, list[str], list[dict[str, Any]], Any]:
+    initial: dict[str, Any],
+    *,
+    chat_id: str,
+    on_validation: Any = None,
+    validation_request: dict[str, Any] | None = None,
+) -> SimpleNamespace:
     """Run AppGenerator from AppValidationAgent with the real graph and gate.
 
     A pause is answered the way the release driver answered it, so a run that
@@ -320,6 +402,7 @@ async def _run_appgenerator_validation(
     bridge = ContextVariablesBridge(initial, authority_policy=policy)
     speakers: list[str] = []
     validations: list[dict[str, Any]] = []
+    pauses: list[dict[str, Any]] = []
 
     class _Agent(Agent):
         async def ask(self, *msg: Any, **kwargs: Any) -> SimpleNamespace:
@@ -334,7 +417,7 @@ async def _run_appgenerator_validation(
                 validations.append(on_validation(bridge))
             else:
                 validations.append(await validate_app_bundle_from_request(
-                    {"validation_strategy": "skip", "start_dev_server": False},
+                    validation_request or {"validation_strategy": "skip", "start_dev_server": False},
                     context_variables=bridge,
                 ))
 
@@ -354,24 +437,30 @@ async def _run_appgenerator_validation(
         failure_message_key=orchestrator["failure_message_key"],
         knowledge_store=MemoryKnowledgeStore(), idle_timeout_seconds=60.0,
     ))
-    replies = 0
-    while result.status is RunStatus.PAUSED and replies < orchestrator["max_turns"]:
-        replies += 1
+    while result.status is RunStatus.PAUSED and len(pauses) < orchestrator["max_turns"]:
+        pauses.append(dict(result.context_variables))
         result = await result.live_run.continue_with_user_message(DRIVER_REPLY)
     if result.live_run is not None:
         await result.live_run.close()
-    return result, speakers, validations, bridge
+    return SimpleNamespace(result=result, speakers=speakers, validations=validations, pauses=pauses)
+
+
+def _assert_readable(message: str) -> None:
+    """Each listed error is one bounded line, with no host temp path in it."""
+    temp_root = tempfile.gettempdir()
+    assert temp_root not in message and temp_root.replace("\\", "/") not in message
+    for line in message.splitlines()[2:]:
+        assert line.startswith("- ") and len(line) <= 2 + 300, line
 
 
 @pytest.mark.asyncio
 async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blocking_errors() -> None:
     """(b) Blocked repair is the end of the run, reported with its blocking errors."""
-    result, speakers, validations, _ = await _run_appgenerator_validation(
-        _bundle_missing_a_handler_method(), chat_id="appgen-blocked",
-    )
+    run = await _run_appgenerator_validation(_bundle_missing_a_handler_method(), chat_id="appgen-blocked")
+    result = run.result
 
-    assert speakers == ["AppValidationAgent"]
-    [validation] = validations
+    assert run.speakers == ["AppValidationAgent"]
+    [validation] = run.validations
     repair = validation["bundle_repair"]
     assert repair["status"] == "blocked" and repair["target_agent"] is None
     assert result.status is RunStatus.FAILED
@@ -385,7 +474,8 @@ async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blockin
     )
     assert repair["errors"], repair
     for error in repair["errors"][:10]:
-        assert f"- {error}" in message
+        assert f"- {_readable_error(error)}" in message
+    _assert_readable(message)
     assert result.context_variables["app_build_failure_message"] == message
     # The terminal event carries it as the error the UI shows.
     event = _run_complete_event(workflow_name="AppGenerator", chat_id="appgen-blocked",
@@ -396,26 +486,121 @@ async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blockin
 
 
 @pytest.mark.asyncio
-async def test_validating_an_unchanged_bundle_again_with_the_same_result_ends_the_run() -> None:
-    """(b) A validation rerun that cannot progress ends the run on the second pass.
+async def test_validating_an_unchanged_bundle_again_with_the_same_result_ends_the_run(monkeypatch) -> None:
+    """(b) A failed build, a user reply, the same failed build: the run ends.
 
-    Batch recovery that cannot act routes validation back to itself. With no
-    change to the bundle, the second result is the first one again.
+    The bundle passes acceptance and its build fails, so validation hands the
+    turn to the user. Nothing in a reply changes the bundle. The second build
+    names a different temp workspace, which is per-run noise, not a new result.
     """
-    initial = {**_bundle_missing_a_handler_method(), "app_task_recovery_status": "blocked"}
+    from mozaiksai.core import adapters
 
-    result, speakers, validations, _ = await _run_appgenerator_validation(initial, chat_id="appgen-no-progress")
+    sandbox = _FailingBuildSandbox()
+    monkeypatch.setattr(adapters, "get_sandbox_adapter", lambda strategy: sandbox)
 
-    assert speakers == ["AppValidationAgent", "AppValidationAgent"]
-    assert [item["bundle_repair"]["status"] for item in validations] == ["blocked", "blocked"]
+    run = await _run_appgenerator_validation(
+        _appgen_bundle(_basic_crud_files()), chat_id="appgen-no-progress",
+        validation_request={"validation_strategy": "docker", "start_dev_server": False},
+    )
+    result = run.result
+
+    assert run.speakers == ["AppValidationAgent", "AppValidationAgent"]
+    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
+    first, second = (item["app_validation_result"]["errors"] for item in run.validations)
+    assert first != second  # the raw stderr names a different temp workspace each time
+    [pause] = run.pauses
+    assert pause["app_validation_no_progress"] is False
+    assert pause["app_build_failure_message"] is None
     assert result.status is RunStatus.FAILED
     assert result.close_reason == "workflow_failed"
     assert result.context_variables["app_validation_no_progress"] is True
-    assert result.failure_message.startswith(
-        "The app build cannot continue: validation ran again on an unchanged bundle and failed the same way."
+    message = result.failure_message
+    assert message.startswith(
+        "The app build cannot continue: validation ran again on an unchanged bundle and failed the same way.\n"
+        "Blocking errors:\n- "
     )
-    for error in validations[-1]["bundle_repair"]["errors"][:10]:
-        assert f"- {error}" in result.failure_message
+    assert "<temp>" in message
+    _assert_readable(message)
+
+
+@pytest.mark.asyncio
+async def test_unavailable_validation_infrastructure_ends_the_run_as_an_environment_problem(monkeypatch) -> None:
+    """(b) An environment outage ends the run without blaming the app.
+
+    The bundle passes acceptance; E2B is requested with no key configured, so
+    the gate reports the validation infrastructure unavailable both times.
+    """
+    monkeypatch.delenv("E2B_API_KEY", raising=False)
+    monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
+
+    run = await _run_appgenerator_validation(
+        _appgen_bundle(_basic_crud_files()), chat_id="appgen-infrastructure",
+        validation_request={"validation_strategy": "e2b", "start_dev_server": False},
+    )
+    result = run.result
+
+    assert run.speakers == ["AppValidationAgent", "AppValidationAgent"]
+    assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
+    assert [item["app_validation_result"]["errors"] for item in run.validations] == (
+        [["Validation infrastructure unavailable."]] * 2
+    )
+    [pause] = run.pauses
+    assert pause["app_build_failure_message"] is None
+    assert result.status is RunStatus.FAILED
+    assert result.close_reason == "workflow_failed"
+    assert result.failure_message == (
+        "The app build cannot continue: the validation environment was unavailable. "
+        "This is an environment problem, not a defect in the app; retry the build "
+        "once validation infrastructure is available.\n"
+        "Validation environment errors:\n"
+        "- Validation infrastructure unavailable."
+    )
+
+
+def test_failure_message_errors_are_one_bounded_line_without_host_temp_paths() -> None:
+    workspace = Path(tempfile.gettempdir()) / "mozaiks-app-runtime-load-5f2c" / "bundle"
+    stderr = "npm run build failed: " + "\n".join(f"  at frame {index} ({workspace})" for index in range(200))
+    errors = _blocking_errors(
+        {"bundle_repair": {"diagnostics": [
+            {"error": f"app_runtime_load: app.json not found in {workspace}"},
+            {"error": stderr},
+        ]}},
+        None,
+    )
+    assert errors[0] == "app_runtime_load: app.json not found in <temp>"
+    assert len(errors[1]) == 300 and errors[1].endswith("...") and "\n" not in errors[1]
+    assert str(workspace) not in " ".join(errors)
+
+
+@pytest.mark.parametrize("outcome,ends_run", [
+    ({"bundle_repair": {"status": "blocked", "target_agent": None}, "task_recovery_request": None}, True),
+    ({"bundle_repair": {"status": "blocked", "target_agent": None},
+      "task_recovery_request": {"request_id": "recover-1"}}, False),
+    ({"bundle_repair": {"status": "needs_revision", "target_agent": "ServiceAgent"},
+      "task_recovery_request": None}, False),
+])
+def test_failure_message_is_written_only_when_the_outcome_ends_the_run(
+    outcome: dict[str, Any], ends_run: bool,
+) -> None:
+    """Recovery or a selected repair runs next, so the run goes on: no message."""
+    _, policy, _ = _appgenerator_contract()
+    bridge = ContextVariablesBridge({}, authority_policy=policy)
+    bridge._bind_run(("AppGenerator", "appgen-run-end", "message-only-when-ending"), policy)
+    acceptance = {"status": "failed", "validation_evidence": {"failed": ["module_implementation"]},
+                  **outcome}
+    acceptance["bundle_repair"] = {**acceptance["bundle_repair"], "diagnostics": [{"error": "handler missing"}]}
+    with _workflow_tool_invocation(bridge):
+        bridge.set("app_build_failure_message", "a previous run's message")
+        _record_validation_outcome(bridge, files={"app.json": "{}"}, acceptance=acceptance,
+                                   validation=None, passed=False)
+    message = bridge.get("app_build_failure_message")
+    if ends_run:
+        assert message == (
+            "The app build cannot continue: validation found errors that no repair step can fix.\n"
+            "Blocking errors:\n- handler missing"
+        )
+    else:
+        assert message is None
 
 
 # The validation the live run repeated, as recorded in its AG2 WAL (channel
@@ -496,13 +681,14 @@ async def test_replaying_the_live_blocked_validation_ends_the_run_with_its_four_
         "app_task_batch_results": {"_meta": {"status": "partial"}},
         **_LIVE_STATE,
     }
-    result, speakers, validations, _ = await _run_appgenerator_validation(
+    run = await _run_appgenerator_validation(
         initial, chat_id="appgen-live-replay", on_validation=_replay_live_validation,
     )
+    result = run.result
 
     # Live, this validation ran 13 times between driver replies until max_turns.
-    assert speakers == ["AppValidationAgent"]
-    assert len(validations) == 1
+    assert run.speakers == ["AppValidationAgent"]
+    assert len(run.validations) == 1
     assert result.status is RunStatus.FAILED
     assert result.close_reason == "workflow_failed"
     expected = "\n".join([
