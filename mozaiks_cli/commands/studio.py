@@ -37,6 +37,7 @@ def run(args) -> int:
             backend_port=int(getattr(args, "backend_port", 8000)),
             frontend_port=int(getattr(args, "frontend_port", 3000)),
             open_browser=not bool(getattr(args, "no_browser", False)),
+            bind_host=str(getattr(args, "listen", "127.0.0.1")),
         )
         print("Studio launched.\n")
         print(f"Backend: {result['backend_url']}")

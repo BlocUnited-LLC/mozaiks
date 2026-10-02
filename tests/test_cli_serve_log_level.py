@@ -20,7 +20,7 @@ def _make_args(**kwargs) -> Namespace:
         "workspace": ".",
         "host": "platform",
         "port": 8000,
-        "listen": "0.0.0.0",
+        "listen": "127.0.0.1",
         "reload": False,
     }
     defaults.update(kwargs)
@@ -72,6 +72,7 @@ def _run_serve_with_captured_log_level(tmp_path, monkeypatch, log_level_env: str
     with (
         patch("mozaiks_cli.commands.serve._resolve_app_root", return_value=tmp_path / "app"),
         patch("mozaiks_cli.commands.sync_agent_guidance.auto_sync_agent_guidance"),
+        patch("mozaiks_cli.commands.serve._require_reachable_mongo"),
     ):
         # Re-import so the module-level ``import uvicorn`` path picks up the fake.
         # The lazy import inside run() uses ``import uvicorn`` which hits sys.modules.

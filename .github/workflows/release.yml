@@ -240,6 +240,17 @@ jobs:
           mozaiks init chat --name "Release Smoke" --dir /tmp/mozaiks-release-init
           test -f /tmp/mozaiks-release-init/app/brand/theme_config.json
 
+      - name: Smoke installed first run (init, serve, ready, shell-config)
+        shell: bash
+        env:
+          MOZAIKS_FIRST_RUN_SMOKE_MONGO_URI: mongodb://localhost:27017/release_first_run_smoke
+        run: |
+          . .release-venv/bin/activate
+          mkdir -p /tmp/mozaiks-release-first-run
+          cd /tmp/mozaiks-release-first-run
+          python "$GITHUB_WORKSPACE/scripts/smoke_installed_first_run.py" \
+            --work-dir /tmp/mozaiks-release-first-run
+
       - name: Upload distributions
         uses: actions/upload-artifact@v7
         with:

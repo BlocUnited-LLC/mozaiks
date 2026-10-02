@@ -10,15 +10,15 @@ import mozaiks_cli.commands.onboard as onboard_command
 from mozaiks_cli.workspace import load_workspace_dotenv, resolve_workspace_root
 
 
-def run(args) -> None:
-    """Execute the quickstart command."""
+def run(args) -> int:
+    """Execute the quickstart command; return the process exit code."""
     workspace_root = resolve_workspace_root(getattr(args, "directory", None))
     # Warnings below must see the workspace .env that Studio will run with.
     load_workspace_dotenv(workspace_root)
     _print_intro(workspace_root)
     _print_environment_warnings(args)
 
-    onboard_command.run(
+    return onboard_command.run(
         Namespace(
             directory=str(workspace_root),
             preset=getattr(args, "preset", "chat"),

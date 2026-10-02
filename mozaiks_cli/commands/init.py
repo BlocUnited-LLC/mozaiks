@@ -59,8 +59,12 @@ TIER_PRESETS = {
     },
 }
 
-def run(args):
-    """Execute the init command."""
+def run(args) -> int:
+    """Execute the init command.
+
+    Returns the process exit code: 0 when the scaffold was created, 1 when the
+    command refused or failed.
+    """
     preset = args.preset
     starter = bool(getattr(args, "starter", False))
 
@@ -68,14 +72,14 @@ def run(args):
     if preset not in TIER_PRESETS:
         print(f"Error: Unknown preset '{preset}'")
         print(f"Available: {', '.join(TIER_PRESETS.keys())}")
-        return
+        return 1
 
     app_name = _resolve_app_name(args.name, args.directory)
     target_dir = _resolve_target_dir(args.directory, app_name)
     if is_framework_repo_root(target_dir.resolve()):
       print(f"Error: refusing to scaffold inside framework repo root: {target_dir.resolve()}")
       print("Use --dir <workspace> to target an app workspace directory.")
-      return
+      return 1
 
     app_root = target_dir / "app"
     existing_surfaces = _existing_scaffold_surfaces(
@@ -88,7 +92,7 @@ def run(args):
         print(f"Error: scaffold already exists in {target_dir}")
         print(f"Found: {', '.join(existing_surfaces)}")
         print("Choose a new target directory or remove the existing scaffold first.")
-        return
+        return 1
 
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -112,6 +116,7 @@ def run(args):
 
     print("\nProject initialized successfully.")
     _show_next_steps(target_dir, preset, starter)
+    return 0
 
 
 def create_scaffold(
@@ -203,6 +208,16 @@ def _slugify_app_name(app_name: str) -> str:
     return slug or "my-app"
 
 
+def default_app_id(app_name: str) -> str:
+    """Return the stable ``appId`` a new scaffold records in ``app/app.json``.
+
+    The shell, Studio, and persistence scope everything by this id, so a
+    scaffold without one cannot render. It is derived once, at creation, and
+    is not changed when the display name is.
+    """
+    return _slugify_app_name(app_name)
+
+
 def _prompt_admin_email() -> str:
     """Prompt for the admin email address. Falls back to a placeholder if skipped."""
     print("Admin portal is included in this preset.")
@@ -285,6 +300,7 @@ def _create_bundle_scaffold(
   admins = [resolved_admin] if resolved_admin else []
   app_json = {
     "appName": app_name,
+    "appId": default_app_id(app_name),
     "preset": preset,
     "startup": {
       "landing_spot": "/",
@@ -428,6 +444,10 @@ OPENAI_API_KEY=
 MONGO_URI=mongodb://localhost:27017/mozaiks
 ENV=development
 AUTH_ENABLED=false
+# Local development only: roles of the anonymous user while AUTH_ENABLED=false.
+# admin opens the Studio management pages (/apps). Ignored once authentication
+# is enabled; the runtime refuses unauthenticated mode outside local development.
+AUTH_ANON_ROLES=admin,user
 """
 
 
@@ -537,7 +557,9 @@ def _run_backend_ps1() -> str:
 
 param(
   [int]$Port = 8000,
-  [string]$BindHost = "0.0.0.0",
+  # Loopback by default: local dev runs auth-off with an anonymous admin.
+  # Pass -BindHost 0.0.0.0 to listen on all interfaces.
+  [string]$BindHost = "127.0.0.1",
   [string]$WorkspacePath = "",
   [switch]$ForceStop,
   [switch]$Reload,
@@ -678,8 +700,9 @@ def _run_frontend_ps1() -> str:
 
 param(
   [int]$Port = 3000,
-  [string]$BindHost = "0.0.0.0",
-  [string]$BackendUrl = "http://localhost:8000",
+  # Loopback by default; pass -BindHost 0.0.0.0 to listen on all interfaces.
+  [string]$BindHost = "127.0.0.1",
+  [string]$BackendUrl = "http://127.0.0.1:8000",
   [string]$WorkspacePath = "",
   [switch]$ForceStop,
   [switch]$DryRun
@@ -1046,19 +1069,23 @@ def _copy_default_brand_bundle(brand_dir: Path, app_name: str) -> None:
 def _secrets_yaml_placeholder() -> str:
     return """\
 # app/security/secrets.yaml - names-only secret management contract.
-# Declare secret names, env handles, and provider policy here.
+# Declare the environment variable names this app reads and where they resolve
+# from (provider.type: env | azure_key_vault). The runtime validates this file
+# at startup against mozaiksai.core.secrets.AppSecretContract.
 # NEVER store raw API keys, tokens, passwords, connection strings, or
 # private keys in this file. Use environment variables or a vault provider.
 #
-# provider: env   # env | vault | aws_secrets_manager | azure_key_vault | gcp_secret_manager
+# Example entries:
 # secrets:
-#   - name: OPENAI_API_KEY
-#     env_handle: OPENAI_API_KEY
-#     description: "OpenAI API key for AI workflows"
-#   - name: MONGO_URI
-#     env_handle: MONGO_URI
-#     description: "MongoDB connection URI"
-provider: env
+#   - env: OPENAI_API_KEY
+#     purpose: OpenAI API key for AI workflows
+#   - env: MONGO_URI
+#     required: true
+#     purpose: MongoDB connection URI
+version: 1
+kind: app_secret_contract
+provider:
+  type: env
 secrets: []
 """
 
