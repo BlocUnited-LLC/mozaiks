@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +37,10 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger("simple_transport.workflow")
+
+# Failed runs whose reason this process keeps for refusing later input. Input
+# for an ended run follows its end closely, so the most recent ones suffice.
+_RUN_END_REASON_LIMIT = 256
 
 
 def _persist_context_kwargs(
@@ -529,20 +534,50 @@ class WorkflowBridgeMixin:
             "route": "chat_lock_lost",
         }
 
+    def _record_run_end(self, chat_id: str, data: dict[str, Any]) -> None:
+        """Remember why a run failed so later input for it can say so.
+
+        Bounded: the oldest reasons are dropped first, and a refusal without
+        one still carries the WORKFLOW_SESSION_TERMINAL code.
+        """
+        reason = data.get("error") or data.get("close_reason")
+        if str(data.get("status") or "").lower() != "failed" or not reason:
+            return
+        registry = getattr(self, "_run_end_reasons", None)
+        if not isinstance(registry, OrderedDict):
+            registry = OrderedDict()
+            self._run_end_reasons = registry
+        registry[chat_id] = str(reason)
+        registry.move_to_end(chat_id)
+        while len(registry) > _RUN_END_REASON_LIMIT:
+            registry.popitem(last=False)
+
+    async def send_session_ended_error(self, *, chat_id: str) -> str | None:
+        """Refuse input for an ended run, with the reason it ended when this process saw it."""
+        reason = (getattr(self, "_run_end_reasons", None) or {}).get(chat_id)
+        await self.send_error(
+            error_message=(
+                f"This workflow session has ended: {reason}\nStart a new run to continue."
+                if reason
+                else "This workflow session has ended. Start a new run to continue."
+            ),
+            error_code="WORKFLOW_SESSION_TERMINAL",
+            chat_id=chat_id,
+            extra_data={"reason": reason} if reason else None,
+        )
+        return reason
+
     async def _reject_terminal_session(self, *, chat_id: str, app_id: str) -> dict[str, Any] | None:
         from mozaiksai.core.data.persistence.persistence_manager import ChatSessionTerminalError
 
         try:
             await self._get_or_create_persistence_manager().assert_chat_resumable(chat_id, app_id)
         except ChatSessionTerminalError as exc:
-            await self.send_error(
-                error_message="This workflow session has ended. Start a new run to continue.",
-                error_code="WORKFLOW_SESSION_TERMINAL",
-                chat_id=chat_id,
-            )
+            reason = await self.send_session_ended_error(chat_id=chat_id)
             return {
                 "status": "error", "chat_id": chat_id, "route": "terminal_session",
                 "run_status": str(exc.status), "error_code": "WORKFLOW_SESSION_TERMINAL",
+                **({"reason": reason} if reason else {}),
             }
         return None
 
@@ -716,10 +751,13 @@ class WorkflowBridgeMixin:
     ) -> dict[str, Any]:
         """Continue a process-live AG2 Network workflow channel."""
 
+        from mozaiksai.core.adapters.ag2_network_runner import CHANNEL_TERMINAL_ERROR
         from mozaiksai.core.ports.orchestration import RunStatus
         from mozaiksai.core.workflow.orchestration_patterns import (
             _last_agent_name_from_runner_result,
             _project_ag2_wal_to_mozaiks_transport,
+            _run_complete_event,
+            _run_failure_text,
             _structured_output_validation_failed,
         )
 
@@ -727,32 +765,37 @@ class WorkflowBridgeMixin:
         if rejection is not None:
             return rejection
 
-        context_updates = await self._apply_user_text_context_updates(
-            chat_id=chat_id,
-            workflow_name=workflow_name,
-            app_id=app_id,
-            user_input=message,
-        )
         pm = self._get_or_create_persistence_manager()
-        append_user_message = getattr(pm, "append_run_user_message", None)
-        if append_user_message is not None:
-            await append_user_message(
+        # A channel AG2 closed while it waited cannot take this message. Its
+        # outcome was never announced, so settle the run before refusing input.
+        runner_result = await live_run.end_if_closed()
+        if runner_result is None:
+            context_updates = await self._apply_user_text_context_updates(
                 chat_id=chat_id,
+                workflow_name=workflow_name,
                 app_id=app_id,
-                content=str(message or ""),
-                metadata={"source": "workflow_user", "user_id": user_id},
+                user_input=message,
             )
-        await self.process_incoming_user_message(
-            chat_id=chat_id,
-            user_id=user_id,
-            content=message,
-            source="http",
-        )
+            append_user_message = getattr(pm, "append_run_user_message", None)
+            if append_user_message is not None:
+                await append_user_message(
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    content=str(message or ""),
+                    metadata={"source": "workflow_user", "user_id": user_id},
+                )
+            await self.process_incoming_user_message(
+                chat_id=chat_id,
+                user_id=user_id,
+                content=message,
+                source="http",
+            )
 
-        runner_result = await live_run.continue_with_user_message(
-            message,
-            context_updates=context_updates,
-        )
+            runner_result = await live_run.continue_with_user_message(
+                message,
+                context_updates=context_updates,
+            )
+        input_refused = runner_result.error == CHANNEL_TERMINAL_ERROR
         if runner_result.status is RunStatus.FAILED:
             await pm.mark_chat_failed(chat_id, app_id=app_id)
         manager = getattr(self, "_derived_context_managers", {}).get(chat_id)
@@ -813,7 +856,7 @@ class WorkflowBridgeMixin:
                     chat_id=chat_id,
                     user_id=user_id,
                     workflow_name=workflow_name,
-                    error=runner_result.error,
+                    error=_run_failure_text(runner_result),
                 )
             except Exception as lifecycle_err:
                 logger.warning("LIVE_AG2_ON_FAIL_FAILED chat=%s: %s", chat_id, lifecycle_err)
@@ -845,29 +888,12 @@ class WorkflowBridgeMixin:
             )
 
         await self.send_event_to_ui(
-            {
-                "kind": "run_complete",
-                "workflow": workflow_name,
-                "chat_id": chat_id,
-                "run_completed": bool(run_completed and not run_failed),
-                "awaiting_user_input": awaiting_user_input,
-                "status": (
-                    "failed"
-                    if run_failed
-                    else "paused"
-                    if awaiting_user_input
-                    else "completed"
-                ),
-                "reason": (
-                    "failed"
-                    if run_failed
-                    else "awaiting_user_input"
-                    if awaiting_user_input
-                    else "finished"
-                ),
-                **({"agent": pause_agent} if pause_agent else {}),
-                **({"error": runner_result.error} if runner_result.error else {}),
-            },
+            _run_complete_event(
+                workflow_name=workflow_name,
+                chat_id=chat_id,
+                runner_result=runner_result,
+                pause_agent=pause_agent,
+            ),
             chat_id,
         )
 
@@ -877,9 +903,19 @@ class WorkflowBridgeMixin:
             except Exception as complete_err:
                 logger.debug("LIVE_AG2_MARK_COMPLETED_FAILED chat=%s: %s", chat_id, complete_err)
 
+        if input_refused:
+            reason = await self.send_session_ended_error(chat_id=chat_id)
+            return {
+                "status": "error", "chat_id": chat_id, "route": "terminal_session",
+                "run_status": "failed", "error_code": "WORKFLOW_SESSION_TERMINAL",
+                "outcome_announced": True,
+                **({"reason": reason} if reason else {}),
+            }
+
         return {
             "status": "success" if not run_failed else "error",
             "chat_id": chat_id,
+            "outcome_announced": True,
             "message": (
                 "Input passed to live AG2 workflow channel."
                 if not run_failed
@@ -936,16 +972,16 @@ class WorkflowBridgeMixin:
                         # A rejected start may report a previous run's completed status.
                         run_status = "failed"
                     run_status_value = run_status
-                    # An accepted execution reports its own outcome: the
+                    # An execution that ran reports its own outcome: the
                     # run_complete envelope it sends is dispatched exactly once
                     # by send_event_to_ui. Emitting here as well would make
                     # every journey handoff run twice, and the duplicate start
-                    # is then refused as CHAT_LOCK_BUSY. A start rejected before
-                    # execution sends no envelope, so this is its only outcome
-                    # signal. A live-AG2 continue that fails reports "error"
-                    # after announcing itself; the extra failed event is inert,
-                    # because only a successful completion advances a journey.
-                    if not execution_accepted:
+                    # is then refused as CHAT_LOCK_BUSY. A live-AG2 continue
+                    # that fails, or that finds its channel already closed,
+                    # reports "error" after announcing itself (outcome_announced).
+                    # A start rejected before execution sends no envelope, so
+                    # this is its only outcome signal.
+                    if not execution_accepted and not result.get("outcome_announced"):
                         try:
                             from mozaiksai.core.events.unified_event_dispatcher import (
                                 get_event_dispatcher,

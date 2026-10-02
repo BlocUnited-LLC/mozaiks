@@ -121,6 +121,7 @@ def test_orchestrator_version_changes_only_document_metadata():
     parsed = parser(copy.deepcopy(document))
     assert parsed == {
         **document,
+        "failure_message_key": None,
         "triggers": [{
             **document["triggers"][0], "endpoint": None, "method": None,
             "description": None, "capability_id": None,

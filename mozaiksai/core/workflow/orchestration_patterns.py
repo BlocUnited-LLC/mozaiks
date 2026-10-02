@@ -24,6 +24,7 @@ from typing import Any, cast
 from logs.logging_config import get_workflow_logger
 from logs.runtime_artifacts import get_agent_outputs_dir
 from mozaiksai.core.adapters.ag2_network_runner import (
+    CHANNEL_TERMINAL_ERROR,
     DEFAULT_IDLE_TIMEOUT_SECONDS,
     AG2NetworkRunner,
     AG2NetworkRunnerRequest,
@@ -520,6 +521,7 @@ async def _run_ag2_network_phase(
     resume_context_updates: Mapping[str, Any] | None = None,
     agent_output_handler: Callable | None = None,
     idle_timeout_seconds: float = DEFAULT_IDLE_TIMEOUT_SECONDS,
+    failure_message_key: str | None = None,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -540,8 +542,61 @@ async def _run_ag2_network_phase(
             context_authority_policy=context_authority_policy,
             resume_existing_only=resume_existing_only,
             resume_context_updates=dict(resume_context_updates or {}),
+            failure_message_key=failure_message_key,
         )
     )
+
+
+def _run_failure_text(runner_result: Any) -> str | None:
+    """What a failed run tells its user: the workflow's own explanation, else the diagnostic.
+
+    A channel that had already closed reports the reason AG2 closed it, not the
+    marker for the refused call.
+    """
+    failure_message = getattr(runner_result, "failure_message", None)
+    if failure_message:
+        return str(failure_message)
+    error = getattr(runner_result, "error", None)
+    if error == CHANNEL_TERMINAL_ERROR:
+        error = getattr(runner_result, "close_reason", None) or error
+    return str(error) if error else None
+
+
+def _run_complete_event(
+    *,
+    workflow_name: str,
+    chat_id: str,
+    runner_result: Any,
+    pause_agent: str | None,
+) -> dict[str, Any]:
+    """One ``chat.run_complete`` payload for an AG2 runner outcome.
+
+    Initial runs and live continuations both announce through this, so a
+    failed run always carries the same fields: ``error`` for the user and the
+    AG2 ``close_reason`` that ended the channel, when one did.
+    """
+    run_failed = runner_result.status is RunStatus.FAILED
+    awaiting_user_input = runner_result.status is RunStatus.PAUSED
+    run_completed = runner_result.status is RunStatus.COMPLETED
+    error = _run_failure_text(runner_result)
+    close_reason = runner_result.close_reason if run_failed else None
+    return {
+        "kind": "run_complete",
+        "workflow": workflow_name,
+        "chat_id": chat_id,
+        "run_completed": bool(run_completed and not run_failed),
+        "awaiting_user_input": awaiting_user_input,
+        "status": (
+            "failed" if run_failed
+            else "paused" if awaiting_user_input
+            else "completed" if run_completed
+            else "in_progress"
+        ),
+        "reason": "failed" if run_failed else ("awaiting_user_input" if awaiting_user_input else "finished"),
+        **({"agent": pause_agent} if pause_agent else {}),
+        **({"error": error} if error else {}),
+        **({"close_reason": close_reason} if close_reason else {}),
+    }
 
 
 def _assemble_result_payload(
@@ -573,7 +628,7 @@ def _assemble_result_payload(
         "app_id": app_id,
         "user_id": user_id,
         "messages": None,
-        "max_turns_reached": False,
+        "max_turns_reached": ag2_close_reason == "max_turns",
         "response": None,
         "run_completed": workflow_complete,
         "awaiting_user_input": awaiting_user_input,
@@ -1092,6 +1147,7 @@ async def run_workflow_orchestration(
             context_authority_policy=context_authority_policy,
             resume_existing_only=resume_existing_only,
             resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
+            failure_message_key=config.get("failure_message_key"),
         )
 
         structured_validation_failed = _structured_output_validation_failed(runner_result)
@@ -1118,7 +1174,7 @@ async def run_workflow_orchestration(
 
         ctx_dict.update(dict(runner_result.context_variables or {}))
         run_failed = runner_result.status is RunStatus.FAILED
-        run_error = runner_result.error
+        run_error = _run_failure_text(runner_result)
         awaiting_user_input = runner_result.status is RunStatus.PAUSED
         run_completed = runner_result.status is RunStatus.COMPLETED
         if run_failed:
@@ -1155,19 +1211,17 @@ async def run_workflow_orchestration(
                 chat_id,
             )
         await transport.send_event_to_ui(
-            {
-                "kind": "run_complete",
-                "workflow": workflow_name,
-                "chat_id": chat_id,
-                "run_completed": bool(run_completed and not run_failed),
-                "awaiting_user_input": awaiting_user_input,
-                "status": run_status,
-                "reason": "failed" if run_failed else ("awaiting_user_input" if awaiting_user_input else "finished"),
-                **({"agent": pause_agent} if pause_agent else {}),
-                **({"error": run_error} if run_error else {}),
-            },
+            _run_complete_event(
+                workflow_name=workflow_name,
+                chat_id=chat_id,
+                runner_result=runner_result,
+                pause_agent=pause_agent,
+            ),
             chat_id,
         )
+        if runner_result.error == CHANNEL_TERMINAL_ERROR:
+            # The resumed channel had already ended; tell the caller why.
+            await transport.send_session_ended_error(chat_id=chat_id)
         stream_state = {
             "run_completed": bool(run_completed and not run_failed),
             "awaiting_user_input": awaiting_user_input,

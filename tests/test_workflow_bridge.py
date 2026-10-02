@@ -160,6 +160,9 @@ class _FakeLiveRun:
         self.continued.append({"message": message, **kwargs})
         return self.result
 
+    async def end_if_closed(self):  # noqa: ANN201
+        return None
+
 
 class _FakePersistenceManager:
     def __init__(self) -> None:

@@ -12,6 +12,7 @@ This tool can:
 import ast
 import asyncio
 import builtins
+import hashlib
 import json
 import logging
 import os
@@ -65,6 +66,10 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
+
+# Set on a validation result that failed because the validation environment
+# (sandbox provider, local toolchain) was unavailable, not because of the app.
+INFRASTRUCTURE_FAILURE = "infrastructure_failure"
 
 
 def _local_validation_available() -> bool:
@@ -904,6 +909,7 @@ async def _run_sandbox_validation(
         return {
             **_base_result(strategy=strategy, status="failed"),
             "errors": ["Validation infrastructure unavailable."],
+            INFRASTRUCTURE_FAILURE: True,
         }
 
     result = _base_result(strategy=strategy, status="passed")
@@ -1017,7 +1023,10 @@ async def _run_sandbox_validation(
         return result
     except Exception as exc:
         logger.warning("sandbox_validation_failed strategy=%s exception=%s", strategy, type(exc).__name__)
-        result.update(success=False, validation_status="failed", errors=["Sandbox validation failed."], preview_url=None)
+        result.update(
+            success=False, validation_status="failed", errors=["Sandbox validation failed."], preview_url=None,
+            **{INFRASTRUCTURE_FAILURE: True},
+        )
         return result
     finally:
         if session_id is not None:
@@ -1028,7 +1037,7 @@ async def _run_sandbox_validation(
                 result["sandbox_terminated"] = False
             result["preview_url"] = None
             if not result["sandbox_terminated"]:
-                result.update(success=False, validation_status="failed")
+                result.update(success=False, validation_status="failed", **{INFRASTRUCTURE_FAILURE: True})
                 result["errors"].append("Sandbox cleanup could not be confirmed; retry cleanup using the recorded session ID.")
 
 
@@ -1043,6 +1052,7 @@ async def _run_local_validation(
         return {
             **_base_result(strategy="local", status="failed"),
             "errors": ["Local validation requested but npm is not available on this runtime host"],
+            INFRASTRUCTURE_FAILURE: True,
         }
 
     result = _base_result(strategy="local", status="passed")
@@ -1116,6 +1126,7 @@ async def _run_local_validation(
             "validation_status": "failed",
             "errors": [f"Local validation error: {exc}"],
             "preview_url": None,
+            INFRASTRUCTURE_FAILURE: True,
         }
 
 
@@ -2375,6 +2386,130 @@ def _context_has_agent_backend(context_variables: Any | None) -> bool:
     return False
 
 
+_FAILURE_MESSAGE_ERROR_LIMIT = 10
+_FAILURE_MESSAGE_ERROR_CHARS = 300
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+
+
+def _host_temp_paths() -> re.Pattern[str]:
+    """Match paths under this host's temp directory, in either separator style."""
+    roots = {tempfile.gettempdir(), os.path.realpath(tempfile.gettempdir())}
+    forms = {
+        form.rstrip("\\/")
+        for root in roots
+        for form in (root, root.replace("\\", "/"), root.replace("/", "\\"))
+    }
+    alternation = "|".join(re.escape(form) for form in sorted(forms, key=len, reverse=True) if form)
+    return re.compile(rf"(?:{alternation})(?:[\\/][^\s'\"<>|]*)?", re.IGNORECASE if os.name == "nt" else 0)
+
+
+def _scrubbed_error(error: Any) -> str:
+    """One line, with this host's temp paths removed: per-run noise, not app content."""
+    return " ".join(_host_temp_paths().sub("<temp>", str(error)).split())
+
+
+def _readable_error(error: Any) -> str:
+    text = _scrubbed_error(error)
+    if len(text) <= _FAILURE_MESSAGE_ERROR_CHARS:
+        return text
+    return text[: _FAILURE_MESSAGE_ERROR_CHARS - 3].rstrip() + "..."
+
+
+def _blocking_errors(acceptance: dict[str, Any], validation: dict[str, Any] | None) -> list[str]:
+    """The errors that stop this build, from repair diagnostics, else validation."""
+    diagnostics = (acceptance.get("bundle_repair") or {}).get("diagnostics") or []
+    errors = [item.get("error") for item in diagnostics if isinstance(item, dict)]
+    if not any(errors):
+        errors = list((validation or {}).get("errors") or [])
+    if not any(errors) and acceptance.get("error"):
+        errors = [acceptance["error"]]
+    return list(dict.fromkeys(_readable_error(error) for error in errors if error))
+
+
+def _build_failure_message(errors: list[str], *, no_progress: bool, infrastructure: bool) -> str:
+    if infrastructure:
+        headline = (
+            "The app build cannot continue: the validation environment was unavailable. "
+            "This is an environment problem, not a defect in the app; retry the build "
+            "once validation infrastructure is available."
+        )
+        label = "Validation environment errors:"
+    else:
+        headline = (
+            "The app build cannot continue: validation ran again on an unchanged bundle "
+            "and failed the same way."
+            if no_progress
+            else "The app build cannot continue: validation found errors that no repair step can fix."
+        )
+        label = "Blocking errors:"
+    if not errors:
+        return headline
+    shown = errors[:_FAILURE_MESSAGE_ERROR_LIMIT]
+    lines = [headline, label, *(f"- {error}" for error in shown)]
+    if len(errors) > len(shown):
+        lines.append(f"- and {len(errors) - len(shown)} more")
+    return "\n".join(lines)
+
+
+def _record_validation_outcome(
+    context_variables: Any | None,
+    *,
+    files: dict[str, str],
+    acceptance: dict[str, Any],
+    validation: dict[str, Any] | None,
+    passed: bool,
+) -> None:
+    """Decide whether the run can still progress after this validation.
+
+    A failed validation of the same bundle with the same outcome as the one
+    before it cannot change on its own, and a blocked repair has no owner left
+    to act. When this outcome ends the run, the gate also writes the message
+    that names the blocking errors; otherwise it clears it.
+    """
+    repair = acceptance.get("bundle_repair") or {}
+    recovery_request = acceptance.get("task_recovery_request")
+    fingerprint = {
+        "bundle": _digest(files),
+        "outcome": _digest({
+            "status": acceptance.get("status"),
+            "evidence": acceptance.get("validation_evidence"),
+            "validation_status": (validation or {}).get("validation_status"),
+            "validation_errors": sorted(_scrubbed_error(error) for error in (validation or {}).get("errors") or []),
+            "repair": {
+                **{key: repair.get(key) for key in ("status", "target_agent", "attempt", "no_progress")},
+                "errors": [_scrubbed_error(error) for error in repair.get("errors") or []],
+            },
+            "recovery_request": (recovery_request or {}).get("request_id"),
+        }),
+    }
+    no_progress = not passed and _context_get(context_variables, "app_validation_fingerprint") == fingerprint
+    _context_set(context_variables, "app_validation_fingerprint", fingerprint)
+    _context_set(context_variables, "app_validation_no_progress", no_progress)
+    # Recovery and a selected repair change the bundle before the next check,
+    # so only an outcome with neither ends the run (transition_graph.yaml).
+    ends_run = (
+        repair.get("target_agent") is None
+        and recovery_request is None
+        and (no_progress or repair.get("status") == "blocked")
+    )
+    _context_set(
+        context_variables,
+        "app_build_failure_message",
+        _build_failure_message(
+            _blocking_errors(acceptance, validation),
+            no_progress=no_progress,
+            infrastructure=bool((validation or {}).get(INFRASTRUCTURE_FAILURE)),
+        )
+        if ends_run
+        else None,
+    )
+
+
 async def validate_app_bundle_from_request(
     AppValidationRequest: dict[str, Any],
     agent_message: str | None = None,
@@ -2397,6 +2532,13 @@ async def validate_app_bundle_from_request(
             await assemble_app_tasks(context_variables=context_variables)
     assembly_failure = _assembly_failure(context_variables, prepare_recovery=True)
     if assembly_failure is not None:
+        _record_validation_outcome(
+            context_variables,
+            files=_context_get(context_variables, "generated_files", {}) or {},
+            acceptance=assembly_failure,
+            validation=None,
+            passed=False,
+        )
         return assembly_failure
 
     request = AppValidationRequest if isinstance(AppValidationRequest, dict) else {}
@@ -2460,6 +2602,13 @@ async def validate_app_bundle_from_request(
         "passed": combined_passed,
     }
     _context_set(context_variables, "integration_test_result", integration_test_result)
+    _record_validation_outcome(
+        context_variables,
+        files=materialized_files,
+        acceptance=acceptance_result,
+        validation=validation,
+        passed=combined_passed,
+    )
 
     return {
         "status": "success" if combined_passed else "failed",
