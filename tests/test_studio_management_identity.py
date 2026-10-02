@@ -11,6 +11,36 @@ import pytest
 ROUTES = Path(__file__).resolve().parents[1] / "factory_app/app/admin/pages/dashboardRoutes.js"
 
 
+def test_dashboard_manifest_request_uses_surface_scope_without_app_identity():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required for Studio route behavior checks")
+    script = f"""
+        import assert from 'node:assert/strict';
+        import {{ fetchDashboardConfig }} from {json.dumps(ROUTES.as_uri())};
+        const requests = [];
+        const manifest = {{ surface: {{ scope: 'app', portals: [] }} }};
+        globalThis.fetch = async (url, options) => {{
+            requests.push({{ url, options }});
+            return {{ ok: true, json: async () => manifest }};
+        }};
+        const signal = new AbortController().signal;
+        for (const scope of ['app', 'workspace', null]) {{
+            const result = await fetchDashboardConfig({{ scope, signal, appId: 'commercial-record' }});
+            assert.equal(result, manifest);
+            const request = requests.at(-1);
+            const url = new URL(request.url, 'http://localhost');
+            assert.equal(url.pathname, '/api/studio/dashboard');
+            assert.deepEqual([...url.searchParams], scope ? [['scope', scope]] : []);
+            assert.equal(request.options.signal, signal);
+            assert.equal(request.options.headers.Accept, 'application/json');
+        }}
+        assert.equal(requests.length, 3);
+    """
+    completed = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_dashboard_links_preserve_distinct_management_factory_target_and_host_ids():
     node = shutil.which("node")
     if not node:

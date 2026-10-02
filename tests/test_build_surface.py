@@ -169,8 +169,6 @@ def test_dashboard_portal_page_renders_manifest_build_panels() -> None:
     manifest_source = _read("factory_app/app/ui/route_manifest.json")
 
     assert "fetchDashboardConfig({ scope, signal:" in source
-    routes = _read("factory_app/app/admin/pages/dashboardRoutes.js")
-    assert "params.set('app_id'" not in routes
     assert "routePatternMatches(item.route, pathname)" in source
     assert "case 'build_requests':" in source
     assert "case 'artifact_timeline':" in source
