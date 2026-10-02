@@ -1021,7 +1021,9 @@ def test_two_users_drive_compiled_writes_over_http_with_closed_schemas_and_gates
     def token(user, workspace):
         claims = {"sub": user, "iss": "https://auth.test", "aud": "writes-test", "app_id": "writes-app",
                   "workspace_id": workspace, "exp": int(time.time()) + 300}
-        return {"Authorization": "Bearer " + jwt.encode(claims, key, algorithm="RS256", headers={"kid": "writes-test"})}
+        return {"Authorization": "Bearer " + jwt.encode(
+            claims, key, algorithm="RS256", headers={"kid": "writes-test", "typ": "at+jwt"},
+        )}
 
     class PaidUsersOnly:
         async def check(self, capability_id, *, app_id, user_id=None, tenant_id=None, workspace_id=None):

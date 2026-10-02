@@ -207,7 +207,7 @@ def http_runtime(monkeypatch):
         if workspace is not None:
             claims["workspace_id"] = workspace
         return {"Authorization": "Bearer " + jwt.encode(
-            claims, key, algorithm="RS256", headers={"kid": "ownership-test"},
+            claims, key, algorithm="RS256", headers={"kid": "ownership-test", "typ": "at+jwt"},
         )}
 
     def client(tenancy="per_user", *, ownerless=False):
