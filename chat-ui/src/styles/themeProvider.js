@@ -686,7 +686,7 @@ function buildSchemaChatTheme(config, basePath) {
 function themeConfigToTheme(config, basePath) {
   const themeConfig = config.theme || {};
   const ui = config.ui || {};
-  const fallback = BARE_FALLBACK_THEME;
+  const fallback = config.theme ? buildSchemaChatTheme(config, basePath) : BARE_FALLBACK_THEME;
   const identity = config.identity || {};
   const resolvedSurfaceTokens = resolveThemeSurfaceTokens({
     themeConfig,
@@ -715,16 +715,16 @@ function themeConfigToTheme(config, basePath) {
   if (!assets.wordmark)
     console.warn(`⚠️ [THEME] [${_bn}] assets.wordmark not set — header wordmark will be missing`);
   if (!config.fonts)
-    console.warn(`⚠️ [THEME] [${_bn}] fonts block not configured — using system-ui fallback`);
+    console.warn(`⚠️ [THEME] [${_bn}] fonts block not configured — using theme defaults`);
   if (!config.colors)
-    console.warn(`⚠️ [THEME] [${_bn}] colors block not configured — using bare fallback palette`);
+    console.warn(`⚠️ [THEME] [${_bn}] colors block not configured — using theme defaults`);
   if (!config.shadows)
-    console.warn(`⚠️ [THEME] [${_bn}] shadows block not configured — using bare fallback shadows`);
+    console.warn(`⚠️ [THEME] [${_bn}] shadows block not configured — using theme defaults`);
 
   return {
-    fonts:   config.fonts   || fallback.fonts,
-    colors:  config.colors  || fallback.colors,
-    shadows: config.shadows || fallback.shadows,
+    fonts:   { ...fallback.fonts, ...(config.fonts || {}) },
+    colors:  deepMerge(fallback.colors, config.colors || {}),
+    shadows: deepMerge(fallback.shadows, config.shadows || {}),
     branding: {
       name:            identity.name              || fallback.branding.name,
       chatbackgroundImage: assets.chatbackgroundImage     || fallback.branding.chatbackgroundImage,
@@ -926,7 +926,7 @@ function buildSchemaOverrideTheme(themeOverride, currentTheme) {
  * Returns the override theme object or null when unavailable.
  *
  * This only applies in multi-tenant platform mode where /api/themes/{appId}
- * returns platform overrides (typically shape: { theme: {...} }).
+ * returns an app-bound ThemeResponse with source: 'custom'.
  * Core/local runtimes may not provide that shape, so this safely returns null.
  */
 async function fetchPlatformOverrides(appId) {
@@ -947,6 +947,10 @@ async function fetchPlatformOverrides(appId) {
     if (!response.ok) return null;   // 404 / 503 / etc — no overrides
 
     const data  = await response.json();
+    // The standalone host aliases this endpoint to the whole declarative
+    // config. Only the theme manager's app-bound custom response is an overlay;
+    // reinterpreting config.theme here discards declared fonts and colors.
+    if (data?.source !== 'custom' || data?.app_id !== appId) return null;
     const theme = data?.theme;
 
     if (!theme || typeof theme !== 'object') return null;

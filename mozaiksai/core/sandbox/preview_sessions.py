@@ -55,6 +55,7 @@ def sandbox_resource_environment() -> dict[str, str]:
         "MOZAIKS_CHAT_UI_PATH": "/opt/mozaiks/chat-ui",
         "MOZAIKS_FACTORY_APP_PATH": "/opt/mozaiks/factory_app",
         **{name[len(_ENV_PREFIX):]: value for name, value in os.environ.items() if name.startswith(_ENV_PREFIX)},
+        "VITE_MOZAIKS_PREVIEW": "true",
     }
 
 

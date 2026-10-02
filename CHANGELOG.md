@@ -24,6 +24,9 @@ This project follows a practical pre-1.0 changelog format:
   The local Keycloak realm uses a distinct `mozaiks-api` audience, and existing
   persistent realms can add that client and mapper without deleting data.
 
+- E2B preview template uploads exclude local environment files, dependencies,
+  caches, browser reports, and runtime log output.
+
 - Self-hosted subscription grant and revoke actions are internal-only; HTTP
   callers cannot assign themselves paid entitlements.
 
@@ -62,6 +65,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- App previews are labeled as temporary drafts, show the selected version, and
+  offer an explicit **Open draft preview** action that keeps the build workspace open.
+  A persistent draft indicator also identifies previews opened in a separate tab.
+
+- Hosted apps can reuse the Studio app directory and dashboard while keeping
+  management routes separate from Factory build identities.
+
 - Importing `mozaiksai` no longer reads a `.env` file (#778).
   `mozaiksai.core.core_config` used to call `load_dotenv()` on import, which
   searched upward from the installed package (or the working directory) and set
@@ -99,6 +109,12 @@ This project follows a practical pre-1.0 changelog format:
   removal path.
 
 ### Fixed
+
+- App fonts and colors declared in `theme_config.json` remain active when the
+  standalone theme endpoint returns that same config. Only saved custom
+  overrides for the matching app can replace them. Partial brand tokens inherit
+  the app's light or dark appearance and font presets, keeping text and
+  background colors consistent.
 
 - A worker's Python that does not compile is now an output rejection the
   worker can correct, not a crash. A live run lost its `business_services` task

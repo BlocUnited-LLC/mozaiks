@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { studioFetch } from './studioApi.js'
+import { resolveStudioApp } from './dashboardRoutes.js'
 import {
   buildStudioDemoAppSummary,
   getStudioDemoActivity,
@@ -108,7 +109,7 @@ function buildDemoPayload(appId) {
   }
 }
 
-export function useAppStudioData(appId) {
+export function useAppStudioData(appId, expectedBuildRegistryId = null) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -134,8 +135,7 @@ export function useAppStudioData(appId) {
         const appsResponse = await studioFetch('/api/studio/apps')
         if (!appsResponse.ok) throw new Error('App registry unavailable.')
         const appsPayload = await appsResponse.json()
-        const registeredApp = appsPayload.apps?.find((entry) => entry.app_id === appId)
-        if (!registeredApp) throw new Error('App not found.')
+        const registeredApp = resolveStudioApp(appsPayload.apps, appId, expectedBuildRegistryId)
         const buildRegistryId = registeredApp?.build_registry_id || null
         const buildScope = buildRegistryId
           ? `build_registry_id=${encodeURIComponent(buildRegistryId)}`
@@ -192,6 +192,7 @@ export function useAppStudioData(appId) {
             buildState,
             buildHistory,
             buildRegistryId,
+            registeredApp,
             integrations,
             context,
             runtimeMetrics,
@@ -220,7 +221,7 @@ export function useAppStudioData(appId) {
     return () => {
       cancelled = true
     }
-  }, [appId, refreshKey])
+  }, [appId, expectedBuildRegistryId, refreshKey])
 
   return {
     data,

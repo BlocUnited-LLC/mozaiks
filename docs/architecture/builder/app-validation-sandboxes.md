@@ -59,6 +59,43 @@ API so the AppWorkbench can boot and restart a saved generated bundle on demand.
 A refinement selects a new artifact version and clears the old preview; the
 user starts the new version explicitly.
 
+### Preview and brand context
+
+The build workspace keeps the management app's branding while the generated
+app runs in its own iframe with its own shell, theme, fonts, and assets.
+Selecting a build does not apply the generated app's theme to the workspace.
+The shared theme loader applies declared fonts and colors from that app's
+`brand/theme_config.json`. It accepts an additional theme overlay only from a
+`source: custom` response whose `app_id` matches the active app. A standalone
+host returning its full declarative config from `/api/themes/{app_id}` does
+not replace those explicit brand values with the config's shorthand defaults.
+Omitted brand tokens inherit the app's selected light/dark appearance and font
+presets so a partial color override keeps readable background and text colors.
+The preview header says **Draft app preview**, identifies the saved version,
+and explains that the preview is temporary. Starting or interacting with a
+preview does not publish the app.
+
+**Open draft preview** opens the running app in a separate tab, leaving the
+build workspace open in the original tab. The shared shell shows a small
+**Draft preview** indicator in the app, including after navigation or while
+sign-in settings load. Sandbox sessions set `VITE_MOZAIKS_PREVIEW=true` through
+their resource environment; preview environment overrides cannot turn it off.
+The indicator uses a neutral style and does not intercept clicks. Normal app
+and management launches do not display it.
+
+App Zero follows the same rule: its preview can share the Mozaiks logo while
+the draft indicator identifies the separate runtime. Its own admin pages do
+not serve as a return link to the original build workspace. Existing sandbox
+templates must be rebuilt to include the indicator in the shared shell.
+
+Hosted management apps can reuse the Studio app directory and dashboard with
+explicit navigation and Factory identity inputs. Management links retain the
+hosted app record's route identity; build reads validate the target app and
+registry binding, and workflow launches use that registry's execution host.
+These identities do not change the management shell's branding.
+
+### Session ownership
+
 - Manager: `mozaiksai/core/sandbox/preview_sessions.py`
   (`ArtifactPreviewSessionManager` over `SandboxPort`; one session per
   host/user/artifact version, with an absolute `SANDBOX_TTL_MINUTES` deadline).
@@ -140,10 +177,17 @@ python scripts/build_e2b_preview_template.py --name mozaiks-preview --confirm-pa
 ```
 
 The helper consumes `infra/docker/Dockerfile.preview`, requires
-`E2B_API_KEY`, and prints only template/build identifiers. The resulting name
-or ID belongs in `E2B_TEMPLATE` or `SANDBOX_TEMPLATE`; credentials remain in
+`E2B_API_KEY`, and prints build progress and template/build identifiers. The
+resulting name or ID belongs in `E2B_TEMPLATE` or `SANDBOX_TEMPLATE`; credentials remain in
 the operator environment. The helper does not run automatically during app
 generation or CI.
+
+The staged upload includes only the framework source and packaging files.
+It excludes local `.env` files (retaining `.env.example`), `node_modules`,
+virtual environments, generated Tailwind source links, caches, build output,
+browser reports, and runtime logs.
+The `logs` Python package remains included; its generated output directories
+are excluded.
 
 Only explicitly configured `MOZAIKS_PREVIEW_ENV_<NAME>` values become preview
 environment variables. Factory API keys, credentials, and database URLs are not

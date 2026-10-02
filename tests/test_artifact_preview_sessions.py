@@ -145,6 +145,7 @@ async def test_only_explicit_preview_environment_is_forwarded(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "host-secret")
     monkeypatch.setenv("MONGO_URI", "host-database")
     monkeypatch.setenv("MOZAIKS_PREVIEW_ENV_VITE_OIDC_AUTHORITY", "http://local-idp")
+    monkeypatch.setenv("MOZAIKS_PREVIEW_ENV_VITE_MOZAIKS_PREVIEW", "false")
     adapter = FakeSandboxAdapter()
     await _create(_manager(adapter))
     env = adapter.calls[0][1]["envs"]
@@ -152,6 +153,7 @@ async def test_only_explicit_preview_environment_is_forwarded(monkeypatch):
     assert env["MOZAIKS_CHAT_UI_PATH"] == "/opt/mozaiks/chat-ui"
     assert env["MOZAIKS_FACTORY_APP_PATH"] == "/opt/mozaiks/factory_app"
     assert env["VITE_OIDC_AUTHORITY"] == "http://local-idp"
+    assert env["VITE_MOZAIKS_PREVIEW"] == "true"
     assert "OPENAI_API_KEY" not in env
     assert "MONGO_URI" not in env
 
