@@ -1,0 +1,260 @@
+{
+  "version": "1",
+  "metadata_kind": "data_contract",
+  "description": "Collections owned by the Studio platform modules. Studio mounts these modules into every workspace; persistence binds each mounted module to the collections declared for it here, beside the workspace's own data contract. A workspace that overrides a module by id owns that module's data in its own contract.",
+  "surfaces": [
+    {
+      "surface_id": "messages",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "threads",
+          "entity": "MessageThread",
+          "scope": "platform",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "ownership": {"surface_id": "messages", "surface_kind": "module"},
+          "notes": "A thread has many participants; messages policy.py scopes reads to participants and the current app or workspace scope.",
+          "fields": [
+            {"name": "thread_id", "type": "string", "required": true},
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "scope_type", "type": "string", "required": true, "enum": ["app", "workspace"]},
+            {"name": "scope_id", "type": "string", "required": false, "nullable": true},
+            {"name": "subject_app_id", "type": "string", "required": false, "nullable": true},
+            {"name": "title", "type": "string", "required": false},
+            {"name": "thread_type", "type": "string", "required": true},
+            {"name": "participant_ids", "type": "array", "required": true},
+            {"name": "status", "type": "string", "required": true},
+            {"name": "created_by", "type": "string", "required": true},
+            {"name": "created_at", "type": "string", "required": true},
+            {"name": "updated_at", "type": "string", "required": true},
+            {"name": "last_message_at", "type": "string", "required": false, "nullable": true},
+            {"name": "last_message", "type": "object", "required": false, "nullable": true},
+            {"name": "related_type", "type": "string", "required": false, "nullable": true},
+            {"name": "related_id", "type": "string", "required": false, "nullable": true},
+            {"name": "metadata", "type": "object", "required": false}
+          ],
+          "indexes": [],
+          "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"}
+        },
+        {
+          "name": "messages",
+          "entity": "Message",
+          "scope": "platform",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "ownership": {"surface_id": "messages", "surface_kind": "module"},
+          "notes": "Every participant of the thread reads its messages.",
+          "fields": [
+            {"name": "message_id", "type": "string", "required": true},
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "thread_id", "type": "string", "required": true},
+            {"name": "sender_id", "type": "string", "required": true},
+            {"name": "sender_role", "type": "string", "required": true},
+            {"name": "body", "type": "string", "required": true},
+            {"name": "message_type", "type": "string", "required": true},
+            {"name": "created_at", "type": "string", "required": true},
+            {"name": "edited_at", "type": "string", "required": false, "nullable": true},
+            {"name": "is_deleted", "type": "boolean", "required": true},
+            {"name": "metadata", "type": "object", "required": false}
+          ],
+          "indexes": [],
+          "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"}
+        },
+        {
+          "name": "thread_reads",
+          "entity": "ThreadReadState",
+          "scope": "platform",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "ownership": {"surface_id": "messages", "surface_kind": "module"},
+          "notes": "Keyed by thread and reader. Deleting a support thread removes every reader's state, so rows are not owner-scoped.",
+          "fields": [
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "thread_id", "type": "string", "required": true},
+            {"name": "user_id", "type": "string", "required": true},
+            {"name": "read_at", "type": "string", "required": true},
+            {"name": "scope_type", "type": "string", "required": false},
+            {"name": "scope_id", "type": "string", "required": false}
+          ],
+          "indexes": [],
+          "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"}
+        }
+      ]
+    },
+    {
+      "surface_id": "security_readiness",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "findings",
+          "entity": "SecurityFinding",
+          "scope": "platform",
+          "tenancy": "per_user",
+          "owner_field": "owner_user_id",
+          "ownership": {"surface_id": "security_readiness", "surface_kind": "module"},
+          "notes": "Every read and write is scoped to the recording user's owner_user_id.",
+          "fields": [
+            {"name": "finding_id", "type": "string", "required": true},
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "owner_user_id", "type": "string", "required": true},
+            {"name": "build_id", "type": "string", "required": false, "nullable": true},
+            {"name": "build_registry_id", "type": "string", "required": false, "nullable": true},
+            {"name": "artifact_version_id", "type": "string", "required": false, "nullable": true},
+            {"name": "title", "type": "string", "required": true},
+            {"name": "description", "type": "string", "required": false, "nullable": true},
+            {"name": "severity", "type": "string", "required": true, "enum": ["low", "medium", "high", "critical"]},
+            {"name": "status", "type": "string", "required": true, "enum": ["open", "accepted", "resolved"]},
+            {"name": "control_area", "type": "string", "required": true},
+            {"name": "evidence_ref", "type": "string", "required": false, "nullable": true},
+            {"name": "remediation", "type": "string", "required": false, "nullable": true},
+            {"name": "source", "type": "string", "required": true, "enum": ["manual", "validation", "eval", "import"]},
+            {"name": "assessed_at", "type": "string", "required": true},
+            {"name": "status_note", "type": "string", "required": false, "nullable": true},
+            {"name": "status_updated_by", "type": "string", "required": false, "nullable": true},
+            {"name": "status_updated_at", "type": "string", "required": false, "nullable": true},
+            {"name": "created_at", "type": "string", "required": true},
+            {"name": "updated_at", "type": "string", "required": true}
+          ],
+          "indexes": [],
+          "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"}
+        }
+      ]
+    },
+    {
+      "surface_id": "user_onboarding",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "status",
+          "entity": "OnboardingStatus",
+          "scope": "platform",
+          "tenancy": "per_user",
+          "owner_field": "user_id",
+          "ownership": {"surface_id": "user_onboarding", "surface_kind": "module"},
+          "notes": "One tour record per signed-in user.",
+          "fields": [
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "user_id", "type": "string", "required": true},
+            {"name": "seen_welcome", "type": "boolean", "required": true},
+            {"name": "dismissed", "type": "boolean", "required": true},
+            {"name": "steps", "type": "object", "required": true},
+            {"name": "completed_at", "type": "string", "required": false, "nullable": true},
+            {"name": "created_at", "type": "string", "required": true},
+            {"name": "updated_at", "type": "string", "required": true}
+          ],
+          "indexes": [],
+          "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"}
+        }
+      ]
+    },
+    {
+      "surface_id": "workspace_integrations",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "integration_notes",
+          "entity": "IntegrationNote",
+          "scope": "platform",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "ownership": {"surface_id": "workspace_integrations", "surface_kind": "module"},
+          "notes": "One operator note per integration, shared by everyone who manages the app's integrations.",
+          "fields": [
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "integration_id", "type": "string", "required": true},
+            {"name": "note", "type": "string", "required": true},
+            {"name": "updated_by", "type": "string", "required": true}
+          ],
+          "indexes": [],
+          "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"}
+        }
+      ]
+    },
+    {
+      "surface_id": "workspace_support",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "requests",
+          "entity": "SupportRequest",
+          "scope": "platform",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "ownership": {"surface_id": "workspace_support", "surface_kind": "module"},
+          "notes": "Requesters list their own requests; holders of workspace_support.read list the app or workspace queue. The service enforces both.",
+          "fields": [
+            {"name": "request_id", "type": "string", "required": true},
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "tenant_id", "type": "string", "required": false, "nullable": true},
+            {"name": "workspace_id", "type": "string", "required": false, "nullable": true},
+            {"name": "subject_app_id", "type": "string", "required": true},
+            {"name": "user_id", "type": "string", "required": false, "nullable": true},
+            {"name": "message", "type": "string", "required": true},
+            {"name": "page_url", "type": "string", "required": false, "nullable": true},
+            {"name": "page_title", "type": "string", "required": false, "nullable": true},
+            {"name": "severity", "type": "string", "required": true, "enum": ["low", "medium", "high"]},
+            {"name": "status", "type": "string", "required": true, "enum": ["open", "resolved"]},
+            {"name": "created_at", "type": "string", "required": true},
+            {"name": "updated_at", "type": "string", "required": true},
+            {"name": "resolved_at", "type": "string", "required": false, "nullable": true},
+            {"name": "resolved_by", "type": "string", "required": false, "nullable": true},
+            {"name": "last_message_at", "type": "string", "required": false, "nullable": true},
+            {"name": "last_message_by_role", "type": "string", "required": false, "nullable": true},
+            {"name": "last_operator_response_at", "type": "string", "required": false, "nullable": true},
+            {"name": "last_user_message_at", "type": "string", "required": false, "nullable": true},
+            {"name": "notes", "type": "string", "required": false, "nullable": true},
+            {"name": "message_thread_id", "type": "string", "required": false, "nullable": true},
+            {"name": "conversation_transcript_count", "type": "integer", "required": false}
+          ],
+          "indexes": [],
+          "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"}
+        },
+        {
+          "name": "feedback",
+          "entity": "SessionFeedback",
+          "scope": "platform",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "ownership": {"surface_id": "workspace_support", "surface_kind": "module"},
+          "notes": "Write-only session ratings, reviewed by support across users.",
+          "fields": [
+            {"name": "feedback_id", "type": "string", "required": true},
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "subject_app_id", "type": "string", "required": true},
+            {"name": "user_id", "type": "string", "required": false, "nullable": true},
+            {"name": "session_id", "type": "string", "required": false, "nullable": true},
+            {"name": "workflow_name", "type": "string", "required": false, "nullable": true},
+            {"name": "rating", "type": "integer", "required": true},
+            {"name": "created_at", "type": "string", "required": true}
+          ],
+          "indexes": [],
+          "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"}
+        }
+      ]
+    }
+  ],
+  "shared_collections": [
+    {
+      "owner_module": "messages",
+      "name": "threads",
+      "shared_with": [
+        {"module": "workspace_support", "access": "support_thread_lifecycle", "purpose": "Creates, updates and deletes the message thread behind each support request."}
+      ]
+    },
+    {
+      "owner_module": "messages",
+      "name": "messages",
+      "shared_with": [
+        {"module": "workspace_support", "access": "support_thread_lifecycle", "purpose": "Posts support replies and deletes them with their support request."}
+      ]
+    },
+    {
+      "owner_module": "messages",
+      "name": "thread_reads",
+      "shared_with": [
+        {"module": "workspace_support", "access": "support_thread_lifecycle", "purpose": "Deletes read state with its support request."}
+      ]
+    }
+  ]
+}

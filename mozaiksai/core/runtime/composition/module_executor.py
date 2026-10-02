@@ -66,7 +66,11 @@ from mozaiksai.core.runtime.composition.schema_validation import (
 from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
     WORKFLOW_TRIGGER_TRACE_KEY,
 )
-from mozaiksai.core.runtime.persistence import MongoPersistenceContext, PersistencePrincipal
+from mozaiksai.core.runtime.persistence import (
+    MongoPersistenceContext,
+    PersistencePrincipal,
+    PlatformModuleDeclarations,
+)
 from mozaiksai.core.runtime.persistence.request_scope import (
     bind_persistence_principal,
     current_persistence_principal,
@@ -270,6 +274,7 @@ class ModuleExecutor:
         event_emitter: Callable[[str, dict[str, Any]], Awaitable[Any] | Any] | None = None,
         entitlement_checker: EntitlementPort | None = None,
         data_contract: dict[str, Any] | None = None,
+        platform_modules: PlatformModuleDeclarations | None = None,
         platform_hooks: PlatformHookRegistry | None = None,
         audit_logger: AuditLogger | None = None,
         persistence_database: str | None = None,
@@ -282,6 +287,10 @@ class ModuleExecutor:
         composes a second app inside its own process (the AppGenerator runtime
         smoke) passes its own so that app's dispatch never reaches the host's
         policy hooks, audit log or database.
+
+        ``platform_modules`` holds the collection declarations of the platform
+        modules a host mounted into this workspace. Each dispatch's persistence
+        is then bound to the dispatching module's own allow-list.
         """
         self._modules: dict[str, Any] = {}
         self._action_methods: dict[str, dict[str, str]] = {}
@@ -293,6 +302,7 @@ class ModuleExecutor:
         self._event_payload_schemas: dict[str, dict[str, dict[str, Any]]] = {}
         self._event_emitter = event_emitter
         self._data_contract = data_contract
+        self._platform_modules = platform_modules
         # When None, use the no-op adapter — grants everything without a DB check.
         self._entitlement_checker: EntitlementPort = entitlement_checker or NoOpEntitlementAdapter()
         self._platform_hooks = platform_hooks
@@ -649,7 +659,7 @@ class ModuleExecutor:
             context.dispatch_authority = dispatch_authority
             context.dispatch_provenance = dispatch_provenance
             context.dispatch_audit = dispatch_audit
-            if self._data_contract is not None:
+            if self._data_contract is not None or self._platform_modules is not None:
                 # A loaded contract owns persistence on every execution path;
                 # custom contexts cannot replace its request-bound policy.
                 context.persistence = self._build_persistence_context(request)
@@ -1051,6 +1061,11 @@ class ModuleExecutor:
         app_id = str(request.app_id or "").strip()
         if not app_id:
             return None
+        # Mounted platform modules bind each dispatch to its module's allow-list.
+        module_binding: dict[str, Any] = (
+            {"platform_modules": self._platform_modules, "module_id": request.module}
+            if self._platform_modules is not None else {}
+        )
         return MongoPersistenceContext(
             app_id=app_id,
             tenant_id=request.tenant_id,
@@ -1060,4 +1075,5 @@ class ModuleExecutor:
             client=self._persistence_client,
             data_contract=self._data_contract,
             principal=lambda: current_persistence_principal(app_id),
+            **module_binding,
         )

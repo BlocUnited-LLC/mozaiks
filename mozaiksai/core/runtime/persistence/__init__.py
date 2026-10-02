@@ -52,6 +52,7 @@ from .naming import (
     scope_metadata,
     short_stable_hash,
 )
+from .platform_modules import CollectionAccess, PlatformModuleDeclarations
 from .startup_policy import (
     DATABASE_STARTUP_POLICY_ENV,
     DatabaseStartupPolicyError,
@@ -66,8 +67,10 @@ __all__ = [
     "PersistenceCollection",
     "PersistencePrincipal",
     "PersistenceScopeError",
+    "PlatformModuleDeclarations",
     "AppData",
     "AppDataAliasError",
+    "CollectionAccess",
     "DataContractLoadError",
     "DataContractIndexPlanItem",
     "DataContractIndexRunResult",
