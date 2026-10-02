@@ -2244,7 +2244,7 @@ agents:
       - Factory may request one correction for an evidenced output rejection through the same AG2 batch. Missing diagnostics, exhausted attempts, stale inputs, and interrupted attempts remain blocked.
       - When generated-bundle scanner, runtime-load, runtime-quality, or module-implementation failures are repairable, the gate writes `bundle_repair_status`, `bundle_repair_target`, `bundle_repair_request`, and `bundle_repair_result`:
         - `needs_revision`: a bounded repair pass is scheduled and workflow routing returns to the owning agent named by `bundle_repair_target`.
-        - `blocked`: scanner repair attempts are exhausted or the scanner error has no deterministic owner, and workflow routing returns to the user.
+        - `blocked`: scanner repair attempts are exhausted or the scanner error has no deterministic owner, and the run ends as failed with the blocking errors reported to the user.
         - `passed` or `not_applicable`: no scanner repair pass is needed.
 
       **Downstream**:

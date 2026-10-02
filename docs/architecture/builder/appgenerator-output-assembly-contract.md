@@ -1033,6 +1033,24 @@ proposal. Each save validates the entire candidate before applying any change;
 foreign writes/deletions are rejected, and unrelated accepted output is preserved.
 Canonical optional-path rules cannot override another explicit task owner.
 
+A run ends rather than waiting for the user when acceptance can make no more
+progress. Blocked repair (no eligible owner or no proposal budget left) routes
+AppValidationAgent to `terminate` as `workflow_failed`; a user reply cannot
+change the bundle. The gate also fingerprints each validation, the bundle it
+inspected and its outcome (`app_validation_fingerprint`). A failed validation
+identical to the one before it sets `app_validation_no_progress`, which ends the
+run the same way, after the recovery and repair-target routes. Host temp paths
+are removed before outcomes are compared, so a rerun that differs only in its
+temp workspace is still no progress. When the outcome ends the run (no selected
+repair, no pending recovery, and blocked or no progress) the gate writes
+`app_build_failure_message`; otherwise it clears it. The message lists the
+blocking errors from the repair diagnostics, else the validation errors, each on
+one line of at most 300 characters with host temp paths removed. A validation
+environment outage (`infrastructure_failure` on the validation result) is
+reported as an environment problem, not an app defect, that a retry can clear.
+`orchestrator.yaml` names the key as the failure message the runtime reports to
+the user.
+
 The graph routes schema, module-contract, and service repairs through their
 quality gates and back to complete-bundle acceptance. It also supports ModelAgent,
 DatabaseAgent, ControllerAgent, RefinementHarnessAgent, and FrontendStubAgent as
@@ -1049,10 +1067,12 @@ that digest. Final snapshot validation cannot refill omissions from historical
 worker output.
 
 Offline regressions live in `tests/test_appgenerator_bounded_recovery.py`,
-`tests/test_appgenerator_task_integrity.py`, and
-`tests/test_appgenerator_recovery_routing.py`. They prove original rejection
-retention, bounded AG2 correction, released descendants, complete acceptance,
-unauthorized-write rejection, and blocked exhausted/interrupted recovery.
+`tests/test_appgenerator_task_integrity.py`,
+`tests/test_appgenerator_recovery_routing.py`, and
+`tests/test_run_termination.py`. They prove original rejection retention,
+bounded AG2 correction, released descendants, complete acceptance,
+unauthorized-write rejection, blocked exhausted/interrupted recovery, and that
+a blocked or non-progressing validation ends the run with its blocking errors.
 
 Browser interaction evidence remains a separate validation-environment contract.
 E2B workspace failures do not authorize worker changes or an app-owned npm project.

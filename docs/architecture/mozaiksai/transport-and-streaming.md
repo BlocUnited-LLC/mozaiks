@@ -46,9 +46,36 @@ The workflow is marked completed only when the operation succeeds with an
 explicit completed run status. Accepting input into an existing session without
 an execution outcome does not emit completion.
 
-Ordering caveat: a run announces its outcome before its terminal status is
-persisted, while a journey advance reads that persisted status. The two are not
-synchronized today.
+A failed run's envelope has `status: failed`, `run_completed: false`, the AG2
+`close_reason` that ended the channel when one did (`workflow_failed`,
+`max_turns`, `no_transition_matched`), and an `error` for the user. When the
+transition graph ends the run as `workflow_failed` and the workflow declares
+`failure_message_key` in `orchestrator.yaml`, `error` is that context value;
+otherwise it is the runtime diagnostic. The session is marked failed before the
+envelope is sent.
+
+Every channel close is announced by the settlement that observed it. AG2's hub
+delivers a packet before it appends the close it decided while accepting that
+packet, so a packet that hands the turn to the user is not a pause until the
+runner asks AG2's channel adapter (`on_accepted`) whether the channel is closing.
+If it is, the runner settles on the close. A `max_turns` close on the turn that
+reverts to the user therefore ends the run as failed instead of pausing it.
+
+Input for a run that has ended is refused with `WORKFLOW_SESSION_TERMINAL`. When
+this process announced the run's failure, the message and the error's `reason`
+field carry the failure text it reported; the process keeps the reasons of its
+most recent failed runs (a bounded map), so a refusal for an older run carries
+the code without a reason. A paused run whose channel AG2 had already closed
+does not deliver the message, and nothing the paused run already reported is
+projected again. Its end is announced once, through the same failed envelope,
+before the input is refused. Live-continuation results say they announced their
+outcome (`outcome_announced`), so background execution adds no second
+`runtime.process_completed` for them; it emits one only for a rejection that
+sent no envelope.
+
+Ordering caveat: a completed run announces its outcome before its completed
+status is persisted, while a journey advance reads that persisted status. The
+two are not synchronized today.
 
 ## Related Docs
 

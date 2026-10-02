@@ -387,6 +387,16 @@ transition_rules:
   condition_key: bundle_repair_target
   condition_value: FrontendStubAgent
   transition_target: AgentTarget
+# Validating an unchanged bundle again and failing the same way is not
+# progress. Ordered after recovery and repair routes, which change the bundle.
+- source_agent: AppValidationAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_validation_no_progress
+  condition_value: true
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 - source_agent: AppValidationAgent
   target_agent: terminate
   transition_type: condition
@@ -402,13 +412,17 @@ transition_rules:
   condition_key: app_task_recovery_status
   condition_value: blocked
   transition_target: AgentTarget
+# Blocked repair has no owner left to act, and a user reply cannot change the
+# bundle: returning to the user only re-ran the same validation until
+# max_turns. End the run; the gate's failure message names the blocking errors.
 - source_agent: AppValidationAgent
-  target_agent: user
+  target_agent: terminate
   transition_type: condition
   condition_type: context_equals
   condition_key: bundle_repair_status
   condition_value: blocked
-  transition_target: RevertToUserTarget
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 - source_agent: AppValidationAgent
   target_agent: user
   transition_type: condition

@@ -72,13 +72,16 @@ class OrchestratorConfig(DeclarativeModel):
     orchestration_pattern: str = "ag2_network"
     initial_message: str | None = None
     initial_agent: str | None = None
+    # Context key whose text the runtime reports to the user when the
+    # transition graph ends a run as workflow_failed.
+    failure_message_key: str | None = None
     triggers: list[OrchestratorTriggerSpec] = Field(default_factory=list)
     @field_validator("workflow_name", "orchestration_pattern")
     @classmethod
     def _required_text_fields(cls, value: Any, info):  # type: ignore[no-untyped-def]
         return _required_text(value, field_name=info.field_name)
 
-    @field_validator("initial_message", "initial_agent", mode="before")
+    @field_validator("initial_message", "initial_agent", "failure_message_key", mode="before")
     @classmethod
     def _optional_text_fields(cls, value: Any) -> str | None:
         return _optional_text(value)

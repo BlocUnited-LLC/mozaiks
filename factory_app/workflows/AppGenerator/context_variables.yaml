@@ -1038,6 +1038,40 @@ definitions:
     source:
       type: state
       default: null
+  app_validation_fingerprint:
+    type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: >
+      Digests of the bundle the last validation inspected and of its outcome,
+      compared against the next validation to detect a rerun that cannot progress.
+    source:
+      type: state
+      default: null
+  app_validation_no_progress:
+    type: boolean
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: >
+      True when validation ran again on an unchanged bundle and failed with the
+      same outcome, so the run ends instead of repeating it.
+    source:
+      type: state
+      default: false
+  app_build_failure_message:
+    type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: >
+      User-facing reason the build cannot continue, listing the blocking errors.
+      Written only when the validation outcome ends the run, null otherwise.
+      orchestrator.yaml names it as the failure message for workflow_failed ends.
+    source:
+      type: state
+      default: null
   interview_complete:
     type: boolean
     description: True once the intake interview has gathered enough non-AI product
