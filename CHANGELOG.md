@@ -76,6 +76,10 @@ This project follows a practical pre-1.0 changelog format:
   - `PYTHON_DOTENV_DISABLED=1` also prevents Studio launchers from copying
     workspace `.env` values into their child process.
 
+- Replaced the default brand fonts with redistributable Bungee Inline and Share
+  Tech, included the OFL text for Oxanium, and added package checks for bundled
+  font licenses.
+
 - Generated subscription plans now select approved module actions from a closed
   inventory. The factory derives capability IDs and gates only for actions that
   differ between plans, so actions included in every plan remain available after

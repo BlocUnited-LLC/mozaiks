@@ -114,9 +114,18 @@ For a local font, use:
 ```json
 {
   "localFont": true,
-  "src": "/fonts/MyFont.otf"
+  "src": "/fonts/MyFont-Regular.ttf"
 }
 ```
+
+Only commit fonts whose license allows redistribution, such as the SIL Open
+Font License or Apache 2.0, and keep the license text beside the font as
+`app/brand/fonts/<Family>-OFL.txt` (or `<Family>-LICENSE.txt`), where
+`<Family>` is the font file name up to its first `-`. A desktop or personal-use
+font license does not cover shipping the font file inside your app. The default
+Mozaiks brand keeps its `mozaik.png` wordmark image and ships Bungee Inline for
+logo-styled text, plus Share Tech and Oxanium, each with its OFL text. An active
+app's brand config supplies its own fonts and colors.
 
 ### colors
 

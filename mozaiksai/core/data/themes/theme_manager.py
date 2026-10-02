@@ -181,7 +181,7 @@ DEFAULT_THEME: dict[str, Any] = {
             "tailwindClass": "font-heading",
         },
         "logo": {
-            "family": "Fagrak Inline",
+            "family": "Bungee Inline",
             "fallbacks": "Rajdhani, ui-sans-serif, system-ui, sans-serif",
             "googleFont": None,
             "localFont": True,

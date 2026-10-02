@@ -169,7 +169,9 @@ brand token selection and expanded visual values: `theme.primary`,
 Local font files live under `app/brand/fonts/` and are referenced as
 `/fonts/...` from theme config. Generated artifacts must not copy font binaries
 outside `brand/`. Google Fonts are declared in theme config and loaded by the
-frontend theme loader.
+frontend theme loader. Each local font ships with its redistribution license
+beside it as `<Family>-OFL.txt` or `<Family>-LICENSE.txt`;
+`scripts/package_content_guard.py` enforces this for the fonts Mozaiks ships.
 
 ## Rules
 

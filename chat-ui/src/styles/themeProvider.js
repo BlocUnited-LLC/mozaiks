@@ -359,10 +359,10 @@ const LEGACY_FONT_PRESETS = {
     googleFont: fontImports['source-code-pro'],
   },
   logo: {
-    family: 'Fagrak Inline',
+    family: 'Bungee Inline',
     fallbacks: "'Rajdhani', ui-sans-serif, system-ui, sans-serif",
     localFont: true,
-    src: '/fonts/Fagrak Inline.otf',
+    src: '/fonts/BungeeInline-Regular.ttf',
   },
 };
 
@@ -376,23 +376,8 @@ const CHAT_BUBBLE_RADIUS_BY_SCALE = {
 
 const BUILTIN_LOCAL_FONT_PRESETS = [
   {
-    family: 'Fagrak',
-    src: '/fonts/Fagrak.otf',
-    fallbacks: 'ui-sans-serif, system-ui, sans-serif',
-  },
-  {
-    family: 'Techfont',
-    src: '/fonts/Techfont.woff',
-    fallbacks: 'ui-sans-serif, system-ui, sans-serif',
-  },
-  {
-    family: 'Fueled by Schlitz',
-    src: '/fonts/FBS.otf',
-    fallbacks: 'ui-sans-serif, system-ui, sans-serif',
-  },
-  {
-    family: 'Hyperjump',
-    src: '/fonts/Hyperjump Bold.otf',
+    family: 'Share Tech',
+    src: '/fonts/ShareTech-Regular.ttf',
     fallbacks: 'ui-sans-serif, system-ui, sans-serif',
   },
   {
@@ -1306,10 +1291,7 @@ function applyFontVariables(root, themeFonts) {
   if (logoStack) root.style.setProperty('--font-logo', logoStack);
 
   const utilityStacks = {
-    '--font-fagrak': buildFontStack({ family: 'Fagrak' }, bodyStack || 'ui-sans-serif, system-ui, sans-serif'),
-    '--font-tech': buildFontStack({ family: 'Techfont' }, `${bodyStack || 'ui-sans-serif, system-ui, sans-serif'}, monospace`),
-    '--font-fbs': buildFontStack({ family: 'Fueled by Schlitz' }, bodyStack || 'ui-sans-serif, system-ui, sans-serif'),
-    '--font-hyperjump': buildFontStack({ family: 'Hyperjump' }, bodyStack || 'ui-sans-serif, system-ui, sans-serif'),
+    '--font-tech': buildFontStack({ family: 'Share Tech' }, `${bodyStack || 'ui-sans-serif, system-ui, sans-serif'}, monospace`),
     '--font-transmission': buildFontStack(
       { family: 'Oxanium' },
       `${headingStack || bodyStack || 'ui-sans-serif, system-ui, sans-serif'}, monospace`

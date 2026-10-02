@@ -842,7 +842,7 @@ def test_platform_ui_fonts_flow_through_semantic_theme_tokens() -> None:
     assert "THEME_HEADING_FONT_STACK" in home_page
 
     # Do not regress to literal brand font names in component code.
-    literal_font_names = ("Rajdhani", "Orbitron", "Fagrak")
+    literal_font_names = ("Rajdhani", "Orbitron", "Bungee")
     ui_root = app_root / "ui"
     for path in sorted(ui_root.rglob("*.jsx")):
         source = path.read_text(encoding="utf-8")
