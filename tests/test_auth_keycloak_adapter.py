@@ -328,6 +328,16 @@ def _offline_keycloak(monkeypatch, *, client_id: str) -> KeycloakAuthAdapter:
 
 class TestKeycloakMandatoryAudience:
     @pytest.mark.asyncio
+    async def test_signed_oidc_id_token_for_browser_client_is_rejected(self, monkeypatch):
+        adapter = _offline_keycloak(monkeypatch, client_id="mozaiks-studio")
+        token = _kc_token(
+            aud="mozaiks-studio", typ="ID", nonce="browser-nonce", at_hash="access-token-hash", scope=None
+        )
+        with pytest.raises(AuthError) as exc_info:
+            await adapter.validate_token(token)
+        assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
     async def test_token_for_client_audience_is_accepted(self, monkeypatch):
         adapter = _offline_keycloak(monkeypatch, client_id="my-app")
         claims = await adapter.validate_token(_kc_token(aud=["my-app", "account"]))
