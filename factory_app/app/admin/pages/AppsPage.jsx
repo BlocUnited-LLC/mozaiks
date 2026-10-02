@@ -95,7 +95,7 @@ function AppMobileItem({ row, onOpen, onDashboard, onDelete }) {
             Dashboard
           </ActionButton>
         )}
-        <ActionButton
+        {onDelete && <ActionButton
           onClick={(e) => { e.stopPropagation(); onDelete(row) }}
           size="sm"
           variant="ghost"
@@ -103,7 +103,7 @@ function AppMobileItem({ row, onOpen, onDashboard, onDelete }) {
           aria-label="Delete app"
         >
           <TrashIcon />
-        </ActionButton>
+        </ActionButton>}
       </div>
     </article>
   )
@@ -165,7 +165,7 @@ function AppsTable({ rows, onOpen, onDashboard, onDelete }) {
               Dashboard
             </ActionButton>
           )}
-          <ActionButton
+          {onDelete && <ActionButton
             onClick={(e) => { e.stopPropagation(); onDelete(row) }}
             size="sm"
             variant="ghost"
@@ -173,7 +173,7 @@ function AppsTable({ rows, onOpen, onDashboard, onDelete }) {
             aria-label="Delete app"
           >
             <TrashIcon />
-          </ActionButton>
+          </ActionButton>}
         </span>
       ),
     },
@@ -194,9 +194,8 @@ function AppsTable({ rows, onOpen, onDashboard, onDelete }) {
   )
 }
 
-export default function AppsPage() {
+export function AppsDirectory({ apps, loading, error, deleteApp, navigationForApp }) {
   const navigate = useNavigate()
-  const { apps, loading, error, deleteApp } = useWorkspaceApps('Could not load your apps.')
   const [dashboardConfig, setDashboardConfig] = useState(null)
   const [searchValue, setSearchValue] = useState('')
   const [activeFilter, setActiveFilter] = useState('all')
@@ -218,10 +217,17 @@ export default function AppsPage() {
     [dashboardConfig],
   )
 
-  const portfolio = useMemo(
-    () => buildWorkspacePortfolio(apps, { appDashboardRoute }),
-    [appDashboardRoute, apps],
-  )
+  const portfolio = useMemo(() => {
+    const model = buildWorkspacePortfolio(apps, { appDashboardRoute })
+    if (!navigationForApp) return model
+    return {
+      ...model,
+      rows: model.rows.map((row) => {
+        const { primaryAction, dashboardHref } = navigationForApp(row.app)
+        return { ...row, primaryAction, dashboardHref }
+      }),
+    }
+  }, [appDashboardRoute, apps, navigationForApp])
 
   const visibleRows = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
@@ -285,7 +291,7 @@ export default function AppsPage() {
             onFilterChange={setActiveFilter}
           />
           {visibleRows.length > 0 ? (
-            <AppsTable rows={visibleRows} onOpen={handleOpen} onDashboard={handleDashboard} onDelete={handleDelete} />
+            <AppsTable rows={visibleRows} onOpen={handleOpen} onDashboard={handleDashboard} onDelete={deleteApp ? handleDelete : null} />
           ) : portfolio.rows.length === 0 ? (
             <InlineEmptyState
               title="No apps yet"
@@ -302,4 +308,9 @@ export default function AppsPage() {
       </div>
     </WorkspaceLayout>
   )
+}
+
+export default function AppsPage() {
+  const directory = useWorkspaceApps('Could not load your apps.')
+  return <AppsDirectory {...directory} />
 }

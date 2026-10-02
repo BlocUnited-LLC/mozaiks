@@ -164,6 +164,28 @@ declaring a normal route-manifest entry with `component: DashboardPortalPage`;
 they should not copy the factory page into their workspace to activate a
 default portal.
 
+### App-owned Management Composition
+
+`@mozaiks/factory-app-ui` exports `AppsDirectory` and `DashboardPortalPage` for
+app-owned composition around the shared Studio presentation. `AppsDirectory`
+accepts `apps`, `loading`, `error`, an optional `deleteApp` callback, and an
+optional `navigationForApp(app)` callback returning `primaryAction` and
+`dashboardHref`. Without that callback, the standard Studio directory retains
+its existing navigation. Without a delete callback, it offers no delete action.
+
+An app whose management record differs from the Factory record must resolve
+that relationship through its own authorized data source. Its wrapper can pass
+`targetAppId` and `buildRegistryId` to `DashboardPortalPage`: Studio finds that
+exact target and verifies its Factory registry association before loading build
+data. The route's `appId` remains the management selector for portal navigation;
+workflow launches use the resolved Factory record's execution host and build
+registry. No identity is rewritten or inferred from another identifier.
+
+Ordinary Studio routes need no wrapper or extra props. Workspace-scoped portal
+routes have no `appId` and require no selected-app lookup. Product wrappers must
+preserve that workspace behavior and show an unavailable or unlinked state when
+their own authorized record cannot resolve a Factory target.
+
 The OSS dashboard contract intentionally stops at build/review management.
 Collaborative development product behavior such as proposal discussion, voting,
 community moderation, and proprietary approval policy belongs in app-owned

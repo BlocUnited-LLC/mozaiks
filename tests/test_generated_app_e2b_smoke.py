@@ -54,6 +54,9 @@ async def test_factory_materialized_app_builds_runs_and_is_terminated(monkeypatc
     monkeypatch.delenv("SANDBOX_TEMPLATE", raising=False)
     outputs = _typed_task_outputs(_load_models())
     outputs["reports.page"]["pages"][0]["sections"][0]["config"]["data_key"] = "reports"
+    outputs["reports.page"]["theme_config_patch"]["theme"].update(
+        primary="teal", font="oxanium", font_heading="oxanium",
+    )
     files, _ = await _assemble_from_payload(
         task_outputs=outputs,
         captured_theme_config={
@@ -79,6 +82,23 @@ async def test_factory_materialized_app_builds_runs_and_is_terminated(monkeypatc
     assert validation["sandbox_terminated"] and validation["preview_url"] is None
     await _assert_absent(provider, validation["sandbox_session_id"])
     print(f"{provider} Factory build validation passed and terminated session={validation['sandbox_session_id']}", flush=True)
+    # Exercise app-owned binary fonts through the same preview sync boundary as
+    # uploaded brand assets, without relying on a third-party font CDN.
+    font_root = Path(__file__).resolve().parents[1] / "factory_app/app/brand/fonts"
+    theme = json.loads(files["brand/theme_config.json"])
+    theme["fonts"] = {
+        role: {
+            "family": "Oxanium", "fallbacks": "sans-serif", "localFont": True,
+            "src": "/fonts/Oxanium-VariableFont_wght.ttf",
+        }
+        for role in ("body", "heading", "logo")
+    }
+    files["brand/theme_config.json"] = json.dumps(theme)
+    preview_files = {
+        **files,
+        "brand/fonts/Oxanium-VariableFont_wght.ttf": (font_root / "Oxanium-VariableFont_wght.ttf").read_bytes(),
+        "brand/fonts/Oxanium-OFL.txt": (font_root / "Oxanium-OFL.txt").read_text(encoding="utf-8"),
+    }
     manager = ArtifactPreviewSessionManager(provider_resolver=lambda: (provider, adapter))
     state = await manager.create_or_reuse(
         "runtime-smoke", app_id="factory", user_id="smoke", target_app_id="deterministic-reports",
@@ -87,7 +107,7 @@ async def test_factory_materialized_app_builds_runs_and_is_terminated(monkeypatc
     session_id = state.session_id
     print(f"{provider} smoke allocated session={session_id}", flush=True)
     try:
-        await manager.sync(state.sandbox_id, [{"path": path, "content": text} for path, text in files.items()], [])
+        await manager.sync(state.sandbox_id, [{"path": path, "content": text} for path, text in preview_files.items()], [])
         await manager.start(state.sandbox_id)
         assert state.status == "running", state.last_error
         print(f"{provider} smoke preview={state.preview_url}", flush=True)

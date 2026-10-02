@@ -24,7 +24,7 @@ import {
   normalizeAppStatus,
 } from './appStudioModel.js'
 import CarryForwardReportSummary from './CarryForwardReportSummary.jsx'
-import { fetchDashboardConfig, getDashboardSurface } from './dashboardRoutes.js'
+import { buildDashboardWorkflowHref, fetchDashboardConfig, getDashboardSurface } from './dashboardRoutes.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 function decodePathSegment(value) {
@@ -407,26 +407,7 @@ function ApprovalPanel({ panel, build, latestArtifact }) {
   )
 }
 
-function workflowHref({ action, panel, build, appId }) {
-  if (action?.type === 'route') return routeForApp(action.target, appId)
-  if (action?.type === 'external_url') return action.target
-
-  const workflow = action?.type === 'workflow'
-    ? action.target
-    : build.initial_compile_workflow || panel.workflow_id || 'ValueEngine'
-  const params = new URLSearchParams({
-    workflow,
-    mode: 'workflow',
-  })
-  if (appId) params.set('app_id', appId)
-  if (action?.type === 'workflow_sequence' && action.target) {
-    params.set('sequence', action.target)
-  }
-  if (action?.id) params.set('action_id', action.id)
-  return `/chat?${params.toString()}`
-}
-
-function WorkflowLauncherPanel({ panel, build, appId }) {
+function WorkflowLauncherPanel({ panel, build, appId, registeredApp }) {
   const actions = toArray(panel.actions)
   const support = build.refinement_support || {}
   const availableModes = Object.entries(support)
@@ -438,7 +419,7 @@ function WorkflowLauncherPanel({ panel, build, appId }) {
       {actions.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {actions.map((action) => {
-            const href = workflowHref({ action, panel, build, appId })
+            const href = buildDashboardWorkflowHref({ action, panel, build, appId, registeredApp })
             const external = action.type === 'external_url'
             if (external) {
               return (
@@ -519,7 +500,7 @@ function DashboardPanelRenderer({ panel, portal, surface, snapshot, data, appId 
     case 'approval_queue':
       return <ApprovalPanel panel={panel} build={build} latestArtifact={latestArtifact} />
     case 'workflow_launcher':
-      return <WorkflowLauncherPanel panel={panel} build={build} appId={appId} />
+      return <WorkflowLauncherPanel panel={panel} build={build} appId={appId} registeredApp={data?.registeredApp} />
     default:
       return <GenericPanelFallback panel={panel} />
   }
@@ -529,13 +510,13 @@ function isWidePanel(type) {
   return ['summary_strip', 'kpi_grid', 'portal_link_grid', 'artifact_timeline'].includes(type)
 }
 
-export default function DashboardPortalPage() {
+export default function DashboardPortalPage({ targetAppId, buildRegistryId } = {}) {
   const params = useParams()
   const location = useLocation()
   const appId = params.appId ? decodePathSegment(params.appId) : null
   const scope = appId ? 'app' : 'workspace'
   const manifest = useDashboardPortal(scope, appId, location.pathname)
-  const { data, loading: appLoading, error: appError, dataMode, refresh } = useAppStudioData(appId || 'workspace-app')
+  const { data, loading: appLoading, error: appError, dataMode, refresh } = useAppStudioData(targetAppId || appId || 'workspace-app', buildRegistryId)
   const snapshot = useMemo(() => getAppStudioSnapshot(appId, data, dataMode), [appId, data, dataMode])
 
   if (manifest.loading || appLoading) {

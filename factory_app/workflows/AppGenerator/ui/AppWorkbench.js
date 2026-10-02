@@ -375,6 +375,7 @@ const AppWorkbench = ({
                 sandboxStatus={sandboxStatus}
                 sandboxSyncing={sandboxSyncing}
                 sandboxError={sandboxSyncError}
+                artifactVersionId={artifactVersionId}
                 config={config}
                 onStartPreview={() => syncAndRestart(filesMap)}
                 canStartPreview={Boolean(artifactVersionId && buildRegistryId && Object.keys(filesMap || {}).length > 0)}

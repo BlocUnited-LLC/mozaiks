@@ -11,6 +11,7 @@ import * as platformExtensions from '@platform/extensions';
 
 const apiBaseUrl = import.meta.env.VITE_API_URL ?? '';
 const wsBaseUrl = import.meta.env.VITE_WS_URL || (apiBaseUrl ? apiBaseUrl.replace(/^http/, 'ws') : undefined);
+const isDraftPreview = import.meta.env.VITE_MOZAIKS_PREVIEW === 'true';
 let bootstrapPromise;
 
 function bootstrap() {
@@ -54,7 +55,22 @@ export default function App() {
     return () => { cancelled = true; };
   }, [attempt]);
 
-  if (!state) return (
+  return <>
+    {isDraftPreview && (
+      <div
+        role="note"
+        aria-label="Draft app preview"
+        style={{
+          position: 'fixed', left: 8, bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))',
+          zIndex: 1000, pointerEvents: 'none', padding: '4px 8px', borderRadius: 6,
+          background: '#0f172a', color: '#f8fafc', border: '1px solid #64748b',
+          font: '600 11px/1.4 system-ui, sans-serif',
+        }}
+      >
+        Draft preview
+      </div>
+    )}
+    {!state ? (
     <main id="main-content" className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
       <div className="max-w-md text-center">
         {failed ? <>
@@ -64,6 +80,6 @@ export default function App() {
         </> : <p role="status">Loading app…</p>}
       </div>
     </main>
-  );
-  return <MozaiksApp {...state} />;
+    ) : <MozaiksApp {...state} />}
+  </>;
 }

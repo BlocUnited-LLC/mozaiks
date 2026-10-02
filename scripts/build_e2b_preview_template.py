@@ -36,6 +36,23 @@ _PREVIEW_CONTEXT_DIRECTORIES = (
 )
 
 
+def _ignore_preview_context(directory: str, names: list[str]) -> set[str]:
+    # Apply the local-output exclusions before E2B receives the staged context.
+    # Keep the logs Python package; only its runtime output directories are data.
+    ignored = shutil.ignore_patterns(
+        ".git", ".local", ".codex-worktrees", "node_modules",
+        ".venv", ".release-venv", ".release-local-venv", ".pkg-venv",
+        "__pycache__", "*.py[cod]", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        "*.egg-info", ".vite", ".mozaiks-tailwind-sources", "build", "dist", "coverage", ".coverage*",
+        "playwright-report*", "test-results", ".logs", "*.log", "*_debug.txt",
+        ".env", ".env.*",
+    )(directory, names)
+    ignored.discard(".env.example")
+    if Path(directory) == REPO_ROOT / "logs":
+        ignored.update({"logs", "agent_outputs", "workflow_converter"}.intersection(names))
+    return ignored
+
+
 def _build_log(entry: Any) -> None:
     message = getattr(entry, "message", None) or getattr(entry, "text", None) or str(entry)
     # E2B build logs can contain Unicode symbols; keep Windows consoles from
@@ -62,7 +79,7 @@ def _stage_preview_context(dockerfile: Path) -> tempfile.TemporaryDirectory[str]
         shutil.copytree(
             source,
             context_root / relative_path,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+            ignore=_ignore_preview_context,
         )
     shutil.copy2(dockerfile, context_root / "Dockerfile.preview")
     return context
