@@ -197,6 +197,12 @@ declarations for it, including shares made to or by it, no longer apply.
 Redeclaring a mounted platform module's collection in the workspace contract
 fails app load. Platform declarations carry no indexes into the workspace.
 
+When platform declarations are mounted, every module's collection handles
+reject foreign-collection aggregation and aggregation writes, including nested
+stages. Literal aliases use the bounded Mongo facade rather than exposing
+database handles. These protections also apply to `app_wide` collections and
+workspaces with no data contract; they do not depend on per-user ownership.
+
 ### `documented_alias_exclusions`
 
 `documented_alias_exclusions` is an explicit non-executable review ledger. It

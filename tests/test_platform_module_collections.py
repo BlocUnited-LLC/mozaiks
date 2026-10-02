@@ -28,6 +28,7 @@ from mozaiksai.core.runtime.persistence import (
     PersistenceScopeError,
     PlatformModuleDeclarations,
 )
+from mozaiksai.core.runtime.persistence.alias_collection import GuardedAliasCollection
 from mozaiksai.core.runtime.persistence.intent_loader import (
     load_data_contract,
     validate_complete_data_contract_ownership,
@@ -251,6 +252,53 @@ async def test_owner_filter_that_repeats_the_principal_is_not_matched_twice():
     ]
 
 
+@pytest.mark.parametrize("module_id,workspace", [
+    ("support", None),
+    ("tasks", None),
+    ("tasks", workspace_contract(tenancy="app_wide")),
+    ("tasks", workspace_contract()),
+])
+@pytest.mark.parametrize("stage", [
+    {"$lookup": {"from": "forbidden", "pipeline": [], "as": "rows"}},
+    {"$unionWith": "forbidden"},
+    {"$graphLookup": {"from": "forbidden", "startWith": "$id", "connectFromField": "id",
+                      "connectToField": "id", "as": "rows"}},
+    {"$out": "forbidden"},
+    {"$merge": "forbidden"},
+    {"$facet": {"rows": [{"$lookup": {"from": "forbidden", "pipeline": [], "as": "rows"}}]}},
+])
+async def test_platform_boundary_refuses_foreign_aggregation_even_without_owned_rows(module_id, workspace, stage):
+    ctx = context(module_id, workspace=workspace, principal=PersistencePrincipal("user-a"))
+    name = "requests" if module_id == "support" else "tasks"
+    collection = ctx.collection(module_id, name)
+    with pytest.raises(PersistenceScopeError):
+        await collection.aggregate([stage])
+    assert collection._collection.aggregate_pipelines == []
+
+
+@pytest.mark.parametrize("module_id,workspace", [
+    ("support", None),
+    ("tasks", None),
+    ("tasks", workspace_contract(tenancy="app_wide")),
+])
+async def test_platform_boundary_keeps_same_collection_aggregation_and_bounds_aliases(module_id, workspace):
+    ctx = context(module_id, workspace=workspace)
+    name = "requests" if module_id == "support" else "tasks"
+    collection = ctx.collection(module_id, name)
+    await collection.insert_one({"status": "open"})
+    assert collection._collection.inserted == [{"status": "open", "app_id": "app-a"}]
+    assert (await collection.find_one({"status": "open"}))["query"] == {"app_id": "app-a", "status": "open"}
+    await collection.aggregate([{"$group": {"_id": "$status", "count": {"$sum": 1}}}])
+    assert collection._collection.aggregate_pipelines[0][0] == {"$match": {"app_id": "app-a"}}
+    alias = ctx.literal_collection(ctx.collection_name(module_id, name))
+    assert isinstance(alias, GuardedAliasCollection)
+    assert not hasattr(alias, "database")
+    with pytest.raises(PersistenceScopeError):
+        alias.aggregate([{"$unionWith": "forbidden"}])
+    await alias.find_one({"app_id": "app-a"})
+    await alias.aggregate([{"$match": {"app_id": "app-a"}}]).to_list(length=None)
+
+
 # --------------------------------------------------------------------------- the Studio declarations
 
 
@@ -440,6 +488,43 @@ STUDIO_PERMISSIONS = (
     "workspace_support.manage", "security_readiness.read", "security_readiness.manage",
     "onboarding.read", "onboarding.manage", "messages.read", "messages.write",
 )
+
+
+async def test_app_wide_platform_boundary_on_mongo_preserves_crud_and_refuses_foreign_stages(mongo):
+    ctx = MongoPersistenceContext(
+        app_id="app-a", client=mongo.client, database_name=mongo.database,
+        platform_modules=mounted(), module_id="support",
+    )
+    own = ctx.collection("support", "requests")
+    foreign = MongoPersistenceContext(
+        app_id="app-a", client=mongo.client, database_name=mongo.database,
+        platform_modules=mounted(), module_id="tour", principal=PersistencePrincipal("user-a"),
+    )
+    protected = foreign.collection("tour", "status")
+    await protected.insert_one({"secret": "owner-only"})
+    await own.insert_one({"request_id": "r1", "status": "open"})
+    await own.update_one({"request_id": "r1"}, {"$set": {"status": "resolved"}})
+    assert (await own.find_one({"request_id": "r1"}))["status"] == "resolved"
+    assert await own.aggregate([{"$group": {"_id": "$status", "count": {"$sum": 1}}}]) == [
+        {"_id": "resolved", "count": 1},
+    ]
+    target = foreign.collection_name("tour", "status")
+    for stage in (
+        {"$lookup": {"from": target, "pipeline": [], "as": "rows"}},
+        {"$unionWith": target}, {"$out": target}, {"$merge": target},
+        {"$facet": {"rows": [{"$unionWith": target}]}},
+    ):
+        with pytest.raises(PersistenceScopeError):
+            await own.aggregate([stage])
+    alias = ctx.literal_collection(ctx.collection_name("support", "requests"))
+    assert not hasattr(alias, "database")
+    with pytest.raises(PersistenceScopeError):
+        alias.aggregate([{"$unionWith": target}])
+    rows = await alias.aggregate([{"$match": {"app_id": "app-a"}}]).to_list(length=None)
+    assert [row["request_id"] for row in rows] == ["r1"]
+    assert (await protected.find_one({}))["secret"] == "owner-only"
+    await own.delete_one({"request_id": "r1"})
+    assert await own.count({}) == 0
 
 
 async def test_studio_pages_load_in_a_fresh_scaffold_and_keep_users_apart(tmp_path, monkeypatch, mongo):

@@ -235,6 +235,7 @@ class MongoPersistenceContext:
         )
         contract = access.data_contract
         self._ownership = collection_ownership(contract, app_id=self.app_id, app_slug=app_slug)
+        self._bounded_collection_access = platform_modules is not None or bool(self._ownership)
         self._bindings = collection_bindings(contract) if contract is not None else None
         self._reserved = frozenset(
             collection_name_for(app_id=self.app_id, app_slug=app_slug, module_id=owner, entity_name=name)
@@ -291,7 +292,7 @@ class MongoPersistenceContext:
                 user_id=self._scope_metadata.get("user_id"),
                 ownership=self._ownership.get(collection_name),
                 principal=lambda: self.principal,
-                restrict_aggregation=bool(self._ownership),
+                restrict_aggregation=self._bounded_collection_access,
             )
         return self._collections[key]
 
@@ -305,7 +306,7 @@ class MongoPersistenceContext:
         Access to a declared owned collection is forbidden. Other aliases use
         a bounded Mongo facade when this app has ownership contracts, retaining
         their explicit app-data semantics, including assignment stores. Apps
-        without owned collections retain raw alias handles. A collection a
+        without ownership or platform declarations retain raw alias handles. A collection a
         mounted platform module declares is unavailable to every other module,
         and a platform module reaches only the collections declared for it.
         """
@@ -320,7 +321,7 @@ class MongoPersistenceContext:
         if name in self._ownership:
             raise PersistenceScopeError("Raw collection access is unavailable for owned collections")
         collection = self._client_handle()[self._database_name][name]
-        return GuardedAliasCollection(collection) if self._ownership else collection
+        return GuardedAliasCollection(collection) if self._bounded_collection_access else collection
 
     def scope_filter(self, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return scope_filter_for(self.app_id, extra)
