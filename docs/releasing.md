@@ -52,7 +52,7 @@ resolved before a stable 1.0 release.
   Execute the pre-release audit script (see [Release-Candidate Audit Command](#release-candidate-audit-command) below)
   and confirm it exits 0:
   ```bash
-  python scripts/run_release_audit.py
+  python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27017/release_audit_first_run
   ```
 
 - [ ] **Governance guardrails pass on main.**
@@ -100,15 +100,24 @@ resolved before a stable 1.0 release.
 ## Release-Candidate Audit Command
 
 Run this locally before tagging any release.  It chains governance, build,
-package inspection, smoke install, and resource verification:
+package inspection, smoke install, resource verification, and a first run of
+the installed package:
 
 ```bash
-python scripts/run_release_audit.py
+python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27017/release_audit_first_run
 ```
 
 The script lives at `scripts/run_release_audit.py` (see source for details).
 It builds a wheel into a temp directory, runs the content guard, smoke-installs
 into a clean venv, and verifies that Factory resources resolve from the install.
+It then runs `scripts/smoke_installed_first_run.py` with the installed Python,
+outside the checkout and with a scrubbed environment: `mozaiks init` →
+`mozaiks serve` (platform and studio hosts) → `/api/health/ready` →
+`/api/shell-config` must return the scaffold's `appId` and an anonymous local
+user with the `admin` role, and `mozaiks serve` against an unreachable
+`MONGO_URI` must stop within seconds. Point `--mongo-uri` (or
+`MOZAIKS_RELEASE_AUDIT_MONGO_URI`) at a throwaway database. The CI `package`
+job and the release workflow run the same smoke.
 
 ---
 

@@ -184,8 +184,11 @@ def create_parser():
     )
     serve_parser.add_argument(
         "--listen",
-        default="0.0.0.0",
-        help="Interface to bind (default: 0.0.0.0)",
+        default="127.0.0.1",
+        help=(
+            "Interface to bind (default: 127.0.0.1, this machine only). "
+            "Use --listen 0.0.0.0 to listen on all interfaces, for example in a container."
+        ),
     )
     serve_parser.add_argument(
         "--reload",
@@ -296,6 +299,14 @@ def create_parser():
         "--no-browser",
         action="store_true",
         help="Launch Studio services without opening the browser",
+    )
+    studio_parser.add_argument(
+        "--listen",
+        default="127.0.0.1",
+        help=(
+            "Interface the launched backend and frontend bind with --open "
+            "(default: 127.0.0.1, this machine only; use 0.0.0.0 for all interfaces)"
+        ),
     )
 
     # mozaiks add
@@ -525,13 +536,19 @@ def main():
 
     try:
         if args.command == "init":
-            init_command.run(args)
+            result = init_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "quickstart":
-            quickstart_command.run(args)
+            result = quickstart_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "serve":
             serve_command.run(args)
         elif args.command == "onboard":
-            onboard_command.run(args)
+            result = onboard_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "studio":
             result = studio_command.run(args)
             if result:

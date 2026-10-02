@@ -137,6 +137,12 @@ This project follows a practical pre-1.0 changelog format:
   error but exited 0, so scripts and CI treated the failure as success. The
   printed messages are unchanged.
 
+- Fresh CLI scaffolds now boot from an installed wheel with a valid secret
+  contract, stable app ID, and local Studio admin access. Local launchers bind
+  loopback by default, report startup logs, fail fast on unreachable MongoDB,
+  and route the frontend to the selected backend port. Release checks now
+  smoke the installed app's first run.
+
 - App fonts and colors declared in `theme_config.json` remain active when the
   standalone theme endpoint returns that same config. Only saved custom
   overrides for the matching app can replace them. Partial brand tokens inherit
