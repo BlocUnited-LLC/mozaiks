@@ -13,11 +13,12 @@ is reconciled here instead of reaching runtime:
   rewritten to the declared type, and a write hook emitting the event its
   canonical write already emits is dropped.
 
-Model-authored Python that does not parse is rejected with its path and line
-before any of this runs (``reject_unparseable_python``). These cleanups are
-optional: one whose own result would not parse keeps the model's file
-unchanged and logs a warning. Required renderings parse their result through
-``parse_rendered_python``, which names the path, line and rendered snippet.
+Model-authored Python that ships as written and does not compile is rejected
+with its path and line before any of this runs (``invalid_python_diagnostics``).
+These cleanups are optional: one whose own result would not parse keeps the
+model's file unchanged and logs a warning. Required renderings parse their
+result through ``parse_rendered_python``, which names the path, line and
+rendered snippet.
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ import ast
 import io
 import logging
 import re
+import warnings
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 
@@ -43,6 +45,7 @@ PERSISTENCE_COLLECTION_METHODS = (
 )
 _HOOK = re.compile(r"^(before|after)_(create|update|delete)_([A-Za-z0-9_]+)$")
 _SNIPPET_CONTEXT_LINES = 3
+_QUOTED_LINE_LIMIT = 200
 
 
 class RenderedPythonError(RuntimeError):
@@ -60,27 +63,38 @@ def source_lines(source: str) -> list[str]:
 
 
 def syntax_error_diagnostic(path: str, source: str, exc: SyntaxError | ValueError) -> str:
-    """``<path>:<line>: <msg>`` followed by the offending source line."""
+    """``<path>:<line>: <msg>`` followed by the offending source line, quoted up to 200 characters."""
     if not isinstance(exc, SyntaxError) or exc.lineno is None:
         return f"{path}: {exc}"
     lines = source_lines(source)
-    offending = lines[exc.lineno - 1] if 0 < exc.lineno <= len(lines) else (exc.text or "")
+    offending = (lines[exc.lineno - 1] if 0 < exc.lineno <= len(lines) else (exc.text or "")).strip()
+    if len(offending) > _QUOTED_LINE_LIMIT:
+        offending = offending[:_QUOTED_LINE_LIMIT] + " ..."
     message = f"{path}:{exc.lineno}: {exc.msg}"
-    return f"{message}\n    {offending.strip()}" if offending.strip() else message
+    return f"{message}\n    {offending}" if offending else message
 
 
-def reject_unparseable_python(files: Mapping[str, str]) -> None:
-    """Reject every ``.py`` file that does not parse, all of them in one message."""
+def invalid_python_diagnostics(files: Mapping[str, str]) -> list[str]:
+    """One diagnostic per ``.py`` file that does not compile.
+
+    Compiling, not only parsing, also catches what the compiler rejects after
+    parsing: ``return`` or ``await`` outside a function, a late
+    ``from __future__`` import. Nothing is executed.
+    """
     errors: list[str] = []
     for path, source in sorted(files.items()):
         if not path.endswith(".py"):
             continue
         try:
-            ast.parse(source, filename=path)
+            with warnings.catch_warnings():
+                # An invalid escape sequence warns at compile time; the file still compiles.
+                warnings.simplefilter("ignore")
+                compile(source, path, "exec", dont_inherit=True)
         except (SyntaxError, ValueError) as exc:  # ValueError: a null byte on Python 3.11
             errors.append(syntax_error_diagnostic(path, source, exc))
-    if errors:
-        raise ValueError("\n".join(errors))
+        except (RecursionError, MemoryError) as exc:
+            errors.append(f"{path}: source is too deeply nested to compile ({type(exc).__name__}); simplify it")
+    return errors
 
 
 def parse_rendered_python(path: str, source: str) -> ast.Module:
@@ -402,10 +416,10 @@ __all__ = [
     "MOTOR_ONLY_METHODS",
     "PERSISTENCE_COLLECTION_METHODS",
     "RenderedPythonError",
+    "invalid_python_diagnostics",
     "parse_rendered_python",
     "prune_repository",
     "reconcile_emit_literals",
-    "reject_unparseable_python",
     "repository_references",
     "source_lines",
     "syntax_error_diagnostic",

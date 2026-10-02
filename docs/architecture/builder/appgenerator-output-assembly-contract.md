@@ -118,19 +118,27 @@ offending field, and what the contract allows: the accepted fields for an
 unknown key, the allowed values for a literal, the rule text for a contract
 rule. It never echoes a rejected value.
 
-Model-authored Python is parsed before any code reads or rewrites it: every
-`.py` file in the worker's file lanes (`code_files`, `python_files`,
-`model_files`, `database_files`, `service_foundation_bundle.files`) that is
-not pack-owned. A file that does not parse rejects the output with one
-diagnostic per file, `<path>:<line>: <message>` followed by the offending
-line, and the candidate is kept, so the rejection is recoverable like any other
-and batch recovery gives the worker its one bounded correction. The code that
-splices canonical functions into model files, prunes repositories and
-normalizes emit literals edits lines by the numbers `ast` reports, so it splits
-source only at `\n`, `\r\n` and `\r`. Those cleanups never turn a parseable
-model file into one that does not parse; a canonical rendering that does not
-parse is a builder defect (`RenderedPythonError`) naming the path, line and
-rendered snippet. A task failure that is not a rejection is `execution_failed`:
+Model-authored Python that ships as written is compiled before any code
+parses or rewrites it: every `.py` file in the worker's file lanes
+(`code_files`, `python_files`, `model_files`, `database_files`,
+`service_foundation_bundle.files`) that is not pack-owned, that the task owns
+when its batch requires owned paths, and that no renderer replaced. A copy
+code renders over keeps its renderer's rule (a model `policy.py` is rejected
+as model-authored policy source, a model `schemas.py` or
+`account_data_handler.py` is replaced), and a file the task does not own gets
+the ownership message. A file that does not compile, which includes `return`
+or `await` outside a function and source too deeply nested to compile, rejects
+the output with one diagnostic per file, `<path>:<line>: <message>` followed by
+the offending line (quoted up to 200 characters), and the candidate is kept,
+so the rejection is recoverable like any other and batch recovery gives the
+worker its one bounded correction. The code that splices canonical functions
+into model files, prunes repositories and normalizes emit literals edits lines
+by the numbers `ast` reports, so it splits source only at `\n`, `\r\n` and
+`\r`. Spliced methods take the indentation of the class body they join, and a
+one-line class body is moved onto its own line first. Those cleanups never turn
+a parseable model file into one that does not parse; a canonical rendering
+that does not parse is a builder defect (`RenderedPythonError`) naming the
+path, line and rendered snippet. A task failure that is not a rejection is `execution_failed`:
 it keeps the candidate as `rejected_output` when there is one and is logged at
 ERROR with the task, chat and traceback (`TASK_OUTPUT_PROCESSING_FAILED` while
 processing an output, `TASK_EXECUTION_FAILED` otherwise). It is not reclassified
