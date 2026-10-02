@@ -308,6 +308,7 @@ def _kc_token(**claim_overrides: object) -> str:
     now = int(time.time())
     claims = {
         **_base_claims(),
+        "typ": "Bearer",
         "iss": f"{_KC_URL}/realms/{_KC_REALM}",
         "iat": now,
         "exp": now + 300,
@@ -329,13 +330,19 @@ def _offline_keycloak(monkeypatch, *, client_id: str) -> KeycloakAuthAdapter:
 class TestKeycloakMandatoryAudience:
     @pytest.mark.asyncio
     async def test_signed_oidc_id_token_for_browser_client_is_rejected(self, monkeypatch):
-        adapter = _offline_keycloak(monkeypatch, client_id="mozaiks-studio")
+        adapter = _offline_keycloak(monkeypatch, client_id="mozaiks-api")
         token = _kc_token(
-            aud="mozaiks-studio", typ="ID", nonce="browser-nonce", at_hash="access-token-hash", scope=None
+            aud="mozaiks-api", typ="ID", nonce="browser-nonce", at_hash="access-token-hash", scope=None
         )
         with pytest.raises(AuthError) as exc_info:
             await adapter.validate_token(token)
         assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_access_token_without_keycloak_type_is_rejected(self, monkeypatch):
+        adapter = _offline_keycloak(monkeypatch, client_id="mozaiks-api")
+        with pytest.raises(AuthError, match="not a Keycloak access token"):
+            await adapter.validate_token(_kc_token(aud="mozaiks-api", typ=None))
 
     @pytest.mark.asyncio
     async def test_token_for_client_audience_is_accepted(self, monkeypatch):

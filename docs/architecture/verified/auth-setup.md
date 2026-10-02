@@ -63,12 +63,14 @@ SUPABASE_JWT_SECRET=your-jwt-secret
 ```bash
 KEYCLOAK_URL=https://keycloak.example.com
 KEYCLOAK_REALM=myrealm
-KEYCLOAK_CLIENT_ID=my-app  # required; the token aud claim must include it
+KEYCLOAK_CLIENT_ID=my-api  # required API audience, distinct from the browser client
 ```
 
-Keycloak does not put the client ID in the access token `aud` claim by
-default. Add an **Audience** mapper to the client (Included Client Audience =
-the same client, Add to access token on).
+Keycloak does not put the API client ID in a browser client's access-token
+`aud` claim by default. Create a separate API client and add an **Audience**
+mapper to the browser client (Included Client Audience = the API client,
+Add to access token on, Add to ID token off). The built-in adapter also
+requires Keycloak's signed `typ: Bearer` access-token claim.
 
 ---
 
@@ -96,7 +98,13 @@ AUTH_AUDIENCE=your-api  # required
 
 `AUTH_AUDIENCE` is required for the `jwt` provider, whichever way it is
 selected. Every token's `aud` claim is verified against it; there is no
-setting that skips the check.
+setting that skips the check. The default access-token rule requires the
+RFC 9068 `at+jwt` JOSE header. For an issuer that uses another signed,
+access-token-only claim, set both `AUTH_ACCESS_TOKEN_TYPE_CLAIM` and
+`AUTH_ACCESS_TOKEN_TYPE_VALUE` to its claim name and access-token value.
+For Keycloak with the generic JWT adapter, use `typ` and `Bearer`. An ID token
+must not carry that value. The API audience must be distinct from the browser
+client ID.
 
 For providers that require a tenant segment in the discovery URL, set:
 

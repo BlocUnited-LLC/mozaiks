@@ -25,6 +25,8 @@ def isolated_preview_environment(monkeypatch):
 
 @pytest.fixture
 def app_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTH_AUDIENCE", "preview-app-api")
+    monkeypatch.setenv("VITE_OIDC_CLIENT_ID", "preview-app")
     app = tmp_path / "app"
     app.mkdir()
     (app / "app.json").write_text('{"appId":"preview-app","authRequired":true}', encoding="utf-8")
@@ -55,12 +57,14 @@ def test_preview_uses_disposable_database_and_same_origin_api(app_root, monkeypa
     monkeypatch.setenv("VITE_OIDC_AUTHORITY", "http://local-idp")
     monkeypatch.setenv("MONGO_URI", "must-not-use-external-database")
     for name in (
-        "AUTH_AUDIENCE", "VITE_OIDC_CLIENT_ID", "VITE_OIDC_REDIRECT_URI", "CORS_ORIGINS",
+        "VITE_OIDC_REDIRECT_URI", "CORS_ORIGINS",
         "MOZAIKS_HOST", "VITE_MOZAIKS_HOST", "PLATFORM_PATH", "MOZAIKS_APP_WORKSPACE_PATH",
         "MOZAIKS_WORKFLOWS_PATH", "MOZAIKS_APP_DATABASE_NAME", "MOZAIKS_APP_DATA_DATABASE_NAME",
         "VITE_API_URL", "VITE_CORE_URL", "VITE_WS_URL", "MOZAIKS_BACKEND_URL",
     ):
         monkeypatch.setenv(name, "must-not-use-host-setting")
+    monkeypatch.setenv("AUTH_AUDIENCE", "preview-app-api")
+    monkeypatch.setenv("VITE_OIDC_CLIENT_ID", "preview-app")
     env = runtime.preview_environment(app_root, preview_url="http://localhost:12345")
     assert env["MONGO_URI"] == "mongodb://127.0.0.1:27017/mozaiks_preview"
     assert env["PLATFORM_PATH"] == str(app_root)
@@ -69,13 +73,24 @@ def test_preview_uses_disposable_database_and_same_origin_api(app_root, monkeypa
     assert env["MOZAIKS_APP_DATABASE_NAME"] == "mozaiks_preview"
     assert env["MOZAIKS_APP_DATA_DATABASE_NAME"] == env["MOZAIKS_APP_DATABASE_NAME"]
     assert env["MOZAIKS_HOST"] == env["VITE_MOZAIKS_HOST"] == "platform"
-    assert env["AUTH_AUDIENCE"] == env["VITE_OIDC_CLIENT_ID"] == "preview-app"
+    assert env["AUTH_AUDIENCE"] == "preview-app-api"
+    assert env["VITE_OIDC_CLIENT_ID"] == "preview-app"
     assert env["AUTH_ENABLED"] == "true"
     assert env["VITE_OIDC_REDIRECT_URI"] == "http://localhost:12345/auth/callback"
     assert env["VITE_API_URL"] == env["VITE_CORE_URL"] == env["VITE_WS_URL"] == ""
     assert env["CORS_ORIGINS"] == "http://localhost:12345"
     assert env["MOZAIKS_BACKEND_URL"] == "http://127.0.0.1:8000"
     assert env["PYTHON_DOTENV_DISABLED"] == "1"
+
+
+def test_authenticated_preview_rejects_browser_client_as_api_audience(app_root, monkeypatch):
+    monkeypatch.setenv("AUTH_ISSUER", "http://local-idp")
+    monkeypatch.setenv("AUTH_JWKS_URL", "http://local-idp/certs")
+    monkeypatch.setenv("VITE_OIDC_AUTHORITY", "http://local-idp")
+    monkeypatch.setenv("VITE_OIDC_CLIENT_ID", "preview-app")
+    monkeypatch.setenv("AUTH_AUDIENCE", "preview-app")
+    with pytest.raises(ValueError, match="must differ"):
+        runtime.preview_environment(app_root, preview_url="http://localhost:3000")
 
 
 @pytest.mark.asyncio

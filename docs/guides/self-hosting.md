@@ -85,7 +85,7 @@ First, copy your environment file:
 ```bash
 cp .env.example .env
 # Edit .env: fill in OPENAI_API_KEY (or ANTHROPIC_API_KEY), then set
-# AUTH_ENABLED=true and AUTH_AUDIENCE=mozaiks-studio.
+# AUTH_ENABLED=true and AUTH_AUDIENCE=mozaiks-api.
 # Set AUTH_JWKS_URL=http://keycloak:8080/realms/mozaiks/protocol/openid-connect/certs
 # For browser sign-in, set VITE_OIDC_CLIENT_ID=mozaiks-studio and
 # VITE_OIDC_AUTHORITY=http://localhost:8080/realms/mozaiks.
@@ -131,7 +131,7 @@ set these values:
 | Variable | What it's for |
 | --- | --- |
 | `OPENAI_API_KEY` | Your OpenAI key, or use `ANTHROPIC_API_KEY` instead |
-| `AUTH_AUDIENCE` | `mozaiks-studio`, the audience emitted by the included Keycloak client. JWT auth refuses to start without an audience. |
+| `AUTH_AUDIENCE` | `mozaiks-api`, the API audience added to access tokens by the included browser client. |
 | `AUTH_JWKS_URL` | `http://keycloak:8080/realms/mozaiks/protocol/openid-connect/certs` lets the backend container fetch Keycloak signing keys on the Compose network. |
 | `VITE_OIDC_CLIENT_ID` | `mozaiks-studio`, the public browser client in the included realm. |
 | `VITE_OIDC_AUTHORITY` | `http://localhost:8080/realms/mozaiks` for the local browser. |
@@ -140,6 +140,38 @@ Keycloak publishes its browser-facing `localhost` URL in OIDC discovery. The
 backend uses `AUTH_JWKS_URL` for signing keys while discovery still provides
 the expected token issuer. The MongoDB connection and Keycloak discovery URL
 are pre-wired in the Compose file for local use.
+
+### Upgrade an existing local Keycloak realm
+
+Keycloak's `--import-realm` skips a realm already stored in its database. If
+this stack existed before the `mozaiks-api` audience was added, restarting it
+does not apply the new realm export. Keep the volumes and update only the
+clients in the Keycloak admin console at http://localhost:8080:
+
+1. Open the `mozaiks` realm. Keep its users, roles, and existing clients.
+2. Under **Clients**, create `mozaiks-api` as an OpenID Connect client. Turn
+   client authentication, standard flow, direct access grants, and service
+   accounts off. It identifies the API audience and has no browser callback.
+3. If `mozaiks-studio` does not exist, create it as a public OpenID Connect
+   client with standard flow on, client authentication off, redirect URI
+   `http://localhost:3000/auth/callback`, and web origin
+   `http://localhost:3000`. If it exists, preserve its registered browser
+   URLs and other settings.
+4. On `mozaiks-studio`, open **Client scopes → mozaiks-studio-dedicated →
+   Mappers**. Add an **Audience** mapper with **Included Client Audience**
+   `mozaiks-api`, **Add to access token** on, and **Add to ID token** off. If
+   the old `mozaiks-studio-audience` mapper exists, edit that mapper to use
+   `mozaiks-api` and rename it; do not leave it adding the browser client as
+   an API audience.
+5. Set `AUTH_AUDIENCE=mozaiks-api` and keep
+   `VITE_OIDC_CLIENT_ID=mozaiks-studio`. Restart the app service. In Keycloak's
+   client-scope evaluator, verify an access token has `aud: mozaiks-api` and
+   `typ: Bearer`, while the ID token has `aud: mozaiks-studio` and no API
+   audience. Sign in again to obtain new tokens.
+
+Do not remove the Keycloak or MongoDB volumes to apply this change; that would
+delete local users or app data. Apply equivalent client and mapper changes to
+your persistent realm before enabling the updated production host.
 
 ---
 
@@ -169,7 +201,7 @@ Required environment variables for production (set these in `.env`):
 | `KC_ADMIN_PASSWORD` | Keycloak admin password |
 | `KC_DB_PASSWORD` | Password for Keycloak's internal Postgres database |
 | `KC_HOSTNAME` | Your public domain (e.g. `mozaiks.yourdomain.com`) |
-| `AUTH_AUDIENCE` | `mozaiks-studio` for the included client, or the audience configured on your own client. Compose requires this value and the runtime verifies it on every token. |
+| `AUTH_AUDIENCE` | `mozaiks-api` for the included realm, or your dedicated API audience. Compose requires this value and the runtime verifies it on every token. |
 
 !!! tip "Put Mozaiks behind a reverse proxy"
     In production, put a reverse proxy (nginx, Caddy, Traefik) in front of port
@@ -306,8 +338,8 @@ what — so Mozaiks doesn't have to build any of that itself.
 
 The Docker Compose stack imports the Mozaiks realm from
 `factory_app/app/brand/realm-export.json`. That file is a repo-local Keycloak
-seed for the OSS compose stack. It includes one public `mozaiks-studio` client
-with a local callback and an Audience mapper. For a deployed browser, change
+seed for the OSS compose stack. It includes a public `mozaiks-studio` browser
+client and a separate `mozaiks-api` audience client. For a deployed browser, change
 the registered callback and web origin to your actual browser URL, and configure
 the public `VITE_OIDC_*` settings alongside backend auth settings. Generated apps carry provider-neutral
 auth behavior in `app/config/auth.yaml`; provider-specific realm export or
@@ -316,24 +348,30 @@ social-login setup remains an operator/host concern.
 ### Token audience
 
 The imported `mozaiks-studio` client has standard OIDC flow enabled, client
-authentication off, and an Audience mapper that adds `mozaiks-studio` to access
-tokens' `aud` claim. For the local browser, set both `AUTH_AUDIENCE` and
-`VITE_OIDC_CLIENT_ID` to `mozaiks-studio`. Its callback is
+authentication off, and an Audience mapper that adds `mozaiks-api` to access
+tokens' `aud` claim, but not to ID tokens. Set `AUTH_AUDIENCE=mozaiks-api`
+and `VITE_OIDC_CLIENT_ID=mozaiks-studio`. Its callback is
 `http://localhost:3000/auth/callback`; update the client redirect URI and web
 origin before using another browser URL. Keep the browser client public and use
 authorization code flow with PKCE.
 
 If you register another client, add an **Audience** mapper to it (**Client
 scopes → <client-id>-dedicated → Add mapper → By configuration → Audience**).
-Set **Included Client Audience** to the audience your backend expects, turn
-**Add to access token** on, and set `AUTH_AUDIENCE` to that same value.
+Set **Included Client Audience** to a separate API client, turn **Add to access
+token** on and **Add to ID token** off, and set `AUTH_AUDIENCE` to that API
+client ID. The Compose backend also requires Keycloak's signed `typ: Bearer`
+access-token claim; the built-in `keycloak` adapter enforces it directly.
 
 Mozaiks always checks the access token's `aud` claim against `AUTH_AUDIENCE`.
 It refuses to start with JWT authentication enabled and no `AUTH_AUDIENCE`,
 and it rejects tokens whose `aud` does not include that value, such as tokens
 issued to the realm's other clients. With the
 `keycloak` provider (`KEYCLOAK_URL` + `KEYCLOAK_REALM`) the same rule applies to
-`KEYCLOAK_CLIENT_ID`.
+`KEYCLOAK_CLIENT_ID`, which must name the API audience client.
+
+Do not use Keycloak's shared `account` audience for either setting. Tokens
+issued to unrelated clients can carry it, so it does not bind a token to
+the Mozaiks API.
 
 For detailed Keycloak configuration (custom domains, social login, external IdPs)
 see [Auth Setup](../architecture/verified/auth-setup.md).

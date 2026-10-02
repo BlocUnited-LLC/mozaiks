@@ -315,6 +315,29 @@ class TestProviderDetectionFailClosed:
         yield
         reset_auth_adapter()
 
+    @pytest.mark.parametrize(
+        ("provider", "audience_var"),
+        [("jwt", "AUTH_AUDIENCE"), ("keycloak", "KEYCLOAK_CLIENT_ID")],
+    )
+    def test_forced_provider_names_missing_audience(self, provider, audience_var):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        with pytest.raises(AuthError, match=audience_var):
+            get_auth_adapter(force_provider=provider)
+
+    def test_explicit_provider_missing_audience_gives_working_no_auth_advice(
+        self, monkeypatch
+    ):
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        with pytest.raises(AuthError, match="unset AUTH_PROVIDER and set AUTH_ENABLED=false"):
+            resolve_auth_config()
+        monkeypatch.delenv("AUTH_PROVIDER")
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        assert resolve_auth_config().provider == "none"
+
     def test_auth_enabled_true_without_provider_raises(self, monkeypatch):
         from mozaiksai.core.auth.adapters.registry import resolve_auth_config
 
@@ -1008,6 +1031,18 @@ class TestProviderConfigIdentity:
         assert second._config.issuer == "https://b.example.com"
         assert second._config.clock_skew_seconds == 300
         assert second._config.workspace_id_claim == "ws_b"
+
+    def test_jwt_access_type_rule_change_rebuilds_adapter(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        self._jwt_base(monkeypatch)
+        first = get_auth_adapter()
+        monkeypatch.setenv("AUTH_ACCESS_TOKEN_TYPE_CLAIM", "token_use")
+        monkeypatch.setenv("AUTH_ACCESS_TOKEN_TYPE_VALUE", "access")
+        second = get_auth_adapter()
+        assert second is not first
+        assert second._config.access_token_type_claim == "token_use"
+        assert second._config.access_token_type_value == "access"
 
     @pytest.mark.parametrize(
         ("var", "value"),

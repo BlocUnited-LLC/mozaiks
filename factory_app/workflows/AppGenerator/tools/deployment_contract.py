@@ -28,6 +28,8 @@ _AUTH_PROVIDER_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _AUTH_RUNTIME_REQUIRED_ENV = ["AUTH_ENABLED", "AUTH_PROVIDER"]
 _AUTH_PROVIDER_AUDIENCE_ENV = {"jwt": "AUTH_AUDIENCE", "keycloak": "KEYCLOAK_CLIENT_ID"}
 _AUTH_RUNTIME_OPTIONAL_ENV = [
+    "AUTH_ACCESS_TOKEN_TYPE_CLAIM",
+    "AUTH_ACCESS_TOKEN_TYPE_VALUE",
     "AUTH_REQUIRED_SCOPE",
     "AUTH_ISSUER",
     "AUTH_JWKS_URL",
@@ -181,7 +183,9 @@ def _auth_contract(*, auth_required: bool, auth_provider: str | None) -> dict[st
         "notes": (
             "Auth uses the OSS provider-neutral adapter. For AUTH_PROVIDER=jwt, configure "
             "MOZAIKS_OIDC_DISCOVERY_URL or MOZAIKS_OIDC_AUTHORITY, or provide both "
-            "AUTH_ISSUER and AUTH_JWKS_URL. Built-in JWT requires AUTH_AUDIENCE; "
+            "AUTH_ISSUER and AUTH_JWKS_URL. Built-in JWT requires AUTH_AUDIENCE "
+            "and an access-token type rule (RFC 9068 at+jwt by default, or the "
+            "configured access-token-only claim/value); "
             "built-in Keycloak requires KEYCLOAK_CLIENT_ID. Frontend OIDC values "
             "are public build-time vars."
         ),

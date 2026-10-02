@@ -81,6 +81,8 @@ _JWT_CONFIG_ENV_VARS: tuple[str, ...] = (
     "AUTH_JWKS_URL",
     "AUTH_ISSUER",
     "AUTH_AUDIENCE",
+    "AUTH_ACCESS_TOKEN_TYPE_CLAIM",
+    "AUTH_ACCESS_TOKEN_TYPE_VALUE",
     "MOZAIKS_OIDC_AUTHORITY",
     "MOZAIKS_OIDC_TENANT_ID",
     "MOZAIKS_OIDC_DISCOVERY_URL",
@@ -144,12 +146,12 @@ _PROVIDER_AUDIENCE_SETTINGS: dict[str, tuple[str, str]] = {
     "jwt": (
         "AUTH_AUDIENCE",
         "Set AUTH_AUDIENCE to the audience ('aud' claim) your identity provider "
-        "issues in access tokens for this API, such as the API identifier or "
-        "the client ID registered for this app.",
+        "issues in access tokens for this API. Use a dedicated API audience, "
+        "distinct from the browser client ID.",
     ),
     "keycloak": (
         "KEYCLOAK_CLIENT_ID",
-        "Set KEYCLOAK_CLIENT_ID to the Keycloak client whose ID your realm "
+        "Set KEYCLOAK_CLIENT_ID to the API client whose ID your realm "
         "issues in the access token 'aud' claim (add an Audience mapper that "
         "includes that client).",
     ),
@@ -488,6 +490,8 @@ def _require_audience_binding(
     provider: str,
     settings: Mapping[str, str],
     registration: _AdapterRegistration | None,
+    *,
+    source: ResolvedAuthSource | None,
 ) -> None:
     """Refuse a built-in token-validating provider with no audience binding.
 
@@ -500,11 +504,22 @@ def _require_audience_binding(
     variable, how_to_set = requirement
     if settings.get(variable, "").strip():
         return
+    if source == "explicit_provider":
+        disable_advice = (
+            " To run without authentication in local development, unset "
+            "AUTH_PROVIDER and set AUTH_ENABLED=false instead."
+        )
+    elif source is None:
+        disable_advice = ""
+    else:
+        disable_advice = (
+            " To run without authentication in local development, set "
+            "AUTH_ENABLED=false instead."
+        )
     raise AuthError(
         f"{variable} is required when {provider!r} authentication is enabled, "
         f"but it is empty. {how_to_set} Audience verification is always on for "
-        f"the {provider!r} provider and cannot be skipped. To run without "
-        "authentication in local development, set AUTH_ENABLED=false instead.",
+        f"the {provider!r} provider and cannot be skipped.{disable_advice}",
         500,
         "registry",
     )
@@ -661,7 +676,7 @@ def resolve_auth_config() -> ResolvedAuthConfig:
 
     _ensure_builtin_adapters()
     registration = _adapter_registry.get(provider)
-    _require_audience_binding(provider, settings, registration)
+    _require_audience_binding(provider, settings, registration, source=source)
 
     return ResolvedAuthConfig(
         provider=provider,
@@ -885,10 +900,15 @@ def get_auth_adapter(force_provider: str | None = None) -> AuthAdapter:
 
     if force_provider is not None:
         provider = force_provider.lower()
+        settings = _environment_snapshot()
+        _ensure_builtin_adapters()
+        _require_audience_binding(
+            provider, settings, _adapter_registry.get(provider), source=None
+        )
         return _build_adapter(
             provider,
             enabled=provider != "none",
-            settings=_environment_snapshot(),
+            settings=settings,
         )
 
     config = resolve_auth_config()

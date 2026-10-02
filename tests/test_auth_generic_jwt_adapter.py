@@ -384,7 +384,7 @@ class TestGenericJWTAdapterValidation:
             },
             key,
             algorithm="RS256",
-            headers={"kid": "kid-1"},
+            headers={"kid": "kid-1", "typ": "at+jwt"},
         )
 
         class _FakeDiscoveryClient:
@@ -447,7 +447,7 @@ _PUBLIC_JWK = {
 }
 
 
-def _signed_token(**claim_overrides: object) -> str:
+def _signed_token(*, token_header_typ: str = "at+jwt", **claim_overrides: object) -> str:
     now = int(time.time())
     claims = {
         **_base_claims(),
@@ -458,7 +458,10 @@ def _signed_token(**claim_overrides: object) -> str:
         **claim_overrides,
     }
     claims = {key: value for key, value in claims.items() if value is not None}
-    return jwt.encode(claims, _SIGNING_KEY, algorithm="RS256", headers={"kid": "kid-aud"})
+    return jwt.encode(
+        claims, _SIGNING_KEY, algorithm="RS256",
+        headers={"kid": "kid-aud", "typ": token_header_typ},
+    )
 
 
 class _StaticJWKSClient:
@@ -490,7 +493,8 @@ class TestMandatoryAudienceVerification:
     async def test_signed_oidc_id_token_for_browser_client_is_rejected(self, monkeypatch):
         adapter = _offline_adapter(monkeypatch, audience="mozaiks-studio")
         token = _signed_token(
-            aud="mozaiks-studio", nonce="browser-nonce", at_hash="access-token-hash", scp=None
+            token_header_typ="JWT", aud="mozaiks-studio", nonce="browser-nonce",
+            at_hash="access-token-hash", scp=None,
         )
         with pytest.raises(AuthError) as exc_info:
             await adapter.validate_token(token)
@@ -501,6 +505,43 @@ class TestMandatoryAudienceVerification:
         adapter = _offline_adapter(monkeypatch, audience="my-api")
         claims = await adapter.validate_token(_signed_token(aud="my-api"))
         assert claims.user_id == "user-abc-123"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("token_header_typ", ["at+jwt", "application/at+jwt"])
+    async def test_rfc_access_token_header_is_accepted(self, monkeypatch, token_header_typ):
+        adapter = _offline_adapter(monkeypatch, audience="my-api")
+        claims = await adapter.validate_token(
+            _signed_token(aud="my-api", token_header_typ=token_header_typ)
+        )
+        assert claims.user_id == "user-abc-123"
+
+    @pytest.mark.asyncio
+    async def test_configured_access_token_claim_accepts_legacy_provider(self, monkeypatch):
+        adapter = _offline_adapter(monkeypatch, audience="my-api")
+        adapter._config.access_token_type_claim = "token_use"
+        adapter._config.access_token_type_value = "access"
+        claims = await adapter.validate_token(
+            _signed_token(aud="my-api", token_header_typ="JWT", token_use="access")
+        )
+        assert claims.user_id == "user-abc-123"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("token_use", ["id", None])
+    async def test_configured_access_token_claim_rejects_id_or_missing_type(
+        self, monkeypatch, token_use
+    ):
+        adapter = _offline_adapter(monkeypatch, audience="my-api")
+        adapter._config.access_token_type_claim = "token_use"
+        adapter._config.access_token_type_value = "access"
+        with pytest.raises(AuthError, match="not an access token"):
+            await adapter.validate_token(
+                _signed_token(aud="my-api", token_header_typ="JWT", token_use=token_use)
+            )
+
+    @pytest.mark.parametrize("claim,value", [("typ", ""), ("", "Bearer")])
+    def test_access_type_claim_and_value_must_be_configured_together(self, claim, value):
+        with pytest.raises(ValueError, match="must be configured together"):
+            JWTAdapterConfig(access_token_type_claim=claim, access_token_type_value=value)
 
     @pytest.mark.asyncio
     async def test_audience_list_containing_configured_audience_is_accepted(self, monkeypatch):

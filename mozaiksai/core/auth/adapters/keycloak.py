@@ -154,6 +154,8 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
                 issuer=self._issuer,
                 options=decode_options,  # type: ignore[arg-type]
             )
+            if claims.get("typ") != "Bearer":
+                raise AuthError("Token is not a Keycloak access token", 401, self.name)
         except jwt.PyJWKClientError as e:
             logger.warning("JWKS error: %s", e)
             raise AuthError("Failed to verify token signature", 401, self.name) from e
@@ -170,6 +172,8 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
         except jwt.DecodeError as e:
             logger.warning("Token decode error: %s", e)
             raise AuthError("Invalid token format", 401, self.name) from e
+        except AuthError:
+            raise
         except Exception as e:
             logger.error("Token validation error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401, self.name) from e

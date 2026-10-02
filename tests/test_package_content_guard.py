@@ -503,7 +503,9 @@ class TestRealmExport:
         import json
 
         data = json.loads(self._REALM_EXPORT_PATH.read_text(encoding="utf-8"))
-        (client,) = data["clients"]
+        clients = {client["clientId"]: client for client in data["clients"]}
+        assert set(clients) == {"mozaiks-studio", "mozaiks-api"}
+        client = clients["mozaiks-studio"]
         assert set(client) == {
             "clientId", "name", "enabled", "protocol", "publicClient",
             "standardFlowEnabled", "directAccessGrantsEnabled", "redirectUris",
@@ -522,8 +524,13 @@ class TestRealmExport:
             "introspection.token.claim",
         }
         assert mapper["protocolMapper"] == "oidc-audience-mapper"
-        assert mapper["config"]["included.client.audience"] == client["clientId"]
+        assert mapper["config"]["included.client.audience"] == "mozaiks-api"
         assert mapper["config"]["access.token.claim"] == "true"
+        assert mapper["config"]["id.token.claim"] == "false"
+        api_client = clients["mozaiks-api"]
+        assert api_client["standardFlowEnabled"] is False
+        assert api_client["directAccessGrantsEnabled"] is False
+        assert api_client["serviceAccountsEnabled"] is False
 
 
 # ---------------------------------------------------------------------------

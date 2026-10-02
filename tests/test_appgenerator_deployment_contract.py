@@ -298,6 +298,22 @@ def test_authenticated_deployment_contract_includes_oidc_runtime_env_and_readine
     assert "APP_AUTH_SMOKE_VERIFIED_AT" in checks["auth_configuration"]["required_evidence"]
 
 
+def test_generated_jwt_audience_is_required_in_every_deployment_env_example() -> None:
+    result = generate_deployment_artifacts(app_id="demo_app", auth_required=True)
+    spec = result["deploy_target_spec"]
+    manifest = result["deployment_manifest"]
+    assert "AUTH_AUDIENCE" in spec["auth"]["runtime_required_variables"]
+    assert "AUTH_AUDIENCE" not in spec["auth"]["runtime_optional_variables"]
+    assert "AUTH_AUDIENCE" in manifest["required_env"]
+    for path in ENV_EXAMPLE_PATHS:
+        assert "AUTH_AUDIENCE=<required>" in result["artifacts"][path], path
+
+
+def test_auth_disabled_contract_does_not_require_jwt_audience() -> None:
+    result = generate_deployment_artifacts(app_id="demo_app", auth_required=False)
+    assert "AUTH_AUDIENCE" not in result["deployment_manifest"]["required_env"]
+
+
 def test_keycloak_deployment_requires_its_token_audience() -> None:
     result = generate_deployment_artifacts(app_id="demo_app", auth_required=True, auth_provider="keycloak")
     manifest = result["deployment_manifest"]

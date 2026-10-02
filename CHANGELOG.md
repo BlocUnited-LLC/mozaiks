@@ -15,12 +15,14 @@ This project follows a practical pre-1.0 changelog format:
 ### Security
 
 - JWT and Keycloak authentication now require an audience at startup and
-  verify it on every access token (`AUTH_AUDIENCE` for JWT,
+  verify it and an access-token type on every bearer token (`AUTH_AUDIENCE` for JWT,
   `KEYCLOAK_CLIENT_ID` for Keycloak). Deployments that left these unset must
   configure them; local runs with `AUTH_ENABLED=false` are unaffected. The
   unused JWT validator was removed (#523).
   Generated authenticated deployment manifests and env templates now mark the
   matching audience setting as required.
+  The local Keycloak realm uses a distinct `mozaiks-api` audience, and existing
+  persistent realms can add that client and mapper without deleting data.
 
 - Self-hosted subscription grant and revoke actions are internal-only; HTTP
   callers cannot assign themselves paid entitlements.

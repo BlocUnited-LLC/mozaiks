@@ -68,8 +68,6 @@ def preview_environment(app_root: Path, *, preview_url: str) -> dict[str, str]:
         "CORS_ORIGINS": preview_url,
         "VITE_MOCK_MODE": "false",
         "VITE_USAGE_DEMO_MODE": "false",
-        "AUTH_AUDIENCE": app_id,
-        "VITE_OIDC_CLIENT_ID": app_id,
         "VITE_OIDC_REDIRECT_URI": preview_url.rstrip("/") + auth_contract.routes.callback if auth_contract else "",
         "LOGS_BASE_DIR": str(_STATE_ROOT / "logs"),
     })
@@ -84,6 +82,12 @@ def preview_environment(app_root: Path, *, preview_url: str) -> dict[str, str]:
             raise ValueError("Configure preview VITE_OIDC_AUTHORITY for this authenticated app")
         if not (env.get("MOZAIKS_OIDC_AUTHORITY") or (env.get("AUTH_ISSUER") and env.get("AUTH_JWKS_URL"))):
             raise ValueError("Configure preview runtime OIDC authority or issuer/JWKS settings")
+        audience = env.get("AUTH_AUDIENCE", "").strip()
+        browser_client = env.get("VITE_OIDC_CLIENT_ID", "").strip()
+        if not audience or not browser_client:
+            raise ValueError("Configure preview AUTH_AUDIENCE and VITE_OIDC_CLIENT_ID")
+        if audience == browser_client:
+            raise ValueError("Preview AUTH_AUDIENCE must differ from VITE_OIDC_CLIENT_ID")
     return env
 
 

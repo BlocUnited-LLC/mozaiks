@@ -102,11 +102,12 @@ services:
     environment:
       # Keycloak auth — enabled when Keycloak is healthy.
       # Set AUTH_ENABLED=false in the Compose --env-file for local no-auth mode.
-      # The imported realm's public mozaiks-studio client has an Audience
-      # mapper. If using another client, set AUTH_AUDIENCE to the audience its
-      # access tokens carry. See docs/guides/self-hosting.md.
+      # The imported browser client adds the distinct mozaiks-api audience to
+      # access tokens. See docs/guides/self-hosting.md.
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
-      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-mozaiks-studio}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-mozaiks-api}
+      AUTH_ACCESS_TOKEN_TYPE_CLAIM: typ
+      AUTH_ACCESS_TOKEN_TYPE_VALUE: Bearer
       MOZAIKS_OIDC_AUTHORITY: http://keycloak:8080/realms/mozaiks
       AG2_RUNTIME_LOGGING: "sqlite"
       LOGS_BASE_DIR: /app/logs/logs

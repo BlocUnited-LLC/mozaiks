@@ -21,18 +21,28 @@
       "webOrigins": ["http://localhost:3000"],
       "protocolMappers": [
         {
-          "name": "mozaiks-studio-audience",
+          "name": "mozaiks-api-audience",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "mozaiks-studio",
+            "included.client.audience": "mozaiks-api",
             "access.token.claim": "true",
             "id.token.claim": "false",
             "introspection.token.claim": "true"
           }
         }
       ]
+    },
+    {
+      "clientId": "mozaiks-api",
+      "name": "Mozaiks API (local Compose audience)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
     }
   ]
 }

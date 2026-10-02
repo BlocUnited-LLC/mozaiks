@@ -68,6 +68,10 @@ class JWTAdapterConfig:
     # Expected ``aud`` claim. Required: every token's audience is verified
     # against it, and validation refuses to run without it.
     audience: str = ""
+    # RFC 9068 access tokens use JOSE typ=at+jwt. Issuers without that header
+    # must expose an access-token-only signed claim configured by these fields.
+    access_token_type_claim: str = ""
+    access_token_type_value: str = ""
 
     # OIDC discovery (used when jwks_url or issuer are not explicitly set)
     oidc_authority: str = ""
@@ -106,6 +110,13 @@ class JWTAdapterConfig:
     def __post_init__(self):
         if self.algorithms is None:
             self.algorithms = ["RS256"]
+        self.access_token_type_claim = self.access_token_type_claim.strip()
+        self.access_token_type_value = self.access_token_type_value.strip()
+        if bool(self.access_token_type_claim.strip()) != bool(self.access_token_type_value.strip()):
+            raise ValueError(
+                "AUTH_ACCESS_TOKEN_TYPE_CLAIM and AUTH_ACCESS_TOKEN_TYPE_VALUE "
+                "must be configured together"
+            )
 
     @classmethod
     def from_env(cls, settings: Mapping[str, str] | None = None) -> "JWTAdapterConfig":
@@ -150,6 +161,8 @@ class JWTAdapterConfig:
             jwks_url=_get("AUTH_JWKS_URL"),
             issuer=_get("AUTH_ISSUER"),
             audience=_get("AUTH_AUDIENCE"),
+            access_token_type_claim=_get("AUTH_ACCESS_TOKEN_TYPE_CLAIM"),
+            access_token_type_value=_get("AUTH_ACCESS_TOKEN_TYPE_VALUE"),
             oidc_authority=_get("MOZAIKS_OIDC_AUTHORITY"),
             oidc_tenant_id=_get("MOZAIKS_OIDC_TENANT_ID"),
             oidc_discovery_url=_get("MOZAIKS_OIDC_DISCOVERY_URL"),
@@ -179,6 +192,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
     - Configurable claim mappings
     - JWKS-based signature validation
     - Mandatory audience verification against AUTH_AUDIENCE
+    - Signed access-token type verification (RFC 9068 header or configured claim)
     - OIDC discovery for issuer and JWKS URL when explicit overrides are absent
     - Flexible scope extraction (space-separated or array)
     - Clock skew tolerance
@@ -190,6 +204,9 @@ class GenericJWTAdapter(BaseAuthAdapter):
         MOZAIKS_OIDC_TENANT_ID: Optional tenant appended to the authority discovery URL
         MOZAIKS_OIDC_DISCOVERY_URL: Optional explicit discovery document URL
         AUTH_AUDIENCE: Required expected audience claim; always verified
+        AUTH_ACCESS_TOKEN_TYPE_CLAIM: Signed access-token-only claim for issuers
+            that do not use the RFC 9068 at+jwt header
+        AUTH_ACCESS_TOKEN_TYPE_VALUE: Expected value of that claim
         AUTH_USER_ID_CLAIM: Claim for user ID (default: sub)
         AUTH_EMAIL_CLAIM: Claim for email (default: email)
         AUTH_NAME_CLAIM: Claim for name (default: name)
@@ -357,6 +374,13 @@ class GenericJWTAdapter(BaseAuthAdapter):
                 leeway=self._config.clock_skew_seconds,
                 options=decode_options,  # type: ignore[arg-type]
             )
+            if self._config.access_token_type_claim:
+                token_type = claims.get(self._config.access_token_type_claim)
+                valid_type = token_type == self._config.access_token_type_value
+            else:
+                valid_type = unverified_header.get("typ") in {"at+jwt", "application/at+jwt"}
+            if not valid_type:
+                raise AuthError("Token is not an access token", 401, self.name)
         except jwt.ExpiredSignatureError as exc:
             raise AuthError("Token has expired", 401, self.name) from exc
         except jwt.ImmatureSignatureError as exc:
@@ -372,6 +396,8 @@ class GenericJWTAdapter(BaseAuthAdapter):
         except jwt.DecodeError as e:
             logger.warning("Token decode error: %s", e)
             raise AuthError("Invalid token format", 401, self.name) from e
+        except AuthError:
+            raise
         except Exception as e:
             logger.error("Token validation error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401, self.name) from e
