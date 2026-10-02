@@ -22,6 +22,11 @@ from mozaiksai.core.workflow.generator_support.data_contract_fields import (
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_action_id,
 )
+from mozaiksai.core.workflow.generator_support.module_authored_code import (
+    parse_rendered_python,
+    source_lines,
+    syntax_error_diagnostic,
+)
 from mozaiksai.core.workflow.generator_support.module_policy import render_module_policy
 
 # Every canonical type except the logical date types is also a JSON Schema type.
@@ -262,34 +267,56 @@ def materialize_module_read_actions(
     return changed
 
 
-def _replace_functions(source: str, functions: dict[str, str], *, class_name: str | None = None) -> str:
-    """Replace only compiler-owned functions, preserving authored code and comments."""
-    tree = ast.parse(source)
-    body = tree.body
+def _replace_functions(
+    source: str, functions: dict[str, str], *, path: str, class_name: str | None = None,
+) -> str:
+    """Replace only compiler-owned functions, preserving authored code and comments.
+
+    Rendered functions take the indentation the authored class body uses
+    (tabs, two spaces, ...); a one-line class body is moved onto its own line
+    first. Authored ``source`` that does not parse is rejected with its path and
+    line; a rendered result that does not parse is a builder defect
+    (``RenderedPythonError``) naming the path, line and rendered snippet.
+    """
+    try:
+        tree = ast.parse(source, filename=path)
+    except (SyntaxError, ValueError) as exc:
+        raise ValueError(syntax_error_diagnostic(path, source, exc)) from exc
     class_node = None
     if class_name is not None:
-        class_node = next((node for node in body if isinstance(node, ast.ClassDef) and node.name == class_name), None)
+        class_node = _class_named(tree, class_name)
         if class_node is None:
             if source.strip():
                 raise ValueError(f"Canonical reads require the declared handler class {class_name!r}")
-            return f"class {class_name}:\n" + "\n".join(
+            constructed = f"class {class_name}:\n" + "\n".join(
                 "\n".join("    " + line if line else "" for line in function.splitlines()) + "\n"
                 for function in functions.values()
             )
-        body = class_node.body
-    lines = source.splitlines(keepends=True)
+            parse_rendered_python(path, constructed)
+            return constructed
+        if _shares_line_with_header(source, class_node):
+            source = _body_on_its_own_line(source, class_node)
+            class_node = _class_named(parse_rendered_python(path, source), class_name)
+            assert class_node is not None
+    body = class_node.body if class_node else tree.body
+    lines = source_lines(source)
+
+    def indentation(lineno: int) -> str:
+        match = re.match(r"[ \t]*", lines[lineno - 1])
+        return match.group() if match else ""
+
     edits: list[tuple[int, int, list[str]]] = []
     remaining = dict(functions)
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in remaining:
             rendered = remaining.pop(node.name)
-            indent = " " * node.col_offset
+            indent = indentation(node.lineno)
             start = min([node.lineno, *(decorator.lineno for decorator in node.decorator_list)]) - 1
             edits.append((start, node.end_lineno or node.lineno, [
                 indent + line + "\n" if line else "\n" for line in rendered.splitlines()
             ]))
     if remaining:
-        indent = "    " if class_node else ""
+        indent = indentation(body[0].lineno) if class_node else ""
         insertion = class_node.end_lineno if class_node else len(lines)
         assert insertion is not None
         rendered_lines = ["\n"]
@@ -299,13 +326,37 @@ def _replace_functions(source: str, functions: dict[str, str], *, class_name: st
         edits.append((insertion, insertion, rendered_lines))
         if class_node:
             for node in body:
-                if isinstance(node, ast.Pass):
+                # A placeholder `pass` alone on its line goes once the class has methods.
+                if isinstance(node, ast.Pass) and lines[node.lineno - 1].split("#", 1)[0].strip() == "pass":
                     edits.append((node.lineno - 1, node.end_lineno or node.lineno, []))
     for start, end, replacement in sorted(edits, reverse=True):
         lines[start:end] = replacement
     rendered_source = "".join(lines)
-    ast.parse(rendered_source)
+    parse_rendered_python(path, rendered_source)
     return rendered_source
+
+
+def _class_named(tree: ast.Module, class_name: str) -> ast.ClassDef | None:
+    return next((node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == class_name), None)
+
+
+def _shares_line_with_header(source: str, class_node: ast.ClassDef) -> bool:
+    """True for ``class Handler: pass``: the body starts on the line its header ends."""
+    first = class_node.body[0]
+    line = source_lines(source)[first.lineno - 1].encode("utf-8")
+    return bool(line[:first.col_offset].strip())
+
+
+def _body_on_its_own_line(source: str, class_node: ast.ClassDef) -> str:
+    """Move a one-line class body below its header, one level in from the class."""
+    lines = source_lines(source)
+    first = class_node.body[0]
+    line = lines[first.lineno - 1].encode("utf-8")
+    header, body = line[:first.col_offset].decode("utf-8").rstrip(), line[first.col_offset:].decode("utf-8")
+    match = re.match(r"[ \t]*", lines[class_node.lineno - 1])
+    class_indent = match.group() if match else ""
+    lines[first.lineno - 1] = f"{header}\n{class_indent}    {body}"
+    return "".join(lines)
 
 
 def _read_functions(module_id: str, collection: dict[str, Any], operation: str) -> tuple[str, str, str]:
@@ -438,7 +489,7 @@ def materialize_module_read_implementations(
                     raise ValueError(f"{module_id}: canonical reads require module.handler=backend.handler:ClassName")
                 class_name = entrypoint.split(":", 1)[1]
             source = files.get(target, "")
-            rendered = _replace_functions(source, functions[index], class_name=class_name)
+            rendered = _replace_functions(source, functions[index], path=target, class_name=class_name)
             if rendered != source:
                 changed[target] = rendered
     return changed

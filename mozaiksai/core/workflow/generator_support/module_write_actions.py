@@ -46,6 +46,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     entity_identifier,
 )
 from mozaiksai.core.workflow.generator_support.module_authored_code import (
+    parse_rendered_python,
     prune_repository,
     reconcile_emit_literals,
 )
@@ -906,10 +907,10 @@ def render_module_schemas(module_id: str, collections: list[dict[str, Any]]) -> 
     return header + "\n\n" + "\n\n".join(_render_collection_schema(module_id, shape) for shape in shapes)
 
 
-def rendered_schema_names(source: str) -> set[str]:
+def rendered_schema_names(source: str, *, path: str) -> set[str]:
     """Top-level names a code-rendered schemas.py defines."""
     names: set[str] = set()
-    for node in ast.parse(source).body:
+    for node in parse_rendered_python(path, source).body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -1026,7 +1027,7 @@ def validate_write_hooks(path: str, source: str, identifiers: list[str]) -> None
 
 
 def _reject_stale_schema_imports(module_id: str, files: Mapping[str, str], rendered_schemas: str) -> None:
-    available = rendered_schema_names(rendered_schemas)
+    available = rendered_schema_names(rendered_schemas, path=f"modules/{module_id}/backend/schemas.py")
     for filename in ("handler.py", "service.py", "repo.py"):
         path = f"modules/{module_id}/backend/{filename}"
         source = files.get(path)
@@ -1308,7 +1309,9 @@ def materialize_module_write_implementations(
                 if not re.fullmatch(r"backend\.handler:[A-Za-z_][A-Za-z0-9_]*", entrypoint):
                     raise ValueError(f"{module_id}: canonical writes require module.handler=backend.handler:ClassName")
                 class_name = entrypoint.split(":", 1)[1]
-            sources[target] = _replace_functions(files.get(target, ""), functions[index], class_name=class_name)
+            sources[target] = _replace_functions(
+                files.get(target, ""), functions[index], path=target, class_name=class_name,
+            )
         events_source = files.get(f"modules/{module_id}/contracts/events.yaml")
         events_document = yaml.safe_load(events_source) if events_source else None
         declared_events = {
