@@ -265,9 +265,9 @@ def prune_repository(
     except SyntaxError as exc:
         # Pruning is a cleanup; it must never turn a parseable model file into one that is not.
         logger.warning(
-            "REPO_PRUNE_SKIPPED: %s: removing %s would leave Python that does not parse (%s); "
+            "REPO_PRUNE_SKIPPED: %s: removing %s would leave Python that does not parse (line %s: %s); "
             "the model-authored file is kept unchanged",
-            path, removed, exc,
+            path, removed, exc.lineno, exc.msg,
         )
         return source
     logger.warning(
@@ -388,9 +388,9 @@ def reconcile_emit_literals(
     except SyntaxError as exc:
         # Normalization is a cleanup; it must never turn a parseable model file into one that is not.
         logger.warning(
-            "EMIT_LITERAL_NORMALIZATION_SKIPPED: %s: %s would leave Python that does not parse (%s); "
+            "EMIT_LITERAL_NORMALIZATION_SKIPPED: %s: %s would leave Python that does not parse (line %s: %s); "
             "the model-authored file is kept unchanged",
-            path, "; ".join(notes), exc,
+            path, "; ".join(notes), exc.lineno, exc.msg,
         )
         return source
     for note in notes:

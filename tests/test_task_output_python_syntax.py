@@ -300,7 +300,7 @@ def test_pruning_whose_result_would_not_parse_keeps_the_model_file(monkeypatch, 
     assert result == source
     warning = next(record.getMessage() for record in caplog.records if "REPO_PRUNE_SKIPPED" in record.getMessage())
     assert warning.startswith(f"REPO_PRUNE_SKIPPED: {REPO}: removing [")
-    assert f"invalid syntax ({REPO}, line" in warning
+    assert "would leave Python that does not parse (line " in warning and ": invalid syntax)" in warning
     assert not any("REPO_CODE_DISCARDED" in record.getMessage() for record in caplog.records)
 
 
@@ -322,7 +322,7 @@ def test_emit_normalization_whose_result_would_not_parse_keeps_the_model_file(ca
         record.getMessage() for record in caplog.records if "EMIT_LITERAL_NORMALIZATION_SKIPPED" in record.getMessage()
     )
     assert warning.startswith(f"EMIT_LITERAL_NORMALIZATION_SKIPPED: {SERVICE}: after_create_task no longer emits")
-    assert f"({SERVICE}, line" in warning
+    assert "would leave Python that does not parse (line 3: " in warning
 
 
 def test_function_replacement_rejects_authored_source_that_does_not_parse_by_path_and_line():
