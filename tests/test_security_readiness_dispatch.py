@@ -38,6 +38,7 @@ RUN = ("SecurityReadiness", "factory-host", "chat_1")
 def live_runtime(monkeypatch, security_build):
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
     for project in ("project_a", "project_b"):
         security_build.add(project=project)
     manifest = yaml.safe_load((ROOT / "factory_app/app/modules/security_readiness/module.yaml").read_text())

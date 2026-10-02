@@ -663,8 +663,10 @@ def _clear_auth_env(monkeypatch) -> None:
         "SUPABASE_URL",
         "KEYCLOAK_URL",
         "KEYCLOAK_REALM",
+        "KEYCLOAK_CLIENT_ID",
         "AUTH_JWKS_URL",
         "AUTH_ISSUER",
+        "AUTH_AUDIENCE",
         "MOZAIKS_OIDC_AUTHORITY",
         "MOZAIKS_OIDC_DISCOVERY_URL",
         # A developer .env may grant the anonymous principal admin roles;
@@ -743,6 +745,7 @@ def test_fulfillment_ingress_internal_key_works_with_auth_enabled(monkeypatch) -
     _clear_auth_env(monkeypatch)
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
     monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
     monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
     monkeypatch.setenv("INTERNAL_API_KEY", "configured-key-0123456789abcdef")
@@ -817,6 +820,7 @@ def _auth_enabled_jwt_env(monkeypatch) -> None:
     _clear_auth_env(monkeypatch)
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
     monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
     monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
     clear_auth_config_cache()

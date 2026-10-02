@@ -399,8 +399,8 @@ class TestApprovedFamilies:
 class TestRealmExport:
     """Regression guard ensuring factory_app/app/brand/realm-export.json remains clean.
 
-    This file ships in the public wheel.  It must never contain OAuth client
-    secrets, production redirect URIs, real BlocUnited domains, or tenant IDs.
+    This file ships in the public wheel. Its one local public client must
+    never contain secrets, production redirect URIs, or tenant IDs.
     """
 
     _REALM_EXPORT_PATH = (
@@ -413,14 +413,11 @@ class TestRealmExport:
             "secret",
             "clientSecret",
             "credentials",
-            "clients",          # would expose OAuth client configs
             "users",            # would expose user data
             "groups",
             "roles",
             "adminUrl",
             "baseUrl",
-            "redirectUris",
-            "webOrigins",
             "attributes",
         }
     )
@@ -439,23 +436,40 @@ class TestRealmExport:
         import json
 
         data = json.loads(self._REALM_EXPORT_PATH.read_text(encoding="utf-8"))
-        present_dangerous = {k for k in data if k in self._DANGEROUS_KEYS}
+        def keys(value):
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    yield key
+                    yield from keys(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    yield from keys(nested)
+
+        present_dangerous = set(keys(data)) & self._DANGEROUS_KEYS
         assert not present_dangerous, (
             f"realm-export.json contains dangerous keys: {sorted(present_dangerous)}. "
-            "These could expose OAuth secrets, client configs, or production topology."
+            "These could expose OAuth secrets, user data, or production topology."
         )
 
     def test_realm_export_no_production_values(self) -> None:
         import json
 
         data = json.loads(self._REALM_EXPORT_PATH.read_text(encoding="utf-8"))
+        def strings(value):
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, dict):
+                for nested in value.values():
+                    yield from strings(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    yield from strings(nested)
+
         violations = []
-        for key, value in data.items():
-            if not isinstance(value, str):
-                continue
+        for value in strings(data):
             for pattern in self._PRODUCTION_VALUE_PATTERNS:
                 if pattern.search(value):
-                    violations.append(f"{key}={value!r} matches {pattern.pattern!r}")
+                    violations.append(f"{value!r} matches {pattern.pattern!r}")
         assert not violations, (
             "realm-export.json string values look production-specific:\n"
             + "\n".join(violations)
@@ -475,6 +489,7 @@ class TestRealmExport:
                 "resetPasswordAllowed",
                 "rememberMe",
                 "sslRequired",
+                "clients",
             }
         )
         data = json.loads(self._REALM_EXPORT_PATH.read_text(encoding="utf-8"))
@@ -483,6 +498,39 @@ class TestRealmExport:
             f"realm-export.json has unexpected keys: {sorted(extra_keys)}. "
             "Review whether these belong in the public OSS template."
         )
+
+    def test_local_client_is_public_and_emits_the_compose_audience(self) -> None:
+        import json
+
+        data = json.loads(self._REALM_EXPORT_PATH.read_text(encoding="utf-8"))
+        clients = {client["clientId"]: client for client in data["clients"]}
+        assert set(clients) == {"mozaiks-studio", "mozaiks-api"}
+        client = clients["mozaiks-studio"]
+        assert set(client) == {
+            "clientId", "name", "enabled", "protocol", "publicClient",
+            "standardFlowEnabled", "directAccessGrantsEnabled", "redirectUris",
+            "webOrigins", "protocolMappers",
+        }
+        assert client["clientId"] == "mozaiks-studio"
+        assert client["publicClient"] is True
+        assert client["standardFlowEnabled"] is True
+        assert client["directAccessGrantsEnabled"] is False
+        assert client["redirectUris"] == ["http://localhost:3000/auth/callback"]
+        assert client["webOrigins"] == ["http://localhost:3000"]
+        (mapper,) = client["protocolMappers"]
+        assert set(mapper) == {"name", "protocol", "protocolMapper", "consentRequired", "config"}
+        assert set(mapper["config"]) == {
+            "included.client.audience", "access.token.claim", "id.token.claim",
+            "introspection.token.claim",
+        }
+        assert mapper["protocolMapper"] == "oidc-audience-mapper"
+        assert mapper["config"]["included.client.audience"] == "mozaiks-api"
+        assert mapper["config"]["access.token.claim"] == "true"
+        assert mapper["config"]["id.token.claim"] == "false"
+        api_client = clients["mozaiks-api"]
+        assert api_client["standardFlowEnabled"] is False
+        assert api_client["directAccessGrantsEnabled"] is False
+        assert api_client["serviceAccountsEnabled"] is False
 
 
 # ---------------------------------------------------------------------------

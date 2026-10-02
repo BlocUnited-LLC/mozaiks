@@ -50,6 +50,11 @@ VITE_OIDC_CLIENT_ID=your-public-browser-client
 ```
 
 These are illustrative public identity settings, not provisioned services.
+`AUTH_AUDIENCE` is required: every access token's `aud` claim is verified
+against it, and startup refuses JWT authentication without it. Use a dedicated
+API audience distinct from the browser client ID. The default JWT adapter
+also requires the RFC 9068 `at+jwt` token header; issuers without it need a
+configured signed access-token-only claim and expected value.
 Register the browser callback URL with the provider: the shell's origin followed
 by `/auth/callback`. The public browser client uses authorization code flow with
 PKCE; a browser client secret is never required or exposed. Operator settings

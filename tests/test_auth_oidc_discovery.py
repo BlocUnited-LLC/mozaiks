@@ -7,8 +7,8 @@ Covers:
   3. Explicit MOZAIKS_OIDC_DISCOVERY_URL configures discovery correctly.
   4. MOZAIKS_OIDC_AUTHORITY + MOZAIKS_OIDC_TENANT_ID builds the right URL.
   5. MOZAIKS_OIDC_AUTHORITY alone (no tenant) uses bare well-known endpoint.
-  6. AuthConfig defaults carry no proprietary authority, audience, or scope.
-  7. Explicit AUTH_AUDIENCE and AUTH_REQUIRED_SCOPE still work.
+  6. AuthConfig defaults carry no proprietary authority or scope.
+  7. Explicit AUTH_REQUIRED_SCOPE and OIDC authority still load.
   8. Auth adapter registry auto-detection behavior is unchanged.
   9. Hygiene scan: no proprietary strings appear in auth source files.
 """
@@ -291,7 +291,7 @@ class TestAuthorityAndTenantDiscoveryUrl:
 
 
 # ---------------------------------------------------------------------------
-# 6. AuthConfig defaults carry no proprietary authority, audience, or scope
+# 6. AuthConfig defaults carry no proprietary authority or scope
 # ---------------------------------------------------------------------------
 
 class TestAuthConfigProviderNeutralDefaults:
@@ -321,12 +321,6 @@ class TestAuthConfigProviderNeutralDefaults:
         config = self._load_config()
         assert config.oidc_tenant_id == ""
 
-    def test_default_audience_is_empty(self) -> None:
-        config = self._load_config()
-        assert config.audience == "", (
-            f"Default audience must be empty (no Mozaiks-specific audience), got: {config.audience!r}"
-        )
-
     def test_default_required_scope_is_empty(self) -> None:
         config = self._load_config()
         assert config.required_scope == "", (
@@ -339,7 +333,6 @@ class TestAuthConfigProviderNeutralDefaults:
             config.oidc_authority
             + config.oidc_tenant_id
             + config.oidc_discovery_url
-            + config.audience
             + config.required_scope
         )
         for s in _PROPRIETARY_STRINGS:
@@ -349,19 +342,10 @@ class TestAuthConfigProviderNeutralDefaults:
 
 
 # ---------------------------------------------------------------------------
-# 7. Explicit AUTH_AUDIENCE and AUTH_REQUIRED_SCOPE still work
+# 7. Explicit AUTH_REQUIRED_SCOPE and OIDC authority still load
 # ---------------------------------------------------------------------------
 
 class TestAuthConfigExplicitValues:
-    def test_explicit_audience_is_loaded(self) -> None:
-        import mozaiksai.core.auth.config as mod
-        mod.clear_auth_config_cache()
-        with patch.dict(os.environ, {"AUTH_AUDIENCE": "api://my-app"}):
-            from mozaiksai.core.auth.config import get_auth_config
-            config = get_auth_config()
-        mod.clear_auth_config_cache()
-        assert config.audience == "api://my-app"
-
     def test_explicit_required_scope_is_loaded(self) -> None:
         import mozaiksai.core.auth.config as mod
         mod.clear_auth_config_cache()
@@ -392,11 +376,15 @@ class TestAdapterRegistryAutoDetection:
             k: v for k, v in os.environ.items()
             if k not in {
                 "AUTH_PROVIDER", "AUTH_ENABLED",
-                "SUPABASE_URL", "KEYCLOAK_URL", "KEYCLOAK_REALM",
-                "AUTH_JWKS_URL", "AUTH_ISSUER",
+                "SUPABASE_URL", "KEYCLOAK_URL", "KEYCLOAK_REALM", "KEYCLOAK_CLIENT_ID",
+                "AUTH_JWKS_URL", "AUTH_ISSUER", "AUTH_AUDIENCE",
                 "MOZAIKS_OIDC_AUTHORITY", "MOZAIKS_OIDC_DISCOVERY_URL",
             }
         }
+        # Audience bindings are required configuration for the jwt and
+        # keycloak providers but never a detection signal, so supplying them
+        # here leaves provider selection unchanged.
+        clean.update({"AUTH_AUDIENCE": "detect-api", "KEYCLOAK_CLIENT_ID": "detect-client"})
         clean.update(env_overrides)
         import mozaiksai.core.auth.adapters.registry as reg
         with patch.dict(os.environ, clean, clear=True):

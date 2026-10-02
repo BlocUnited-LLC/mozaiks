@@ -7,5 +7,42 @@
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": true,
   "rememberMe": true,
-  "sslRequired": "external"
+  "sslRequired": "external",
+  "clients": [
+    {
+      "clientId": "mozaiks-studio",
+      "name": "Mozaiks Studio (local Compose)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:3000/auth/callback"],
+      "webOrigins": ["http://localhost:3000"],
+      "protocolMappers": [
+        {
+          "name": "mozaiks-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "mozaiks-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "mozaiks-api",
+      "name": "Mozaiks API (local Compose audience)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    }
+  ]
 }

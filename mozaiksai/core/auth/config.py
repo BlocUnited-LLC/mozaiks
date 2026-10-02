@@ -37,8 +37,9 @@ class AuthConfig:
     issuer_override: str | None = None
     jwks_url_override: str | None = None
     
-    # Audience and scope
-    audience: str = ""
+    # Scope. The expected audience is not part of this compatibility surface:
+    # the JWT adapter reads AUTH_AUDIENCE from its own configuration snapshot
+    # and requires it.
     required_scope: str = ""
 
     # Claim mappings (provider-specific)
@@ -93,7 +94,6 @@ def get_auth_config() -> AuthConfig:
 
     Validation Variables:
         AUTH_ENABLED: Enable/disable auth (default: true, set to false for local dev)
-        AUTH_AUDIENCE: Expected audience claim
         AUTH_REQUIRED_SCOPE: Required scope for user endpoints (e.g., access_as_user)
 
     Claim Mapping Variables:
@@ -126,8 +126,6 @@ def get_auth_config() -> AuthConfig:
         # Override settings
         issuer_override=_none_if_empty(os.getenv("AUTH_ISSUER")),
         jwks_url_override=_none_if_empty(os.getenv("AUTH_JWKS_URL")),
-        # Audience and scope (empty = not enforced; set via env for your provider)
-        audience=os.getenv("AUTH_AUDIENCE", ""),
         required_scope=os.getenv("AUTH_REQUIRED_SCOPE", ""),
         # Claim mappings
         user_id_claim=os.getenv("AUTH_USER_ID_CLAIM", "sub"),

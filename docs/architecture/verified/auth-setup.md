@@ -63,8 +63,14 @@ SUPABASE_JWT_SECRET=your-jwt-secret
 ```bash
 KEYCLOAK_URL=https://keycloak.example.com
 KEYCLOAK_REALM=myrealm
-KEYCLOAK_CLIENT_ID=my-app  # optional, for audience validation
+KEYCLOAK_CLIENT_ID=my-api  # required API audience, distinct from the browser client
 ```
+
+Keycloak does not put the API client ID in a browser client's access-token
+`aud` claim by default. Create a separate API client and add an **Audience**
+mapper to the browser client (Included Client Audience = the API client,
+Add to access token on, Add to ID token off). The built-in adapter also
+requires Keycloak's signed `typ: Bearer` access-token claim.
 
 ---
 
@@ -73,7 +79,7 @@ KEYCLOAK_CLIENT_ID=my-app  # optional, for audience validation
 ```bash
 AUTH_PROVIDER=jwt
 MOZAIKS_OIDC_AUTHORITY=https://your-tenant.auth0.com
-AUTH_AUDIENCE=your-api-identifier
+AUTH_AUDIENCE=your-api-identifier  # required
 AUTH_SCOPES_FORMAT=array
 ```
 
@@ -87,8 +93,18 @@ discovery explicitly.
 ```bash
 AUTH_PROVIDER=jwt
 MOZAIKS_OIDC_AUTHORITY=https://your-provider
-AUTH_AUDIENCE=your-api
+AUTH_AUDIENCE=your-api  # required
 ```
+
+`AUTH_AUDIENCE` is required for the `jwt` provider, whichever way it is
+selected. Every token's `aud` claim is verified against it; there is no
+setting that skips the check. The default access-token rule requires the
+RFC 9068 `at+jwt` JOSE header. For an issuer that uses another signed,
+access-token-only claim, set both `AUTH_ACCESS_TOKEN_TYPE_CLAIM` and
+`AUTH_ACCESS_TOKEN_TYPE_VALUE` to its claim name and access-token value.
+For Keycloak with the generic JWT adapter, use `typ` and `Bearer`. An ID token
+must not carry that value. The API audience must be distinct from the browser
+client ID.
 
 For providers that require a tenant segment in the discovery URL, set:
 
@@ -156,6 +172,11 @@ adapter cache, and startup validation consume that same interpretation:
 - An unknown `AUTH_PROVIDER` value, or a selected provider whose
   configuration cannot validate tokens (for example `AUTH_PROVIDER=jwt`
   without JWKS/issuer/discovery settings), is fatal.
+- A token-validating provider without its audience binding is fatal: `jwt`
+  requires `AUTH_AUDIENCE` and `keycloak` requires `KEYCLOAK_CLIENT_ID`. Both
+  adapters verify the `aud` claim on every token and reject tokens without
+  one, so on an issuer shared by several applications a token minted for
+  another application never validates.
 - An unrecognized `AUTH_ENABLED` value (for example a typo like `tru`) is
   fatal instead of silently disabling auth.
 - **Unauthenticated operation is allowlisted, not denylisted.** No-auth

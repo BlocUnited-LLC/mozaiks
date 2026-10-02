@@ -217,21 +217,3 @@ class JWKSClient:
         self._cache = None
         self._keys_by_kid = {}
         self._resolved_jwks_url = None
-
-
-# Module-level singleton
-_jwks_client: JWKSClient | None = None
-
-
-def get_jwks_client() -> JWKSClient:
-    """Get or create the singleton JWKS client."""
-    global _jwks_client
-    if _jwks_client is None:
-        _jwks_client = JWKSClient()
-    return _jwks_client
-
-
-def reset_jwks_client() -> None:
-    """Reset the singleton (for testing)."""
-    global _jwks_client
-    _jwks_client = None

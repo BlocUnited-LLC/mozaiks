@@ -44,7 +44,9 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
     Configuration via environment variables:
         KEYCLOAK_URL: Keycloak server URL (e.g., https://keycloak.example.com)
         KEYCLOAK_REALM: Realm name
-        KEYCLOAK_CLIENT_ID: Client ID for audience validation (optional)
+        KEYCLOAK_CLIENT_ID: Required. Client ID every token's ``aud`` claim is
+            verified against. Keycloak adds it to access tokens through an
+            Audience mapper on that client.
 
     The adapter automatically constructs:
         - JWKS URL: {KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs
@@ -118,6 +120,19 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
 
         token = token.strip()
 
+        audience = (self._client_id or "").strip()
+        if not audience:
+            # Fail closed: never validate a token without binding it to this
+            # client's audience. Registry resolution refuses this
+            # configuration at startup; this guards adapters constructed
+            # directly.
+            raise AuthError(
+                "KEYCLOAK_CLIENT_ID is not configured; refusing to validate "
+                "tokens without audience verification.",
+                500,
+                self.name,
+            )
+
         try:
             jwks_client = self._get_jwks_client()
             signing_key = jwks_client.get_signing_key_from_jwt(token)
@@ -127,16 +142,9 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
                 "verify_exp": True,
                 "verify_iat": True,
                 "verify_iss": True,
-                "require": ["exp", "iss", "sub"],
+                "verify_aud": True,
+                "require": ["exp", "iss", "sub", "aud"],
             }
-
-            # Only verify audience if client_id is configured
-            if self._client_id:
-                decode_options["verify_aud"] = True
-                audience = self._client_id
-            else:
-                decode_options["verify_aud"] = False
-                audience = None
 
             claims = jwt.decode(
                 token,
@@ -146,6 +154,8 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
                 issuer=self._issuer,
                 options=decode_options,  # type: ignore[arg-type]
             )
+            if claims.get("typ") != "Bearer":
+                raise AuthError("Token is not a Keycloak access token", 401, self.name)
         except jwt.PyJWKClientError as e:
             logger.warning("JWKS error: %s", e)
             raise AuthError("Failed to verify token signature", 401, self.name) from e
@@ -153,6 +163,8 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
             raise AuthError("Token has expired", 401, self.name) from exc
         except jwt.InvalidAudienceError as exc:
             raise AuthError("Invalid token audience", 401, self.name) from exc
+        except jwt.MissingRequiredClaimError as exc:
+            raise AuthError(f"Token missing required claim: {exc.claim}", 401, self.name) from exc
         except jwt.InvalidIssuerError as exc:
             raise AuthError("Invalid token issuer", 401, self.name) from exc
         except jwt.InvalidSignatureError as exc:
@@ -160,6 +172,8 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
         except jwt.DecodeError as e:
             logger.warning("Token decode error: %s", e)
             raise AuthError("Invalid token format", 401, self.name) from e
+        except AuthError:
+            raise
         except Exception as e:
             logger.error("Token validation error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401, self.name) from e
@@ -226,5 +240,5 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
         return roles
 
     def is_enabled(self) -> bool:
-        """Check if Keycloak is configured."""
-        return bool(self._keycloak_url and self._realm)
+        """Check if Keycloak is configured, including the audience client ID."""
+        return bool(self._keycloak_url and self._realm and (self._client_id or "").strip())
