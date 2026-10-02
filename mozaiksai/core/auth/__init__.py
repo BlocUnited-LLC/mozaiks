@@ -42,7 +42,7 @@ Configuration (environment variables):
     # Generic JWT Configuration
     AUTH_JWKS_URL=https://.../.well-known/jwks.json
     AUTH_ISSUER=https://...
-    AUTH_AUDIENCE=my-api
+    AUTH_AUDIENCE=my-api      # required; every token's aud claim is verified
     AUTH_USER_ID_CLAIM=sub
     AUTH_EMAIL_CLAIM=email
     AUTH_ROLES_CLAIM=roles
@@ -56,7 +56,7 @@ Configuration (environment variables):
     # Keycloak Configuration
     KEYCLOAK_URL=https://keycloak.example.com
     KEYCLOAK_REALM=myrealm
-    KEYCLOAK_CLIENT_ID=my-app
+    KEYCLOAK_CLIENT_ID=my-app # required; every token's aud claim is verified
 
 Custom Adapter Registration:
     from mozaiksai.core.auth.adapters import register_adapter

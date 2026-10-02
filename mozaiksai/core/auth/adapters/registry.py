@@ -22,6 +22,10 @@ Fail-closed contract:
   ``AUTH_PROVIDER``) raise instead of silently choosing one.
 - Unrecognized ``AUTH_ENABLED`` values raise instead of silently disabling
   authentication.
+- A built-in token-validating provider without its audience binding raises:
+  ``jwt`` requires ``AUTH_AUDIENCE`` and ``keycloak`` requires
+  ``KEYCLOAK_CLIENT_ID``. Audience verification is always on for both, so a
+  token minted for another audience on a shared issuer never validates here.
 - No-auth operation of any kind (explicit disable or implicit demo mode) is
   permitted **only** in the finite set of recognized local/development/test
   environments (see :mod:`mozaiksai.core.environment`). Every other explicit
@@ -130,6 +134,26 @@ _ALL_AUTH_ENV_VARS: tuple[str, ...] = tuple(
 )
 
 BUILTIN_PROVIDERS: frozenset[str] = frozenset(_PROVIDER_CONFIG_ENV_VARS)
+
+# Audience binding each built-in token-validating provider cannot run without.
+# The adapter verifies the token ``aud`` claim against this setting on every
+# request; resolution refuses a configuration that leaves it empty. There is
+# no opt-out: on an issuer shared by several applications, skipping the check
+# would accept tokens minted for any of them.
+_PROVIDER_AUDIENCE_SETTINGS: dict[str, tuple[str, str]] = {
+    "jwt": (
+        "AUTH_AUDIENCE",
+        "Set AUTH_AUDIENCE to the audience ('aud' claim) your identity provider "
+        "issues in access tokens for this API, such as the API identifier or "
+        "the client ID registered for this app.",
+    ),
+    "keycloak": (
+        "KEYCLOAK_CLIENT_ID",
+        "Set KEYCLOAK_CLIENT_ID to the Keycloak client whose ID your realm "
+        "issues in the access token 'aud' claim (add an Audience mapper that "
+        "includes that client).",
+    ),
+}
 
 SETTINGS_PARAMETER = "settings"
 
@@ -460,6 +484,32 @@ def _auth_enabled_setting(settings: Mapping[str, str]) -> bool | None:
     )
 
 
+def _require_audience_binding(
+    provider: str,
+    settings: Mapping[str, str],
+    registration: _AdapterRegistration | None,
+) -> None:
+    """Refuse a built-in token-validating provider with no audience binding.
+
+    Applies only to the built-in adapter registered under the provider name;
+    a custom adapter registered over a built-in name owns its own validation.
+    """
+    requirement = _PROVIDER_AUDIENCE_SETTINGS.get(provider)
+    if requirement is None or registration is None or not registration.builtin:
+        return
+    variable, how_to_set = requirement
+    if settings.get(variable, "").strip():
+        return
+    raise AuthError(
+        f"{variable} is required when {provider!r} authentication is enabled, "
+        f"but it is empty. {how_to_set} Audience verification is always on for "
+        f"the {provider!r} provider and cannot be skipped. To run without "
+        "authentication in local development, set AUTH_ENABLED=false instead.",
+        500,
+        "registry",
+    )
+
+
 def _fingerprint(
     *,
     provider: str,
@@ -512,6 +562,10 @@ def resolve_auth_config() -> ResolvedAuthConfig:
     Environment policy (mandatory, mode-independent): any configuration that
     resolves to no-auth operation — explicit disable or implicit demo — is
     permitted only in a recognized local/development/test environment.
+
+    Audience policy (mandatory, mode-independent): the built-in ``jwt``
+    provider requires ``AUTH_AUDIENCE`` and the built-in ``keycloak`` provider
+    requires ``KEYCLOAK_CLIENT_ID``; an empty value is fatal.
     """
     settings = _environment_snapshot()
 
@@ -607,6 +661,7 @@ def resolve_auth_config() -> ResolvedAuthConfig:
 
     _ensure_builtin_adapters()
     registration = _adapter_registry.get(provider)
+    _require_audience_binding(provider, settings, registration)
 
     return ResolvedAuthConfig(
         provider=provider,

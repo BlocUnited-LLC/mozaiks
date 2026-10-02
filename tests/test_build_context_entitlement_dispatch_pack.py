@@ -223,6 +223,7 @@ async def test_template_actions_allow_server_dispatch_and_reject_http(
     monkeypatch.setattr(platform.app.state, "failed_module_names", [], raising=False)
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "template-test-api")
     client = TestClient(platform.app, raise_server_exceptions=False)
     url = f"/api/modules/{loaded.name}/{action}"
     assert client.get(url, params={"user_id": "subscriber", "plan_id": "pro"}).status_code == 404

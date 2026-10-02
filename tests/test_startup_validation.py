@@ -685,6 +685,7 @@ def _configure_valid_jwt_provider(monkeypatch) -> None:
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
     monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
     monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
+    monkeypatch.setenv("AUTH_AUDIENCE", "example-api")
     clear_auth_config_cache()
     reset_auth_adapter()
 
@@ -800,8 +801,10 @@ class TestAuthProviderCheck:
         monkeypatch.delenv("SUPABASE_URL", raising=False)
         monkeypatch.delenv("KEYCLOAK_URL", raising=False)
         monkeypatch.delenv("KEYCLOAK_REALM", raising=False)
+        monkeypatch.delenv("KEYCLOAK_CLIENT_ID", raising=False)
         monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
         monkeypatch.delenv("AUTH_ISSUER", raising=False)
+        monkeypatch.delenv("AUTH_AUDIENCE", raising=False)
         monkeypatch.delenv("MOZAIKS_OIDC_AUTHORITY", raising=False)
         monkeypatch.delenv("MOZAIKS_OIDC_DISCOVERY_URL", raising=False)
 
@@ -818,6 +821,7 @@ class TestAuthProviderCheck:
         """AUTH_PROVIDER=jwt without JWKS/issuer/discovery config cannot validate tokens → fatal."""
         self._base_env(monkeypatch)
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "example-api")
 
         with pytest.raises(StartupConfigError, match="not fully configured"):
             await run_startup_checks(_mongo_client=_MockPingClient())
@@ -828,6 +832,7 @@ class TestAuthProviderCheck:
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
         monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
+        monkeypatch.setenv("AUTH_AUDIENCE", "example-api")
 
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
@@ -874,6 +879,7 @@ class TestAuthProviderCheck:
         self._base_env(monkeypatch)
         monkeypatch.setenv("KEYCLOAK_URL", "https://keycloak.example.com")
         monkeypatch.setenv("KEYCLOAK_REALM", "myrealm")
+        monkeypatch.setenv("KEYCLOAK_CLIENT_ID", "my-app")
 
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
@@ -884,6 +890,7 @@ class TestAuthProviderCheck:
         self._base_env(monkeypatch)
         monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
+        monkeypatch.setenv("AUTH_AUDIENCE", "example-api")
 
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
@@ -893,6 +900,7 @@ class TestAuthProviderCheck:
     async def test_no_warning_when_oidc_authority_configured(self, monkeypatch):
         self._base_env(monkeypatch)
         monkeypatch.setenv("MOZAIKS_OIDC_AUTHORITY", "https://login.example.com")
+        monkeypatch.setenv("AUTH_AUDIENCE", "example-api")
 
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
@@ -905,10 +913,72 @@ class TestAuthProviderCheck:
             "MOZAIKS_OIDC_DISCOVERY_URL",
             "https://login.example.com/.well-known/openid-configuration",
         )
+        monkeypatch.setenv("AUTH_AUDIENCE", "example-api")
 
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert not any("auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("environment", ["production", "development"])
+    @pytest.mark.parametrize(
+        "jwt_env",
+        [
+            {"AUTH_PROVIDER": "jwt", "MOZAIKS_OIDC_AUTHORITY": "https://login.example.com"},
+            {"MOZAIKS_OIDC_AUTHORITY": "https://login.example.com"},
+            {
+                "AUTH_JWKS_URL": "https://example.com/.well-known/jwks.json",
+                "AUTH_ISSUER": "https://example.com",
+            },
+            {
+                "MOZAIKS_OIDC_AUTHORITY": "https://login.example.com",
+                "AUTH_AUDIENCE": "   ",
+            },
+        ],
+        ids=["explicit-jwt", "oidc-authority", "jwks-issuer", "blank-audience"],
+    )
+    async def test_fatal_when_jwt_enabled_without_audience(
+        self, monkeypatch, environment, jwt_env
+    ):
+        """Issue #523: JWT auth with an empty AUTH_AUDIENCE refuses to start in
+        every environment, and the error names the variable to set."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", environment)
+        for name, value in jwt_env.items():
+            monkeypatch.setenv(name, value)
+
+        with pytest.raises(StartupConfigError) as exc_info:
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+        message = str(exc_info.value)
+        assert "AUTH_AUDIENCE is required when 'jwt' authentication is enabled" in message
+        assert "Set AUTH_AUDIENCE to the audience" in message
+
+    @pytest.mark.asyncio
+    async def test_fatal_when_keycloak_enabled_without_client_id(self, monkeypatch):
+        """The Keycloak adapter's audience is KEYCLOAK_CLIENT_ID: same rule."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("KEYCLOAK_URL", "https://keycloak.example.com")
+        monkeypatch.setenv("KEYCLOAK_REALM", "myrealm")
+
+        with pytest.raises(StartupConfigError) as exc_info:
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert (
+            "KEYCLOAK_CLIENT_ID is required when 'keycloak' authentication is enabled"
+            in str(exc_info.value)
+        )
+
+    @pytest.mark.asyncio
+    async def test_auth_disabled_development_boots_without_audience(self, monkeypatch):
+        """Explicit local no-auth is unaffected by the audience requirement."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", "development")
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("AUTH_AUDIENCE" in w for w in warnings)
 
     @pytest.mark.asyncio
     async def test_fatal_in_development_when_auth_enabled_but_no_provider(self, monkeypatch):
@@ -1144,8 +1214,10 @@ class TestProtectedEnvironmentStartupMatrix:
             "SUPABASE_URL",
             "KEYCLOAK_URL",
             "KEYCLOAK_REALM",
+            "KEYCLOAK_CLIENT_ID",
             "AUTH_JWKS_URL",
             "AUTH_ISSUER",
+            "AUTH_AUDIENCE",
             "MOZAIKS_OIDC_AUTHORITY",
             "MOZAIKS_OIDC_DISCOVERY_URL",
             "ENV",

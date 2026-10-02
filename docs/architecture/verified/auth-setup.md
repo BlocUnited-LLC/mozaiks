@@ -63,8 +63,12 @@ SUPABASE_JWT_SECRET=your-jwt-secret
 ```bash
 KEYCLOAK_URL=https://keycloak.example.com
 KEYCLOAK_REALM=myrealm
-KEYCLOAK_CLIENT_ID=my-app  # optional, for audience validation
+KEYCLOAK_CLIENT_ID=my-app  # required; the token aud claim must include it
 ```
+
+Keycloak does not put the client ID in the access token `aud` claim by
+default. Add an **Audience** mapper to the client (Included Client Audience =
+the same client, Add to access token on).
 
 ---
 
@@ -73,7 +77,7 @@ KEYCLOAK_CLIENT_ID=my-app  # optional, for audience validation
 ```bash
 AUTH_PROVIDER=jwt
 MOZAIKS_OIDC_AUTHORITY=https://your-tenant.auth0.com
-AUTH_AUDIENCE=your-api-identifier
+AUTH_AUDIENCE=your-api-identifier  # required
 AUTH_SCOPES_FORMAT=array
 ```
 
@@ -87,8 +91,12 @@ discovery explicitly.
 ```bash
 AUTH_PROVIDER=jwt
 MOZAIKS_OIDC_AUTHORITY=https://your-provider
-AUTH_AUDIENCE=your-api
+AUTH_AUDIENCE=your-api  # required
 ```
+
+`AUTH_AUDIENCE` is required for the `jwt` provider, whichever way it is
+selected. Every token's `aud` claim is verified against it; there is no
+setting that skips the check.
 
 For providers that require a tenant segment in the discovery URL, set:
 
@@ -156,6 +164,11 @@ adapter cache, and startup validation consume that same interpretation:
 - An unknown `AUTH_PROVIDER` value, or a selected provider whose
   configuration cannot validate tokens (for example `AUTH_PROVIDER=jwt`
   without JWKS/issuer/discovery settings), is fatal.
+- A token-validating provider without its audience binding is fatal: `jwt`
+  requires `AUTH_AUDIENCE` and `keycloak` requires `KEYCLOAK_CLIENT_ID`. Both
+  adapters verify the `aud` claim on every token and reject tokens without
+  one, so on an issuer shared by several applications a token minted for
+  another application never validates.
 - An unrecognized `AUTH_ENABLED` value (for example a typo like `tru`) is
   fatal instead of silently disabling auth.
 - **Unauthenticated operation is allowlisted, not denylisted.** No-auth

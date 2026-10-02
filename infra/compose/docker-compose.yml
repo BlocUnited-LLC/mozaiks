@@ -101,8 +101,12 @@ services:
       #433: "443:443"   # Uncomment if using HTTPS
     environment:
       # Keycloak auth — enabled when Keycloak is healthy.
-      # Set AUTH_ENABLED=false in .env to skip JWT validation during dev.
+      # Set AUTH_ENABLED=false in the Compose --env-file for local no-auth mode.
+      # The imported realm's public mozaiks-studio client has an Audience
+      # mapper. If using another client, set AUTH_AUDIENCE to the audience its
+      # access tokens carry. See docs/guides/self-hosting.md.
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-mozaiks-studio}
       MOZAIKS_OIDC_AUTHORITY: http://keycloak:8080/realms/mozaiks
       AG2_RUNTIME_LOGGING: "sqlite"
       LOGS_BASE_DIR: /app/logs/logs

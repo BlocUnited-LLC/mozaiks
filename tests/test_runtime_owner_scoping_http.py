@@ -181,6 +181,7 @@ def http_runtime(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "ownership-test")
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
     jwk.update({"kid": "ownership-test", "alg": "RS256", "use": "sig"})

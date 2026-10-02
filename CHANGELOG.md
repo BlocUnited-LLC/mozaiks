@@ -14,6 +14,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- JWT and Keycloak authentication now require an audience at startup and
+  verify it on every access token (`AUTH_AUDIENCE` for JWT,
+  `KEYCLOAK_CLIENT_ID` for Keycloak). Deployments that left these unset must
+  configure them; local runs with `AUTH_ENABLED=false` are unaffected. The
+  unused JWT validator was removed (#523).
+
 - Self-hosted subscription grant and revoke actions are internal-only; HTTP
   callers cannot assign themselves paid entitlements.
 

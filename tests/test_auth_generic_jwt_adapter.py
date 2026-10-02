@@ -2,7 +2,8 @@
 
 Tests _extract_claims, _extract_scopes, is_enabled, and JWTAdapterConfig
 without network calls or live JWKS endpoints.
-The validate_token JWKS path is covered by integration/e2e tests.
+Signed-token tests exercise validation with an in-memory JWKS; live endpoint
+behavior is covered by integration/e2e tests.
 """
 from __future__ import annotations
 
@@ -278,16 +279,28 @@ class TestGenericJWTAdapterConfig:
         assert adapter.is_enabled() is False
 
     def test_is_enabled_with_oidc_authority(self):
-        adapter = GenericJWTAdapter(config=JWTAdapterConfig(oidc_authority="https://auth.example.com"))
+        adapter = GenericJWTAdapter(
+            config=JWTAdapterConfig(oidc_authority="https://auth.example.com", audience="my-api")
+        )
         assert adapter.is_enabled() is True
 
     def test_is_enabled_with_oidc_discovery_url(self):
         adapter = GenericJWTAdapter(
             config=JWTAdapterConfig(
                 oidc_discovery_url="https://auth.example.com/.well-known/openid-configuration",
+                audience="my-api",
             )
         )
         assert adapter.is_enabled() is True
+
+    @pytest.mark.parametrize("audience", ["", "   "])
+    def test_not_enabled_without_audience(self, audience):
+        """Audience is required configuration: a key source alone is not enough."""
+        assert _adapter(audience=audience).is_enabled() is False
+        discovery_only = GenericJWTAdapter(
+            config=JWTAdapterConfig(oidc_authority="https://auth.example.com", audience=audience)
+        )
+        assert discovery_only.is_enabled() is False
 
     def test_name_is_jwt(self):
         assert GenericJWTAdapter.name == "jwt"
@@ -418,3 +431,97 @@ class TestGenericJWTAdapterValidation:
         assert claims.tenant_id == "tenant-xyz"
         assert claims.workspace_id == "workspace-xyz"
         assert claims.app_id == "app-xyz"
+
+
+# ---------------------------------------------------------------------------
+# Audience verification is mandatory (issue #523)
+# ---------------------------------------------------------------------------
+
+_ISSUER = "https://issuer.example.com"
+_SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_PUBLIC_JWK = {
+    **json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(_SIGNING_KEY.public_key())),
+    "kid": "kid-aud",
+    "alg": "RS256",
+    "use": "sig",
+}
+
+
+def _signed_token(**claim_overrides: object) -> str:
+    now = int(time.time())
+    claims = {
+        **_base_claims(),
+        "iss": _ISSUER,
+        "iat": now,
+        "nbf": now - 1,
+        "exp": now + 300,
+        **claim_overrides,
+    }
+    claims = {key: value for key, value in claims.items() if value is not None}
+    return jwt.encode(claims, _SIGNING_KEY, algorithm="RS256", headers={"kid": "kid-aud"})
+
+
+class _StaticJWKSClient:
+    """Serves the test signing key without any network access."""
+
+    async def get_signing_key(self, kid: str):
+        assert kid == "kid-aud"
+        return _PUBLIC_JWK
+
+
+def _offline_adapter(monkeypatch, *, audience: str) -> GenericJWTAdapter:
+    adapter = GenericJWTAdapter(
+        config=JWTAdapterConfig(
+            jwks_url="https://issuer.example.com/.well-known/jwks.json",
+            issuer=_ISSUER,
+            audience=audience,
+        )
+    )
+
+    async def _jwks_client():
+        return _StaticJWKSClient()
+
+    monkeypatch.setattr(adapter, "_get_jwks_client_async", _jwks_client)
+    return adapter
+
+
+class TestMandatoryAudienceVerification:
+    @pytest.mark.asyncio
+    async def test_token_for_configured_audience_is_accepted(self, monkeypatch):
+        adapter = _offline_adapter(monkeypatch, audience="my-api")
+        claims = await adapter.validate_token(_signed_token(aud="my-api"))
+        assert claims.user_id == "user-abc-123"
+
+    @pytest.mark.asyncio
+    async def test_audience_list_containing_configured_audience_is_accepted(self, monkeypatch):
+        adapter = _offline_adapter(monkeypatch, audience="my-api")
+        claims = await adapter.validate_token(_signed_token(aud=["account", "my-api"]))
+        assert claims.user_id == "user-abc-123"
+
+    @pytest.mark.asyncio
+    async def test_token_for_another_audience_on_same_issuer_is_rejected(self, monkeypatch):
+        """The #523 scenario: same issuer, valid signature, different audience."""
+        adapter = _offline_adapter(monkeypatch, audience="my-api")
+        with pytest.raises(AuthError) as exc_info:
+            await adapter.validate_token(_signed_token(aud="other-app"))
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.message == "Invalid token audience"
+
+    @pytest.mark.asyncio
+    async def test_token_without_audience_claim_is_rejected(self, monkeypatch):
+        adapter = _offline_adapter(monkeypatch, audience="my-api")
+        with pytest.raises(AuthError) as exc_info:
+            await adapter.validate_token(_signed_token(aud=None))
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.message == "Token missing required claim: aud"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("audience", ["", "   "])
+    async def test_adapter_without_audience_refuses_to_validate(self, monkeypatch, audience):
+        """A directly constructed adapter with no audience fails closed instead
+        of accepting any audience, even for an otherwise valid token."""
+        adapter = _offline_adapter(monkeypatch, audience=audience)
+        with pytest.raises(AuthError) as exc_info:
+            await adapter.validate_token(_signed_token(aud="my-api"))
+        assert exc_info.value.status_code == 500
+        assert "AUTH_AUDIENCE" in exc_info.value.message

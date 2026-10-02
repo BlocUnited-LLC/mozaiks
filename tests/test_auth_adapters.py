@@ -303,8 +303,10 @@ class TestProviderDetectionFailClosed:
             "SUPABASE_URL",
             "KEYCLOAK_URL",
             "KEYCLOAK_REALM",
+            "KEYCLOAK_CLIENT_ID",
             "AUTH_JWKS_URL",
             "AUTH_ISSUER",
+            "AUTH_AUDIENCE",
             "MOZAIKS_OIDC_AUTHORITY",
             "MOZAIKS_OIDC_DISCOVERY_URL",
         ):
@@ -387,6 +389,7 @@ class TestProviderDetectionFailClosed:
 
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
         clear_auth_config_cache()
         try:
             with pytest.raises(AuthError, match="not fully configured"):
@@ -406,8 +409,10 @@ _AUTH_MATRIX_VARS = (
     "SUPABASE_JWT_SECRET",
     "KEYCLOAK_URL",
     "KEYCLOAK_REALM",
+    "KEYCLOAK_CLIENT_ID",
     "AUTH_JWKS_URL",
     "AUTH_ISSUER",
+    "AUTH_AUDIENCE",
     "MOZAIKS_OIDC_AUTHORITY",
     "MOZAIKS_OIDC_DISCOVERY_URL",
     "ENV",
@@ -491,9 +496,17 @@ class TestResolvedAuthStateMatrix:
             {"AUTH_PROVIDER": "none"},
             {"AUTH_ENABLED": "true", "SUPABASE_URL": "https://x.supabase.co"},
             {"AUTH_PROVIDER": "supabase", "SUPABASE_URL": "https://x.supabase.co"},
-            {"KEYCLOAK_URL": "https://kc.example.com", "KEYCLOAK_REALM": "r"},
-            {"AUTH_JWKS_URL": "https://x/jwks.json", "AUTH_ISSUER": "https://x"},
-            {"MOZAIKS_OIDC_AUTHORITY": "https://login.example.com"},
+            {
+                "KEYCLOAK_URL": "https://kc.example.com",
+                "KEYCLOAK_REALM": "r",
+                "KEYCLOAK_CLIENT_ID": "c",
+            },
+            {
+                "AUTH_JWKS_URL": "https://x/jwks.json",
+                "AUTH_ISSUER": "https://x",
+                "AUTH_AUDIENCE": "api",
+            },
+            {"MOZAIKS_OIDC_AUTHORITY": "https://login.example.com", "AUTH_AUDIENCE": "api"},
         ],
     )
     def test_enabled_and_explicitly_disabled_never_both_true(self, monkeypatch, env):
@@ -656,6 +669,7 @@ class TestAdapterCacheCoherence:
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
         monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
+        monkeypatch.setenv("AUTH_AUDIENCE", "example-api")
 
     def test_astra_d5_sequence_none_then_jwt_startup_binds_jwt(self, monkeypatch):
         """demo 'none' resolved first -> config becomes valid JWT -> startup
@@ -691,6 +705,7 @@ class TestAdapterCacheCoherence:
         monkeypatch.delenv("SUPABASE_URL", raising=False)
         monkeypatch.setenv("KEYCLOAK_URL", "https://kc.example.com")
         monkeypatch.setenv("KEYCLOAK_REALM", "realm")
+        monkeypatch.setenv("KEYCLOAK_CLIENT_ID", "client")
         assert get_auth_adapter().name == "keycloak"
 
     def test_valid_provider_to_malformed_config_fails_closed(self, monkeypatch):
@@ -937,6 +952,12 @@ class TestProviderConfigIdentity:
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
         monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/.well-known/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
+
+    def _keycloak_base(self, monkeypatch) -> None:
+        monkeypatch.setenv("KEYCLOAK_URL", "https://kc-a.example.com")
+        monkeypatch.setenv("KEYCLOAK_REALM", "realm-a")
+        monkeypatch.setenv("KEYCLOAK_CLIENT_ID", "client-a")
 
     @pytest.mark.parametrize(
         ("var", "value"),
@@ -1002,8 +1023,7 @@ class TestProviderConfigIdentity:
     def test_keycloak_input_change_rebuilds_adapter(self, monkeypatch, var, value):
         from mozaiksai.core.auth.adapters.registry import get_auth_adapter
 
-        monkeypatch.setenv("KEYCLOAK_URL", "https://kc-a.example.com")
-        monkeypatch.setenv("KEYCLOAK_REALM", "realm-a")
+        self._keycloak_base(monkeypatch)
         first = get_auth_adapter()
         monkeypatch.setenv(var, value)
         second = get_auth_adapter()
@@ -1012,8 +1032,7 @@ class TestProviderConfigIdentity:
     def test_keycloak_rebuilt_adapter_reflects_new_claim_mapping(self, monkeypatch):
         from mozaiksai.core.auth.adapters.registry import get_auth_adapter
 
-        monkeypatch.setenv("KEYCLOAK_URL", "https://kc-a.example.com")
-        monkeypatch.setenv("KEYCLOAK_REALM", "realm-a")
+        self._keycloak_base(monkeypatch)
         first = get_auth_adapter()
         assert first._workspace_id_claim == "workspace_id"
 
@@ -1205,6 +1224,7 @@ class TestCachePublicationCoherence:
 
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
         monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
 
@@ -1256,6 +1276,7 @@ class TestLazyClientSnapshotBinding:
     def _config_a(self, monkeypatch) -> None:
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
         monkeypatch.setenv("MOZAIKS_OIDC_DISCOVERY_URL", "https://a.example.com/.well-known")
         # An explicit JWKS URL keeps key resolution off the network while still
         # exercising the full lazy construction path.
@@ -1326,6 +1347,7 @@ class TestLazyClientSnapshotBinding:
 
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
         monkeypatch.setenv("MOZAIKS_OIDC_AUTHORITY", "https://authority-a.example.com")
         adapter = get_auth_adapter()
 
@@ -1341,6 +1363,7 @@ class TestLazyClientSnapshotBinding:
 
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
         monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
         adapter = get_auth_adapter()
@@ -1398,6 +1421,7 @@ class TestCacheTtlValidation:
 
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
         monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
         monkeypatch.setenv(ttl_var, bad_value)
@@ -1415,6 +1439,7 @@ class TestCacheTtlValidation:
 
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
         monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
         monkeypatch.setenv("AUTH_JWKS_CACHE_TTL", good_value)
@@ -1798,6 +1823,7 @@ class TestBuiltinSnapshotConsumption:
 
         # Mutating the environment does not mutate the existing adapter.
         monkeypatch.setenv("KEYCLOAK_REALM", "realm-b")
+        monkeypatch.setenv("KEYCLOAK_CLIENT_ID", "client-a")
         assert a._realm == "realm-a"
         assert a._issuer == "https://kc-a.example.com/realms/realm-a"
 
@@ -2125,6 +2151,7 @@ class TestConstructorClassification:
 
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
         monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
         assert get_auth_adapter().name == "jwt"
@@ -2155,6 +2182,7 @@ class TestConstructorClassification:
         register_adapter("jwt", _MyJwt, config_identity="v1")
         monkeypatch.setenv("AUTH_ENABLED", "true")
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_AUDIENCE", "api-a")
         adapter = get_auth_adapter()
         assert getattr(adapter, "mine", False) is True
 
@@ -2226,6 +2254,7 @@ class TestCacheTtlArithmetic:
             {
                 "AUTH_ENABLED": "true",
                 "AUTH_PROVIDER": "jwt",
+                "AUTH_AUDIENCE": "api-a",
                 "AUTH_JWKS_URL": "https://a.example.com/jwks.json",
                 "AUTH_ISSUER": "https://a.example.com",
             },
@@ -2310,6 +2339,7 @@ class TestCacheTtlNormalization:
         env = {
             "AUTH_ENABLED": "true",
             "AUTH_PROVIDER": "jwt",
+            "AUTH_AUDIENCE": "api-a",
             "AUTH_JWKS_URL": "https://a.example.com/jwks.json",
             "AUTH_ISSUER": "https://a.example.com",
         }
@@ -2343,6 +2373,7 @@ class TestCacheTtlNormalization:
             {
                 "AUTH_ENABLED": "true",
                 "AUTH_PROVIDER": "jwt",
+                "AUTH_AUDIENCE": "api-a",
                 "AUTH_JWKS_URL": "https://a.example.com/jwks.json",
                 "AUTH_ISSUER": "https://a.example.com",
             },
@@ -2679,6 +2710,7 @@ class TestConstructorSignatureBinding:
                 {
                     "AUTH_ENABLED": "true",
                     "AUTH_PROVIDER": "jwt",
+                    "AUTH_AUDIENCE": "api-a",
                     "AUTH_JWKS_URL": "https://a.example.com/jwks.json",
                     "AUTH_ISSUER": "https://a.example.com",
                 },
@@ -2690,6 +2722,7 @@ class TestConstructorSignatureBinding:
                     "AUTH_ENABLED": "true",
                     "KEYCLOAK_URL": "https://kc.example.com",
                     "KEYCLOAK_REALM": "r",
+                    "KEYCLOAK_CLIENT_ID": "client-a",
                 },
                 "keycloak",
             ),

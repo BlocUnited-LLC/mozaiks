@@ -7,7 +7,12 @@ a live JWKS endpoint; that path is covered by integration/e2e tests.
 """
 from __future__ import annotations
 
+import time
+from types import SimpleNamespace
+
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from mozaiksai.core.auth.adapters.base import AuthError
 from mozaiksai.core.auth.adapters.keycloak import KeycloakAuthAdapter
@@ -237,6 +242,12 @@ class TestKeycloakAdapterConfig:
         adapter = KeycloakAuthAdapter(keycloak_url="https://kc.example.com", realm="")
         assert adapter.is_enabled() is False
 
+    def test_is_not_enabled_without_client_id(self, monkeypatch):
+        """The client ID is the audience every token is verified against."""
+        monkeypatch.delenv("KEYCLOAK_CLIENT_ID", raising=False)
+        adapter = KeycloakAuthAdapter(keycloak_url="https://kc.example.com", realm="myrealm")
+        assert adapter.is_enabled() is False
+
     def test_jwks_url_construction(self):
         adapter = KeycloakAuthAdapter(
             keycloak_url="https://kc.example.com",
@@ -282,3 +293,66 @@ class TestKeycloakAdapterConfig:
 
     def test_name_is_keycloak(self):
         assert KeycloakAuthAdapter.name == "keycloak"
+
+
+# ---------------------------------------------------------------------------
+# Audience verification is mandatory (issue #523)
+# ---------------------------------------------------------------------------
+
+_KC_URL = "https://kc.example.com"
+_KC_REALM = "myrealm"
+_KC_SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def _kc_token(**claim_overrides: object) -> str:
+    now = int(time.time())
+    claims = {
+        **_base_claims(),
+        "iss": f"{_KC_URL}/realms/{_KC_REALM}",
+        "iat": now,
+        "exp": now + 300,
+        **claim_overrides,
+    }
+    claims = {key: value for key, value in claims.items() if value is not None}
+    return jwt.encode(claims, _KC_SIGNING_KEY, algorithm="RS256", headers={"kid": "kc-kid"})
+
+
+def _offline_keycloak(monkeypatch, *, client_id: str) -> KeycloakAuthAdapter:
+    monkeypatch.delenv("KEYCLOAK_CLIENT_ID", raising=False)
+    adapter = KeycloakAuthAdapter(keycloak_url=_KC_URL, realm=_KC_REALM, client_id=client_id)
+    signing_key = SimpleNamespace(key=_KC_SIGNING_KEY.public_key())
+    fake_jwks = SimpleNamespace(get_signing_key_from_jwt=lambda _token: signing_key)
+    monkeypatch.setattr(adapter, "_get_jwks_client", lambda: fake_jwks)
+    return adapter
+
+
+class TestKeycloakMandatoryAudience:
+    @pytest.mark.asyncio
+    async def test_token_for_client_audience_is_accepted(self, monkeypatch):
+        adapter = _offline_keycloak(monkeypatch, client_id="my-app")
+        claims = await adapter.validate_token(_kc_token(aud=["my-app", "account"]))
+        assert claims.user_id == "user-uuid-123"
+
+    @pytest.mark.asyncio
+    async def test_token_for_another_client_is_rejected(self, monkeypatch):
+        adapter = _offline_keycloak(monkeypatch, client_id="my-app")
+        with pytest.raises(AuthError) as exc_info:
+            await adapter.validate_token(_kc_token(aud="account"))
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.message == "Invalid token audience"
+
+    @pytest.mark.asyncio
+    async def test_token_without_audience_claim_is_rejected(self, monkeypatch):
+        adapter = _offline_keycloak(monkeypatch, client_id="my-app")
+        with pytest.raises(AuthError) as exc_info:
+            await adapter.validate_token(_kc_token(aud=None))
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.message == "Token missing required claim: aud"
+
+    @pytest.mark.asyncio
+    async def test_adapter_without_client_id_refuses_to_validate(self, monkeypatch):
+        adapter = _offline_keycloak(monkeypatch, client_id="")
+        with pytest.raises(AuthError) as exc_info:
+            await adapter.validate_token(_kc_token(aud="my-app"))
+        assert exc_info.value.status_code == 500
+        assert "KEYCLOAK_CLIENT_ID" in exc_info.value.message

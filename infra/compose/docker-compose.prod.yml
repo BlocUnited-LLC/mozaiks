@@ -90,8 +90,11 @@ services:
     environment:
       # MongoDB connection (uses compose network)
       MONGO_URI: "mongodb://mongo:27017/mozaiksai"
-      # Auth
+      # The imported realm includes a public mozaiks-studio client and its
+      # Audience mapper. Set AUTH_AUDIENCE in the Compose --env-file to that
+      # client ID, or to a custom client's configured audience.
       AUTH_ENABLED: "true"
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:?Set AUTH_AUDIENCE to the Keycloak client audience}
       MOZAIKS_OIDC_AUTHORITY: http://keycloak:8080/realms/mozaiks
       # Runtime settings
       AG2_RUNTIME_LOGGING: "sqlite"

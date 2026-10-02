@@ -277,6 +277,7 @@ def test_module_dispatch_idor_guard_fires_on_mismatched_app_id(monkeypatch) -> N
     # AUTH_PROVIDER must be set to a non-empty value so _auto_detect_provider()
     # doesn't fall through to the "none" default and is_auth_enabled() returns True.
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
     monkeypatch.setattr(
         "mozaiksai.core.auth.dependencies.get_auth_adapter",
         lambda: _MockAdapter(),
@@ -345,6 +346,7 @@ def test_auth_enabled_module_dispatch_requires_token_by_default(monkeypatch) -> 
     monkeypatch.setattr(platform_host, "executor_registry", registry)
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
 
     client = _client(failed_module_names=[])
     resp = client.get("/api/modules/orders/whoami")
@@ -361,6 +363,7 @@ def test_auth_enabled_public_module_dispatch_allows_anonymous_call(monkeypatch) 
     monkeypatch.setattr(platform_host, "executor_registry", registry)
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
 
     client = _client(
         failed_module_names=[],
@@ -421,6 +424,7 @@ def test_authenticated_module_dispatch_uses_scope_hook_result(monkeypatch) -> No
     monkeypatch.setattr("mozaiksai.hosts.routers.modules.get_platform_hooks", lambda: hooks)
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
     monkeypatch.setattr(
         "mozaiksai.core.auth.dependencies.get_auth_adapter",
         lambda: _MockAdapter(),
@@ -479,6 +483,7 @@ def test_authenticated_module_dispatch_uses_authenticated_user_authority(monkeyp
     monkeypatch.setattr(platform_host, "executor_registry", registry)
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
     monkeypatch.setattr(
         "mozaiksai.core.auth.dependencies.get_auth_adapter",
         lambda: _MockAdapter(),
@@ -533,6 +538,7 @@ def test_module_dispatch_rejects_authenticated_user_id_override(monkeypatch) -> 
 
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
     monkeypatch.setattr(
         "mozaiksai.core.auth.dependencies.get_auth_adapter",
         lambda: _MockAdapter(),
@@ -570,6 +576,7 @@ def test_module_dispatch_rejects_token_bound_tenant_workspace_override(monkeypat
 
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
     monkeypatch.setattr(
         "mozaiksai.core.auth.dependencies.get_auth_adapter",
         lambda: _MockAdapter(),
@@ -642,6 +649,7 @@ def test_internal_surface_block_applies_regardless_of_auth_enabled(monkeypatch) 
     unreachable either way.)"""
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_AUDIENCE", "test-api")
     monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
     monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
 
@@ -760,6 +768,31 @@ def test_platform_startup_gate_fails_closed_in_protected_no_auth_env(monkeypatch
     reset_auth_adapter()
     try:
         with pytest.raises(AuthError, match="not permitted"):
+            asyncio.run(platform_host._platform_startup())
+    finally:
+        reset_auth_adapter()
+
+
+def test_platform_startup_refuses_jwt_auth_without_audience(monkeypatch) -> None:
+    """Issue #523: the platform (and Studio) host refuses to boot when JWT
+    auth is enabled with an empty AUTH_AUDIENCE, naming the variable."""
+    import asyncio
+
+    from mozaiksai.core.auth.adapters.base import AuthError
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    for var in (
+        "AUTH_PROVIDER", "SUPABASE_URL", "KEYCLOAK_URL", "KEYCLOAK_REALM",
+        "KEYCLOAK_CLIENT_ID", "AUTH_JWKS_URL", "AUTH_ISSUER", "AUTH_AUDIENCE",
+        "MOZAIKS_OIDC_DISCOVERY_URL", "ENVIRONMENT",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("MOZAIKS_OIDC_AUTHORITY", "https://login.example.com")
+    monkeypatch.setenv("ENV", "production")
+    reset_auth_adapter()
+    try:
+        with pytest.raises(AuthError, match="AUTH_AUDIENCE is required"):
             asyncio.run(platform_host._platform_startup())
     finally:
         reset_auth_adapter()

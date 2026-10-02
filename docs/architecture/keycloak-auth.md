@@ -143,7 +143,8 @@ Own deployment-time backend configuration, such as:
 - `MOZAIKS_OIDC_AUTHORITY` — required; base URL of the OIDC identity provider
 - `MOZAIKS_OIDC_TENANT_ID` — optional; appended to authority for discovery URL
 - `MOZAIKS_OIDC_DISCOVERY_URL` — optional; explicit `.well-known` URL (overrides authority/tenant)
-- `AUTH_AUDIENCE` — expected audience claim for token validation
+- `AUTH_AUDIENCE` — required with JWT auth; expected audience claim, verified
+  on every token (startup refuses JWT auth without it)
 - `AUTH_REQUIRED_SCOPE` — required scope for user-authenticated endpoints
 - `AUTH_ROLES_CLAIM` — JWT claim name for roles (default: `roles`)
 - `VITE_OIDC_AUTHORITY` — frontend: OIDC authority for the browser auth flow

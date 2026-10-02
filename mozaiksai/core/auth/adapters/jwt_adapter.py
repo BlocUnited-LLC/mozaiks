@@ -62,9 +62,11 @@ class JWTAdapterConfig:
     All fields can be set via environment variables with AUTH_ prefix.
     """
 
-    # JWKS and issuer (required for validation)
+    # JWKS and issuer (explicit, or resolved through OIDC discovery)
     jwks_url: str = ""
     issuer: str = ""
+    # Expected ``aud`` claim. Required: every token's audience is verified
+    # against it, and validation refuses to run without it.
     audience: str = ""
 
     # OIDC discovery (used when jwks_url or issuer are not explicitly set)
@@ -176,6 +178,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
     Features:
     - Configurable claim mappings
     - JWKS-based signature validation
+    - Mandatory audience verification against AUTH_AUDIENCE
     - OIDC discovery for issuer and JWKS URL when explicit overrides are absent
     - Flexible scope extraction (space-separated or array)
     - Clock skew tolerance
@@ -186,7 +189,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
         MOZAIKS_OIDC_AUTHORITY: OIDC authority used for discovery when overrides are absent
         MOZAIKS_OIDC_TENANT_ID: Optional tenant appended to the authority discovery URL
         MOZAIKS_OIDC_DISCOVERY_URL: Optional explicit discovery document URL
-        AUTH_AUDIENCE: Expected audience claim
+        AUTH_AUDIENCE: Required expected audience claim; always verified
         AUTH_USER_ID_CLAIM: Claim for user ID (default: sub)
         AUTH_EMAIL_CLAIM: Claim for email (default: email)
         AUTH_NAME_CLAIM: Claim for name (default: name)
@@ -297,6 +300,18 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
         token = token.strip()
 
+        audience = self._config.audience.strip()
+        if not audience:
+            # Fail closed: never validate a token without binding it to this
+            # API's audience. Registry resolution refuses this configuration
+            # at startup; this guards adapters constructed directly.
+            raise AuthError(
+                "AUTH_AUDIENCE is not configured; refusing to validate tokens "
+                "without audience verification.",
+                500,
+                self.name,
+            )
+
         # Decode header to get key id, then resolve signing key from explicit
         # JWKS URL or OIDC discovery.
         try:
@@ -329,20 +344,15 @@ class GenericJWTAdapter(BaseAuthAdapter):
                 "verify_exp": True,
                 "verify_nbf": True,
                 "verify_iat": True,
-                "require": ["exp", "iss"],
+                "verify_aud": True,
+                "require": ["exp", "iss", "aud"],
             }
-
-            # Only verify audience if configured
-            if self._config.audience:
-                decode_options["verify_aud"] = True
-            else:
-                decode_options["verify_aud"] = False
 
             claims = jwt.decode(
                 token,
                 signing_key,
                 algorithms=self._config.algorithms,
-                audience=self._config.audience if self._config.audience else None,
+                audience=audience,
                 issuer=expected_issuer,
                 leeway=self._config.clock_skew_seconds,
                 options=decode_options,  # type: ignore[arg-type]
@@ -353,6 +363,8 @@ class GenericJWTAdapter(BaseAuthAdapter):
             raise AuthError("Token not yet valid", 401, self.name) from exc
         except jwt.InvalidAudienceError as exc:
             raise AuthError("Invalid token audience", 401, self.name) from exc
+        except jwt.MissingRequiredClaimError as exc:
+            raise AuthError(f"Token missing required claim: {exc.claim}", 401, self.name) from exc
         except jwt.InvalidIssuerError as exc:
             raise AuthError("Invalid token issuer", 401, self.name) from exc
         except jwt.InvalidSignatureError as exc:
@@ -446,6 +458,12 @@ class GenericJWTAdapter(BaseAuthAdapter):
             return []
 
     def is_enabled(self) -> bool:
-        """Check if the adapter has required configuration."""
+        """Check if the adapter has required configuration.
+
+        Requires a key/issuer source (explicit JWKS URL + issuer, or OIDC
+        discovery) and the audience every token is verified against.
+        """
+        if not self._config.audience.strip():
+            return False
         explicit_configured = bool(self._config.jwks_url and self._config.issuer)
         return explicit_configured or bool(self._configured_discovery_url())
