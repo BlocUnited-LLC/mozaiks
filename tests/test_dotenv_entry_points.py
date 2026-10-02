@@ -184,6 +184,23 @@ def test_load_workspace_dotenv_without_a_file_changes_nothing(tmp_path: Path) ->
     assert dict(os.environ) == before
 
 
+def test_disabled_dotenv_is_not_loaded_or_injected_by_studio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mozaiks_cli.studio_launcher import _workspace_env
+    from mozaiks_cli.workspace import load_workspace_dotenv
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_dotenv(workspace, {"MOZAIKS_DOTENV_WORKSPACE": "should-not-appear"})
+    _restore_after(monkeypatch, "MOZAIKS_DOTENV_WORKSPACE")
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+
+    assert load_workspace_dotenv(workspace) is None
+    assert "MOZAIKS_DOTENV_WORKSPACE" not in os.environ
+    assert "MOZAIKS_DOTENV_WORKSPACE" not in _workspace_env(workspace, host="studio")
+
+
 def test_serve_hands_the_workspace_dotenv_to_the_host(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

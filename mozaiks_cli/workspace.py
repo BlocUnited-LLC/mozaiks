@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,6 +21,8 @@ def load_workspace_dotenv(workspace_root: Path) -> Path | None:
     Returns the file that was loaded, or ``None`` when the workspace has none.
     """
     env_file = workspace_root.resolve() / ".env"
+    if os.getenv("PYTHON_DOTENV_DISABLED", "").strip().lower() in {"1", "true", "yes"}:
+        return None
     if not env_file.is_file():
         return None
     load_dotenv(dotenv_path=env_file, override=False)

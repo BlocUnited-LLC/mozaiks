@@ -73,6 +73,8 @@ This project follows a practical pre-1.0 changelog format:
   - App-local hosts that compose `mozaiksai.hosts.studio` (App Zero) must load
     their own `.env` in their launcher before upgrading. See
     `docs/architecture/hosts/host-composition-contract.md`.
+  - `PYTHON_DOTENV_DISABLED=1` also prevents Studio launchers from copying
+    workspace `.env` values into their child process.
 
 - Generated subscription plans now select approved module actions from a closed
   inventory. The factory derives capability IDs and gates only for actions that
