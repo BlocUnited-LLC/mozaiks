@@ -1,15 +1,17 @@
 # ==============================================================================
 # FILE: mozaiksai/core/core_config.py
 # DESCRIPTION: Lazy MongoDB and app-backend configuration using shared secret policy.
+#
+# Configuration comes from the process environment only. Importing this module
+# never reads a .env file: that belongs to process entry points (the CLI loads
+# its workspace .env; `uvicorn --env-file` for direct host launches). See #778.
 # ==============================================================================
 import os
 
-from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from logs.logging_config import get_core_logger
 
-load_dotenv()
 logger = get_core_logger("core_config")
 _mongo_client: AsyncIOMotorClient | None = None
 _mongo_client_conn_str: str | None = None

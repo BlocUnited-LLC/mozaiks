@@ -143,12 +143,21 @@ if ($pythonCmd -eq "python") {
   Write-Host "[backend] .venv not found; using Python from PATH." -ForegroundColor Yellow
 }
 
+$uvicornArgs = @("-m", "uvicorn", "mozaiksai.hosts.studio:app", "--host", "0.0.0.0", "--port", [string]$Port)
+# Importing mozaiksai never reads a .env (#778). This launcher is the process
+# entry point, so it hands the repo .env to uvicorn, which loads it before the
+# app import without overriding anything already set in this shell.
+$repoEnvFile = Join-Path $RepoRoot ".env"
+if (Test-Path -LiteralPath $repoEnvFile) {
+  $uvicornArgs += @("--env-file", $repoEnvFile)
+}
+
 Write-Host "[backend] Starting uvicorn on port $Port..." -ForegroundColor Cyan
-Write-Host "[backend] Command: $pythonCmd -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port $Port" -ForegroundColor DarkGray
+Write-Host "[backend] Command: $pythonCmd $($uvicornArgs -join ' ')" -ForegroundColor DarkGray
 
 $backendExitCode = 0
 try {
-  & $pythonCmd -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port $Port
+  & $pythonCmd @uvicornArgs
   $backendExitCode = $LASTEXITCODE
 }
 finally {

@@ -30,6 +30,16 @@ Studio startup therefore also rebinds the catalog to the root its defaults
 selected (`align_workflow_catalog_with_host_config`), which is a no-op when
 the two already agree.
 
+Importing any `mozaiksai` module also never reads a `.env` file. Configuration
+comes from the process environment, which the app-local host's launcher
+supplies: the variables are already set, or the launcher loads the workspace
+`.env` explicitly before the app import (`uvicorn app.host:app --env-file .env`,
+or `dotenv.load_dotenv(<workspace>/.env, override=False)` at the top of the
+entrypoint). Nothing later in the process re-reads the file, so a variable the
+launcher deliberately removes (for example `MOZAIKS_FACTORY_APP_PATH`, to keep
+factory resources inside the installed package) stays removed, as long as the
+launcher removes it after loading its `.env` or keeps it out of that file.
+
 The app-local host must configure workspace paths before the composed server
 starts. Setting them before importing `mozaiksai.hosts.studio` is still the
 recommended pattern — it makes the import-time catalog agree with the startup

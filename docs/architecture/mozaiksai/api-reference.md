@@ -13,8 +13,12 @@ behavioral contracts, see the linked architecture docs.
 | `mozaiksai.hosts.platform` | 8000 | Full app platform: modules, pages, sessions, profile |
 | `mozaiksai.hosts.studio` | 8000 | Studio management layer; composes platform host |
 
-Start with `mozaiks serve . --host studio` or `uvicorn mozaiksai.hosts.studio:app --reload`
-for the recommended local development surface.
+Start with `mozaiks serve . --host studio` or
+`uvicorn mozaiksai.hosts.studio:app --reload --env-file .env` for the recommended
+local development surface. Importing `mozaiksai` never reads a `.env` file: the
+process entry point supplies configuration. `mozaiks serve` loads the workspace
+`.env`; a direct `uvicorn` launch needs `--env-file` (or the variables set in the
+shell). Neither overrides a variable the process already has.
 
 ---
 

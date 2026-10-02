@@ -12,7 +12,7 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from mozaiks_cli.workspace import resolve_active_app_root
+from mozaiks_cli.workspace import load_workspace_dotenv, resolve_active_app_root
 from mozaiksai.resources import (
     resolve_chat_ui_root,
     resolve_factory_app_root,
@@ -45,17 +45,11 @@ def _workspace_env(workspace_root: Path, *, host: str) -> dict[str, str]:
     if chat_ui_root is not None:
         env.setdefault("MOZAIKS_CHAT_UI_PATH", str(chat_ui_root))
 
-    try:
-        from dotenv import load_dotenv
-    except ImportError as exc:
-        raise RuntimeError("python-dotenv is required to launch Studio from the CLI.") from exc
-
     env_file = workspace_root / ".env"
     env_example = workspace_root / ".env.example"
     if not env_file.exists() and env_example.exists():
         shutil.copy(env_example, env_file)
-    if env_file.exists():
-        load_dotenv(dotenv_path=env_file, override=False)
+    if load_workspace_dotenv(workspace_root) is not None:
         for line in env_file.read_text(encoding="utf-8").splitlines():
             text = line.strip()
             if not text or text.startswith("#") or "=" not in text:

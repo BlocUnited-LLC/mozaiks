@@ -293,7 +293,14 @@ if (-not $pythonExe) {
     exit 1
 }
 Write-Host "Starting local backend on http://localhost:$AppPort (AUTH_ENABLED=$($env:AUTH_ENABLED))" -ForegroundColor Yellow
-& $pythonExe -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port $AppPort
+# Importing mozaiksai never reads a .env (#778); hand the repo .env to uvicorn,
+# which loads it without overriding values already set in this shell.
+$uvicornArgs = @("-m", "uvicorn", "mozaiksai.hosts.studio:app", "--host", "0.0.0.0", "--port", [string]$AppPort)
+$repoEnvFile = Join-Path -Path $RepoRoot -ChildPath '.env'
+if (Test-Path -LiteralPath $repoEnvFile) {
+    $uvicornArgs += @("--env-file", $repoEnvFile)
+}
+& $pythonExe @uvicornArgs
 
 if ($StartFrontend) {
     Write-Host "Starting frontend (app) in a new process..." -ForegroundColor Green

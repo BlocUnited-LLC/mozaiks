@@ -63,14 +63,10 @@ import json
 import os
 import sys
 
-# Import the module whose import side effect is load_dotenv() FIRST, so the
-# snapshot below isolates what importing the host itself does. Compensating for
-# dotenv by pre-seeding the child environment instead would make this test
-# vacuous for any developer whose .env pins PLATFORM_PATH or
-# MOZAIKS_WORKFLOWS_PATH: the host's writes would land on identical values and
-# the diff would stay clean even with the import-time bootstrap restored.
-import mozaiksai.core.core_config  # noqa: F401
-
+# Snapshot before anything from mozaiksai is imported: the whole import chain
+# under the host, core_config included, must leave the environment alone. No
+# module reads a .env on import (issue #778), so a developer's .env cannot
+# account for a difference here.
 before_env = dict(os.environ)
 before_path = list(sys.path)
 before_cwd = os.getcwd()

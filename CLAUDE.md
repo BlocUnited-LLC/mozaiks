@@ -73,7 +73,7 @@ mozaiks serve . --host studio # Studio management host on :8000
 Or directly via uvicorn:
 
 ```bash
-uvicorn mozaiksai.hosts.studio:app --reload
+uvicorn mozaiksai.hosts.studio:app --reload --env-file .env
 ```
 
 ### Run with Docker Compose (includes MongoDB + Keycloak)

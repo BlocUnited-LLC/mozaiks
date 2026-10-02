@@ -220,6 +220,8 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     backend_script = (target_dir / "scripts" / "run-backend.ps1").read_text(encoding="utf-8")
     assert "mozaiksai.hosts.platform:app" in backend_script
     assert "MOZAIKS_APP_WORKSPACE_PATH" in backend_script
+    # Importing mozaiksai never reads a .env (#778); the launcher passes it.
+    assert '$uvicornArgs += @("--env-file", $workspaceEnvFile)' in backend_script
 
     frontend_script = (target_dir / "scripts" / "run-frontend.ps1").read_text(encoding="utf-8")
     assert "resolve_web_shell_root" in frontend_script

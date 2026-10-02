@@ -199,10 +199,6 @@ def test_workspace_resolution_identical_before_and_after_host_import() -> None:
     probe = (
         "import json, sys\n"
         "sys.path.insert(0, 'tests')\n"
-        # Run the load_dotenv() import side effect before the first snapshot,
-        # so a developer .env that pins PLATFORM_PATH cannot masquerade as the
-        # host import changing the resolution.
-        "import mozaiksai.core.core_config  # noqa: F401\n"
         "from conftest import _resolve_active_app_root\n"
         "before = _resolve_active_app_root()\n"
         "import mozaiksai.hosts.studio  # noqa: F401\n"
