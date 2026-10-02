@@ -82,6 +82,7 @@ def test_app_build_plan_accepts_persistence_contract_task() -> None:
         "pages": [{"name": "Projects", "route": "/projects", "purpose": "List projects"}],
         "entities": [{"name": "Project"}, {"name": "Task"}],
         "roles": ["user"],
+        "auth_strategy": "basic-login",
         "service_scope": ["projects", "tasks"],
         "frontend_scope": ["projects_page"],
         "capability_packs": [],

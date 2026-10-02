@@ -390,7 +390,7 @@ def _workflow_plan() -> dict[str, Any]:
             }
         ],
         modules={"research": ["summarize_source", "start_research"]},
-        auth_strategy="required",
+        auth_strategy="role-based",
     )
     plan["agent_backend_required"] = True
     plan["workflow_touchpoints"] = [
@@ -417,6 +417,26 @@ def test_brownfield_handoff_preserves_explicit_page_action_selection() -> None:
         {"module_id": "work_items", "action_id": "list_work_items"},
     ]
     assert "api_endpoint" not in json.dumps(plan["pages"])
+
+
+@pytest.mark.parametrize(
+    ("auth_model", "expected_strategy", "expected_roles"),
+    [
+        ("JWT required for mutations", "basic-login", ["user"]),
+        ("none", "public", []),
+    ],
+)
+def test_brownfield_handoff_emits_canonical_auth_strategy(
+    auth_model, expected_strategy, expected_roles,
+) -> None:
+    discovery = _brownfield_discovery_artifact()
+    discovery["existing_product_spec"]["auth_model"] = auth_model
+    plan = build_app_build_plan_from_discovery(
+        discovery,
+        module_decomposition_plan=_brownfield_module_decomposition(),
+    )
+    assert plan["auth_strategy"] == expected_strategy
+    assert plan["roles"] == expected_roles
 
 
 async def _run_platform_acceptance(

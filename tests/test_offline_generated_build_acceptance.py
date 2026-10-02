@@ -484,7 +484,7 @@ async def _admit_offline_fixture(monkeypatch, context, files, *, module_actions,
         "app.json", "config/ai.json", "config/shell.json", "ui/route_manifest.json", f"ui/pages/{page}.yaml",
     ], [task_id for module_id in module_actions for task_id in (f"{module_id}.contract", f"{module_id}.services")], surface_kind="ui_only")
     plan = {
-        "app_kind": "saas" if saas else "internal_app", "auth_strategy": "none", "roles": [], "entities": [],
+        "app_kind": "saas" if saas else "internal_app", "auth_strategy": "public", "roles": [], "entities": [],
         "pages": [{"name": page.title(), "route": f"/{page}", "purpose": "Use the declared module actions."}],
         "capability_packs": [{
             "capability_pack_id": module_id, "surface_id": module_id, "surface_kind": "module",

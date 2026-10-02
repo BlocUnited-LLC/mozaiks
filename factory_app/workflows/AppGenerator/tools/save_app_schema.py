@@ -46,6 +46,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     _page_file_stem,
+    auth_required_from_strategy,
     data_contract_requires_auth,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -1348,13 +1349,15 @@ def _persist_to_filesystem(
 
     # app.json — app-level startup and product intent.
     default_route = manifest_dict.get("default_route") or "/"
-    auth_strategy = manifest_dict.get("auth_strategy")
+    auth_required = auth_required_from_strategy(
+        manifest_dict.get("auth_strategy"), roles=manifest_dict.get("roles")
+    )
     app_json = {
         "appId": require_build_binding(context_variables).target_app_id,
         "appName": manifest_dict["app_name"],
         "startup": {"landing_spot": default_route},
         "targets": {"web": True, "mobile": False},
-        "authRequired": bool(auth_strategy and auth_strategy != "public") or data_contract_requires_auth(data_contract),
+        "authRequired": auth_required or data_contract_requires_auth(data_contract),
         "admins": [],
     }
     for manifest_key, app_json_key in (
@@ -1612,6 +1615,9 @@ def save_app_schema(
         manifest_dict = _require_dict(_strip_none(_to_plain(manifest)), "manifest")
         if not manifest_dict.get("app_name"):
             raise ValueError("manifest.app_name is required")
+        auth_required_from_strategy(
+            manifest_dict.get("auth_strategy"), roles=manifest_dict.get("roles")
+        )
 
         raw_page_list = _normalize_list(_to_plain(pages))
         for page in raw_page_list:
@@ -1888,7 +1894,7 @@ def save_app_schema(
         f"{msg}\n\n"
         f"App: {manifest_dict.get('app_name')}\n"
         f"Pages: {len(page_list)}\n"
-        f"Auth strategy: {manifest_dict.get('auth_strategy') or 'none'}\n"
+        f"Auth strategy: {manifest_dict.get('auth_strategy') or 'null'}\n"
         f"Theme config patch: {'yes' if theme_config_patch else 'no'}\n"
         f"Shell config: {'yes' if shell_config else 'no'}\n"
         f"Asset manifest: {'yes' if asset_manifest else 'no'}\n"

@@ -461,7 +461,7 @@ def _base_plan(
     app_kind: str,
     pages: list[dict[str, Any]],
     modules: dict[str, list[str]],
-    auth_strategy: str = "none",
+    auth_strategy: str = "public",
     extra_tasks: list[dict[str, Any]] | None = None,
     capability_packs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -569,7 +569,7 @@ def _base_plan(
         "app_kind": app_kind,
         "pages": pages,
         "entities": [{"name": module_id.title()} for module_id in modules],
-        "roles": [{"id": "user", "label": "User"}],
+        "roles": ["user"] if auth_strategy != "public" else [],
         "auth_strategy": auth_strategy,
         "service_scope": list(modules),
         "frontend_scope": [str(page["name"]) for page in pages],
@@ -687,7 +687,7 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
             "manifest": {
                 "app_name": spec.app_name,
                 "default_route": spec.plan["pages"][0]["route"],
-                "auth_strategy": "oidc" if spec.auth_enabled else "public",
+                "auth_strategy": "third-party" if spec.auth_enabled else "public",
             },
             "pages": _validation_pages(spec.plan, {}),
             "code_files": [
@@ -1219,7 +1219,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
             },
         ],
         modules={"projects": ["create_project", "list_projects"], "tasks": ["create_task", "list_tasks"]},
-        auth_strategy="required",
+        auth_strategy="role-based",
     )
     workflow_plan = _base_plan(
         app_kind="workflow_agent",

@@ -18,7 +18,10 @@ from mozaiksai.core.runtime.app.paths import (
 )
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+from mozaiksai.core.workflow.generator_support.code_files import (
+    _page_file_stem,
+    auth_required_from_strategy,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_facade_directories,
     pack_owned_output_paths,
@@ -2166,6 +2169,7 @@ def app_build_plan(
     entities = _normalize_object_list(AppBuildPlan.get("entities"))
     roles = _normalize_string_list(AppBuildPlan.get("roles"))
     auth_strategy = AppBuildPlan.get("auth_strategy")
+    auth_required_from_strategy(auth_strategy, roles=roles, field="AppBuildPlan.auth_strategy")
     service_scope = _normalize_string_list(AppBuildPlan.get("service_scope"))
     frontend_scope = _normalize_string_list(AppBuildPlan.get("frontend_scope"))
     theme_preferences = AppBuildPlan.get("theme_preferences")

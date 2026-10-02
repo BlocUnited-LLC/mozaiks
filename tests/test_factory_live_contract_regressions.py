@@ -42,7 +42,7 @@ def _repair_context(task_type, agent, files, *, data_contract=None):
         "owned_paths": list(files), "depends_on": [], "acceptance_criteria": ["Preserve task ownership."],
     }
     app_build_plan(AppBuildPlan={
-        "app_kind": "internal_app", "auth_strategy": "none", "roles": [], "entities": [],
+        "app_kind": "internal_app", "auth_strategy": "public", "roles": [], "entities": [],
         "build_tasks": [task], "pages": [{"name": "Contacts", "route": "/contacts", "purpose": "Review contacts."}],
         "capability_packs": [],
     }, context_variables=context)

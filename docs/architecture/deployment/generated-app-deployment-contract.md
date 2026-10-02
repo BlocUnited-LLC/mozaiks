@@ -162,7 +162,8 @@ Default generated checks are provider-neutral:
   - requires evidence stamp `APP_HEALTHCHECK_VERIFIED_AT`
 - `auth_configuration`
   - emitted only when `app.json.authRequired=true`
-  - requires `AUTH_ENABLED` and `AUTH_PROVIDER`
+  - requires `AUTH_ENABLED` and `AUTH_PROVIDER`, plus `AUTH_AUDIENCE` for
+    JWT or `KEYCLOAK_CLIENT_ID` for Keycloak
   - requires evidence stamp `APP_AUTH_SMOKE_VERIFIED_AT`
 
 Rules:
@@ -225,6 +226,14 @@ its access tokens. Use an API audience distinct from the browser client ID.
 The OSS runtime also verifies the configured adapter's access-token type rule
 and rejects ID tokens. Generated app modules continue to enforce permissions
 and entitlement gates through declarative module contracts.
+
+Generated bundle validation checks the deployment manifest and its embedded
+target specification against the same provider requirements used by the renderer.
+The app manifest and deployment manifest must agree on whether authentication
+is required. Required audience variables cannot be omitted or moved to optional
+metadata, and the generated environment examples must retain their required
+placeholders. These checks run again on the assembled bundle, so an edited
+deployment artifact cannot bypass validation by having been valid when rendered.
 
 ### CI Workflow Secret Requirements
 

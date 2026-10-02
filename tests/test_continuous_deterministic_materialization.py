@@ -124,7 +124,7 @@ def _plan_payload() -> dict[str, Any]:
                 }
             ],
             "entities": [{"name": "Report", "operations": ["read"], "notes": None}],
-            "roles": ["operator"],
+            "roles": [],
             "auth_strategy": "public",
             "service_scope": ["reports"],
             "frontend_scope": ["reports"],
@@ -350,7 +350,7 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
                 "value_proposition": None,
                 "version": "1.0.0",
                 "auth_strategy": "public",
-                "roles": ["operator"],
+                "roles": [],
                 "default_route": "/reports",
                 "pages": ["reports"],
                 "custom_routes": [],

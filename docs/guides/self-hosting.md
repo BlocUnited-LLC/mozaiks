@@ -362,7 +362,7 @@ token** on and **Add to ID token** off, and set `AUTH_AUDIENCE` to that API
 client ID. The Compose backend also requires Keycloak's signed `typ: Bearer`
 access-token claim; the built-in `keycloak` adapter enforces it directly.
 
-Mozaiks always checks the access token's `aud` claim against `AUTH_AUDIENCE`.
+With the `jwt` provider, Mozaiks checks the access token's `aud` claim against `AUTH_AUDIENCE`.
 It refuses to start with JWT authentication enabled and no `AUTH_AUDIENCE`,
 and it rejects tokens whose `aud` does not include that value, such as tokens
 issued to the realm's other clients. With the

@@ -52,7 +52,7 @@
       "user",
       "admin"
     ],
-    "auth_strategy": "role_based",
+    "auth_strategy": "role-based",
     "service_scope": [
       "reports"
     ],

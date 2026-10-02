@@ -139,6 +139,7 @@ def _minimal_plan(**overrides) -> dict[str, Any]:
         "app_kind": "marketplace",
         "pages": [{"name": "Home", "route": "/", "purpose": "Landing"}],
         "entities": [], "roles": ["user"], "service_scope": [], "frontend_scope": [],
+        "auth_strategy": "basic-login",
         "capability_packs": [], "external_integrations": [], "agent_backend_required": False,
         "build_tasks": [], "generation_order": [],
     }

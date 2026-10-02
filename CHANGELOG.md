@@ -20,7 +20,8 @@ This project follows a practical pre-1.0 changelog format:
   configure them; local runs with `AUTH_ENABLED=false` are unaffected. The
   unused JWT validator was removed (#523).
   Generated authenticated deployment manifests and env templates now mark the
-  matching audience setting as required.
+  matching audience setting as required. Bundle validation rejects deployment
+  artifacts that omit or downgrade those requirements.
   The local Keycloak realm uses a distinct `mozaiks-api` audience, and existing
   persistent realms can add that client and mapper without deleting data.
 
@@ -115,6 +116,11 @@ This project follows a practical pre-1.0 changelog format:
   overrides for the matching app can replace them. Partial brand tokens inherit
   the app's light or dark appearance and font presets, keeping text and
   background colors consistent.
+
+- Generated app plans and page manifests use the same finite auth choices.
+  Public apps use `public`; invalid or retired labels such as `none` are
+  rejected before they can accidentally enable login. Public auth cannot
+  declare logical roles, and role-based auth must declare at least one role.
 
 - A worker's Python that does not compile is now an output rejection the
   worker can correct, not a crash. A live run lost its `business_services` task

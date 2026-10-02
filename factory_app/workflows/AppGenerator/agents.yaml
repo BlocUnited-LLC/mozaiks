@@ -365,7 +365,10 @@ agents:
            - do not plan removed model or database-schema artifacts.
          - For project/task CRUD apps, prefer separate app-owned generated modules for `projects` and `tasks` unless the user explicitly asks for a single combined module. Each persistent module must be decomposed into a contract task, a schema/model task, and a service implementation task so YAML, typed shapes, and runtime logic have separate owners.
          - For ordinary CRUD apps, use the plural lowercase entity id as the module id and path (for example `modules/projects/...` and `modules/tasks/...`). Do not rename simple CRUD modules to abstract `*_core` ids unless the user asks for a platform/core abstraction.
-      7. Make auth explicit: public, basic login, role-based, or third-party auth.
+      7. Make auth explicit with exactly one canonical value: `public` for no sign-in,
+         `basic-login`, `role-based`, or `third-party`. Do not emit `none` or provider names.
+         Leave `roles` empty for `public` or null; logical roles require a login strategy.
+         Declare at least one role when using `role-based`.
       8. Capture any visual/style preference the user stated during the interview (e.g. "dark", "minimal", "techy") as `theme_preferences` — raw text, no translation needed. Set to null if no preference was stated.
       9. Preserve upstream `concept_blueprint.brand_intent` as `brand_intent` whenever it exists. Only change it if the user explicitly refined the brand or experience direction.
       9a. Select `shell_preset_hint` from `[SHELL PRESET CONTEXT]` only when a preset clearly matches the app's navigation/chrome model. Set it to null when platform defaults are sufficient. This is prompt-time guidance only; do not plan a generated runtime file for the preset.
@@ -1065,7 +1068,8 @@ agents:
           a. `app_name`, `description`, `tagline`, and `value_proposition` — preserve the approved concept identity from `value_manifest` / `concept_blueprint` when present. `description` should be the durable "what this app is" summary shown in Studio; `tagline` should be a short positioning line; `value_proposition` should carry the core user value.
           b. `pages` — list every declared `app_build_plan.pages[].name`.
           c. `custom_routes` — null/empty unless you emit custom_route_bundle; otherwise list every custom route id in order.
-          d. `auth_strategy` and `roles` from `app_build_plan`.
+          d. Copy `auth_strategy` and `roles` from `app_build_plan`. Use `public` for
+             no sign-in with no logical roles; do not replace it with `none` or a provider name.
           e. `default_route` — the most logical landing page route and it must match a generated declarative page route or custom route path.
       5. Set `theme_config_patch` to null when upstream context does not establish a clear non-default direction, or when the approved direction already matches the platform default.
       6. Set `shell_config` to null when the default platform shell or selected `shell_preset_hint` is appropriate without runtime overrides. Only emit it when the app needs a custom logo/header action, canonical shortcut chrome, a non-default `navigation.policy`, non-page-owned `navigation.items`, or a non-default `chrome` mode policy.
@@ -2924,7 +2928,7 @@ agents:
 
       **Standard app-scope page inclusion rules** (apply per capability set):
       - `overview` — always include; path `/admin`; icon `dashboard`; order 0
-      - `access` — include when auth_strategy is not `none` or any pack manages user/account/member entities; path `/admin/access`; icon `access`; order 10
+      - `access` — include when auth_strategy is neither `public` nor null, or any pack manages user/account/member entities; path `/admin/access`; icon `access`; order 10
       - `usage` — include when any pack has quota, metering, analytics, or reporting entities; path `/admin/usage`; icon `chart`; order 20
       - `billing` — include when any pack manages billing, subscription, payment, or invoice entities; path `/admin/billing`; icon `billing`; order 30
       - `activity` — include when any pack has audit trail, event log, history, or timeline entities; path `/admin/activity`; icon `history`; order 40
@@ -2971,7 +2975,7 @@ agents:
     content: |-
       1. Read `app_build_plan.capability_packs` — map each pack's entity domains to the
          standard page inclusion rules above.
-      2. Read `app_build_plan.auth_strategy` — if `none`, skip `access` unless a pack
+      2. Read `app_build_plan.auth_strategy` — if `public` or null, skip `access` unless a pack
          explicitly manages member entities.
       3. Always include `overview` and `settings`.
       4. Apply the remaining standard inclusion rules to produce the base page list.

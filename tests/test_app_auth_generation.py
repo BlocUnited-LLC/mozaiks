@@ -35,7 +35,7 @@ async def generated_auth_bundle(monkeypatch, tmp_path):
         }},
         manifest={
             "app_name": "Auth route proof", "version": "1.0.0", "default_route": "/home",
-            "pages": ["home"], "custom_routes": [], "auth_strategy": "oidc",
+            "pages": ["home"], "custom_routes": [], "auth_strategy": "third-party",
         },
         pages=[{
             "schema_version": "mozaiks.app_page.v1", "name": "home", "route": "/home",

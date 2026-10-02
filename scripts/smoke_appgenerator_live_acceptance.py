@@ -521,7 +521,7 @@ def build_appgenerator_acceptance_task_state(files: dict[str, str]) -> dict[str,
     return {
         "data_contract": json.loads(files["data/contract.json"]),
         "app_build_plan": {
-            "app_kind": "internal_app", "auth_strategy": "none", "roles": [], "entities": [],
+            "app_kind": "internal_app", "auth_strategy": "public", "roles": [], "entities": [],
             "build_tasks": tasks,
             "pages": [{"name": "SupportTickets", "route": "/support-tickets", "purpose": "Manage support tickets."}],
             "capability_packs": [{

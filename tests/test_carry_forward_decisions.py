@@ -58,6 +58,7 @@ def _minimal_plan(**overrides) -> dict[str, Any]:
         "pages": [{"name": "Home", "route": "/", "purpose": "Landing"}],
         "entities": [],
         "roles": ["user"],
+        "auth_strategy": "basic-login",
         "service_scope": [],
         "frontend_scope": [],
         "capability_packs": [],

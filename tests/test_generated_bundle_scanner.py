@@ -690,6 +690,75 @@ def test_scan_generated_bundle_accepts_authenticated_app_deploy_contract() -> No
     assert errors == []
 
 
+def _authenticated_deployment_files(provider: str = "jwt") -> dict[str, str]:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        auth_required=True,
+        auth_provider=provider,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml()
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+    files["ui/route_manifest.json"] = _auth_routes_json()
+    return files
+
+
+@pytest.mark.parametrize("provider", ["jwt", "keycloak", "custom_oidc"])
+def test_scan_generated_bundle_accepts_authenticated_provider_contract(provider: str) -> None:
+    assert scan_generated_bundle(
+        _authenticated_deployment_files(provider), require_deployment_artifacts=True,
+    ) == []
+
+
+@pytest.mark.parametrize(
+    ("provider", "audience_env"),
+    [("jwt", "AUTH_AUDIENCE"), ("keycloak", "KEYCLOAK_CLIENT_ID")],
+)
+def test_scan_generated_bundle_rejects_missing_provider_audience(
+    provider: str, audience_env: str,
+) -> None:
+    files = _authenticated_deployment_files(provider)
+    manifest = json.loads(files["deployment.manifest.json"])
+    manifest["required_env"].remove(audience_env)
+    files["deployment.manifest.json"] = json.dumps(manifest)
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+    assert any(audience_env in error and "required_env" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_conflicting_auth_provider() -> None:
+    files = _authenticated_deployment_files()
+    manifest = json.loads(files["deployment.manifest.json"])
+    manifest["auth"]["provider"] = "custom_oidc"
+    files["deployment.manifest.json"] = json.dumps(manifest)
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+    assert any("auth must match deploy_target_spec.auth" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_public_app_with_auth_deployment() -> None:
+    files = generate_deployment_artifacts(
+        app_id="public-smoke", auth_required=True, include_workflow=False,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Public Smoke","authRequired":false}'
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+    assert any("auth.required=false" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_missing_auth_in_private_manifest() -> None:
+    files = _authenticated_deployment_files()
+    manifest = json.loads(files["deployment.manifest.json"])
+    manifest["auth"] = None
+    files["deployment.manifest.json"] = json.dumps(manifest)
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+    assert any("auth.required=true" in error for error in errors)
+
+
 @pytest.mark.parametrize("intent", ["true", "false", 1, 0, None, [], {}])
 def test_scan_generated_bundle_rejects_non_boolean_auth_intent(intent: object) -> None:
     errors = scan_generated_bundle({"app.json": json.dumps({"name": "Example", "authRequired": intent})})
