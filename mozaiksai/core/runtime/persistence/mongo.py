@@ -25,6 +25,7 @@ from .ownership import (
     owned_update,
     validate_owned_pipeline,
 )
+from .platform_modules import CollectionAccess, PlatformModuleDeclarations
 
 DEFAULT_APP_DATABASE_NAME = "mozaiks_apps"
 MAX_FIND_MANY_LIMIT = 100
@@ -85,7 +86,13 @@ class MongoPersistenceCollection:
                     for field in ("app_id", owner_field)
                 ],
             }
-            return {"$and": [scope, dict(query)]} if query else scope
+            # A filter repeating the scope's own identity adds no condition, and
+            # Mongo cannot infer an upsert's fields from a path matched twice.
+            domain = {
+                key: value for key, value in dict(query or {}).items()
+                if not (key in {"app_id", owner_field} and isinstance(value, str) and value == scope[key])
+            }
+            return {"$and": [scope, domain]} if domain else scope
         return scope_filter_for(self._app_id, dict(query or {}))
 
     async def find_one(
@@ -201,7 +208,15 @@ class MongoPersistenceContext:
         client: Any | None = None,
         data_contract: DataContract | None = None,
         principal: PersistencePrincipal | Callable[[], PersistencePrincipal | None] | None = None,
+        platform_modules: PlatformModuleDeclarations | None = None,
+        module_id: str | None = None,
     ) -> None:
+        """Bind persistence to the loaded data contract.
+
+        With ``platform_modules``, ``module_id`` names the dispatching module,
+        and its allow-list is composed from the workspace ``data_contract`` and
+        the declarations of the platform modules mounted into the workspace.
+        """
         self._scope_metadata = scope_metadata(
             app_id,
             tenant_id=tenant_id,
@@ -213,8 +228,23 @@ class MongoPersistenceContext:
         self._client = client
         self._collections: dict[tuple[str, str], MongoPersistenceCollection] = {}
         self._principal = principal
-        self._ownership = collection_ownership(data_contract, app_id=self.app_id, app_slug=app_slug)
-        self._bindings = collection_bindings(data_contract) if data_contract is not None else None
+        access = (
+            platform_modules.access_for(module_id, data_contract)
+            if platform_modules is not None
+            else CollectionAccess(data_contract=data_contract)
+        )
+        contract = access.data_contract
+        self._ownership = collection_ownership(contract, app_id=self.app_id, app_slug=app_slug)
+        self._bounded_collection_access = platform_modules is not None or bool(self._ownership)
+        self._bindings = collection_bindings(contract) if contract is not None else None
+        self._reserved = frozenset(
+            collection_name_for(app_id=self.app_id, app_slug=app_slug, module_id=owner, entity_name=name)
+            for owner, name in access.reserved_collections
+        ) | access.reserved_literals
+        self._literal_names = None if access.literal_names is None else access.literal_names | {
+            collection_name_for(app_id=self.app_id, app_slug=app_slug, module_id=owner, entity_name=name)
+            for (owner, _reference), name in (self._bindings or {}).items()
+        }
 
     @property
     def principal(self) -> PersistencePrincipal | None:
@@ -239,12 +269,15 @@ class MongoPersistenceContext:
                 collection_name = self._bindings[(module_id, collection_name)]
             except KeyError as exc:
                 raise PersistenceScopeError(f"Undeclared collection {module_id}.{collection_name}") from exc
-        return collection_name_for(
+        storage_name = collection_name_for(
             app_id=self.app_id,
             app_slug=self._app_slug,
             module_id=module_id,
             entity_name=collection_name,
         )
+        if storage_name in self._reserved:
+            raise PersistenceScopeError(f"Collection {module_id}.{collection_name} belongs to a platform module")
+        return storage_name
 
     def collection(self, module_id: str, collection_name: str) -> MongoPersistenceCollection:
         key = (module_id, collection_name)
@@ -259,7 +292,7 @@ class MongoPersistenceContext:
                 user_id=self._scope_metadata.get("user_id"),
                 ownership=self._ownership.get(collection_name),
                 principal=lambda: self.principal,
-                restrict_aggregation=bool(self._ownership),
+                restrict_aggregation=self._bounded_collection_access,
             )
         return self._collections[key]
 
@@ -273,16 +306,22 @@ class MongoPersistenceContext:
         Access to a declared owned collection is forbidden. Other aliases use
         a bounded Mongo facade when this app has ownership contracts, retaining
         their explicit app-data semantics, including assignment stores. Apps
-        without owned collections retain raw alias handles.
+        without ownership or platform declarations retain raw alias handles. A collection a
+        mounted platform module declares is unavailable to every other module,
+        and a platform module reaches only the collections declared for it.
         """
 
         name = str(collection_name or "").strip()
         if not name:
             raise ValueError("collection_name is required")
+        if name in self._reserved:
+            raise PersistenceScopeError("Raw collection access is unavailable for platform module collections")
+        if self._literal_names is not None and name not in self._literal_names:
+            raise PersistenceScopeError(f"Undeclared collection {name}")
         if name in self._ownership:
             raise PersistenceScopeError("Raw collection access is unavailable for owned collections")
         collection = self._client_handle()[self._database_name][name]
-        return GuardedAliasCollection(collection) if self._ownership else collection
+        return GuardedAliasCollection(collection) if self._bounded_collection_access else collection
 
     def scope_filter(self, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return scope_filter_for(self.app_id, extra)

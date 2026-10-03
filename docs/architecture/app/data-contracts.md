@@ -169,6 +169,42 @@ This section is a guardrail, not an index source. If the shared collection also
 needs runtime-managed indexes, surface the collection under its owner in
 `surfaces`.
 
+An entry identifies the shared collection by a literal `mongo_collection`, or
+by its owner's `owner_module` and declared `name` when the storage name is
+derived from the module. It lists the receiving modules in `shared_with` or
+`read_by`; the `access` and `purpose` notes are not enforced.
+
+### Platform modules mounted into a workspace
+
+A host can mount platform modules into a workspace; Studio mounts the packaged
+`factory_app/app/modules`. Those modules declare their collections in their own
+bundle's `data/contract.json`, using this same shape with `scope: platform`.
+Runtime persistence composes the two contracts per dispatching module:
+
+- an app module keeps the workspace contract as its allow-list and cannot reach
+  a collection a mounted platform module declares, even when the workspace has
+  no contract;
+- a mounted platform module may reach only its own declared collections,
+  collections another mounted platform module shares with it in
+  `shared_collections`, and collections the workspace declares under its
+  surface or shares with it;
+- undeclared collections are refused for both.
+
+Shares are enforced only for mounted platform modules; app modules keep the
+workspace contract's existing, module-agnostic allow-list. A workspace that
+overrides a platform module by id owns that module's data, and the platform
+declarations for it, including shares made to or by it, no longer apply.
+Redeclaring a mounted platform module's collection in the workspace contract
+fails app load. Platform declarations carry no indexes into the workspace.
+
+When platform declarations are mounted, every module's collection handles
+reject foreign-collection aggregation and aggregation writes, including nested
+stages. Literal aliases use the bounded Mongo facade rather than exposing
+database handles. These protections also apply to `app_wide` collections and
+workspaces with no data contract; they do not depend on per-user ownership.
+Workspace literal grants cannot bypass the reservations of other mounted
+platform modules, including by naming a collection's derived storage name.
+
 ### `documented_alias_exclusions`
 
 `documented_alias_exclusions` is an explicit non-executable review ledger. It

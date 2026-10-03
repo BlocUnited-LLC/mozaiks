@@ -415,6 +415,8 @@ async def _platform_startup() -> None:
                 event_emitter=dispatcher.emit,
                 entitlement_checker=entitlement_checker,
                 data_contract=load_result.data_contract,
+                # Mounted host default modules are bound by their own declarations.
+                platform_modules=load_result.platform_modules,
             )
             module_action_surfaces: dict[str, dict[str, str | None]] = {}
             module_ask_context_actions: dict[str, dict[str, bool]] = {}

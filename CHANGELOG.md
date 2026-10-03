@@ -199,6 +199,22 @@ This project follows a practical pre-1.0 changelog format:
     through background execution, and the caller gets
     `WORKFLOW_SESSION_TERMINAL` with the reason, as does a later message for a
     run that recently ended in this process.
+- Studio's Integrations, Support, onboarding, security findings and messages
+  no longer return 403 in a workspace that has a data contract (#790). Studio
+  mounts its built-in modules into every workspace, but their persistence was
+  checked against the workspace's contract, so the placeholder `mozaiks init`
+  writes, and every generated app's contract, refused their collections. The
+  built-in modules now declare their collections in
+  `factory_app/app/data/contract.json`, and persistence composes those
+  declarations with the workspace contract per dispatching module. The
+  allow-list stays strict: app modules cannot reach a built-in module's
+  collections, a built-in module reaches only what is declared for it, and an
+  undeclared collection is refused for both. Onboarding status and security
+  findings are owner-scoped per user. A workspace that overrides a built-in
+  module by id owns its data, and one that redeclares a built-in collection
+  fails to load. Owned upserts whose filter repeats the principal's owner
+  field no longer fail with Mongo error 54. Session feedback, which those
+  workspaces dropped silently while reporting success, is now stored.
 
 - AppGenerator no longer rejects a module contract task because its output
   repeats a companion contract as a raw file. A live run's `task_management`

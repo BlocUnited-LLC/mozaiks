@@ -47,6 +47,25 @@ The platform-only host loads only its active app modules. Config, services,
 data contracts, and app identity continue to come from the active workspace;
 module defaults do not replace those app families or grant permissions.
 
+Module defaults bring their own persistence declarations. The collections the
+Studio modules own are declared in `factory_app/app/data/contract.json`, in the
+same contract shape an app uses. `AppLoader` composes the declarations of the
+defaults it actually mounted, and each module dispatch gets one allow-list:
+
+- an app module keeps the workspace's `app/data/contract.json` unchanged and
+  cannot reach a collection a mounted default declares, even in a workspace
+  with no contract;
+- a mounted default reaches only the collections declared for it: its own,
+  those another mounted default shares with it through `shared_collections`,
+  and those the workspace declares for it under its surface or shares with it;
+- an undeclared collection is refused for both.
+
+A workspace that overrides a default by id owns that module's data in its own
+contract; the default's declarations, and shares made to or by it, no longer
+apply. A workspace contract that redeclares a mounted default's collection
+fails app load. When the factory bundle is itself the active root
+(source-checkout Studio), its contract is the workspace contract.
+
 | Family | Purpose | Path |
 | --- | --- | --- |
 | App manifest | Small app identity and target manifest | `app/app.json` |

@@ -252,6 +252,15 @@ collections receive no additional owner filter.
 Repos call `ctx.persistence.collection(module_id, collection_name)` using the
 declared collection `name`. A declared `entity` value resolves to the same
 physical collection and ownership policy; unknown references fail closed.
+A filter that repeats the principal's own owner or app identity adds no
+condition and is not matched twice, so owned upserts may name the owner field.
+
+Platform modules a host mounts into a workspace, such as Studio's built-in
+modules, are bound by their own bundle's `data/contract.json` rather than the
+workspace's. Each dispatch's persistence is composed for the dispatching module:
+app modules keep the workspace contract and cannot reach platform collections,
+and a platform module reaches only the collections declared for it. See
+[Data Contracts](../../app/data-contracts.md#platform-modules-mounted-into-a-workspace).
 
 Aggregations operate on the caller's owned rows. Foreign-collection stages and
 aggregation writes cannot bypass the boundary, and admin permissions do not
