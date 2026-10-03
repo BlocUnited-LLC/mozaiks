@@ -446,8 +446,6 @@ def _build_narrative(
     catalog: dict[str, Any],
     features: list[dict],
     services: list[dict],
-    meta: dict[str, Any],
-    app_type: str,
     app_name: str,
 ) -> str:
     """Produce a plain-language summary. Agent-produced text is preferred."""
@@ -493,12 +491,8 @@ def _build_narrative(
         labels = [s["label"] for s in services[:3]]
         service_clause = f" It integrates with {', '.join(labels)}."
 
-    files_str = f"{meta['files']:,}" if meta.get("files") else "the"
-    edges_str = f"{meta['edges']:,}" if meta.get("edges") else "many"
-
     return (
-        f"{app_name} is a {app_type} built with {stack_str}. "
-        f"We read {files_str} files and mapped {edges_str} relationships to understand how it works."
+        f"{app_name} is built with {stack_str}."
         f"{cat_clause}{service_clause}"
     )
 
@@ -722,8 +716,6 @@ def _build_overview_payload(
         catalog=safe_catalog,
         features=features,
         services=services,
-        meta=meta,
-        app_type=app_type,
         app_name=app_name,
     )
     artifact = _dict_value(_ctx_get(ctx, "existing_app_discovery_artifact"))
