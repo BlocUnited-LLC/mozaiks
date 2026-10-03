@@ -710,8 +710,18 @@ def close_module_actions(
     bundle = output.get("module_contract")
     if not isinstance(bundle, dict):
         files = extract_code_file_map_from_payload(output)
+        module_inputs = {**companion_files, **files}
+        for path in list(module_inputs):
+            match = re.fullmatch(r"modules/([^/]+)/module\.yaml", path)
+            if match and not any(
+                f"modules/{match[1]}/{relative}" in files
+                for relative in ("module.yaml", _EVENTS_PATH, *_COMPANION_PATHS.values())
+            ):
+                # A service task cannot repair an inherited manifest. Retain
+                # owners of edited contract companions for event normalization.
+                del module_inputs[path]
         changes = materialize_module_actions(
-            {**companion_files, **files}, app_build_plan=plan, data_contract=contract,
+            module_inputs, app_build_plan=plan, data_contract=contract,
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
             declared_auth_scopes=granted,
         )

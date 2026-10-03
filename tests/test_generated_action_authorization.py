@@ -266,6 +266,38 @@ async def test_task_rejection_retains_candidate_and_one_recovery_can_preserve_kn
     assert context == original_context
 
 
+def test_python_task_does_not_revalidate_unowned_manifest_but_full_assembly_does():
+    inherited = {**_auth("tasks.view"), **extract_code_file_map_from_payload(_payload("tasks.veiw"))}
+    candidate = {"code_files": [{"filename": f"modules/{MODULE}/backend/service.py", "content": "pass\n"}]}
+    assert close_module_actions(candidate, app_build_plan=_plan(), companion_files=inherited) == candidate
+    with pytest.raises(ValueError, match="tasks.veiw"):
+        materialize_module_actions(inherited, app_build_plan=_plan())
+
+
+def test_raw_event_only_repair_still_normalizes_using_its_companion_manifest():
+    context = FIXTURE["context"]
+    design = {"surfaces": [{"surface_id": MODULE, "events_emitted": ["domain.task.created"]}]}
+    closed = close_module_actions(
+        _candidate("openid"), app_build_plan=context["app_build_plan"], data_contract=context["data_contract"],
+        design_surface_map=design,
+    )
+    inherited = extract_code_file_map_from_payload(closed)
+    before = deepcopy(inherited)
+    events_path = f"modules/{MODULE}/contracts/events.yaml"
+    events = yaml.safe_load(inherited[events_path])
+    create = next(event for event in events["events"] if event["type"] == "domain.task.created")
+    create["type"] = "domain.tasks.task_created"
+    candidate = {"code_files": [{"filename": events_path, "content": yaml.safe_dump(events)}]}
+    repaired = extract_code_file_map_from_payload(close_module_actions(
+        candidate, app_build_plan=context["app_build_plan"], data_contract=context["data_contract"],
+        companion_files=inherited, design_surface_map=design,
+    ))
+    assert set(repaired) == {events_path}
+    event_types = {event["type"] for event in yaml.safe_load(repaired[events_path])["events"]}
+    assert "domain.task.created" in event_types and "domain.tasks.task_created" not in event_types
+    assert inherited == before
+
+
 @pytest.mark.parametrize("permissions", ["tasks.view", [{"id": "tasks.view"}], ["tasks.view", 7]])
 @pytest.mark.asyncio
 async def test_raw_malformed_permissions_are_recoverable_task_rejections(monkeypatch, permissions):
