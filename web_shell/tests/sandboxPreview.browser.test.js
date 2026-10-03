@@ -15,6 +15,11 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   let failStart = false;
   let delayedStart = null;
   let delayNextStart = false;
+  let delayedCreate = null;
+  let delayNextCreate = false;
+  let delayedStop = null;
+  let delayNextStop = false;
+  let previousExpired = false;
   let previewUrl;
   const bundle = await build({
     stdin: { resolveDir: shell, loader: 'jsx', contents: `
@@ -25,6 +30,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
       function Fixture() {
         const [version, setVersion] = useState(1);
         const preview = useSandbox('artifact-' + version, 'registry-a');
+        window.tryPreview = () => preview.syncAndRestart({'app.json':'{}'});
         return <main>
           <h1 id="workspace-brand" style={{color:'var(--color-primary)',fontFamily:'sans-serif'}}>Mozaiks builder</h1>
           <PreviewPane
@@ -34,12 +40,14 @@ test('draft preview preserves workspace branding, opens separately, and follows 
             sandboxSyncing={preview.syncing}
             sandboxError={preview.sandboxError}
             onStartPreview={() => preview.syncAndRestart({'app.json':'{}'})}
+            onStopPreview={preview.sandboxId ? preview.stopPreview : null}
+            sandboxStopping={preview.stopping}
             canStartPreview
           />
           <button onClick={() => setVersion(version + 1)}>Next version</button>
           <button onClick={() => window.previewSocket.onmessage({data:JSON.stringify({type:'status',status:'error',lastError:'Container expired'})})}>Expire</button>
           <output aria-label="Version">{version}</output>
-          <output aria-label="State">{JSON.stringify({status:preview.sandboxStatus,url:preview.livePreviewUrl,error:preview.sandboxError,syncing:preview.syncing})}</output>
+          <output aria-label="State">{JSON.stringify({status:preview.sandboxStatus,url:preview.livePreviewUrl,error:preview.sandboxError,syncing:preview.syncing,stopping:preview.stopping})}</output>
         </main>;
       }
       createRoot(document.getElementById('root')).render(<Fixture />);
@@ -63,10 +71,19 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     if (!req.url.startsWith('/api/')) { res.setHeader('Content-Type', 'text/html'); res.end('<style>:root{--color-primary:#06b6d4}</style><div id="root"></div><script src="/fixture.js"></script>'); return; }
     requests.push(req.url);
     res.setHeader('Content-Type', 'application/json');
-    if (req.url.includes('/artifacts/')) res.end(JSON.stringify({sandboxId: 'sandbox-' + new URL(req.url, 'http://local').pathname.split('/')[3]}));
+    if (req.url.includes('/artifacts/')) {
+      const finish = () => res.end(JSON.stringify({sandboxId: 'sandbox-' + new URL(req.url, 'http://local').pathname.split('/')[3]}));
+      if (delayNextCreate) { delayNextCreate = false; delayedCreate = finish; } else finish();
+    }
     else if (req.url.endsWith('/start')) {
       const finish = () => res.end(JSON.stringify(failStart ? {status:'error',previewUrl:null,message:'Backend startup failed'} : {status:'running',previewUrl}));
       if (delayNextStart) { delayNextStart = false; delayedStart = finish; } else finish();
+    } else if (req.url.endsWith('/stop') && delayNextStop) {
+      delayNextStop = false;
+      delayedStop = () => res.end('{"ok":true}');
+    } else if (req.url.endsWith('/stop') && previousExpired) {
+      res.statusCode = 404;
+      res.end('{"detail":"Sandbox not found"}');
     } else if (req.url.endsWith('/status')) res.end(JSON.stringify({status:'running',previewUrl}));
     else res.end('{"ok":true}');
   });
@@ -123,6 +140,67 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
   await expect.poll(async () => (await state()).status).toBe('running');
   assert.ok(requests.includes('/api/artifacts/artifact-2/sandbox?build_registry_id=registry-a'));
+  assert.ok(requests.includes('/api/sandbox/sandbox-artifact-1/stop'), 'Changing saved versions releases the previous preview before allocating another');
+  previousExpired = true;
+  await page.getByRole('button', {name:'Next version',exact:true}).click();
+  await expect(page.getByLabel('Version')).toHaveText('3');
+  await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+  await expect.poll(async () => (await state()).status).toBe('running');
+  assert.ok(requests.includes('/api/artifacts/artifact-3/sandbox?build_registry_id=registry-a'), 'An expired previous preview does not block another saved version');
+  previousExpired = false;
+  await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+  await expect.poll(async () => (await state()).status).toBe(null);
+  await expect(page.locator('iframe')).toHaveCount(0);
+  await expect(page.getByRole('link', {name:'Open draft preview',exact:true})).toHaveCount(0);
+  assert.ok(requests.includes('/api/sandbox/sandbox-artifact-3/stop'));
+  await expect(page.getByRole('button', {name:'Start draft preview',exact:true})).toBeVisible();
+
+  // A pending allocation remains the only request across version changes. Its
+  // late session must be stopped before the next version can allocate a session.
+  const allocationRequests = requests.length;
+  delayNextCreate = true;
+  await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+  await expect.poll(() => Boolean(delayedCreate)).toBe(true);
+  await page.getByRole('button', {name:'Next version',exact:true}).click();
+  await expect(page.getByLabel('Version')).toHaveText('4');
+  await expect.poll(async () => (await state()).syncing).toBe(true);
+  await expect(page.getByRole('button', {name:'Start draft preview',exact:true})).toHaveCount(0);
+  await page.evaluate(() => window.tryPreview());
+  assert.deepEqual(requests.slice(allocationRequests), ['/api/artifacts/artifact-3/sandbox?build_registry_id=registry-a']);
+  delayedCreate();
+  await expect.poll(async () => (await state()).syncing).toBe(false);
+  assert.equal((await state()).url, null);
+  assert.equal((await state()).status, null);
+  await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+  await expect.poll(async () => (await state()).status).toBe('running');
+  assert.deepEqual(requests.slice(allocationRequests, allocationRequests + 3), [
+    '/api/artifacts/artifact-3/sandbox?build_registry_id=registry-a',
+    '/api/sandbox/sandbox-artifact-3/stop',
+    '/api/artifacts/artifact-4/sandbox?build_registry_id=registry-a',
+  ]);
+  const nextRequests = requests.length;
+  await page.getByRole('button', {name:'Next version',exact:true}).click();
+  await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+  await expect.poll(async () => (await state()).status).toBe('running');
+  assert.deepEqual(requests.slice(nextRequests, nextRequests + 2), [
+    '/api/sandbox/sandbox-artifact-4/stop',
+    '/api/artifacts/artifact-5/sandbox?build_registry_id=registry-a',
+  ]);
+
+  // Stopping an old version also retains admission until its response settles.
+  delayNextStop = true;
+  await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+  await expect.poll(() => Boolean(delayedStop)).toBe(true);
+  await page.getByRole('button', {name:'Next version',exact:true}).click();
+  await expect.poll(async () => (await state()).syncing).toBe(true);
+  await expect(page.getByRole('button', {name:'Start draft preview',exact:true})).toHaveCount(0);
+  delayedStop();
+  await expect.poll(async () => (await state()).syncing).toBe(false);
+  assert.equal((await state()).stopping, false);
+  assert.equal((await state()).status, null);
+  await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+  await expect.poll(async () => (await state()).status).toBe('running');
+  assert.ok(requests.includes('/api/artifacts/artifact-6/sandbox?build_registry_id=registry-a'));
 });
 
 test('standalone shell identifies drafts through loading and navigation without blocking app controls', async (t) => {

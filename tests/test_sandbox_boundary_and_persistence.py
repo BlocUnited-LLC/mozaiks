@@ -226,7 +226,7 @@ def test_coding_worker_plan_rejects_e2b():
 
 @pytest.mark.asyncio
 async def test_artifact_preview_manager_tags_and_bounds_sessions(monkeypatch):
-    from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
+    from tests.test_artifact_preview_sessions import _manager
 
     created: dict[str, Any] = {}
 
@@ -238,10 +238,7 @@ async def test_artifact_preview_manager_tags_and_bounds_sessions(monkeypatch):
             return SandboxSessionInfo(session_id="fake-session", provider="e2b")
 
     monkeypatch.setenv("SANDBOX_TTL_MINUTES", "15")
-    manager = ArtifactPreviewSessionManager(
-        provider_resolver=lambda: ("e2b", _FakeAdapter())
-    )
-    manager._broadcast = AsyncMock()
+    manager = _manager(_FakeAdapter(), provider="e2b")
 
     state = await manager.create_or_reuse(
         "artifact-123", app_id="factory", user_id="user-a", target_app_id="generated-app", build_registry_id="appreg-a",

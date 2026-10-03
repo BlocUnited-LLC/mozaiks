@@ -40,6 +40,8 @@ class BuilderCollections:
 
 
 class PlatformCollections:
+    PREVIEW_SESSIONS = "PreviewSessions"
+    PREVIEW_COORDINATION = "PreviewCoordination"
     BUILD_EVENTS_OUTBOX = "PlatformBuildEventsOutbox"
     BUILD_STATE = "BuildState"
     CONNECTORS = "Connectors"

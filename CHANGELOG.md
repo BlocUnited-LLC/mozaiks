@@ -66,6 +66,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Artifact preview ownership and capacity now persist in MongoDB across Studio
+  workers and restarts. Preview allocation uses a bounded queue and positive
+  shared limits; interrupted updates require cleanup before reuse. Operators
+  must replace former zero/unlimited sandbox limits before upgrading.
+- The shared app directory supports controlled search, filters, and server
+  pagination for management apps with larger portfolios.
+
 - App previews are labeled as temporary drafts, show the selected version, and
   offer an explicit **Open draft preview** action that keeps the build workspace open.
   A persistent draft indicator also identifies previews opened in a separate tab.
