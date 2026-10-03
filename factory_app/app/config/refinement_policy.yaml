@@ -59,7 +59,7 @@ coding:
   llm_profile: codegen
   # Coding execution providers. The structured-output provider is always
   # available when coding is enabled; the ACP-backed CLI coding provider is
-  # opt-in and stays disabled until its runtime support ships. Budgets are
+  # opt-in and disabled by default. Budgets are
   # hard ceilings enforced outside the model. No credentials or adapter
   # connection details belong in this file.
   providers:

@@ -28,7 +28,7 @@ from mozaiksai.core.workflow.generator_support.workflow_exports import (
     record_workflow_export,
 )
 
-ALLOWED_EXPORT_VALIDATION_STATUSES = {"passed", "skipped"}
+ALLOWED_EXPORT_VALIDATION_STATUSES = {"passed"}
 
 
 def _read_ctx(context_variables: Any | None, key: str) -> Any:

@@ -391,6 +391,41 @@ into `brownfield_repo_input`, which asks which repo to analyze before
 `ExistingAppDiscovery` starts. The selected internal value (`light_integration`
 or `full_migration`) becomes downstream scope context.
 
+### Discovery human continuation
+
+`ExistingAppDiscovery/transition_graph.yaml` explicitly routes human replies
+back to the unfinished discovery stage using `identity_complete`,
+`capabilities_complete`, `plan_complete`, and `decomposition_complete`.
+The runtime's initial user-to-agent dispatch is bootstrap-only. It does not
+substitute for these workflow-local return edges, including after reconnect.
+
+Selecting an `adoption_level` does not confirm the adoption plan. The planner
+remains at its human review boundary until the user confirms the recommendation
+and `record_adoption_plan` validates the workflow's typed `AgentAugmentationPlan`.
+The tool records the existing finite adoption choice and scope together with
+`plan_complete`; text alone cannot advance this stage. Embed/bridge then proceeds
+to assembly. Ecosystem/gradual modernization first reviews decomposition and
+records its typed `ModuleDecompositionPlan` through `record_module_decomposition`.
+Both agents acknowledge successful recording conversationally. Neither uses NEXT
+as a completion writer. Decomposition remains workflow-local evidence.
+
+The recorded plan, adoption choice, and completion flags use existing deterministic
+tool writer authority. Automatic structured-output projection cannot replace the
+approved plan. Assembly rejects a conflicting adoption choice before persistence
+and uses the recorded plan for approved scope rather than accepting scope changes
+from the assembler's synthesis.
+
+Assembly has no additional human review boundary. Its automatic save tool uses
+the canonical tool outcome contract: one deterministic attempt, `saved` only
+after all required artifact drafts persist and the final `AppContextVersion`
+registers successfully. That outcome terminates discovery as `workflow_complete`.
+Missing output, mapping/persistence errors, or a missing fresh tool result fail
+closed; preloaded version references and agent text cannot report completion.
+Failure leaves the prior current context intact and does not publish new save
+references. The overview refresh is best effort after durable registration.
+This completes discovery, without authorizing source changes, app bundle
+promotion, or a cross-workflow handoff.
+
 ### Brownfield App Intelligence UX
 
 The existing-app intake path has two user-facing context surfaces:

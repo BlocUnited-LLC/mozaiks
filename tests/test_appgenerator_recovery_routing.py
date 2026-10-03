@@ -150,7 +150,7 @@ def test_final_export_routes_models_controller_and_task_recovery_to_existing_lan
 @pytest.mark.parametrize("quality_status", [None, "needs_revision", "blocked"])
 async def test_schema_quality_cannot_be_bypassed_by_returning_to_acceptance(graph, tmp_path, quality_status):
     files, _, _, context, _ = await _materialize_plan_bundle(tmp_path=tmp_path)
-    assert context.get("app_bundle_acceptance_status") == "passed"
+    assert context.get("app_bundle_acceptance_status") == "pending"
     page_task = next(task for task in context.get("app_task_batch_items") if task["task_type"] == "page_bundle")
     context.set("current_build_task", page_task)
     context.set("app_schema_ready", True)

@@ -11,6 +11,7 @@ same harness without changing the SessionRouter contract.
 
 from __future__ import annotations
 
+from asyncio import CancelledError
 from typing import Any
 
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
@@ -30,7 +31,6 @@ from mozaiksai.control_plane.invalidation import (
 from mozaiksai.control_plane.metrics import (
     ControlPlaneBuildTimer,
     check_token_usage,
-    log_build_outcome,
 )
 from mozaiksai.control_plane.refinement_tracking import record_refinement_event
 from mozaiksai.control_plane.runtime import ControlPlaneCheckpointRuntime
@@ -191,13 +191,6 @@ class OrchestrationControlHarness:
             )
             raise
 
-        log_build_outcome(
-            outcome="ok",
-            request_id=request.request_id,
-            app_id=request.app_id,
-            change_class=decision.change_class,
-            workflow_sequence=decision.workflow_sequence,
-        )
         await record_refinement_event(
             event_kind="classified",
             request_id=request.request_id,
@@ -420,14 +413,11 @@ class OrchestrationControlHarness:
         if not self.coding_enabled():
             raise RuntimeError("Refinement coding worker is disabled in app/config/refinement_policy.yaml")
 
-        request_id: str | None = None
-        try:
-            seed = request.context_seed or {}
-            refinement_payload = seed.get("refinement_request")
-            if isinstance(refinement_payload, dict):
-                request_id = str(refinement_payload.get("request_id") or "").strip() or None
-        except Exception:
-            pass
+        refinement_payload = request.context_seed.get("refinement_request")
+        request_id = (
+            str(refinement_payload.get("request_id") or "").strip()
+            if isinstance(refinement_payload, dict) else ""
+        ) or "unknown"
 
         try:
             with ControlPlaneBuildTimer(
@@ -436,10 +426,19 @@ class OrchestrationControlHarness:
                 app_id=request.app_id,
             ):
                 result = await self._coding_worker.execute(request)
+        except CancelledError:
+            await record_refinement_event(
+                event_kind="cancelled",
+                request_id=request_id,
+                app_id=request.app_id,
+                change_class=request.change_class,
+                outcome="cancelled",
+            )
+            raise
         except Exception as exc:
             await record_refinement_event(
                 event_kind="failed",
-                request_id=request_id or "unknown",
+                request_id=request_id,
                 app_id=request.app_id,
                 change_class=request.change_class,
                 outcome="error",
@@ -447,18 +446,36 @@ class OrchestrationControlHarness:
             )
             raise
 
+        provider = result.metadata.get("coding_provider")
+        usage = provider.get("usage") if isinstance(provider, dict) else None
+        token_count = usage.get("total_tokens") if isinstance(usage, dict) else None
         check_token_usage(
             stage="coding_worker",
-            token_count=getattr(result, "token_count", None),
+            token_count=token_count,
+            request_id=request_id,
             app_id=request.app_id,
         )
+        event_kind, outcome = {
+            "validated": ("completed", "ok"),
+            "failed": ("failed", "error"),
+            "planned": ("planned", "skipped"),
+            "ineligible": ("ineligible", "skipped"),
+        }[result.status]
         await record_refinement_event(
-            event_kind="completed",
-            request_id=request_id or "unknown",
+            event_kind=event_kind,
+            request_id=request_id,
             app_id=request.app_id,
             change_class=request.change_class,
-            outcome="ok",
-            metadata={"token_count": getattr(result, "token_count", None)},
+            outcome=outcome,
+            error=result.error,
+            metadata={
+                "coding_status": result.status,
+                "validation_status": (result.validation_result or {}).get("validation_status"),
+                "build_record_id": result.metadata.get("build_record_id"),
+                "target_app_id": request.artifact_app_id,
+                "blocked_reason": result.blocked_reason,
+                "token_count": token_count,
+            },
         )
         return result
 

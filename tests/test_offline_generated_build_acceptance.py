@@ -581,13 +581,14 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
         context_variables=context,
     )
 
-    assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
+    assert validation["status"] == "failed"
+    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
     assert detach(context.get("app_task_batch_results")) == accepted
-    assert validation["app_bundle_acceptance_result"]["status"] == "passed"
-    assert validation["integration_tests_passed"] is True
-    assert context.get("app_bundle_acceptance_status") == "passed"
+    assert validation["app_bundle_acceptance_result"]["status"] == "pending"
+    assert validation["integration_tests_passed"] is False
+    assert context.get("app_bundle_acceptance_status") == "pending"
     assert not context.get("app_bundle_validation_evidence")["failed"]
-    assert context.get("integration_tests_passed") is True
+    assert context.get("integration_tests_passed") is False
     assert context.get("bundle_scan_result")["passed"] is True
     assert context.get("wiring_validation_result")["passed"] is True
     assert context.get("module_implementation_validation_result")["passed"] is True
@@ -755,11 +756,12 @@ async def test_offline_saas_build_acceptance_gate_passes(monkeypatch) -> None:
         context_variables=context,
     )
 
-    assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
+    assert validation["status"] == "failed"
+    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
     assert detach(context.get("app_task_batch_results")) == accepted
-    assert validation["app_bundle_acceptance_result"]["status"] == "passed"
-    assert validation["integration_tests_passed"] is True
-    assert context.get("app_bundle_acceptance_status") == "passed"
+    assert validation["app_bundle_acceptance_result"]["status"] == "pending"
+    assert validation["integration_tests_passed"] is False
+    assert context.get("app_bundle_acceptance_status") == "pending"
     assert not context.get("app_bundle_validation_evidence")["failed"]
     assert context.get("bundle_scan_result")["passed"] is True
     assert context.get("wiring_validation_result")["passed"] is True

@@ -80,6 +80,56 @@ The Refinement Engine does not replace the factory. It routes to it.
 
 ## Checkpoint Chain
 
+### Completion and saved drafts
+
+AG2 owns agent execution. The harness owns the decision to stage a change and
+the evidence required before a saved draft can advance. Classification finishes
+only the routing stage; it does not emit a successful build outcome.
+
+| Coding result | Audit event | Workbench behavior |
+|---|---|---|
+| `validated` with a saved `build_record_id` | `completed` | Open the validated draft for review; explicit acceptance is still required. |
+| `planned` | `planned` | Show incomplete validation and offer review when a draft was saved. Keep the active editor/preview on its previous version. |
+| `failed` | `failed` | Show failed checks and offer review when a draft was saved. Keep the previous version active. |
+| `ineligible` | `ineligible` | Explain the blocked request without reporting completion. |
+| Cancelled coding task | `cancelled` | Propagate cancellation and mark the matching registered build as needing revision. |
+
+The worker finalizer checks the proposed files against the approved scope before
+validation or persistence, regardless of coding provider. Unknown validation
+strategies fail; static-only checks, skipped commands, and partially executed
+checks cannot produce a validated result. A saved draft identifies reviewable
+work, not a promoted application. Persistence failure cannot emit completion.
+
+The workbench uses `coding_worker.metadata.build_record_id` as its review target.
+Its **Review patch** action opens that saved candidate; it does not submit another
+coding request. Review, accept, and reject continue through the existing artifact
+lifecycle APIs. A validated coding attempt alone does not certify the entire
+application or replace independent runtime acceptance.
+
+#### Current readiness and promotion boundaries
+
+`control_plane/app_validation.py` runs selected source-project commands against
+the candidate workspace; it does not run AppGenerator's full bundle acceptance
+gate. Factory `AppGenerator/tools/app_validation.py` separately checks generated
+contracts, wiring, runtime loading, and database-backed smoke behavior before
+build validation and export. The default scoped coding provider makes one
+structured-output attempt; a failed check does not start an automatic coding
+repair loop. Audit events and Studio refinement-session writes are best-effort,
+so their absence is not evidence that a candidate was never saved. Saved build
+records and validation results remain the evidence to inspect.
+
+Promotion currently has several implementation paths. The scoped coding worker
+writes draft BuildRecords directly. Studio acceptance uses
+`accept_staged_refinement_build_record` for staged-review metadata and otherwise
+the BuildRecord store; its promotion endpoint restores an accepted current
+bundle into the selected workspace. `artifact_promotion.py` also retains
+parallel artifact-version and BuildRecord draft/accept helpers, while
+`promotion.py` exposes direct source-workspace promotion. The exported staged
+draft helpers and direct source-workspace promotion have no in-tree production
+caller connecting them to the scoped coding worker. This inventory does not
+establish that those exported APIs can be removed or that every promotion path
+runs Factory acceptance.
+
 Checkpoints are triggered by events, not by agent turns. Each checkpoint is a
 discrete unit of work with a declared handler and optional LLM backing.
 

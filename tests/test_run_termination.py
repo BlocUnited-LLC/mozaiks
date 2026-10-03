@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -453,6 +454,18 @@ def _assert_readable(message: str) -> None:
         assert line.startswith("- ") and len(line) <= 2 + 300, line
 
 
+@pytest.fixture
+def runtime_smoke_passed(monkeypatch):
+    """Isolate build-failure termination from the separate runtime smoke gate."""
+    from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
+
+    smoke = AsyncMock(return_value={
+        "status": "passed", "passed": True, "failed_tests": [], "checks": [],
+    })
+    monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", smoke)
+    return smoke
+
+
 @pytest.mark.asyncio
 async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blocking_errors() -> None:
     """(b) Blocked repair is the end of the run, reported with its blocking errors."""
@@ -486,7 +499,9 @@ async def test_blocked_repair_ends_the_run_after_one_validation_with_its_blockin
 
 
 @pytest.mark.asyncio
-async def test_validating_an_unchanged_bundle_again_with_the_same_result_ends_the_run(monkeypatch) -> None:
+async def test_validating_an_unchanged_bundle_again_with_the_same_result_ends_the_run(
+    monkeypatch, runtime_smoke_passed,
+) -> None:
     """(b) A failed build, a user reply, the same failed build: the run ends.
 
     The bundle passes acceptance and its build fails, so validation hands the
@@ -505,6 +520,7 @@ async def test_validating_an_unchanged_bundle_again_with_the_same_result_ends_th
     result = run.result
 
     assert run.speakers == ["AppValidationAgent", "AppValidationAgent"]
+    assert runtime_smoke_passed.await_count == 2
     assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
     first, second = (item["app_validation_result"]["errors"] for item in run.validations)
     assert first != second  # the raw stderr names a different temp workspace each time
@@ -524,7 +540,9 @@ async def test_validating_an_unchanged_bundle_again_with_the_same_result_ends_th
 
 
 @pytest.mark.asyncio
-async def test_unavailable_validation_infrastructure_ends_the_run_as_an_environment_problem(monkeypatch) -> None:
+async def test_unavailable_validation_infrastructure_ends_the_run_as_an_environment_problem(
+    monkeypatch, runtime_smoke_passed,
+) -> None:
     """(b) An environment outage ends the run without blaming the app.
 
     The bundle passes acceptance; E2B is requested with no key configured, so
@@ -540,6 +558,7 @@ async def test_unavailable_validation_infrastructure_ends_the_run_as_an_environm
     result = run.result
 
     assert run.speakers == ["AppValidationAgent", "AppValidationAgent"]
+    assert runtime_smoke_passed.await_count == 2
     assert [item["app_bundle_acceptance_result"]["passed"] for item in run.validations] == [True, True]
     assert [item["app_validation_result"]["errors"] for item in run.validations] == (
         [["Validation infrastructure unavailable."]] * 2

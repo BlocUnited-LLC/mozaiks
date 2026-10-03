@@ -127,6 +127,11 @@ async def test_acceptance_reports_a_skipped_smoke_explicitly_and_consistently():
     context: dict = {}
     result = await run_app_bundle_acceptance_gate(files=_good(), context_variables=context)
 
+    assert result["status"] != "passed"
+    assert result["passed"] is False
+    assert "snapshot_digest" not in result
+    assert result["bundle_repair"]["target_agent"] is None
+    assert context["integration_tests_passed"] is False
     smoke_check = next(check for check in result["checks"] if check["id"] == "app_runtime_smoke")
     assert (smoke_check["passed"], smoke_check["status"]) == (None, "skipped")
     assert result["app_runtime_smoke"]["passed"] is None

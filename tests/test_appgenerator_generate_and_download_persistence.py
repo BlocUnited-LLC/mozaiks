@@ -356,7 +356,7 @@ def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_
         }
         context_variables.set("app_bundle_acceptance_result", accepted)
         context_variables.set("app_bundle_acceptance_status", "passed")
-        context_variables.set("app_validation_status", "skipped")
+        context_variables.set("app_validation_status", "passed")
         context_variables.set("integration_tests_passed", True)
         return accepted
 

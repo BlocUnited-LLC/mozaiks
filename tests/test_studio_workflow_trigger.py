@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -1796,7 +1797,7 @@ def _async_coding_worker(result: dict):
 
 
 
-@pytest.mark.parametrize("validation_status", ["passed", "failed"])
+@pytest.mark.parametrize("validation_status", ["passed", "failed", "pending"])
 def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_changes(monkeypatch, validation_status):
     from mozaiksai.control_plane.contracts import (
         ContractSurfacePlan,
@@ -1916,7 +1917,7 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
         })
         _BaselineStore.versions[child.id] = child
         return CodingWorkerResult(
-            eligible=True, status="validated" if validation_status == "passed" else "failed",
+            eligible=True, status={"passed": "validated", "pending": "planned"}.get(validation_status, "failed"),
             metadata={"build_record_id": child.id},
         )
 
@@ -1953,7 +1954,7 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     assert body["trigger_source"] == "refinement"
     assert body["rerouted_by_dependency"] is False
     assert body["harness_decision"]["decision_type"] == "targeted_regeneration"
-    assert body["surface_result"]["status"] == ("success" if validation_status == "passed" else "failed")
+    assert body["surface_result"]["status"] == {"passed": "success", "pending": "partial", "failed": "failed"}[validation_status]
     assert body["surface_result"]["metadata"]["build_record_id"] == "surface_child"
     assert "app/modules/product/backend/handler.py" in body["surface_result"]["all_files"]
     assert body["refinement_session_id"] == "rs_surface_1"
@@ -1962,4 +1963,59 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     assert persisted_sessions[0]["build_record_id"] == "av_456"
     assert persisted_sessions[0]["change_request_id"] == "cr_surface_1"
     assert persisted_sessions[0]["result_build_record_id"] == "surface_child"
-    assert persisted_sessions[0]["status"].value == ("validated" if validation_status == "passed" else "failed")
+    assert persisted_sessions[0]["status"].value == {"passed": "validated", "pending": "pending", "failed": "failed"}[validation_status]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_at", ["coding", "surface_execution", "surface_finalization"])
+async def test_cancelled_inline_refinement_releases_bound_build_without_promotion(
+    monkeypatch, _owned_build_target, cancel_at,
+):
+    from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import studio
+
+    harness = studio.get_orchestration_control_harness()
+    monkeypatch.setattr(harness, "_config_loader", lambda: ControlPlaneConfig(
+        enabled=True, classifier={"enabled": True}, coding={"enabled": True},
+    ))
+    monkeypatch.setattr(harness, "contract_surface_enabled", lambda: cancel_at != "coding")
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(
+        classify=_async_classifier(
+            change_class="patch" if cancel_at == "coding" else "feature",
+            rationale="Requested scoped change", confidence=0.95, signals=["test"],
+        ),
+    ))
+    if cancel_at == "coding":
+        monkeypatch.setattr(harness, "execute_coding_request", AsyncMock(side_effect=asyncio.CancelledError))
+    else:
+        monkeypatch.setattr(harness, "prepare_contract_surface_request", AsyncMock(return_value=(
+            SimpleNamespace(requires_schema_migration=False), None,
+        )))
+        monkeypatch.setattr(harness, "execute_surface_plan", AsyncMock(
+            side_effect=asyncio.CancelledError if cancel_at == "surface_execution" else None,
+            return_value=SimpleNamespace(status="success"),
+        ))
+        monkeypatch.setattr(harness, "finalize_surface_output", AsyncMock(side_effect=asyncio.CancelledError))
+    original = _BaselineStore.versions["av_456"].model_dump(mode="json")
+    trigger_payload = {
+        "refinement_request": {
+            "artifact_kind": "app_bundle", "artifact_key": "app_bundle", "artifact_version_id": "av_456",
+            "raw_user_request": "Update dashboard", "source_surface": "app_build",
+        },
+    }
+    if cancel_at == "coding":
+        trigger_payload["coding_request"] = {"files": {"app/ui/pages/Dashboard.jsx": "ignored"}}
+    body = studio.WorkflowTriggerRequest(
+        build_registry_id="appreg_1", trigger_source="refinement", trigger_payload=trigger_payload,
+    )
+    principal = UserPrincipal(user_id="demo-user", email=None, name=None, roles=[], scopes=[], raw_claims={})
+
+    with pytest.raises(asyncio.CancelledError):
+        await studio.trigger_workflow(body, principal=principal)
+
+    _owned_build_target.update_build_status.assert_awaited_once_with(
+        owner_user_id="demo-user", build_registry_id="appreg_1",
+        expected_build_id="build_1", status="needs_revision",
+    )
+    _owned_build_target.promote_build.assert_not_awaited()
+    assert _BaselineStore.versions["av_456"].model_dump(mode="json") == original

@@ -122,11 +122,15 @@ async def test_readiness_user_reply_materializes_auth_before_real_validation(con
             result = await AG2NetworkRunner().run(request("Confirmed", reopen=True))
         else:
             result = await result.live_run.continue_with_user_message("Confirmed")
-        assert result.status is RunStatus.PAUSED, result.error
-        assert validations[0]["integration_tests_passed"] is True, json.dumps(
-            validations[0]["app_bundle_acceptance_result"]["failed_tests"], indent=2,
-        )
-        assert speakers == ["IntegrationReadinessAgent", "AppValidationAgent", "DownloadAgent"]
+        assert result.status is RunStatus.FAILED, result.error
+        assert result.close_reason == "workflow_failed"
+        acceptance = validations[0]["app_bundle_acceptance_result"]
+        assert acceptance["status"] == "pending"
+        assert acceptance["validation_evidence"]["failed"] == []
+        assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+        assert validations[0]["integration_tests_passed"] is False
+        assert validations[0]["app_validation_result"]["validation_status"] == "pending"
+        assert speakers == ["IntegrationReadinessAgent", "AppValidationAgent"]
         assert validations[0]["app_runtime_load_result"]["passed"] is True
         assert validations[0]["bundle_scan_result"]["passed"] is True
         generated = admitted_app_file_map(result.context_variables)

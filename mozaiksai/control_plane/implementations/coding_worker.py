@@ -166,10 +166,10 @@ class ScopedRefinementCodingWorker:
                 },
             )
 
-        resolved_strategy = self._resolve_validation_strategy(
-            request.validation_strategy or proposal.validation_strategy_hint or "skip"
-        )
         try:
+            resolved_strategy = self._resolve_validation_strategy(
+                request.validation_strategy or proposal.validation_strategy_hint or "skip"
+            )
             resolved_plan = self._plan_from_proposal(
                 request=request,
                 proposal=proposal,
@@ -292,6 +292,14 @@ class ScopedRefinementCodingWorker:
         resolved_strategy: str,
     ) -> CodingWorkerPlan:
         """Reconstruct the checkpoint-facing plan from a provider proposal."""
+        changed_paths = [change.path for change in proposal.changed_files]
+        if not changed_paths:
+            raise ValueError("Coding provider returned no file changes")
+        if len(set(changed_paths)) != len(changed_paths):
+            raise ValueError("Coding provider returned duplicate file changes")
+        allowed_paths = set(request.files)
+        if set(proposal.owned_paths) - allowed_paths or set(changed_paths) - set(proposal.owned_paths):
+            raise ValueError("Coding provider returned changes outside the approved file scope")
         return CodingWorkerPlan(
             summary=proposal.summary,
             owned_paths=list(proposal.owned_paths),
@@ -308,7 +316,9 @@ class ScopedRefinementCodingWorker:
     @staticmethod
     def _resolve_validation_strategy(raw: str) -> str:
         normalized = str(raw or "").strip().lower() or "skip"
-        return normalized if normalized in _VALIDATION_STRATEGIES else "skip"
+        if normalized not in _VALIDATION_STRATEGIES:
+            raise ValueError(f"Unsupported coding validation strategy: {normalized}")
+        return normalized
 
     @staticmethod
     def _check_eligibility(request: CodingWorkerRequest) -> tuple[bool, str | None]:
@@ -471,14 +481,14 @@ class ScopedRefinementCodingWorker:
                     app_id=request.artifact_app_id,
                     artifact_version_id=f"pending_{zip_sha[:16]}",
                 )
+                if not content_ref:
+                    raise ValueError("Configured content store returned no bundle reference")
                 commit_content_metadata["content_ref"] = content_ref
                 commit_content_metadata["content_backend"] = content_store.backend_name
             except Exception as cs_exc:
-                logger.warning(
-                    "CONTENT_STORE_PUT_BUNDLE_FAILED app=%s: %s — using local path only",
-                    request.app_id,
-                    cs_exc,
-                )
+                raise RuntimeError(
+                    f"CONTENT_STORE_PUT_BUNDLE_FAILED: {cs_exc}"
+                ) from cs_exc
 
         artifact_store = self._artifact_store or get_artifact_store()
         validation_status = self._artifact_validation_status(validation_result)

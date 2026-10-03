@@ -3,10 +3,11 @@
 // DESCRIPTION: AppGenerator artifact canvas (files + Monaco + preview + export)
 // ==============================================================================
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Code, LayoutGrid, Monitor } from 'lucide-react';
 import { useWorkflowStart } from '@mozaiks/chat-ui/hooks/useWorkflowStart.js';
 import { workflowSurfaceStyles, workflowToolbarButtonClass } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
+import { normalizePrimitiveActions } from '@mozaiks/chat-ui/core/ui/workflowPrimitiveUtils.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
 import { useSandbox } from './useSandbox';
 import BuildStatusPane from './BuildStatusPane';
@@ -63,6 +64,33 @@ const AppWorkbench = ({
   const [activeArtifactVersionId, setActiveArtifactVersionId] = useState(
     payload?.artifact_version_id || payload?.artifactVersionId || null
   );
+  const [reviewArtifactVersionId, setReviewArtifactVersionId] = useState(
+    payload?.artifact_version_id || payload?.artifactVersionId || null
+  );
+  const artifactReviewRef = useRef(null);
+  const codingResult = refinementResult?.coding_worker;
+  const savedDraftId = codingResult?.metadata?.build_record_id;
+  const confirmationOnly = payload?.stage === 'confirm';
+  const hasDownloadFiles = Array.isArray(payload?.files) && payload.files.some(Boolean);
+  const canShowExportActions = showExportActions && !codingResult && (hasDownloadFiles || confirmationOnly);
+  const exportPayload = confirmationOnly ? {
+    ...payload,
+    actions: normalizePrimitiveActions(payload, [
+      { id: 'download_complete', label: 'Confirm app bundle', variant: 'primary', approved: true },
+      { id: 'close', label: 'Close', variant: 'secondary' },
+    ]).map((action) => action.id === 'download_complete' ? { ...action, label: 'Confirm app bundle' } : action),
+  } : payload;
+  const codingResultTone = codingResult?.status === 'validated' && savedDraftId
+    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+    : codingResult?.status === 'failed'
+      ? 'border-red-500/30 bg-red-500/10 text-red-200'
+      : 'border-amber-400/30 bg-amber-400/10 text-amber-100';
+  const codingResultMessage = {
+    validated: savedDraftId ? 'Draft validated and saved for review.' : 'Validation passed, but no saved draft is available.',
+    planned: savedDraftId ? 'Draft saved; validation is incomplete.' : 'Refinement planned; no draft was saved.',
+    failed: savedDraftId ? 'Draft saved; validation failed.' : 'Refinement failed; no draft was saved.',
+    ineligible: 'This change is not eligible for scoped refinement.',
+  }[codingResult?.status] || 'Refinement has not completed.';
 
   // Preview ownership follows the persisted artifact version and build target.
   const artifactVersionId = activeArtifactVersionId;
@@ -98,6 +126,8 @@ const AppWorkbench = ({
 
   useEffect(() => {
     setActiveArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
+    setReviewArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
+    setRefinementResult(null);
   }, [payload?.artifact_version_id, payload?.artifactVersionId]);
 
   useEffect(() => {
@@ -140,7 +170,7 @@ const AppWorkbench = ({
   useEffect(() => {
     let cancelled = false;
     async function loadReview() {
-      if (!artifactVersionId || !buildRegistryId) {
+      if (!reviewArtifactVersionId || !buildRegistryId) {
         if (!cancelled) {
           setArtifactReview(null);
           setArtifactReviewError(null);
@@ -149,8 +179,9 @@ const AppWorkbench = ({
       }
       setArtifactReviewBusy(true);
       setArtifactReviewError(null);
+      setArtifactReview(null);
       try {
-        const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review${artifactQuery}`);
+        const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(reviewArtifactVersionId)}/review${artifactQuery}`);
         const body = await response.json().catch(() => ({ detail: response.statusText }));
         if (!response.ok) {
           throw new Error(body.detail || 'Artifact review could not be loaded.');
@@ -170,7 +201,7 @@ const AppWorkbench = ({
     }
     loadReview();
     return () => { cancelled = true; };
-  }, [artifactVersionId, artifactQuery, buildRegistryId]);
+  }, [reviewArtifactVersionId, artifactQuery, buildRegistryId]);
 
   const buildRefinementTriggerPayload = (harnessAction = null, overrideArtifactKind = null) => {
     const resolvedArtifactKind = overrideArtifactKind || artifactKind;
@@ -220,22 +251,24 @@ const AppWorkbench = ({
     return triggerPayload;
   };
 
-  // Shared handler for any refinement response. Handles coding_worker patches
-  // (updates filesMap and advances the persisted artifact version) and
-  // harness_decision responses (routes user to a confirmation action).
+  // Shared handler for any refinement response. Saved candidates remain
+  // inspectable even when validation prevents advancing the preview baseline.
   const handleRefinementResponse = (response) => {
     if (!response) {
       if (workflowStartError) setRefinementError(workflowStartError);
       return;
     }
     if (response.execution_mode === 'coding_worker') {
-      const appliedFiles = response?.coding_worker?.applied_files || {};
-      if (typeof appliedFiles === 'object' && Object.keys(appliedFiles).length > 0) {
-        const mergedFilesMap = { ...(filesMap || {}), ...appliedFiles };
-        setFilesMap(mergedFilesMap);
+      const result = response.coding_worker;
+      const nextVersionId = result?.metadata?.build_record_id;
+      if (nextVersionId) setReviewArtifactVersionId(nextVersionId);
+      if (result?.status === 'validated' && nextVersionId) {
+        const appliedFiles = result.applied_files || {};
+        if (typeof appliedFiles === 'object' && Object.keys(appliedFiles).length > 0) {
+          setFilesMap({ ...(filesMap || {}), ...appliedFiles });
+        }
+        setActiveArtifactVersionId(nextVersionId);
       }
-      const nextVersionId = response?.coding_worker?.metadata?.artifact_version_id || null;
-      if (nextVersionId) setActiveArtifactVersionId(nextVersionId);
       setRefinementResult(response);
       return;
     }
@@ -283,6 +316,16 @@ const AppWorkbench = ({
   };
 
   const handleHarnessDecisionAction = async (action) => {
+    if (action?.action_type === 'review_patch') {
+      if (!savedDraftId) {
+        setRefinementError('No saved draft is available to review.');
+        return;
+      }
+      setReviewArtifactVersionId(savedDraftId);
+      artifactReviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      artifactReviewRef.current?.focus({ preventScroll: true });
+      return;
+    }
     if (!action || !refinementRequest.trim() || !artifactVersionId) return;
     setRefinementError(null);
     const response = await startWorkflow(
@@ -294,11 +337,11 @@ const AppWorkbench = ({
   };
 
   const handleArtifactReviewAction = async (action) => {
-    if (!artifactVersionId || !action) return;
+    if (!reviewArtifactVersionId || !action) return;
     setArtifactReviewBusy(true);
     setArtifactReviewError(null);
     try {
-      const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}${artifactQuery}`, {
+      const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(reviewArtifactVersionId)}/${action}${artifactQuery}`, {
         method: 'POST',
       });
       const body = await response.json().catch(() => ({ detail: response.statusText }));
@@ -447,17 +490,18 @@ const AppWorkbench = ({
             </div>
           )}
 
-          {refinementResult?.coding_worker && (
-            <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 text-xs text-emerald-100">
-              <div className="font-semibold text-emerald-50">
-                {refinementResult.coding_worker.plan?.summary || 'Scoped refinement applied.'}
-              </div>
+          {codingResult && (
+            <div role="status" aria-label="Refinement result" className={`mt-3 rounded-xl border px-3 py-3 text-xs ${codingResultTone}`}>
+              <div className="font-semibold">{codingResultMessage}</div>
+              {codingResult.plan?.summary && <div className="mt-1">{codingResult.plan.summary}</div>}
               <div className="mt-1">
-                Status: {refinementResult.coding_worker.status}
-                {refinementResult.coding_worker.metadata?.artifact_version_id
-                  ? ` • Artifact ${refinementResult.coding_worker.metadata.artifact_version_id}`
-                  : ''}
+                Status: {codingResult.status}
+                {savedDraftId ? ` • Draft ${savedDraftId}` : ''}
               </div>
+              {savedDraftId && codingResult.status !== 'validated' && (
+                <div className="mt-1">The editor and preview still show version {artifactVersionId}. Inspect the saved draft below.</div>
+              )}
+              {codingResult.error && <div className="mt-1">{codingResult.error}</div>}
             </div>
           )}
 
@@ -474,11 +518,19 @@ const AppWorkbench = ({
           )}
         </div>
 
+        <section ref={artifactReviewRef} tabIndex={-1} aria-label="Artifact review">
+        {artifactReviewBusy && <p role="status" className="text-xs text-[var(--color-text-muted)]">Loading artifact review…</p>}
+        {artifactReviewError && (
+          <div role="alert" className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            {artifactReviewError}
+          </div>
+        )}
         {artifactReview && (
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-white">Artifact Review</div>
+                <div className="mt-1 text-xs text-[var(--color-text-muted)]">Version {reviewArtifactVersionId}</div>
                 <div className="mt-1 text-xs text-[var(--color-text-muted)]">
                   Lifecycle: {artifactReview.lifecycle_status} · Validation: {artifactReview.validation_status} · Review: {artifactReview.review_status}
                 </div>
@@ -592,19 +644,14 @@ const AppWorkbench = ({
                 ))}
               </div>
             )}
-
-            {artifactReviewError && (
-              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                {artifactReviewError}
-              </div>
-            )}
           </div>
         )}
+        </section>
 
-        {showExportActions && (
+        {canShowExportActions && (
           <div className="pt-2">
             <ExportActions
-              payload={payload}
+              payload={exportPayload}
               onResponse={onResponse}
               toolName={toolName}
               toolCallId={toolCallId}

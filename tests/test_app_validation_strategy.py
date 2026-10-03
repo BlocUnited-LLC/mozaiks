@@ -152,7 +152,7 @@ def _repair_responded(context):
     ("status", "acceptance_status", "integration_passed", "allow_export"),
     [
         ("passed", "passed", True, True),
-        ("skipped", "passed", True, True),
+        ("skipped", "passed", True, False),
         ("passed", "failed", True, False),
         ("passed", None, True, False),
         ("failed", "passed", True, False),
@@ -302,7 +302,7 @@ def test_validate_app_build_skip_strategy_persists_context() -> None:
         )
     )
 
-    assert result["success"] is True
+    assert result["success"] is False
     assert result["validation_strategy"] == "skip"
     assert result["validation_status"] == "skipped"
     assert context.get("app_validation_status") == "skipped"
@@ -754,8 +754,10 @@ async def test_module_implementation_failure_uses_bounded_bundle_repair(repair: 
         )
     _repair_responded(context)
     second = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
-    assert second["passed"] is repair
-    assert second["bundle_repair"]["status"] == ("passed" if repair else "blocked")
+    assert second["module_implementation"]["passed"] is repair
+    assert second["passed"] is False
+    assert second["status"] == ("pending" if repair else "failed")
+    assert second["bundle_repair"]["status"] == "blocked"
     assert second["bundle_repair"]["no_progress"] is (not repair)
     assert second["bundle_repair"]["target_agent"] is None
     assert context.get("bundle_repair_attempt_count") == 1
@@ -793,8 +795,10 @@ async def test_runtime_import_failure_uses_stable_bounded_bundle_repair(repair) 
         files[handler] = original
     _repair_responded(context)
     second = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
-    assert second["passed"] is repair
-    assert second["bundle_repair"]["status"] == ("passed" if repair else "blocked")
+    assert second["app_runtime_load"]["passed"] is repair
+    assert second["passed"] is False
+    assert second["status"] == ("pending" if repair else "failed")
+    assert second["bundle_repair"]["status"] == "blocked"
     assert second["bundle_repair"]["no_progress"] is (not repair)
     assert context.get("bundle_repair_attempt_count") == 1
 

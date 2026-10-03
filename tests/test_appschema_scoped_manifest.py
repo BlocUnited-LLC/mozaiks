@@ -212,6 +212,14 @@ async def test_partial_output_requires_complete_assembled_bundle_for_acceptance(
         assert result["export_gate"]["allow_export"] is False
         assert "Generated app bundles must include app.json." in json.dumps(result["acceptance"])
     else:
-        assert result["success"] is True, result["validation_errors"]
+        assert result["success"] is False
         assert result["runtime_loader"]["loaded"] is True
-        assert result["export_gate"]["allow_export"] is True
+        assert result["export_gate"]["allow_export"] is False
+        assert result["acceptance"]["status"] == "pending"
+        evidence = result["acceptance"]["validation_evidence"]
+        assert evidence["failed"] == []
+        assert evidence["skipped"] == ["app_runtime_smoke"]
+        assert "workflow_integration" in evidence["completed"]
+        assert "snapshot_digest" not in result["acceptance"]
+        assert result["app_validation_result"]["validation_status"] == "pending"
+        assert result["context"]["integration_tests_passed"] is False
