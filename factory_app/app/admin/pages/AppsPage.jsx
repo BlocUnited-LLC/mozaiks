@@ -194,11 +194,16 @@ function AppsTable({ rows, onOpen, onDashboard, onDelete }) {
   )
 }
 
-export function AppsDirectory({ apps, loading, error, deleteApp, navigationForApp }) {
+export function AppsDirectory({
+  apps, loading, error, deleteApp, navigationForApp, pagination,
+  searchValue: controlledSearch, onSearchChange, activeFilter: controlledFilter, onFilterChange,
+}) {
   const navigate = useNavigate()
   const [dashboardConfig, setDashboardConfig] = useState(null)
-  const [searchValue, setSearchValue] = useState('')
-  const [activeFilter, setActiveFilter] = useState('all')
+  const [localSearch, setLocalSearch] = useState('')
+  const [localFilter, setLocalFilter] = useState('all')
+  const searchValue = controlledSearch ?? localSearch
+  const activeFilter = controlledFilter ?? localFilter
 
   useEffect(() => {
     const controller = new AbortController()
@@ -230,25 +235,29 @@ export function AppsDirectory({ apps, loading, error, deleteApp, navigationForAp
   }, [appDashboardRoute, apps, navigationForApp])
 
   const visibleRows = useMemo(() => {
+    if (pagination) {
+      const rowsByApp = new Map(portfolio.rows.map(row => [row.app, row]))
+      return (apps || []).map(app => rowsByApp.get(app))
+    }
     const search = searchValue.trim().toLowerCase()
     const filtered = portfolio.rows.filter((row) => {
       const matchesSearch = !search || row.searchText.includes(search)
       return matchesSearch && matchesFilter(row, activeFilter)
     })
     return sortByNeedsInput(filtered)
-  }, [activeFilter, portfolio.rows, searchValue])
+  }, [activeFilter, apps, pagination, portfolio.rows, searchValue])
 
   const filterOptions = useMemo(() => (
     FILTER_OPTIONS.map((filter) => ({
       ...filter,
-      count: filter.value === 'all'
+      count: pagination ? undefined : filter.value === 'all'
         ? portfolio.rows.length
         : portfolio.rows.filter((row) => matchesFilter(row, filter.value)).length,
     }))
-  ), [portfolio.rows])
+  ), [pagination, portfolio.rows])
 
   const summaryItems = [
-    { id: 'tracked', label: 'Total', value: formatCompactNumber(portfolio.totalApps, '0') },
+    { id: 'tracked', label: pagination ? 'On this page' : 'Total', value: formatCompactNumber(portfolio.totalApps, '0') },
     { id: 'active', label: 'Live', value: formatCompactNumber(portfolio.activeCount, '0') },
     { id: 'build', label: 'In build', value: formatCompactNumber(portfolio.buildCount, '0') },
     { id: 'blocked', label: 'Needs input', value: formatCompactNumber(portfolio.blockingAlerts, '0') },
@@ -269,39 +278,53 @@ export function AppsDirectory({ apps, loading, error, deleteApp, navigationForAp
     await deleteApp(buildRegistryId)
   }
 
-  if (loading) return <StudioLoadingState label="Loading your apps…" />
-  if (error) return <StudioErrorState title="Could not load apps" message={error} />
+  if (loading && !pagination) return <StudioLoadingState label="Loading your apps…" />
+  if (error && !pagination) return <StudioErrorState title="Could not load apps" message={error} />
 
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
         <WorkspaceStudioHero
           title="Apps"
-          subtitle="Manage your apps, continue builds, and open app Studio."
-          summaryItems={summaryItems}
+          subtitle={pagination ? 'Manage your apps. Search and filters include all your apps.' : 'Manage your apps, continue builds, and open app Studio.'}
+          summaryItems={pagination ? summaryItems.slice(0, 1) : summaryItems}
         />
 
         <section className="space-y-4">
           <CollectionToolbar
             searchValue={searchValue}
-            onSearchChange={setSearchValue}
-            searchPlaceholder="Search apps..."
+            onSearchChange={onSearchChange ?? setLocalSearch}
+            searchPlaceholder={pagination ? 'Search app names and descriptions...' : 'Search apps...'}
             filters={filterOptions}
             activeFilter={activeFilter}
-            onFilterChange={setActiveFilter}
+            onFilterChange={onFilterChange ?? setLocalFilter}
           />
-          {visibleRows.length > 0 ? (
+          {loading ? <StudioLoadingState label="Loading your apps…" /> : error ? (
+            <div className="space-y-3">
+              <StudioErrorState title="Could not load apps" message={error} />
+              {pagination?.onRetry && <ActionButton onClick={pagination.onRetry}>Try again</ActionButton>}
+            </div>
+          ) : visibleRows.length > 0 ? (
             <AppsTable rows={visibleRows} onOpen={handleOpen} onDashboard={handleDashboard} onDelete={deleteApp ? handleDelete : null} />
-          ) : portfolio.rows.length === 0 ? (
+          ) : portfolio.rows.length === 0 && !searchValue && activeFilter === 'all' && (!pagination || pagination.page === 1) ? (
             <InlineEmptyState
               title="No apps yet"
               description="Apps you create or manage will appear here."
             />
           ) : (
             <InlineEmptyState
-              title="No apps match this search"
-              description="Adjust the search term or clear the filter."
+              title={pagination && !searchValue && activeFilter === 'all' ? 'No apps on this page' : 'No apps match this search'}
+              description={pagination && !searchValue && activeFilter === 'all' ? 'Go to the previous page to continue browsing.' : 'Adjust the search term or clear the filter.'}
             />
+          )}
+          {pagination && (
+            <nav aria-label="Apps pagination" className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground" aria-live="polite">Page {pagination.page}</span>
+              <div className="flex gap-2">
+                <ActionButton variant="outline" onClick={pagination.onPrevious} disabled={loading || !pagination.hasPrevious}>Previous</ActionButton>
+                <ActionButton variant="outline" onClick={pagination.onNext} disabled={loading || Boolean(error) || !pagination.hasNext}>Next</ActionButton>
+              </div>
+            </nav>
           )}
         </section>
 
