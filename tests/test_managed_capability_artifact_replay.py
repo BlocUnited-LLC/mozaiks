@@ -825,9 +825,10 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
         context_variables=ctx,
     )
 
-    assert validation["status"] == "success", validation["app_bundle_acceptance_result"]["failed_tests"]
-    assert validation["app_bundle_acceptance_result"]["status"] == "passed"
-    assert ctx.get("app_bundle_acceptance_status") == "passed"
+    assert validation["status"] == "failed"
+    assert validation["app_bundle_acceptance_result"]["status"] == "pending"
+    assert validation["app_bundle_acceptance_result"]["validation_evidence"]["failed"] == []
+    assert ctx.get("app_bundle_acceptance_status") == "pending"
     assert ctx.get("bundle_scan_result")["passed"] is True
     assert ctx.get("wiring_validation_result")["passed"] is True
     assert ctx.get("module_implementation_validation_result")["passed"] is True

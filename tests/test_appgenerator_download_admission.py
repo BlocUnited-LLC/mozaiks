@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from factory_app.workflows.AppGenerator.tools import (
+    app_runtime_smoke,
     app_validation,
     export_app_code,
     generate_and_download,
@@ -41,6 +42,10 @@ def _select_repair(context, task_id, request_id):
 
 
 def _external_boundaries(monkeypatch, tmp_path, historical_outputs):
+    # These tests isolate artifact admission/export, not runtime acceptance.
+    monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", AsyncMock(return_value={
+        "status": "passed", "passed": True, "failed_tests": [], "checks": [],
+    }))
     history = AsyncMock(return_value=historical_outputs)
     monkeypatch.setattr(AG2PersistenceManager, "gather_latest_agent_jsons", history)
     artifact = AsyncMock(return_value=None)
@@ -68,6 +73,8 @@ def _external_boundaries(monkeypatch, tmp_path, historical_outputs):
 
 
 async def _download_and_assert_snapshot(context, boundaries):
+    context.set("app_validation_status", "passed")
+    context.set("app_validation_strategy_used", "local")
     result = await generate_and_download.generate_and_download(
         {}, "Review the admitted app bundle.", context_variables=context,
     )
@@ -211,6 +218,29 @@ async def test_missing_execution_evidence_cannot_admit_history_during_acceptance
     assert accepted["planned_completeness"]["passed"] is False
     assert detach(context.get("generated_files")) == files
     history.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pending_runtime_validation_reports_prerequisite_without_export(monkeypatch, tmp_path):
+    _, _, _, context, _ = await _materialize_plan_bundle(tmp_path=tmp_path / "fixture")
+    boundaries = _external_boundaries(monkeypatch, tmp_path, {})
+    monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", AsyncMock(return_value={
+        "status": "skipped", "passed": None, "failed_tests": [], "checks": [],
+        "reason": "MONGO_URI is unavailable",
+    }))
+
+    result = await generate_and_download.generate_and_download(
+        {}, "Review the admitted app bundle.", context_variables=context,
+    )
+
+    assert result["status"] == "error"
+    assert result["app_bundle_acceptance_status"] == "pending"
+    assert "validation prerequisites" in result["message"]
+    assert "contract errors" not in result["message"]
+    boundaries.artifact.assert_not_awaited()
+    boundaries.ui.assert_not_awaited()
+    boundaries.external_export.assert_not_awaited()
+    assert not list((tmp_path / "download").rglob("*.zip"))
 
 
 @pytest.mark.asyncio

@@ -78,7 +78,7 @@ def _local_validation_available() -> bool:
 
 def _base_result(*, strategy: str, status: str) -> dict[str, Any]:
     return {
-        "success": status != "failed",
+        "success": status == "passed",
         "validation_strategy": strategy,
         "validation_status": status,
         "strategy_reason": "",
@@ -1263,12 +1263,31 @@ def _check_result(
 def _result_check(result: dict[str, Any], *, default_id: str, default_message: str) -> dict[str, Any]:
     checks = result.get("checks")
     if isinstance(checks, list) and checks and isinstance(checks[0], dict):
-        return dict(checks[0])
+        check = dict(checks[0])
+        if result.get("status") in {"skipped", "pending"}:
+            check["details"] = {**check.get("details", {}), "blocking": True}
+        return check
     return _check_result(
         check_id=default_id,
         passed=bool(result.get("passed")),
         message=default_message,
     )
+
+
+def _acceptance_readiness(subresults: dict[str, dict[str, Any]]) -> tuple[str, dict[str, list[str]]]:
+    """Aggregate required gates, preserving checks that have not run.
+
+    Each gate determines applicability from the app contracts before execution;
+    a successful not-applicable check can pass. A skipped applicable gate cannot.
+    """
+    skipped = sorted(name for name, result in subresults.items() if result.get("status") in {"skipped", "pending"})
+    completed = sorted(
+        name for name, result in subresults.items()
+        if result.get("status") in {None, "passed", "success"} and result.get("passed") is True
+    )
+    failed = sorted(name for name in subresults if name not in skipped and name not in completed)
+    status = "failed" if failed else "pending" if skipped or not completed else "passed"
+    return status, {"completed": completed, "failed": failed, "skipped": skipped}
 
 
 def _runtime_quality_result(generated_files: dict[str, str]) -> dict[str, Any]:
@@ -2148,19 +2167,12 @@ async def run_app_bundle_acceptance_gate(
         "app_runtime_load": app_runtime_load_result,
         "app_runtime_smoke": runtime_smoke_result,
     }
-    # A skipped check is reported as skipped: never a pass, and not a failure to
-    # repair. Acceptance can still pass; skipped_checks says what did not run.
-    skipped = sorted(name for name, result in subresults.items() if result.get("status") == "skipped")
+    acceptance_status, validation_evidence = _acceptance_readiness(subresults)
+    skipped = validation_evidence["skipped"]
     skipped_checks = [
         {"id": name, "reason": subresults[name].get("skipped_reason") or "skipped"} for name in skipped
     ]
-    passed_by_check = {
-        name: bool(result.get("passed"))
-        for name, result in subresults.items() if name not in skipped
-    }
-    failed = sorted(name for name, passed in passed_by_check.items() if not passed)
-    completed = sorted(name for name, passed in passed_by_check.items() if passed)
-    acceptance_passed = not failed
+    acceptance_passed = acceptance_status == "passed"
 
     failed_tests: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -2186,7 +2198,7 @@ async def run_app_bundle_acceptance_gate(
 
     result = {
         "contract_version": "1.0",
-        "status": "passed" if acceptance_passed else "failed",
+        "status": acceptance_status,
         "passed": acceptance_passed,
         "checks": [
             _result_check(completeness_result, default_id="planned_completeness", default_message="Approved plan completeness checked."),
@@ -2201,11 +2213,7 @@ async def run_app_bundle_acceptance_gate(
             _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
             _result_check(runtime_smoke_result, default_id="app_runtime_smoke", default_message="App runtime smoke completed."),
         ],
-        "validation_evidence": {
-            "completed": completed,
-            "failed": failed,
-            "skipped": skipped,
-        },
+        "validation_evidence": validation_evidence,
         "skipped_checks": skipped_checks,
         "failed_tests": failed_tests,
         "warnings": warnings,
@@ -2428,6 +2436,13 @@ def _blocking_errors(acceptance: dict[str, Any], validation: dict[str, Any] | No
         errors = list((validation or {}).get("errors") or [])
     if not any(errors) and acceptance.get("error"):
         errors = [acceptance["error"]]
+    if not any(errors):
+        errors = [
+            f"{item['id']}: {item['reason']}"
+            for item in acceptance.get("skipped_checks", [])
+        ]
+    if not any(errors) and (validation or {}).get("validation_status") in {"pending", "skipped"}:
+        errors = ["Required build validation did not complete."]
     return list(dict.fromkeys(_readable_error(error) for error in errors if error))
 
 
@@ -2492,10 +2507,14 @@ def _record_validation_outcome(
     _context_set(context_variables, "app_validation_no_progress", no_progress)
     # Recovery and a selected repair change the bundle before the next check,
     # so only an outcome with neither ends the run (transition_graph.yaml).
+    unverified = not passed and (
+        acceptance.get("status") == "pending"
+        or (acceptance.get("passed") is True and (validation or {}).get("validation_status") in {"pending", "skipped"})
+    )
     ends_run = (
         repair.get("target_agent") is None
         and recovery_request is None
-        and (no_progress or repair.get("status") == "blocked")
+        and (unverified or no_progress or repair.get("status") == "blocked")
     )
     _context_set(
         context_variables,
@@ -2503,7 +2522,7 @@ def _record_validation_outcome(
         _build_failure_message(
             _blocking_errors(acceptance, validation),
             no_progress=no_progress,
-            infrastructure=bool((validation or {}).get(INFRASTRUCTURE_FAILURE)),
+            infrastructure=bool(unverified or (validation or {}).get(INFRASTRUCTURE_FAILURE)),
         )
         if ends_run
         else None,
@@ -2584,7 +2603,7 @@ async def validate_app_bundle_from_request(
     app_runtime_load_result = acceptance_result["app_runtime_load"]
     runtime_smoke_result = acceptance_result["app_runtime_smoke"]
     bundle_repair = acceptance_result.get("bundle_repair")
-    validation_passed = str(validation.get("validation_status") or "").strip().lower() in {"passed", "skipped"}
+    validation_passed = str(validation.get("validation_status") or "").strip().lower() == "passed"
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
     _context_set(context_variables, "integration_tests_passed", combined_passed)
     integration_test_result = {

@@ -1382,7 +1382,7 @@ def test_existing_app_refresh_preloads_prior_source_context_bundle_when_availabl
     assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
 
 
-def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
+def test_existing_app_artifact_saver_persists_canonical_fields(monkeypatch) -> None:
     module = _load_module(
         "factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
         "tests.save_existing_app_artifacts_direct",
@@ -1442,7 +1442,7 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
         },
     )
     save_module = module
-    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(module, "get_artifact_store", _MemoryArtifactStore)
     monkeypatch.setitem(
         save_module.emit_app_intelligence_enriched_overview_card.__globals__,
         "emit_ui_surface",
@@ -1450,7 +1450,6 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
     )
 
     result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
-    monkeypatch.undo()
 
     assert result["success"] is True
     assert context["existing_product_spec"]["app_name"] == "existing-product-host"

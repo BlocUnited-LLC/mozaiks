@@ -184,7 +184,9 @@ async def test_valid_explicit_bundle_counts_real_wired_endpoints():
     result = await app_validation.run_app_bundle_acceptance_gate(files=files)
     assert result["module_wiring"]["checks"][0]["details"]["total_endpoints_referenced"] == 2
     assert result["module_wiring"]["checks"][0]["details"]["wired_count"] == 2
-    assert result["passed"] is True
+    assert result["status"] == "pending"
+    assert result["validation_evidence"]["failed"] == []
+    assert result["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
     assert files == before
 
 

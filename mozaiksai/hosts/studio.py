@@ -10,7 +10,7 @@ workflow triggering on top of the headless platform host.
 import os
 import stat
 import zipfile
-from asyncio import to_thread
+from asyncio import CancelledError, to_thread
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from difflib import unified_diff
@@ -2796,10 +2796,10 @@ async def trigger_workflow(
                     )
                     await _complete_inline_refinement(binding=inline_binding, user_id=user_id, result=finalized)
                     surface_result = surface_result.model_copy(update={
-                        "status": "success" if finalized.status == "validated" else "failed",
+                        "status": {"validated": "success", "planned": "partial"}.get(finalized.status, "failed"),
                         "metadata": {**surface_result.metadata, **finalized.metadata, "validation_result": finalized.validation_result},
                     })
-            except HTTPException:
+            except (HTTPException, CancelledError):
                 if inline_binding is not None:
                     await _fail_inline_refinement(binding=inline_binding, user_id=user_id)
                 raise
@@ -2856,7 +2856,7 @@ async def trigger_workflow(
                             binding=inline_binding, user_id=user_id, result=coding_result,
                         )
                         harness_decision = orchestration_control.build_coding_result_decision(coding_request, coding_result)
-                except HTTPException:
+                except (HTTPException, CancelledError):
                     if inline_binding is not None:
                         await _fail_inline_refinement(binding=inline_binding, user_id=user_id)
                     raise
@@ -3065,7 +3065,7 @@ async def trigger_workflow(
                     app_id=artifact_app_id,
                     build_record_id=refinement_request.build_record_id,
                     change_request_id=persisted_change_request_id,
-                    result_build_record_id=((coding_result.metadata or {}).get("build_record_id") or (coding_result.metadata or {}).get("artifact_version_id")),
+                    result_build_record_id=coding_result.metadata.get("build_record_id"),
                     provider="control_plane_coding",
                     status=session_status,
                     preview_url=((coding_result.validation_result or {}).get("preview_url")),

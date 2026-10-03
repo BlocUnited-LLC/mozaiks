@@ -34,16 +34,10 @@ def _json_bytes(payload: Any) -> bytes:
 
 
 def _set_context_value(context_variables: Any, key: str, value: Any) -> None:
-    try:
-        if hasattr(context_variables, "set"):
-            context_variables.set(key, value)
-            return
-    except Exception:
-        pass
-    try:
+    if hasattr(context_variables, "set"):
+        context_variables.set(key, value)
+    else:
         context_variables[key] = value
-    except Exception:
-        return
 
 
 def _get_context_value(context_variables: Any, key: str, default: Any = None) -> Any:
@@ -59,7 +53,7 @@ def _get_context_value(context_variables: Any, key: str, default: Any = None) ->
 
 
 def _artifact_version_id(version_doc: Any) -> str | None:
-    if hasattr(version_doc, "id"):
+    if getattr(version_doc, "id", None):
         return str(version_doc.id)
     if isinstance(version_doc, dict):
         raw_id = version_doc.get("id") or version_doc.get("_id")
@@ -114,8 +108,9 @@ async def _persist_app_context_artifact_drafts(
             },
         )
         version_id = _artifact_version_id(version_doc)
-        if version_id:
-            persisted_refs[artifact_kind] = version_id
+        if not version_id:
+            raise ValueError(f"No persisted artifact version returned for {artifact_kind}")
+        persisted_refs[artifact_kind] = version_id
 
     return persisted_refs
 
@@ -125,12 +120,17 @@ async def save_existing_app_artifacts(
 ) -> dict[str, Any]:
     """Persist the canonical existing-app discovery artifacts and emit a UI summary."""
     if not context_variables:
-        return {"success": False, "error": "No context provided"}
+        return {"success": False, "outcome": "failed", "error": "No context provided"}
+
+    # These refs describe this save attempt, never a prior preload or failed save.
+    _set_context_value(context_variables, "brownfield_app_context_artifact_version_refs", {})
+    _set_context_value(context_variables, "brownfield_app_context_artifact_persistence_error", None)
 
     data = context_variables.get("structured_output")
     if not data:
         return {
             "success": False,
+            "outcome": "failed",
             "error": "No structured output from DiscoveryArtifactAssemblerAgent",
         }
 
@@ -225,12 +225,6 @@ async def save_existing_app_artifacts(
                 artifact_payloads=app_context_payloads,
                 artifact_store=artifact_store,
             )
-            _set_context_value(
-                context_variables,
-                "brownfield_app_context_artifact_version_refs",
-                persisted_refs,
-            )
-
             app_context_version = build_brownfield_app_context_version(
                 app_id=app_context_artifacts.app_id,
                 artifact_version_refs=persisted_refs,
@@ -246,7 +240,17 @@ async def save_existing_app_artifacts(
                 source_chat_id=str(chat_id) if chat_id else None,
                 make_current=True,
             )
+            if (
+                not _artifact_version_id(registered_context.artifact_version)
+                or registered_context.artifact_version.lifecycle_status != ArtifactLifecycleStatus.CURRENT
+            ):
+                raise ValueError("Discovery AppContextVersion was not registered as current")
             app_context_version_payload = registered_context.context_version.model_dump(mode="json")
+            _set_context_value(
+                context_variables,
+                "brownfield_app_context_artifact_version_refs",
+                persisted_refs,
+            )
             _set_context_value(
                 context_variables,
                 "app_context_version",
@@ -272,11 +276,14 @@ async def save_existing_app_artifacts(
                 "brownfield_app_context_artifact_persistence_error",
                 str(exc),
             )
+            return {"success": False, "outcome": "failed", "error": str(exc)}
     except Exception as exc:
         logger.warning(
             "[ExistingAppDiscovery] Could not derive app-context contract drafts: %s",
             exc,
         )
+        _set_context_value(context_variables, "brownfield_app_context_artifact_persistence_error", str(exc))
+        return {"success": False, "outcome": "failed", "error": str(exc)}
 
     logger.info(
         "[ExistingAppDiscovery] Artifacts saved for '%s' — capabilities=%s "
@@ -314,5 +321,6 @@ async def save_existing_app_artifacts(
     ]
     return {
         "success": True,
+        "outcome": "saved",
         "message": "".join(summary_parts),
     }

@@ -111,8 +111,8 @@ generated business operations must bind to actual module actions. Runtime page
 schema parsing still permits safe host-owned/custom API paths; this check does
 not replace the host's routing contract or introduce a second runtime validator.
 
-`validation_strategy: skip` skips optional execution checks, not mandatory
-app-bundle acceptance or its wiring check. A zero-reference result only means
+`validation_strategy: skip` leaves build execution unverified; it does not
+establish acceptance or bypass mandatory wiring checks. A zero-reference result only means
 that inspected input contains no page API references, not that an absent input
 was successfully validated.
 
@@ -241,9 +241,20 @@ the file each one names:
 With no configured database, or an unreachable one, the check reports
 `skipped` with the reason (`passed: null`, `status: "skipped"`). Acceptance
 lists it in `validation_evidence.skipped` and `skipped_checks` with that reason.
-It is neither completed nor failed, so acceptance can still pass. The build
-status pane shows the integration checks as skipped (amber), not as a clean
-pass.
+It is neither completed nor failed. The aggregate acceptance remains `pending`
+with `passed: false` until required checks complete; an actual contract failure
+still makes it `failed`. A skipped smoke contributes no app-code repair
+diagnostic. Missing validation infrastructure must be restored and the check
+rerun against the candidate before it becomes ready. No accepted snapshot
+digest is issued for an unverified candidate.
+
+Source refinement follows the same distinction. Every selected, applicable
+detected validation command must complete successfully. Unselected commands do
+not block that source-validation result; rejected, unavailable or truncated
+selected commands do. Static fallback checks retain their individual results,
+but syntax-only success is an aggregate `warning`, not readiness. Empty or
+all-skipped validation stays `skipped`. These outcomes preserve a reviewable
+draft without declaring it validated or eligible for promotion.
 
 **Not covered.** Module reactions, workflow triggers, pages and startup services
 are not exercised. Custom actions are called only when they carry an entitlement

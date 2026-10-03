@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from factory_app.workflows.ExistingAppDiscovery.tools import app_context_mapping
 from mozaiksai.core.app_context.models import (
     AdoptionPath,
@@ -317,6 +319,7 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
     result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
 
     assert result["success"] is True
+    assert result["outcome"] == "saved"
     assert context["existing_product_spec"]["app_name"] == "Operations Studio"
     assert context["capability_specs"][0]["capability_id"] == "work_order_triage"
     assert context["agent_augmentation_plan"]["adoption_level"] == "gradual_modernization"
@@ -361,6 +364,58 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
         assert "EMAIL_API_KEY" not in json.dumps(call["commit_metadata"], default=str)
         assert "native_migration" not in json.dumps(call["commit_metadata"], default=str)
         assert "module_decomposition_plan" not in json.dumps(call["commit_metadata"], default=str)
+
+
+@pytest.mark.parametrize("failure", ["missing_output", "mapping", "persistence", "partial_persistence", "missing_id", "registration", "not_current"])
+def test_failed_save_does_not_publish_new_current_context(monkeypatch, failure) -> None:
+    context = _context()
+    context.update({
+        "brownfield_app_context_artifact_version_refs": {"application_inventory": "prior-draft"},
+        "current_app_context_version_id": "prior-context",
+        "app_context_version_artifact_version_id": "prior-version",
+        "app_context_version": {"context_version_id": "prior-context"},
+    })
+    store = _FakeArtifactStore()
+    monkeypatch.setattr(save_module, "get_artifact_store", lambda: store)
+
+    async def unexpected_emit(**kwargs):
+        pytest.fail("Failed persistence must not emit a saved overview")
+
+    monkeypatch.setattr(save_module, "emit_app_intelligence_enriched_overview_card", unexpected_emit)
+    if failure == "missing_output":
+        context.pop("structured_output")
+    elif failure == "mapping":
+        def invalid_mapping(*args, **kwargs):
+            raise ValueError("Synthetic invalid mapping")
+        monkeypatch.setattr(save_module, "build_existing_app_context_artifacts", invalid_mapping)
+    elif failure in {"persistence", "partial_persistence", "missing_id"}:
+        create = store.create_build_record
+
+        async def broken_create(**kwargs):
+            if failure == "partial_persistence" and len(store.calls) < 2:
+                return await create(**kwargs)
+            if failure == "missing_id":
+                return {}
+            raise OSError("Synthetic storage failure")
+        monkeypatch.setattr(store, "create_build_record", broken_create)
+    elif failure == "not_current":
+        async def reject_current(**kwargs):
+            return None
+        monkeypatch.setattr(store, "accept_build_record", reject_current)
+    else:
+        async def failed_registration(*args, **kwargs):
+            raise OSError("Synthetic registration failure")
+        monkeypatch.setattr(save_module, "register_app_context_version", failed_registration)
+
+    result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
+
+    assert result["success"] is False
+    assert result["outcome"] == "failed"
+    assert context["brownfield_app_context_artifact_version_refs"] == {}
+    assert context["current_app_context_version_id"] == "prior-context"
+    assert context["app_context_version_artifact_version_id"] == "prior-version"
+    assert context["app_context_version"] == {"context_version_id": "prior-context"}
+    assert all(record.lifecycle_status is ArtifactLifecycleStatus.DRAFT for record in store.versions.values())
 
 
 def test_existing_app_context_persistence_has_no_graph_database_or_sequence_dependency() -> None:

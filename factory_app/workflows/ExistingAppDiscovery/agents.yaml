@@ -631,6 +631,9 @@ agents:
          not a second copy of the same summary.
 
       9. Respond with ONLY valid JSON matching the schema. No markdown. No commentary.
+         The automatic save tool determines whether durable discovery artifacts
+         were registered and the workflow can complete. Do not claim they are
+         saved, set a save outcome, or ask for another review after assembly.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |

@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
+from pydantic import ValidationError
 
 from mozaiksai.control_plane import (
     ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS,
@@ -102,6 +104,40 @@ def test_control_plane_capability_llm_config_fallback_remains_supported() -> Non
     assert config.resolve_capability_llm_config("classifier") == {
         "model": "gpt-5-nano",
         "temperature": 0.0,
+    }
+
+
+def test_refinement_policy_rejects_unused_profile_temperature(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    config_dir = app_root / "config"
+    config_dir.mkdir(parents=True)
+    policy = {
+        "enabled": True,
+        "llm_profiles": {
+            "classifier": {
+                "default_temperature": 0.5,
+                "llm_config": {"model": "test-model"},
+            }
+        },
+        "classifier": {"enabled": True, "llm_profile": "classifier"},
+    }
+    policy_path = config_dir / "refinement_policy.yaml"
+    policy_path.write_text(yaml.safe_dump(policy), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="default_temperature") as exc_info:
+        load_control_plane_config(app_root)
+
+    assert exc_info.value.errors()[0]["type"] == "extra_forbidden"
+
+    profile = policy["llm_profiles"]["classifier"]
+    profile.pop("default_temperature")
+    profile["llm_config"]["temperature"] = 0.5
+    policy_path.write_text(yaml.safe_dump(policy), encoding="utf-8")
+
+    config = load_control_plane_config(app_root)
+    assert config.resolve_capability_llm_config("classifier") == {
+        "model": "test-model",
+        "temperature": 0.5,
     }
 
 

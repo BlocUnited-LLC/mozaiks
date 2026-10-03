@@ -693,7 +693,9 @@ async def test_ai_research_workspace_offline_golden_path(
         context_variables=context,
     )
     acceptance = validation["app_bundle_acceptance_result"]
-    assert acceptance["passed"] is True, acceptance["failed_tests"]
+    assert acceptance["status"] == "pending", acceptance["failed_tests"]
+    assert acceptance["validation_evidence"]["failed"] == []
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
     assert set(acceptance["validation_evidence"]["completed"]) == {
         "agent_backend",
         "app_runtime_load",
@@ -708,10 +710,10 @@ async def test_ai_research_workspace_offline_golden_path(
     }
     assert acceptance["agent_backend"]["checks"][0]["id"] == "agent_backend_integration_not_required"
     assert acceptance["workflow_integration"]["checks"][0]["id"] == "workflow_integration_contract"
-    assert context["app_validation_status"] == "skipped"
-    assert context["integration_tests_passed"] is True
+    assert context["app_validation_status"] == "pending"
+    assert context["integration_tests_passed"] is False
     export_gate = resolve_export_gate(context)
-    assert export_gate["allow_export"] is True, export_gate["reasons"]
+    assert export_gate["allow_export"] is False
 
     async def no_op(*_args: Any, **_kwargs: Any) -> None:
         return None
@@ -742,18 +744,23 @@ async def test_ai_research_workspace_offline_golden_path(
         "AI Research Workspace bundle ready.",
         context_variables=context,
     )
-    assert exported["status"] == "success", exported
-    exported_paths = set(exported["files_written"])
+    assert exported["status"] == "error", exported
+    assert exported["app_bundle_acceptance_status"] == "pending"
+    assert "bundle_zip" not in exported
+    candidate_files = detach(context["generated_files"])
     assert {
         "Dockerfile",
         "docker-compose.yml",
         ".env.example",
         "deployment.manifest.json",
         ".github/workflows/deploy.yml",
-    } <= exported_paths
-    assert Path(exported["bundle_zip"]).is_file()
+    } <= set(candidate_files)
 
-    loaded = await AppLoader.load(exported["bundle_dir"])
+    # Offline contract preservation is useful evidence, but it cannot authorize
+    # export while persistence and build execution remain unverified.
+    candidate_root = tmp_path / "candidate"
+    _write_files(candidate_root, candidate_files)
+    loaded = await AppLoader.load(str(candidate_root))
     assert loaded.failed_module_names == []
     assert {module.name for module in loaded.modules} >= {"research", "billing_portal"}
     # App and workflow bundles have distinct canonical roots. Their connection

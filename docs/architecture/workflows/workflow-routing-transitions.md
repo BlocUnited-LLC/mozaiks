@@ -391,6 +391,30 @@ into `brownfield_repo_input`, which asks which repo to analyze before
 `ExistingAppDiscovery` starts. The selected internal value (`light_integration`
 or `full_migration`) becomes downstream scope context.
 
+### Discovery human continuation
+
+`ExistingAppDiscovery/transition_graph.yaml` explicitly routes human replies
+back to the unfinished discovery stage using `identity_complete`,
+`capabilities_complete`, `plan_complete`, and `decomposition_complete`.
+The runtime's initial user-to-agent dispatch is bootstrap-only. It does not
+substitute for these workflow-local return edges, including after reconnect.
+
+Selecting an `adoption_level` does not confirm the adoption plan. The planner
+remains at its human review boundary until its declared `NEXT` sentinel sets
+`plan_complete`. Then embed/bridge proceeds to artifact assembly, while
+ecosystem/gradual modernization first confirms decomposition.
+
+Assembly has no additional human review boundary. Its automatic save tool uses
+the canonical tool outcome contract: one deterministic attempt, `saved` only
+after all required artifact drafts persist and the final `AppContextVersion`
+registers successfully. That outcome terminates discovery as `workflow_complete`.
+Missing output, mapping/persistence errors, or a missing fresh tool result fail
+closed; preloaded version references and agent text cannot report completion.
+Failure leaves the prior current context intact and does not publish new save
+references. The overview refresh is best effort after durable registration.
+This completes discovery, without authorizing source changes, app bundle
+promotion, or a cross-workflow handoff.
+
 ### Brownfield App Intelligence UX
 
 The existing-app intake path has two user-facing context surfaces:

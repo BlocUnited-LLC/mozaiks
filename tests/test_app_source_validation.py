@@ -39,7 +39,7 @@ def test_mozaiks_pages_use_runtime_contracts_before_source_validation_passes(tmp
     result = run_app_source_validation(app_id="app_1", workspace_root=tmp_path)
     check = next(c for c in result.fallback_checks if c.name == "mozaiks_page_contracts")
     assert check.status == ("failed" if extra else "passed"), check.reason
-    assert result.validation_status == check.status
+    assert result.validation_status == ("failed" if extra else "warning")
 
 
 @pytest.mark.asyncio
@@ -121,6 +121,7 @@ def test_app_source_validation_rejects_unsafe_commands_and_uses_fallback(tmp_pat
     assert result.planned_commands[0].status == "skipped"
     assert result.planned_commands[0].skip_reason == "unsafe_command_rejected"
     assert any(check.name == "json_manifest_parse" and check.status == "passed" for check in result.fallback_checks)
+    assert result.validation_status == "warning"
 
 
 def test_app_source_validation_fallback_applies_staged_overlay(tmp_path: Path) -> None:

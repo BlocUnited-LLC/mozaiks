@@ -194,7 +194,9 @@ async def test_exact_materialized_file_map_validates_boots_and_executes_http(
         context_variables=context,
         capability_packs=_selected_packs(),
     )
-    assert acceptance["passed"] is True, acceptance
+    assert acceptance["status"] == "pending", acceptance
+    assert acceptance["validation_evidence"]["failed"] == []
+    assert acceptance["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
     assert acceptance["functional_completeness"]["passed"] is True
     assert acceptance["app_runtime_load"]["passed"] is True
 
