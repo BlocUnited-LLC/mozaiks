@@ -892,7 +892,10 @@ async def generate_and_download(
             "status": "error",
             "outcome": _export_repair_outcome(acceptance_result),
             "message": (
-                "Generated app bundle failed deterministic acceptance. "
+                "Required app validation checks have not completed. "
+                "Resolve the reported validation prerequisites and run validation again."
+                if acceptance_result.get("status") == "pending"
+                else "Generated app bundle failed deterministic acceptance. "
                 "Fix the reported contract errors and regenerate."
             ),
             "app_bundle_acceptance_status": acceptance_result.get("status"),

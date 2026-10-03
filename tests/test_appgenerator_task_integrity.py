@@ -340,7 +340,9 @@ async def test_acceptance_repair_policy_and_code_save_use_frozen_context_and_dec
         assert saved["saved_files"] == [path]
         assert bridge.get("bundle_repair_result")["active"]["status"] == "responded"
         accepted = await run_app_bundle_acceptance_gate(context_variables=bridge)
-        assert accepted["passed"] is True, accepted
+        assert accepted["status"] == "pending", accepted
+        assert accepted["validation_evidence"]["failed"] == []
+        assert accepted["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
 
     assert bridge.snapshot()["app_task_batch_results"] == original_results
     updates = bridge.consume_authorized_context_updates(policy=policy, run_identity=run)

@@ -121,7 +121,9 @@ async def test_failed_service_correction_releases_page_and_passes_complete_app_a
     files.update(_file_map(await save_auth_scaffold(context_variables=context)))
     compose_bundle_auth_routes(files)
     gate = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
-    assert gate["passed"] is True, gate
+    assert gate["status"] == "pending", gate
+    assert gate["validation_evidence"]["failed"] == []
+    assert gate["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
     assert gate["functional_completeness"]["passed"] is True
     assert "ForeignServiceSchema" not in files["modules/reports/backend/schemas.py"]
 

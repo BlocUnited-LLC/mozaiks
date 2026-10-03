@@ -46,6 +46,19 @@ coding:
   llm_profile: codegen
 ```
 
+Model parameters belong inside each profile's `llm_config`. For models that
+support temperature, use `llm_config.temperature`. Profile fields are strict:
+`purpose`, `expected_behavior`, and `llm_config`. The unused
+`default_temperature` field is rejected.
+
+### Optional ACP coding provider
+
+The external coding provider is disabled by default. Its
+`coding.providers.acp.budget` accepts only `max_files`, `max_diff_bytes`, and
+`max_wall_seconds`. These limit one provider attempt. The unused `max_retries`
+setting is rejected; it never controlled provider retries. This does not
+change provider-specific retry parameters inside `llm_config`.
+
 ## Minimal Harness
 
 ```yaml

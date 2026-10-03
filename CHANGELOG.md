@@ -116,7 +116,28 @@ This project follows a practical pre-1.0 changelog format:
   consumption yet (#770); unavailable selections receive valid choices and a
   removal path.
 
+### Removed
+
+- Unused refinement `coding.providers.acp.budget.max_retries` and LLM profile
+  `default_temperature` settings. Configure provider retries and temperature in
+  `llm_config`; obsolete fields now fail configuration validation. Removed the
+  premature build-success metric emitted after classification and its orphaned
+  logger, plus an unreachable duplicate artifact lookup branch.
+
 ### Fixed
+
+- Refinement completion now reflects validation and persistence outcomes.
+  Failed or unverified drafts stay reviewable without replacing the active
+  editor/preview; Review patch opens the saved candidate instead of running
+  another coding request. Cancellation clears the matching in-progress session,
+  and every coding provider passes the finalizer's approved-file scope check.
+- Required runtime checks that are skipped or unavailable leave generated-app
+  acceptance pending. Partial source validation cannot pass, and exports require
+  a passed build for the accepted snapshot. Live acceptance scripts run the
+  canonical validator instead of injecting skipped build results.
+- Existing-app discovery resumes the correct interview after human replies and
+  completes only after its deterministic artifact save succeeds. Persistence
+  failures terminate as failures instead of reporting successful discovery.
 
 - **`mozaiks add --preset <tier>` works** (#304). The command `mozaiks info`
   recommends always failed with "the following arguments are required:

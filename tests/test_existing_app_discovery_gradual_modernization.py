@@ -19,6 +19,8 @@ from pathlib import Path
 
 import yaml
 
+from tests.factory_context import factory_context
+
 WORKSPACE = Path(__file__).resolve().parents[1]
 
 
@@ -330,9 +332,12 @@ def _fake_decomposition_plan() -> dict:
     }
 
 
-def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persistence(tmp_path) -> None:
+def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persistence(tmp_path, monkeypatch) -> None:
     """save_existing_app_artifacts no longer persists module_decomposition_plan.json."""
     module = _make_save_module()
+    from tests.test_existing_app_discovery_app_context_persistence import _FakeArtifactStore
+
+    monkeypatch.setattr(module, "get_artifact_store", _FakeArtifactStore)
 
     emitted = {}
 
@@ -409,6 +414,7 @@ def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persis
         },
     )
 
+    context.update(factory_context())
     try:
         result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
     finally:
@@ -435,9 +441,12 @@ def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persis
     assert emitted["payload"]["capabilities"][0]["migration_priority"] == "p1_critical"
 
 
-def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path) -> None:
+def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path, monkeypatch) -> None:
     """save_existing_app_artifacts does NOT write decomposition plan for embed/bridge."""
     module = _make_save_module()
+    from tests.test_existing_app_discovery_app_context_persistence import _FakeArtifactStore
+
+    monkeypatch.setattr(module, "get_artifact_store", _FakeArtifactStore)
 
     emitted = {}
 
@@ -499,6 +508,7 @@ def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path) -> None:
         },
     )
 
+    context.update(factory_context())
     try:
         result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
     finally:

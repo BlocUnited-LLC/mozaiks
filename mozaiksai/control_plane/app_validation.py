@@ -342,9 +342,17 @@ def run_app_source_validation(
             overlay_count = _apply_overlay_files(validation_root, overlay_files)
             fallback_checks = run_app_validation_fallback_checks(validation_root)
 
+    status = _aggregate_status(
+        command_results=command_results,
+        fallback_checks=fallback_checks,
+        planned_commands=planned,
+        selected_kinds=selected,
+    )
+    if status == "warning":
+        warnings.append("Required source validation commands did not all complete; static checks alone do not establish readiness.")
     return _validation_result(
         app_id=resolved_app_id,
-        status=_aggregate_status(command_results=command_results, fallback_checks=fallback_checks),
+        status=status,
         source=source,
         execution_mode=execution_mode,
         framework_detection=detection,
@@ -839,13 +847,32 @@ def _aggregate_status(
     *,
     command_results: Sequence[AppValidationCommandResult],
     fallback_checks: Sequence[AppValidationFallbackCheckResult],
+    planned_commands: Sequence[AppValidationCommandPlanItem],
+    selected_kinds: Sequence[str],
 ) -> AppValidationStatus:
+    """Only completed applicable commands establish source-validation readiness.
+
+    Unselected commands are not obligations. Rejected, bounded-out, or unavailable
+    selected commands remain obligations; syntax-only fallbacks cannot satisfy them.
+    """
     statuses = [item.status for item in command_results] + [item.status for item in fallback_checks]
     if any(status == "failed" for status in statuses):
         return "failed"
-    if any(status == "passed" for status in statuses):
+    required = [item for item in planned_commands if item.kind in selected_kinds]
+    completed = {
+        (item.kind, item.command, item.working_directory)
+        for item in command_results if item.status == "passed"
+    }
+    if (
+        any(item.kind in DEFAULT_VALIDATION_KINDS for item in required)
+        and all(
+            item.status == "planned" and (item.kind, item.command, item.working_directory) in completed
+            for item in required
+        )
+        and all(status == "passed" for status in statuses)
+    ):
         return "passed"
-    if any(status == "warning" for status in statuses):
+    if any(status in {"passed", "warning"} for status in statuses):
         return "warning"
     return "skipped"
 

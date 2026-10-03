@@ -136,9 +136,19 @@ tools:
   description: >
     Auto-invoked after DiscoveryArtifactAssemblerAgent outputs the structured
     existing-app augmentation artifact. Persists the artifact set and updates
-    the App Intelligence overview with the synthesized summary.
+    the App Intelligence overview with the synthesized summary. Completes
+    discovery only after AppContext registration; required save errors fail
+    the workflow without promoting an app bundle.
   tool_type: UI_Surface
   auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: discovery_save_outcome
+    attempts_key: discovery_save_attempts
+    result_field: outcome
+    values: [saved, failed]
+    error_value: failed
+    max_attempts: 1
   ui:
     component: AppIntelligenceOverviewCard
     mode: artifact

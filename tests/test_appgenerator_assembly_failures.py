@@ -184,7 +184,9 @@ async def test_owned_module_failure_repairs_overlay_before_real_reassembly_and_v
 
     assert context.get("app_task_batch_results")[task["task_id"]]["code_files"][0]["content"] == "[]"
     assert yaml.safe_load(context.get("generated_files")[path])["module"]["id"] == "orders"
-    assert final["integration_tests_passed"] is True, final
+    assert final["integration_tests_passed"] is False
+    assert final["app_bundle_acceptance_result"]["status"] == "pending", final
+    assert final["app_bundle_acceptance_result"]["validation_evidence"]["failed"] == []
     assert final["app_runtime_load_result"]["passed"] is True
 
 

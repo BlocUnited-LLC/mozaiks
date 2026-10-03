@@ -887,6 +887,23 @@ definitions:
       type: state
       default: null
 
+  discovery_save_outcome:
+    type: string
+    description: Deterministic final artifact save outcome; saved only after AppContext registration.
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    model_visible: false
+    persisted: true
+    source: {type: state, default: failed}
+
+  discovery_save_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    model_visible: false
+    persisted: true
+    source: {type: state, default: 0}
+
   app_context_graph:
     type: object
     description: >
@@ -955,7 +972,7 @@ definitions:
 
   brownfield_app_context_artifact_persistence_error:
     type: string
-    description: Non-fatal persistence error from saving brownfield AppContext artifacts, if any.
+    description: Final mapping or persistence error that prevents discovery completion, if any.
     source:
       type: state
       default: null
