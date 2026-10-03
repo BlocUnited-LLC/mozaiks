@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_app_contracts
 from mozaiksai.core.admin.registry import AdminRegistry, build_admin_shell_routes
 from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
@@ -18,7 +20,7 @@ from mozaiksai.core.runtime.composition import module_executor as module_executo
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
 from mozaiksai.core.validation import scan_functional_generated_app
-from mozaiksai.hosts import platform
+from mozaiksai.hosts import platform, shell_config
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES_ROOT = ROOT / "examples" / "canonical-apps"
@@ -210,6 +212,36 @@ def test_canonical_example_has_no_functional_bundle_gaps(name: str) -> None:
     }
 
     assert scan_functional_generated_app(files) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["project-hub", "reporting-saas"])
+async def test_authenticated_example_routes_resolve_without_navigation(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app_root = _app_root(name)
+    files = {
+        path.relative_to(app_root).as_posix(): path.read_text(encoding="utf-8")
+        for path in app_root.rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts
+    }
+    assert scan_app_contracts(files) == []
+
+    auth_routes = yaml.safe_load(files["config/auth.yaml"])["routes"]
+    manifest_pages = json.loads(files["ui/route_manifest.json"])["pages"]
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    shell = await shell_config.build_shell_config(surface="platform")
+
+    for key in ("login", "callback"):
+        path = auth_routes[key]
+        declared = [page for page in manifest_pages if page["path"] == path]
+        resolved = [page for page in shell["pages"] if page["path"] == path]
+        assert len(declared) == len(resolved) == 1
+        assert resolved[0]["component"] == ("LoginPage" if key == "login" else "AuthCallbackPage")
+        assert resolved[0]["meta"]["requiresAuth"] is False
+        assert resolved[0]["meta"]["appShell"] is False
+        assert declared[0]["navigation"]["include"] is False
+        assert path not in {item.get("path") for item in shell["navigation"]["items"]}
 
 
 @pytest.mark.asyncio
