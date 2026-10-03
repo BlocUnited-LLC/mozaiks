@@ -59,8 +59,14 @@ Terminal 1 — infrastructure and backend:
 # Skip this when MongoDB is already running, or start only `mongo`.
 docker compose -f infra/compose/docker-compose.yml up -d mongo keycloak-db keycloak
 
-python -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port 8000
+python -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port 8000 --env-file .env
 ```
+
+Importing `mozaiksai` never reads a `.env`, so `--env-file .env` is how the
+backend gets the repo `.env`, as `run-backend.ps1` does. Values already set in
+the shell win. Drop the flag if the repo has no `.env`. `.env.example` sets
+`AUTH_ENABLED=false`; with auth enabled, startup also requires `AUTH_AUDIENCE`
+(see `.env.example`).
 
 Terminal 2 — frontend, once `http://localhost:8000/api/shell-config` responds:
 
