@@ -2,18 +2,24 @@ import React, { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
-import { deriveShellActionContext, isShellItemVisible, resolveShellActions } from "../../navigation/shellActions";
+import {
+  deriveShellActionContext,
+  filterPersonalAccountItems,
+  isShellItemVisible,
+  isSignInAvailable,
+  resolveShellActions,
+} from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
 import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
 import { fetchNotificationCount } from "./notificationApi.js";
 import "./header-styles.css";
 
-const buildAutoItems = ({ headerPages, header, notifications, profile, actionContext }) => {
+const buildAutoItems = ({ headerPages, header, notifications, profile, shellAuth, actionContext }) => {
   const items = [];
   const roles = actionContext?.roles || [];
 
   if (Array.isArray(headerPages)) {
-    for (const item of headerPages) {
+    for (const item of filterPersonalAccountItems(headerPages, shellAuth)) {
       if (items.length >= 3) break;
       if (isShellItemVisible(item, roles) && item.path) {
         items.push({
@@ -26,9 +32,10 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
     }
   }
 
-  const resolvedActions = Array.isArray(header?.actions)
-    ? resolveShellActions(header.actions, actionContext)
-    : [];
+  const resolvedActions = filterPersonalAccountItems(
+    Array.isArray(header?.actions) ? resolveShellActions(header.actions, actionContext) : [],
+    shellAuth,
+  );
   const primaryAction = resolvedActions.find((item) => item?.path || item?.href || item?.trigger);
   if (primaryAction) {
     items.push({
@@ -50,7 +57,8 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
     });
   }
 
-  const profileItem = Array.isArray(profile?.menu)
+  // The profile slot stands for the signed-in person; without sign-in there is no one to stand for.
+  const profileItem = isSignInAvailable(shellAuth) && Array.isArray(profile?.menu)
     ? profile.menu.find((item) => (
       isShellItemVisible(item, roles) &&
       item.action !== "signout" &&
@@ -80,7 +88,7 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
   const location = useLocation();
   const handleNavigationItem = useNavigationActions();
   const { login, logout, user } = useChatUI();
-  const { mobile, headerPages, header, notifications, profile } = useNavigation();
+  const { mobile, headerPages, header, notifications, profile, auth: shellAuth } = useNavigation();
   const [notificationCount, setNotificationCount] = useState(0);
   const actionContext = useMemo(
     () => deriveShellActionContext({ location, route, shellMode, user }),
@@ -125,14 +133,17 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
   });
 
   const bottomBar = mobile?.bottomBar || {};
-  const configuredItems = Array.isArray(bottomBar.items)
-    ? bottomBar.items.filter((item) => isShellItemVisible(item, actionContext.roles || []))
-    : [];
+  const configuredItems = filterPersonalAccountItems(
+    Array.isArray(bottomBar.items)
+      ? bottomBar.items.filter((item) => isShellItemVisible(item, actionContext.roles || []))
+      : [],
+    shellAuth,
+  );
   const items = useMemo(
     () => configuredItems.length > 0
       ? configuredItems.slice(0, 5)
-      : buildAutoItems({ headerPages, header, notifications, profile, actionContext }),
-    [actionContext, configuredItems, header, headerPages, notifications, profile]
+      : buildAutoItems({ headerPages, header, notifications, profile, shellAuth, actionContext }),
+    [actionContext, configuredItems, header, headerPages, notifications, profile, shellAuth]
   );
 
   if (bottomBar.visible === false || items.length === 0) return null;
