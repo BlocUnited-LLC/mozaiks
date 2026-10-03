@@ -118,6 +118,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Exported app requirements now pin Mozaiks to the version that built the app
+  and omit imports supplied by the app's own root folders or Python files.
+
 - `dispatch_module_action` called without an `app` no longer imports the
   platform host as a side effect. On a serving runtime-only host that import
   could never complete: every call failed with "Cannot add middleware after an
