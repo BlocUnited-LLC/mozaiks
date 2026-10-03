@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from argparse import Namespace
+from inspect import signature
 from types import SimpleNamespace
 
 from mozaiks_cli.commands import context_command
@@ -22,8 +23,10 @@ def test_context_index_parser_accepts_required_inputs() -> None:
 
 def test_context_index_command_registers_workspace(monkeypatch, tmp_path, capsys) -> None:
     captured = {}
+    real_signature = signature(context_command.index_workspace_app_intelligence)
 
     async def fake_index_workspace_app_intelligence(**kwargs):
+        real_signature.bind(**kwargs)
         captured.update(kwargs)
         return SimpleNamespace(
             app_id=kwargs["app_id"],
@@ -56,6 +59,7 @@ def test_context_index_command_registers_workspace(monkeypatch, tmp_path, capsys
     assert result == 0
     assert captured["app_id"] == "app_1"
     assert captured["workspace_root"] == tmp_path.resolve()
+    assert captured["workspace_key"] == "app_intelligence_workspace"
     assert captured["make_current"] is True
     payload = json.loads(capsys.readouterr().out)
     assert payload["app_bundle_artifact_version_id"] == "av_bundle"

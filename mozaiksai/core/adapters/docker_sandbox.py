@@ -31,7 +31,7 @@ logger = get_core_logger("docker_sandbox")
 
 _DEFAULT_IMAGE = os.getenv("DOCKER_SANDBOX_IMAGE", "mozaiks-sandbox:local")
 _DEFAULT_WORKDIR = "/workspace"
-_DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT", "300"))
+_DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT") or "300")
 
 
 def _preview_ports() -> list[int]:
