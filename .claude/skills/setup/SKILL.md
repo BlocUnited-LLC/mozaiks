@@ -24,7 +24,7 @@ For more info on tiers: `/init-project` or `/add-feature` skills.
 Run these commands and verify versions:
 - Docker 24+ and Compose v2+
 - Python 3.11+
-- Node 18+, npm 9+
+- Node 20.19+ or 22.12+ (Vite 8 requirement), npm 9+
 
 If anything is missing, help them install it first.
 

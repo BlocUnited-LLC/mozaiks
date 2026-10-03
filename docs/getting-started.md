@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Python 3.11+
-- Node.js 18+
+- Node.js 20.19+ or 22.12+ (required by the Vite 8 frontend toolchain)
 - Docker Desktop — [download here](https://www.docker.com/products/docker-desktop/) (used to run MongoDB)
 
 Mozaiks installs Tree-sitter parser packages with the core framework checkout

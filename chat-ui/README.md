@@ -4,83 +4,112 @@ The single frontend package for the mozaiks stack — UI primitives, state machi
 
 ## Structure
 
+The package has no starter app directory. In this repo, `web_shell/` is the
+host that mounts chat-ui (see [web_shell/README.md](../web_shell/README.md)),
+and `src/main.jsx` is a small standalone demo.
+
 ```
+chat-ui/
+├── src/                    Package source (layout below)
+├── index.html              Page that loads src/main.jsx for the standalone demo
+├── vite.demo.config.js     Vite config for the standalone demo
+├── vite.embed.config.js    Vite config for the self-contained embed bundle (npm run build:embed)
+├── package.json            Dependencies and the package `exports` map
+├── tailwind.config.js      Tailwind configuration
+└── postcss.config.js       PostCSS configuration
+
 src/
-├── components/        Chat components (ChatInterface, ArtifactPanel, FluidChatLayout), layout, actions
-├── core/              Event dispatching, dynamic UI handler, action utilities, WorkflowUIRouter
-├── pages/             ChatPage, MyWorkflowsPage
-├── adapters/          API and auth adapter contracts
-├── providers/         Config-driven BrandingProvider, NavigationProvider
-├── primitives/        Core artifact renderers
-├── state/             uiSurfaceReducer (surface FSM)
-├── styles/            Theme system, design tokens
+├── index.js           Full web entrypoint (`@mozaiks/chat-ui`): components, pages, providers, hooks
+├── runtimeBridge.js   Runtime WebSocket URL and auth-protocol helpers for host apps
+├── main.jsx           Standalone demo entry (onboarding tour with no-op callbacks)
+├── demo.css           Styles for the standalone demo
+├── @chat-workflows/   Workflow UI registry fed by the host (see Workflow UI Components below)
+├── adapters/          API, WebSocket auth, and UI tool response adapters
+├── admin/             Admin portal sections, panels, and app studio model
+├── app/               MozaiksApp root shell (router, providers, workflow registration)
+├── assets/            Static images
+├── auth/              Browser auth adapter and login/callback pages (`@mozaiks/chat-ui/auth`)
+├── components/        Chat components (ChatInterface, ArtifactPanel, FluidChatLayout), layout, actions, profile
+├── config/            Environment config, config validation overlay, workflow discovery
 ├── context/           ChatUIProvider + useChatUI hook
-├── hooks/             useWidgetMode
-├── widget/            GlobalChatWidgetWrapper
-├── config/            Environment config, workflow discovery
+├── core/              Event dispatching, dynamic UI handler, WorkflowUIRouter, interactive UI cards; `core/index.js` is the `@mozaiks/chat-ui/core` entrypoint
+├── embed/             Embeddable widget entry and stubs (`@mozaiks/chat-ui/embed`)
+├── hooks/             Chat, session, WebSocket, and widget hooks
+├── navigation/        Navigation cache, nav sections, and shell action hooks
+├── pages/             ChatPage, AdminPage, AppAdminDashboard, ProfilePage, page hooks
+├── platform/          Platform bridge for non-browser hosts (`@mozaiks/chat-ui/platform`)
+├── primitives/        Core artifact renderers
+├── providers/         Config-driven BrandingProvider, NavigationProvider
 ├── registry/          Generic component registry
-├── navigation/        Navigation cache and action hooks
-├── services/          Service initialization
-├── @chat-workflows/   Alias entry point (see Workflow UI section below)
-├── workflows_stub/    No-op stub used when no real workflows are registered
-└── main.jsx           Minimal dev demo (mock adapters)
-
-template/
-├── App.jsx            Starter app shell using ChatUIProvider + providers
-├── adapters/          Mock API adapter for local dev without backend
-├── workflows/         Example workflow modules (hello_world)
-└── brands/public/     Declarative branding config + assets (brand.json)
+├── services/          Service initialization (API adapter selection)
+├── session/           Chat session storage and workflow chat resolution
+├── shared/            Portable core exports re-exported by `core/index.js`
+├── state/             uiSurfaceReducer (surface FSM)
+├── styles/            Theme system, design tokens, shell CSS
+├── theme/             Brand loading and BrandProvider
+├── types/             TypeScript declarations
+├── ui/                Web UI primitives, page renderer, screens (`@mozaiks/chat-ui/ui`)
+├── utils/             Small helpers (debug flags, workflow resolution, support links)
+├── widget/            GlobalChatWidgetWrapper
+└── workspace/         WorkspaceLayout (`@mozaiks/chat-ui/workspace`)
 ```
 
-## Workflow UI Components (`@chat-workflows` alias)
+## Workflow UI Components (`src/@chat-workflows/`)
 
-chat-ui keeps workflow UI registration inside its own package, but the actual workflow root is still a **host-owned injection seam**.
-
-The registry module reads `<workflow>/ui/index.js` barrels from a build-time alias named `@chat-workflows-root`.
-That keeps chat-ui decoupled from repo layout and artifact paths while letting the host inject one selected workflow root for the active host/session.
+chat-ui keeps workflow UI registration inside its own package, but the set of
+workflows is supplied by the host build.
 
 ### How it works
 
-1. **In chat-ui (this package):** the internal registry module scans `@chat-workflows-root/*/ui/index.{js,jsx}`.
-2. **In a consuming app:** the bundler alias `@chat-workflows-root` is configured to point at the selected workflow root for that host/session.
-3. **In standalone/embed builds:** `@chat-workflows-root` points at an empty stub directory, so no workflow UI is registered.
+1. **In chat-ui (this package):** `src/@chat-workflows/index.js` imports the
+   Vite virtual module `virtual:mozaiks-workflow-ui`. Its default export maps
+   each workflow name to a lazy import of that workflow's `ui/index.js` (or
+   `ui/index.jsx`) barrel.
+2. **In the host build:** the host provides that virtual module. In this repo,
+   `web_shell/vite.config.js` registers `workflowUiPlugin` from
+   `web_shell/workflowUi.js`, which reads the active workflow root. When the
+   app's `extended_orchestration/extension_registry.json` declares
+   `extends: mozaiks.default_workflow_registry`, the factory workflows in
+   `factory_app/workflows/` are included first; an app workflow with the same
+   name replaces the inherited one, and `{id, remove: true}` registry entries
+   drop it.
+3. **In standalone embed builds:** `vite.embed.config.js` aliases
+   `virtual:mozaiks-workflow-ui` to `src/embed/workflowUiModulesStub.js`, so no
+   workflow UI is registered.
 
-### Consuming app setup (Vite example)
-
-The consuming app must configure its bundler to resolve the injected workflow root:
-
-```js
-// vite.config.js
-import { defineConfig } from 'vite';
-import path from 'path';
-
-export default defineConfig({
-  resolve: {
-    alias: {
-      '@chat-workflows-root': path.resolve(__dirname, '../factory_app/workflows'),
-    },
-  },
-});
-```
-
-For Studio in this repo, that selected root is `factory_app/workflows`. For an app/product host, it is usually the active app root's `workflows/` directory.
+`initializeWorkflows()` loads each barrel and registers every named export
+twice: as `<WorkflowName>:<ExportName>` (the key workflow UI tools resolve) and
+as the plain export name.
 
 ### Creating a workflow UI module
 
-Use the template pattern:
+Put a UI barrel in the workflow folder, next to its `orchestrator.yaml` (a
+folder without `orchestrator.yaml` is skipped):
 
 ```text
-template/workflows/
-├── index.js
-└── my_workflow/
+workflows/MyWorkflow/
+├── orchestrator.yaml
+├── tools.yaml
+└── ui/
     ├── index.js
-    └── MyWorkflowArtifact.jsx
+    └── MyComponent.jsx
 ```
 
-- `my_workflow/index.js` exports `{ name, label, artifactComponent, suggestions }`.
-- `name` must match backend `orchestrator.yaml`.
-- Register each module in `template/workflows/index.js`.
-- `artifactComponent` receives `{ data, status, onAction }`.
+```js
+// workflows/MyWorkflow/ui/index.js
+export { default as MyComponent } from './MyComponent.jsx';
+```
+
+- Export each component as a named export; the export name is the component
+  name.
+- Reference it from the tool's `ui` block in the workflow's `tools.yaml`
+  (`component: MyComponent`, alongside the block's other fields such as
+  `mode`).
+- A workflow may declare only one barrel: `ui/index.js` or `ui/index.jsx`, not
+  both.
+- Components shared by several factory workflows live in
+  `factory_app/workflows/_shared/ui/` and are re-exported from each consuming
+  workflow's own barrel.
 
 ## Canonical Paths
 
@@ -96,6 +125,10 @@ Use the package entrypoint that matches the host you are building.
 - `@mozaiks/chat-ui` — full web entrypoint; exports browser UI, pages, routing helpers, browser auth adapters, and app shell components.
 - `@mozaiks/chat-ui/core` — portable shared-core entrypoint; exports transport, state, adapters, providers, and hooks intended for non-browser hosts such as React Native.
 - `@mozaiks/chat-ui/platform` — platform bridge; lets a non-browser host inject synchronous storage, auth token lookup, runtime config overrides, and base URLs.
+- `@mozaiks/chat-ui/ui` — web-safe UI primitives for Studio, app pages, and custom routes.
+- `@mozaiks/chat-ui/workspace` — `WorkspaceLayout`.
+- `@mozaiks/chat-ui/embed` — the embeddable widget (`MozaiksEmbed`).
+- `@mozaiks/chat-ui/auth` — browser auth adapter plus login and callback pages.
 
 These paths are declared explicitly in `package.json` via the package `exports` map. The portable surface is now formalized there rather than relying on extra top-level re-export files.
 
@@ -129,13 +162,26 @@ Web-only auth adapters (e.g. `mockAuthAdapter`) should not be imported from a na
 
 ## Dev Demo
 
+The package has no `dev` script. Start the standalone demo with Vite directly
+(the same command in every shell):
+
 ```bash
-npm run dev
+cd chat-ui
+npm install
+npx vite --config vite.demo.config.js
 ```
 
-Starts a lightweight app with mock auth/API adapters for testing without a full platform.
+Then open `http://localhost:5173/demo/onboarding`. The demo renders the shared
+onboarding tour with deterministic step data and no-op callbacks, so it needs
+no backend. CI's onboarding demo smoke test runs the same config.
 
-## Frontend Build Guide
+Build the self-contained embed bundle (`dist/embed.js`) with:
 
-See `/docs/guides/CREATE_FRONTEND_WITH_MOZAIKS.md` for step-by-step frontend setup and declarative `brand.json` customization.
+```bash
+npm run build:embed
+```
 
+## Frontend Guides
+
+- [Add a Page](../docs/guides/adding-pages/01-overview.md) for app pages and routes.
+- [App Shell & Branding](../docs/guides/custom-brand-integration/01-overview.md) for themes, navigation, logos, and shell behavior.
