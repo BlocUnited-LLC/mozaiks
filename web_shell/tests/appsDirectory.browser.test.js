@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import postcss from 'postcss';
 import tailwindcss from '@tailwindcss/postcss';
 
@@ -97,7 +97,7 @@ test('AppsDirectory accepts server pages, controlled search/filters, retry and b
   await page.getByRole('button', { name: 'Needs input', exact: true }).click();
   assert.equal(await page.getByText('Second app', { exact: true }).filter({ visible: true }).count(), 1, 'server rows must not be filtered a second time');
   await page.evaluate(() => window.updateDirectory({ loading: true }));
-  assert.equal(await page.getByRole('button', { name: 'Previous', exact: true }).isDisabled(), true);
+  await expect(page.getByRole('button', { name: 'Previous', exact: true })).toBeDisabled();
   assert.equal(await search.inputValue(), 'server controls these results');
   await page.evaluate(() => window.updateDirectory({ loading: false, error: 'Temporary outage' }));
   await page.getByText('Temporary outage', { exact: true }).waitFor();

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -8,6 +9,7 @@ import yaml
 from factory_app.workflows._shared.subscription_contract_context import (
     subscription_assignment_store,
 )
+from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, app_validation
 from scripts.smoke_appgenerator_live_subscription import (
     REPORT_GATE_ID,
     WORKFLOWS_ROOT,
@@ -192,10 +194,13 @@ def test_module_contract_validator_rejects_action_field_indentation_drift() -> N
 
 
 @pytest.mark.asyncio
-async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_wiring() -> None:
+async def test_deterministic_subscription_smoke_keeps_unavailable_runtime_checks_pending(monkeypatch) -> None:
+    monkeypatch.setattr(app_runtime_smoke, "resolve_smoke_mongo_uri", lambda: None)
+    build = AsyncMock(side_effect=AssertionError("Incomplete runtime acceptance must not reach the build."))
+    monkeypatch.setattr(app_validation, "_run_local_validation", build)
     payload = await run_deterministic_appgenerator_subscription_smoke()
 
-    assert payload["success"] is True, payload
+    assert payload["success"] is False
     acceptance = payload["appgenerator_acceptance"]
     assert acceptance["task_batch_status"] == "completed"
     assert acceptance["failed_tasks"] == {}
@@ -207,8 +212,15 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
         f"modules/reports/contracts/{name}.yaml"
         for name in ("admin", "events", "notifications", "reactions", "settings")
     }.issubset(acceptance["generated_paths"])
-    assert acceptance["acceptance"]["passed"] is True
-    assert acceptance["export_gate"]["allow_export"] is True
+    assert acceptance["acceptance"]["status"] == "pending"
+    assert acceptance["acceptance"]["passed"] is False
+    assert acceptance["acceptance"]["validation_evidence"]["failed"] == []
+    assert acceptance["acceptance"]["validation_evidence"]["skipped"] == ["app_runtime_smoke"]
+    assert "snapshot_digest" not in acceptance["acceptance"]
+    assert acceptance["app_validation_result"]["validation_status"] == "pending"
+    assert acceptance["context"]["integration_tests_passed"] is False
+    assert acceptance["export_gate"]["allow_export"] is False
+    build.assert_not_awaited()
     assert acceptance["runtime_loader"]["subscriptions_loaded"] is True
     assert acceptance["runtime_loader"]["action_entitlements"]["generate_report"] == REPORT_GATE_ID
 
@@ -231,6 +243,30 @@ async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_
     details = acceptance["wiring"]["checks"][0]["details"]
     assert details["platform_endpoint_count"] == 3
     assert details["wired_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_subscription_export_requires_completed_runtime_and_build_checks(monkeypatch):
+    # Explicit execution fixtures for this unit test; the canonical validator
+    # still writes acceptance, build and integration evidence into context.
+    smoke = AsyncMock(return_value={
+        "status": "passed", "passed": True, "failed_tests": [], "checks": [],
+    })
+    build = AsyncMock(return_value=app_validation._base_result(strategy="local", status="passed"))
+    monkeypatch.setattr(app_runtime_smoke, "run_app_runtime_smoke", smoke)
+    monkeypatch.setattr(app_validation, "_run_local_validation", build)
+
+    payload = await run_deterministic_appgenerator_subscription_smoke()
+
+    assert payload["success"] is True, payload["validation_errors"]
+    result = payload["appgenerator_acceptance"]
+    assert result["acceptance"]["status"] == "passed"
+    assert result["app_validation_result"]["validation_status"] == "passed"
+    assert result["context"]["app_validation_strategy_used"] == "local"
+    assert result["context"]["integration_tests_passed"] is True
+    assert result["export_gate"]["allow_export"] is True
+    smoke.assert_awaited_once()
+    build.assert_awaited_once()
 
 
 @pytest.mark.asyncio
