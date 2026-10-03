@@ -47,9 +47,11 @@ def test_mongo_preflight_redacts_a_uri_echoed_in_an_error(monkeypatch) -> None:
 
     monkeypatch.setattr(mongo_preflight, "ping_mongo_uri", fail_ping)
 
-    reason = mongo_preflight.mongo_unreachable_reason(uri, timeout_ms=1000)
+    failure = mongo_preflight.mongo_unreachable(uri, timeout_ms=1000)
 
-    assert reason == "RuntimeError: connection to mongodb://***@localhost:27017/mozaiks failed"
+    assert failure is not None
+    assert failure.shown_uri == "mongodb://***@localhost:27017/mozaiks"
+    assert failure.reason == "RuntimeError: connection to mongodb://***@localhost:27017/mozaiks failed"
 
 
 def test_mongo_preflight_accepts_alias(monkeypatch, tmp_path) -> None:
@@ -77,10 +79,9 @@ def test_mongo_preflight_fails_fast_against_a_closed_port() -> None:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     started = time.monotonic()
-    reason = mongo_preflight.mongo_unreachable_reason(
-        f"mongodb://127.0.0.1:{port}/mozaiks", timeout_ms=1000
-    )
-    assert reason is not None
+    failure = mongo_preflight.mongo_unreachable(f"mongodb://127.0.0.1:{port}/mozaiks", timeout_ms=1000)
+    assert failure is not None
+    assert failure.shown_uri == f"mongodb://127.0.0.1:{port}/mozaiks"
     assert time.monotonic() - started < 15
 
 
