@@ -15,6 +15,7 @@ To run workspace-dependent tests against another workspace locally:
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,42 @@ def _isolate_chat_lock_state():
 
     reset_chat_lock_state()
     yield
+
+
+def _unstart_shared_host_app() -> None:
+    """Drop the built middleware stack of the process-wide host app, if any.
+
+    The host is looked up, never imported, so this is inert for a process that
+    has not loaded one.
+    """
+    runtime_host = sys.modules.get("mozaiksai.hosts.runtime")
+    host_app = getattr(runtime_host, "app", None)
+    if host_app is not None:
+        host_app.middleware_stack = None
+
+
+@pytest.fixture(autouse=True)
+def _isolate_shared_host_app_start():
+    """Enter and leave every test with the process-wide host app not started.
+
+    ``mozaiksai.hosts.runtime`` owns one module-level FastAPI app, and the
+    platform host composes itself onto that same object when it is first
+    imported, registering an HTTP middleware on it. Starlette builds the
+    middleware stack on the app's first ASGI call and refuses
+    ``add_middleware`` from then on. A test that served a request through the
+    runtime app before anything in the process had imported the platform host
+    therefore made that import raise ``RuntimeError: Cannot add middleware
+    after an application has started`` in every later test, and whether that
+    happened depended only on which test files shared a CI shard.
+
+    The built stack is a cache of the registered middleware, so dropping it is
+    a complete un-start: the next ASGI call rebuilds it from whatever is
+    registered by then. Dropping it on the way in as well covers a stack built
+    outside a test body, such as a wider-scoped fixture's teardown.
+    """
+    _unstart_shared_host_app()
+    yield
+    _unstart_shared_host_app()
 
 
 
