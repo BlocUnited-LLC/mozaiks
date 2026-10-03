@@ -573,6 +573,11 @@ This project follows a practical pre-1.0 changelog format:
 - Android export from an installed distribution now reads an embedded exact
   source revision verified against wheel metadata; ordinary wheel installs no
   longer fail because they have no VCS `direct_url.json`.
+- AppGenerator rejects generated action permissions that do not resolve against
+  the approved auth contract during task admission, repair, and assembly.
+  Diagnostics identify the action and declared scope choices; valid restrictions
+  remain intact. Authenticated generation resolves early defaults from the
+  canonical auth scaffold instead of waiting for its file to be materialized.
 
 - Resuming an AppReview chat now restores scoped persisted workflow state to the
   durable AG2 channel under replay validation. Router-owned build checks no
@@ -738,7 +743,6 @@ This project follows a practical pre-1.0 changelog format:
   still returns a cursor when more rows exist. The Common Ground reference
   builds its own JSX and runs eight desktop/phone browser checks in dedicated
   CI using disposable local MongoDB and Keycloak services.
-
 - `dispatch_module_action` called without an `app` no longer imports the
   platform host as a side effect. On a serving runtime-only host that import
   could never complete: every call failed with "Cannot add middleware after an
