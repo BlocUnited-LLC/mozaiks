@@ -15,12 +15,12 @@ export function useSandbox(artifactId, buildRegistryId) {
 
   useEffect(() => {
     generation.current += 1;
-    inFlight.current = false;
     setSandboxId(null);
     setSandboxStatus(null);
     setLivePreviewUrl(null);
     setSandboxError(null);
-    setSyncing(false);
+    // A new version waits for the previous request before adopting a session.
+    setSyncing(inFlight.current);
     setStopping(false);
     return () => { generation.current += 1; };
   }, [artifactId, buildRegistryId]);
@@ -113,10 +113,9 @@ export function useSandbox(artifactId, buildRegistryId) {
     } catch (error) {
       if (isCurrent()) applyStatus({ status: 'error', message: error.message || 'Preview failed' });
     } finally {
-      if (isCurrent()) {
-        inFlight.current = false;
-        setSyncing(false);
-      }
+      inFlight.current = false;
+      setSyncing(false);
+      setStopping(false);
     }
   }, [artifactId, buildRegistryId, applyStatus]);
 
@@ -135,16 +134,13 @@ export function useSandbox(artifactId, buildRegistryId) {
         generation.current += 1;
         setSandboxId(null);
         applyStatus({ status: null });
-        setStopping(false);
-        inFlight.current = false;
       }
     } catch (error) {
       if (isCurrent()) setSandboxError(error.message || 'Preview could not be stopped');
     } finally {
-      if (isCurrent()) {
-        setStopping(false);
-        inFlight.current = false;
-      }
+      inFlight.current = false;
+      setSyncing(false);
+      setStopping(false);
     }
   }, [sandboxId, applyStatus]);
 
