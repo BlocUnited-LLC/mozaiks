@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +11,7 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from mozaiks_cli.unauthenticated_bind import unauthenticated_bind_warning
 from mozaiks_cli.workspace import load_workspace_dotenv, resolve_active_app_root
 from mozaiksai.resources import (
     resolve_chat_ui_root,
@@ -87,42 +87,9 @@ def _mongo_uri_from_env(env: dict[str, str]) -> str:
     return ""
 
 
-def _redact_mongo_uri(uri: str) -> str:
-    return re.sub(r"^(mongodb(?:\+srv)?://)([^/@]+@)", r"\1***@", uri)
-
-
-def _short_error_message(exc: Exception) -> str:
-    message = str(exc).replace("\n", " ")
-    message = re.sub(r"\s*\(configured timeouts:[^)]+\)", "", message)
-    for marker in (", Timeout:", " Timeout:", ", Topology Description:", " Topology Description:"):
-        index = message.find(marker)
-        if index != -1:
-            message = message[:index]
-            break
-    return f"{type(exc).__name__}: {message.strip()}"
-
-
-def _mongo_timeout_ms(env: dict[str, str]) -> int:
-    raw_value = str(env.get("MOZAIKS_MONGO_PREFLIGHT_TIMEOUT_MS") or "").strip()
-    if not raw_value:
-        return 5000
-    try:
-        return max(1000, int(raw_value))
-    except ValueError:
-        return 5000
-
-
-def _ping_mongo_uri(uri: str, *, timeout_ms: int) -> None:
-    from pymongo import MongoClient
-
-    client = MongoClient(uri, serverSelectionTimeoutMS=timeout_ms)
-    try:
-        client.admin.command("ping")
-    finally:
-        client.close()
-
-
 def _assert_mongo_ready(env: dict[str, str], *, workspace_root: Path) -> None:
+    from mozaiks_cli import mongo_preflight
+
     uri = _mongo_uri_from_env(env)
     rerun_command = f'python -m mozaiks studio --dir "{workspace_root}" --open'
     env_path = workspace_root / ".env"
@@ -135,18 +102,45 @@ def _assert_mongo_ready(env: dict[str, str], *, workspace_root: Path) -> None:
             "For a local MongoDB server, use: mongodb://localhost:27017/mozaiks"
         )
 
-    try:
-        _ping_mongo_uri(uri, timeout_ms=_mongo_timeout_ms(env))
-    except Exception as exc:
-        safe_uri = _redact_mongo_uri(uri)
+    failure = mongo_preflight.mongo_unreachable(
+        uri, timeout_ms=mongo_preflight.preflight_timeout_ms(env)
+    )
+    if failure is not None:
         raise RuntimeError(
             "MongoDB is required to start Mozaiks Studio.\n"
-            f"Could not connect to MONGO_URI ({safe_uri}).\n"
+            f"Could not connect to MONGO_URI ({failure.shown_uri}).\n"
             "Start MongoDB locally, or set MONGO_URI to a reachable MongoDB Atlas/local URI "
             f"in {env_path}, then rerun:\n"
             f"  {rerun_command}\n"
-            f"Underlying error: {_short_error_message(exc)}"
-        ) from exc
+            f"Underlying error: {failure.reason}"
+        )
+
+
+_LOG_TAIL_LINES = 40
+
+
+def _process_log_path(workspace_root: Path, name: str) -> Path:
+    """Return the workspace file that receives one launched server's output."""
+    log_dir = workspace_root / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / f"studio-{name}.log"
+
+
+def _log_tail(path: Path, *, lines: int = _LOG_TAIL_LINES) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return "\n".join(text.splitlines()[-lines:])
+
+
+def _start_failure(detail: str, log_path: Path) -> RuntimeError:
+    """Build the error for a server that did not start, quoting its own output."""
+    message = f"{detail}\nFull log: {log_path}"
+    tail = _log_tail(log_path)
+    if tail:
+        message += "\nLast lines:\n" + "\n".join(f"  {line}" for line in tail.splitlines())
+    return RuntimeError(message)
 
 
 def _spawn_process(
@@ -154,19 +148,38 @@ def _spawn_process(
     *,
     cwd: Path,
     env: dict[str, str],
+    log_path: Path,
 ) -> subprocess.Popen[Any]:
+    """Start a server that outlives this command, writing its output to ``log_path``.
+
+    The CLI returns once the servers are up, so a separate console window or a
+    pipe loses the output exactly when it matters: when a server dies during
+    startup. The log file keeps it, and a failed start quotes its tail.
+    """
     kwargs: dict[str, Any] = {
         "cwd": str(cwd),
         "env": env,
+        "stdin": subprocess.DEVNULL,
+        "stderr": subprocess.STDOUT,
     }
     if os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        kwargs["creationflags"] = creationflags
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        )
     else:
         kwargs["start_new_session"] = True
-        kwargs["stdout"] = subprocess.DEVNULL
-        kwargs["stderr"] = subprocess.DEVNULL
-    return subprocess.Popen(command, **kwargs)
+    with log_path.open("wb") as log_file:
+        # The child keeps its own handle to the file after this one closes.
+        return subprocess.Popen(command, stdout=log_file, **kwargs)
+
+
+def _loopback_host(bind_host: str) -> str:
+    """Return the host this machine uses to reach a server bound to ``bind_host``."""
+    if bind_host in {"", "0.0.0.0", "localhost"}:
+        return "127.0.0.1"
+    if bind_host in {"::", "::1"}:
+        return "[::1]"
+    return bind_host
 
 
 def _resolve_backend_app_module(preferred_host: str) -> str:
@@ -182,22 +195,42 @@ def launch_studio(
     workspace_root: Path,
     backend_port: int = 8000,
     frontend_port: int = 3000,
-    bind_host: str = "0.0.0.0",
+    bind_host: str = "127.0.0.1",
     open_browser: bool = True,
     preferred_host: str = "auto",
 ) -> dict[str, Any]:
+    """Start (or reuse) the Studio backend and frontend for ``workspace_root``.
+
+    Both servers listen on ``bind_host``: loopback by default, because local
+    development runs with authentication off and an anonymous admin user. On
+    any other address, a warning says so before the first server starts.
+    """
     web_shell_root = resolve_web_shell_root()
     host_name = "studio" if preferred_host == "auto" else preferred_host
     app_module = _resolve_backend_app_module(host_name)
     env = _workspace_env(workspace_root, host=host_name)
+    # The backend runs in a child process that receives exactly ``env``.
+    exposure_warning = unauthenticated_bind_warning(
+        bind_host, environ=env, env_file=workspace_root / ".env"
+    )
 
-    backend_url = f"http://localhost:{backend_port}/api/health"
-    frontend_url = f"http://localhost:{frontend_port}/"
-    studio_url = f"http://localhost:{frontend_port}/apps"
+    def warn_about_exposure_once() -> None:
+        nonlocal exposure_warning
+        if exposure_warning is not None:
+            print(exposure_warning, file=sys.stderr, flush=True)
+            exposure_warning = None
+
+    local_host = _loopback_host(bind_host)
+    backend_origin = f"http://{local_host}:{backend_port}"
+    backend_url = f"{backend_origin}/api/health"
+    frontend_url = f"http://{local_host}:{frontend_port}/"
+    studio_url = f"{frontend_url}apps"
 
     backend_process = None
+    backend_log: Path | None = None
     if not _http_ready(backend_url):
         _assert_mongo_ready(env, workspace_root=workspace_root)
+        warn_about_exposure_once()
         backend_command = [
             sys.executable,
             "-m",
@@ -208,13 +241,24 @@ def launch_studio(
             "--port",
             str(backend_port),
         ]
-        backend_process = _spawn_process(backend_command, cwd=workspace_root, env=env)
+        backend_log = _process_log_path(workspace_root, "backend")
+        backend_process = _spawn_process(
+            backend_command,
+            cwd=workspace_root,
+            env={**env, "PYTHONUNBUFFERED": "1"},
+            log_path=backend_log,
+        )
         if not _wait_for_url(backend_url, timeout_seconds=40):
-            if backend_process.poll() is not None:
-                raise RuntimeError("Backend failed to start. Check the backend terminal for details.")
-            raise RuntimeError("Backend did not become healthy in time.")
+            exit_code = backend_process.poll()
+            if exit_code is not None:
+                raise _start_failure(f"Backend failed to start (exit code {exit_code}).", backend_log)
+            raise _start_failure(
+                f"Backend did not become healthy at {backend_url} within 40 seconds.", backend_log
+            )
+        print(f"Backend running (pid {backend_process.pid}); log: {backend_log}")
 
     frontend_process = None
+    frontend_log: Path | None = None
     frontend_available = web_shell_root is not None and (web_shell_root / "package.json").exists()
     if frontend_available and not _http_ready(frontend_url):
         npm_cmd = shutil.which("npm")
@@ -244,22 +288,39 @@ def launch_studio(
             str(frontend_port),
             "--strictPort",
         ]
-        frontend_process = _spawn_process(frontend_command, cwd=web_shell_root, env=env)
+        # The dev server proxies /api to the backend, so it exposes the same
+        # anonymous user even when the backend was already running.
+        warn_about_exposure_once()
+        frontend_log = _process_log_path(workspace_root, "frontend")
+        frontend_process = _spawn_process(
+            frontend_command,
+            cwd=web_shell_root,
+            # The dev server proxies /api and /ws to MOZAIKS_BACKEND_URL; point
+            # it at the backend this launch uses, not the 8000 default.
+            env={**env, "MOZAIKS_BACKEND_URL": backend_origin},
+            log_path=frontend_log,
+        )
         if not _wait_for_url(frontend_url, timeout_seconds=50):
-            if frontend_process.poll() is not None:
-                raise RuntimeError("Frontend failed to start. Check the frontend terminal for details.")
-            raise RuntimeError("Frontend did not become ready in time.")
+            exit_code = frontend_process.poll()
+            if exit_code is not None:
+                raise _start_failure(f"Frontend failed to start (exit code {exit_code}).", frontend_log)
+            raise _start_failure(
+                f"Frontend did not become ready at {frontend_url} within 50 seconds.", frontend_log
+            )
+        print(f"Frontend running (pid {frontend_process.pid}); log: {frontend_log}")
 
     if open_browser and frontend_available:
         webbrowser.open(studio_url)
 
     return {
-        "backend_url": f"http://localhost:{backend_port}",
-        "frontend_url": f"http://localhost:{frontend_port}" if frontend_available else None,
+        "backend_url": backend_origin,
+        "frontend_url": frontend_url.rstrip("/") if frontend_available else None,
         "studio_url": studio_url if frontend_available else None,
         "backend_started": backend_process is not None,
         "frontend_started": frontend_process is not None,
         "backend_pid": backend_process.pid if backend_process is not None else None,
         "frontend_pid": frontend_process.pid if frontend_process is not None else None,
+        "backend_log": str(backend_log) if backend_log is not None else None,
+        "frontend_log": str(frontend_log) if frontend_log is not None else None,
         "frontend_available": frontend_available,
     }

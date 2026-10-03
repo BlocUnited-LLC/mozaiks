@@ -50,9 +50,12 @@ resolved before a stable 1.0 release.
 
 - [ ] **Run the local release-candidate audit.**
   Execute the pre-release audit script (see [Release-Candidate Audit Command](#release-candidate-audit-command) below)
-  and confirm it exits 0:
+  and confirm it exits 0. Give it a throwaway MongoDB server on a non-default
+  port, never the server you develop against:
   ```bash
-  python scripts/run_release_audit.py
+  docker run --rm -d --name mozaiks-release-audit-mongo -p 127.0.0.1:27018:27017 mongo:7
+  python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27018
+  docker stop mozaiks-release-audit-mongo
   ```
 
 - [ ] **Governance guardrails pass on main.**
@@ -100,15 +103,32 @@ resolved before a stable 1.0 release.
 ## Release-Candidate Audit Command
 
 Run this locally before tagging any release.  It chains governance, build,
-package inspection, smoke install, and resource verification:
+package inspection, smoke install, resource verification, and a first run of
+the installed package:
 
 ```bash
-python scripts/run_release_audit.py
+docker run --rm -d --name mozaiks-release-audit-mongo -p 127.0.0.1:27018:27017 mongo:7
+python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27018
+docker stop mozaiks-release-audit-mongo
 ```
 
 The script lives at `scripts/run_release_audit.py` (see source for details).
 It builds a wheel into a temp directory, runs the content guard, smoke-installs
 into a clean venv, and verifies that Factory resources resolve from the install.
+It then runs `scripts/smoke_installed_first_run.py` with the installed Python,
+outside the checkout and with a scrubbed environment: `mozaiks init` →
+`mozaiks serve` (platform and studio hosts) → `/api/health/ready` →
+`/api/shell-config` must return the scaffold's `appId` and an anonymous local
+user with the `admin` role, and `mozaiks serve` against an unreachable
+`MONGO_URI` must stop within seconds. The CI `package` job and the release
+workflow run the same smoke.
+
+Point `--mongo-uri` (or `MOZAIKS_RELEASE_AUDIT_MONGO_URI`) at a throwaway
+MongoDB **server** on a non-default port, as above. A database name in the URI
+does not isolate anything: the runtime ignores it and uses fixed database
+names, `mozaiksai` and `mozaiks_apps`, on whatever server the URI points to.
+Against the default `localhost:27017` the smoke would write into the databases
+your local development stack uses.
 
 ---
 

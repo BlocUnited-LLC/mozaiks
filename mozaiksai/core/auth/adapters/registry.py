@@ -137,6 +137,18 @@ _ALL_AUTH_ENV_VARS: tuple[str, ...] = tuple(
 
 BUILTIN_PROVIDERS: frozenset[str] = frozenset(_PROVIDER_CONFIG_ENV_VARS)
 
+# The settings auto-detection reads to select a provider (step 3 of
+# resolve_auth_config). Each is part of the census above.
+_PROVIDER_SIGNAL_ENV_VARS: tuple[str, ...] = (
+    "SUPABASE_URL",
+    "KEYCLOAK_URL",
+    "KEYCLOAK_REALM",
+    "AUTH_JWKS_URL",
+    "AUTH_ISSUER",
+    "MOZAIKS_OIDC_DISCOVERY_URL",
+    "MOZAIKS_OIDC_AUTHORITY",
+)
+
 # Audience binding each built-in token-validating provider cannot run without.
 # The adapter verifies the token ``aud`` claim against this setting on every
 # request; resolution refuses a configuration that leaves it empty. There is
@@ -450,9 +462,10 @@ _registry_generation: int = 0
 _adapter_cache: _AdapterCacheEntry | None = None
 
 
-def _environment_snapshot() -> Mapping[str, str]:
+def _environment_snapshot(environ: Mapping[str, str] | None = None) -> Mapping[str, str]:
     """Capture the complete auth configuration surface once, immutably."""
-    return MappingProxyType({name: os.getenv(name) or "" for name in _ALL_AUTH_ENV_VARS})
+    source = os.environ if environ is None else environ
+    return MappingProxyType({name: source.get(name) or "" for name in _ALL_AUTH_ENV_VARS})
 
 
 def _has_oidc_discovery_config(settings: Mapping[str, str]) -> bool:
@@ -551,11 +564,14 @@ def _fingerprint(
     return tuple(parts)
 
 
-def resolve_auth_config() -> ResolvedAuthConfig:
+def resolve_auth_config(*, environ: Mapping[str, str] | None = None) -> ResolvedAuthConfig:
     """Resolve the environment into the canonical auth configuration.
 
-    This is the ONLY parser of auth-mode environment variables. Resolution
-    order:
+    This is the ONLY parser of auth-mode environment variables. ``environ``
+    lets a caller that starts a host in another process resolve the
+    environment that process will receive, through this same parser and
+    without mutating its own; hosts resolve the process environment.
+    Resolution order:
 
     1. ``AUTH_PROVIDER`` explicitly set — after contradiction checks against
        ``AUTH_ENABLED`` — selects that provider (``none`` = explicit disable).
@@ -582,10 +598,10 @@ def resolve_auth_config() -> ResolvedAuthConfig:
     provider requires ``AUTH_AUDIENCE`` and the built-in ``keycloak`` provider
     requires ``KEYCLOAK_CLIENT_ID``; an empty value is fatal.
     """
-    settings = _environment_snapshot()
+    settings = _environment_snapshot(environ)
 
     try:
-        environment = resolve_environment()
+        environment = resolve_environment(environ=environ)
     except EnvironmentConfigError as exc:
         raise AuthError(str(exc), 500, "registry") from exc
 
@@ -686,6 +702,21 @@ def resolve_auth_config() -> ResolvedAuthConfig:
         environment=environment,
         settings=settings,
         fingerprint=_fingerprint(provider=provider, settings=settings, registration=registration),
+    )
+
+
+def unused_provider_settings(config: ResolvedAuthConfig) -> tuple[str, ...]:
+    """Provider-selection settings that carry a value while authentication is off.
+
+    An explicit disable wins over passive provider presence, and an incomplete
+    provider signal selects nothing, so an identity provider the operator
+    supplied can be ignored without any other sign. Callers that report the
+    effective auth mode use this to say so.
+    """
+    if config.enabled:
+        return ()
+    return tuple(
+        name for name in _PROVIDER_SIGNAL_ENV_VARS if config.settings.get(name, "").strip()
     )
 
 

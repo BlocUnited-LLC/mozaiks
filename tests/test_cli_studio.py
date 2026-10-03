@@ -201,17 +201,17 @@ def test_unconfigured_provider_and_model_are_labelled(capsys) -> None:
     assert "Provider / Model:  not configured / not configured\n" in capsys.readouterr().out
 
 
-def test_open_launches_with_requested_ports(
-    monkeypatch, tmp_path, capsys, guidance_sync_calls, stub_summary
-) -> None:
-    launched = {}
+def _record_launches(monkeypatch) -> dict:
+    """Replace ``launch_studio`` with a recorder that has its real keyword set."""
+    launched: dict = {}
 
-    def fake_launch(*, workspace_root, backend_port, frontend_port, open_browser):
+    def fake_launch(*, workspace_root, backend_port, frontend_port, open_browser, bind_host):
         launched.update(
             workspace_root=workspace_root,
             backend_port=backend_port,
             frontend_port=frontend_port,
             open_browser=open_browser,
+            bind_host=bind_host,
         )
         return {
             "backend_url": f"http://localhost:{backend_port}",
@@ -221,6 +221,13 @@ def test_open_launches_with_requested_ports(
         }
 
     monkeypatch.setattr(studio_command, "launch_studio", fake_launch)
+    return launched
+
+
+def test_open_launches_with_requested_ports(
+    monkeypatch, tmp_path, capsys, guidance_sync_calls, stub_summary
+) -> None:
+    launched = _record_launches(monkeypatch)
 
     result = studio_command.run(
         _args(tmp_path, open_studio=True, backend_port=8010, frontend_port=3010, no_browser=True)
@@ -232,11 +239,30 @@ def test_open_launches_with_requested_ports(
         "backend_port": 8010,
         "frontend_port": 3010,
         "open_browser": False,
+        "bind_host": "127.0.0.1",
     }
     output = capsys.readouterr().out
     assert "Studio launched." in output
     assert "Studio: http://localhost:3010/apps" in output
     assert stub_summary["calls"] == []
+
+
+def test_open_binds_loopback_unless_listen_is_given(
+    monkeypatch, tmp_path, guidance_sync_calls, stub_summary
+) -> None:
+    """The parser default and an explicit ``--listen`` both reach the launcher."""
+    launched = _record_launches(monkeypatch)
+
+    monkeypatch.setattr("sys.argv", ["mozaiks", "studio", "--dir", str(tmp_path), "--open", "--no-browser"])
+    main()
+    assert launched["bind_host"] == "127.0.0.1"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["mozaiks", "studio", "--dir", str(tmp_path), "--open", "--no-browser", "--listen", "0.0.0.0"],
+    )
+    main()
+    assert launched["bind_host"] == "0.0.0.0"
 
 
 # --- real scaffold, real summary builder --------------------------------------
