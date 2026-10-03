@@ -12,6 +12,7 @@ from mozaiksai.control_plane.contracts import (
     ProposedFileChange,
     StagedPatchProposal,
 )
+from mozaiksai.control_plane.implementations import coding_worker as coding_module
 from mozaiksai.control_plane.implementations import orchestration_control
 from mozaiksai.control_plane.implementations.coding_worker import ScopedRefinementCodingWorker
 
@@ -101,6 +102,42 @@ async def test_failed_artifact_persistence_does_not_emit_success(monkeypatch, tm
     assert event["event_kind"] == "failed"
     assert event["outcome"] == "error"
     assert "ARTIFACT_PERSISTENCE_FAILED" in event["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store_result", ["unavailable", "missing_reference", "saved"])
+async def test_configured_content_store_must_save_before_a_draft_can_be_ready(monkeypatch, tmp_path, store_result):
+    recorded = AsyncMock()
+    monkeypatch.setattr(orchestration_control, "record_refinement_event", recorded)
+    upload = AsyncMock(return_value="bundle-ref" if store_result == "saved" else "")
+    if store_result == "unavailable":
+        upload.side_effect = OSError("content store unavailable")
+    monkeypatch.setattr(
+        coding_module, "get_artifact_content_store",
+        lambda: SimpleNamespace(backend_name="gridfs", put_bundle=upload),
+    )
+    store = SimpleNamespace(create_build_record=AsyncMock(return_value=SimpleNamespace(id="candidate")))
+    worker = ScopedRefinementCodingWorker(
+        provider=SimpleNamespace(execute=AsyncMock(return_value=_proposal())),
+        config_loader=_config, artifact_store=store, output_root=tmp_path,
+        source_validation_runner=AsyncMock(return_value={"validation_status": "passed"}),
+    )
+    harness = orchestration_control.OrchestrationControlHarness(coding_worker=worker, config_loader=_config)
+
+    result = await harness.execute_coding_request(_request())
+
+    upload.assert_awaited_once()
+    if store_result == "saved":
+        assert result.status == "validated"
+        metadata = store.create_build_record.await_args.kwargs["commit_metadata"]["metadata"]
+        assert metadata["content_ref"] == "bundle-ref"
+        assert metadata["content_backend"] == "gridfs"
+    else:
+        assert result.status == "failed"
+        assert "CONTENT_STORE_PUT_BUNDLE_FAILED" in result.error
+        assert not result.metadata.get("build_record_id")
+        store.create_build_record.assert_not_awaited()
+        assert recorded.await_args.kwargs["event_kind"] == "failed"
 
 
 @pytest.mark.asyncio

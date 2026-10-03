@@ -25,6 +25,7 @@ from ag2.network import (
     EV_PACKET,
     EV_TEXT,
     AgentTarget,
+    ChannelAdapter,
     ChannelState,
     Envelope,
     Hub,
@@ -40,6 +41,7 @@ from ag2.network import (
 from ag2.network.client.handlers import default_handler
 
 from mozaiksai.core.adapters.ag2_transition_conditions import BootstrapInitialDispatch
+from mozaiksai.core.adapters.ag2_workflow_view import WorkflowHistoryAdapter
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import (
     AGENT_TEXT_WRITER,
@@ -437,6 +439,8 @@ class AG2NetworkRunner:
             ttl_sweep_interval=0,
             expectation_sweep_interval=0,
         )
+        # Native WorkflowAdapter narrows the generic protocol's state types.
+        hub.register_adapter(cast(ChannelAdapter, WorkflowHistoryAdapter()))
         turn_failure_listener = _TurnFailureListener()
         hub.register_listener(turn_failure_listener)  # type: ignore[arg-type]
         progress_listener = _ChannelProgressListener()

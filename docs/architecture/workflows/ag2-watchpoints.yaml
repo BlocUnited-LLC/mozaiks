@@ -164,6 +164,16 @@ watchpoints:
     verification_tests:
       - tests/test_ag2_on_accepted_recall.py
 
+  - watchpoint_id: AG2-WP-015
+    ag2_surface: Workflow transcript projection into provider message history
+    mozaiks_surface: mozaiksai/core/adapters/ag2_workflow_view.py
+    status: ACTIVE
+    last_verified_version: "1.0.5"
+    trigger: Native workflow views emit assistant history that provider mappers preserve.
+    replacement_condition: Delete WorkflowHistoryAdapter when native Chat and Responses history tests pass across human reply and durable reopen.
+    verification_tests:
+      - tests/test_ag2_workflow_provider_history.py
+
 private_api_register:
   - private_api_id: AG2-PRI-001
     ag2_surface: HubClient durable human reattachment internals

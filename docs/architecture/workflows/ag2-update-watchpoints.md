@@ -224,6 +224,32 @@ middleware is still applied on every turn, correction turns included.
 each provider attempt, so it does not meet the attempt-provenance condition
 above.
 
+## Workflow Provider History
+
+`AG2-WP-015` (`ACTIVE`, October 3, 2026): native workflow views in the pinned
+AG2 1.0.5 project an agent's own earlier packets as bare `ModelMessage` events.
+The OpenAI Chat, OpenAI Responses, and Anthropic mappers consume assistant
+history through `ModelResponse`; bare messages are omitted. A real discovery
+run consequently repeated its opening after human confirmation. An isolated
+AG2 1.1.1 wheel reproduces the same event-to-provider conversion gap; the
+dependency upgrade alone does not close this watchpoint.
+
+`ag2_workflow_view.py` subclasses the existing `WorkflowAdapter` and wraps its
+native view through public `Hub.register_adapter`. It converts only projected
+bare `ModelMessage` events to `ModelResponse`, preserving message metadata.
+AG2 continues to own WAL, visibility, peer labels, bounded history, turn
+selection, and channel lifecycle. Existing responses and tool events remain
+unchanged; the wrapper adds no usage or tool-execution events.
+
+`tests/test_ag2_workflow_provider_history.py` captures actual provider mapper
+payloads through real Agent/Hub execution, human continuation, and disk-backed
+reopen without paid model calls. It also covers self-edges and privacy/window
+preservation. The strict expected-failure native-provider tests are the
+retirement signal: when they unexpectedly pass on an AG2 upgrade, remove the
+local adapter and registration, remove those expected-failure markers, and
+keep continuation/reopen tests passing on the native adapter. No dependency
+baseline is changed by this correction.
+
 ## AG2 Ownership Guard
 
 Before adding any Mozaiks abstraction involving agents, `Task`, Network,
