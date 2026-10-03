@@ -313,3 +313,4 @@ nav:
       - adr/0006-provider-neutral-bounded-multi-workflow-journey-execution.md
       - adr/0007-generalized-semantic-compiler.md
       - adr/0008-deterministic-engineering-context.md
+      - adr/0012-compiled-app-build-plan-skeleton.md
