@@ -44,8 +44,12 @@ TIER_PRESETS = {
 }
 
 
-def run(args):
-    """Execute the add command."""
+def run(args) -> int:
+    """Execute the add command.
+
+    Returns the process exit code: 0 when app.json was updated, 1 when the
+    command failed.
+    """
     app_root = resolve_active_app_root(Path(".").resolve())
     app_root_label = app_root.name if app_root.name in {"app", "platform"} else "."
     app_json_path = app_root / "app.json"
@@ -53,22 +57,23 @@ def run(args):
     if not app_json_path.exists():
         print(f"Error: No {app_root_label}/app.json found.")
         print("Run 'mozaiks init <preset>' to create a new project first.")
-        return
+        return 1
 
     try:
         with open(app_json_path, encoding="utf-8") as f:
             app_config = json.load(f)
     except Exception as e:
         print(f"Error reading {app_json_path}: {e}")
-        return
+        return 1
 
     # Upgrade to preset
     if args.preset:
         if args.preset not in TIER_PRESETS:
             print(f"Error: Unknown preset '{args.preset}'")
             print(f"Available: {', '.join(TIER_PRESETS.keys())}")
-            return
+            return 1
 
+        change = args.preset
         app_config["preset"] = args.preset
         # Clear feature overrides when upgrading preset
         if "features" in app_config:
@@ -77,12 +82,12 @@ def run(args):
         print(f"Upgraded to preset: {args.preset}")
     else:
         # Enable individual feature
-        feature = args.feature
+        change = args.feature
         if "features" not in app_config:
             app_config["features"] = {}
 
-        app_config["features"][feature] = True
-        print(f"Enabled feature: {feature}")
+        app_config["features"][change] = True
+        print(f"Enabled feature: {change}")
 
     # Write back
     try:
@@ -92,10 +97,11 @@ def run(args):
         print(f"\nUpdated {app_json_path}")
     except Exception as e:
         print(f"Error writing {app_json_path}: {e}")
-        return
+        return 1
 
     # Show next steps
-    _show_next_steps(args.preset or feature, app_root_label)
+    _show_next_steps(change, app_root_label)
+    return 0
 
 
 def _show_next_steps(feature_or_preset, app_root_label: str):

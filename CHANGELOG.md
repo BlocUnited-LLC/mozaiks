@@ -118,6 +118,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **`mozaiks add --preset <tier>` works** (#304). The command `mozaiks info`
+  recommends always failed with "the following arguments are required:
+  feature". `mozaiks add` now takes exactly one of a feature or
+  `--preset {engine,chat,integrated,full}`: giving neither, both, or an
+  unknown preset is a usage error (exit 2) that names the valid choices, and
+  `app.json` is left untouched.
+- **`mozaiks info`, `mozaiks add` and `mozaiks studio` exit 1 when they
+  fail** (#305). A missing or unreadable `app.json`, an unknown preset, a
+  failed `app.json` write, and a workspace without a valid scaffold printed an
+  error but exited 0, so scripts and CI treated the failure as success. The
+  printed messages are unchanged.
+
 - App fonts and colors declared in `theme_config.json` remain active when the
   standalone theme endpoint returns that same config. Only saved custom
   overrides for the matching app can replace them. Partial brand tokens inherit
