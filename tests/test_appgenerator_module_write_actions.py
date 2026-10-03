@@ -137,6 +137,7 @@ def _closed(output=None, contract=None, plan=None, **kwargs):
         data_contract=context.get("data_contract"),
         design_surface_map=context.get("design_surface_map"),
         subscription_contract=context.get("subscription_contract"),
+        companion_files=context.get("companion_files"),
     )
 
 
@@ -228,7 +229,9 @@ def test_authored_permissions_on_owner_scoped_writes_are_stripped_with_a_logged_
     )
     before = deepcopy(output)
     with caplog.at_level(logging.WARNING):
-        closed = _closed(output, _contract(tenancy))
+        closed = _closed(output, _contract(tenancy), companion_files={
+            "config/auth.yaml": yaml.safe_dump({"frontend": {"default_scopes": ["task.audit"]}}),
+        })
     actions = _actions(closed)
     assert actions["create_task"]["permissions"] == [] and actions["create_task"]["api_surface"] is None
     # 'domain.tasks.task_created' names the canonical create event under the one naming rule.
@@ -240,7 +243,7 @@ def test_authored_permissions_on_owner_scoped_writes_are_stripped_with_a_logged_
     normalized = [record.message for record in caplog.records if "CANONICAL_WRITE_NORMALIZED" in record.message]
     assert len(normalized) == 3
     assert "action=create_task" in normalized[0] and "permissions=['task.create']" in normalized[0]
-    assert f"tenancy={tenancy}" in normalized[0] and "declared auth grants=[]" in normalized[0]
+    assert f"tenancy={tenancy}" in normalized[0] and "declared auth grants=['task.audit']" in normalized[0]
     assert "removed unreferenced permission declarations ['task.create', 'task.update']" in normalized[2]
     assert output == before
 
@@ -1232,7 +1235,12 @@ def test_fully_declared_but_unrestricted_app_wide_writes_are_still_rejected(decl
     subscription = subscription_contract(MODULE, *WRITES)
     reads = [action for action in _actions(_closed()).values() if action["id"] in {"get_tasks", "list_tasks"}]
     gated["module_contract"]["module_yaml"]["actions"].extend(reads)
-    closed = _closed(gated, _contract("app_wide"), subscription_contract=subscription)
+    if declared_access["permissions"]:
+        with pytest.raises(ValueError, match="unresolved permissions.*task.write"):
+            _closed(gated, _contract("app_wide"), subscription_contract=subscription)
+    closed = _closed(gated, _contract("app_wide"), subscription_contract=subscription, companion_files={
+        "config/auth.yaml": yaml.safe_dump({"frontend": {"default_scopes": ["task.write"]}}),
+    })
     assert all(_actions(closed)[name]["api_surface"] is None for name in WRITES)  # gated, authored, preserved
 
 

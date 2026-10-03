@@ -429,6 +429,7 @@ async def test_task_dependency_gates_paid_read_and_keeps_shared_write_and_canoni
 @pytest.mark.asyncio
 async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materialization(monkeypatch):
     contract = _contract("app_wide")
+    auth = {"config/auth.yaml": yaml.safe_dump({"frontend": {"default_scopes": ["tasks.audit"]}})}
     output = _closed(contract=contract)
     actions = output["module_contract"]["module_yaml"]["actions"]
     actions[:] = [action for action in actions if action["id"] in {"create_task", "list_tasks"}]
@@ -461,7 +462,7 @@ async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materi
     }]
     plan = {**_plan(), "build_tasks": tasks}
     bridge = ContextVariablesBridge({
-        "app_build_plan": plan, "data_contract": contract, "app_task_batch_items": tasks,
+        "app_build_plan": plan, "data_contract": contract, "app_task_batch_items": tasks, "generated_files": auth,
     })
 
     async def run(_runner, request):
@@ -488,7 +489,9 @@ async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materi
     )
     results = snapshot["app_task_batch_results"]
     assert snapshot["app_task_batch_status"] == "completed", results
-    accepted = [results["contract"], results["service"]]
+    accepted = [results["contract"], results["service"], {"code_files": [
+        {"filename": path, "content": source} for path, source in auth.items()
+    ]}]
     task_files = {path: source for candidate in accepted for path, source in extract_code_file_map_from_payload(candidate).items()}
     compiled_read = next(action for action in yaml.safe_load(task_files[MANIFEST])["actions"] if action["id"] == "list_tasks")
     original_read.pop("entitlement_gate", None)
