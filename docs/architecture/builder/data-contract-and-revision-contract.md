@@ -348,8 +348,8 @@ plan or owner-scoped data contract uses the scopes in the canonical
 not grant mappings, and a candidate cannot approve its own restriction by
 emitting an auth edit alongside it. An unresolved restriction rejects task
 admission, repair persistence, and final materialization with the module path,
-action, unknown permissions, and declared choices. Custom restrictions are
-never stripped: repair must preserve the approved access intent, exposure, and
+action, unknown permissions, and declared choices. The closure never strips
+custom restrictions: repair must preserve the approved access intent, exposure, and
 subscription gate, or revise the authorization contract before retrying.
 Requested scopes do not prove that an identity provider issues them; runtime
 dispatch still denies a caller lacking any required permission. This Factory
