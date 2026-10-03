@@ -64,6 +64,10 @@ _FORBIDDEN_PATTERNS = [
         r"autogen\.logger",
     ]
 ]
+_FORBIDDEN_PATTERN = re.compile(
+    "|".join(f"(?:{pattern.pattern})" for pattern in _FORBIDDEN_PATTERNS),
+    re.IGNORECASE,
+)
 
 
 def _tracked_text_files() -> list[Path]:
@@ -96,7 +100,7 @@ def test_active_repo_surfaces_do_not_reintroduce_legacy_ag2_terms() -> None:
         except UnicodeDecodeError:
             continue
         for line_no, line in enumerate(text.splitlines(), start=1):
-            if any(pattern.search(line) for pattern in _FORBIDDEN_PATTERNS):
+            if _FORBIDDEN_PATTERN.search(line):
                 rel = path.relative_to(_ROOT).as_posix()
                 matches.append(f"{rel}:{line_no}: {line.strip()}")
 
