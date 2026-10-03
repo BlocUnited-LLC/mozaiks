@@ -90,6 +90,9 @@ const AppWorkbench = ({
     livePreviewUrl,
     sandboxError: sandboxSyncError,
     syncing: sandboxSyncing,
+    sandboxId,
+    stopping: sandboxStopping,
+    stopPreview,
     syncAndRestart,
   } = useSandbox(artifactVersionId, buildRegistryId);
 
@@ -378,6 +381,8 @@ const AppWorkbench = ({
                 artifactVersionId={artifactVersionId}
                 config={config}
                 onStartPreview={() => syncAndRestart(filesMap)}
+                onStopPreview={sandboxId ? stopPreview : null}
+                sandboxStopping={sandboxStopping}
                 canStartPreview={Boolean(artifactVersionId && buildRegistryId && Object.keys(filesMap || {}).length > 0)}
               />
             </div>

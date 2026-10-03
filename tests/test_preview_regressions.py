@@ -13,6 +13,8 @@ from tests.test_artifact_preview_sessions import (
     FakeSandboxAdapter,
     _create,
     _manager,
+    _metadata,
+    _read,
     _sync_manifest,
 )
 
@@ -28,7 +30,8 @@ async def test_dead_server_never_becomes_running():
     adapter.install_result = SandboxRunResult(success=False, exit_code=1, stderr="connection refused")
     manager = _manager(adapter)
     state = await _create(manager)
-    result = await manager._finish_start(state, 3000)
+    await _sync_manifest(manager, state)
+    result = await manager.start(state.sandbox_id)
     assert result.status == "error"
     assert result.preview_url is None
 
@@ -76,7 +79,7 @@ async def test_manifest_alias_rejected_before_initial_provider_write(alias):
         ], [])
 
     assert adapter.calls == before
-    assert state.last_files == {}
+    assert _metadata(await _read(manager, state)) == (None, [], False)
 
 
 @pytest.mark.asyncio
@@ -90,7 +93,7 @@ async def test_binary_file_path_rejected_before_provider_write():
         await manager.sync(state.sandbox_id, [{"path": b"app.json", "content": MANIFEST}], [])
 
     assert adapter.calls == before
-    assert state.last_files == {}
+    assert _metadata(await _read(manager, state)) == (None, [], False)
 
 
 @pytest.mark.parametrize("path", ["app.json", "ui/pages/home.yaml"])
@@ -101,7 +104,7 @@ async def test_workspace_alias_cannot_modify_an_existing_snapshot(path, operatio
     manager = _manager(adapter)
     state = await _create(manager)
     await _sync_manifest(manager, state, **{"ui/pages/home.yaml": "original"})
-    snapshot = dict(state.last_files)
+    snapshot = _metadata(await _read(manager, state))
     before = list(adapter.calls)
     alias = f"app/{path}"
 
@@ -112,7 +115,7 @@ async def test_workspace_alias_cannot_modify_an_existing_snapshot(path, operatio
             [alias] if operation == "delete" else [],
         )
 
-    assert state.last_files == snapshot
+    assert _metadata(await _read(manager, state)) == snapshot
     assert adapter.calls == before
 
 
@@ -126,8 +129,8 @@ async def test_failed_sync_cannot_restart_or_resync_a_partially_written_sandbox(
         "ui/pages/home.yaml": "original", "ui/pages/obsolete.yaml": "old page",
     })
     await manager.start(state.sandbox_id)
-    snapshot = dict(state.last_files)
-    provider_files = {f"app/{path}": content for path, content in snapshot.items()}
+    snapshot = _metadata(await _read(manager, state))
+    provider_files = dict(next(kwargs["files"] for name, kwargs in adapter.calls if name == "write_files"))
 
     async def partial_write(**kwargs):
         path, content = next(iter(kwargs["files"].items()))
@@ -152,10 +155,11 @@ async def test_failed_sync_cannot_restart_or_resync_a_partially_written_sandbox(
 
     assert provider_files["app/ui/pages/home.yaml"] == "partially updated"
     assert provider_files["app/ui/pages/obsolete.yaml"] == "old page"
-    assert state.last_files == snapshot
-    assert state.status == "error" and state.preview_url is None
+    current = await _read(manager, state)
+    assert _metadata(current) == snapshot
+    assert current.status == "error" and current.preview_url is None
     before_retry = list(adapter.calls)
-    error = state.last_error
+    error = current.last_error
 
     restarted = await manager.start(state.sandbox_id)
     assert restarted.status == "error" and restarted.preview_url is None
@@ -167,7 +171,8 @@ async def test_failed_sync_cannot_restart_or_resync_a_partially_written_sandbox(
 
     replacement = await _create(manager)
     assert replacement.sandbox_id != state.sandbox_id
-    assert state.sandbox_id not in manager._sessions
+    with pytest.raises(KeyError):
+        await _read(manager, state)
     assert any(kind == "terminate_session" for kind, _ in adapter.calls)
 
 
@@ -233,8 +238,10 @@ async def test_failed_stop_keeps_the_session_available_for_cleanup():
     with pytest.raises(RuntimeError, match="stop"):
         await manager.stop(state.sandbox_id)
 
-    assert await manager.require_owner(state.sandbox_id, app_id=state.app_id, user_id=state.user_id) is state
-    assert manager._artifact_to_sandbox[(state.app_id, state.user_id, state.artifact_id)] == state.sandbox_id
+    current = await _read(manager, state)
+    assert current.sandbox_id == state.sandbox_id
+    assert current.session_id == state.session_id
+    assert (await _create(manager)).sandbox_id == state.sandbox_id
 
 
 @pytest.mark.asyncio
@@ -245,9 +252,12 @@ async def test_confirmed_provider_absence_allows_failed_session_recreation(monke
     adapter.terminate_session = docker.terminate_session
     manager = _manager(adapter)
     state = await _create(manager)
-    state.status = "error"
+    token = await manager._store.claim_operation(state.sandbox_id, kind="status", lease_seconds=60)
+    await manager._store.save(state.sandbox_id, {"status": "error"}, operation_token=token)
+    await manager._store.release_operation(state.sandbox_id, token)
 
     replacement = await _create(manager)
 
     assert replacement.sandbox_id != state.sandbox_id
-    assert state.sandbox_id not in manager._sessions
+    with pytest.raises(KeyError):
+        await _read(manager, state)

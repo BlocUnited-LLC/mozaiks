@@ -23,6 +23,11 @@ from mozaiksai.core.sandbox import (
     is_valid_sandbox_id,
 )
 from mozaiksai.core.sandbox.preview_sessions import PreviewCapacityError
+from mozaiksai.core.sandbox.preview_store import (
+    PreviewLeaseLostError,
+    PreviewOperationBusy,
+    PreviewRecoveryRequired,
+)
 
 _logger = logging.getLogger(__name__)
 _Status = Literal["starting", "running", "error"]
@@ -74,6 +79,10 @@ def create_sandbox_router(
             await manager.require_owner(sandboxId, app_id=app_id, user_id=user_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Sandbox not found") from exc
+        except PreviewOperationBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc), headers={"Retry-After": "2"}) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Preview coordination unavailable; try again shortly") from exc
         return manager
 
     @router.post("/api/artifacts/{artifactId}/sandbox", response_model=_SandboxCreateResponse)
@@ -91,15 +100,19 @@ def create_sandbox_router(
                 artifactId, app_id=app_id, user_id=user_id,
                 target_app_id=target_app_id, build_registry_id=build_registry_id,
             )
-            if not state.last_files:
+            if not state.paths:
                 try:
                     await manager.sync(state.sandbox_id, files=[{"path": path, "content": content} for path, content in files.items()], deleted=[])
+                except (PreviewOperationBusy, PreviewLeaseLostError, PreviewRecoveryRequired):
+                    raise
                 except Exception:
                     await manager.stop(state.sandbox_id)
                     raise
             return {"sandboxId": state.sandbox_id}
         except PreviewCapacityError as exc:
             raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "15"}) from exc
+        except (PreviewOperationBusy, PreviewLeaseLostError, PreviewRecoveryRequired) as exc:
+            raise HTTPException(status_code=409, detail=str(exc), headers={"Retry-After": "2"}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
@@ -115,6 +128,8 @@ def create_sandbox_router(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Sandbox not found") from exc
+        except (PreviewOperationBusy, PreviewLeaseLostError, PreviewRecoveryRequired) as exc:
+            raise HTTPException(status_code=409, detail=str(exc), headers={"Retry-After": "2"}) from exc
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Preview file sync failed") from exc
         return {"ok": True}
@@ -125,6 +140,10 @@ def create_sandbox_router(
             state = await manager.start(sandboxId)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Sandbox not found") from exc
+        except (PreviewOperationBusy, PreviewLeaseLostError, PreviewRecoveryRequired) as exc:
+            raise HTTPException(status_code=409, detail=str(exc), headers={"Retry-After": "2"}) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Preview startup unavailable; try again shortly") from exc
         return {"status": state.status, "previewUrl": state.preview_url, "message": state.last_error}
 
     @router.get("/api/sandbox/{sandboxId}/status", response_model=_StatusResponse)
@@ -133,11 +152,20 @@ def create_sandbox_router(
             state = await manager.status(sandboxId)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Sandbox not found") from exc
+        except (PreviewOperationBusy, PreviewLeaseLostError, PreviewRecoveryRequired) as exc:
+            raise HTTPException(status_code=409, detail=str(exc), headers={"Retry-After": "2"}) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Preview status unavailable; try again shortly") from exc
         return {"status": state.status, "previewUrl": state.preview_url, "lastError": state.last_error}
 
     @router.post("/api/sandbox/{sandboxId}/stop", response_model=_OkResponse)
     async def stop_preview(sandboxId: str, manager=Depends(owned_session)):
-        await manager.stop(sandboxId)
+        try:
+            await manager.stop(sandboxId)
+        except (PreviewOperationBusy, PreviewLeaseLostError, PreviewRecoveryRequired) as exc:
+            raise HTTPException(status_code=409, detail=str(exc), headers={"Retry-After": "2"}) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Preview cleanup could not be confirmed; try again shortly") from exc
         return {"ok": True}
 
     @router.websocket("/ws/sandbox/{sandboxId}")

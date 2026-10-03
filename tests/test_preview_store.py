@@ -1,0 +1,429 @@
+"""Admission and mutation races against the real store, with fake/real Mongo."""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import pytest
+import pytest_asyncio
+
+from mozaiksai.core.sandbox.preview_store import (
+    MongoPreviewStore,
+    PreviewCapacityError,
+    PreviewLeaseLostError,
+    PreviewOperationBusy,
+    PreviewRecoveryRequired,
+)
+from tests.helpers.preview_mongo import FakePreviewDatabase
+
+
+@pytest_asyncio.fixture(params=["fake", "mongo"])
+async def storage(request):
+    now = [datetime(2026, 10, 3, tzinfo=UTC)]
+    if request.param == "fake":
+        yield FakePreviewDatabase(), now
+        return
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    client = AsyncIOMotorClient(os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017"), serverSelectionTimeoutMS=1000)
+    database_name = f"preview_store_test_{uuid4().hex}"
+    try:
+        await client.admin.command("ping")
+    except Exception:
+        client.close()
+        if os.getenv("MOZAIKS_REQUIRE_REAL_MONGO"):
+            pytest.fail("Real MongoDB is required")
+        pytest.skip("MongoDB is unavailable")
+    try:
+        yield client[database_name], now
+    finally:
+        assert database_name.startswith("preview_store_test_")
+        await client.drop_database(database_name)
+        client.close()
+
+
+def _store(storage):
+    database, now = storage
+    return MongoPreviewStore(database, now=lambda: now[0])
+
+
+async def _reserve(store, artifact="artifact", owner="owner", **limits):
+    return await store.reserve(
+        {"app_id": "host", "user_id": owner, "artifact_id": artifact, "target_app_id": "target",
+         "build_registry_id": "build", "provider": "e2b"},
+        **({"max_sessions": 2, "max_owner_sessions": 1, "max_pending": 20, "queue_seconds": 15, "ttl_seconds": 300} | limits),
+    )
+
+
+async def _allocate(store, reservation, now, parallel=1):
+    return await store.try_allocate(reservation["sandbox_id"], max_parallel_creates=parallel, provider_deadline=now + timedelta(seconds=330))
+
+
+async def _attach(store, reservation):
+    return await store.attach_session(reservation["sandbox_id"], reservation["allocation_token"], {
+        "session_id": "provider-" + reservation["sandbox_id"], "status": "running", "preview_url": "https://preview.example",
+        "manifest": '{"appId":"target"}', "paths": ["app.json"], "has_requirements": False,
+    })
+
+
+async def test_cross_worker_deduplication_and_immutable_identity(storage):
+    workers = [_store(storage) for _ in range(24)]
+    results = await asyncio.gather(*(_reserve(worker) for worker in workers))
+    assert len({result["sandbox_id"] for result in results}) == 1
+    assert len(await workers[0].list()) == 1
+    with pytest.raises(ValueError, match="identity changed"):
+        await workers[0].reserve(
+            {key: ("other" if key == "target_app_id" else value) for key, value in results[0].items()
+             if key in {"app_id", "user_id", "artifact_id", "target_app_id", "build_registry_id", "provider"}},
+            max_sessions=2, max_owner_sessions=1, max_pending=20, queue_seconds=15, ttl_seconds=300,
+        )
+
+
+async def test_atomic_queue_bound_and_configuration_agreement(storage):
+    results = await asyncio.gather(*(_reserve(_store(storage), f"artifact-{index}") for index in range(30)), return_exceptions=True)
+    assert sum(isinstance(result, dict) for result in results) == 20
+    assert sum(isinstance(result, PreviewCapacityError) for result in results) == 10
+    with pytest.raises(ValueError, match="differs between workers"):
+        await _reserve(_store(storage), "new", max_pending=21)
+
+
+async def test_parallel_creation_global_owner_limits_and_eligible_fifo(storage):
+    store = _store(storage)
+    now = storage[1][0]
+    first = await _reserve(store, "first", "owner-a")
+    blocked_owner = await _reserve(store, "blocked-owner", "owner-a")
+    second = await _reserve(store, "second", "owner-b")
+    third = await _reserve(store, "third", "owner-c")
+    racers = await asyncio.gather(*(_allocate(_store(storage), first, now) for _ in range(12)))
+    allocated = [result for result in racers if result is not None]
+    assert len(allocated) == 1
+    assert await _allocate(store, second, now) is None
+    await _attach(store, allocated[0])
+    assert await _allocate(store, blocked_owner, now) is None
+    assert await _allocate(store, third, now) is None
+    second_allocated = await _allocate(store, second, now)
+    assert second_allocated is not None
+    await _attach(store, second_allocated)
+    assert await _allocate(store, third, now) is None
+    assert sum(item["phase"] == "active" for item in await store.list()) == 2
+
+
+async def test_queue_expiry_releases_only_unallocated_admission(storage):
+    store = _store(storage)
+    queued = await _reserve(store)
+    storage[1][0] += timedelta(seconds=16)
+    with pytest.raises(KeyError):
+        await _allocate(store, queued, storage[1][0])
+    replacement = await _reserve(store)
+    assert replacement["sandbox_id"] != queued["sandbox_id"]
+    assert await store.abandon_queued(replacement["sandbox_id"])
+    assert await store.list() == []
+
+
+async def test_uncertain_allocation_remains_capacity_debt_until_provider_deadline(storage):
+    store = _store(storage)
+    entry = await _allocate(store, await _reserve(store), storage[1][0])
+    assert entry is not None
+    assert not await store.abandon_queued(entry["sandbox_id"])
+    storage[1][0] += timedelta(seconds=100)
+    recovered = await _store(storage).get(entry["sandbox_id"])
+    assert recovered["phase"] == "provisioning" and recovered["session_id"] is None
+    with pytest.raises(PreviewRecoveryRequired):
+        await store.release(entry["sandbox_id"], allocation_token=entry["allocation_token"])
+    with pytest.raises(PreviewLeaseLostError):
+        await store.release(entry["sandbox_id"], allocation_token="stale", provider_absent=True)
+    storage[1][0] += timedelta(seconds=231)
+    assert await store.release(entry["sandbox_id"], allocation_token=entry["allocation_token"])
+    assert await store.get(entry["sandbox_id"]) is None
+
+
+async def test_restart_recovers_session_and_fences_mutations(storage):
+    first, restarted = _store(storage), _store(storage)
+    entry = await _allocate(first, await _reserve(first), storage[1][0])
+    original = await _attach(first, entry)
+    assert (await restarted.get(entry["sandbox_id"]))["session_id"] == original["session_id"]
+    token = await first.claim_operation(entry["sandbox_id"], kind="sync", lease_seconds=10)
+    with pytest.raises(PreviewOperationBusy):
+        await restarted.claim_operation(entry["sandbox_id"], kind="start", lease_seconds=10)
+    saved = await first.save(entry["sandbox_id"], {"paths": ["app.json", "brand/logo.png"]}, token)
+    assert saved["revision"] >= 2
+    assert (await restarted.get(entry["sandbox_id"]))["paths"] == ["app.json", "brand/logo.png"]
+    storage[1][0] += timedelta(seconds=11)
+    for kind in ("sync", "start", "status"):
+        with pytest.raises(PreviewRecoveryRequired):
+            await restarted.claim_operation(entry["sandbox_id"], kind=kind, lease_seconds=10)
+    cleanup = await restarted.claim_operation(entry["sandbox_id"], kind="recovery", lease_seconds=10)
+    with pytest.raises(PreviewLeaseLostError):
+        await first.save(entry["sandbox_id"], {"status": "running"}, token)
+    with pytest.raises(PreviewLeaseLostError):
+        await first.renew_operation(entry["sandbox_id"], token, 10)
+    assert not await first.release_operation(entry["sandbox_id"], token)
+    snapshot = await restarted.get(entry["sandbox_id"])
+    assert snapshot["status"] == "error" and snapshot["preview_url"] is None
+    assert await restarted.release(entry["sandbox_id"], operation_token=cleanup, provider_absent=True)
+    assert await first.list() == []
+
+
+async def test_renewal_keeps_operation_exclusive_and_release_is_fenced(storage):
+    store = _store(storage)
+    entry = await _allocate(store, await _reserve(store), storage[1][0])
+    await _attach(store, entry)
+    token = await store.claim_operation(entry["sandbox_id"], kind="start", lease_seconds=10)
+    storage[1][0] += timedelta(seconds=8)
+    await store.renew_operation(entry["sandbox_id"], token, 10)
+    storage[1][0] += timedelta(seconds=5)
+    with pytest.raises(PreviewOperationBusy):
+        await _store(storage).claim_operation(entry["sandbox_id"], kind="stop", lease_seconds=10)
+    with pytest.raises(PreviewLeaseLostError):
+        await store.release(entry["sandbox_id"], operation_token=token, provider_absent=True)
+    assert await store.release_operation(entry["sandbox_id"], token)
+    cleanup = await store.claim_operation(entry["sandbox_id"], kind="stop", lease_seconds=10)
+    assert await store.release(entry["sandbox_id"], operation_token=cleanup, provider_absent=True)
+
+
+async def test_expired_mutation_lease_clears_visible_url_before_cleanup(storage):
+    store = _store(storage)
+    entry = await _allocate(store, await _reserve(store), storage[1][0])
+    await _attach(store, entry)
+    await store.claim_operation(entry["sandbox_id"], kind="sync", lease_seconds=10)
+    before = await store.get(entry["sandbox_id"])
+    assert before["status"] == "running" and before["preview_url"]
+    storage[1][0] += timedelta(seconds=11)
+    for snapshot in [await _store(storage).get(entry["sandbox_id"]), *(await _store(storage).list())]:
+        assert snapshot["status"] == "error" and snapshot["preview_url"] is None
+        assert "interrupted" in snapshot["last_error"]
+        assert snapshot["revision"] == before["revision"]
+    # The projection derives from the persisted lease; reads do not invent a
+    # second mutation authority or discard the cleanup obligation.
+    durable = await store._sessions_collection().find_one({"_id": entry["sandbox_id"]})
+    assert durable["state"]["status"] == "running"
+    assert durable["operation"] is not None
+
+
+async def test_cleanup_can_retry_after_interrupted_capacity_release(storage, monkeypatch):
+    from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
+    from tests.test_artifact_preview_sessions import FakeSandboxAdapter
+
+    storage[1][0] = datetime.now(UTC)
+    store = _store(storage)
+    adapter = FakeSandboxAdapter()
+    manager = ArtifactPreviewSessionManager(provider_resolver=lambda: ("docker", adapter), store=store)
+    state = await manager.create_or_reuse("cleanup-retry", app_id="host", user_id="owner", target_app_id="target", build_registry_id="build")
+    original_change = store._change
+
+    async def unavailable(_):
+        raise RuntimeError("admission release unavailable")
+
+    monkeypatch.setattr(store, "_change", unavailable)
+    with pytest.raises(RuntimeError, match="release unavailable"):
+        await manager.stop(state.sandbox_id)
+    snapshot = await store.get(state.sandbox_id)
+    assert snapshot["status"] == "error" and snapshot["preview_url"] is None
+    assert snapshot["operation"] is None
+    durable = await store._sessions_collection().find_one({"_id": state.sandbox_id})
+    assert durable["closing"]
+    with pytest.raises(PreviewRecoveryRequired):
+        await store.claim_operation(state.sandbox_id, kind="start", lease_seconds=10)
+    monkeypatch.setattr(store, "_change", original_change)
+    await manager.stop(state.sandbox_id)
+    assert await store.get(state.sandbox_id) is None
+
+
+async def test_attachment_receipt_survives_coordinator_write_interruption(storage, monkeypatch):
+    store = _store(storage)
+    entry = await _allocate(store, await _reserve(store), storage[1][0])
+    original_change = store._change
+
+    async def unavailable(_):
+        raise RuntimeError("coordination unavailable")
+
+    monkeypatch.setattr(store, "_change", unavailable)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await _attach(store, entry)
+    snapshot = await _store(storage).get(entry["sandbox_id"])
+    assert snapshot["session_id"] == "provider-" + entry["sandbox_id"]
+    assert snapshot["phase"] == "active"
+    monkeypatch.setattr(store, "_change", original_change)
+    assert (await _attach(store, entry))["phase"] == "active"
+
+
+async def test_payload_is_bounded_metadata_and_authority_errors_propagate(storage):
+    store = _store(storage)
+    await store.ensure_indexes()
+    entry = await _allocate(store, await _reserve(store), storage[1][0])
+    await _attach(store, entry)
+    token = await store.claim_operation(entry["sandbox_id"], kind="sync", lease_seconds=10)
+    for payload in ({"last_files": {"secret": b"data"}}, {"manifest": b"binary"}, {"paths": [b"binary"]}, {"manifest": "x" * (1024 * 1024)}):
+        with pytest.raises(ValueError):
+            await store.save(entry["sandbox_id"], payload, token)
+    with pytest.raises(PreviewLeaseLostError):
+        await store.save(entry["sandbox_id"], {"status": "running"}, "unknown")
+
+
+async def test_multiple_managers_bound_allocation_peak_and_drain_queue(storage):
+    from mozaiksai.core.ports.sandbox import SandboxSessionInfo
+    from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
+    from tests.test_artifact_preview_sessions import FakeSandboxAdapter
+
+    storage[1][0] = datetime.now(UTC)
+
+    class MeasuredProvider(FakeSandboxAdapter):
+        def __init__(self):
+            super().__init__()
+            self.creating = 0
+            self.peak_creating = 0
+            self.live = {}
+            self.peak_live = 0
+            self.peak_owner = 0
+
+        async def create_session(self, **kwargs):
+            self.creating += 1
+            self.peak_creating = max(self.peak_creating, self.creating)
+            try:
+                await asyncio.sleep(0.025)
+                session_id = uuid4().hex
+                self.live[session_id] = kwargs["metadata"]["user_id"]
+                self.peak_live = max(self.peak_live, len(self.live))
+                self.peak_owner = max(self.peak_owner, max(list(self.live.values()).count(owner) for owner in self.live.values()))
+                return SandboxSessionInfo(session_id=session_id, provider="docker")
+            finally:
+                self.creating -= 1
+
+        async def terminate_session(self, *, session_id):
+            self.live.pop(session_id, None)
+            return True
+
+    adapter = MeasuredProvider()
+    managers = [ArtifactPreviewSessionManager(provider_resolver=lambda: ("docker", adapter), store=_store(storage)) for _ in range(4)]
+    for manager in managers:
+        manager._max_sessions = 6
+        manager._max_owner_sessions = 2
+        manager._max_pending = 30
+        manager._max_parallel_creates = 2
+        manager._queue_seconds = 10
+        manager._poll_seconds = 0.005
+
+    async def client(index):
+        manager = managers[index % len(managers)]
+        started = time.monotonic()
+        state = await manager.create_or_reuse(
+            f"artifact-{index}", app_id="host", user_id=f"owner-{index % 4}",
+            target_app_id="target", build_registry_id="build",
+        )
+        latency = time.monotonic() - started
+        await asyncio.sleep(0.06)
+        await managers[(index + 1) % len(managers)].stop(state.sandbox_id)
+        return latency
+
+    latencies = await asyncio.gather(*(client(index) for index in range(24)))
+    assert adapter.peak_creating <= 2
+    assert adapter.peak_live <= 6
+    assert adapter.peak_owner <= 2
+    assert max(latencies) > 0.05
+    assert not adapter.live
+    assert await managers[0]._store.list() == []
+    print(json.dumps({"requests": len(latencies), "workers": len(managers), "peak_creating": adapter.peak_creating,
+                      "peak_live": adapter.peak_live, "peak_owner": adapter.peak_owner, "maximum_queue_and_create_seconds": round(max(latencies), 3)}))
+
+
+async def test_separate_process_recovers_owner_and_operates_existing_session(storage):
+    if isinstance(storage[0], FakePreviewDatabase):
+        pytest.skip("Cross-process proof requires real MongoDB")
+    from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
+    from tests.test_artifact_preview_sessions import FakeSandboxAdapter
+
+    database, now = storage
+    now[0] = datetime.now(UTC)
+    store = _store(storage)
+    manager = ArtifactPreviewSessionManager(provider_resolver=lambda: ("docker", FakeSandboxAdapter()), store=store)
+    state = await manager.create_or_reuse("restart", app_id="host", user_id="owner", target_app_id="target", build_registry_id="build")
+    await manager.sync(state.sandbox_id, [{"path": "app.json", "content": '{"appId":"target"}'}], [])
+    await manager.start(state.sandbox_id)
+    await manager.close()
+    script = '''
+import asyncio, json, os, sys
+from motor.motor_asyncio import AsyncIOMotorClient
+from mozaiksai.core.sandbox.preview_store import MongoPreviewStore
+from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
+from tests.test_artifact_preview_sessions import FakeSandboxAdapter
+async def main():
+    client = AsyncIOMotorClient(os.environ['MONGO_URI'])
+    adapter = FakeSandboxAdapter()
+    manager = ArtifactPreviewSessionManager(provider_resolver=lambda: ('docker', adapter), store=MongoPreviewStore(client[sys.argv[1]]))
+    try:
+        state = await manager.require_owner(sys.argv[2], app_id='host', user_id='owner')
+        assert state.status == 'running' and state.session_id == sys.argv[3]
+        try:
+            await manager.require_owner(sys.argv[2], app_id='host', user_id='outsider')
+        except KeyError:
+            pass
+        else:
+            raise AssertionError('cross-owner access accepted')
+        await manager.sync(state.sandbox_id, [{'path': 'brand/note.txt', 'content': 'new worker'}], [])
+        updated = await manager.start(state.sandbox_id)
+        assert updated.status == 'running'
+        assert not any(name == 'create_session' for name, _ in adapter.calls)
+        await manager.stop(state.sandbox_id)
+        assert await manager._store.get(state.sandbox_id) is None
+        print(json.dumps({'reused_provider_session': True, 'cross_owner_rejected': True, 'sync_start_stop': True}))
+    finally:
+        await manager.close()
+        client.close()
+asyncio.run(main())
+'''
+    environment = {**os.environ, "PYTHON_DOTENV_DISABLED": "1", "MONGO_URI": os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")}
+    result = await asyncio.to_thread(
+        subprocess.run, [sys.executable, "-c", script, database.name, state.sandbox_id, state.session_id],
+        env=environment, capture_output=True, text=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout.splitlines()[-1])["sync_start_stop"]
+    assert await store.get(state.sandbox_id) is None
+
+
+@pytest.mark.parametrize("failure_persists", [False, True])
+async def test_sync_receipt_failure_never_unlocks_unrecorded_remote_mutation(storage, monkeypatch, failure_persists):
+    from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
+    from tests.test_artifact_preview_sessions import FakeSandboxAdapter
+
+    storage[1][0] = datetime.now(UTC)
+    store = _store(storage)
+    adapter = FakeSandboxAdapter()
+    manager = ArtifactPreviewSessionManager(provider_resolver=lambda: ("docker", adapter), store=store)
+    other_worker = ArtifactPreviewSessionManager(provider_resolver=lambda: ("docker", adapter), store=_store(storage))
+    state = await manager.create_or_reuse("receipt-failure", app_id="host", user_id="owner", target_app_id="target", build_registry_id="build")
+    await manager.sync(state.sandbox_id, [{"path": "app.json", "content": '{"appId":"target"}'}], [])
+    await manager.start(state.sandbox_id)
+    original_save = store.save
+
+    async def failing_save(sandbox_id, payload, operation_token):
+        if failure_persists or payload["status"] != "error":
+            raise RuntimeError("metadata receipt unavailable")
+        return await original_save(sandbox_id, payload, operation_token)
+
+    monkeypatch.setattr(store, "save", failing_save)
+    with pytest.raises(RuntimeError, match="receipt unavailable"):
+        await manager.sync(state.sandbox_id, [{"path": "brand/note.txt", "content": "remote changed"}], [])
+    writes = [kwargs for name, kwargs in adapter.calls if name == "write_files"]
+    assert writes[-1]["files"] == {"app/brand/note.txt": "remote changed"}
+    snapshot = await store.get(state.sandbox_id)
+    if failure_persists:
+        assert snapshot["operation"] is not None
+        with pytest.raises(PreviewOperationBusy):
+            await other_worker.start(state.sandbox_id)
+        storage[1][0] += timedelta(seconds=manager._lease_seconds + 1)
+        with pytest.raises(PreviewRecoveryRequired):
+            await other_worker.start(state.sandbox_id)
+    else:
+        assert snapshot["status"] == "error" and snapshot["session_id"] is None
+        assert snapshot["operation"] is None
+        assert (await other_worker.start(state.sandbox_id)).status == "error"
+    await other_worker.stop(state.sandbox_id)
+    assert await store.get(state.sandbox_id) is None

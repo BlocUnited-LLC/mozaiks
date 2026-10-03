@@ -15,6 +15,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   let failStart = false;
   let delayedStart = null;
   let delayNextStart = false;
+  let previousExpired = false;
   let previewUrl;
   const bundle = await build({
     stdin: { resolveDir: shell, loader: 'jsx', contents: `
@@ -34,6 +35,8 @@ test('draft preview preserves workspace branding, opens separately, and follows 
             sandboxSyncing={preview.syncing}
             sandboxError={preview.sandboxError}
             onStartPreview={() => preview.syncAndRestart({'app.json':'{}'})}
+            onStopPreview={preview.sandboxId ? preview.stopPreview : null}
+            sandboxStopping={preview.stopping}
             canStartPreview
           />
           <button onClick={() => setVersion(version + 1)}>Next version</button>
@@ -67,6 +70,9 @@ test('draft preview preserves workspace branding, opens separately, and follows 
     else if (req.url.endsWith('/start')) {
       const finish = () => res.end(JSON.stringify(failStart ? {status:'error',previewUrl:null,message:'Backend startup failed'} : {status:'running',previewUrl}));
       if (delayNextStart) { delayNextStart = false; delayedStart = finish; } else finish();
+    } else if (req.url.endsWith('/stop') && previousExpired) {
+      res.statusCode = 404;
+      res.end('{"detail":"Sandbox not found"}');
     } else if (req.url.endsWith('/status')) res.end(JSON.stringify({status:'running',previewUrl}));
     else res.end('{"ok":true}');
   });
@@ -123,6 +129,20 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
   await expect.poll(async () => (await state()).status).toBe('running');
   assert.ok(requests.includes('/api/artifacts/artifact-2/sandbox?build_registry_id=registry-a'));
+  assert.ok(requests.includes('/api/sandbox/sandbox-artifact-1/stop'), 'Changing saved versions releases the previous preview before allocating another');
+  previousExpired = true;
+  await page.getByRole('button', {name:'Next version',exact:true}).click();
+  await expect(page.getByLabel('Version')).toHaveText('3');
+  await page.getByRole('button', {name:'Start draft preview',exact:true}).click();
+  await expect.poll(async () => (await state()).status).toBe('running');
+  assert.ok(requests.includes('/api/artifacts/artifact-3/sandbox?build_registry_id=registry-a'), 'An expired previous preview does not block another saved version');
+  previousExpired = false;
+  await page.getByRole('button', {name:'Stop preview',exact:true}).click();
+  await expect.poll(async () => (await state()).status).toBe(null);
+  await expect(page.locator('iframe')).toHaveCount(0);
+  await expect(page.getByRole('link', {name:'Open draft preview',exact:true})).toHaveCount(0);
+  assert.ok(requests.includes('/api/sandbox/sandbox-artifact-3/stop'));
+  await expect(page.getByRole('button', {name:'Start draft preview',exact:true})).toBeVisible();
 });
 
 test('standalone shell identifies drafts through loading and navigation without blocking app controls', async (t) => {

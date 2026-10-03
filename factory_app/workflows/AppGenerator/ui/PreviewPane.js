@@ -15,6 +15,8 @@ const PreviewPane = ({
   config = {},
   onStartPreview = null,
   canStartPreview = false,
+  onStopPreview = null,
+  sandboxStopping = false,
 }) => {
   const previewCfg = config?.artifacts?.['e2b-preview'] || {};
   const [iframeKey, setIframeKey] = useState(0);
@@ -39,6 +41,16 @@ const PreviewPane = ({
   }, []);
 
   const isRestarting = sandboxSyncing || sandboxStatus === 'starting';
+  const stopControl = onStopPreview && (
+    <button
+      type="button"
+      onClick={onStopPreview}
+      disabled={sandboxSyncing || sandboxStopping}
+      className="inline-flex items-center px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 text-xs text-[var(--color-text-secondary)]"
+    >
+      {sandboxStopping ? 'Stopping preview…' : 'Stop preview'}
+    </button>
+  );
   const previewIdentity = (
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
@@ -85,6 +97,7 @@ const PreviewPane = ({
         {sandboxError && (
           <div className="mt-2 text-xs text-red-300">{sandboxError}</div>
         )}
+        {stopControl && <div className="mt-2">{stopControl}</div>}
       </div>
     );
   }
@@ -94,6 +107,7 @@ const PreviewPane = ({
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-black/40 border-b border-white/10">
         {previewIdentity}
         <div className="flex flex-wrap items-center gap-2">
+          {stopControl}
           {onStartPreview && canStartPreview && (
             <button
               type="button"

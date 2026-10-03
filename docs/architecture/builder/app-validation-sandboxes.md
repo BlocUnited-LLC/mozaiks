@@ -83,6 +83,11 @@ their resource environment; preview environment overrides cannot turn it off.
 The indicator uses a neutral style and does not intercept clicks. Normal app
 and management launches do not display it.
 
+**Stop preview** confirms sandbox teardown and releases its capacity. Starting
+a different saved version from the same workbench stops its previous preview
+first. Leaving the workspace alone does not stop a preview opened separately;
+its absolute lifetime still applies.
+
 App Zero follows the same rule: its preview can share the Mozaiks logo while
 the draft indicator identifies the separate runtime. Its own admin pages do
 not serve as a return link to the original build workspace. Existing sandbox
@@ -230,9 +235,10 @@ One-shot validation always stops its sandbox and clears `preview_url`; its
 result is not an interactive preview. `sandbox_terminated` records confirmed
 cleanup. Unconfirmed cleanup fails validation rather than reporting success.
 Interactive artifact previews are owned separately by Studio. Failed starts
-stop immediately, expired sessions are swept every 15 seconds, and graceful
-host shutdown attempts to stop every owned preview. Provider outages retain
-session identity for cleanup retries; the provider-side deadline is the final
+stop immediately and expired sessions are swept every 15 seconds. Graceful
+worker shutdown closes its status sockets and preserves active previews for
+another worker to recover. Provider outages retain durable session identity
+for cleanup retries; the provider-side deadline is the final
 backstop after a process crash. Polling and normal file/command operations do
 not renew the E2B deadline. Supervisor launch allows only the exact
 provider-published hostname via Vite's
@@ -240,12 +246,51 @@ provider-published hostname via Vite's
 subdomains. Explicit `E2B_TIMEOUT` caps one-shot validation even when a tool
 requests a longer timeout.
 
-`SANDBOX_MAX_SESSIONS` and `SANDBOX_MAX_OWNER_SESSIONS` limit concurrent
-artifact previews before allocation. Zero means unlimited for local operators.
-Exhaustion returns HTTP `429` with `Retry-After: 15`. These limits and ownership
-records are process-local, not distributed quotas: use one Studio worker and
-one replica until ownership and admission have a shared durable implementation.
-They do not impose a billing budget or concurrency cap on one-shot validation.
+`MongoPreviewStore` owns immutable host/user/artifact/build/target bindings in
+the framework system database. `PreviewCoordination` holds bounded admission
+reservations; `PreviewSessions` holds provider IDs, status, operation leases,
+and synced manifest/path metadata. File contents and environment credentials
+are not copied into these records. Admission uses an atomic compare-and-swap
+on one bounded coordinator document, so standalone MongoDB is supported.
+MongoDB failure rejects new allocation; there is no process-local fallback.
+
+`SANDBOX_MAX_SESSIONS` and `SANDBOX_MAX_OWNER_SESSIONS` apply across workers
+sharing that database. A bounded FIFO queue waits up to
+`SANDBOX_QUEUE_TIMEOUT_SECONDS`; it skips owners already at their limit so
+they cannot block other owners. `SANDBOX_MAX_PARALLEL_CREATES` bounds provider
+allocation calls. Runtime installation/start calls remain bounded by total
+active sessions, not that allocation limit. Exhaustion returns HTTP `429`
+with `Retry-After: 15`; an operation already in progress returns `409` with
+`Retry-After: 2`. The create request waits for its queue turn; no detached
+workflow or agent run is created. Queued requests abandoned by a crashed
+worker expire, and retrying the same artifact reuses the shared reservation.
+
+All workers must agree on limits and provider settings. Limits are positive;
+replace former zero/unlimited values before upgrading. Capacity can be
+reconfigured after reservations drain. An unconfirmed remote allocation
+retains its reservation through the provider lifetime plus the bounded
+allocation allowance. Failed cleanup never silently frees capacity. These
+limits cover interactive artifact previews; one-shot validation and hosted
+billing budgets retain their separate owners.
+
+For the first upgrade from process-local preview tracking, stop existing
+previews and upgrade all Studio workers before relying on shared admission.
+Old in-memory session records cannot be imported, and older workers do not
+participate in the shared limits. Subsequent worker restarts preserve sessions
+created with the durable store.
+
+Sync, start, health checks, and stop acquire a renewed per-preview lease.
+State writes require the current token and an unexpired lease. An interrupted
+operation requires teardown before another mutation; a successor cannot
+resume a partially written bundle. Status health checks are coalesced across
+workers for ten seconds. WebSocket status observes durable state without
+issuing a provider health call per socket. Rolling workers may reconnect to
+an E2B session by its persisted provider ID. Local Docker workers must share
+the same daemon; a localhost preview URL is only useful on that machine.
+
+This enables shared preview coordination, not an end-to-end capacity claim
+for the whole product. Exercise the actual deployment's authentication,
+artifact storage, provider limits, and expected traffic before broad rollout.
 
 - The validation result (status, strategy, errors, trimmed build output,
   `sandbox_session_id`, `sandbox_provider`, `preview_url`) lands in workflow
@@ -269,8 +314,12 @@ They do not impose a billing budget or concurrency cap on one-shot validation.
 | `DOCKER_SANDBOX_IMAGE` | `mozaiks-sandbox:local` | locally built Docker adapter image |
 | `DOCKER_SANDBOX_TIMEOUT` | `300` | docker container lifetime (seconds) |
 | `SANDBOX_TTL_MINUTES` | `30` | artifact preview-session TTL (also the e2b kill deadline) |
-| `SANDBOX_MAX_SESSIONS` | `0` | process-local concurrent artifact preview limit; zero is unlimited |
-| `SANDBOX_MAX_OWNER_SESSIONS` | `0` | concurrent previews per host app/user; zero is unlimited |
+| `SANDBOX_MAX_SESSIONS` | `20` | shared active artifact preview limit, including uncertain allocations |
+| `SANDBOX_MAX_OWNER_SESSIONS` | `2` | shared active previews per host app/user |
+| `SANDBOX_MAX_PENDING` | `20` | shared pending admission queue bound |
+| `SANDBOX_MAX_PARALLEL_CREATES` | `4` | simultaneous provider allocation calls |
+| `SANDBOX_QUEUE_TIMEOUT_SECONDS` | `15` | maximum wait for an admission turn |
+| `SANDBOX_OPERATION_LEASE_SECONDS` | `60` | renewed mutation lease; expired operations require teardown |
 | `SANDBOX_TEMPLATE` | provider default | artifact preview-session e2b template |
 | `MOZAIKS_PREVIEW_PROVIDER` | auto | `docker` (default) or explicit `e2b`; a key alone never selects E2B |
 | `SANDBOX_WORKDIR` | `/home/user/app` | e2b workspace root; Docker uses `/workspace` |

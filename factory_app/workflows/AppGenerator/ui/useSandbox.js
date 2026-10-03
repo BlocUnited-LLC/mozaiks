@@ -8,8 +8,10 @@ export function useSandbox(artifactId, buildRegistryId) {
   const [livePreviewUrl, setLivePreviewUrl] = useState(null);
   const [sandboxError, setSandboxError] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const generation = useRef(0);
   const inFlight = useRef(false);
+  const lastSession = useRef(null);
 
   useEffect(() => {
     generation.current += 1;
@@ -19,6 +21,7 @@ export function useSandbox(artifactId, buildRegistryId) {
     setLivePreviewUrl(null);
     setSandboxError(null);
     setSyncing(false);
+    setStopping(false);
     return () => { generation.current += 1; };
   }, [artifactId, buildRegistryId]);
 
@@ -79,19 +82,26 @@ export function useSandbox(artifactId, buildRegistryId) {
     setSyncing(true);
     applyStatus({ status: 'starting' });
 
-    async function post(url, body) {
+    async function post(url, body, allowMissing = false) {
       const response = await studioFetch(url, {
         method: 'POST',
         ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || `Preview request failed (${response.status})`);
+      if (!response.ok && !(allowMissing && response.status === 404)) throw new Error(result.detail || `Preview request failed (${response.status})`);
       return result;
     }
 
     try {
+      const previous = lastSession.current;
+      if (previous && (previous.artifactId !== artifactId || previous.buildRegistryId !== buildRegistryId)) {
+        await post(`/api/sandbox/${encodeURIComponent(previous.sandboxId)}/stop`, null, true);
+        if (lastSession.current === previous) lastSession.current = null;
+        if (!isCurrent()) return;
+      }
       const query = `?build_registry_id=${encodeURIComponent(buildRegistryId)}`;
       const { sandboxId: sid } = await post(`/api/artifacts/${encodeURIComponent(artifactId)}/sandbox${query}`);
+      lastSession.current = { sandboxId: sid, artifactId, buildRegistryId };
       if (!isCurrent()) return;
       setSandboxId(sid);
       await post(`/api/sandbox/${encodeURIComponent(sid)}/sync`, {
@@ -110,5 +120,33 @@ export function useSandbox(artifactId, buildRegistryId) {
     }
   }, [artifactId, buildRegistryId, applyStatus]);
 
-  return { sandboxId, sandboxStatus, livePreviewUrl, sandboxError, syncing, syncAndRestart };
+  const stopPreview = useCallback(async () => {
+    if (!sandboxId || inFlight.current) return;
+    const currentGeneration = generation.current;
+    const isCurrent = () => generation.current === currentGeneration;
+    inFlight.current = true;
+    setStopping(true);
+    try {
+      const response = await studioFetch(`/api/sandbox/${encodeURIComponent(sandboxId)}/stop`, { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok && response.status !== 404) throw new Error(result.detail || 'Preview could not be stopped');
+      if (lastSession.current?.sandboxId === sandboxId) lastSession.current = null;
+      if (isCurrent()) {
+        generation.current += 1;
+        setSandboxId(null);
+        applyStatus({ status: null });
+        setStopping(false);
+        inFlight.current = false;
+      }
+    } catch (error) {
+      if (isCurrent()) setSandboxError(error.message || 'Preview could not be stopped');
+    } finally {
+      if (isCurrent()) {
+        setStopping(false);
+        inFlight.current = false;
+      }
+    }
+  }, [sandboxId, applyStatus]);
+
+  return { sandboxId, sandboxStatus, livePreviewUrl, sandboxError, syncing, stopping, syncAndRestart, stopPreview };
 }
