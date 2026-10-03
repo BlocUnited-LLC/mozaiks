@@ -391,18 +391,22 @@ agents:
          App Features is for approved module and product expansion beyond AI, and
          that the user can add AI workflows first and build app features later.
 
-      8. Emit NEXT only when the recommended adoption path is confirmed.
+      8. Present the recommendation and approved scope for explicit human confirmation.
+         Only after the user confirms, call `record_adoption_plan` with the complete
+         AgentAugmentationPlan, including storage and adapter requirements. The tool
+         validates and records the routing choice and scope together. On success,
+         acknowledge briefly (for example, "Your adoption plan is recorded.").
+         If recording fails, explain the missing information and ask for corrections.
+         A conversational acknowledgment cannot record or complete the plan.
 
       CRITICAL FIRST-TURN RULE: Your FIRST response after entering this stage MUST
-      be a conversational adoption recommendation. Do NOT include NEXT in your first
-      response. NEXT may only appear as a standalone response AFTER the user has
-      read and explicitly responded to your recommendation.
+      be a conversational adoption recommendation. Do not record the plan until
+      the user has read and explicitly confirmed your recommendation and scope.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
-      Your output at each turn MUST be exactly ONE of:
-      - A conversational response (string)
-      - EXACTLY `NEXT` (uppercase, no extra text) when the adoption plan is confirmed
+      Respond conversationally. After explicit user confirmation, call the plan
+      recording tool, then briefly acknowledge success. Do not emit NEXT.
   max_consecutive_auto_reply: 1
   structured_outputs_required: false
 
@@ -526,18 +530,20 @@ agents:
       9. Do not implement code. Do not name specific provider credentials.
          Do not reference proprietary app logic. This is a design brief, not code.
 
-      10. Confirm your decomposition with the user, invite corrections, then emit NEXT.
+      10. Present the decomposition and invite corrections. Only after explicit user
+          confirmation, call `record_module_decomposition` with the complete
+          ModuleDecompositionPlan. Its adoption level must match the recorded
+          adoption plan. On success, briefly acknowledge that the decomposition
+          is recorded. On failure, request the missing information or correction.
 
       CRITICAL FIRST-TURN RULE: Your FIRST response after entering this stage MUST
-      be a conversational decomposition plan. Do NOT include NEXT in your first
-      response. NEXT may only appear as a standalone response AFTER the user has
-      read and explicitly responded to your decomposition plan.
+      be a conversational decomposition plan. Do not record it until the user has
+      read and explicitly confirmed your decomposition plan.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
-      Your output at each turn MUST be exactly ONE of:
-      - A conversational response presenting the decomposition plan
-      - EXACTLY `NEXT` (uppercase, no extra text) when the decomposition is confirmed
+      Respond conversationally. After explicit user confirmation, call the
+      decomposition recording tool, then briefly acknowledge success. Do not emit NEXT.
   max_consecutive_auto_reply: 1
   structured_outputs_required: false
 
@@ -567,7 +573,7 @@ agents:
       - capability map: `capabilities`, `api_surface`, `api_docs_available`,
         `auth_model`, `key_entities`, `has_existing_integrations`,
         `service_surfaces`, `route_surfaces`, `agent_ready_capabilities`
-      - adoption plan: `adoption_level`, `migration_complexity`, `ui_surface_preference`,
+      - recorded adoption plan: `agent_augmentation_plan`, `adoption_level`, `migration_complexity`, `ui_surface_preference`,
         `ai_accessible_capabilities`, `auth_delegation_model`, `initial_workflows`,
         `ecosystem_bindings`, `repo_access_willingness`, `adoption_rationale`,
         `theme_adaptation_strategy`, `embed_theme_ready`
@@ -616,12 +622,10 @@ agents:
            payments, ✉ for messaging, 📊 for analytics, 🤖 for AI, 🏪 for marketplace, 🚚
            for logistics, 🖼 for media. Do not default to generic symbols like ◈.
 
-      6. `agent_augmentation_plan` must be a real `AgentAugmentationPlan` that recommends the first realistic Mozaiks adoption step.
-         - Populate `migration_complexity` from context.
-         - Populate `storage_migration_required` from context.
-         - Populate `new_adapters_required` from context when connectors with mozaiks_adapter_exists=false are present.
-         - Include `theme_adaptation_strategy` and `embed_theme_ready`.
-         - Do not assume a full rewrite unless the evidence explicitly demands it.
+      6. Copy the recorded `agent_augmentation_plan`, including its adoption level
+         and approved capability/workflow/module scope. Do not choose a new path
+         or widen the user's confirmed scope. The save tool rejects a conflicting
+         adoption level and preserves the recorded plan in the final artifact.
 
       7. Do not include `module_decomposition_plan` in the final artifact. It is
          workflow-local evidence consumed by app-context mapping, not a

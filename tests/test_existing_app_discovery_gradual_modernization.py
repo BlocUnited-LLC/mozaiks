@@ -292,44 +292,11 @@ def _make_save_module():
 
 
 def _fake_decomposition_plan() -> dict:
-    return {
-        "proposed_modules": [
-            {
-                "module_id": "dns_zone_manager",
-                "label": "DNS Zone Manager",
-                "priority": "p1_critical",
-                "actions": ["list_zones", "add_record", "remove_record", "run_health_check"],
-                "emits": ["infra.dns_zone_manager.record.added"],
-                "mongo_collections": ["dns_zones"],
-                "connector_dependencies": ["cloudflare"],
-            }
-        ],
-        "proposed_workflows": [
-            {
-                "workflow_id": "DnsProviderMigration",
-                "priority": "p1_critical",
-                "module_calls": ["dns_zone_manager.list_zones", "dns_zone_manager.add_record"],
-            }
-        ],
-        "proposed_pages": [
-            {
-                "page_id": "dns_zone_list",
-                "page_type": "declarative_yaml",
-                "route": "/admin/dns/zones",
-                "module_bindings": ["dns_zone_manager"],
-            }
-        ],
-        "proposed_adapters": [
-            {
-                "provider_id": "cloudflare",
-                "adapter_ownership": "app_specific_adapter",
-                "secret_requirements": ["CLOUDFLARE_API_TOKEN"],
-            }
-        ],
-        "persistence_migration": "File-based zone store → dns_zones MongoDB collection owned by dns_zone_manager.",
-        "security_migration": "No-auth Express → platform Keycloak JWT with tenant scoping.",
-        "implementation_phases": ["phase_1_dns_module", "phase_2_migration_workflow"],
-    }
+    from tests.test_existing_app_discovery_app_context_persistence import _decomposition_evidence
+
+    plan = _decomposition_evidence()
+    plan["migration_complexity"] = "full_rewrite"
+    return plan
 
 
 def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persistence(tmp_path, monkeypatch) -> None:
@@ -414,7 +381,18 @@ def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persis
         },
     )
 
+    from factory_app.workflows.ExistingAppDiscovery.tools.record_discovery_plans import (
+        record_adoption_plan,
+        record_module_decomposition,
+    )
+
     context.update(factory_context())
+    context.update(identity_complete=True, capabilities_complete=True)
+    approved = context["structured_output"]["agent_augmentation_plan"]
+    approved["repo_access_willingness"] = "now"
+    record_adoption_plan(approved, context)
+    if approved["adoption_level"] == "gradual_modernization":
+        record_module_decomposition(plan, context)
     try:
         result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
     finally:
@@ -426,7 +404,7 @@ def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persis
     written = tmp_path / "existing_app_discovery" / "chat_gradual_001" / "module_decomposition_plan.json"
     assert not written.exists()
 
-    assert context["module_decomposition_plan"] == json.dumps(plan)
+    assert json.loads(context["module_decomposition_plan"]) == plan
     assert "module_decomposition_plan" not in context["existing_app_discovery_artifact"]
 
     # Check UI payload has new fields
@@ -508,7 +486,15 @@ def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path, monkeypatch) -
         },
     )
 
+    from factory_app.workflows.ExistingAppDiscovery.tools.record_discovery_plans import (
+        record_adoption_plan,
+    )
+
     context.update(factory_context())
+    context.update(identity_complete=True, capabilities_complete=True)
+    approved = context["structured_output"]["agent_augmentation_plan"]
+    approved["repo_access_willingness"] = "now"
+    record_adoption_plan(approved, context)
     try:
         result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
     finally:

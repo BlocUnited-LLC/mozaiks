@@ -625,6 +625,26 @@ must remain usable during additive delivery work. Any plan-authority migration
 that intentionally changes mode availability needs its own accepted cutover
 decision; this roadmap does not silently authorize that change.
 
+### M0 implementation status
+
+[PR #809](https://github.com/BlocUnited-LLC/mozaiks/pull/809) implements the first
+reliability slice: truthful refinement outcomes, approved file scope enforcement,
+required validation/export gates, saved-draft review, and discovery continuation
+through recorded plans and deterministic artifact-save outcomes. It removes unused
+settings and obsolete success-reporting branches while preserving the existing
+AG2, artifact, and promotion owners.
+
+The implementation includes real backend/browser checks for planned, failed, and
+validated refinement candidates, plus tests of discovery's four adoption paths.
+Controlled coding-provider output in those browser checks is not live generation
+acceptance. Full brownfield discovery and the exact OSS/App Zero release pair
+remain separate evidence gates. See the
+[refinement boundary inventory](../architecture/workflows/refinement-harness-architecture.md)
+for remaining lifecycle limits and consolidation work.
+
+M1 through M6 remain future milestones. This change does not enable mobile,
+games, model training, external coding providers, or production scale claims.
+
 ### Required acceptance matrix
 
 | Reference scenario | Minimum proof |

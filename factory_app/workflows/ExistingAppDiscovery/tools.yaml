@@ -75,6 +75,13 @@ tools:
   tool_type: Agent_Tool
   auto_tool_call: false
 - agent: IntegrationPlannerAgent
+  file: record_discovery_plans.py
+  function: record_adoption_plan
+  description: >
+    Record the complete AgentAugmentationPlan after the user explicitly confirms the recommendation and scope. This tool validates the plan and owns adoption routing state.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: IntegrationPlannerAgent
   file: source_context_retrieval.py
   function: get_preloaded_app_intelligence
   description: >
@@ -96,6 +103,13 @@ tools:
   description: >
     Read one indexed source file when adoption planning depends on exact code
     evidence.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ModuleDecomposerAgent
+  file: record_discovery_plans.py
+  function: record_module_decomposition
+  description: >
+    Record the complete ModuleDecompositionPlan after user confirmation. The plan must match the recorded adoption choice; it remains workflow-local evidence.
   tool_type: Agent_Tool
   auto_tool_call: false
 - agent: ModuleDecomposerAgent

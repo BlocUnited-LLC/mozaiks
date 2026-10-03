@@ -74,23 +74,49 @@ class _FakeArtifactStore:
         return artifact
 
 
-def _decomposition_evidence() -> dict:
+def _decomposition_evidence(adoption_level="gradual_modernization") -> dict:
     return {
+        "adoption_level": adoption_level,
+        "migration_complexity": "moderate",
+        "source_app_summary": "Internal work-order operations app.",
+        "proposed_workflows": [],
+        "persistence_migration": "Review work-order storage before changes.",
+        "security_migration": "Preserve OIDC and tenant boundaries.",
+        "risks": [],
+        "unresolved_questions": [],
         "proposed_modules": [
             {
                 "module_id": "work_order_manager",
+                "purpose": "Own reviewed work-order operations.",
+                "notes": None,
+                "source_capabilities": ["work_order_triage"],
                 "source_files": ["src/work_orders/service.py"],
+                "proposed_actions": [],
+                "emitted_events": [],
+                "reactions": [],
+                "persistence_entities": ["work_orders"],
+                "external_connectors": [],
+                "priority": "p1_critical",
             }
         ],
         "proposed_pages": [
             {
                 "page_id": "work_order_queue",
+                "label": "Work orders",
+                "page_type": "admin_panel",
+                "purpose": "Review the work-order queue.",
+                "module_bindings": ["work_order_manager"],
+                "priority": "p1_critical",
                 "route": "/work-orders",
             }
         ],
         "proposed_adapters": [
             {
                 "provider_id": "email_gateway",
+                "provider_type": "email",
+                "ownership": "app_specific_adapter",
+                "source_files": [],
+                "priority": "p3_useful",
                 "secret_requirements": ["EMAIL_API_KEY"],
             }
         ],
@@ -159,6 +185,7 @@ def _discovery_output() -> dict:
         ],
         "agent_augmentation_plan": {
             "adoption_level": "gradual_modernization",
+            "repo_access_willingness": "now",
             "migration_complexity": "moderate",
             "adoption_rationale": "Move selected operations into reviewed owned modules over time.",
             "storage_migration_required": True,
@@ -231,6 +258,12 @@ def _context() -> dict:
             "warnings": [],
             "metadata": {},
         },
+        "identity_complete": True,
+        "capabilities_complete": True,
+        "plan_complete": True,
+        "adoption_level": "gradual_modernization",
+        "agent_augmentation_plan": _discovery_output()["agent_augmentation_plan"],
+        "decomposition_complete": True,
         "module_decomposition_plan": json.dumps(_decomposition_evidence()),
         "structured_output": _discovery_output(),
     }
@@ -416,6 +449,29 @@ def test_failed_save_does_not_publish_new_current_context(monkeypatch, failure) 
     assert context["app_context_version_artifact_version_id"] == "prior-version"
     assert context["app_context_version"] == {"context_version_id": "prior-context"}
     assert all(record.lifecycle_status is ArtifactLifecycleStatus.DRAFT for record in store.versions.values())
+
+
+def test_assembly_preserves_recorded_scope_without_comparing_descriptive_text(monkeypatch) -> None:
+    context = _context()
+    approved = context["agent_augmentation_plan"]
+    context["structured_output"]["agent_augmentation_plan"].update(
+        adoption_rationale="A new phrasing from assembly.",
+        ai_accessible_capabilities=["unapproved_admin_write"],
+        initial_workflows=["UnapprovedExpansion"],
+        ecosystem_bindings=["unapproved_payments"],
+    )
+    store = _FakeArtifactStore()
+    monkeypatch.setattr(save_module, "get_artifact_store", lambda: store)
+
+    async def emit(**kwargs):
+        pass
+
+    monkeypatch.setattr(save_module, "emit_app_intelligence_enriched_overview_card", emit)
+    result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
+    assert result["success"] is True
+    assert context["agent_augmentation_plan"] == approved
+    assert context["existing_app_discovery_artifact"]["agent_augmentation_plan"] == approved
+    assert "UnapprovedExpansion" not in json.dumps([call["commit_metadata"] for call in store.calls])
 
 
 def test_existing_app_context_persistence_has_no_graph_database_or_sequence_dependency() -> None:
