@@ -253,6 +253,41 @@ async def test_attachment_receipt_survives_coordinator_write_interruption(storag
     assert (await _attach(store, entry))["phase"] == "active"
 
 
+async def test_metadata_delete_failure_does_not_retain_capacity_or_revive_preview(storage, monkeypatch):
+    from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
+    from tests.test_artifact_preview_sessions import FakeSandboxAdapter
+
+    storage[1][0] = datetime.now(UTC)
+    store = _store(storage)
+    adapter = FakeSandboxAdapter()
+    manager = ArtifactPreviewSessionManager(provider_resolver=lambda: ("docker", adapter), store=store)
+    manager._max_sessions = manager._max_owner_sessions = 1
+    identity = dict(app_id="host", user_id="owner", target_app_id="target", build_registry_id="build")
+    state = await manager.create_or_reuse("delete-outage", **identity)
+    collection = store._sessions_collection()
+    monkeypatch.setattr(store, "_sessions_collection", lambda: collection)
+    original_delete = collection.delete_one
+
+    async def unavailable(*args, **kwargs):
+        raise RuntimeError("metadata deletion unavailable")
+
+    monkeypatch.setattr(collection, "delete_one", unavailable)
+    with pytest.raises(RuntimeError, match="metadata deletion unavailable"):
+        await manager.stop(state.sandbox_id)
+    assert ("terminate_session", {"session_id": state.session_id}) in adapter.calls
+    assert await _store(storage).get(state.sandbox_id) is None
+    assert await _store(storage).list() == []
+    orphan = await collection.find_one({"_id": state.sandbox_id})
+    assert orphan["closing"] and orphan["state"]["preview_url"] is None
+    with pytest.raises(KeyError, match="not found"):
+        await manager.require_owner(state.sandbox_id, app_id="host", user_id="owner")
+    replacement = await manager.create_or_reuse("delete-outage", **identity)
+    assert replacement.sandbox_id != state.sandbox_id
+    assert sum(name == "create_session" for name, _ in adapter.calls) == 2
+    monkeypatch.setattr(collection, "delete_one", original_delete)
+    await manager.stop(replacement.sandbox_id)
+
+
 async def test_payload_is_bounded_metadata_and_authority_errors_propagate(storage):
     store = _store(storage)
     await store.ensure_indexes()

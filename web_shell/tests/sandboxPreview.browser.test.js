@@ -163,7 +163,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   await expect.poll(() => Boolean(delayedCreate)).toBe(true);
   await page.getByRole('button', {name:'Next version',exact:true}).click();
   await expect(page.getByLabel('Version')).toHaveText('4');
-  assert.equal((await state()).syncing, true);
+  await expect.poll(async () => (await state()).syncing).toBe(true);
   await expect(page.getByRole('button', {name:'Start draft preview',exact:true})).toHaveCount(0);
   await page.evaluate(() => window.tryPreview());
   assert.deepEqual(requests.slice(allocationRequests), ['/api/artifacts/artifact-3/sandbox?build_registry_id=registry-a']);
@@ -192,7 +192,7 @@ test('draft preview preserves workspace branding, opens separately, and follows 
   await page.getByRole('button', {name:'Stop preview',exact:true}).click();
   await expect.poll(() => Boolean(delayedStop)).toBe(true);
   await page.getByRole('button', {name:'Next version',exact:true}).click();
-  assert.equal((await state()).syncing, true);
+  await expect.poll(async () => (await state()).syncing).toBe(true);
   await expect(page.getByRole('button', {name:'Start draft preview',exact:true})).toHaveCount(0);
   delayedStop();
   await expect.poll(async () => (await state()).syncing).toBe(false);
