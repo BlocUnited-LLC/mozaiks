@@ -1,9 +1,15 @@
 """Prove an installed Mozaiks package boots a brand-new workspace, as a stranger would.
 
 Run it with the Python of the environment under test, from outside any checkout,
-against a throwaway MongoDB database::
+against a throwaway MongoDB server on a non-default port::
 
-    python scripts/smoke_installed_first_run.py --mongo-uri mongodb://localhost:27017/first_run_smoke
+    docker run --rm -d --name first-run-smoke-mongo -p 127.0.0.1:27018:27017 mongo:7
+    python scripts/smoke_installed_first_run.py --mongo-uri mongodb://127.0.0.1:27018
+
+The server must be a throwaway one, not the database name: the runtime ignores
+the database name in the URI and uses fixed database names (``mozaiksai`` and
+``mozaiks_apps``) on whatever server the URI points to. Against the default
+``localhost:27017`` this smoke writes into your local development databases.
 
 The release audit and CI pass the URI through ``MOZAIKS_FIRST_RUN_SMOKE_MONGO_URI``
 so it does not appear in a child process command line.
@@ -323,7 +329,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--mongo-uri",
         default=os.environ.get(MONGO_URI_ENV, ""),
-        help=f"a reachable, throwaway MongoDB database URI (or set {MONGO_URI_ENV})",
+        help=(
+            "URI of a reachable, throwaway MongoDB server on a non-default port "
+            f"(or set {MONGO_URI_ENV}). The runtime ignores the database name in the URI "
+            "and uses fixed database names on that server."
+        ),
     )
     parser.add_argument(
         "--work-dir",
@@ -340,7 +350,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if not args.mongo_uri:
-        parser.error(f"a throwaway MongoDB URI is required: pass --mongo-uri or set {MONGO_URI_ENV}")
+        parser.error(
+            f"the URI of a throwaway MongoDB server is required: pass --mongo-uri or set {MONGO_URI_ENV}"
+        )
 
     work_dir = (args.work_dir or Path(tempfile.mkdtemp(prefix="mozaiks-first-run-"))).resolve()
     checkout_root = Path(__file__).resolve().parents[1]

@@ -132,16 +132,32 @@ This project follows a practical pre-1.0 changelog format:
   unknown preset is a usage error (exit 2) that names the valid choices, and
   `app.json` is left untouched.
 - **`mozaiks info`, `mozaiks add` and `mozaiks studio` exit 1 when they
-  fail** (#305). A missing or unreadable `app.json`, an unknown preset, a
-  failed `app.json` write, and a workspace without a valid scaffold printed an
-  error but exited 0, so scripts and CI treated the failure as success. The
-  printed messages are unchanged.
+  fail** (#305). A missing or unreadable `app.json`, a failed `app.json`
+  write, and a workspace without a valid scaffold printed an error but exited
+  0, so scripts and CI treated the failure as success. The printed messages
+  are unchanged. An unknown preset does not reach these commands: the argument
+  parser rejects it with exit 2.
 
 - Fresh CLI scaffolds now boot from an installed wheel with a valid secret
   contract, stable app ID, and local Studio admin access. Local launchers bind
   loopback by default, report startup logs, fail fast on unreachable MongoDB,
   and route the frontend to the selected backend port. Release checks now
   smoke the installed app's first run.
+  The MongoDB startup error never prints credential text from `MONGO_URI`. It
+  shows the scheme, `***@` in place of credentials, the hosts and the database
+  name, never the query string, and only a placeholder when the URI is
+  malformed (for example an unescaped `@` or `/` in the password). The
+  driver's own message is repeated only for a failed connection to a
+  well-formed URI.
+  `mozaiks serve --listen <address>` and `mozaiks studio --open --listen
+  <address>` on a non-loopback address with authentication off now print a
+  warning to stderr before starting: the address, the anonymous user's roles
+  (`AUTH_ANON_ROLES`), any identity-provider settings that `AUTH_ENABLED=false`
+  overrides, and how to turn authentication on. The host still starts, and
+  `ENV=production` without authentication is still refused.
+  The release docs and scripts ask for a throwaway MongoDB server, on a
+  non-default port, for the first-run smoke: the runtime ignores the database
+  name in `MONGO_URI` and uses fixed database names on that server.
 
 - App fonts and colors declared in `theme_config.json` remain active when the
   standalone theme endpoint returns that same config. Only saved custom

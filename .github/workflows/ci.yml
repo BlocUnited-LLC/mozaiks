@@ -403,7 +403,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     services:
-      # Throwaway database for the installed first-run smoke below.
+      # Throwaway MongoDB server for the installed first-run smoke below.
       mongodb:
         image: mongo:7
         ports:

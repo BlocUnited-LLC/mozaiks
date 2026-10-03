@@ -7,6 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from mozaiks_cli.unauthenticated_bind import warn_if_unauthenticated_bind
 from mozaiks_cli.workspace import load_workspace_dotenv
 
 _HOST_MODULES = {
@@ -71,6 +72,9 @@ def run(args) -> None:
     print(f"Host     : {host}  ({listen}:{port})")
     if reload:
         print("Reload   : enabled")
+
+    # The host runs with this process's environment.
+    warn_if_unauthenticated_bind(listen, environ=os.environ, env_file=env_file)
 
     uvicorn.run(app_module, host=listen, port=port, reload=reload, log_level=log_level)
 

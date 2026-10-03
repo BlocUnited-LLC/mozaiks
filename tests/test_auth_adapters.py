@@ -2793,3 +2793,99 @@ class TestConstructorSignatureBinding:
         signature = inspect.signature(namespace["_probe"])
         ok, _ = reg._bind_invocation(signature, mode)
         assert ok is expected
+
+
+# ---------------------------------------------------------------------------
+# Resolving the environment of a host that runs in another process
+# ---------------------------------------------------------------------------
+
+
+class TestProspectiveEnvironmentResolution:
+    """``resolve_auth_config(environ=...)`` is the same parser over a mapping,
+    and ``unused_provider_settings`` names provider signals not in effect."""
+
+    def test_a_mapping_is_resolved_instead_of_the_process_environment(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        _set_matrix_env(
+            monkeypatch, {"AUTH_ENABLED": "true", "SUPABASE_URL": "https://x.supabase.co"}
+        )
+
+        prospective = resolve_auth_config(environ={"ENV": "development", "AUTH_ENABLED": "false"})
+
+        assert (prospective.provider, prospective.source) == ("none", "explicit_disable")
+        assert prospective.environment.name == "development"
+        assert prospective.settings["SUPABASE_URL"] == ""
+        assert resolve_auth_config().provider == "supabase"
+
+    @pytest.mark.parametrize(
+        ("environ", "message"),
+        [
+            ({"ENV": "production", "AUTH_ENABLED": "false"}, "not permitted in the 'production'"),
+            ({"ENV": "development", "ENVIRONMENT": "production"}, "Conflicting deployment environment"),
+            ({"AUTH_ENABLED": "flase"}, "Unrecognized AUTH_ENABLED"),
+            ({"AUTH_ENABLED": "true"}, "no authentication provider"),
+        ],
+    )
+    def test_a_mapping_is_held_to_the_same_fail_closed_rules(self, environ, message):
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        with pytest.raises(AuthError, match=message):
+            resolve_auth_config(environ=environ)
+
+    @pytest.mark.parametrize(
+        ("environ", "unused"),
+        [
+            ({"AUTH_ENABLED": "false"}, ()),
+            (
+                {"AUTH_ENABLED": "false", "KEYCLOAK_URL": "https://idp", "KEYCLOAK_REALM": "apps"},
+                ("KEYCLOAK_URL", "KEYCLOAK_REALM"),
+            ),
+            ({"AUTH_PROVIDER": "none", "SUPABASE_URL": "https://x.supabase.co"}, ("SUPABASE_URL",)),
+            # Half a provider signal selects nothing: demo mode, signal unused.
+            ({"AUTH_ISSUER": "https://idp"}, ("AUTH_ISSUER",)),
+            # Claim mappings and other provider tuning are not provider signals.
+            ({"AUTH_ENABLED": "false", "AUTH_ALGORITHMS": "RS256", "AUTH_AUDIENCE": "api"}, ()),
+            (
+                {
+                    "AUTH_ENABLED": "true",
+                    "KEYCLOAK_URL": "https://idp",
+                    "KEYCLOAK_REALM": "apps",
+                    "KEYCLOAK_CLIENT_ID": "api",
+                    "AUTH_ISSUER": "https://idp",
+                },
+                (),
+            ),
+        ],
+    )
+    def test_unused_provider_settings_names_signals_that_are_not_in_effect(self, environ, unused):
+        from mozaiksai.core.auth.adapters.registry import (
+            resolve_auth_config,
+            unused_provider_settings,
+        )
+
+        assert unused_provider_settings(resolve_auth_config(environ=environ)) == unused
+
+    def test_provider_signals_are_exactly_what_auto_detection_reads(self):
+        """Guards the signal list against drifting from the resolver."""
+        import mozaiksai.core.auth.adapters.registry as reg
+
+        audience = {"AUTH_AUDIENCE": "api", "KEYCLOAK_CLIENT_ID": "api"}
+        selecting = {
+            ("SUPABASE_URL",): "supabase",
+            ("KEYCLOAK_URL", "KEYCLOAK_REALM"): "keycloak",
+            ("AUTH_JWKS_URL", "AUTH_ISSUER"): "jwt",
+            ("MOZAIKS_OIDC_DISCOVERY_URL",): "jwt",
+            ("MOZAIKS_OIDC_AUTHORITY",): "jwt",
+        }
+        for names, provider in selecting.items():
+            signal = dict.fromkeys(names, "https://idp.example.invalid")
+            assert reg.resolve_auth_config(environ={**audience, **signal}).provider == provider
+            for dropped in names:
+                rest = {name: value for name, value in signal.items() if name != dropped}
+                assert reg.resolve_auth_config(environ={**audience, **rest}).provider == "none"
+
+        assert {name for names in selecting for name in names} == set(reg._PROVIDER_SIGNAL_ENV_VARS)
+        mode = set(reg._AUTH_MODE_ENV_VARS)
+        for name in set(reg._ALL_AUTH_ENV_VARS) - mode - set(reg._PROVIDER_SIGNAL_ENV_VARS):
+            assert reg.resolve_auth_config(environ={name: "60"}).provider == "none", name
