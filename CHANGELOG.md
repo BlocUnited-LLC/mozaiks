@@ -118,6 +118,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- `dispatch_module_action` called without an `app` no longer imports the
+  platform host as a side effect. On a serving runtime-only host that import
+  could never complete: every call failed with "Cannot add middleware after an
+  application has started" after writing platform state onto the live app. It
+  now reports "Module runtime is not available." there, and still dispatches
+  through the platform host whenever the process has composed one.
+
 - **`mozaiks add --preset <tier>` works** (#304). The command `mozaiks info`
   recommends always failed with "the following arguments are required:
   feature". `mozaiks add` now takes exactly one of a feature or
