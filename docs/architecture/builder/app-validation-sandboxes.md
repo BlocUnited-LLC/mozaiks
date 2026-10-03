@@ -279,6 +279,12 @@ Old in-memory session records cannot be imported, and older workers do not
 participate in the shared limits. Subsequent worker restarts preserve sessions
 created with the durable store.
 
+If deleting session metadata fails after admission removal, a closed metadata
+row can remain without an admission entry. It cannot revive a preview or
+consume capacity, but automated reconciliation of these orphan rows is not
+implemented. Monitor this collection before substantially increasing limits;
+repeated deletion failures can accumulate metadata.
+
 Sync, start, health checks, and stop acquire a renewed per-preview lease.
 State writes require the current token and an unexpired lease. An interrupted
 operation requires teardown before another mutation; a successor cannot
