@@ -13,6 +13,7 @@ import yaml
 
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
 from mozaiksai.core.ports.orchestration import RunStatus
@@ -182,6 +183,26 @@ def test_missing_auth_uses_only_canonical_scaffold_scopes(strategy):
     with pytest.raises(ValueError) as rejected:
         close_module_actions(_payload("admin"), app_build_plan=_plan(strategy))
     assert all(scope in str(rejected.value) for scope in ("openid", "profile", "email"))
+
+
+def test_scope_admission_and_auth_rendering_use_the_same_factory_override(tmp_path, monkeypatch):
+    relative = "build_context/webapp_builder/templates/config/auth.yaml"
+    document = yaml.safe_load((ROOT / "factory_app" / relative).read_text(encoding="utf-8").replace(
+        "{{AUTH_DEFAULT_ROUTE}}", "/",
+    ))
+    document["frontend"]["default_scopes"].append("tasks.view")
+    template = tmp_path / relative
+    template.parent.mkdir(parents=True)
+    template.write_text(yaml.safe_dump(document), encoding="utf-8")
+    monkeypatch.setenv("MOZAIKS_FACTORY_APP_PATH", str(tmp_path))
+    admitted = close_module_actions(_payload("tasks.view"), app_build_plan=_plan("basic-login"))
+    rendered = materialize_auth_scaffold({
+        "app.json": json.dumps({"authRequired": True}),
+        "ui/auth/authAdapter.js": "// Already admitted adapter",
+        "ui/route_manifest.json": json.dumps({"pages": []}),
+    })
+    assert _permissions(admitted) == ["tasks.view"]
+    assert "tasks.view" in yaml.safe_load(rendered[AUTH_PATH])["frontend"]["default_scopes"]
 
 
 @pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
