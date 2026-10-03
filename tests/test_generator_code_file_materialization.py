@@ -434,6 +434,7 @@ def test_extract_code_file_map_materializes_app_schema_output() -> None:
                 "app_name": "Support Operations",
                 "default_route": "/tickets",
                 "auth_strategy": "role-based",
+                "roles": ["support"],
             },
             "pages": [
                 {

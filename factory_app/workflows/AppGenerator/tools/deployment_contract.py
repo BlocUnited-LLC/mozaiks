@@ -833,10 +833,13 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
 
     env = _dict_or_empty(spec.get("environment"))
     required_env = _list_of_str(env.get("required_variables"))
+    optional_env = _list_of_str(env.get("optional_variables"))
     secret_env = _list_of_str(env.get("secret_variables"))
     public_env = _list_of_str(env.get("public_variables"))
     if not required_env:
         errors.append("environment.required_variables must not be empty")
+    if set(required_env) & set(optional_env):
+        errors.append("environment.required_variables and environment.optional_variables must not overlap")
     if set(secret_env) & set(public_env):
         errors.append("environment.secret_variables and environment.public_variables must not overlap")
 
@@ -866,16 +869,28 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
                     if not value or not _SECRET_NAME_RE.fullmatch(value):
                         errors.append(f"auth.{bucket}[{idx}] must be an uppercase env identifier")
             if auth.get("required"):
-                missing_auth_required = sorted(
-                    name for name in _auth_contract(
-                        auth_required=True, auth_provider=provider
-                    )["runtime_required_variables"] if name not in required_env
-                )
+                canonical_required = set(_auth_contract(
+                    auth_required=True, auth_provider=provider
+                )["runtime_required_variables"])
+                declared_required = set(_list_of_str(auth.get("runtime_required_variables")))
+                missing_auth_required = sorted(canonical_required - set(required_env))
                 if missing_auth_required:
                     errors.append(
                         "authenticated deployment specs must include runtime auth required variables: "
                         + ", ".join(missing_auth_required)
                     )
+                missing_auth_metadata = sorted(canonical_required - declared_required)
+                if missing_auth_metadata:
+                    errors.append(
+                        "auth.runtime_required_variables must include: "
+                        + ", ".join(missing_auth_metadata)
+                    )
+                if declared_required - set(required_env):
+                    errors.append("auth.runtime_required_variables must be in environment.required_variables")
+                if declared_required & set(_list_of_str(auth.get("runtime_optional_variables"))):
+                    errors.append("auth runtime required and optional variables must not overlap")
+            elif _list_of_str(auth.get("runtime_required_variables")):
+                errors.append("auth.runtime_required_variables must be empty when auth.required=false")
 
     image = spec.get("image") if isinstance(spec.get("image"), dict) else {}
     if not str(image.get("image_name") or "").strip():  # type: ignore[union-attr]
@@ -1046,8 +1061,21 @@ def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]
     if status not in {"pending", "valid", "invalid"}:
         errors.append("validation_status must be pending, valid, or invalid")
 
-    if not isinstance(manifest.get("deploy_target_spec"), dict):
+    deploy_target_spec = manifest.get("deploy_target_spec")
+    if not isinstance(deploy_target_spec, dict):
         errors.append("deploy_target_spec must be present")
+    else:
+        errors.extend(
+            f"deploy_target_spec.{error}"
+            for error in validate_deploy_target_spec(deploy_target_spec)
+        )
+        if auth != deploy_target_spec.get("auth"):
+            errors.append("auth must match deploy_target_spec.auth")
+        spec_environment = _dict_or_empty(deploy_target_spec.get("environment"))
+        if set(_list_of_str(manifest.get("required_env"))) != set(
+            _list_of_str(spec_environment.get("required_variables"))
+        ):
+            errors.append("required_env must match deploy_target_spec.environment.required_variables")
 
     normalized_ci_requirements = _normalize_ci_secret_requirements(ci_secret_requirements)
     if manifest.get("ci_workflow") is None:
@@ -1684,7 +1712,7 @@ def validate_generated_deployment_bundle(
     include_workflow: bool,
     include_readiness_workflow: bool | None = None,
 ) -> list[str]:
-    """Validate artifact presence and verify forbidden secret/provider markers are absent."""
+    """Validate generated deployment files against their manifest and secret rules."""
     errors: list[str] = []
     if not isinstance(artifacts, dict):
         return ["artifacts must be a dictionary"]
@@ -1729,8 +1757,39 @@ def validate_generated_deployment_bundle(
             parsed_manifest = json.loads(manifest_text)
             if isinstance(parsed_manifest, dict):
                 manifest_payload = parsed_manifest
+            else:
+                errors.append("deployment.manifest.json must contain a JSON object")
         except Exception:
             errors.append("deployment.manifest.json must contain valid JSON")
+    elif "deployment.manifest.json" in artifacts:
+        errors.append("deployment.manifest.json must contain a JSON object")
+
+    if manifest_payload is not None:
+        errors.extend(
+            f"deployment.manifest.json: {error}"
+            for error in validate_deployment_template_manifest(manifest_payload)
+        )
+        required_env = set(_list_of_str(manifest_payload.get("required_env")))
+        secret_env = set(_list_of_str(manifest_payload.get("secret_env")))
+        for env_path in _ENV_EXAMPLE_PATHS:
+            if env_path not in artifacts:
+                continue
+            assignments: dict[str, list[str]] = {}
+            for line in str(artifacts[env_path]).splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or "=" not in stripped:
+                    continue
+                name, value = stripped.split("=", 1)
+                assignments.setdefault(name.strip(), []).append(value.strip())
+            invalid_required = sorted(
+                name for name in required_env
+                if assignments.get(name) != ["" if name in secret_env else "<required>"]
+            )
+            if invalid_required:
+                errors.append(
+                    f"{env_path} must declare each required_env once with its required placeholder: "
+                    + ", ".join(invalid_required)
+                )
 
     if include_workflow and manifest_payload is not None:
         workflow_text = str(artifacts.get(".github/workflows/deploy.yml") or "")

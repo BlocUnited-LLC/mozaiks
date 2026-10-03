@@ -31,7 +31,7 @@ def build_app_build_plan_from_discovery(
 
     resolved_app_id = _slug(app_id or product_spec.get("app_id") or product_spec.get("app_name"), fallback="existing_app")
     resolved_app_name = _clean(app_name or product_spec.get("app_name") or resolved_app_id.replace("_", " ").title())
-    auth_strategy = "required" if _auth_required(product_spec) else "none"
+    auth_strategy = "basic-login" if _auth_required(product_spec) else "public"
     tasks = _build_tasks(modules, pages)
 
     return {
@@ -46,7 +46,7 @@ def build_app_build_plan_from_discovery(
         },
         "pages": pages,
         "entities": _entities(module_decomposition_plan, modules),
-        "roles": [{"id": "user", "label": "User"}],
+        "roles": ["user"] if auth_strategy != "public" else [],
         "auth_strategy": auth_strategy,
         "service_scope": list(modules),
         "frontend_scope": [str(page["name"]) for page in pages],

@@ -123,6 +123,17 @@ AppGenerator materializes the auth scaffold from assembled `app.json` before
 every validation request, including after user replies and repairs. This
 idempotent step does not depend on a separate agent turn.
 
+The build plan and app-schema manifest use the same auth choices:
+`public`, `basic-login`, `role-based`, or `third-party`. The three login
+choices use the shared OIDC scaffold; the operator configures the identity
+provider. `public` and `null` declare no login requirement, but a data contract
+with user or workspace owned collections still requires authentication.
+Unknown values, including the retired `none` label, fail before materialization.
+Public or undeclared auth cannot carry logical roles; declare a login strategy
+when roles are needed. The `role-based` strategy must declare at least one role.
+Use `public` for a public app. Local `AUTH_ENABLED=false` remains an explicit
+runtime setting and does not change the app's declared auth intent.
+
 Final bundle composition adds the shared login and callback entries to the normal
 route manifest after app-schema and auth-scaffold output are combined. Authored
 custom pages can occupy those routes. Validation requires each route to resolve

@@ -54,6 +54,25 @@ _MODULE_CONTRACT_OUTPUT_PATHS = {
     "runtime_extensions_yaml": "runtime_extensions.yaml",
 }
 
+_AUTH_STRATEGIES_REQUIRING_LOGIN = frozenset({"basic-login", "role-based", "third-party"})
+_AUTH_STRATEGIES = frozenset({"public", *_AUTH_STRATEGIES_REQUIRING_LOGIN})
+
+
+def auth_required_from_strategy(
+    value: Any, *, roles: Any = None, field: str = "manifest.auth_strategy"
+) -> bool:
+    """Validate the generated-app auth taxonomy before deriving authRequired."""
+    if value is not None and (not isinstance(value, str) or value not in _AUTH_STRATEGIES):
+        raise ValueError(
+            f"{field} must be public, basic-login, role-based, third-party, or null"
+        )
+    auth_required = value in _AUTH_STRATEGIES_REQUIRING_LOGIN
+    if not auth_required and roles:
+        raise ValueError(f"{field} cannot be public or null when roles are declared")
+    if value == "role-based" and not roles:
+        raise ValueError(f"{field} requires at least one role for role-based auth")
+    return auth_required
+
 
 def safe_relpath(raw: str) -> str | None:
     if not isinstance(raw, str):
@@ -116,12 +135,14 @@ def _materialize_app_schema_file_map(
     # Scoped page workers leave app identity and provenance to their existing owner.
     if manifest is not None:
         default_route = manifest.get("default_route") or "/"
-        auth_strategy = manifest.get("auth_strategy")
+        auth_required = auth_required_from_strategy(
+            manifest.get("auth_strategy"), roles=manifest.get("roles")
+        )
         app_json = {  # type: ignore[var-annotated]
             "appName": manifest.get("app_name") or manifest.get("name") or "Generated App",
             "startup": {"landing_spot": default_route},
             "targets": {"web": True, "mobile": False},
-            "authRequired": bool(auth_strategy and auth_strategy != "public"),
+            "authRequired": auth_required,
             "admins": [],
         }
         file_map["app.json"] = json.dumps(app_json, indent=2, ensure_ascii=False)

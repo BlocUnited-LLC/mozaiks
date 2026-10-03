@@ -203,7 +203,7 @@ def _build_plan(mozaikspay_pack: dict[str, Any]) -> dict[str, Any]:
             }
         ],
         "roles": ["user"],
-        "auth_strategy": "basic",
+        "auth_strategy": "basic-login",
         "service_scope": ["research"],
         "frontend_scope": ["research", "billing", "pricing", "usage"],
         "monetization_provider": "mozaiks_pay",

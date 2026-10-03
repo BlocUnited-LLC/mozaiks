@@ -18,10 +18,8 @@
       }
     ],
     "entities": [],
-    "roles": [
-      "user"
-    ],
-    "auth_strategy": "none",
+    "roles": [],
+    "auth_strategy": "public",
     "service_scope": [
       "documents"
     ],

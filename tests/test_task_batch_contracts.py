@@ -871,6 +871,7 @@ async def test_page_bundle_task_preserves_valid_worker_sections_and_plan_identit
                             "app_name": "Support",
                             "default_route": "/tickets",
                             "auth_strategy": "role-based",
+                            "roles": ["support"],
                         },
                         "pages": [
                             {

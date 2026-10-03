@@ -51,7 +51,10 @@ def _live_context() -> ContextVariablesBridge:
 
 
 def _plan() -> dict:
-    return deepcopy(_fixture()["AppBuildPlan"])
+    plan = deepcopy(_fixture()["AppBuildPlan"])
+    # Preserve the recorded WAL; replay its login intent using today's contract.
+    plan["auth_strategy"] = "basic-login"
+    return plan
 
 
 def _review(plan: dict) -> tuple[dict, ContextVariablesBridge]:

@@ -4,6 +4,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     _default_ci_secret_requirements,
     _render_workflow,
@@ -337,6 +339,92 @@ def test_authenticated_deployment_rejects_missing_audience_in_spec_and_manifest(
     )
     manifest["required_env"].remove("AUTH_AUDIENCE")
     assert any("AUTH_AUDIENCE" in error for error in validate_deployment_template_manifest(manifest))
+
+
+@pytest.mark.parametrize(
+    ("provider", "audience_env"),
+    [("jwt", "AUTH_AUDIENCE"), ("keycloak", "KEYCLOAK_CLIENT_ID")],
+)
+def test_deployment_bundle_rejects_missing_provider_audience(
+    provider: str, audience_env: str,
+) -> None:
+    artifacts = dict(generate_deployment_artifacts(
+        app_id="demo_app", auth_required=True, auth_provider=provider,
+    )["artifacts"])
+    manifest = json.loads(artifacts["deployment.manifest.json"])
+    manifest["required_env"].remove(audience_env)
+    artifacts["deployment.manifest.json"] = json.dumps(manifest)
+
+    errors = validate_generated_deployment_bundle(
+        artifacts, include_dockerfiles=True, include_workflow=True,
+    )
+    assert any(audience_env in error and "required_env" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("provider", "audience_env"),
+    [("jwt", "AUTH_AUDIENCE"), ("keycloak", "KEYCLOAK_CLIENT_ID")],
+)
+def test_deployment_bundle_rejects_optional_provider_audience_example(
+    provider: str, audience_env: str,
+) -> None:
+    artifacts = dict(generate_deployment_artifacts(
+        app_id="demo_app", auth_required=True, auth_provider=provider,
+    )["artifacts"])
+    artifacts[".env.staging.example"] = artifacts[".env.staging.example"].replace(
+        f"{audience_env}=<required>", f"{audience_env}=",
+    )
+
+    errors = validate_generated_deployment_bundle(
+        artifacts, include_dockerfiles=True, include_workflow=True,
+    )
+    assert any(
+        ".env.staging.example" in error and audience_env in error for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("provider", "audience_env"),
+    [("jwt", "AUTH_AUDIENCE"), ("keycloak", "KEYCLOAK_CLIENT_ID")],
+)
+def test_deployment_bundle_rejects_duplicate_provider_audience_example(
+    provider: str, audience_env: str,
+) -> None:
+    artifacts = dict(generate_deployment_artifacts(
+        app_id="demo_app", auth_required=True, auth_provider=provider,
+    )["artifacts"])
+    artifacts[".env.example"] += f"{audience_env}=\n"
+
+    errors = validate_generated_deployment_bundle(
+        artifacts, include_dockerfiles=True, include_workflow=True,
+    )
+    assert any(".env.example" in error and audience_env in error for error in errors)
+
+
+def test_deployment_manifest_rejects_conflicting_auth_metadata() -> None:
+    manifest = json.loads(generate_deployment_artifacts(
+        app_id="demo_app", auth_required=True,
+    )["artifacts"]["deployment.manifest.json"])
+    manifest["auth"]["provider"] = "custom_oidc"
+    assert "auth must match deploy_target_spec.auth" in validate_deployment_template_manifest(manifest)
+
+    manifest["auth"]["provider"] = "jwt"
+    manifest["deploy_target_spec"]["auth"]["runtime_required_variables"].remove(
+        "AUTH_AUDIENCE"
+    )
+    assert any(
+        "auth.runtime_required_variables must include: AUTH_AUDIENCE" in error
+        for error in validate_deployment_template_manifest(manifest)
+    )
+
+
+def test_deployment_bundle_accepts_public_and_custom_auth_provider() -> None:
+    for auth_required, provider in [(False, "jwt"), (True, "custom_oidc")]:
+        result = generate_deployment_artifacts(
+            app_id="demo_app", auth_required=auth_required, auth_provider=provider,
+        )
+        assert result["deploy_target_spec_errors"] == []
+        assert result["bundle_errors"] == []
 
 
 def test_generate_artifacts_accept_extra_capability_env_handles() -> None:

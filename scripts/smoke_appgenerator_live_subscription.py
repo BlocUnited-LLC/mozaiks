@@ -251,7 +251,7 @@ def _build_plan(tasks: list[dict[str, Any]]) -> dict[str, Any]:
         ],
         "entities": [{"name": "Report", "operations": ["read", "create"], "notes": None}],
         "roles": ["user"],
-        "auth_strategy": "basic",
+        "auth_strategy": "basic-login",
         "service_scope": ["reports"],
         "frontend_scope": ["reports", "usage"],
         "capability_packs": [

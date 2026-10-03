@@ -1140,6 +1140,15 @@ models:
           Task ids from build_tasks that are directly related to this decision.
           Empty when no specific tasks are affected (e.g. for a drop decision).
 
+  AppAuthStrategy:
+    type: literal
+    values:
+    - public
+    - basic-login
+    - role-based
+    - third-party
+    description: Provider-neutral auth intent. Public has no sign-in or roles; role-based requires at least one role.
+
   AppBuildPlan:
     type: model
     fields:
@@ -1166,13 +1175,13 @@ models:
       roles:
         type: optional_list
         items: str
-        description: User roles that influence auth or visibility.
+        description: User roles that influence auth or visibility. Empty for public or null auth; at least one for role-based auth.
       auth_strategy:
         type: union
         variants:
-        - str
+        - AppAuthStrategy
         - 'null'
-        description: Auth approach such as public, basic-login, role-based, or third-party auth.
+        description: Auth intent; public means no sign-in, null means not declared. Both require empty roles; role-based requires at least one role.
       service_scope:
         type: optional_list
         items: str
@@ -5420,13 +5429,13 @@ models:
       auth_strategy:
         type: union
         variants:
-        - str
+        - AppAuthStrategy
         - 'null'
-        description: "Auth approach: public | basic-login | role-based | third-party."
+        description: Auth intent; public means no sign-in, null means not declared. Both require empty roles; role-based requires at least one role.
       roles:
         type: optional_list
         items: str
-        description: All roles defined in the application.
+        description: All roles defined in the application. Empty for public or null auth; at least one for role-based auth.
       default_route:
         type: str
         description: Route to redirect to after login (e.g. /dashboard).

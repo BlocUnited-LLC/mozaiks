@@ -1464,38 +1464,35 @@ def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
 
 
 def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
-    """Require deploy-time JWT/OIDC contract metadata for authenticated apps."""
+    """Match app auth intent to deploy-time OIDC contract metadata."""
     try:
         required = _app_manifest_auth_required(files_map)
     except AppAuthContractError as exc:
         return [str(exc)]
-    if not required:
-        return []
-
     normalized_files = _normalized_files_map(files_map)
     errors: list[str] = []
 
-    env_example = normalized_files.get(".env.example", "")
-    required_env_handles = {
-        "AUTH_ENABLED",
-        "AUTH_PROVIDER",
-        "AUTH_AUDIENCE",
-        "MOZAIKS_OIDC_DISCOVERY_URL",
-        "MOZAIKS_OIDC_AUTHORITY",
-        "AUTH_ISSUER",
-        "AUTH_JWKS_URL",
-        "VITE_OIDC_CLIENT_ID",
-        "VITE_OIDC_REDIRECT_URI",
-    }
-    missing_env_handles = sorted(
-        name for name in required_env_handles if f"{name}=" not in env_example
-    )
-    if missing_env_handles:
-        errors.append(
-            "Authenticated generated apps must document provider-neutral OIDC/JWT "
-            "runtime and frontend env handles in .env.example: "
-            f"{missing_env_handles}."
+    if required:
+        env_example = normalized_files.get(".env.example", "")
+        required_env_handles = {
+            "AUTH_ENABLED",
+            "AUTH_PROVIDER",
+            "MOZAIKS_OIDC_DISCOVERY_URL",
+            "MOZAIKS_OIDC_AUTHORITY",
+            "AUTH_ISSUER",
+            "AUTH_JWKS_URL",
+            "VITE_OIDC_CLIENT_ID",
+            "VITE_OIDC_REDIRECT_URI",
+        }
+        missing_env_handles = sorted(
+            name for name in required_env_handles if f"{name}=" not in env_example
         )
+        if missing_env_handles:
+            errors.append(
+                "Authenticated generated apps must document provider-neutral OIDC/JWT "
+                "runtime and frontend env handles in .env.example: "
+                f"{missing_env_handles}."
+            )
 
     manifest_text = normalized_files.get("deployment.manifest.json", "")
     if manifest_text:
@@ -1512,20 +1509,15 @@ def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
             return errors
 
         auth = manifest.get("auth")
-        if not isinstance(auth, dict) or auth.get("required") is not True:
+        if required and (not isinstance(auth, dict) or auth.get("required") is not True):
             errors.append(
                 "Authenticated generated apps must carry auth.required=true in "
                 "deployment.manifest.json."
             )
-
-        required_env = {str(item) for item in manifest.get("required_env") or []}
-        missing_required_env = sorted(
-            name for name in ("AUTH_ENABLED", "AUTH_PROVIDER") if name not in required_env
-        )
-        if missing_required_env:
+        elif not required and isinstance(auth, dict) and auth.get("required") is True:
             errors.append(
-                "Authenticated generated apps must include runtime auth required_env entries "
-                f"in deployment.manifest.json: {missing_required_env}."
+                "Public generated apps must carry auth.required=false in "
+                "deployment.manifest.json."
             )
 
     return errors

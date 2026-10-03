@@ -71,11 +71,26 @@ internally declared app route/action/facade must not be missing.
 | Managed capability facade completeness | `scan_functional_generated_app` | Static | Added |
 | 501/not-implemented generated surfaces | `scan_functional_generated_app` | Static | Added to public facade |
 | Generated app host boot and declared HTTP page/module surfaces | Platform `TestClient` over deterministic CRUD bundle | Runtime / HTTP | Added |
+| Generated app JWT startup and request authentication | Platform `TestClient` over a materialized authenticated CRUD bundle with real signature and claim validation | Runtime / HTTP | Added |
 | Monetized SaaS app host boot and declared MozaiksPay-compatible billing/facade surfaces | Platform `TestClient` over deterministic SaaS bundle plus in-process compatible provider fake | Runtime / HTTP | Added |
 | Workflow/agent app catalog load, start, and module-action surfaces | Workflow manager plus platform `TestClient` over deterministic workflow bundle | Runtime / HTTP | Added |
 | Cross-archetype post-plan replay | Captured `AppBuildPlan` fixtures through the real deterministic AppGenerator task-batch/materialization path, bundle validation, functional scanner, `AppLoader`, and platform `TestClient` | Static / Runtime / HTTP | Added |
 | Brownfield post-discovery handoff | Captured `ExistingAppDiscovery` artifact plus module decomposition through deterministic AppBuildPlan projection, real AppGenerator materialization, validation, `AppLoader`, and platform `TestClient` | Static / Runtime / HTTP | Added |
 | AgentGenerator-to-AppGenerator handoff | Captured `WorkflowBundleBuilderOutput` through AgentGenerator bundle materialization/promotion, workflow integration metadata, AppGenerator AppBuildPlan consumption, workflow registry loading, and platform `TestClient` | Static / Runtime / HTTP | Added |
+
+### Generated App JWT Authentication
+
+`tests/test_generated_app_jwt_auth.py` materializes an authenticated app and its
+deployment files, loads it through `AppLoader`, and boots the platform host. It
+proves missing `AUTH_AUDIENCE` prevents startup; a correctly signed access token
+with the configured audience can call a module action; and missing bearer
+tokens, missing or wrong audiences, ID tokens, and a request user ID that differs
+from the token subject are rejected.
+
+The test uses ephemeral signing keys, an in-process JWKS response, and fake
+persistence. It exercises the real JWT verifier and HTTP authentication
+dependencies. Browser sign-in and a live identity provider remain separate
+acceptance checks.
 
 ## Page Wiring Input Authority
 
