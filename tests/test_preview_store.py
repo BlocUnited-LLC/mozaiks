@@ -290,7 +290,6 @@ async def test_metadata_delete_failure_does_not_retain_capacity_or_revive_previe
 
 async def test_payload_is_bounded_metadata_and_authority_errors_propagate(storage):
     store = _store(storage)
-    await store.ensure_indexes()
     entry = await _allocate(store, await _reserve(store), storage[1][0])
     await _attach(store, entry)
     token = await store.claim_operation(entry["sandbox_id"], kind="sync", lease_seconds=10)
@@ -299,6 +298,30 @@ async def test_payload_is_bounded_metadata_and_authority_errors_propagate(storag
             await store.save(entry["sandbox_id"], payload, token)
     with pytest.raises(PreviewLeaseLostError):
         await store.save(entry["sandbox_id"], {"status": "running"}, "unknown")
+
+
+async def test_preview_lifespan_tolerates_missing_mongo_but_admission_fails_closed(monkeypatch):
+    from mozaiksai.core import core_config
+    from mozaiksai.core.sandbox import preview_sessions
+    from tests.test_artifact_preview_sessions import FakeSandboxAdapter
+
+    monkeypatch.delenv("MONGO_URI", raising=False)
+    monkeypatch.delenv("MONGO_URI_SECRET_NAME", raising=False)
+
+    def missing_mongo():
+        raise RuntimeError("MONGO_URI is not configured")
+
+    monkeypatch.setattr(core_config, "get_mongo_client", missing_mongo)
+    adapter = FakeSandboxAdapter()
+    manager = preview_sessions.ArtifactPreviewSessionManager(provider_resolver=lambda: ("docker", adapter))
+    monkeypatch.setattr(preview_sessions, "get_artifact_preview_sessions", lambda: manager)
+    async with preview_sessions.preview_sessions_lifespan(object()):
+        # The optional maintenance loop may report the outage, while the host
+        # remains usable and admission still requires durable authority.
+        await asyncio.sleep(0)
+        with pytest.raises(RuntimeError, match="MONGO_URI is not configured"):
+            await manager.create_or_reuse("no-database", app_id="host", user_id="owner", target_app_id="target", build_registry_id="build")
+    assert adapter.calls == []
 
 
 async def test_multiple_managers_bound_allocation_peak_and_drain_queue(storage):

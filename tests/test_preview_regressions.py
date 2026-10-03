@@ -7,7 +7,7 @@ import pytest
 
 from mozaiksai.core.adapters.docker_sandbox import DockerSandboxAdapter
 from mozaiksai.core.ports.sandbox import SandboxRunResult
-from mozaiksai.core.sandbox.preview_sessions import _safe_relpath
+from mozaiksai.core.sandbox.preview_sessions import PreviewCapacityError, _safe_relpath
 from tests.test_artifact_preview_sessions import (
     MANIFEST,
     FakeSandboxAdapter,
@@ -233,6 +233,7 @@ async def test_failed_stop_keeps_the_session_available_for_cleanup():
     adapter = FakeSandboxAdapter()
     adapter.terminate_session = AsyncMock(return_value=False)
     manager = _manager(adapter)
+    manager._max_sessions = manager._max_owner_sessions = 1
     state = await _create(manager)
 
     with pytest.raises(RuntimeError, match="stop"):
@@ -241,7 +242,22 @@ async def test_failed_stop_keeps_the_session_available_for_cleanup():
     current = await _read(manager, state)
     assert current.sandbox_id == state.sandbox_id
     assert current.session_id == state.session_id
-    assert (await _create(manager)).sandbox_id == state.sandbox_id
+    assert current.status == "error"
+    assert current.preview_url is None
+    with pytest.raises(RuntimeError, match="stop"):
+        await _create(manager)
+    with pytest.raises(PreviewCapacityError):
+        await _create(manager, artifact_id="other-artifact")
+    assert sum(name == "create_session" for name, _ in adapter.calls) == 1
+    assert (await _read(manager, state)).session_id == state.session_id
+
+    adapter.terminate_session.return_value = True
+    await manager.stop(state.sandbox_id)
+    with pytest.raises(KeyError):
+        await _read(manager, state)
+    replacement = await _create(manager)
+    assert replacement.sandbox_id != state.sandbox_id
+    assert sum(name == "create_session" for name, _ in adapter.calls) == 2
 
 
 @pytest.mark.asyncio
