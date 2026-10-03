@@ -108,20 +108,17 @@ def _require_reachable_mongo(app_root: Path, *, workspace: Path, host: str) -> N
         print(f"  {rerun}")
         sys.exit(1)
 
-    reason = mongo_preflight.mongo_unreachable_reason(
+    failure = mongo_preflight.mongo_unreachable(
         uri, timeout_ms=mongo_preflight.preflight_timeout_ms(os.environ)
     )
-    if reason is not None:
-        print(
-            "Error: MongoDB is not reachable at MONGO_URI "
-            f"({mongo_preflight.redact_mongo_uri(uri)})."
-        )
+    if failure is not None:
+        print(f"Error: MongoDB is not reachable at MONGO_URI ({failure.shown_uri}).")
         print(
             "Start MongoDB, or set MONGO_URI in your shell or in "
             f"{env_file} to a reachable server, then rerun:"
         )
         print(f"  {rerun}")
-        print(f"Underlying error: {reason}")
+        print(f"Underlying error: {failure.reason}")
         sys.exit(1)
 
 

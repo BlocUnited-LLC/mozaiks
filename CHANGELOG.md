@@ -143,12 +143,22 @@ This project follows a practical pre-1.0 changelog format:
   loopback by default, report startup logs, fail fast on unreachable MongoDB,
   and route the frontend to the selected backend port. Release checks now
   smoke the installed app's first run.
-  The MongoDB startup error never prints credential text from `MONGO_URI`. It
-  shows the scheme, `***@` in place of credentials, the hosts and the database
-  name, never the query string, and only a placeholder when the URI is
-  malformed (for example an unescaped `@` or `/` in the password). The
-  driver's own message is repeated only for a failed connection to a
-  well-formed URI.
+  The MongoDB startup error shows `MONGO_URI` as its scheme, `***@` in place
+  of credentials, the hosts and the database name; the query string is never
+  shown. As long as the URI has the `@` that ends its credentials, no
+  credential text is printed, whatever characters the password contains. A URI
+  with a sign that it is malformed (an unescaped `@`, `/` or `?` in the
+  password, a percent-encoded host name), or that the driver rejects as
+  malformed, prints as a placeholder. Next to credentials, a host with no dot
+  and no port prints as `<host not shown>`, because the rest of a password
+  reads the same way after an unescaped `@`; write its port (`mongo:27017`) to
+  have it shown. The driver's own message is repeated only for a failed
+  connection to hosts that are shown. Known limit: when that `@` is missing
+  (an unquoted `.env` value cut at ` #` before it, or the wrong `@`
+  percent-encoded), the value is a different URI, and credential text standing
+  where its hosts and database name are read is still shown when it reads as
+  an address: next to an `@`, one with a dot, a port or IPv6 brackets; with no
+  `@` left in the value, any host name.
   `mozaiks serve --listen <address>` and `mozaiks studio --open --listen
   <address>` on a non-loopback address with authentication off now print a
   warning to stderr before starting: the address, the anonymous user's roles

@@ -102,17 +102,17 @@ def _assert_mongo_ready(env: dict[str, str], *, workspace_root: Path) -> None:
             "For a local MongoDB server, use: mongodb://localhost:27017/mozaiks"
         )
 
-    reason = mongo_preflight.mongo_unreachable_reason(
+    failure = mongo_preflight.mongo_unreachable(
         uri, timeout_ms=mongo_preflight.preflight_timeout_ms(env)
     )
-    if reason is not None:
+    if failure is not None:
         raise RuntimeError(
             "MongoDB is required to start Mozaiks Studio.\n"
-            f"Could not connect to MONGO_URI ({mongo_preflight.redact_mongo_uri(uri)}).\n"
+            f"Could not connect to MONGO_URI ({failure.shown_uri}).\n"
             "Start MongoDB locally, or set MONGO_URI to a reachable MongoDB Atlas/local URI "
             f"in {env_path}, then rerun:\n"
             f"  {rerun_command}\n"
-            f"Underlying error: {reason}"
+            f"Underlying error: {failure.reason}"
         )
 
 
