@@ -11,6 +11,7 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from mozaiks_cli.unauthenticated_bind import unauthenticated_bind_warning
 from mozaiks_cli.workspace import load_workspace_dotenv, resolve_active_app_root
 from mozaiksai.resources import (
     resolve_chat_ui_root,
@@ -201,12 +202,23 @@ def launch_studio(
     """Start (or reuse) the Studio backend and frontend for ``workspace_root``.
 
     Both servers listen on ``bind_host``: loopback by default, because local
-    development runs with authentication off and an anonymous admin user.
+    development runs with authentication off and an anonymous admin user. On
+    any other address, a warning says so before the first server starts.
     """
     web_shell_root = resolve_web_shell_root()
     host_name = "studio" if preferred_host == "auto" else preferred_host
     app_module = _resolve_backend_app_module(host_name)
     env = _workspace_env(workspace_root, host=host_name)
+    # The backend runs in a child process that receives exactly ``env``.
+    exposure_warning = unauthenticated_bind_warning(
+        bind_host, environ=env, env_file=workspace_root / ".env"
+    )
+
+    def warn_about_exposure_once() -> None:
+        nonlocal exposure_warning
+        if exposure_warning is not None:
+            print(exposure_warning, file=sys.stderr, flush=True)
+            exposure_warning = None
 
     local_host = _loopback_host(bind_host)
     backend_origin = f"http://{local_host}:{backend_port}"
@@ -218,6 +230,7 @@ def launch_studio(
     backend_log: Path | None = None
     if not _http_ready(backend_url):
         _assert_mongo_ready(env, workspace_root=workspace_root)
+        warn_about_exposure_once()
         backend_command = [
             sys.executable,
             "-m",
@@ -275,6 +288,9 @@ def launch_studio(
             str(frontend_port),
             "--strictPort",
         ]
+        # The dev server proxies /api to the backend, so it exposes the same
+        # anonymous user even when the backend was already running.
+        warn_about_exposure_once()
         frontend_log = _process_log_path(workspace_root, "frontend")
         frontend_process = _spawn_process(
             frontend_command,

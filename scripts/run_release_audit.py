@@ -10,21 +10,26 @@ Chains the following checks:
 6. Verify Factory resources resolve from the install
 7. First run from the install: ``mozaiks init`` -> ``mozaiks serve`` (platform
    and studio hosts) -> ``/api/health/ready`` -> ``/api/shell-config``, in a
-   scrubbed environment against a throwaway MongoDB database
+   scrubbed environment against a throwaway MongoDB server
 8. Offline functional acceptance tests
 
 Returns 0 when all checks pass.  Returns non-zero on the first failure.
 
 Usage::
 
-    python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27017/release_audit_first_run
+    docker run --rm -d --name mozaiks-release-audit-mongo -p 127.0.0.1:27018:27017 mongo:7
+    python scripts/run_release_audit.py --mongo-uri mongodb://127.0.0.1:27018
 
 Options:
     --skip-build   Re-use an existing dist/ directory instead of rebuilding.
                    Useful when iterating on content guard failures.
-    --mongo-uri    Throwaway MongoDB database for the first-run smoke (or set
-                   MOZAIKS_RELEASE_AUDIT_MONGO_URI). Required unless
-                   --skip-first-run-smoke is given.
+    --mongo-uri    URI of a throwaway MongoDB server, on a non-default port, for
+                   the first-run smoke (or set MOZAIKS_RELEASE_AUDIT_MONGO_URI).
+                   The runtime ignores the database name in the URI and uses
+                   fixed database names (mozaiksai, mozaiks_apps) on whatever
+                   server it points to, so never point it at the server you
+                   develop against. Required unless --skip-first-run-smoke is
+                   given.
 """
 
 from __future__ import annotations
@@ -237,8 +242,9 @@ def main(argv: list[str] | None = None) -> int:
         "--mongo-uri",
         default=os.environ.get("MOZAIKS_RELEASE_AUDIT_MONGO_URI", ""),
         help=(
-            "throwaway MongoDB database for the first-run smoke "
-            "(default: $MOZAIKS_RELEASE_AUDIT_MONGO_URI)"
+            "URI of a throwaway MongoDB server, on a non-default port, for the first-run "
+            "smoke (default: $MOZAIKS_RELEASE_AUDIT_MONGO_URI). The runtime ignores the "
+            "database name in the URI and uses fixed database names on that server."
         ),
     )
     parser.add_argument(
@@ -249,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.skip_first_run_smoke and not args.mongo_uri:
         parser.error(
-            "the first-run smoke needs a throwaway MongoDB: pass --mongo-uri "
+            "the first-run smoke needs a throwaway MongoDB server: pass --mongo-uri "
             "(or set MOZAIKS_RELEASE_AUDIT_MONGO_URI), or --skip-first-run-smoke"
         )
 
