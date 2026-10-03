@@ -357,7 +357,7 @@ This project follows a practical pre-1.0 changelog format:
   of silently claiming success with files available on only one worker.
 - Required runtime checks that are skipped or unavailable leave generated-app
   acceptance pending. Partial source validation cannot pass, and exports require
-  a passed build for the accepted snapshot. Live acceptance scripts run the
+  a passed build for the accepted snapshot. Acceptance smoke scripts run the
   canonical validator instead of injecting skipped build results.
 - Existing-app discovery resumes the correct interview after human replies and
   completes only after its deterministic artifact save succeeds. Persistence

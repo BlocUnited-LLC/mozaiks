@@ -25,7 +25,7 @@ from factory_app.workflows._shared.subscription_contract_context import (
     subscription_assignment_store,
 )
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
-from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
+from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_bundle_from_request
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
@@ -1052,8 +1052,6 @@ async def validate_subscription_acceptance_handoff(
             "data_contract": _data_contract(),
             "design_surface_map": _design_surface_map(),
             "subscription_contract": subscription_contract,
-            "app_validation_status": "skipped",
-            "app_validation_strategy_used": "skip",
         }
     )
     app_build_plan(AppBuildPlan=_build_plan(tasks), context_variables=context)
@@ -1087,11 +1085,11 @@ async def validate_subscription_acceptance_handoff(
     if not assembled.get("success"):
         raise RuntimeError(f"Subscription smoke assembly failed: {assembled.get('error')}")
     files = {file["filename"]: file["content"] for file in assembled["code_files"]}
-    # This offline smoke validates the assembled bundle without a browser build.
-    context.set("app_validation_status", "skipped")
-
     wiring = await validate_wiring(context_variables=context)
-    acceptance = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    validation = await validate_app_bundle_from_request(
+        {"validation_strategy": "local", "start_dev_server": False}, context_variables=context,
+    )
+    acceptance = validation["app_bundle_acceptance_result"]
     export_gate = resolve_export_gate(context)
 
     loader_result: dict[str, Any]
@@ -1154,6 +1152,7 @@ async def validate_subscription_acceptance_handoff(
             "validation_errors": errors,
             "wiring": wiring,
             "acceptance": acceptance,
+            "app_validation_result": validation["app_validation_result"],
             "export_gate": export_gate,
             "runtime_loader": loader_result,
             "task_batch_status": context.get("app_task_batch_status"),
