@@ -118,6 +118,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator rejects generated action permissions that do not resolve against
+  the approved auth contract during task admission, repair, and assembly.
+  Diagnostics identify the action and declared scope choices; valid restrictions
+  remain intact. Authenticated generation resolves early defaults from the
+  canonical auth scaffold instead of waiting for its file to be materialized.
+
 - `dispatch_module_action` called without an `app` no longer imports the
   platform host as a side effect. On a serving runtime-only host that import
   could never complete: every call failed with "Cannot add middleware after an

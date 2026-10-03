@@ -340,6 +340,22 @@ canonical writes or reads: ConfigMiddlewareAgent declares each of them
 explicitly with its access policy and ServiceAgent implements them. Ordinary
 canonical implementations remain code-owned.
 
+After this bounded CRUD normalization, every remaining action permission on a
+`generated_module` must resolve against the admitted `config/auth.yaml`
+`frontend.default_scopes`. Before that file is materialized, an authenticated
+plan or owner-scoped data contract uses the scopes in the canonical
+`webapp_builder` auth template. Module permission catalogues and plan roles are
+not grant mappings, and a candidate cannot approve its own restriction by
+emitting an auth edit alongside it. An unresolved restriction rejects task
+admission, repair persistence, and final materialization with the module path,
+action, unknown permissions, and declared choices. The closure never strips
+custom restrictions: repair must preserve the approved access intent, exposure, and
+subscription gate, or revise the authorization contract before retrying.
+Requested scopes do not prove that an identity provider issues them; runtime
+dispatch still denies a caller lacking any required permission. This Factory
+policy covers generated modules; selected pack templates and host-owned
+permission resolvers retain their separate owners.
+
 `backend/schemas.py` is rendered from the contract for every module owning
 collections: record and input `TypedDict`s, field constants, a
 `serialize_<entity>` allowlist, `<entity>_create_values`,

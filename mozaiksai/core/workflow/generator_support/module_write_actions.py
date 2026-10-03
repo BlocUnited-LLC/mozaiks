@@ -24,6 +24,8 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     _materialize_schema_contract,
     _unwrap_output_envelope,
+    auth_required_from_strategy,
+    data_contract_requires_auth,
     extract_code_file_map_from_payload,
 )
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
@@ -55,6 +57,7 @@ from mozaiksai.core.workflow.generator_support.module_read_actions import (
     _replace_functions,
     close_module_read_actions,
 )
+from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
 
@@ -226,14 +229,30 @@ def _canonical_read_ids(module_id: str, plan: dict[str, Any], contract: Any) -> 
 # --------------------------------------------------------------------------- access policy
 
 
-def auth_contract_scopes(files: Mapping[str, str]) -> frozenset[str]:
-    """Permission ids the app's auth contract can actually grant.
+def auth_contract_scopes(
+    files: Mapping[str, str], *, app_build_plan: Any = None, data_contract: Any = None,
+) -> frozenset[str]:
+    """Resolve declared scopes from admitted auth or its approved default scaffold.
 
-    ``config/auth.yaml`` declares no roles; the only declared grants are the
-    OIDC scopes the frontend requests, which arrive as token scopes and become
-    dispatch permissions. Everything else is unsatisfiable by any caller.
+    Requested scopes establish generation intent, not proof of an issuer grant.
+    The runtime still enforces the caller's token scopes. Plan roles and module
+    permission catalogues do not supply a role-to-permission grant mapping.
+    Before auth scaffolding runs, authenticated generation uses that scaffold's
+    actual template; a supplied auth file always takes precedence.
     """
     raw = files.get("config/auth.yaml")
+    plan = detach(app_build_plan) or {}
+    if not isinstance(plan, dict):
+        raise ValueError("Generated action authorization requires a structured app_build_plan")
+    if raw is None and (
+        auth_required_from_strategy(plan.get("auth_strategy"), roles=plan.get("roles"), field="app_build_plan.auth_strategy")
+        or data_contract_requires_auth(detach(data_contract))
+    ):
+        root = resolve_factory_app_root()
+        if root is None:
+            raise ValueError("Generated action authorization requires the Factory auth scaffold")
+        raw = (root / "build_context/webapp_builder/templates/config/auth.yaml").read_text(encoding="utf-8")
+        raw = raw.replace("{{AUTH_DEFAULT_ROUTE}}", "/")
     if raw is None:
         return frozenset()
     try:
@@ -244,7 +263,38 @@ def auth_contract_scopes(files: Mapping[str, str]) -> frozenset[str]:
         return frozenset()
     frontend = document.get("frontend")
     scopes = frontend.get("default_scopes") if isinstance(frontend, dict) else None
-    return frozenset(str(scope) for scope in scopes or [] if isinstance(scope, str))
+    return frozenset(scope for scope in scopes if isinstance(scope, str)) if isinstance(scopes, list) else frozenset()
+
+
+def _validate_generated_action_permissions(
+    module_id: str, manifest: Mapping[str, Any], plan: Mapping[str, Any], scopes: frozenset[str],
+) -> None:
+    """Reject unresolved restrictions after bounded canonical CRUD normalization."""
+    if not any(
+        pack.get("capability_pack_id") == module_id and pack.get("capability_source") == "generated_module"
+        for pack in plan.get("capability_packs") or [] if isinstance(pack, dict)
+    ):
+        return  # Selected packs and host-authored modules have their own authorization owner.
+    for action in manifest.get("actions") or []:
+        permissions = action.get("permissions")
+        if permissions is None:
+            permissions = []
+        if not isinstance(permissions, list) or any(not isinstance(item, str) for item in permissions):
+            raise ValueError(
+                f"modules/{module_id}/module.yaml: action {action['id']!r} permissions must be a list of strings"
+            )
+        unresolved = sorted(set(permissions) - scopes)
+        if unresolved:
+            raise ValueError(
+                f"modules/{module_id}/module.yaml: action {action['id']!r} has unresolved permissions "
+                f"{unresolved!r} in the approved generated auth contract; declared scopes={sorted(scopes)!r}. "
+                "Resolve the reference against config/auth.yaml frontend.default_scopes or its approved "
+                "auth scaffold. Preserve the intended restriction, api_surface and entitlement_gate; "
+                "do not remove permissions or substitute an unrelated scope just to pass validation. "
+                "If no declared scope expresses the approved policy, revise the authorization contract "
+                "before retrying. Plan roles, module permission declarations, and auth changes in this "
+                "candidate cannot approve a new grant."
+            )
 
 
 def _approved_gates(module_id: str, subscription_contract: Any) -> dict[str, str]:
@@ -641,8 +691,10 @@ def close_module_actions(
 
     Writes close first so an app-wide access conflict is reported as the write
     decision it is, before read closure asks for explicit read declarations.
-    ``declared_auth_scopes`` are the auth contract's declared grants; when
-    omitted they are read from ``config/auth.yaml`` in ``companion_files``.
+    ``declared_auth_scopes`` come from approved auth; when omitted they are read
+    from admitted ``companion_files`` or the approved default auth scaffold.
+    Candidate files cannot approve their own permissions. Remaining action
+    restrictions must resolve after canonical CRUD normalization.
     """
     output = _unwrap_output_envelope(detach(payload))
     plan = detach(app_build_plan)
@@ -652,12 +704,24 @@ def close_module_actions(
     if contract is not None and not isinstance(contract, dict):
         raise ValueError("Write action closure requires a structured data_contract")
     companion_files = dict(companion_files or {})
-    granted = declared_auth_scopes if declared_auth_scopes is not None else auth_contract_scopes(companion_files)
+    granted = declared_auth_scopes if declared_auth_scopes is not None else auth_contract_scopes(
+        companion_files, app_build_plan=plan, data_contract=contract,
+    )
     bundle = output.get("module_contract")
     if not isinstance(bundle, dict):
         files = extract_code_file_map_from_payload(output)
+        module_inputs = {**companion_files, **files}
+        for path in list(module_inputs):
+            match = re.fullmatch(r"modules/([^/]+)/module\.yaml", path)
+            if match and not any(
+                f"modules/{match[1]}/{relative}" in files
+                for relative in ("module.yaml", _EVENTS_PATH, *_COMPANION_PATHS.values())
+            ):
+                # A service task cannot repair an inherited manifest. Retain
+                # owners of edited contract companions for event normalization.
+                del module_inputs[path]
         changes = materialize_module_actions(
-            {**companion_files, **files}, app_build_plan=plan, data_contract=contract,
+            module_inputs, app_build_plan=plan, data_contract=contract,
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
             declared_auth_scopes=granted,
         )
@@ -692,6 +756,7 @@ def close_module_actions(
     closed = output["module_contract"]
     _require_declared_design_actions(module_id, closed["module_yaml"], design_surface_map)
     _close_user_data_scope(module_id, closed["module_yaml"], plan, contract)
+    _validate_generated_action_permissions(module_id, closed["module_yaml"], plan, granted)
     events = close_module_events(
         module_id, closed["module_yaml"], closed.get("events_yaml"),
         {key: closed[key] for key in _COMPANION_PATHS if isinstance(closed.get(key), dict)},
@@ -737,7 +802,9 @@ def materialize_module_actions(
     changed: dict[str, str] = {}
     if app_build_plan is None:
         return changed
-    granted = declared_auth_scopes if declared_auth_scopes is not None else auth_contract_scopes(files_map)
+    granted = declared_auth_scopes if declared_auth_scopes is not None else auth_contract_scopes(
+        files_map, app_build_plan=app_build_plan, data_contract=data_contract,
+    )
     companion_paths = {_EVENTS_KEY: _EVENTS_PATH, **_COMPANION_PATHS}
     for path, content in files_map.items():
         match = re.fullmatch(r"modules/([^/]+)/module\.yaml", path)
