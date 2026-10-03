@@ -14,6 +14,22 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Bounded module collection handles now forward only the options MongoDB defines
+  for each operation. Previously the handle passed a caller's keyword and
+  positional arguments straight to the driver; the driver merges an option it
+  does not recognize into the command it sends to the server, and a few of those
+  fields are read as the collection or database to act on (a raw query command
+  envelope in a read filter had the same effect). An app running beside
+  owner-scoped collections could therefore be steered to a collection or
+  database outside its boundary. Each method now accepts an explicit allow-list
+  of options (sessions, comments, projections, sorts, upserts, index hints, time
+  limits, `skip`/`limit` for counts, `allowDiskUse`/`batchSize` for
+  aggregations, and the like) and refuses any other option, surplus positional
+  argument, or query envelope before the driver builds a command. Which
+  collections a handle may open, the aggregation-stage validator, and the
+  owner-scoped facade (which already used explicit signatures and forwarded no
+  caller options) are unchanged, and every legitimate option keeps working.
+
 - JWT and Keycloak authentication now require an audience at startup and
   verify it and an access-token type on every bearer token (`AUTH_AUDIENCE` for JWT,
   `KEYCLOAK_CLIENT_ID` for Keycloak). Deployments that left these unset must
