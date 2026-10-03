@@ -70,11 +70,6 @@ class MongoPreviewStore:
     def _sessions_collection(self) -> Any:
         return self._database()[PlatformCollections.PREVIEW_SESSIONS]
 
-    async def ensure_indexes(self) -> None:
-        # _id is the unique admission/session authority. Active records have no
-        # TTL index: removing a record cannot stand in for stopping a sandbox.
-        await self._sessions_collection().create_index("updated_at", name="preview_updated_at")
-
     async def _ledger(self) -> dict[str, Any]:
         collection = self._ledger_collection()
         document = await collection.find_one({"_id": _LEDGER_ID})

@@ -651,7 +651,6 @@ class ArtifactPreviewSessionManager:
 @asynccontextmanager
 async def preview_sessions_lifespan(_app):
     manager = get_artifact_preview_sessions()
-    await manager._store.ensure_indexes()
     task = asyncio.create_task(manager._maintenance_loop())
     try:
         yield
