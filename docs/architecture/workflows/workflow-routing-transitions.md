@@ -400,9 +400,20 @@ The runtime's initial user-to-agent dispatch is bootstrap-only. It does not
 substitute for these workflow-local return edges, including after reconnect.
 
 Selecting an `adoption_level` does not confirm the adoption plan. The planner
-remains at its human review boundary until its declared `NEXT` sentinel sets
-`plan_complete`. Then embed/bridge proceeds to artifact assembly, while
-ecosystem/gradual modernization first confirms decomposition.
+remains at its human review boundary until the user confirms the recommendation
+and `record_adoption_plan` validates the workflow's typed `AgentAugmentationPlan`.
+The tool records the existing finite adoption choice and scope together with
+`plan_complete`; text alone cannot advance this stage. Embed/bridge then proceeds
+to assembly. Ecosystem/gradual modernization first reviews decomposition and
+records its typed `ModuleDecompositionPlan` through `record_module_decomposition`.
+Both agents acknowledge successful recording conversationally. Neither uses NEXT
+as a completion writer. Decomposition remains workflow-local evidence.
+
+The recorded plan, adoption choice, and completion flags use existing deterministic
+tool writer authority. Automatic structured-output projection cannot replace the
+approved plan. Assembly rejects a conflicting adoption choice before persistence
+and uses the recorded plan for approved scope rather than accepting scope changes
+from the assembler's synthesis.
 
 Assembly has no additional human review boundary. Its automatic save tool uses
 the canonical tool outcome contract: one deterministic attempt, `saved` only

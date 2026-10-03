@@ -362,6 +362,8 @@ This project follows a practical pre-1.0 changelog format:
 - Existing-app discovery resumes the correct interview after human replies and
   completes only after its deterministic artifact save succeeds. Persistence
   failures terminate as failures instead of reporting successful discovery.
+  Typed plan-recording tools now write the selected adoption path and protect
+  the confirmed scope from replacement during artifact assembly.
 - Workflow provider input retains the agent's prior replies after human
   confirmation and saved-channel reopen. A thin AG2 view adapter corrects the
   event shape consumed by provider mappers, preserving AG2 visibility and
