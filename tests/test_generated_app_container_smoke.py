@@ -22,6 +22,7 @@ from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     generate_deployment_artifacts,
 )
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
+from mozaiksai.version import __version__
 from tests.test_continuous_deterministic_materialization import _write_bundle
 from tests.test_materialized_bundle_production_runtime import _assemble_from_payload
 
@@ -109,7 +110,7 @@ async def test_materialized_generated_app_image_boots_and_serves_runtime(
     logs = ""
     try:
         requirements = scan_requirements(files).splitlines()
-        requirements[requirements.index("mozaiks")] = (
+        requirements[requirements.index(f"mozaiks=={__version__}")] = (
             f"http://host.docker.internal:{package_port}/{wheels[0].name}"
         )
         files["requirements.txt"] = "\n".join(requirements) + "\n"
