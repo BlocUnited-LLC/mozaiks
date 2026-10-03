@@ -180,10 +180,13 @@ const Header = ({
     [currentUser, location.pathname, location.search, route, shellMode, userRoles]
   );
   const headerActions = useMemo(
-    () => (Array.isArray(headerConfig.actions)
-      ? resolveShellActions(headerConfig.actions, shellActionContext)
-      : []),
-    [headerConfig.actions, shellActionContext]
+    () => filterPersonalAccountItems(
+      Array.isArray(headerConfig.actions)
+        ? resolveShellActions(headerConfig.actions, shellActionContext)
+        : [],
+      shellAuth,
+    ),
+    [headerConfig.actions, shellActionContext, shellAuth]
   );
   const visibleHeaderPages = useMemo(() => {
     const actionTargets = new Set(
@@ -192,12 +195,12 @@ const Header = ({
         .filter(Boolean)
     );
 
-    return headerPages.filter((item) => {
+    return filterPersonalAccountItems(headerPages, shellAuth).filter((item) => {
       if (!isShellItemVisible(item, userRoles)) return false;
       const target = getNavigationTargetKey(item);
       return !target || !actionTargets.has(target);
     });
-  }, [headerActions, headerPages, userRoles]);
+  }, [headerActions, headerPages, userRoles, shellAuth]);
   const primaryAction = useMemo(
     () => headerActions.find((item) => item?.variant === "gradient") || headerActions[0] || null,
     [headerActions]

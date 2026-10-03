@@ -19,7 +19,7 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, shellAuth
   const roles = actionContext?.roles || [];
 
   if (Array.isArray(headerPages)) {
-    for (const item of headerPages) {
+    for (const item of filterPersonalAccountItems(headerPages, shellAuth)) {
       if (items.length >= 3) break;
       if (isShellItemVisible(item, roles) && item.path) {
         items.push({
@@ -32,9 +32,10 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, shellAuth
     }
   }
 
-  const resolvedActions = Array.isArray(header?.actions)
-    ? resolveShellActions(header.actions, actionContext)
-    : [];
+  const resolvedActions = filterPersonalAccountItems(
+    Array.isArray(header?.actions) ? resolveShellActions(header.actions, actionContext) : [],
+    shellAuth,
+  );
   const primaryAction = resolvedActions.find((item) => item?.path || item?.href || item?.trigger);
   if (primaryAction) {
     items.push({

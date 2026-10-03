@@ -219,9 +219,15 @@ Personal account entries follow the host's sign-in mode, read from the
 `auth.runtime.enabled: false` (authentication disabled, including local
 development), there is no signed-in person, so the shell drops every entry that
 targets the `/me` route family (`profile`, `account`, `support`) and every
-`signin` or `signout` action from the profile menu and the mobile bar. If no
-profile menu entry remains, the header shows no account menu. With
-authentication enabled, every configured entry renders unchanged.
+`signin` or `signout` action from the profile menu, header pages, header
+actions, footer links, and the mobile bar. If no profile menu entry remains, the
+header shows no account menu, and if no footer link remains, there is no footer.
+The host does not register the public profile route `/u/:username`, whichever
+manifest declares it. In local development, where the host signs everyone in as
+its local identity, a visit to `/me` renders a "Sign-in is not enabled" notice
+instead of a profile. With authentication enabled, every configured entry
+renders unchanged. `/u/:username` is a `:username` template, so it is a
+deep-link target only: the host never derives a navigation entry for it.
 
 Use page `navigation` for page-owned routes. Use `navigation.items` only for
 app-level entries that are not owned by a page schema. Do not define custom

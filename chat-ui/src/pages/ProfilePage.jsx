@@ -5,6 +5,10 @@
  *   /me          — own profile, editable
  *   /u/:username — public profile, read-only
  *
+ * With authentication disabled (auth.runtime.enabled === false in
+ * /api/shell-config) nobody signs in, so both views render a short
+ * "Sign-in is not enabled" notice instead of a profile.
+ *
  * Layout driven by GET /api/me/profile-config → layout field.
  * Pages contributed by modules via contracts/profile.yaml (v2 schema).
  * Page data is loaded from GET /api/me/profile-pages.
@@ -15,9 +19,11 @@
  * See: docs/architecture/foundations/profile-panel-contract.md
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, useContext } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
+import { isSignInAvailable } from '../navigation/shellActions';
+import { NavigationContext } from '../providers/NavigationProvider';
 import componentRegistry from '../registry/componentRegistry';
 
 // ---------------------------------------------------------------------------
@@ -637,10 +643,38 @@ const DEMO_PROFILE = {
 };
 
 // ---------------------------------------------------------------------------
+// Sign-in not enabled
+// ---------------------------------------------------------------------------
+
+// A profile belongs to a signed-in person. With authentication disabled
+// nobody signs in, so there is no profile to show or edit.
+function SignInNotEnabled() {
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto w-full max-w-content px-4 py-20 md:px-6 lg:px-8">
+        <div role="status" className="mx-auto max-w-md rounded-2xl border border-border bg-card px-6 py-8 text-center">
+          <h1 className="text-lg font-semibold text-foreground">Sign-in is not enabled for this app</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Profiles belong to people who sign in, so there is no profile here.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
 
 export default function ProfilePage() {
+  // Sign-in availability comes from the host's /api/shell-config auth projection.
+  const navigation = useContext(NavigationContext);
+  if (!isSignInAvailable(navigation?.auth)) return <SignInNotEnabled />;
+  return <PersonProfile />;
+}
+
+function PersonProfile() {
   const params = useParams();
   const location = useLocation();
   const navigate = useNavigate();

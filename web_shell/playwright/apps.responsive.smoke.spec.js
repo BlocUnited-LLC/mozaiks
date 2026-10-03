@@ -40,7 +40,8 @@ const composedShellConfig = {
   ...shellConfig,
   appId: appConfig.appId,
   appName: appConfig.appName,
-  pages: [...(routeManifest.pages || []), ...transitionRoutes],
+  // Like the host: with sign-in disabled the public profile route is not registered.
+  pages: [...(routeManifest.pages || []).filter((route) => route.path !== '/u/:username'), ...transitionRoutes],
 };
 const dashboardPayload = {
   schema_version: 'mozaiks.dashboard.v1',
@@ -1391,59 +1392,19 @@ test('workspace support route stays responsive across desktop and mobile widths'
   }
 });
 
-test('profile support page loads tickets on a same-origin Studio host', async ({ page }) => {
-  let profilePageRequests = 0;
-  await page.route('**/api/me/profile-pages**', async (route) => {
-    profilePageRequests += 1;
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        pages: [{
-          id: 'overview',
-          label: 'Profile',
-          section: 'overview',
-          renderer: 'custom_component',
-          component: 'ProfileOverview',
-          visibility: 'public',
-        }, {
-          id: 'support-tickets',
-          label: 'Support',
-          section: 'overview',
-          renderer: 'custom_component',
-          component: 'UserSupportPanel',
-          visibility: 'owner_only',
-          data: {
-            requests: [{
-              request_id: 'sr_browser',
-              subject_app_id: APP_ID,
-              user_id: 'user_1',
-              message: 'Need help with my app',
-              status: 'open',
-              created_at: '2026-01-01T00:00:00Z',
-            }],
-            total: 1,
-          },
-        }],
-      }),
-    });
+// A signed-in person's profile and support tickets are covered in auth.spec.js, which signs in.
+test('with sign-in disabled the profile route says so instead of rendering a profile', async ({ page }) => {
+  const profileRequests = [];
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith('/api/me/profile-') || path.startsWith('/api/users/')) profileRequests.push(path);
   });
 
   await page.goto('/me?tab=support-tickets');
 
-  await expect(page.getByText('Need help with my app').first()).toBeVisible();
-  expect(profilePageRequests).toBeGreaterThan(0);
-
-  await page.route('**/api/users/test-person', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ username: 'test-person', display_name: 'Public Profile Name' }),
-    });
-  });
-  await page.goto('/u/test-person?tab=support-tickets');
-  await expect(page.getByText('Public Profile Name').first()).toBeVisible();
-  await expect(page.getByText('Need help with my app')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Sign-in is not enabled for this app' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit profile' })).toHaveCount(0);
+  expect(profileRequests).toEqual([]);
 });
 
 test('app Studio root redirects to manifest default portal', async ({ page }) => {

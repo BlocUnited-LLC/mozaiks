@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import test from 'node:test';
-import {
-  filterPersonalAccountItems,
-  isPersonalAccountItem,
-  isSignInAvailable,
-} from '../../chat-ui/src/navigation/shellActions.js';
+import vm from 'node:vm';
+import * as shellActions from '../../chat-ui/src/navigation/shellActions.js';
+
+const { filterPersonalAccountItems, isPersonalAccountItem, isSignInAvailable } = shellActions;
+const require = createRequire(new URL('../package.json', import.meta.url));
+const { transformSync } = require('esbuild');
+const React = require('react');
+const { renderToStaticMarkup } = require('react-dom/server');
 
 // The /api/shell-config auth projections the shell receives (see build_app_auth_projection).
 const authDisabled = { runtime: { enabled: false, provider: 'none', local_development: true, user: { id: 'anonymous' } } };
@@ -70,4 +75,111 @@ test('with auth enabled every configured entry is kept unchanged', () => {
   assert.equal(filterPersonalAccountItems(studioProfileMenu, authEnabled), studioProfileMenu);
   assert.equal(filterPersonalAccountItems(studioMobileBar, null), studioMobileBar);
   assert.deepEqual(filterPersonalAccountItems(undefined, authDisabled), []);
+});
+
+// The shell chrome components themselves, rendered with the real shellActions and a stubbed navigation context.
+const localUser = { id: 'local-user', name: 'Local User', roles: ['admin', 'user'] };
+
+function renderShellComponent(file, navigation, props = {}) {
+  const source = readFileSync(new URL(`../../chat-ui/src/components/layout/${file}`, import.meta.url), 'utf8');
+  const { code } = transformSync(source, { loader: 'jsx', format: 'cjs', jsx: 'automatic' });
+  const modules = {
+    'react-router-dom': { useLocation: () => ({ pathname: '/apps', search: '' }) },
+    '../../styles/themeProvider': {
+      DEFAULT_HEADER_CONFIG: { logo: { src: null, wordmark: null, alt: 'App', href: '/' }, actions: [] },
+      DEFAULT_FOOTER_CONFIG: { links: [], visible: true },
+    },
+    '../../providers/NavigationProvider': { useNavigation: () => navigation },
+    '../../navigation/useNavigationActions': { useNavigationActions: () => () => {} },
+    '../../navigation/shellActions': shellActions,
+    '../../context/ChatUIContext': { useChatUI: () => ({ user: localUser, login: () => {}, logout: () => {} }) },
+    '../../ui/hooks/useAppEventBus.js': { useAppEventBus: () => {} },
+    './notificationApi.js': { fetchNotificationCount: async () => null, clearNotifications: async () => null },
+    './header-styles.css': {},
+  };
+  const module = { exports: {} };
+  vm.runInNewContext(code, {
+    module,
+    exports: module.exports,
+    require: (name) => {
+      if (name === 'react' || name === 'react/jsx-runtime') return require(name);
+      if (Object.hasOwn(modules, name)) return modules[name];
+      throw new Error(`Unexpected import: ${name}`);
+    },
+  });
+  return renderToStaticMarkup(React.createElement(module.exports.default, props));
+}
+
+const renderFooter = (navigation) => renderShellComponent('Footer.js', navigation);
+
+const footerLabels = (html) => [...html.matchAll(/class="shell-footer-link"[^>]*>([^<]+)</g)].map((match) => match[1]);
+
+// Footer links as /api/shell-config composes them from footer-scoped navigation items ({ label, href }).
+const footerLinks = [
+  { label: 'Account', href: '/me' },
+  { label: 'Support', href: '/me?tab=support-tickets' },
+  { label: 'Members', href: '/members' },
+  { label: 'Privacy Policy', href: 'https://www.mozaiks.ai/privacy', external: true },
+];
+
+test('with auth disabled the footer renders no Account or Support link', () => {
+  assert.deepEqual(
+    footerLabels(renderFooter({ footer: { links: footerLinks }, auth: authDisabled })),
+    ['Members', 'Privacy Policy'],
+  );
+  assert.deepEqual(
+    footerLabels(renderFooter({ footer: { links: footerLinks }, auth: demoMode })),
+    ['Members', 'Privacy Policy'],
+  );
+  // With only personal links configured nothing is left to show, so there is no footer.
+  assert.equal(renderFooter({ footer: { links: footerLinks.slice(0, 2) }, auth: authDisabled }), '');
+});
+
+test('with auth enabled or no auth projection the footer renders every configured link', () => {
+  const labels = footerLinks.map((link) => link.label);
+  assert.deepEqual(footerLabels(renderFooter({ footer: { links: footerLinks }, auth: authEnabled })), labels);
+  assert.deepEqual(footerLabels(renderFooter({ footer: { links: footerLinks }, auth: null })), labels);
+});
+
+// Header pills and header actions as an app might configure them; the mobile bar builds its auto items from both.
+const chromeNavigation = (auth) => ({
+  auth,
+  headerPages: [
+    { id: 'members', label: 'Members Directory', action: 'navigate', path: '/members' },
+    { id: 'preferences', label: 'My Preferences Page', action: 'navigate', path: '/me/preferences' },
+  ],
+  header: {
+    actions: [
+      { id: 'signin', label: 'Sign In Now', action: 'signin' },
+      { id: 'my-profile', label: 'Open My Profile', action: 'navigate', path: '/me' },
+      { id: 'new-app', label: 'New App Draft', action: 'navigate', path: '/create?new=1' },
+    ],
+  },
+  profile: { show: true, menu: [] },
+  notifications: { show: false },
+  mobile: { bottomBar: {} },
+});
+const shown = (html, labels) => labels.filter((label) => html.includes(label));
+const chromeLabels = ['Members Directory', 'My Preferences Page', 'Sign In Now', 'Open My Profile', 'New App Draft'];
+
+test('with auth disabled the header shows no personal pages or sign-in call to action', () => {
+  const html = renderShellComponent('Header.js', chromeNavigation(authDisabled), { user: localUser });
+  // The primary action falls through to the first entry the auth mode can honor.
+  assert.deepEqual(shown(html, chromeLabels), ['Members Directory', 'New App Draft']);
+});
+
+test('with auth enabled the header shows every configured page and its first action', () => {
+  const html = renderShellComponent('Header.js', chromeNavigation(authEnabled), { user: localUser });
+  assert.deepEqual(shown(html, chromeLabels), ['Members Directory', 'My Preferences Page', 'Sign In Now']);
+});
+
+test('with auth disabled the mobile bar builds no personal items from header pages or actions', () => {
+  assert.deepEqual(
+    shown(renderShellComponent('MobileBottomBar.jsx', chromeNavigation(authDisabled)), chromeLabels),
+    ['Members Directory', 'New App Draft'],
+  );
+  assert.deepEqual(
+    shown(renderShellComponent('MobileBottomBar.jsx', chromeNavigation(authEnabled)), chromeLabels),
+    ['Members Directory', 'My Preferences Page', 'Open My Profile'],
+  );
 });
