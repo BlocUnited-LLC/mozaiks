@@ -543,6 +543,59 @@ async def test_app_wide_platform_boundary_on_mongo_preserves_crud_and_refuses_fo
     assert await own.count({}) == 0
 
 
+@pytest.mark.parametrize("module_id,workspace", [
+    ("support", None),  # a mounted built-in module's own alias handle
+    ("tasks", workspace_contract(tenancy="app_wide")),  # an app module's own alias handle
+])
+async def test_module_alias_handles_refuse_driver_option_routes_on_mongo(module_id, workspace, mongo):
+    """Each module's bounded alias handle forwards only documented options (follow-up to #798).
+
+    The handle wraps a real driver collection. Left unchecked, the installed
+    driver merges an unexpected keyword into the command document, or lifts a
+    ``$query`` filter envelope, and the operation reaches a collection or
+    database the module must not touch. The handle now refuses those before the
+    driver builds a command, while legitimate options keep working.
+    """
+    other_db = f"{mongo.database}_handle_other"
+    ctx = MongoPersistenceContext(
+        app_id="app-a", client=mongo.client, database_name=mongo.database,
+        data_contract=workspace, platform_modules=mounted(), module_id=module_id,
+        principal=PersistencePrincipal("user-a", "ws-a"),
+    )
+    name = "requests" if module_id == "support" else "tasks"
+    handle = ctx.literal_collection(ctx.collection_name(module_id, name))
+    assert isinstance(handle, GuardedAliasCollection)
+    try:
+        foreign = mongo.client[mongo.database]["foreign_rows"]
+        await foreign.insert_many([{"k": 1, "marker": "foreign"}, {"k": 2, "marker": "foreign"}])
+        await mongo.client[other_db]["foreign_rows"].insert_one({"k": 1, "marker": "other-db"})
+
+        async def refused(coro):
+            with pytest.raises(PersistenceScopeError):
+                await coro
+
+        await refused(handle.count_documents({}, pipeline=[{"$collStats": {}}]))
+        await refused(handle.distinct("marker", distinct="foreign_rows"))
+        await refused(handle.find_one_and_update({}, {"$set": {"marker": "x"}}, findAndModify="foreign_rows"))
+        await refused(handle.find_one_and_delete({}, findAndModify="foreign_rows"))
+        await refused(handle.find_one({"$query": {}, "find": "foreign_rows"}))
+        with pytest.raises(PersistenceScopeError):
+            handle.aggregate([{"$match": {}}], aggregate="foreign_rows")
+        with pytest.raises(PersistenceScopeError):
+            handle.find({"$query": {}, "$db": other_db, "find": "foreign_rows"})
+
+        # The foreign collection and the second database are untouched.
+        assert await foreign.count_documents({}) == 2
+        assert await foreign.count_documents({"marker": {"$ne": "foreign"}}) == 0
+        assert await mongo.client[other_db]["foreign_rows"].count_documents({}) == 1
+
+        # A legitimate option on the module's own alias handle still works.
+        await handle.insert_one({"state": "open"})
+        assert await handle.count_documents({"state": "open"}, limit=5) == 1
+    finally:
+        await mongo.client.drop_database(other_db)
+
+
 async def test_studio_pages_load_in_a_fresh_scaffold_and_keep_users_apart(tmp_path, monkeypatch, mongo):
     active = app_root(tmp_path, "my-app", workspace_contract())
     module(active, "tasks", {"own": ("tasks", "tasks"), "support": ("workspace_support", "requests")})
