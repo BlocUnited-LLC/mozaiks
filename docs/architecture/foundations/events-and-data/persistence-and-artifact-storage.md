@@ -271,6 +271,12 @@ In mixed apps, literal access to an owned physical collection is rejected.
 Unowned aliases remain usable through a bounded Mongo-compatible facade that
 supports their existing operations and safe aggregation cursors; it prevents
 foreign-collection stages and database introspection from exposing owned rows.
+Each method forwards only the options Mongo defines for that operation (such as
+sessions, comments, projections, sorts, upserts, index hints, time limits,
+`skip`/`limit` for counts, and `allowDiskUse`/`batchSize` for aggregations). An
+option, surplus positional argument, or raw query command envelope the facade does
+not recognize is refused before the driver builds a command, so a leftover
+argument cannot name another collection, database, pipeline, or command.
 Apps with no owned collections retain raw alias behavior. Scoped shared
 collections must declare their owning surface; missing ownership fails loading.
 Index changes on owned collections remain host startup work: module calls cannot
