@@ -283,8 +283,11 @@ upstream changelog into this document.
   recorded under `AG2-WP-014`. `HumanInputRequest.timeout`,
   `ToolApprovalRequest`, `MessageEnqueued`, `ModelResponse.response_id`, and
   the OpenAI prompt-cache options are additive and not adopted. Reserved `ag:`
-  and `a2a:` context keys no longer cross A2A or AG-UI transports, and
-  `BedrockConfig` now requires aiobotocore; Mozaiks uses neither.
+  and `a2a:` context keys no longer cross A2A or AG-UI transports. Mozaiks
+  does not use AG-UI. Its declarative A2A remote agents
+  (`mozaiksai/core/workflow/agents/a2a.py`) do send context variables, but no
+  Mozaiks key uses either prefix, so nothing they send is stripped.
+  `BedrockConfig` now requires aiobotocore; Mozaiks does not use Bedrock.
 - **Dependency floors moved with the extras** (OpenAI SDK 3.9, Anthropic SDK
   1.6, MCP 2.2). Mozaiks pins none of them; the `a2a-sdk` and
   `agent-client-protocol` ranges are unchanged.
