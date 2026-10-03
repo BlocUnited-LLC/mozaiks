@@ -481,14 +481,14 @@ class ScopedRefinementCodingWorker:
                     app_id=request.artifact_app_id,
                     artifact_version_id=f"pending_{zip_sha[:16]}",
                 )
+                if not content_ref:
+                    raise ValueError("Configured content store returned no bundle reference")
                 commit_content_metadata["content_ref"] = content_ref
                 commit_content_metadata["content_backend"] = content_store.backend_name
             except Exception as cs_exc:
-                logger.warning(
-                    "CONTENT_STORE_PUT_BUNDLE_FAILED app=%s: %s — using local path only",
-                    request.app_id,
-                    cs_exc,
-                )
+                raise RuntimeError(
+                    f"CONTENT_STORE_PUT_BUNDLE_FAILED: {cs_exc}"
+                ) from cs_exc
 
         artifact_store = self._artifact_store or get_artifact_store()
         validation_status = self._artifact_validation_status(validation_result)

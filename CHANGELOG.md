@@ -131,6 +131,8 @@ This project follows a practical pre-1.0 changelog format:
   editor/preview; Review patch opens the saved candidate instead of running
   another coding request. Cancellation clears the matching in-progress session,
   and every coding provider passes the finalizer's approved-file scope check.
+  A configured remote content-store failure now blocks saving the draft instead
+  of silently claiming success with files available on only one worker.
 - Required runtime checks that are skipped or unavailable leave generated-app
   acceptance pending. Partial source validation cannot pass, and exports require
   a passed build for the accepted snapshot. Live acceptance scripts run the
@@ -138,6 +140,10 @@ This project follows a practical pre-1.0 changelog format:
 - Existing-app discovery resumes the correct interview after human replies and
   completes only after its deterministic artifact save succeeds. Persistence
   failures terminate as failures instead of reporting successful discovery.
+- Workflow provider input retains the agent's prior replies after human
+  confirmation and saved-channel reopen. A thin AG2 view adapter corrects the
+  event shape consumed by provider mappers, preserving AG2 visibility and
+  history limits; an upstream watchpoint defines when this adapter is removed.
 
 - **`mozaiks add --preset <tier>` works** (#304). The command `mozaiks info`
   recommends always failed with "the following arguments are required:

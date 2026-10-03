@@ -84,7 +84,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     './CodeEditorPane': `export default function Editor({content}) { return <output aria-label="Editor contents">{content}</output>; }`,
     './PreviewPane': `export default function Preview({artifactVersionId}) { return <output aria-label="Preview version">{artifactVersionId}</output>; }`,
     './BuildStatusPane': 'export default function BuildStatus() { return null; }',
-    './ExportActions': 'export default function Export() { return null; }',
+    '../../adapters/api.js': `export const authFetch = (...args) => fetch(...args);`,
     '../../../app/admin/pages/studioApi.js': 'export const studioFetch = (...args) => fetch(...args);',
   };
   const fixture = await build({
@@ -92,11 +92,20 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       import React from 'react';
       import { createRoot } from 'react-dom/client';
       import AppWorkbench from ${JSON.stringify(path.join(root, 'factory_app/workflows/AppGenerator/ui/AppWorkbench.js'))};
+      const delivery = new URLSearchParams(location.search).get('delivery') || 'files';
       const payload = {artifact_version_id:'baseline', build_registry_id:'owned-build',
+        files:delivery==='files' ? [{name:'app.zip'}] : [],
+        stage:delivery==='confirm' || delivery==='custom-confirm' ? 'confirm' : 'files_ready',
+        ...(delivery==='custom-confirm' ? {actions:[
+          {id:'download_complete', label:'Download Bundle', approved:true},
+          {id:'close', label:'Return to editor'},
+        ]} : {}),
         generated_files:{'README.md':'Original contents'}, app_validation_status:'passed'};
-      createRoot(document.getElementById('root')).render(<AppWorkbench payload={payload} showExportActions={false} />);
+      createRoot(document.getElementById('root')).render(<AppWorkbench payload={payload}
+        onResponse={response => fetch('/fixture-response',{method:'POST',body:JSON.stringify(response)})} />);
     `},
-    bundle: true, write: false, jsx: 'automatic', loader: {'.js':'jsx'}, nodePaths: [path.join(shell, 'node_modules')],
+    bundle: true, write: false, jsx: 'automatic', loader: {'.js':'jsx', '.png':'dataurl'}, nodePaths: [path.join(shell, 'node_modules')],
+    alias: {react:path.join(shell, 'node_modules/react'), 'react-dom':path.join(shell, 'node_modules/react-dom')},
     plugins: [{name:'workbench-boundaries', setup(builder) {
       builder.onResolve({filter:/.*/}, args => {
         if (Object.hasOwn(stubs, args.path)) return {path:args.path, namespace:'fixture'};
@@ -120,13 +129,14 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     if (req.url === '/fixture.js') {
       res.setHeader('Content-Type','text/javascript'); res.end(fixture.outputFiles[0].text); return;
     }
-    if (req.url === '/') {
+    if (req.url === '/' || req.url.startsWith('/?')) {
       res.setHeader('Content-Type','text/html'); res.end('<div id="root"></div><script src="/fixture.js"></script>'); return;
     }
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     requests.push({url:req.url, method:req.method, body:Buffer.concat(chunks).toString()});
     res.setHeader('Content-Type','application/json');
+    if (req.url === '/fixture-response') {res.end('{"accepted":true}'); return;}
     if (req.url === '/fixture-trigger') {
       res.end(JSON.stringify({execution_mode:'coding_worker', coding_worker:{
         status:scenario.status, applied_files:{'README.md':'Candidate contents'},
@@ -148,6 +158,36 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
   t.after(() => new Promise(resolve => {server.closeAllConnections(); server.close(resolve);}));
   const browser = await chromium.launch({headless:true});
   t.after(() => browser.close());
+  for (const delivery of ['empty', 'confirm', 'custom-confirm']) {
+    await t.test(`original delivery actions: ${delivery}`, async () => {
+      scenario = {status:'planned', validation:'pending', saved:true};
+      requests.length = 0;
+      const page = await browser.newPage();
+      page.on('pageerror', error => console.error(error.stack));
+      try {
+        await page.goto(`http://127.0.0.1:${server.address().port}/?delivery=${delivery}`);
+        await expect(page.getByRole('region', {name:'Artifact review'})).toContainText('Version baseline');
+        await expect(page.getByRole('button', {name:'Download Bundle', exact:true})).toHaveCount(0);
+        const confirm = page.getByRole('button', {name:'Confirm app bundle', exact:true});
+        if (delivery==='empty') await expect(confirm).toHaveCount(0);
+        else {
+          await expect(page.getByRole('button', {name:delivery==='custom-confirm'?'Return to editor':'Close',exact:true})).toBeVisible();
+          await confirm.click();
+          await expect.poll(() => requests.filter(r => r.url==='/fixture-response').length).toBe(1);
+          const response=JSON.parse(requests.find(r => r.url==='/fixture-response').body);
+          assert.equal(response.action,'download_complete');
+          assert.equal(response.approved,true);
+          assert.equal(response.download_accepted,true);
+          assert.ok(!requests.some(r => r.url.includes('/download?')));
+          await page.getByRole('textbox', {name:'App change request'}).fill('Change the README.');
+          await page.getByRole('button', {name:'Apply change',exact:true}).click();
+          await expect(page.getByRole('status', {name:'Refinement result'})).toContainText('Draft saved');
+          await expect(confirm).toHaveCount(0);
+          assert.equal(requests.filter(r => r.url==='/fixture-response').length,1);
+        }
+      } finally {await page.close();}
+    });
+  }
   for (const item of [
     {status:'planned', validation:'pending', saved:true, message:'Draft saved; validation is incomplete.', tone:'amber'},
     {status:'failed', validation:'failed', saved:true, message:'Draft saved; validation failed.', tone:'red'},
@@ -161,15 +201,18 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       scenario = item;
       requests.length = 0;
       const page = await browser.newPage();
+      page.on('pageerror', error => console.error(error.stack));
       try {
         await page.goto(`http://127.0.0.1:${server.address().port}`);
         await expect(page.getByRole('region', {name:'Artifact review'})).toContainText('Version baseline');
+        await expect(page.getByRole('button', {name:'Download Bundle',exact:true})).toBeVisible();
         await page.getByRole('textbox').fill('Change the README.');
         await page.getByRole('button', {name:'Apply change', exact:true}).click();
         const result = page.getByRole('status', {name:'Refinement result'});
         await expect(result).toContainText(item.message);
         await expect(result).toHaveClass(new RegExp(`border-${item.tone}-`));
         await expect(result).not.toContainText('Scoped refinement applied.');
+        await expect(page.getByRole('button', {name:'Download Bundle',exact:true})).toHaveCount(0);
         const advances = item.status === 'validated' && item.saved;
         await expect(page.getByLabel('Preview version')).toHaveText(advances ? 'candidate' : 'baseline');
         await expect(page.getByLabel('Editor contents')).toHaveText(advances ? 'Candidate contents' : 'Original contents');
@@ -199,6 +242,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
         }
         assert.equal(requests.filter(r => r.url === '/fixture-trigger').length, 1, 'Review must not execute another refinement');
         assert.ok(!requests.some(r => r.method === 'POST' && r.url.includes('/baseline/')));
+        assert.ok(!requests.some(r => r.url === '/fixture-response'), 'Refinement review must not answer the original delivery workflow');
       } finally { await page.close(); }
     });
   }

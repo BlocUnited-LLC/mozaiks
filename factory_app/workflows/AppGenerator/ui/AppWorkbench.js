@@ -7,6 +7,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { Code, LayoutGrid, Monitor } from 'lucide-react';
 import { useWorkflowStart } from '@mozaiks/chat-ui/hooks/useWorkflowStart.js';
 import { workflowSurfaceStyles, workflowToolbarButtonClass } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
+import { normalizePrimitiveActions } from '@mozaiks/chat-ui/core/ui/workflowPrimitiveUtils.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
 import { useSandbox } from './useSandbox';
 import BuildStatusPane from './BuildStatusPane';
@@ -69,6 +70,16 @@ const AppWorkbench = ({
   const artifactReviewRef = useRef(null);
   const codingResult = refinementResult?.coding_worker;
   const savedDraftId = codingResult?.metadata?.build_record_id;
+  const confirmationOnly = payload?.stage === 'confirm';
+  const hasDownloadFiles = Array.isArray(payload?.files) && payload.files.some(Boolean);
+  const canShowExportActions = showExportActions && !codingResult && (hasDownloadFiles || confirmationOnly);
+  const exportPayload = confirmationOnly ? {
+    ...payload,
+    actions: normalizePrimitiveActions(payload, [
+      { id: 'download_complete', label: 'Confirm app bundle', variant: 'primary', approved: true },
+      { id: 'close', label: 'Close', variant: 'secondary' },
+    ]).map((action) => action.id === 'download_complete' ? { ...action, label: 'Confirm app bundle' } : action),
+  } : payload;
   const codingResultTone = codingResult?.status === 'validated' && savedDraftId
     ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
     : codingResult?.status === 'failed'
@@ -637,10 +648,10 @@ const AppWorkbench = ({
         )}
         </section>
 
-        {showExportActions && (
+        {canShowExportActions && (
           <div className="pt-2">
             <ExportActions
-              payload={payload}
+              payload={exportPayload}
               onResponse={onResponse}
               toolName={toolName}
               toolCallId={toolCallId}
