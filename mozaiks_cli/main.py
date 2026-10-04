@@ -188,8 +188,8 @@ def create_parser():
         help=(
             "Interface to bind (default: 127.0.0.1, this machine only). "
             "Use --listen 0.0.0.0 to listen on all interfaces, for example in a container. "
-            "With authentication off, everyone who can reach that address is the anonymous "
-            "user; serve prints a warning before it starts."
+            "With authentication off, everyone who can reach that address can act as any "
+            "user with any role; serve prints a warning before it starts."
         ),
     )
     serve_parser.add_argument(
@@ -308,8 +308,8 @@ def create_parser():
         help=(
             "Interface the launched backend and frontend bind with --open "
             "(default: 127.0.0.1, this machine only; use 0.0.0.0 for all interfaces). "
-            "With authentication off, everyone who can reach that address is the anonymous "
-            "user; the launcher prints a warning before it starts."
+            "With authentication off, everyone who can reach that address can act as any "
+            "user with any role; the launcher prints a warning before it starts."
         ),
     )
 

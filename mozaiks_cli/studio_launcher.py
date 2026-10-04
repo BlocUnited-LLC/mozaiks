@@ -202,8 +202,9 @@ def launch_studio(
     """Start (or reuse) the Studio backend and frontend for ``workspace_root``.
 
     Both servers listen on ``bind_host``: loopback by default, because local
-    development runs with authentication off and an anonymous admin user. On
-    any other address, a warning says so before the first server starts.
+    development runs with authentication off, where any request can act as any
+    user with any role. On any other address, a warning says so before the
+    first server starts.
     """
     web_shell_root = resolve_web_shell_root()
     host_name = "studio" if preferred_host == "auto" else preferred_host
@@ -289,7 +290,7 @@ def launch_studio(
             "--strictPort",
         ]
         # The dev server proxies /api to the backend, so it exposes the same
-        # anonymous user even when the backend was already running.
+        # unauthenticated API even when the backend was already running.
         warn_about_exposure_once()
         frontend_log = _process_log_path(workspace_root, "frontend")
         frontend_process = _spawn_process(

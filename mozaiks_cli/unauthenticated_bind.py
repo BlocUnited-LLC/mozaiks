@@ -1,10 +1,12 @@
 """Warn before a host without authentication listens beyond this machine.
 
-Local development runs with authentication off: every request is the anonymous
-user, with the roles in ``AUTH_ANON_ROLES`` (a fresh scaffold grants ``admin``).
-On a loopback address only this machine can reach that user. On any other
-address everyone who can reach the server is that user, so commands that start
-a host say so first.
+Local development runs with authentication off. A request that claims no
+identity is the anonymous user, with the roles in ``AUTH_ANON_ROLES`` (a fresh
+scaffold grants ``admin``), and a request may claim any user and any roles for
+itself, so that one browser can try several users. On a loopback address only
+this machine can do either. On any other address everyone who can reach the
+server can act as any user with any role, so commands that start a host say so
+first.
 
 The auth mode comes from the runtime's own resolution of the environment the
 host will receive, so the warning describes what the host does. This is a
@@ -59,10 +61,13 @@ def unauthenticated_bind_warning(
         return None
 
     roles = NoAuthAdapter(settings=config.settings).validate_token_sync("").roles
-    granted = (
-        f"the roles in AUTH_ANON_ROLES: {', '.join(roles)}"
+    # The roles only describe requests that claim nothing; they limit nothing.
+    anonymous = (
+        "Requests that claim no identity are the anonymous user, with the roles in "
+        f"AUTH_ANON_ROLES: {', '.join(roles)}."
         if roles
-        else "no roles (AUTH_ANON_ROLES is empty)"
+        else "Requests that claim no identity are the anonymous user. AUTH_ANON_ROLES is "
+        "empty, which does not limit access while authentication is off."
     )
     switches = [
         f"{name}={config.settings[name].strip()}"
@@ -72,7 +77,9 @@ def unauthenticated_bind_warning(
     lines = [
         f"WARNING: authentication is off and the server is about to listen on {bind_host}, "
         "which other machines can reach.",
-        f"Anyone who can reach it is treated as the anonymous user with {granted}.",
+        "With authentication off, anyone who can reach it can act as any user with any role, "
+        "including admin.",
+        anonymous,
     ]
     unused = ", ".join(unused_provider_settings(config))
     if unused and switches:

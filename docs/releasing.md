@@ -127,6 +127,8 @@ Point `--mongo-uri` (or `MOZAIKS_RELEASE_AUDIT_MONGO_URI`) at a throwaway
 MongoDB **server** on a non-default port, as above. A database name in the URI
 does not isolate anything: the runtime ignores it and uses fixed database
 names, `mozaiksai` and `mozaiks_apps`, on whatever server the URI points to.
+Module actions, such as those a Studio session runs, also write audit records
+to a third database, `mozaiks_audit`.
 Against the default `localhost:27017` the smoke would write into the databases
 your local development stack uses.
 

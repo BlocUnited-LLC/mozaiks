@@ -98,6 +98,46 @@ _CASES: list[_Case] = [
         ("authSource", "QuerySecret"),
     ),
     _Case(
+        # No "/" between the hosts and the options. pymongo 4.5 to 4.7 read the
+        # hosts up to the later "/" and name the option text in their error.
+        "options_without_slash_after_hosts",
+        "mongodb://127.0.0.1:{port}?authSource=admin&password=QueryHead/QueryTail",
+        f"mongodb://{_NOT_SHOWN}",
+        ("authSource", "QueryHead", "queryhead", "QueryTail"),
+    ),
+    _Case(
+        "options_after_slash_without_database",
+        "mongodb://appuser:OptOnlySecret@127.0.0.1:{port}/?authSource=admin",
+        "mongodb://***@127.0.0.1:{port}",
+        ("appuser", "OptOnlySecret", "authSource"),
+    ),
+    _Case(
+        # With no "@" at all, the user name reads as a host and the password as
+        # its port, which is not a number: that is not an address.
+        "credentials_without_host",
+        "mongodb://appuser:NoAtSecret",
+        f"mongodb://{_NOT_SHOWN}",
+        ("appuser", "NoAtSecret"),
+    ),
+    _Case(
+        "credentials_without_host_with_database",
+        "mongodb://appuser:NoAtSecret/app",
+        f"mongodb://{_NOT_SHOWN}",
+        ("appuser", "NoAtSecret"),
+    ),
+    _Case(
+        "database_segment_with_colon",
+        "mongodb://127.0.0.1:{port}/admin:DbPathSecret",
+        f"mongodb://{_NOT_SHOWN}",
+        ("DbPathSecret",),
+    ),
+    _Case(
+        "database_segment_with_hash",
+        "mongodb://127.0.0.1:{port}/app#FragSecret",
+        f"mongodb://{_NOT_SHOWN}",
+        ("FragSecret",),
+    ),
+    _Case(
         # The driver warns about an unusable option by quoting its value.
         "option_value",
         "mongodb://appuser:OptSecret@127.0.0.1:{port}/app?readPreference=PrefSecret",
@@ -222,6 +262,9 @@ _LAUNCHER_CASES = [
         "wrong_at_percent_encoded",
         "cut_off_after_at_in_password",
         "cut_off_after_at_and_slash_in_password",
+        "options_without_slash_after_hosts",
+        "credentials_without_host",
+        "database_segment_with_colon",
     }
 ]
 
@@ -393,7 +436,8 @@ def test_hosts_are_not_shown_for_a_uri_whose_form_the_driver_rejects(uri, driver
 
 def test_hosts_stay_shown_when_the_driver_read_the_uri_and_refused_its_request() -> None:
     """A failed SRV lookup, like conflicting options, is about a URI the driver
-    could read. The operator needs the host name to see which lookup failed."""
+    could read. The operator needs the host name to see which lookup failed,
+    and a pointer at DNS rather than at the password's encoding."""
     failure = mongo_preflight.mongo_unreachable(
         "mongodb+srv://appuser:SrvSecret@cluster0.example.invalid/app?retryWrites=true", timeout_ms=1000
     )
@@ -403,7 +447,86 @@ def test_hosts_stay_shown_when_the_driver_read_the_uri_and_refused_its_request()
     assert failure.reason.startswith(
         "ConfigurationError: the MongoDB driver rejected MONGO_URI before connecting"
     )
+    assert "looks up the host shown in DNS" in failure.reason
+    assert "percent-encoded" not in failure.reason
     _assert_nothing_secret(failure.shown_uri + failure.reason, ("appuser", "SrvSecret", "retryWrites"))
+
+
+def test_options_the_driver_refuses_are_not_reported_as_a_password_encoding_problem() -> None:
+    failure = mongo_preflight.mongo_unreachable(
+        "mongodb://appuser:ConfSecret@127.0.0.1:27999,127.0.0.1:27998/app?directConnection=true",
+        timeout_ms=1000,
+    )
+
+    assert failure is not None
+    assert failure.shown_uri == "mongodb://***@127.0.0.1:27999,127.0.0.1:27998/app"
+    assert failure.reason.startswith("ConfigurationError: the MongoDB driver rejected MONGO_URI before connecting")
+    assert "refused what its options ask for" in failure.reason
+    assert "percent-encoded" not in failure.reason
+    assert "DNS" not in failure.reason
+    _assert_nothing_secret(failure.reason, ("appuser", "ConfSecret", "directConnection"))
+
+
+@pytest.mark.parametrize(
+    ("uri", "shown", "hint"),
+    [
+        # The host is not shown, so a hint about the host shown would point at nothing.
+        ("mongodb+srv://appuser:CutHead@CutTail", f"mongodb+srv://***@{_HOST_NOT_SHOWN}", "write its port"),
+        (
+            "mongodb+srv://appuser:AppSecret@cluster0.example.invalid/app?appName=me@AtCorp",
+            f"mongodb+srv://{_NOT_SHOWN}",
+            "percent-encoded",
+        ),
+    ],
+    ids=["host_not_shown", "not_well_formed"],
+)
+def test_a_lookup_hint_is_given_only_for_a_host_that_is_shown(monkeypatch, uri, shown, hint) -> None:
+    def refuse(uri: str, *, timeout_ms: int) -> None:
+        raise mongo_preflight.MongoUriRejectedError("ConfigurationError", malformed=False)
+
+    monkeypatch.setattr(mongo_preflight, "ping_mongo_uri", refuse)
+
+    failure = mongo_preflight.mongo_unreachable(uri, timeout_ms=1000)
+
+    assert failure is not None
+    assert failure.shown_uri == shown
+    assert hint in failure.reason
+    assert "DNS" not in failure.reason
+    _assert_nothing_secret(failure.reason, ("appuser", "CutHead", "CutTail", "AppSecret", "AtCorp"))
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "mongodb://dbhost.invalid?authSource=admin&password=QueryHead/QueryTail",
+        "mongodb://dbhost.invalid:27999?authSource=admin&password=QueryHead/QueryTail",
+        "mongodb+srv://dbhost.invalid?authSource=admin&password=QueryHead/QueryTail",
+    ],
+    ids=["no_port", "port", "srv"],
+)
+def test_options_without_the_slash_after_the_hosts_withhold_the_driver_message(monkeypatch, uri) -> None:
+    """pymongo 4.5 to 4.7, which the declared floor allows, read the hosts up to
+    a later ``/`` and name the option text before it in their connection error."""
+
+    def fail_ping(uri: str, *, timeout_ms: int) -> None:
+        raise RuntimeError(
+            "dbhost.invalid?authsource=admin&password=queryhead:27017: [Errno 11001] getaddrinfo failed"
+        )
+
+    monkeypatch.setattr(mongo_preflight, "ping_mongo_uri", fail_ping)
+
+    failure = mongo_preflight.mongo_unreachable(uri, timeout_ms=1000)
+
+    assert failure is not None
+    assert failure.shown_uri == f"{uri.split('//', 1)[0]}//{_NOT_SHOWN}"
+    assert failure.reason.startswith(
+        "RuntimeError: the driver's message is not shown because MONGO_URI is not a well-formed MongoDB URI"
+    )
+    assert "options follow a / after the hosts" in failure.reason
+    _assert_nothing_secret(
+        failure.shown_uri + failure.reason,
+        ("dbhost", "authSource", "authsource", "QueryHead", "queryhead", "QueryTail"),
+    )
 
 
 def test_a_connection_failure_to_a_well_formed_uri_keeps_the_driver_message(closed_ports) -> None:

@@ -1,8 +1,9 @@
 """A host started without authentication beyond this machine warns first.
 
 A fresh scaffold runs with authentication off and an anonymous user that has
-the ``admin`` role. On a loopback address only this machine reaches it; with
-``--listen 0.0.0.0`` everyone who can reach the server is that user. These
+the ``admin`` role, and any request may claim another user and other roles. On
+a loopback address only this machine reaches it; with ``--listen 0.0.0.0``
+everyone who can reach the server can act as any user with any role. These
 tests run the real command functions. Only ``uvicorn.run`` (serve) and the
 process spawn (Studio launcher) are replaced, by recorders that also note what
 had been printed when the host was about to start; nothing binds a socket.
@@ -29,6 +30,7 @@ from mozaiksai.core.auth.config import clear_auth_config_cache
 from tests.test_cli_serve_first_run import _VALID_CONTRACT, _workspace
 
 _WARNING = "WARNING: authentication is off and the server is about to listen on"
+_ANY_USER = "With authentication off, anyone who can reach it can act as any user with any role, including admin."
 _KEYCLOAK = {
     "KEYCLOAK_URL": "https://idp.example.invalid",
     "KEYCLOAK_REALM": "apps",
@@ -116,7 +118,11 @@ def test_serve_beyond_loopback_with_auth_off_warns_before_starting(monkeypatch, 
 
     warning = started["stderr_before_start"]
     assert f"{_WARNING} 0.0.0.0, which other machines can reach." in warning
-    assert "treated as the anonymous user with the roles in AUTH_ANON_ROLES: admin, user." in warning
+    assert _ANY_USER in warning
+    assert (
+        "Requests that claim no identity are the anonymous user, with the roles in "
+        "AUTH_ANON_ROLES: admin, user."
+    ) in warning
     assert "To turn authentication on, set AUTH_ENABLED=true and configure an identity provider" in warning
     assert str(workspace / ".env") in warning
     assert "--listen 127.0.0.1" in warning
@@ -126,14 +132,47 @@ def test_serve_beyond_loopback_with_auth_off_warns_before_starting(monkeypatch, 
     assert started["host"] == "0.0.0.0"
 
 
-def test_serve_warning_says_the_anonymous_user_has_no_roles_when_none_are_set(
-    monkeypatch, tmp_path, capsys
-) -> None:
-    _auth_env(monkeypatch, ENV="development", AUTH_ENABLED="false")
+def test_serve_warning_does_not_present_fewer_anonymous_roles_as_a_limit(monkeypatch, tmp_path, capsys) -> None:
+    """With authentication off a request can claim any user and roles, so the
+    anonymous user's roles describe only requests that claim nothing."""
+    _auth_env(monkeypatch, ENV="development", AUTH_ENABLED="false", AUTH_ANON_ROLES="user")
 
     started = _serve(monkeypatch, capsys, _workspace(tmp_path, secrets=_VALID_CONTRACT), listen="0.0.0.0")
 
-    assert "the anonymous user with no roles (AUTH_ANON_ROLES is empty)." in started["stderr_before_start"]
+    warning = started["stderr_before_start"]
+    assert _ANY_USER in warning
+    assert (
+        "Requests that claim no identity are the anonymous user, with the roles in AUTH_ANON_ROLES: user."
+    ) in warning
+    assert started["host"] == "0.0.0.0"
+
+
+@pytest.mark.parametrize(
+    "auth",
+    [
+        {"ENV": "development", "AUTH_ENABLED": "false"},
+        {"ENV": "development", "AUTH_ENABLED": "false", "AUTH_ANON_ROLES": ""},
+        {"ENV": "development", "AUTH_ENABLED": "false", "AUTH_ANON_ROLES": " , "},
+        {"ENV": "development"},
+    ],
+    ids=["unset", "empty", "blank_entries", "implicit_demo_mode"],
+)
+def test_serve_warning_does_not_present_empty_anonymous_roles_as_a_limit(
+    monkeypatch, tmp_path, capsys, auth
+) -> None:
+    """No anonymous roles is not a restriction while authentication is off."""
+    _auth_env(monkeypatch, **auth)
+
+    started = _serve(monkeypatch, capsys, _workspace(tmp_path, secrets=_VALID_CONTRACT), listen="0.0.0.0")
+
+    warning = started["stderr_before_start"]
+    assert _ANY_USER in warning
+    assert (
+        "Requests that claim no identity are the anonymous user. AUTH_ANON_ROLES is empty, which "
+        "does not limit access while authentication is off."
+    ) in warning
+    assert "no roles" not in warning
+    assert started["host"] == "0.0.0.0"
 
 
 def test_serve_beyond_loopback_with_auth_on_prints_no_warning(monkeypatch, tmp_path, capsys) -> None:
@@ -159,6 +198,42 @@ def test_serve_warning_says_auth_enabled_false_overrides_a_supplied_provider(
         "(KEYCLOAK_URL, KEYCLOAK_REALM, AUTH_ISSUER): they are ignored."
     ) in warning
     assert started["host"] == "0.0.0.0"
+
+
+@pytest.mark.parametrize(
+    ("switches", "expected"),
+    [
+        ({"AUTH_PROVIDER": "none"}, "AUTH_PROVIDER=none overrides"),
+        ({"AUTH_ENABLED": "false", "AUTH_PROVIDER": "none"}, "AUTH_ENABLED=false and AUTH_PROVIDER=none override"),
+    ],
+    ids=["auth_provider_none", "both_switches"],
+)
+def test_serve_warning_names_each_switch_that_overrides_a_supplied_provider(
+    monkeypatch, tmp_path, capsys, switches, expected
+) -> None:
+    _auth_env(monkeypatch, ENV="development", **switches, **_KEYCLOAK)
+
+    started = _serve(monkeypatch, capsys, _workspace(tmp_path, secrets=_VALID_CONTRACT), listen="0.0.0.0")
+
+    assert (
+        f"{expected} the provider settings present in the environment (KEYCLOAK_URL, KEYCLOAK_REALM): "
+        "they are ignored."
+    ) in started["stderr_before_start"]
+
+
+def test_serve_warning_says_an_incomplete_provider_signal_selects_nothing(monkeypatch, tmp_path, capsys) -> None:
+    """Half of Keycloak's pair, nothing else: the runtime falls back to demo mode."""
+    _auth_env(monkeypatch, ENV="development", KEYCLOAK_URL=_KEYCLOAK["KEYCLOAK_URL"])
+
+    started = _serve(monkeypatch, capsys, _workspace(tmp_path, secrets=_VALID_CONTRACT), listen="0.0.0.0")
+
+    warning = started["stderr_before_start"]
+    assert f"{_WARNING} 0.0.0.0" in warning
+    assert (
+        "The provider settings present in the environment (KEYCLOAK_URL) do not select a provider "
+        "on their own: they are ignored."
+    ) in warning
+    assert "overrides" not in warning
 
 
 def test_serve_leaves_the_production_refusal_to_the_host(monkeypatch, tmp_path, capsys) -> None:

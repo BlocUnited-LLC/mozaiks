@@ -26,8 +26,10 @@ Options:
     --mongo-uri    URI of a throwaway MongoDB server, on a non-default port, for
                    the first-run smoke (or set MOZAIKS_RELEASE_AUDIT_MONGO_URI).
                    The runtime ignores the database name in the URI and uses
-                   fixed database names (mozaiksai, mozaiks_apps) on whatever
-                   server it points to, so never point it at the server you
+                   fixed database names (mozaiksai, mozaiks_apps, and
+                   mozaiks_audit once a module action runs, as in a Studio
+                   session) on whatever server it points to, so never point
+                   it at the server you
                    develop against. Required unless --skip-first-run-smoke is
                    given.
 """

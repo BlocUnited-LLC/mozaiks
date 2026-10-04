@@ -53,7 +53,17 @@ _DATABASE = re.compile(r"[A-Za-z0-9_-]+")
 _URI_IN_TEXT = re.compile(r"mongodb(?:\+srv)?://\S+")
 _ESCAPE_HINT = (
     "Check the URI's format: special characters in the username or password "
-    "(such as @ : / ? #) must be percent-encoded."
+    "(such as @ : / ? #) must be percent-encoded, and options follow a / after the "
+    "hosts (mongodb://host:27017/?name=value)."
+)
+_SRV_HINT = (
+    "For mongodb+srv:// the driver looks up the host shown in DNS before it connects, and "
+    "this is most often that lookup failing: check the host name and that this machine can "
+    "resolve it."
+)
+_OPTIONS_HINT = (
+    "The driver read the URI and refused what its options ask for, such as options that "
+    "conflict with each other or with the number of hosts."
 )
 _HOST_NOT_SHOWN_HINT = (
     "MONGO_URI has credentials and a host with no dot and no port, which is also how the rest "
@@ -118,16 +128,21 @@ def _printable_parts(uri: str) -> _Parts | None:
     Returns ``None`` on any sign that the URI does not read the way it was
     meant. An unescaped ``@``, ``/`` or ``?`` in a password moves credential
     text out of the credential section, so any ``@`` beyond the single one
-    that ends that section, a host that is not an address, and a database
-    segment that is not a plain name each make the whole URI unprintable
-    rather than partly shown.
+    that ends that section, a ``?`` before the first ``/``, a host that is not
+    an address, and a database segment that is not a plain name each make the
+    whole URI unprintable rather than partly shown.
     """
     scheme = _scheme_of(uri)
     if not scheme:
         return None
     rest = uri[len(scheme):]
-    cut = min((index for index in (rest.find("/"), rest.find("?")) if index != -1), default=len(rest))
-    authority, tail = rest[:cut], rest[cut:]
+    slash, question = rest.find("/"), rest.find("?")
+    # Options follow a "/" after the hosts. Without it, where the hosts end is
+    # each driver version's own reading: older ones read up to a later "/" and
+    # name the option text before it as a host in their connection errors.
+    if question != -1 and (slash == -1 or question < slash):
+        return None
+    authority, tail = (rest[:slash], rest[slash:]) if slash != -1 else (rest, "")
     if "@" in tail or authority.count("@") > 1:
         return None
     _credentials, separator, hosts = authority.rpartition("@")
@@ -220,10 +235,12 @@ def mongo_unreachable(uri: str, *, timeout_ms: int) -> MongoUnreachable | None:
     except MongoUriRejectedError as exc:
         if exc.malformed:
             shown_uri, hint = f"{_scheme_of(uri)}{_NOT_SHOWN}", _ESCAPE_HINT
+        elif parts is not None and not parts.host_may_be_password_text:
+            # The driver read the URI, whose hosts are shown, and refused what it asks for.
+            hint = _SRV_HINT if parts.scheme == "mongodb+srv://" else _OPTIONS_HINT
         reason = (
-            f"{exc.driver_error}: the MongoDB driver rejected MONGO_URI before connecting "
-            "(for mongodb+srv:// this includes the DNS lookup of the host). Its message is "
-            f"not shown because it can repeat parts of the URI. {hint}"
+            f"{exc.driver_error}: the MongoDB driver rejected MONGO_URI before connecting. Its "
+            f"message is not shown because it can repeat parts of the URI. {hint}"
         )
     except Exception as exc:
         if parts is None:

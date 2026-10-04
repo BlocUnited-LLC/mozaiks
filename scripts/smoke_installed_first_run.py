@@ -8,8 +8,10 @@ against a throwaway MongoDB server on a non-default port::
 
 The server must be a throwaway one, not the database name: the runtime ignores
 the database name in the URI and uses fixed database names (``mozaiksai`` and
-``mozaiks_apps``) on whatever server the URI points to. Against the default
-``localhost:27017`` this smoke writes into your local development databases.
+``mozaiks_apps``) on whatever server the URI points to. Module actions, such as
+those a Studio session runs, also write audit records to a third database,
+``mozaiks_audit``. Against the default ``localhost:27017`` this smoke writes
+into your local development databases.
 
 The release audit and CI pass the URI through ``MOZAIKS_FIRST_RUN_SMOKE_MONGO_URI``
 so it does not appear in a child process command line.

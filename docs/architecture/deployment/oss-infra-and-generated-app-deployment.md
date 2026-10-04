@@ -193,7 +193,8 @@ Resolved in this pass:
    through `mozaiks serve . --host studio --listen 0.0.0.0` (`mozaiks serve`
    binds `127.0.0.1` unless a container passes `--listen`). With
    authentication off, a non-loopback `--listen` prints a warning to stderr
-   before the host starts: everyone who can reach the address is the anonymous
+   before the host starts: everyone who can reach the address can act as any
+   user with any role, and a request that claims no identity is the anonymous
    user with the roles in `AUTH_ANON_ROLES`.
 2. `infra/helm/mozaiks/values.yaml` liveness probe now targets the route that
    actually exists (`/api/health/live`), not `/api/health/liveness`.
