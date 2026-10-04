@@ -73,7 +73,14 @@ The optional `build_registry_id` is a selector, not target authority. Retry
 rejects context, trigger payload, journey, action, and artifact-key overrides.
 Ordinary source-chat launches without this flag retain their existing behavior.
 
-A genesis retry starts fresh. A refinement retry uses the saved typed change
+A genesis retry starts with fresh execution state and preserves the saved
+`coding_participation` choice (`autonomous` or `guided`) through the existing
+launch-context authority check. Missing choices retain the workflow default;
+invalid persisted values fail before launch. Other failed-run state is not
+copied. Approved concept, design, theme and subscription inputs continue to
+resolve through the workflow's existing artifact references.
+
+A refinement retry uses the saved typed change
 request, selected baseline record, and journey through
 `TriggerRoutingContribution`; it does not reclassify the request or allocate a
 new build. Missing, foreign, retired, or inconsistent baseline records fail

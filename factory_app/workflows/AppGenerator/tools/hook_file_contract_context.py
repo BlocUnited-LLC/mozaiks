@@ -206,6 +206,20 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 )
 
     if agent_name == "ServiceAgent":
+        lines.append(
+            "module_contract.python_stubs, downstream_python_defaults, and current_build_task.owned_paths "
+            "describe the final artifact inventory, not a request to author every file. "
+            "Implement only model-owned source; policy.py is rendered from the approved data_contract. "
+            "Do not emit a comment-only or pass stub for a code-rendered artifact. "
+            "Keep its planned path so the canonical renderer can fulfill that task's ownership."
+        )
+        policy_paths = [
+            str(path) for path in task.get("owned_paths") or []
+            if str(path).endswith("/backend/policy.py")
+        ]
+        lines.extend(_format_list_block(
+            "Code-rendered policy artifacts; omit from python_files and code_files:", policy_paths,
+        ))
         methods = [
             f"async {name}{inspect.signature(method)}"
             for name, method in vars(PersistenceCollection).items()

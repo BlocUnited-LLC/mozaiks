@@ -2488,7 +2488,8 @@ async def _failed_workflow_retry_contribution(
     source = await (await _PERSISTENCE_MANAGER._coll()).find_one(
         {"_id": body.source_chat_id, "user_id": user_id, "workflow_name": body.workflow_id,
          **build_app_scope_filter(app_id)},
-        {"status": 1, "run_build_binding": 1, "trigger_meta": 1, "change_request_id": 1, "revision_id": 1},
+        {"status": 1, "run_build_binding": 1, "trigger_meta": 1, "change_request_id": 1,
+         "revision_id": 1, "coding_participation": 1},
     )
     if not source or source.get("status") != 2:
         raise ValueError("Source workflow session is not an owned failed run")
@@ -2499,8 +2500,14 @@ async def _failed_workflow_retry_contribution(
     )
     trigger_meta = source.get("trigger_meta") or {}
     if binding.phase == "genesis":
+        seed = {}
+        if source.get("coding_participation") is not None:
+            seed["coding_participation"] = TypeAdapter(Literal["guided", "autonomous"]).validate_python(
+                source["coding_participation"],
+            )
         return TriggerRoutingContribution(
             workflow_id=body.workflow_id, journey_id=trigger_meta.get("journey_id"),
+            context_seed=validate_context_for_workflow(body.workflow_id, seed),
             explanation="Retry failed workflow", require_exact_route=True,
         )
 

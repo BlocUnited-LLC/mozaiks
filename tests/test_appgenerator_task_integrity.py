@@ -154,7 +154,7 @@ def _materialized_custom_page_context():
     output = {"manifest": None, "pages": [], "custom_route_bundle": {
         "route_manifest": [{"id": "focus", "path": "/focus", "component": "FocusTimer"}],
         "page_files": [{
-            "path": "ui/pages/custom/focus.jsx", "component_name": "FocusTimerPage",
+            "route_id": "focus", "path": "ui/pages/custom/focus.jsx", "component_name": "FocusTimerPage",
             "registry_key": "FocusTimer", "purpose": "Interactive focus timer",
             "content": "export default function FocusTimerPage() { return <main>Focus timer</main>; }",
         }],

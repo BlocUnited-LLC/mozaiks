@@ -324,6 +324,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Failed initial-build retries retain the saved guided/autonomous choice while
+  starting with fresh execution state. Invalid saved choices fail before launch.
+- Bundle scanning resolves custom pages through their registered imports instead
+  of guessing a filename from the component name. Missing bindings still fail.
+- ServiceAgent guidance distinguishes the final backend file inventory from
+  model-authored files, keeping generated policy code with its existing owner.
 - Custom page task builds and standalone saves now share page-file validation
   and registry materialization. Model-authored registry files fail with guidance
   to preserve the approved page and let code generate its registration.

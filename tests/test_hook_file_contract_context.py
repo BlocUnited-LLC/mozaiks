@@ -213,6 +213,33 @@ class TestInjectCookieCutterContractsContext:
         assert "Selected module type: workflow" in msg
         assert "validate_transition" in msg
 
+    def test_service_policy_inventory_is_code_owned_even_when_task_owns_path(self):
+        from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+
+        policy = "modules/orders/backend/policy.py"
+        service = "modules/orders/backend/service.py"
+        context = ContextVariablesBridge({
+            "current_build_task": {
+                "task_type": "business_services", "capability_pack_id": "orders",
+                "owned_paths": [policy, service],
+            },
+            "module_contract": {"python_stubs": [{"path": policy}, {"path": service}]},
+        })
+        agent = _FakeAgent(name="ServiceAgent")
+        agent.context_variables = context
+        before = context.snapshot()
+        self.mod.inject_cookie_cutter_contracts_context(agent, [])
+        message = agent.system_message
+        assert "final artifact inventory, not a request to author every file" in message
+        assert f"Code-rendered policy artifacts; omit from python_files and code_files:\n  - {policy}" in message
+        assert "Do not emit a comment-only or pass stub" in message
+        assert context.snapshot() == before
+
+        context.set("current_build_task", {"task_type": "business_services", "owned_paths": [service]})
+        self.mod.inject_cookie_cutter_contracts_context(agent, [])
+        assert policy not in agent.system_message
+        assert "final artifact inventory, not a request to author every file" in agent.system_message
+
     def test_controller_agent_gets_api_surface_contract(self):
         agent = _FakeAgent(name="ControllerAgent")
         self.mod.inject_cookie_cutter_contracts_context(agent, [])

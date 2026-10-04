@@ -199,17 +199,54 @@ async def test_refinement_retry_uses_saved_request_and_baseline_with_fresh_execu
 
 
 @pytest.mark.asyncio
-async def test_genesis_retry_does_not_inherit_refinement_or_failed_output(retry):
+@pytest.mark.parametrize("participation", ["autonomous", "guided", None])
+async def test_genesis_retry_does_not_inherit_refinement_or_failed_output(retry, monkeypatch, participation):
     retry.source["run_build_binding"]["phase"] = "genesis"
     retry.source["build_mode"] = "initial"
     retry.source.pop("change_request_id")
     retry.source["trigger_meta"] = {"trigger_source": "transition", "journey_id": "build"}
+    if participation is not None:
+        retry.source["coding_participation"] = participation
+    # Match Mongo's inclusion projection so an omitted saved-intent field
+    # cannot pass merely because the in-memory collection returns whole rows.
+    find_one = retry.pm._default.find_one
+
+    async def projected_find_one(query, projection=None, **kwargs):
+        document = await find_one(query, **kwargs)
+        if document is not None and projection and any(projection.values()):
+            return {key: value for key, value in document.items()
+                    if projection.get(key) or (key == "_id" and projection.get("_id", 1))}
+        return document
+
+    monkeypatch.setattr(retry.pm._default, "find_one", projected_find_one)
+    before = deepcopy(retry.source)
     result = await launch(retry)
     fresh = retry.pm._default._docs[result["chat_id"]]
     assert fresh["run_build_binding"]["phase"] == "genesis"
     assert result["journey_id"] == fresh["trigger_meta"]["journey_id"] == "build"
     assert "build_mode" not in fresh and "refinement_request" not in fresh and "generated_files" not in fresh
+    assert fresh.get("coding_participation") == participation
+    assert retry.source == before
+    # A later failed retry carries the same user decision, never failed output.
+    fresh.update(status=2, generated_files={"bad.py": "failed again"}, app_plan_attempts=3)
+    retry.record["active_chat_id"] = result["chat_id"]
+    second = await launch(retry, source_chat_id=result["chat_id"])
+    next_session = retry.pm._default._docs[second["chat_id"]]
+    assert next_session.get("coding_participation") == participation
+    assert "generated_files" not in next_session and "app_plan_attempts" not in next_session
     retry.store.get_change_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("participation", ["anything", True, {"mode": "autonomous"}])
+async def test_genesis_retry_rejects_corrupt_saved_participation(retry, participation):
+    retry.source["run_build_binding"]["phase"] = "genesis"
+    retry.source["coding_participation"] = participation
+    before = deepcopy(retry.pm._default._docs)
+    with pytest.raises(HTTPException) as error:
+        await launch(retry)
+    assert error.value.status_code == 400
+    assert retry.pm._default._docs == before
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
+from factory_app.workflows._shared.generated_ui_contract import resolve_registered_component_files
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
     scan_module_persistence,
@@ -1840,13 +1841,7 @@ def _scan_page_api_endpoint_alignment(files_map: dict[str, str]) -> list[str]:
 
 
 def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]:
-    """Validate that every component declared in ui/route_manifest.json has a
-    matching custom page file under ui/pages/custom/.
-
-    This catches the common generation failure where route_manifest.json is
-    written correctly but the corresponding JSX file is missing, which produces
-    a runtime 404 for every missing component.
-    """
+    """Resolve custom route keys through registered imports to existing pages."""
     errors: list[str] = []
     normalized = _normalized_files_map(files_map)
     manifest_raw = normalized.get("ui/route_manifest.json")
@@ -1862,13 +1857,10 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
     if not isinstance(pages, list):
         return errors
 
-    # Collect custom page file stems that are actually present.
-    custom_page_stems: set[str] = set()
-    for path in normalized:
-        if path.startswith("ui/pages/custom/") and path.endswith(".jsx"):
-            stem = PurePosixPath(path).stem
-            if stem:
-                custom_page_stems.add(stem)
+    registered_files, registry_errors = resolve_registered_component_files(
+        normalized, source_label="ui/route_manifest.json:",
+    )
+    errors.extend(registry_errors)
 
     for i, page in enumerate(pages):
         if not isinstance(page, dict):
@@ -1879,12 +1871,16 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
         # Shell-built-in components are always available — no custom JSX file required.
         if component in _SHELL_CORE_COMPONENTS or component in APP_AUTH_COMPONENTS:
             continue
-        if component not in custom_page_stems:
+        if not any(
+            path.startswith("ui/pages/custom/") and path.endswith(".jsx")
+            for path in registered_files.get(component, set())
+        ):
             route_path = str(page.get("path") or "<unknown>").strip()
             errors.append(
                 f"ui/route_manifest.json: pages[{i}] route '{route_path}' declares "
-                f"component '{component}' but ui/pages/custom/{component}.jsx is missing. "
-                f"The route will 404 at runtime."
+                f"component '{component}' but no registered import resolves to an existing "
+                "ui/pages/custom/*.jsx file. Preserve the approved page path and bind its "
+                "import to this component key in ui/index.js."
             )
     return errors
 

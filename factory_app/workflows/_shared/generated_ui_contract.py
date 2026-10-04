@@ -307,6 +307,36 @@ def _import_path_exists(import_path: str, file_names: set[str]) -> bool:
     return False
 
 
+def resolve_registered_component_files(
+    files: dict[str, str], *, source_label: str,
+) -> tuple[dict[str, set[str]], list[str]]:
+    """Resolve registry keys through their actual JS binding and local import."""
+    registered_files: dict[str, set[str]] = {}
+    warnings: list[str] = []
+    file_names = set(files)
+    for filename, source in files.items():
+        if not filename.endswith(("index.js", "index.jsx")):
+            continue
+        registrations = _parse_registered_component_bindings(source)
+        bindings, imports = _parse_imports_and_local_definitions(source, filename=filename)
+        for component, binding in registrations.items():
+            registered_files.setdefault(component, set())
+            if not binding or binding not in bindings:
+                warnings.append(
+                    f"{source_label} {filename} registers component '{component}' but does not import or define its registered binding '{binding or '<missing>'}'."
+                )
+                continue
+            import_path = imports.get(binding)
+            if import_path:
+                if not _import_path_exists(import_path, file_names):
+                    warnings.append(
+                        f"{source_label} {filename} registers component '{component}' from missing file '{import_path}'."
+                    )
+                else:
+                    registered_files[component].add(import_path)
+    return registered_files, warnings
+
+
 def _parse_admin_registry(content: str, *, source_label: str) -> tuple[dict[str, Any] | None, list[str]]:
     if yaml is None:
         return None, [f"{source_label} admin_registry.yaml could not be parsed because PyYAML is unavailable."]
@@ -1080,7 +1110,6 @@ def audit_app_ui_bundle_integrity(
         return []
 
     warnings: list[str] = []
-    file_names = set(files)
     route_pages: list[dict[str, Any]] = []
     route_auth_refs: list[dict[str, str]] = []
 
@@ -1122,23 +1151,8 @@ def audit_app_ui_bundle_integrity(
         if ref is not None:
             route_auth_refs.append(ref)
 
-    registry_files = {
-        filename: content
-        for filename, content in files.items()
-        if filename.endswith("index.js") or filename.endswith("index.jsx")
-    }
-    registered_components: dict[str, list[str]] = {}
-    registered_bindings: dict[str, dict[str, str | None]] = {}
-    available_bindings: dict[str, set[str]] = {}
-    import_sources: dict[str, dict[str, str]] = {}
-
-    for filename, source in registry_files.items():
-        registered_bindings[filename] = _parse_registered_component_bindings(source)
-        for component in registered_bindings[filename]:
-            registered_components.setdefault(component, []).append(filename)
-        bindings, imports = _parse_imports_and_local_definitions(source, filename=filename)
-        available_bindings[filename] = bindings
-        import_sources[filename] = imports
+    registered_files, registry_warnings = resolve_registered_component_files(files, source_label=source_label)
+    warnings.extend(registry_warnings)
 
     route_components: dict[str, set[str]] = {}
     for index, page in enumerate(route_pages):
@@ -1159,30 +1173,10 @@ def audit_app_ui_bundle_integrity(
         if not component:
             continue
         route_components.setdefault(component, set()).add(route_path or "<missing path>")
-        if component not in registered_components and component not in APP_AUTH_COMPONENTS:
+        if component not in registered_files and component not in APP_AUTH_COMPONENTS:
             warnings.append(
                 f"{source_label} {label} path '{route_path or '<missing path>'}' references component '{component}' but no registerComponent('{component}', ...) call was found in ui/index.js."
             )
-
-    registered_files: dict[str, set[str]] = {}
-    for component, registry_paths in registered_components.items():
-        for registry_path in registry_paths:
-            bindings = available_bindings.get(registry_path, set())
-            imports = import_sources.get(registry_path, {})
-            binding = registered_bindings[registry_path].get(component)
-            if not binding or binding not in bindings:
-                warnings.append(
-                    f"{source_label} {registry_path} registers component '{component}' but does not import or define its registered binding '{binding or '<missing>'}'."
-                )
-                continue
-            import_path = imports.get(binding)
-            if import_path:
-                if not _import_path_exists(import_path, file_names):
-                    warnings.append(
-                        f"{source_label} {registry_path} registers component '{component}' from missing file '{import_path}'."
-                    )
-                else:
-                    registered_files.setdefault(component, set()).add(import_path)
 
     custom_page_files = [
         filename
@@ -1197,7 +1191,7 @@ def audit_app_ui_bundle_integrity(
             )
 
     for component, paths in route_components.items():
-        if component not in registered_components:
+        if component not in registered_files:
             continue
         if not registered_files.get(component):
             warnings.append(
@@ -1267,4 +1261,5 @@ __all__ = [
     "audit_page_schemas",
     "custom_route_bundle_page_files",
     "dedupe",
+    "resolve_registered_component_files",
 ]

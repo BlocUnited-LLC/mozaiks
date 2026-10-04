@@ -162,6 +162,13 @@ ERROR with the task, chat and traceback (`TASK_OUTPUT_PROCESSING_FAILED` while
 processing an output, `TASK_EXECUTION_FAILED` otherwise). It is not reclassified
 as a repairable output error.
 
+ServiceAgent's declared `python_stubs` and task `owned_paths` describe the final
+backend inventory, including code-rendered artifacts. Its prompt identifies
+task-owned `policy.py` paths as renderer-owned: omit them from `python_files`
+and `code_files`, including comment-only placeholders, while retaining the
+planned paths. Existing admission still rejects authored policy source; no
+source is silently dropped and persistence remains the enforcement owner.
+
 `config/subscriptions.yaml` is never model work either. Assembly writes it
 from the approved subscription contract (`materialize_app_config_contracts`,
 reading `subscription_contract` or its artifact fallback) and omits it when no
@@ -1337,7 +1344,11 @@ agents do not supply an extra `ui_index` field or put `ui/index.js` or
 `ui/route_manifest.json` inside `page_files`. Non-page and traversal paths are
 rejected before rendering, with feedback to omit the invalid entry while
 preserving the approved page source and route. No authored source is silently
-discarded. Timers with start/pause/resume/reset, canvas interactions, and
+discarded. Bundle scanning and UI auditing resolve each registry key through
+the same registered binding and import resolver. A key such as `Main` may import
+the approved `ui/pages/custom/main.jsx`; it does not imply `Main.jsx`. Missing
+registrations, unresolved bindings, and missing or wrongly cased import paths
+remain validation errors. Timers with start/pause/resume/reset, canvas interactions, and
 playable controls require real React behavior when no shipped primitive provides
 it. A static Metric cannot substitute for that behavior. Contract checks do not
 prove those interactions work: browser acceptance must exercise them.
