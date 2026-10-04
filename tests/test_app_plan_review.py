@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
+    _label_persistence_tasks,
     _repair_plan,
     review_app_build_plan,
     validate_plan_coverage,
@@ -571,6 +572,47 @@ def test_persistence_serializer_uses_existing_structural_identity_without_approv
     assert accepted["capability_pack_id"] is None
     assert detach(context.get("design_surface_map")) == approved
     assert all(pack["surface_id"] != "main" for pack in context.get("app_build_plan")["capability_packs"])
+
+
+@pytest.mark.parametrize("label", ["persistence_contract", "serialize-approved-data"])
+def test_persistence_serializer_clears_an_unbound_capability_label(label):
+    plan, task = _mislabelled_persistence_plan()
+    task.update(task_id="persistence_contract", surface_id=label, capability_pack_id=label,
+                execution_target="DatabaseAgent")
+    dependent = next(item for item in plan["build_tasks"] if item["task_type"] == "business_services")
+    dependent["depends_on"].append(task["task_id"])
+    original = deepcopy(plan)
+    context = _context()
+    approved_contract = detach(context.get("data_contract"))
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "ready", result
+    accepted = next(item for item in context.get("app_task_batch_items") if item["task_id"] == task["task_id"])
+    assert accepted["surface_id"] == "data_contract"
+    assert accepted["surface_kind"] == "module"
+    assert accepted["capability_pack_id"] is None
+    assert list(accepted["owned_paths"]) == ["data/contract.json"]
+    cached = detach(context.get("app_build_plan"))
+    assert task["task_id"] in next(item for item in cached["build_tasks"] if item["task_id"] == dependent["task_id"])["depends_on"]
+    assert {pack["capability_pack_id"] for pack in cached["capability_packs"]} == {"reports"}
+    assert detach(context.get("data_contract")) == approved_contract
+    assert plan == original
+
+
+@pytest.mark.parametrize("association", ["declared", "selected", "available"])
+def test_persistence_serializer_does_not_erase_a_real_capability_association(association):
+    plan, task = _mislabelled_persistence_plan()
+    task.update(surface_id="persistence_contract", capability_pack_id="persistence_contract")
+    context = _context()
+    capability = {**deepcopy(plan["capability_packs"][0]), "capability_pack_id": "persistence_contract"}
+    if association == "declared":
+        plan["capability_packs"].append(capability)
+    elif association == "selected":
+        context.set("capability_packs", [capability])
+    else:
+        context.set("available_managed_capabilities", [capability])
+    original = deepcopy(plan)
+    assert _label_persistence_tasks(plan, context) == []
+    assert plan == original
 
 
 @pytest.mark.parametrize("defect", ["extra_path", "module_task", "capability", "wrong_agent", "no_approved_contract"])

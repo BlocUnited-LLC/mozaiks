@@ -369,6 +369,15 @@ by existing materializers: the pack ID, its declared `surface_id`, and
 page task may use the structural scope `page_bundle` with type `page_bundle`,
 kind `ui_only`, and a null capability ID when approved ExperienceSpec pages
 exist. This scope never authorizes a capability or module task.
+A `persistence_contract` task that serializes only the approved `data/contract.json`
+uses `DatabaseAgent`, structural surface `data_contract`, kind `module`, and a
+null capability ID. Before surface validation, review assigns that identity from
+the exact artifact ownership when its proposed surface is unapproved and its
+capability label resolves to no declared, selected, or available capability.
+It preserves the task ID, dependency edges, approved data, and all actual
+capabilities. Extra paths, missing approved data, another worker, or a real
+capability association cannot use this correction to gain approval. Additive
+migrations remain separate capability-owned `data_migrations` tasks.
 What a page task owns determines that scope. Before the surface check, a
 `page_bundle` task with a null capability ID that owns at least one path, every
 one an approved page artifact (an approved page file or `app.json`), is labelled

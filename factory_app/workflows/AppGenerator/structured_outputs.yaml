@@ -933,6 +933,10 @@ models:
           runtime_extensions.yaml; it must not own backend/*.py.
           `data_models` emits modules/{module_id}/backend/schemas.py and must start
           at ModelAgent.
+          `persistence_contract` serializes the approved data/contract.json only,
+          with initial_agent=DatabaseAgent, surface_id=data_contract,
+          surface_kind=module, and capability_pack_id=null. It is app-level
+          structural work, not an additional module or capability.
           `business_services` emits module backend implementation files such as
           handler.py, service.py, repo.py, policy.py, and declared hooks; it must
           start at ServiceAgent and must not own schemas.py in task-batch execution.
@@ -967,7 +971,10 @@ models:
         variants:
         - str
         - 'null'
-        description: Capability pack this task belongs to. Null only for truly cross-cutting setup work.
+        description: >
+          Capability pack this task belongs to. Null for app-level structural
+          work, including the approved data/contract.json serializer and page
+          bundle. Module-local tasks use their approved module capability ID.
       surface_id:
         type: str
         description: >
@@ -975,6 +982,10 @@ models:
           may use page_bundle only with task_type=page_bundle, surface_kind=ui_only,
           and capability_pack_id=null, scoped to approved experience_spec pages.
           This structural scope cannot identify a capability or module task.
+          The approved data/contract.json serializer uses surface_id=data_contract only
+          with task_type=persistence_contract, initial_agent=DatabaseAgent,
+          surface_kind=module, and capability_pack_id=null. This structural
+          identity grants no new module or capability authority.
       surface_kind:
         type: literal
         values:

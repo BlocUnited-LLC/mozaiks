@@ -324,6 +324,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Reopened failed workflows retain their declared failure explanation in a
+  collapsed details panel beside the existing retry action. The metadata read
+  keeps the session's user and app scope and exposes no other workflow context.
+- App planning preserves the approved data-contract serializer when its task
+  carries an unbound capability label. Planner, schema, and file guidance now
+  agree on its existing structural identity; actual capability associations and
+  extra file ownership remain subject to the normal approval checks.
 - Failed initial-build retries retain the saved guided/autonomous choice while
   starting with fresh execution state. Invalid saved choices fail before launch.
 - Bundle scanning resolves custom pages through their registered imports instead

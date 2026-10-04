@@ -73,6 +73,16 @@ The optional `build_registry_id` is a selector, not target authority. Retry
 rejects context, trigger payload, journey, action, and artifact-key overrides.
 Ordinary source-chat launches without this flag retain their existing behavior.
 
+Reopening a failed chat uses the existing authenticated chat metadata route.
+Its optional `failure_message` is the nonblank string named by the loaded
+workflow's validated `failure_message_key`, read from the same scoped session
+snapshot as status `2`. Missing workflow configuration, absent text, and other
+statuses return no failure detail. No context object or guessed feedback field
+is exposed. Studio shows this text in a collapsed details card only when the
+current transcript has no visible `workflow_failure` message; changing the
+session or receiving nonfailed metadata clears the fallback. This projection
+does not write session state or insert synthetic messages into model history.
+
 A genesis retry starts with fresh execution state and preserves the saved
 `coding_participation` choice (`autonomous` or `guided`) through the existing
 launch-context authority check. Missing choices retain the workflow default;

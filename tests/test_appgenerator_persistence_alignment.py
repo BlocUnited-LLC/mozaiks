@@ -119,6 +119,18 @@ def test_app_plan_agent_explicitly_forbids_legacy_config_data_path() -> None:
     assert "config/data_migrations" not in block
 
 
+def test_persistence_serializer_identity_agrees_across_planner_schema_and_catalog() -> None:
+    fields = yaml.safe_load(_read(APPGEN / "structured_outputs.yaml"))["models"]["AppBuildTask"]["fields"]
+    constraints = yaml.safe_load(_read(APPGEN_CATALOGS / "file_contracts.yaml"))["task_contracts"]["persistence_contract"]["hard_constraints"]
+    guidance = (_agent_block("AppPlanAgent"), fields["task_type"]["description"],
+                fields["surface_id"]["description"], "\n".join(constraints))
+    for text in guidance:
+        assert "surface_id=data_contract" in text
+        assert "capability_pack_id=null" in text
+        assert "initial_agent=DatabaseAgent" in text
+    assert "data/contract.json serializer" in fields["capability_pack_id"]["description"]
+
+
 def test_service_agent_treats_runtime_persistence_as_ownership_boundary() -> None:
     block = _agent_block("ServiceAgent")
     assert "Runtime `context.persistence.collection(module_id, collection_name)` enforces" in block

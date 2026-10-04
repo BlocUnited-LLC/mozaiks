@@ -595,6 +595,11 @@ const ModernChatInterface = ({
     });
   })();
 
+  const reopenedFailureMessage = failedWorkflowRetry?.failureMessage;
+  const showReopenedFailure = typeof reopenedFailureMessage === 'string' && reopenedFailureMessage.trim()
+    && !messages?.some(chat => chat?.sender === 'system' && !chat.metadata?.hideInTranscript
+      && chat.metadata?.event_type === 'workflow_failure' && chat.content && String(chat.content).trim());
+
   const messageStackClass = isOnChatPage
     ? 'chat-feed-stream flex flex-col'
     : 'relative';
@@ -605,6 +610,18 @@ const ModernChatInterface = ({
     <div className={messageStackClass} style={{ rowGap: 'var(--chat-bubble-stack-gap, 1rem)' }}>
       {/* Messages render below */}
       {renderedMessages}
+      {showReopenedFailure && (
+        <div className="message-container">
+          <section className="workflow-failure-message" aria-label="Workflow failure">
+            <h3>This step couldn’t finish</h3>
+            <p>Review the details below for what needs attention.</p>
+            <details>
+              <summary>View failure details</summary>
+              <div className="message-body" style={{ whiteSpace: 'pre-wrap' }}>{reopenedFailureMessage}</div>
+            </details>
+          </section>
+        </div>
+      )}
       {/* Typing indicator slot: shown while loading, or when a UI surface arrived before any agent text */}
       {showTypingIndicator && (
         <div className="flex justify-start px-0 message-container">

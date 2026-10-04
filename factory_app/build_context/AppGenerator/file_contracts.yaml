@@ -176,6 +176,7 @@ task_contracts:
       - modules/{module_id}/backend/policy.py
       - modules/{module_id}/backend/schemas.py
     hard_constraints:
+      - The approved data/contract.json serializer has task_type=persistence_contract, surface_id=data_contract, surface_kind=module, capability_pack_id=null, initial_agent=DatabaseAgent, and owned_paths containing only data/contract.json. It is app-level structural work, not a new capability or module. Preserve the approved data work when correcting task labels; separately approved migrations use data_migrations tasks with their owning capability.
       - data_contract is the canonical source of truth for durable generated app collections.
       - data/contract.json is the exported app artifact for that bundle.
       - Any per_user or per_workspace collection deterministically requires app.json.authRequired=true and the canonical auth scaffold. AppSchema manifest auth intent cannot make an owned app public.

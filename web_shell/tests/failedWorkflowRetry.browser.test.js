@@ -277,6 +277,38 @@ test('failed workflow retry uses the existing authenticated launch path', async 
     });
   }
   for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    await t.test(`reopened failure restores exact safe details without duplicating live history at ${viewport.width}px`, async () => {
+      const page = await open(viewport);
+      await observe(page, { failure_message: failureText });
+      const card = page.getByRole('region', { name: 'Workflow failure', exact: true });
+      await card.waitFor({ timeout: 2000 });
+      assert.equal(await card.count(), 1);
+      assert.equal(await card.locator('details').getAttribute('open'), null);
+      assert.equal(await card.locator('.message-body').isVisible(), false);
+      assert.ok((await card.boundingBox()).height < 220);
+      await card.locator('summary').click();
+      assert.equal(await card.locator('.message-body').textContent(), failureText);
+      assert.equal(await card.locator('script, img, svg, a').count(), 0, 'reopened text is not interpreted as HTML or markdown');
+      assert.equal(await page.evaluate(() => Boolean(window.failureInjected)), false);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+      await observe(page, { app_id: 'foreign', failure_message: 'Foreign message' });
+      assert.equal(await card.locator('.message-body').textContent(), failureText);
+      const message = await failureMessageFromEvent();
+      await page.evaluate(message => window.fixture.setMessages([message]), message);
+      await page.waitForFunction(() => document.querySelector('.workflow-failure-message strong'));
+      assert.equal(await card.count(), 1, 'the live transcript card supersedes the metadata fallback');
+      await page.evaluate(() => window.fixture.setMessages([]));
+      await page.waitForFunction(() => !document.querySelector('.workflow-failure-message strong'));
+      assert.equal(await card.count(), 1, 'replay clearing the log retains the persisted explanation');
+      await page.evaluate(message => window.fixture.setMessages([{ ...message,
+        metadata: { ...message.metadata, hideInTranscript: true } }]), message);
+      assert.equal(await card.count(), 1, 'a hidden message does not suppress the explanation');
+      assert.deepEqual(await page.evaluate(() => window.fixture.requests), []);
+      const screenshotDir = path.join(shell, 'test-results/failed-workflow-retry');
+      await fs.mkdir(screenshotDir, { recursive: true });
+      await page.screenshot({ path: path.join(screenshotDir, `reopened-failure-${viewport.width}.png`), fullPage: true });
+      await page.close();
+    });
     await t.test(`failure card keeps full safe details available and one retry at ${viewport.width}px`, async () => {
       const page = await open(viewport);
       const message = await failureMessageFromEvent();
@@ -349,6 +381,31 @@ test('failed workflow retry uses the existing authenticated launch path', async 
       await page.close();
     });
   }
+  await t.test('current metadata invalidation clears stale failure detail while missing detail still permits retry', async () => {
+    const page = await open();
+    const card = page.getByRole('region', { name: 'Workflow failure', exact: true });
+    for (const patch of [{ status: 0 }, { status: 1 }, { exists: false },
+      { failure_message: null }, { failure_message: '' }, { failure_message: '  ' }, { failure_message: {} }]) {
+      await observe(page, { failure_message: failureText });
+      await card.waitFor({ timeout: 2000 });
+      await observe(page, patch);
+      await card.waitFor({ state: 'detached' });
+      assert.equal(await retryButton(page).count(), patch.status !== undefined || patch.exists === false ? 0 : 1);
+    }
+    await observe(page, { failure_message: failureText });
+    await card.waitFor();
+    await page.evaluate(() => {
+      window.fixture.oldObserver = window.fixture.observe;
+      window.fixture.setScope({ chatId: 'other-chat' });
+    });
+    await card.waitFor({ state: 'detached' });
+    await page.evaluate(() => window.fixture.oldObserver({ exists: true, status: 2, chat_id: 'failed-chat',
+      app_id: 'execution-host', workflow_name: 'ExampleWorkflow', failure_message: 'Stale failure' }));
+    assert.equal(await card.count(), 0);
+    assert.equal(await retryButton(page).count(), 0);
+    assert.deepEqual(await page.evaluate(() => window.fixture.requests), []);
+    await page.close();
+  });
   for (const outcome of [401, 403, 404, 500, 'network', 'missing_ack', 'old_chat', 'invalid_ack']) {
     await t.test(`launch failure ${outcome} keeps the failed session and allows an explicit retry`, async () => {
       const page = await open();

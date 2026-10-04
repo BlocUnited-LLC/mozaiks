@@ -1238,18 +1238,27 @@ def _owns_only_approved_data_contract(task: dict[str, Any], context: Any) -> boo
 
 def _label_persistence_tasks(plan: dict[str, Any], context: Any) -> list[str]:
     approved = _approved_surface_ids(context)
+    capability_ids = approved | set(_context_available_pack_map(context)) | {
+        _pack_id_from_descriptor(pack) for pack in plan.get("capability_packs") or []
+    }
     repairs: list[str] = []
     for task in plan.get("build_tasks") or []:
         surface_id = str(task.get("surface_id") or "")
+        capability_id = task.get("capability_pack_id")
         if (
             surface_id in approved
-            or (surface_id == "data_contract" and task.get("surface_kind") == "module")
-            or not _owns_only_approved_data_contract(task, context)
+            or capability_id in capability_ids
+            or not _owns_only_approved_data_contract({**task, "capability_pack_id": None}, context)
+            or (surface_id == "data_contract" and task.get("surface_kind") == "module" and capability_id is None)
         ):
             continue
-        task["surface_id"], task["surface_kind"] = "data_contract", "module"
+        # Its exact approved artifact determines serializer ownership. An
+        # unbound label cannot create a module, and a real association is never
+        # removed to make a task pass the surface inventory check.
+        task.update(surface_id="data_contract", surface_kind="module", capability_pack_id=None)
         repairs.append(
-            f"{task.get('task_id')}: surface {surface_id!r} -> 'data_contract'; "
+            f"{task.get('task_id')}: surface {surface_id!r} -> 'data_contract', "
+            f"capability_pack_id {capability_id!r} -> None; "
             "the persistence task serializes only the approved data/contract.json"
         )
     return repairs
