@@ -854,6 +854,27 @@ This project follows a practical pre-1.0 changelog format:
   task-batch lane already ran, including on baseline pages merged during a
   repair.
 
+### Added
+
+- `scripts/live_journey_driver.py` runs one build journey unattended, from the
+  entry transition to AppReview promotion, as a plain client of a running
+  host's HTTP and WebSocket APIs. It answers only the pauses and UI requests its
+  prompt file scripts, never sends free text to validation or review agents,
+  answers the AppWorkbench, and promotes the reviewed build before sending one
+  promotion signal. It stops on every terminal event, at a wall-clock limit, or
+  at a spend limit priced from the usage-pricing catalog, and exits 0 only when
+  the host reports the journey complete. It writes `journey-websocket.jsonl`,
+  `journey-http.jsonl`, `transitions.json` and `exit-reason.json`. It imports
+  nothing from `mozaiksai` or `factory_app` and cannot retry, resume or cancel
+  a run.
+- `scripts/pinned_acceptance_env.py` installs one OSS commit or wheel into a
+  fresh venv and proves that every package, the factory, workflow, chat-ui and
+  web-shell roots, and every capability pack load from that venv, and that the
+  runtime-check database answers. Only then does it start the host as a
+  detached process on 127.0.0.1; `stop` ends it by PID. The host gets an
+  explicit environment (operating-system variables, one named env file, and
+  path variables pointing into the venv) and reads no `.env` file.
+
 ## 0.2.0 - 2026-09-18
 
 ### Fixed
