@@ -180,6 +180,11 @@ artifact ids, source refs, raw paths, scanner warning codes, language counts,
 and file-role counts stay in state, logs, APIs, agent context, or a separate
 developer diagnostics surface. They must not render in the default artifact.
 
+The overview consumes the emitter's existing summary and feature fields. Source
+details are available on demand; incomplete scan coverage remains visible in
+plain language. An indexed source map does not establish that an app runs
+correctly, and missing scan entries do not establish that a feature is absent.
+
 Default App Intelligence artifacts are read-only insight surfaces. They should
 not include readiness badges, priority badges, repeated per-card CTAs,
 suggested-workflow blocks, or bottom decision panels unless the workflow

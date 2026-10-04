@@ -66,6 +66,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Existing-app discovery now presents the app summary and readable feature names,
+  keeps incomplete scan coverage visible, and puts source diagnostics behind
+  expandable details.
+
 - Artifact preview ownership and capacity now persist in MongoDB across Studio
   workers and restarts. Preview allocation uses a bounded queue and positive
   shared limits; interrupted updates require cleanup before reuse. Operators

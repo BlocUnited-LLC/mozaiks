@@ -1706,6 +1706,9 @@ def test_v2_payload_contains_all_required_fields() -> None:
     meta = payload["meta"]
     for meta_field in ("files", "symbols", "nodes", "edges", "truncated", "file_limit"):
         assert meta_field in meta, f"Missing meta field: {meta_field!r}"
+    assert payload["summary"].startswith("FlatApp is built with ")
+    assert "We read" not in payload["summary"]
+    assert "relationships" not in payload["summary"]
 
 
 def test_overview_summary_prefers_analysis_summary_over_app_summary() -> None:
@@ -1732,7 +1735,9 @@ def test_overview_summary_prefers_analysis_summary_over_app_summary() -> None:
 
     result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
     assert result["success"] is True
-    assert emitted["payload"]["summary"].startswith("Agent synthesis:")
+    assert emitted["payload"]["summary"] == (
+        "Agent synthesis: the app exposes a job queue, a review route, and a graph-backed dashboard."
+    )
 
 
 def test_v2_meta_reflects_catalog_coverage() -> None:
