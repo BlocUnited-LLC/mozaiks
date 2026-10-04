@@ -73,7 +73,7 @@ def _owned_build_target(monkeypatch, tmp_path):
         "Dockerfile": "FROM scratch",
     })
     versions = {
-        key: _artifact_version(artifact_version_id=key, zip_path=archive, files_manifest=[])
+        key: _artifact_version(artifact_version_id=key, zip_path=archive)
         for key in ("av_123", "av_456", "av_789", "av_scope_1", "av_core_1", "av_review_1")
     }
     versions["av_review_1"].commit_metadata.metadata["workspace_dir"] = str(tmp_path / "staged")
@@ -102,12 +102,12 @@ def _artifact_version(
 ) -> ArtifactVersionDoc:
     resolved_manifest = files_manifest
     if resolved_manifest is None:
-        with zipfile.ZipFile(zip_path, "r") as archive:
-            resolved_manifest = [
-                {"path": info.filename, "size_bytes": info.file_size}
-                for info in archive.infolist()
-                if not info.is_dir()
-            ]
+        resolved_manifest = [{
+            "path": f"{zip_path.stem}/{zip_path.stem}.zip",
+            "size_bytes": zip_path.stat().st_size,
+            "sha256": hashlib.sha256(zip_path.read_bytes()).hexdigest(),
+            "content_type": "application/zip",
+        }]
     return ArtifactVersionDoc.model_validate(
         {
             "_id": artifact_version_id,
@@ -122,12 +122,13 @@ def _artifact_version(
             "canonical_inputs_version": {},
             "lifecycle_status": lifecycle_status.value,
             "validation_status": validation_status.value,
+            "app_validation_status": validation_status.value,
             "files_manifest": resolved_manifest,
             "commit_metadata": ArtifactCommitMetadata(
                 message="Generated artifact",
                 source_workflow="AppGenerator",
                 source_chat_id="chat_1",
-                metadata={"artifact_path": str(zip_path), **_BINDING.model_dump()},
+                metadata={"artifact_path": str(zip_path), "bundle_name": zip_path.stem, **_BINDING.model_dump()},
             ).model_dump(mode="python"),
         }
     )
@@ -342,7 +343,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "target_app_id": "app_1",
             "user_id": captured_prepare["user_id"],
             "requested_workflow_id": None,
-            "extra": {"files_manifest": []},
+            "extra": {"files_manifest": [entry.model_dump(mode="python") for entry in _BaselineStore.versions["av_123"].files_manifest]},
         },
     }
     assert "change_class" not in captured_prepare
@@ -376,7 +377,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                 "target_app_id": "app_1",
                 "user_id": "demo-user",
                 "requested_workflow_id": None,
-                "extra": {"files_manifest": []},
+                "extra": {"files_manifest": [entry.model_dump(mode="python") for entry in _BaselineStore.versions["av_123"].files_manifest]},
             },
             "change_intent": {
                 "change_class": "feature",
@@ -1641,10 +1642,52 @@ def test_studio_artifact_review_endpoint_returns_diff_and_session_context(monkey
     assert body["review"]["can_promote"] is False
     assert body["review"]["actions"][0]["id"] == "accept"
     assert body["review"]["actions"][0]["enabled"] is True
-    assert any(action["id"] == "reroute" and action["enabled"] is False for action in body["review"]["actions"])
     assert body["review"]["changed_files"][0]["path"] == "src/App.jsx"
     assert "Builder Workspace" in body["review"]["changed_files"][0]["diff_preview"]
     assert body["refinement_session"]["status"] == "validated"
+    assert any(action["id"] == "reroute" and action["enabled"] is False for action in body["review"]["actions"])
+
+
+@pytest.mark.parametrize("endpoint", ["review", "bundle"])
+def test_studio_review_reads_verified_durable_archive(monkeypatch, tmp_path, endpoint):
+    from mozaiksai.core.artifacts import content_store
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    blobs = {}
+    for version in (store.parent_version, store.child_version):
+        path = Path(version.commit_metadata.metadata["artifact_path"])
+        blobs[version.id] = path.read_bytes()
+        version.commit_metadata.metadata.update(content_ref=version.id, content_backend="test-durable")
+        path.unlink()
+    backend = SimpleNamespace(backend_name="test-durable", get_bundle=AsyncMock(side_effect=lambda ref: blobs[ref]))
+    monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: backend)
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    client = TestClient(studio.app)
+    response = client.get(f"/api/studio/build/artifacts/av_child_1/{endpoint}?build_registry_id=appreg_1")
+    assert response.status_code == 200
+    assert response.json()["review"]["changed_file_count"] == 1
+    blobs[store.child_version.id] += b"changed after validation"
+    assert client.get(f"/api/studio/build/artifacts/av_child_1/{endpoint}?build_registry_id=appreg_1").status_code == 409
+
+
+def test_reloaded_workbench_does_not_inherit_source_only_success(monkeypatch, tmp_path):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    store.child_version.app_validation_status = None
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    response = TestClient(studio.app).get("/api/studio/build/artifacts/av_child_1/bundle?build_registry_id=appreg_1")
+    assert response.status_code == 200
+    assert response.json()["workbench"]["app_validation_status"] == "pending"
 
 
 def test_studio_artifact_review_marks_skipped_validation_as_override_required(monkeypatch, tmp_path: Path):
@@ -2076,7 +2119,7 @@ async def test_cancelled_inline_refinement_releases_bound_build_without_promotio
         assert cancelled[0]["outcome"] == "cancelled"
 
 
-@pytest.mark.parametrize("strategy", ["docker", "e2b", "unsupported"])
+@pytest.mark.parametrize("strategy", ["unsupported", "automatic"])
 def test_studio_rejects_coding_validation_strategy_before_classification(monkeypatch, _owned_build_target, strategy):
     from mozaiksai.core.auth import reset_auth_adapter
     from mozaiksai.hosts import studio
@@ -2107,5 +2150,42 @@ def test_studio_rejects_coding_validation_strategy_before_classification(monkeyp
     assert response.status_code == 400
     assert response.json()["detail"] == f"Unsupported coding validation strategy: {strategy}"
     classify.assert_not_awaited()
+    execute.assert_not_awaited()
+    _owned_build_target.begin_refinement_run.assert_not_awaited()
+
+
+def test_tampered_refinement_baseline_cannot_start_coding(monkeypatch, _owned_build_target):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    harness = studio.get_orchestration_control_harness()
+    monkeypatch.setattr(harness, "_config_loader", lambda: ControlPlaneConfig(
+        enabled=True, classifier={"enabled": True}, coding={"enabled": True},
+    ))
+    monkeypatch.setattr(harness, "contract_surface_enabled", lambda: False)
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(
+        classify=_async_classifier(change_class="patch", rationale="Scoped change", confidence=0.95, signals=["test"]),
+    ))
+    execute = AsyncMock()
+    monkeypatch.setattr(harness, "execute_coding_request", execute)
+    parent = _BaselineStore.versions["av_456"]
+    archive = Path(parent.commit_metadata.metadata["artifact_path"])
+    _make_bundle_zip(archive, {"app/ui/pages/Dashboard.jsx": "tampered after registration"})
+
+    response = TestClient(studio.app).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {
+            "refinement_request": {
+                "artifact_kind": "app_bundle", "artifact_version_id": parent.id,
+                "raw_user_request": "Update dashboard", "source_surface": "app_build",
+            },
+            "coding_request": {"files": {"app/ui/pages/Dashboard.jsx": "ignored"}},
+        },
+    })
+    assert response.status_code == 409
+    assert "could not be verified" in response.json()["detail"]
     execute.assert_not_awaited()
     _owned_build_target.begin_refinement_run.assert_not_awaited()

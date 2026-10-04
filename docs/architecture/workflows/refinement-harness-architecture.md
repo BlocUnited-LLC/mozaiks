@@ -127,11 +127,11 @@ never harvested or deleted by the harvester.
 
 #### Current readiness and promotion boundaries
 
-`control_plane/app_validation.py` runs selected source-project commands against
-the candidate workspace; it does not run AppGenerator's full bundle acceptance
-gate. Factory `AppGenerator/tools/app_validation.py` separately checks generated
-contracts, wiring, runtime loading, and database-backed smoke behavior before
-build validation and export. The default scoped coding provider makes one
+`control_plane/app_validation.py` remains the source-project command validator.
+Scoped coding uses `core.validation.validate_generated_app_candidate`, which
+connects Factory's existing generated-contract, wiring, runtime-load and
+database-backed smoke checks to its app build validator. It validates the complete
+merged candidate and records both outcomes before Studio review. The default scoped coding provider makes one
 structured-output attempt; a failed check does not start an automatic coding
 repair loop. Audit events and Studio refinement-session writes are best-effort,
 so their absence is not evidence that a candidate was never saved. Saved build
@@ -677,17 +677,14 @@ output and the staging area.
 
 ```
 LLM coding checkpoint
-    → structured output: list[{path, new_content, reason}]
-    → apply_scoped_refinement_changes()   # scoped_execution.py
-        → path safety checks (no traversal, no secrets, no absolute paths)
-        → write files into staging area (never live workspace)
-        → return ScopedRefinementResult
-    → run_app_source_validation()          # app_validation.py (optional)
-        → copy staging area into isolated temp dir
-        → apply staged files as overlay
-        → run framework-detected lint/test commands
-        → return AppSourceValidationResult
-    → persist staged artifact version
+    → provider-neutral StagedPatchProposal
+    → enforce approved file scope and reject ineffective changes
+    → merge changes into the complete saved baseline
+    → validate_generated_app_candidate()  # existing acceptance + build owners
+        → deterministic bundle and runtime acceptance
+        → operator-selected Docker/E2B/local build execution
+        → require both checks to pass
+    → persist canonical archive and draft BuildRecord with candidate evidence
     → emit tool event to Studio panel
 ```
 
@@ -696,15 +693,18 @@ LLM coding checkpoint
 - It does not modify the live workspace. All writes go to a staging area.
 - It does not interpret the LLM's reasoning. It receives already-typed
   structured output and applies it deterministically.
-- It does not run validation unless `confirm_execution=True` is passed. The
-  default is to plan validation commands and return them without running.
+- It does not let the model choose execution policy. The canonical app validation
+  resolver applies operator settings before a request strategy; `skip` leaves
+  the candidate unverified and blocks activation.
 - It does not promote staged changes. Promotion requires a separate
   acceptance step through the Studio promotion flow.
 
 ### Security guarantees from scoped execution
 
-Every path written by the coding worker passes through
-`apply_scoped_refinement_changes()`, which enforces:
+Every candidate staged by the coding worker passes through
+`materialize_coding_workspace()` and its harvest check, enforcing path containment
+and rejecting symlinks or reparse points. Proposal admission additionally enforces
+the exact approved file scope. The separate scoped-execution helper enforces:
 
 - no `..` traversal components
 - no absolute paths (Windows drive qualifiers or POSIX `/` prefixes)

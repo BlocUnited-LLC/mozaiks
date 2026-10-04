@@ -40,6 +40,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import uuid4
 
+from anyio import CancelScope
 from fastapi import FastAPI, Request
 
 logger = logging.getLogger(__name__)
@@ -163,13 +164,16 @@ async def run_app_runtime_smoke(
         try:
             run = await asyncio.to_thread(child.run, app_root, request, timeout_seconds)
         except BaseException:
-            await asyncio.to_thread(child.kill)
+            # ASGI cancellation must not leave generated code running.
+            with CancelScope(shield=True):
+                await asyncio.to_thread(child.kill)
             raise
         finally:
-            try:
-                await client.drop_database(database_name)
-            except Exception as exc:
-                logger.warning("APP_RUNTIME_SMOKE_DROP_FAILED: database=%s error=%s", database_name, type(exc).__name__)
+            with CancelScope(shield=True):
+                try:
+                    await client.drop_database(database_name)
+                except Exception as exc:
+                    logger.warning("APP_RUNTIME_SMOKE_DROP_FAILED: database=%s error=%s", database_name, type(exc).__name__)
         return _child_result(run, mongo_uri=mongo_uri, timeout_seconds=timeout_seconds, started=started)
     finally:
         client.close()

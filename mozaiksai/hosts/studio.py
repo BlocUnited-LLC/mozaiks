@@ -21,7 +21,7 @@ from uuid import uuid4
 
 from anyio import CancelScope
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, ValidationError
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
@@ -285,13 +285,13 @@ def _strip_app_bundle_root_prefix(paths: list[str]) -> dict[str, str]:
     return {path: stripped_path for path, stripped_path in zip(paths, stripped, strict=False)}
 
 
-def _decode_text_bundle_entries(zip_path: Path) -> tuple[dict[str, str], list[str]]:
+def _decode_text_bundle_entries(zip_source: Path | bytes) -> tuple[dict[str, str], list[str]]:
     files: dict[str, str] = {}
     skipped: list[str] = []
     total_bytes = 0
     entries: list[tuple[str, bytes]] = []
 
-    with zipfile.ZipFile(zip_path, "r") as archive:
+    with zipfile.ZipFile(io.BytesIO(zip_source) if isinstance(zip_source, bytes) else zip_source, "r") as archive:
         for info in archive.infolist():
             safe_name = _normalize_bundle_entry_name(info.filename)
             if safe_name is None:
@@ -339,7 +339,7 @@ def _artifact_bundle_path_from_version(version) -> Path | None:  # noqa: ANN001
     return path if path.exists() else None
 
 
-async def _verified_bundle_for_restore(version) -> bytes:  # noqa: ANN001
+async def _verified_app_bundle(version) -> bytes:  # noqa: ANN001
     try:
         return await read_verified_artifact_bundle(version)
     except (ValueError, ContentNotFoundError, OSError) as exc:
@@ -347,9 +347,15 @@ async def _verified_bundle_for_restore(version) -> bytes:  # noqa: ANN001
             status_code=409,
             detail=(
                 "Artifact archive identity or content could not be verified. "
-                "Revalidate and save a canonical app bundle before restoring or promoting it."
+                "Save a canonical app bundle before using this version."
             ),
         ) from exc
+
+
+async def _bundle_source_for_review(version) -> bytes | Path | None:  # noqa: ANN001
+    if version.build_family == "app_bundle":
+        return await _verified_app_bundle(version)
+    return _artifact_bundle_path_from_version(version)
 
 
 def _version_metadata(version) -> dict[str, Any]:
@@ -417,10 +423,10 @@ def _enforce_artifact_validation_gate(
             detail=f"Artifact cannot be {action}; validation_status='failed'.",
         )
     if version.validation_status == ArtifactValidationStatus.PASSED:
-        if action in {"promoted", "restored"} and version.app_validation_status != "passed":
+        if action in {"promoted", "restored", "exported"} and version.app_validation_status != "passed":
             raise HTTPException(
                 status_code=409,
-                detail="This candidate needs passed whole-app build validation before activation.",
+                detail="This candidate needs passed whole-app build validation before export or activation.",
             )
         return
     raise HTTPException(
@@ -563,7 +569,7 @@ async def _build_artifact_review_payload(
     version,
     artifact_store,
 ) -> dict[str, Any]:  # noqa: ANN001
-    current_zip = _artifact_bundle_path_from_version(version)
+    current_zip = await _bundle_source_for_review(version)
     current_files: dict[str, str] = {}
     current_skipped: list[str] = []
     if current_zip is not None:
@@ -577,7 +583,7 @@ async def _build_artifact_review_payload(
             app_id=app_id,
             build_record_id=version.parent_build_record_id,
         )
-        parent_zip = _artifact_bundle_path_from_version(parent_version) if parent_version is not None else None
+        parent_zip = await _bundle_source_for_review(parent_version) if parent_version is not None else None
         if parent_zip is not None:
             parent_files, parent_skipped = _decode_text_bundle_entries(parent_zip)
 
@@ -614,12 +620,14 @@ async def _build_artifact_review_payload(
             coding_summary = (worker_meta.get("plan") or {}).get("summary")
     if not selected_paths:
         selected_paths = list((version.commit_metadata.metadata or {}).get("applied_paths") or [])
+    if validation_result is None:
+        validation_result = _version_metadata(version).get("validation_result")
 
     review_status = version.lifecycle_status.value
     if latest_session is not None:
         review_status = latest_session.status.value
     elif version.lifecycle_status == ArtifactLifecycleStatus.DRAFT:
-        review_status = "validated"
+        review_status = "validated" if version.validation_status == ArtifactValidationStatus.PASSED else "needs_revision"
     elif version.lifecycle_status == ArtifactLifecycleStatus.ARCHIVED:
         review_status = "rejected"
 
@@ -1871,6 +1879,12 @@ async def download_build_artifact(
         raise HTTPException(status_code=409, detail="Artifact has no verified build identity") from exc
     if binding.build_registry_id != build_registry_id or binding.target_app_id != target_app_id:
         raise HTTPException(status_code=409, detail="Artifact identity does not match its build target")
+    if version.build_family == "app_bundle":
+        _enforce_artifact_validation_gate(version, action="exported")
+        return Response(
+            await _verified_app_bundle(version), media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{target_app_id}-{artifact_version_id}.zip"'},
+        )
     zip_path = _artifact_bundle_path_from_version(version)
     if zip_path is None or not zip_path.is_file():
         raise HTTPException(status_code=404, detail="Artifact archive is unavailable")
@@ -1928,15 +1942,15 @@ async def get_build_artifact_bundle(
     if version.build_family not in {"app_bundle", "workflow_bundle"}:
         raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for bundle workbench: {version.build_family}")
 
-    zip_path = _artifact_bundle_path_from_version(version)
-    if zip_path is None:
+    zip_source = await _bundle_source_for_review(version)
+    if zip_source is None:
         raise HTTPException(
             status_code=400,
             detail="This artifact version does not have a bundle path that the build surface can inspect.",
         )
 
     try:
-        generated_files, skipped_files = _decode_text_bundle_entries(zip_path)
+        generated_files, skipped_files = _decode_text_bundle_entries(zip_source)
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to load artifact bundle") from exc
 
@@ -1952,7 +1966,7 @@ async def get_build_artifact_bundle(
         "build_family": version.build_family,
         "build_key": version.build_key,
         "source_workflow": version.source_workflow,
-        "bundle_path": str(zip_path),
+        "bundle_path": _version_metadata(version).get("artifact_path"),
         "generated_files": generated_files,
         "skipped_files": skipped_files,
         "workbench_ui": {"component": "AppWorkbench", "workflow_name": "AppGenerator"},
@@ -1966,6 +1980,10 @@ async def get_build_artifact_bundle(
             "build_family": version.build_family,
             "build_key": version.build_key,
             "generated_files": generated_files,
+            "validation_result": _version_metadata(version).get("validation_result") or _version_metadata(version).get("app_validation_result"),
+            "app_validation_status": version.app_validation_status or "pending",
+            "app_validation_strategy_used": version.app_validation_strategy,
+            "integration_test_result": _version_metadata(version).get("app_bundle_acceptance"),
         },
         "review": review_payload["review"],
         "refinement_session": review_payload["refinement_session"],
@@ -2179,7 +2197,7 @@ async def promote_build_artifact_version(
             raise HTTPException(status_code=409, detail="Selected artifact is not the current build under review")
     refinement_metadata = _refinement_metadata_from_version(version)
 
-    bundle_bytes = await _verified_bundle_for_restore(version)
+    bundle_bytes = await _verified_app_bundle(version)
     target_dir = _resolve_bundle_restore_target(version)
     try:
         restore_summary = _restore_bundle_to_target(bundle_bytes=bundle_bytes, target_dir=target_dir, workspace_layout=True)
@@ -2289,7 +2307,7 @@ async def restore_artifact_version(
         raise HTTPException(status_code=409, detail="Only previously accepted artifacts can be restored")
     _enforce_artifact_validation_gate(version, action="restored")
 
-    bundle_bytes = await _verified_bundle_for_restore(version)
+    bundle_bytes = await _verified_app_bundle(version)
     target_dir = _resolve_bundle_restore_target(version)
 
     try:
@@ -2546,7 +2564,10 @@ async def _complete_inline_refinement(*, binding: RunBuildBinding, user_id: str,
             _version_metadata(version).get(key) != value for key, value in binding.model_dump().items()
         ):
             raise ValueError("Inline refinement output does not belong to its registered run")
-        if result.status == "validated" and version.validation_status != ArtifactValidationStatus.PASSED:
+        if result.status == "validated" and (
+            version.validation_status != ArtifactValidationStatus.PASSED
+            or version.app_validation_status != "passed"
+        ):
             raise ValueError("Inline refinement output has not passed validation")
     result_status = "review" if version is not None and result.status == "validated" else "needs_revision"
     saved = await _get_app_registry_service().update_build_status(
@@ -2745,10 +2766,7 @@ async def trigger_workflow(
                     contract_surface_plan = None
                     harness_decision = orchestration_control.build_harness_decision(refinement_decision)
                 if contract_surface_plan is not None:
-                    zip_path = _artifact_bundle_path_from_version(source_version)
-                    if zip_path is None:
-                        raise HTTPException(status_code=409, detail="Refinement baseline archive is unavailable")
-                    baseline_files, skipped = _decode_text_bundle_entries(zip_path)
+                    baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
                     if skipped:
                         raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
                     inline_binding = await _get_app_registry_service().begin_refinement_run(
@@ -2793,10 +2811,9 @@ async def trigger_workflow(
         if orchestration_control.coding_enabled() and isinstance(trigger_payload.get("coding_request"), dict):
             coding_payload = dict(trigger_payload["coding_request"])
             if coding_payload.get("files"):
-                zip_path = _artifact_bundle_path_from_version(source_version)
-                if zip_path is None:
-                    raise HTTPException(status_code=409, detail="Refinement baseline archive is unavailable")
-                baseline_files, _ = _decode_text_bundle_entries(zip_path)
+                baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
+                if skipped:
+                    raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
                 requested_paths = coding_payload["files"]
                 if not isinstance(requested_paths, dict) or any(path not in baseline_files for path in requested_paths):
                     raise HTTPException(status_code=400, detail="Refinement file scope is not in the selected artifact")
@@ -2812,10 +2829,7 @@ async def trigger_workflow(
                     coding_request, coding_decision = await orchestration_control.prepare_coding_request(coding_request)
                     harness_decision = coding_decision
                     if coding_request is not None:
-                        zip_path = _artifact_bundle_path_from_version(source_version)
-                        if zip_path is None:
-                            raise HTTPException(status_code=409, detail="Refinement baseline archive is unavailable")
-                        baseline_files, skipped = _decode_text_bundle_entries(zip_path)
+                        baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
                         if skipped:
                             raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
                         inline_binding = await _get_app_registry_service().begin_refinement_run(

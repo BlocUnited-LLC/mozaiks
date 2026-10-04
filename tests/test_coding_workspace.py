@@ -9,6 +9,7 @@ deletions become scope violations instead of accepted changes.
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -200,7 +201,7 @@ def test_harvest_rejects_directory_junction_without_reading_or_changing_target(t
         f"New-Item -ItemType Junction -Path {quote(link)} -Target {quote(outside)} | Out-Null",
     ], check=True, capture_output=True, text=True)
     try:
-        assert link.is_junction()
+        assert link.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT
         harvest = harvest_coding_workspace(workspace)
         assert not harvest.clean
         assert any(v.path == "app/ui/pages" and v.kind == "symlink" for v in harvest.violations)

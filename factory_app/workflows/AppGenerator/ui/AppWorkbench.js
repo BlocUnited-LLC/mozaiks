@@ -30,6 +30,7 @@ const refinementOutput = (response) => {
       : result.status === 'success' && result.metadata?.validation_result?.validation_status === 'passed'
         ? 'validated' : 'planned',
     applied_files: result.all_files,
+    validation_result: result.metadata?.validation_result,
     error: result.surfaces_executed?.find((surface) => surface.status === 'failed')?.error,
   };
 };
@@ -125,7 +126,7 @@ const AppWorkbench = ({
     validationStrategy,
     integrationTestResult,
     integrationPassed,
-  } = useAppValidationWorkbench(payload, config);
+  } = useAppValidationWorkbench(payload, config, codingResult);
 
   const {
     sandboxStatus,
@@ -151,6 +152,7 @@ const AppWorkbench = ({
   const headerText = useMemo(() => payload?.title || 'App Workbench', [payload]);
 
   const subtitle = useMemo(() => {
+    if (codingResult) return 'Review the checks for this refinement before accepting it.';
     const agentMsg = payload?.agent_message || payload?.description || null;
     if (agentMsg && typeof agentMsg === 'string') return agentMsg;
     if (validationStatus === 'passed') {
@@ -163,7 +165,7 @@ const AppWorkbench = ({
       return 'Validation failed. Review errors and retry.';
     }
     return 'Checks are incomplete. Review the draft; export and activation require passed checks.';
-  }, [payload, validationStatus]);
+  }, [payload, validationStatus, codingResult]);
 
   const panelClass = workflowSurfaceStyles.darkPanel;
 

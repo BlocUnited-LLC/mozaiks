@@ -471,9 +471,10 @@ async def test_accepted_scoped_patch_requires_whole_app_validation_before_activa
     draft_review_response = TestClient(studio_app.app).get(
         f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/review?build_registry_id=appreg_1"
     )
-    assert draft_review_response.status_code == 200
-    assert draft_review_response.json()["review"]["write_back_mode"] == "generated_artifact"
-    assert draft_review_response.json()["review"]["write_back_target"] is None
+    # The separate staged-patch helper does not create canonical app archives.
+    # Studio cannot display unverified bytes as the candidate under review.
+    assert draft_review_response.status_code == 409
+    assert "could not be verified" in draft_review_response.json()["detail"]
 
     draft_promote_response = TestClient(studio_app.app).post(
         f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/promote?build_registry_id=appreg_1"
@@ -503,7 +504,7 @@ async def test_accepted_scoped_patch_requires_whole_app_validation_before_activa
     )
     assert promote_response.status_code == 409
     assert promote_response.json() == {
-        "detail": "This candidate needs passed whole-app build validation before activation.",
+        "detail": "This candidate needs passed whole-app build validation before export or activation.",
     }
     assert not list(runtime_root.iterdir())
     assert not (tmp_path / "workspaces").exists()

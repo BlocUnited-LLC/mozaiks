@@ -324,6 +324,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Scoped refinements now validate the complete edited app through the existing
+  acceptance and build checks, save a canonical verified archive, and carry that
+  candidate's evidence into Studio review. Operator execution policy wins over
+  model hints; skipped checks cannot activate a draft. Cancelled validation
+  finishes sandbox and disposable runtime-smoke cleanup.
+
 - DesignDocs now declares each page's existing canonical rendering surface.
   App planning preserves it and uses the shared materializer for prompt paths,
   preventing an approved interactive custom page from becoming static YAML.

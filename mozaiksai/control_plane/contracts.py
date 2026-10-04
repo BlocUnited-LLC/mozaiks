@@ -397,7 +397,7 @@ class CodingWorkerPlan(BaseModel):
     summary: str = Field(min_length=1)
     owned_paths: list[str]
     updated_files: list[FileUpdate]
-    validation_strategy: Literal["skip", "local"]
+    validation_strategy: Literal["e2b", "docker", "local", "skip"]
     validation_commands: list[str]
     start_preview: bool
     needs_human_review: bool

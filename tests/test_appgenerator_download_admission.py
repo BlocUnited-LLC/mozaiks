@@ -244,6 +244,30 @@ async def test_pending_runtime_validation_reports_prerequisite_without_export(mo
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("build_status", [None, "skipped", "pending", "failed"])
+async def test_completed_acceptance_cannot_download_an_unverified_build(monkeypatch, tmp_path, build_status):
+    _, _, _, context, _ = await _materialize_plan_bundle(tmp_path=tmp_path / "fixture")
+    boundaries = _external_boundaries(monkeypatch, tmp_path, {})
+    context.set("app_validation_status", build_status)
+    context.set("integration_tests_passed", False)
+
+    result = await generate_and_download.generate_and_download(
+        {}, "Review the admitted app bundle.", context_variables=context,
+    )
+
+    assert context.get("app_bundle_acceptance_status") == "passed"
+    assert result["status"] == "error"
+    assert result["outcome"] == "blocked"
+    assert result["export_gate"]["allow_export"] is False
+    assert result["export_gate"]["app_validation_status"] == build_status
+    boundaries.artifact.assert_not_awaited()
+    boundaries.registry.assert_not_awaited()
+    boundaries.ui.assert_not_awaited()
+    boundaries.external_export.assert_not_awaited()
+    assert not list((tmp_path / "download").rglob("*.zip"))
+
+
+@pytest.mark.asyncio
 async def test_explicit_empty_validation_input_does_not_fall_back_to_context_history_or_disk(monkeypatch, tmp_path):
     (tmp_path / "app.json").write_text('{"appName":"Old disk snapshot"}', encoding="utf-8")
     context = ContextVariablesBridge({

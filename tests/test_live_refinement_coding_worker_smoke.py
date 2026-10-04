@@ -230,7 +230,7 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
     worker = ScopedRefinementCodingWorker(
         agent_factory=lambda sp, lc, *, middleware: _FakeAgent(),
         tool_executor=executor,
-        source_validation_runner=_manual_validation_runner,
+        candidate_validation_runner=_manual_validation_runner,
         artifact_store=store,
         output_root=tmp_path / "generated_refinements",
     )

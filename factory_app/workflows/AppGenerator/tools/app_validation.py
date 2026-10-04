@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+from anyio import CancelScope
 
 from factory_app.workflows._shared.workflow_integration import (
     workflow_integration_metadata_from_context,
@@ -229,7 +230,11 @@ async def _resolve_files(
     wf_logger,
 ) -> tuple[dict[str, str], str | None, str | None]:
     if files is not None:
-        return _safe_files_map(files), None, None
+        return (
+            _safe_files_map(files),
+            _context_get(context_variables, "chat_id"),
+            _context_get(context_variables, "app_id"),
+        )
     return (
         admitted_app_file_map(context_variables),
         _context_get(context_variables, "chat_id"),
@@ -1030,11 +1035,13 @@ async def _run_sandbox_validation(
         return result
     finally:
         if session_id is not None:
-            try:
-                result["sandbox_terminated"] = bool(await adapter.terminate_session(session_id=session_id))
-            except Exception as exc:
-                logger.error("sandbox_cleanup_failed session=%s exception=%s", session_id, type(exc).__name__)
-                result["sandbox_terminated"] = False
+            # Request cancellation must not interrupt provider teardown.
+            with CancelScope(shield=True):
+                try:
+                    result["sandbox_terminated"] = bool(await adapter.terminate_session(session_id=session_id))
+                except Exception as exc:
+                    logger.error("sandbox_cleanup_failed session=%s exception=%s", session_id, type(exc).__name__)
+                    result["sandbox_terminated"] = False
             result["preview_url"] = None
             if not result["sandbox_terminated"]:
                 result.update(success=False, validation_status="failed", **{INFRASTRUCTURE_FAILURE: True})

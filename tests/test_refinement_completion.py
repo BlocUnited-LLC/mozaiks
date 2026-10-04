@@ -23,7 +23,30 @@ from mozaiksai.control_plane.implementations.refinement_router import (
     RefinementRequest,
     RefinementRoutingDecision,
 )
+from mozaiksai.core.artifacts.models import BuildRecord
 from mozaiksai.core.session.build_binding import RunBuildBinding
+
+
+def _candidate_validation(status):
+    return {
+        "validation_status": status,
+        "app_bundle_acceptance_result": {
+            "status": "skipped" if status == "skipped" else "passed",
+            "passed": status != "skipped",
+        },
+        "app_validation_result": {
+            "validation_status": status,
+            "validation_strategy": "skip" if status == "skipped" else "local",
+        },
+    }
+
+
+def _saved_candidate(**kwargs):
+    return BuildRecord(id="candidate", version_number=1, lineage_root_id="parent", **kwargs)
+
+
+def _saved_surface_candidate(**kwargs):
+    return BuildRecord(id="surface-candidate", version_number=1, lineage_root_id="parent", **kwargs)
 
 
 def _config():
@@ -76,11 +99,11 @@ async def test_worker_validation_and_saved_draft_agree_with_completion_event(
 ):
     recorded = AsyncMock()
     monkeypatch.setattr(orchestration_control, "record_refinement_event", recorded)
-    store = SimpleNamespace(create_build_record=AsyncMock(return_value=SimpleNamespace(id="candidate")))
+    store = SimpleNamespace(create_build_record=AsyncMock(side_effect=_saved_candidate))
     worker = ScopedRefinementCodingWorker(
         provider=SimpleNamespace(execute=AsyncMock(return_value=_proposal())),
         config_loader=_config, artifact_store=store, output_root=tmp_path,
-        source_validation_runner=AsyncMock(return_value={"validation_status": validation_status}),
+        candidate_validation_runner=AsyncMock(return_value=_candidate_validation(validation_status)),
     )
     harness = orchestration_control.OrchestrationControlHarness(coding_worker=worker, config_loader=_config)
 
@@ -109,7 +132,7 @@ async def test_failed_artifact_persistence_does_not_emit_success(monkeypatch, tm
         provider=SimpleNamespace(execute=AsyncMock(return_value=_proposal())),
         config_loader=_config, output_root=tmp_path,
         artifact_store=SimpleNamespace(create_build_record=AsyncMock(side_effect=RuntimeError("store unavailable"))),
-        source_validation_runner=AsyncMock(return_value={"validation_status": "passed"}),
+        candidate_validation_runner=AsyncMock(return_value=_candidate_validation("passed")),
     )
     harness = orchestration_control.OrchestrationControlHarness(coding_worker=worker, config_loader=_config)
 
@@ -134,11 +157,11 @@ async def test_configured_content_store_must_save_before_a_draft_can_be_ready(mo
         coding_module, "get_artifact_content_store",
         lambda: SimpleNamespace(backend_name="gridfs", put_bundle=upload),
     )
-    store = SimpleNamespace(create_build_record=AsyncMock(return_value=SimpleNamespace(id="candidate")))
+    store = SimpleNamespace(create_build_record=AsyncMock(side_effect=_saved_candidate))
     worker = ScopedRefinementCodingWorker(
         provider=SimpleNamespace(execute=AsyncMock(return_value=_proposal())),
         config_loader=_config, artifact_store=store, output_root=tmp_path,
-        source_validation_runner=AsyncMock(return_value={"validation_status": "passed"}),
+        candidate_validation_runner=AsyncMock(return_value=_candidate_validation("passed")),
     )
     harness = orchestration_control.OrchestrationControlHarness(coding_worker=worker, config_loader=_config)
 
@@ -177,14 +200,14 @@ async def test_ineligible_request_never_invokes_provider_or_reports_completion(m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("strategy", ["docker", "e2b", "unsupported"])
+@pytest.mark.parametrize("strategy", ["unsupported", "inline"])
 async def test_unsupported_validation_never_invokes_either_coding_provider(tmp_path, strategy):
     provider = SimpleNamespace(execute=AsyncMock())
     acp_provider = SimpleNamespace(execute=AsyncMock())
     validate = AsyncMock()
     worker = ScopedRefinementCodingWorker(
         provider=provider, acp_provider=acp_provider, config_loader=_config,
-        source_validation_runner=validate, output_root=tmp_path,
+        candidate_validation_runner=validate, output_root=tmp_path,
     )
 
     result = await worker.execute(_request(validation_strategy=strategy))
@@ -281,7 +304,7 @@ async def test_finalization_rejects_invalid_provider_output_before_validation_or
     validate = AsyncMock()
     store = SimpleNamespace(create_build_record=AsyncMock())
     worker = ScopedRefinementCodingWorker(
-        source_validation_runner=validate, artifact_store=store, output_root=tmp_path,
+        candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path,
     )
 
     result = await worker.finalize_proposal(request, proposal)
@@ -307,10 +330,10 @@ async def test_finalization_bounds_extra_owned_paths_and_keeps_only_effective_ch
             ProposedFileChange(path="ui/unchanged.json", content="{}"),
         ],
     )
-    validate = AsyncMock(return_value={"validation_status": "skipped"})
-    store = SimpleNamespace(create_build_record=AsyncMock(return_value=SimpleNamespace(id="candidate")))
+    validate = AsyncMock(return_value=_candidate_validation("skipped"))
+    store = SimpleNamespace(create_build_record=AsyncMock(side_effect=_saved_candidate))
     worker = ScopedRefinementCodingWorker(
-        source_validation_runner=validate, artifact_store=store, output_root=tmp_path,
+        candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path,
     )
 
     result = await worker.finalize_proposal(request, proposal)
@@ -320,7 +343,7 @@ async def test_finalization_bounds_extra_owned_paths_and_keeps_only_effective_ch
     assert [change.path for change in result.plan.updated_files] == ["ui/page.json"]
     assert result.applied_files == {"ui/page.json": '{"title":"After"}'}
     assert result.metadata["applied_file_count"] == 1
-    assert validate.await_args.kwargs["overlay_files"]["ui/unchanged.json"] == "{}"
+    assert validate.await_args.kwargs["files"]["ui/unchanged.json"] == "{}"
     store.create_build_record.assert_awaited_once()
 
 
@@ -354,11 +377,11 @@ async def test_surface_finalizer_writes_real_audit_document_after_validation_and
 
     # Exercise the canonical event writer; only its database boundary is replaced.
     monkeypatch.setattr(refinement_tracking, "_get_collection", lambda: SimpleNamespace(insert_one=insert_one))
-    create = AsyncMock(return_value=SimpleNamespace(id="surface-candidate"))
+    create = AsyncMock(side_effect=_saved_surface_candidate)
     if persistence_fails:
         create.side_effect = RuntimeError("store unavailable")
     worker = ScopedRefinementCodingWorker(
-        source_validation_runner=AsyncMock(return_value={"validation_status": validation_status}),
+        candidate_validation_runner=AsyncMock(return_value=_candidate_validation(validation_status)),
         artifact_store=SimpleNamespace(create_build_record=create), output_root=tmp_path,
     )
     harness = orchestration_control.OrchestrationControlHarness(coding_worker=worker, config_loader=_config)

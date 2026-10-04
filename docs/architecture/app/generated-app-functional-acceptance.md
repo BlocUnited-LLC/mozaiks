@@ -776,6 +776,26 @@ The focused regression suites are `test_factory_auto_tool_acceptance.py`,
 and `test_structured_output_runtime_contracts.py`. They complement, but do not
 replace, an authenticated live generated-app CRUD/refinement/export proof.
 
+## Scoped refinement candidates
+
+`validate_generated_app_candidate` in `mozaiksai.core.validation` connects the
+existing Factory acceptance and build validators for a complete, explicit file
+snapshot. The coding worker merges only approved changes into the saved baseline,
+validates that candidate, and persists a canonical bundle archive with its own
+acceptance and build results. Both must pass before the candidate is validated.
+Parent validation and source-index checks cannot certify a new candidate.
+
+Execution strategy comes from operator policy and the request, never a model's
+suggestion. `skip` runs neither acceptance nor build execution and cannot activate
+the candidate. Acceptance uses the existing local runtime load and smoke process;
+Docker/E2B isolates the subsequent compilation stage, not the whole acceptance
+pipeline. This entrypoint proves explicit bundle correctness. It does not replay
+Genesis task execution or manufacture task evidence from a refinement request.
+
+Saved archives use the same canonical identity and digest checks as normal builds.
+The existing Studio lifecycle registers the exact candidate for review; explicit
+acceptance and promotion remain separate from generating or validating edits.
+
 ## Remaining Gaps
 
 P0: none identified by this pass in the covered deterministic fixtures.

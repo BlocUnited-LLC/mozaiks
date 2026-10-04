@@ -507,12 +507,16 @@ async def test_surface_finalization_reuses_validation_and_saves_complete_target_
 
     async def validate(**kwargs):
         assert kwargs["app_id"] == "tracker"
-        assert kwargs["overlay_files"]["app.json"] == '{"appId":"tracker"}'
-        assert kwargs["overlay_files"]["modules/x/backend/service.py"] == "VALUE = 2\n"
-        return {"validation_status": "passed"}
+        assert kwargs["files"]["app.json"] == '{"appId":"tracker"}'
+        assert kwargs["files"]["modules/x/backend/service.py"] == "VALUE = 2\n"
+        return {
+            "validation_status": "passed",
+            "app_bundle_acceptance_result": {"status": "passed", "passed": True},
+            "app_validation_result": {"validation_status": "passed", "validation_strategy": "local"},
+        }
 
     store = _FakeArtifactStore()
-    worker = ScopedRefinementCodingWorker(source_validation_runner=validate, artifact_store=store, output_root=tmp_path)
+    worker = ScopedRefinementCodingWorker(candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path)
     harness = OrchestrationControlHarness(coding_worker=worker)
     binding = RunBuildBinding(target_app_id="tracker", build_registry_id="registry", build_id="revision", phase="refinement")
     request = _make_refinement_request(app_id="factory").model_copy(update={"target_app_id": "tracker", "build_record_id": "parent"})

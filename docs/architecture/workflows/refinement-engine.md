@@ -619,6 +619,11 @@ Current first-party coding worker path:
   validates the merged staged artifact workspace, and can persist a child artifact
   version for the refined bundle
 - persisted child artifact versions enter Studio review as `draft`
+- app candidates pass both the existing explicit-file acceptance gate and the
+  operator-selected app build validator. Source-index checks and parent evidence
+  cannot certify the edited candidate; skipped execution blocks activation.
+- saved candidates use canonical ZIP identity and digest verification, including
+  verified parent bytes before refinement and verified candidate bytes at activation
 - Studio review is now a first-class lifecycle step with:
   - diff preview against the parent artifact version
   - selected scope and coding summary

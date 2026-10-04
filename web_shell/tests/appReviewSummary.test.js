@@ -98,7 +98,6 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     './useSandbox': `export const useSandbox = () => ({syncAndRestart(){}, stopPreview(){}});`,
     './CodeEditorPane': `export default function Editor({content}) { return <output aria-label="Editor contents">{content}</output>; }`,
     './PreviewPane': `export default function Preview({artifactVersionId}) { return <output aria-label="Preview version">{artifactVersionId}</output>; }`,
-    './BuildStatusPane': 'export default function BuildStatus() { return null; }',
     '../../adapters/api.js': `export const authFetch = (...args) => fetch(...args);`,
     '../../../app/admin/pages/studioApi.js': 'export const studioFetch = (...args) => fetch(...args);',
   };
@@ -116,7 +115,10 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
           {id:'download_complete', label:'Download Bundle', approved:true},
           {id:'close', label:'Return to editor'},
         ]} : {}),
-        generated_files:{'README.md':'Original contents'}, app_validation_status:'passed'};
+        generated_files:{'README.md':'Original contents'}, app_validation_status:'passed',
+        app_validation_strategy_used:'parent-only-strategy',
+        app_validation_result:{warnings:['Parent evidence only']}, integration_tests_passed:true,
+        integration_test_result:{passed:true}};
       createRoot(document.getElementById('root')).render(<AppWorkbench payload={payload}
         onResponse={response => fetch('/fixture-response',{method:'POST',body:JSON.stringify(response)})} />);
     `},
@@ -132,15 +134,21 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
   });
   let scenario;
   const requests = [];
+  const candidateValidation = () => scenario.missingProof ? {validation_status:"passed"} : ({
+    validation_status:scenario.validation, validation_strategy:'local',
+    app_bundle_acceptance_result:{status:scenario.validation, passed:scenario.validation==='passed'},
+    app_validation_result:{validation_status:scenario.validation, validation_strategy:'local'},
+  });
   const triggerResult = () => ({
     execution_mode:scenario.mode || 'coding_worker',
     ...(scenario.mode === 'surface_regeneration' ? {surface_result:{
       status:{validated:'success', planned:'partial', failed:'failed'}[scenario.status],
       all_files:{'README.md':'Candidate contents'},
-      metadata:{...(scenario.saved ? {build_record_id:'candidate'} : {}), validation_result:{validation_status:scenario.validation}},
+      metadata:{...(scenario.saved ? {build_record_id:'candidate'} : {}), validation_result:candidateValidation()},
       surfaces_executed:scenario.status === 'failed' ? [{status:'failed', error:'Required checks failed.'}] : [],
     }} : {coding_worker:{
       status:scenario.status, applied_files:{'README.md':'Candidate contents'},
+      validation_result:candidateValidation(),
       metadata:scenario.saved ? {build_record_id:'candidate'} : {},
       error:scenario.status === 'failed' ? 'Required checks failed.' : null,
     }}),
@@ -215,6 +223,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     });
   }
   for (const mode of ['coding_worker', 'surface_regeneration']) for (const item of [
+    {status:'planned', validation:'passed', missingProof:true, saved:true, message:'Draft saved; validation is incomplete.', tone:'amber'},
     {status:'planned', validation:'pending', saved:true, message:'Draft saved; validation is incomplete.', tone:'amber'},
     {status:'failed', validation:'failed', saved:true, message:'Draft saved; validation failed.', tone:'red'},
     {status:'validated', validation:'passed', saved:true, message:'Draft validated and saved for review.', tone:'emerald'},
@@ -232,10 +241,15 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
         await page.goto(`http://127.0.0.1:${server.address().port}`);
         await expect(page.getByRole('region', {name:'Artifact review'})).toContainText('Version baseline');
         await expect(page.getByRole('button', {name:'Download Bundle',exact:true})).toBeVisible();
+        await expect(page.getByText('Parent evidence only', {exact:true})).toBeVisible();
         await page.getByRole('textbox').fill('Change the README.');
         await page.getByRole('button', {name:'Apply change', exact:true}).click();
         const result = page.getByRole('status', {name:'Refinement result'});
         await expect(result).toContainText(item.message);
+        await expect(page.getByText('Parent evidence only', {exact:true})).toHaveCount(0);
+        await expect(page.getByText('parent-only-strategy', {exact:true})).toHaveCount(0);
+        const validationLabel = {passed:'Validation passed', failed:'Validation failed', pending:'Validation pending', skipped:'Validation skipped'}[item.missingProof ? 'pending' : item.validation];
+        await expect(page.getByText(validationLabel, {exact:true})).toBeVisible();
         await expect(result).toHaveClass(new RegExp(`border-${item.tone}-`));
         await expect(result).not.toContainText('Scoped refinement applied.');
         await expect(page.getByRole('button', {name:'Download Bundle',exact:true})).toHaveCount(0);
@@ -283,6 +297,8 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
         await expect(page.getByRole('status', {name:'Refinement result'})).toContainText(
           validation === 'passed' ? 'Draft validated and saved for review.' : 'Draft saved; validation is incomplete.');
         await expect(page.getByLabel('Preview version')).toHaveText(validation === 'passed' ? 'candidate' : 'baseline');
+        await expect(page.getByText('Parent evidence only', {exact:true})).toHaveCount(0);
+        await expect(page.getByText(validation === 'passed' ? 'Validation passed' : 'Validation skipped', {exact:true})).toBeVisible();
         await expect(page.getByLabel('Editor contents')).toHaveText(validation === 'passed' ? 'Candidate contents' : 'Original contents');
         await page.getByRole('button', {name:'Review patch',exact:true}).click();
         await expect(page.getByRole('region', {name:'Artifact review'})).toContainText('Version candidate');

@@ -151,7 +151,7 @@ const BuildStatusPane = ({
               {validationStatus === 'passed'
                 ? 'Build/test completed successfully.'
                 : validationStatus === 'skipped'
-                  ? 'Runtime validation was explicitly skipped for this run.'
+                  ? 'Build validation did not run. This draft remains unverified.'
                   : validationStatus === 'failed'
                     ? 'Review errors and retry generation/validation.'
                     : 'Validation has not completed yet.'}

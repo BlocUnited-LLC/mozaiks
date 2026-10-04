@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import zipfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -80,23 +81,51 @@ async def test_artifact_scope_never_defaults_to_host(studio, selector):
 
 @pytest.mark.asyncio
 async def test_download_checks_artifact_and_binding(studio, monkeypatch, tmp_path):
+    from mozaiksai.core.artifacts.models import BuildRecord
+
     module, _ = studio
     archive = tmp_path / "bundle.zip"
     with zipfile.ZipFile(archive, "w") as output:
         output.writestr("tracker/app.json", '{"appId":"tracker"}')
     binding = RunBuildBinding(build_registry_id="registry_tracker", target_app_id="tracker", build_id="build_one", phase="genesis")
-    metadata = {**binding.model_dump(), "artifact_path": str(archive)}
-    version = SimpleNamespace(commit_metadata=SimpleNamespace(metadata=metadata))
+    version = BuildRecord(
+        _id="version_one", app_id="tracker", build_family="app_bundle", build_key="app_bundle",
+        version_number=1, lineage_root_id="version_one", validation_status="passed", app_validation_status="passed",
+        files_manifest=[{"path": "bundle/bundle.zip", "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                         "size_bytes": archive.stat().st_size, "content_type": "application/zip"}],
+        commit_metadata={"metadata": {**binding.model_dump(), "artifact_path": str(archive), "bundle_name": "bundle"}},
+    )
     store = SimpleNamespace(get_build_record=AsyncMock(return_value=version))
     monkeypatch.setattr(module, "get_artifact_store", lambda: store)
     response = await module.download_build_artifact("version_one", "registry_tracker", principal=None)
-    assert response.path == archive
-    assert response.filename == "tracker-version_one.zip"
+    assert response.body == archive.read_bytes()
+    assert response.headers["Content-Disposition"] == 'attachment; filename="tracker-version_one.zip"'
     store.get_build_record.assert_awaited_once_with(app_id="tracker", build_record_id="version_one")
-    metadata["target_app_id"] = "foreign_app"
+    version.commit_metadata.metadata["target_app_id"] = "foreign_app"
     with pytest.raises(HTTPException) as caught:
         await module.download_build_artifact("version_one", "registry_tracker", principal=None)
     assert caught.value.status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("validation_status,build_status", [("pending", "passed"), ("skipped", "passed"), ("passed", None), ("passed", "skipped")])
+async def test_download_cannot_export_unverified_candidate(studio, monkeypatch, validation_status, build_status):
+    from mozaiksai.core.artifacts.models import BuildRecord
+
+    module, _ = studio
+    binding = RunBuildBinding(build_registry_id="registry_tracker", target_app_id="tracker", build_id="build_one", phase="refinement")
+    version = BuildRecord(
+        _id="version_one", app_id="tracker", build_family="app_bundle", build_key="app_bundle",
+        version_number=1, lineage_root_id="version_one", validation_status=validation_status,
+        app_validation_status=build_status, commit_metadata={"metadata": binding.model_dump()},
+    )
+    monkeypatch.setattr(module, "get_artifact_store", lambda: SimpleNamespace(get_build_record=AsyncMock(return_value=version)))
+    read = AsyncMock()
+    monkeypatch.setattr(module, "_verified_app_bundle", read)
+    with pytest.raises(HTTPException) as caught:
+        await module.download_build_artifact("version_one", "registry_tracker", principal=None)
+    assert caught.value.status_code == 409
+    read.assert_not_awaited()
 
 
 def test_promotion_does_not_touch_factory(studio, monkeypatch, tmp_path):
@@ -163,8 +192,11 @@ def test_refinement_request_round_trips_execution_and_target_identity():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("validation_status", ["failed", "skipped", "pending"])
-async def test_inline_completion_requires_saved_validation(studio, monkeypatch, validation_status):
+@pytest.mark.parametrize("validation_status,build_status", [
+    ("failed", "passed"), ("skipped", "passed"), ("pending", "passed"),
+    ("passed", None), ("passed", "skipped"), ("passed", "pending"), ("passed", "failed"),
+])
+async def test_inline_completion_requires_saved_validation(studio, monkeypatch, validation_status, build_status):
     from mozaiksai.core.artifacts import ArtifactValidationStatus
 
     module, service = studio
@@ -172,6 +204,7 @@ async def test_inline_completion_requires_saved_validation(studio, monkeypatch, 
     binding = RunBuildBinding(build_registry_id="registry_tracker", target_app_id="tracker", build_id="run_one", phase="refinement")
     version = SimpleNamespace(
         validation_status=ArtifactValidationStatus(validation_status),
+        app_validation_status=build_status,
         commit_metadata=SimpleNamespace(metadata=binding.model_dump()),
     )
     store = SimpleNamespace(get_build_record=AsyncMock(return_value=version))

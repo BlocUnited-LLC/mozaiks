@@ -2209,7 +2209,7 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Select one approved validation strategy: `e2b`, `docker`, `local`, or `skip`.
+      - Defer validation environment selection to the runtime unless context supplies a strategy.
       - Respect `app_validation_strategy` from context when it is provided.
       - Do not call tools. Your structured output auto-invokes the deterministic validation gate after your turn.
   - id: context
@@ -2288,7 +2288,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Upstream**:
-      - AppValidation has completed with `passed` or explicit `skipped`.
+      - Deterministic acceptance and build execution have both passed. Skipped or pending checks do not permit export.
 
       **Runtime**:
       - Your structured output will auto-invoke the generate_and_download UI tool.

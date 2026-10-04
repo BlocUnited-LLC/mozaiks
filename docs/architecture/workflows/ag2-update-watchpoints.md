@@ -226,13 +226,15 @@ above.
 
 ## Workflow Provider History
 
-`AG2-WP-015` (`ACTIVE`, October 3, 2026): native workflow views in the pinned
-AG2 1.0.5 project an agent's own earlier packets as bare `ModelMessage` events.
+`AG2-WP-015` (`ACTIVE`, reverified October 4, 2026): native workflow views in the
+installed AG2 1.1.2 pin project an agent's own earlier packets as bare `ModelMessage` events.
 The OpenAI Chat, OpenAI Responses, and Anthropic mappers consume assistant
 history through `ModelResponse`; bare messages are omitted. A real discovery
 run consequently repeated its opening after human confirmation. An isolated
-AG2 1.1.1 wheel reproduces the same event-to-provider conversion gap; the
-dependency upgrade alone does not close this watchpoint.
+AG2 1.1.1 wheel reproduced the same event-to-provider conversion gap. On 1.1.2,
+real Agent/Hub continuation and disk reopen tests pass with the adapter, while
+the strict provider-neutral native-history retirement gate still fails as
+expected. The dependency upgrade alone does not close this watchpoint.
 
 `ag2_workflow_view.py` subclasses the existing `WorkflowAdapter` and wraps its
 native view through public `Hub.register_adapter`. It converts only projected
@@ -413,9 +415,9 @@ upstream changelog into this document.
   (`SandboxPort` + e2b/docker adapters, preview URLs, app boot) are
   Mozaiks-owned application-runtime behavior outside AG2's snippet-execution
   scope; agent-level execution stays on AG2 `SandboxShellTool` (already used
-  by six AppGenerator agents). The coding worker's unimplemented `e2b`
-  validation label was removed so build records only claim strategies that
-  actually ran. Session identity/metadata now persists (validation results
+  by six AppGenerator agents). Scoped coding now calls the same candidate
+  acceptance/build facade; Docker/E2B build evidence comes from the existing
+  `SandboxPort`, never from a model's strategy label. Session identity/metadata persists (validation results
   carry `sandbox_session_id`/`sandbox_provider`; preview sandboxes are
   created with identity metadata and provider-side kill deadlines), closing
   the orphaned-sandbox billing vector ahead of hosted e2b activation.
