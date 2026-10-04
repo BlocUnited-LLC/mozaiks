@@ -11,6 +11,10 @@ from typing import Any, cast
 
 import yaml
 
+from mozaiksai.core.runtime.app.auth_contract import (
+    app_auth_route_entries,
+    validate_app_auth_contract,
+)
 from mozaiksai.core.runtime.app.page_schema import PageSchemaValidationError, validate_page_schema
 from mozaiksai.core.workflow.context.frozen import detach
 
@@ -924,10 +928,27 @@ def validate_planned_custom_routes(
     routes = routes_from(combined)
     preserved = routes_from(baseline) if manifest_path in baseline else []
     approved_routes = {planned[path]["route"] for path in custom_paths}
+    # Assembly adds shared sign-in/callback routes from the app auth contract.
+    # Only that exact projection belongs to auth; matching a URL or a component
+    # name alone must not authorize an undeclared custom page.
+    auth_routes: list[dict[str, Any]] = []
+    if "config/auth.yaml" in combined:
+        app_manifest = json.loads(combined.get("app.json", "{}"))
+        if isinstance(app_manifest, dict) and app_manifest.get("authRequired") is True:
+            contract = validate_app_auth_contract(yaml.safe_load(combined["config/auth.yaml"]))
+            auth_routes = app_auth_route_entries(contract)
     if manifest_path in owned_paths:
         for route in routes:
-            if route.get("path") not in approved_routes and route not in preserved:
-                raise ValueError(f"{manifest_path}: unapproved custom route {route.get('path')!r}")
+            canonical_auth = route in auth_routes and sum(
+                entry.get("path") == route.get("path") for entry in routes
+            ) == 1
+            if route.get("path") not in approved_routes and route not in preserved and not canonical_auth:
+                raise ValueError(
+                    f"{manifest_path}: unapproved custom route {route.get('path')!r}. "
+                    f"Preserve the approved custom routes {sorted(approved_routes)} and their registered page files. "
+                    "Sign-in and callback routes must match the canonical auth projection from config/auth.yaml; "
+                    "other custom routes require an approved page identity. Do not remove required app behavior."
+                )
     registry = combined.get("ui/index.js", "")
     for path in sorted(custom_paths):
         approved = planned[path]["route"]

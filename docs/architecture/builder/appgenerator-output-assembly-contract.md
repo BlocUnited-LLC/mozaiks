@@ -1311,10 +1311,23 @@ give that worker ownership of shell components or other frontend source.
 
 Task admission and assembly both bind each owned custom page to its exact
 approved route and canonical page file through the generated registry. New
-custom registries reject additional routes absent from the plan. Scoped
+custom registries reject additional routes absent from the plan. The shared
+sign-in and callback entries composed from a validated `config/auth.yaml` and
+`app.json.authRequired=true` remain owned by the auth contract: each must match
+that owner's exact route/component/metadata projection and occur once. A matching
+URL or component name alone does not authorize another custom page. Rejection
+feedback names the approved custom routes and the auth owner without removing
+required app behavior. Scoped
 revisions may retain unchanged route entries from the hydrated baseline; pack
 templates outside the task remain under their existing pack ownership. Failed
 tasks still reach the partial-bundle acceptance gate for actionable repair.
+
+When an original task's bounded correction fails during assembly recovery, the
+existing validation policy runs again before the assembly terminal guard. It
+may select a separate accepted task's owned repair; accepted batch outputs are
+retained rather than regenerated. Exhausted or unchanged repairs terminate with
+the original assembly cause and repair diagnostics in `app_build_failure_message`.
+The existing attempt cap and no-progress guard remain authoritative.
 
 Both the standalone save tool and task-batch materializer use the same route
 manifest and component registry renderer. The registry is derived from typed
@@ -1323,6 +1336,17 @@ manifest and component registry renderer. The registry is derived from typed
 playable controls require real React behavior when no shipped primitive provides
 it. A static Metric cannot substitute for that behavior. Contract checks do not
 prove those interactions work: browser acceptance must exercise them.
+
+Custom React guidance uses the shipped component API: DataTable actions dispatch
+through `actions`, selection, and `onAction(actionId, selectedRows)`, not column
+render callbacks. State updaters stay pure; asynchronous mutations and timers
+belong in event handlers or effects with cleanup. An exactly-once persistence
+requirement needs a declared stable operation identity and backend idempotency;
+component state alone cannot establish it across retries or reloads. Missing
+action contracts require repair by their owner, and failed saves remain visible
+with a retry action. These are generation instructions, not proof that emitted
+code complies: browser/runtime acceptance must verify the actual controls,
+failure recovery, and persistence behavior without weakening the approved scope.
 
 
 

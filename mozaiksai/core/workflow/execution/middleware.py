@@ -1,4 +1,4 @@
-"""AG2 1.0 middleware support for Mozaiks workflow prompt injection.
+"""AG2 middleware for workflow prompt injection and live UI activity.
 
 Mozaiks uses ``middleware.yaml`` as the declarative authoring file for
 workflow-local prompt middleware. Entries are compiled into agent-level AG2 1.0
@@ -21,10 +21,38 @@ from ag2 import Context
 from ag2.events import BaseEvent, ModelResponse
 from ag2.middleware import BaseMiddleware, LLMCall, Middleware
 
+from mozaiksai.core.utils.context_vars import context_get
+
 from ..context.context_utils import apply_context_exposures, context_to_dict
 from ..declarative import parse_middleware_config
 
 logger = logging.getLogger("middleware_loader")
+
+
+class MozaiksActivityMiddleware(BaseMiddleware):
+    """Project actual model calls onto the existing transient thinking indicator."""
+
+    def __init__(self, event: BaseEvent, context: Context, *, context_bridge: Any) -> None:
+        super().__init__(event, context)
+        self._context_bridge = context_bridge
+
+    async def on_llm_call(
+        self, call_next: LLMCall, events: Sequence[BaseEvent], context: Context,
+    ) -> ModelResponse:
+        chat_id = str(context_get(self._context_bridge, "chat_id") or "").strip()
+        if chat_id:
+            try:
+                from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+                transport = await SimpleTransport.get_instance()
+                await transport.send_event_to_ui(
+                    {"kind": "select_speaker", "agent": "Assistant", "selected_speaker": "Assistant"},
+                    chat_id,
+                )
+            except Exception as exc:
+                # UI delivery is optional; cancellation still propagates.
+                logger.debug("Workflow model activity delivery unavailable: %s", type(exc).__name__)
+        return await call_next(events, context)
 
 
 class MozaiksPromptMiddleware(BaseMiddleware):
@@ -285,8 +313,14 @@ def build_prompt_middleware(
     )
 
 
+def build_activity_middleware(*, context_bridge: Any) -> Middleware:
+    return Middleware(MozaiksActivityMiddleware, context_bridge=context_bridge)
+
+
 __all__ = [
+    "MozaiksActivityMiddleware",
     "MozaiksPromptMiddleware",
+    "build_activity_middleware",
     "build_prompt_middleware",
     "load_prompt_middleware_entries",
     "_resolve_import",

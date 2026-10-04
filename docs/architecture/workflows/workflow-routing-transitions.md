@@ -431,6 +431,17 @@ existing three-attempt review limit still fail closed.
 DesignDocs uses its existing `design_docs_save_feedback` as the terminal failure
 explanation, so a rejected design reports the actionable reason in the workflow UI.
 
+### Autonomous stages with nothing to generate
+
+Only exact `coding_participation: autonomous` suppresses the extra review for
+two validated empty decisions. SubscriptionContractDesigner records an explicit
+no-contract result as `not_required`, with `user_confirmed: false`, after its
+existing concept and contract guards. AgentGenerator records a validated empty
+workflow partition as `not_required` and uses its existing `no_workflows` route.
+Both must persist their actual disposition before completing. Nonempty plans,
+collaborative mode, and missing or unknown modes retain their existing reviews.
+App validation, final artifact review, acceptance, and promotion gates still apply.
+
 ### Discovery human continuation
 
 `ExistingAppDiscovery/transition_graph.yaml` explicitly routes human replies

@@ -147,6 +147,7 @@ async def test_unattributed_failure_terminates_after_recovery_policy_without_use
     assert validation["bundle_repair"]["repairable"] is False
     assert validation["task_recovery_request"] is None
     assert _next("AppValidationAgent", context) == "terminate"
+    assert "unknown materializer cause" in context.get("app_build_failure_message")
     rules = yaml.safe_load((WORKFLOW / "transition_graph.yaml").read_text(encoding="utf-8"))["transition_rules"]
     terminal = next(rule for rule in rules if rule["source_agent"] == "AppValidationAgent"
                     and rule.get("condition_key") == "app_assembly_status")
@@ -250,3 +251,56 @@ async def test_failed_assembly_preserves_real_partial_batch_recovery_and_reassem
     assert counts == counts_before
     assert context.get("app_task_recovery_status") == "idle"
     assert _next("AppValidationAgent", context) == "terminate"
+
+
+@pytest.mark.asyncio
+async def test_blocked_batch_recovery_revisits_independent_page_repair_without_replaying_outputs(monkeypatch):
+    from mozaiksai.core.workflow.context.frozen import detach
+    from tests import test_appgenerator_bounded_recovery as fixture
+
+    # Script only the worker output boundary. Inventory, checkpoint restoration,
+    # bounded recovery, ownership policy, graph selection, and saves remain real.
+    plan = fixture._load_fixture_plan()
+    page_task = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    page_task["depends_on"] = ["task_reports_module"]
+    monkeypatch.setattr(fixture, "_load_fixture_plan", lambda: deepcopy(plan))
+    context, execute, counts, _, _ = fixture._fixture(monkeypatch, correction="invalid")
+    await execute("AppPlanAgent")
+    accepted = deepcopy(detach(context.get("app_task_batch_results")))
+    page_id = page_task["task_id"]
+    assert counts[page_id] == 1
+    assert (await assembly.assemble_app_tasks(context_variables=context))["success"] is True
+    cause = "ui/pages/reports.yaml: unresolved route /unapproved; preserve approved /reports"
+    materializer = Mock(side_effect=ValueError(cause))
+    monkeypatch.setattr(assembly, "_apply_app_config_contracts", materializer)
+    await assembly.assemble_app_tasks(context_variables=context)
+    first = await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    assert first["bundle_repair"]["target_agent"] is None
+    assert first["task_recovery_request"]["root_task_ids"] == ["task_reports_services"]
+
+    await execute("AppValidationAgent")
+    assert context.get("app_task_recovery_status") == "blocked"
+    assert _next("AppValidationAgent", context) == "AppValidationAgent"
+    second = await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    assert second["task_recovery_request"] is None
+    assert second["bundle_repair"]["target_agent"] == "AppSchemaAgent"
+    assert second["bundle_repair"]["active"]["task_id"] == page_id
+    assert second["bundle_repair"]["active"]["allowed_paths"] == page_task["owned_paths"]
+    assert cause in second["bundle_repair"]["repair_request"]
+    await execute("AppValidationAgent")
+    assert _next("AppValidationAgent", context) == "AppSchemaAgent"
+    context.set("structured_output", {"code_files": accepted[page_id]["code_files"]})
+    saved = save_generated_code(context)
+    assert set(saved["saved_files"]) == set(page_task["owned_paths"]), saved
+    assert context.get("bundle_repair_result")["active"]["status"] == "responded"
+    final = await app_validation.validate_app_bundle_from_request({}, context_variables=context)
+    assert final["bundle_repair"]["no_progress"] is True
+    assert context.get("bundle_repair_attempt_count") == 1
+    assert _next("AppValidationAgent", context) == "terminate"
+    assert cause in context.get("app_build_failure_message")
+    assert counts["task_reports_services"] == 2
+    assert counts[page_id] == 1
+    for task_id, output in accepted.items():
+        if not task_id.startswith("_"):
+            assert detach(context.get("app_task_batch_results"))[task_id] == output
+    assert materializer.call_count == 2

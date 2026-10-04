@@ -184,6 +184,61 @@ def test_custom_plan_binding_closes_typed_candidates_at_both_owners(schema_model
         assert {entry["filename"]: entry["content"] for entry in validate()} == files
 
 
+@pytest.mark.parametrize("custom_auth_paths", [False, True])
+def test_authenticated_custom_page_assembly_keeps_canonical_auth_routes(schema_model, custom_auth_paths):
+    typed, _, plan = _planned_custom_candidate(schema_model)
+    typed["manifest"] = {**_manifest(), "auth_strategy": "basic-login", "default_route": "/deal-room", "pages": []}
+    entries = _merge_code_files([schema_model.model_validate(typed).model_dump(mode="json")], app_build_plan=plan)
+    files = {entry["filename"]: entry["content"] for entry in entries}
+    routes = json.loads(files["ui/route_manifest.json"])["pages"]
+    assert {route["path"] for route in routes} == {"/deal-room", "/login", "/auth/callback"}
+    if custom_auth_paths:
+        from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+            compose_bundle_auth_routes,
+        )
+
+        auth = yaml.safe_load(files["config/auth.yaml"])
+        auth["routes"]["login"] = "/sign-in"
+        auth["routes"]["callback"] = "/sign-in/callback"
+        files["config/auth.yaml"] = yaml.safe_dump(auth)
+        files["ui/route_manifest.json"] = json.dumps({"pages": [routes[0]]})
+        compose_bundle_auth_routes(files)
+        entries = [{"filename": path, "content": content} for path, content in files.items()]
+    assert {entry["filename"]: entry["content"] for entry in _apply_planned_page_contracts(entries, plan)} == files
+
+
+@pytest.mark.parametrize("mutation", ["component", "auth_meta", "extra", "duplicate", "missing_contract", "public_manifest"])
+def test_custom_route_admission_cannot_bypass_plan_by_claiming_auth(schema_model, mutation):
+    from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import (
+        materialize_auth_scaffold,
+    )
+
+    typed, task, plan = _planned_custom_candidate(schema_model)
+    files = extract_code_file_map_from_payload(typed)
+    files["app.json"] = json.dumps({"name": "Example", "authRequired": True})
+    files.update(materialize_auth_scaffold(files))
+    manifest = json.loads(files["ui/route_manifest.json"])
+    login = next(route for route in manifest["pages"] if route["path"] == "/login")
+    if mutation == "component":
+        login["component"] = "UnapprovedCustomLogin"
+    elif mutation == "auth_meta":
+        login["meta"]["requiresAuth"] = True
+    elif mutation == "extra":
+        manifest["pages"].append({**login, "path": "/unapproved"})
+    elif mutation == "duplicate":
+        manifest["pages"].append(deepcopy(login))
+    elif mutation == "missing_contract":
+        files.pop("config/auth.yaml")
+    else:
+        files["app.json"] = json.dumps({"name": "Example", "authRequired": False})
+    files["ui/route_manifest.json"] = json.dumps(manifest)
+    entries = [{"filename": path, "content": content} for path, content in files.items()]
+    with pytest.raises(ValueError, match="unapproved custom route") as error:
+        _normalize_owned_page_files_from_plan(entries, task=task, base_context={"app_build_plan": plan})
+    assert "approved" in str(error.value) and "/deal-room" in str(error.value)
+    assert "canonical auth" in str(error.value)
+
+
 @pytest.mark.parametrize("stage", ["admission", "assembly"])
 @pytest.mark.parametrize("change_baseline_route", [False, True])
 @pytest.mark.parametrize("build_mode", ["revision", "initial"])

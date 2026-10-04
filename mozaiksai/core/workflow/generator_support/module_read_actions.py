@@ -287,7 +287,13 @@ def _replace_functions(
         class_node = _class_named(tree, class_name)
         if class_node is None:
             if source.strip():
-                raise ValueError(f"Canonical reads require the declared handler class {class_name!r}")
+                raise ValueError(
+                    f"{path}: define class {class_name} in this file; an import or re-export "
+                    "does not define the required workspace handler. If base_handler.py is owned, "
+                    "import its distinct base class and declare the workspace subclass here, "
+                    "preserving custom action dispatch in the base. Code adds canonical methods "
+                    "to the declared workspace class."
+                )
             constructed = f"class {class_name}:\n" + "\n".join(
                 "\n".join("    " + line if line else "" for line in function.splitlines()) + "\n"
                 for function in functions.values()

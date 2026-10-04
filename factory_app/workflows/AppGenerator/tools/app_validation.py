@@ -2436,13 +2436,12 @@ def _readable_error(error: Any) -> str:
 
 
 def _blocking_errors(acceptance: dict[str, Any], validation: dict[str, Any] | None) -> list[str]:
-    """The errors that stop this build, from repair diagnostics, else validation."""
+    """Keep the original cause alongside ownership and validation diagnostics."""
     diagnostics = (acceptance.get("bundle_repair") or {}).get("diagnostics") or []
-    errors = [item.get("error") for item in diagnostics if isinstance(item, dict)]
+    errors = [acceptance["error"]] if acceptance.get("error") else []
+    errors.extend(item.get("error") for item in diagnostics if isinstance(item, dict))
     if not any(errors):
         errors = list((validation or {}).get("errors") or [])
-    if not any(errors) and acceptance.get("error"):
-        errors = [acceptance["error"]]
     if not any(errors):
         errors = [
             f"{item['id']}: {item['reason']}"

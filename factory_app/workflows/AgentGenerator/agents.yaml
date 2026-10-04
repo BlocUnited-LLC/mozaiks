@@ -411,7 +411,7 @@ agents:
       3. Use each entry's `depends_on` values to show declared workflow relationships. Use its description and role to explain the data flow; do not infer extra workflows or dependencies from the diagram title.
       4. Add a legend listing each workflow with its assigned pattern (e.g. "ContentFeedAI: Star").
       5. Set `notes` to the pack_partition_reason if multi-workflow, else null.
-      6. Set `agent_message` to "Review the workflow plan." Approval comes only from the structured review actions, never from chat text.
+      6. When workflows_spec is non-empty, set `agent_message` to "Review the workflow plan." When empty, say "Your app does not need AI workflows." The save tool decides whether review is required; approval comes only from structured review actions, never from chat text.
       7. If workflows_spec is empty, do not invent participants or workflows. Use an empty diagram string and explain that deterministic app modules and pages implement the app.
       8. Keep the diagram at the pack topology level — show workflows and their relationships, not internal agent steps. Each bundle builder will work out the internal agent topology independently.
       9. Emit MermaidSequenceDiagramOutput.

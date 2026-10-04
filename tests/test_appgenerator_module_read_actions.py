@@ -427,6 +427,130 @@ async def test_task_dependency_gates_paid_read_and_keeps_shared_write_and_canoni
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("repair", [False, True])
+@pytest.mark.parametrize("aliased_export", [False, True])
+async def test_import_only_handler_recovery_requires_explicit_workspace_subclass(monkeypatch, repair, aliased_export):
+    handler_path = f"{BACKEND}/handler.py"
+    base_path = f"{BACKEND}/base_handler.py"
+    base_class = "TaskManagementBaseHandler" if aliased_export else "TaskManagementHandler"
+    base_source = (
+        f"class {base_class}:\n"
+        "    async def task_summary(self, ctx, **params):\n"
+        "        from . import service\n"
+        "        return await service.task_summary(ctx)\n"
+    )
+    authored = {
+        handler_path: f"from .base_handler import {base_class}"
+        + (" as TaskManagementHandler" if aliased_export else "") + "\n",
+        base_path: base_source,
+        f"{BACKEND}/service.py": (
+            "async def task_summary(ctx):\n"
+            "    from . import repo\n"
+            "    result = await repo.list_tasks(ctx)\n"
+            "    return {'total': result['total']}\n"
+        ),
+    }
+    tasks = [{
+        "task_id": "contract", "task_type": "module_contract", "capability_pack_id": MODULE,
+        "initial_agent": "ConfigMiddlewareAgent", "initial_message": "Declare task actions.",
+        "owned_paths": [MANIFEST], "depends_on": [],
+    }, {
+        "task_id": "services", "task_type": "business_services", "capability_pack_id": MODULE,
+        "initial_agent": "ServiceAgent", "initial_message": "Implement task summary dispatch.",
+        "owned_paths": [*authored, f"{BACKEND}/repo.py", f"{BACKEND}/policy.py"],
+        "depends_on": ["contract"],
+    }]
+    contract = _contract()
+    contract["surfaces"][0]["collections"][0]["lifecycle"] = {"write_mode": "module_action"}
+    context = {
+        "app_build_plan": {**_plan(), "build_tasks": tasks},
+        "data_contract": contract, "app_task_batch_items": tasks,
+        "design_surface_map": {"surfaces": [{
+            "surface_id": MODULE, "surface_kind": "module", "owner": "app",
+            "primary_entities": ["Task"],
+            "owned_mutations": ["create_task", "update_task", "delete_task"],
+            "custom_reads": ["task_summary"],
+        }]},
+    }
+    service_requests = []
+
+    async def run(_runner, request):
+        if request.task_id == "contract":
+            output = _output()
+            output["module_contract"]["module_yaml"]["actions"].append({
+                "id": "task_summary", "handler_method": "task_summary",
+            })
+        else:
+            service_requests.append(request)
+            candidate = dict(authored)
+            if repair and len(service_requests) == 2:
+                candidate[base_path] = base_source.replace(
+                    f"class {base_class}:", "class TaskManagementBaseHandler:",
+                )
+                candidate[handler_path] = (
+                    "from .base_handler import TaskManagementBaseHandler\n\n"
+                    "class TaskManagementHandler(TaskManagementBaseHandler):\n"
+                    '    """Workspace customization boundary."""\n'
+                )
+            output = {"code_files": [{"filename": path, "content": source}
+                                     for path, source in candidate.items()]}
+        return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output=deepcopy(output))
+
+    monkeypatch.setattr(task_batches.AG2TaskBatchRunner, "run", run)
+    config = task_batches.load_task_batches_config(
+        "AppGenerator", workflows_root=Path(__file__).resolve().parents[1] / "factory_app" / "workflows",
+    )
+
+    checkpoints = []
+
+    async def checkpoint(updates):
+        checkpoints.append(deepcopy(updates))
+
+    async def execute(trigger):
+        await task_batches.execute_task_batches_for_trigger(
+            workflow_name="AppGenerator", trigger_agent=trigger, batches_config=config,
+            agents={"ConfigMiddlewareAgent": object(), "ServiceAgent": object()}, context_variables=context,
+            chat_id="handler-subclass", app_id="handler-subclass", user_id="owner",
+            fresh_agents_per_task=False, parent_channel_id="handler-subclass-parent", checkpoint=checkpoint,
+        )
+
+    await execute("AppPlanAgent")
+    results = context["app_task_batch_results"]
+    rejected = deepcopy(results["_failed"]["services"])
+    assert rejected["failure_kind"] == "output_rejected"
+    assert handler_path in rejected["error"]
+    assert "define class TaskManagementHandler" in rejected["error"]
+    assert "re-export" in rejected["error"] and "subclass" in rejected["error"]
+    assert extract_code_file_map_from_payload(rejected["rejected_output"]) == authored
+    accepted_contract = deepcopy(results["contract"])
+    context["app_task_recovery_request"] = {
+        "batch_id": "app_build_tasks", "request_id": "correct-handler-shape",
+        "input_fingerprint": results["_meta"]["input_fingerprint"], "root_task_ids": ["services"],
+    }
+    await execute("AppValidationAgent")
+    assert len(service_requests) == 2
+    assert checkpoints
+    assert rejected["error"] in service_requests[1].prompt
+    assert context["app_task_batch_results"]["contract"] == accepted_contract
+    if not repair:
+        assert context["app_task_recovery_status"] == "blocked"
+        assert "services" not in context["app_task_batch_results"]
+        assert context["app_task_batch_results"]["_failed"]["services"]["recoverable"] is False
+        return
+    assert context["app_task_batch_status"] == "completed"
+    accepted = context["app_task_batch_results"]["services"]
+    files = extract_code_file_map_from_payload(accepted_contract)
+    files.update(extract_code_file_map_from_payload(accepted))
+    assert files[base_path] == base_source.replace(f"class {base_class}:", "class TaskManagementBaseHandler:")
+    assert "async def task_summary" not in files[handler_path]
+    assert "async def list_tasks" in files[handler_path]
+    assert "async def get_tasks" in files[handler_path]
+    assert "async def create_task" in files[handler_path]
+    validation = validate_module_implementation_contract(files)
+    assert validation["passed"], validation["failed_tests"]
+
+
+@pytest.mark.asyncio
 async def test_app_wide_authored_read_survives_task_assembly_and_repeated_materialization(monkeypatch):
     contract = _contract("app_wide")
     output = _closed(contract=contract)

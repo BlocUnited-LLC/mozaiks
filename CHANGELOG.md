@@ -324,6 +324,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Studio shows working activity when an actual AG2 model call begins, including
+  repeated calls by the same agent, without exposing hidden agent identities.
+- Authenticated custom-page builds now recognize the exact sign-in and callback
+  routes produced by the canonical auth scaffold. Unapproved custom routes still
+  fail with repair guidance. Exhausted task recovery reports the assembly cause
+  through the existing validation and failure path.
+- Autonomous builds continue through validated no-subscription and no-workflow
+  decisions without redundant approval cards, recording that review was not
+  required. Nonempty decisions and final app activation retain their review gates.
+- Generated handler repair feedback identifies the required workspace subclass.
+  Design and UI guidance preserves mandatory persistence behavior, uses shipped
+  table action APIs, and keeps side effects out of React state updaters.
+
 - Studio clears working and typing indicators when a workflow asks for input
   or displays an interactive approval, keeping the user's next action clear.
 - The activation response uses the same verified app archive as the activation

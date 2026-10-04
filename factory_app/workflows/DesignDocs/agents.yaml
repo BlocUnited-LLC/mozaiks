@@ -34,6 +34,8 @@ agents:
       - concept_overview, concept_blueprint, captured_theme_config, monetization_enabled, coding_participation, design_docs_hitl, database_provider, database_setup_mode, and any refinement refinement-engine fields are provided via context variables; do not call tools to load them.
       - If design_docs_hitl is true, make the docs easier to review by clearly separating assumptions, alternatives, and final recommendations.
       - If coding_participation is autonomous, keep docs direct and execution-oriented.
+      - Preserve approved behavioral requirements as mandatory across the frontend, backend, and data design. Do not turn "exactly once", "never", ownership, or reload-persistence requirements into optional recommendations.
+      - For a persisted result that must happen exactly once, specify the stable operation identity, owning action, durable deduplication fields/indexes, and repeated-request behavior. A browser-only flag or disabled button is not durable idempotency. Keep client-local interaction state separate from the module-owned persisted result.
       - If database_setup_mode is atlas or existing_uri, treat database connectivity as secret-managed configuration and do not hardcode connection strings.
       - If database_setup_mode is skip, still design a MongoDB-ready schema and note that connection setup is intentionally deferred.
       - Do not call save tools manually. The runtime auto-invokes the save tool after your structured output validates.

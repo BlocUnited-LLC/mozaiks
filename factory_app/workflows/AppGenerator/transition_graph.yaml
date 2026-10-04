@@ -405,6 +405,15 @@ transition_rules:
   transition_target: TerminateTarget
   termination_reason: workflow_failed
 - source_agent: AppValidationAgent
+  target_agent: AppValidationAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_task_recovery_status
+  condition_value: blocked
+  transition_target: AgentTarget
+# A rejected task correction can leave an independent accepted output needing
+# repair. Revalidate once through the existing policy before ending assembly.
+- source_agent: AppValidationAgent
   target_agent: terminate
   transition_type: condition
   condition_type: context_equals
@@ -412,13 +421,6 @@ transition_rules:
   condition_value: failed
   transition_target: TerminateTarget
   termination_reason: workflow_failed
-- source_agent: AppValidationAgent
-  target_agent: AppValidationAgent
-  transition_type: condition
-  condition_type: context_equals
-  condition_key: app_task_recovery_status
-  condition_value: blocked
-  transition_target: AgentTarget
 - source_agent: AppValidationAgent
   target_agent: user
   transition_type: condition
