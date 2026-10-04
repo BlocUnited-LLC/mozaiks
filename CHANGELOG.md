@@ -14,6 +14,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- An app workspace without its own `workflows/` folder now serves no
+  workflows. Hosts other than Studio previously fell back to the packaged
+  Factory workflows for such an app, so a generated app's container loaded
+  them. Studio still serves the Factory workflows, an app with its own
+  `workflows/` serves those, and an app registry that extends
+  `mozaiks.default_workflow_registry` still resolves the default workflows.
+  `/api/health` now reports workflow counts only, without workflow names,
+  handler metadata or filesystem paths, and starting a chat on a host that
+  serves no workflows returns 404 instead of 503.
+
 - JWT and Keycloak authentication now require an audience at startup and
   verify it and an access-token type on every bearer token (`AUTH_AUDIENCE` for JWT,
   `KEYCLOAK_CLIENT_ID` for Keycloak). Deployments that left these unset must

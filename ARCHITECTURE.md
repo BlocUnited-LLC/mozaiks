@@ -311,7 +311,7 @@ Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, 
 Shared factory workflows live in `factory_app/workflows/`. A running host resolves one workflow root by default. `MOZAIKS_WORKFLOWS_PATH` may override explicitly.
 
 - Studio uses `factory_app/workflows/` as the shared builder workflow root
-- Product/app hosts use workspace-root `workflows/` when present
+- Product/app hosts use workspace-root `workflows/`; an app without one serves no workflows, never the Factory's
 - Build is coordinated by `workflow_sequences` in `factory_app/workflows/extended_orchestration/extension_registry.json`; `ValueEngine`, `ThemeCapture`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` are individual workflows inside those sequences
 - `ExistingAppDiscovery` belongs to the brownfield adoption sequence rather than the default greenfield build path
 - Refinement today is checkpoint-driven re-entry through `app/config/refinement_policy.yaml` plus `factory_app/refinement_harness/config/harness.yaml`, not a dedicated `RefinementWorkflow`
