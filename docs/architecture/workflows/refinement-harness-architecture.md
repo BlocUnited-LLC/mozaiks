@@ -90,14 +90,21 @@ requires a new decision rather than reusing the previous approval. If execution
 fails after admission, the user submits a new request; the consumed approval is
 not restored.
 
-**Limit to selected file** is a hard boundary. If classification requires design,
-feature, or core work beyond the eligible patch lane, Studio rejects the request
-before planning, allocating a refinement build, or generating files. The user can
-narrow the request or remove the file limit and submit a broader request. This
-does not change classification to accommodate the selected file. While Apply is
+**Limit to selected file** is a hard boundary. Patches use the scoped coding
+worker; eligible design or feature requests use the existing surface planner,
+which must resolve every write to saved contracts within that selection. Core
+changes, schema migrations, workflow fallback and unresolved or wider writes
+are rejected before allocating a refinement build or generating files. The user
+can narrow the request or remove the file limit and submit a broader request.
+This does not change classification to accommodate the selected file. While Apply is
 pending, review mutations are disabled; the previous candidate's source and
 validation evidence remain available if the new request fails or asks for scope
 confirmation.
+
+Saved review labels its initial history selection **Starting version**. A new
+candidate remains in the Workbench for preview and review. Detailed model
+summaries and version identifiers are expandable; failures, validation blockers
+and review actions remain visible.
 
 ---
 
@@ -159,6 +166,15 @@ structured-output attempt; a failed check does not start an automatic coding
 repair loop. Audit events and Studio refinement-session writes are best-effort,
 so their absence is not evidence that a candidate was never saved. Saved build
 records and validation results remain the evidence to inspect.
+
+Patch requests, approved execution contexts and surface finalization use the
+same validation strategy resolver. Explicit operator environment configuration
+takes precedence over an explicit request; otherwise automatic selection prefers
+an available Docker daemon, then local npm, then skipped validation. Saved
+validation evidence is historical information and does not select the next
+request's strategy. The strategy controls app build validation; the existing
+contract, runtime-load and database smoke acceptance checks still run in the
+host process. A subsequent interactive preview is a separate sandbox operation.
 
 Promotion currently has several implementation paths. The scoped coding worker
 writes draft BuildRecords directly. Studio acceptance uses

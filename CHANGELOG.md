@@ -346,6 +346,10 @@ This project follows a practical pre-1.0 changelog format:
   pairs and the complete write scope before generation, retaining the route and
   registry as read-only context. Unknown, ambiguous and unsafe mappings fail
   before generating files; new surfaces require the broader workflow path.
+- Refinements use the configured validation policy and automatic provider
+  selection instead of forcing local builds or inheriting a previous build's
+  local strategy. Saved review labels the starting version and keeps detailed
+  change summaries expandable while showing failures and review actions.
 - Studio drafts show the registered app's current build and approved description.
   The workbench opens on preview, keeps required continuation and review actions
   visible, and offers code, downloads, and diagnostics on demand. Historical chat

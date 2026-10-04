@@ -162,6 +162,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       status:scenario.status, applied_files:{'README.md':'Candidate contents'},
       validation_result:candidateValidation(),
       metadata:scenario.saved ? {build_record_id:'candidate'} : {},
+      plan:{summary:'Update the selected document while preserving its surrounding files.'},
       error:scenario.status === 'failed' ? 'Required checks failed.' : null,
     }}),
     harness_decision:{decision_type:'auto_patch', message:'Inspect the refinement result.',
@@ -171,6 +172,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     lifecycle_status:'draft', validation_status: id === 'baseline' ? 'passed' : scenario.validation,
     review_status: id === 'baseline' ? 'validated' : scenario.status,
     changed_file_count: id === 'baseline' ? 0 : 1,
+    coding_summary: id === 'baseline' ? null : 'Update the selected document while preserving its surrounding files.',
     changed_files: id === 'baseline' ? [] : [{path:'README.md', change_type:'modified', diff_preview:'-Original contents\n+Candidate contents'}],
     can_accept: id !== 'baseline' && scenario.status === 'validated' && !accepted,
     can_reject: id !== 'baseline', can_promote:scenario.promotion === true && accepted,
@@ -304,6 +306,14 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       await page.getByRole('button', {name:'Apply change',exact:true}).click();
       const panel = page.getByRole('region', {name:'Artifact review'});
       await expect(panel.getByRole('button', {name:'Accept artifact',exact:true})).toBeVisible();
+      const result = page.getByRole('status', {name:'Refinement result'});
+      const summary = 'Update the selected document while preserving its surrounding files.';
+      await expect(result.getByText(summary, {exact:true})).toBeHidden();
+      await expect(panel.getByText(summary, {exact:true})).toBeHidden();
+      await result.getByText('Refinement details', {exact:true}).click();
+      await expect(result.getByText(summary, {exact:true})).toBeVisible();
+      await panel.getByText('Change summary', {exact:true}).click();
+      await expect(panel.getByText(summary, {exact:true})).toBeVisible();
       await expect(panel.getByText('A binary asset was omitted from the text diff.', {exact:true})).toBeHidden();
       await panel.getByText('Review notes (1)', {exact:true}).click();
       await expect(panel.getByText('A binary asset was omitted from the text diff.', {exact:true})).toBeVisible();

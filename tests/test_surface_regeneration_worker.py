@@ -713,27 +713,55 @@ async def test_execute_plan_rejects_model_write_to_read_only_page_binding(read_o
 
 
 @pytest.mark.asyncio
-async def test_surface_finalization_reuses_validation_and_saves_complete_target_bundle(tmp_path):
+@pytest.mark.parametrize("operator,docker_available,local_available,expected", [
+    (None, True, True, "docker"),
+    (None, False, True, "local"),
+    (None, False, False, "skip"),
+    ("local", True, True, "local"),
+    ("docker", False, True, "docker"),
+    ("skip", True, True, "skip"),
+    ("e2b", True, True, "e2b"),
+    ("invalid", True, True, None),
+])
+async def test_surface_finalization_reuses_validation_and_saves_complete_target_bundle(
+    monkeypatch, tmp_path, operator, docker_available, local_available, expected,
+):
     import zipfile
 
     from mozaiksai.control_plane.implementations.orchestration_control import (
         OrchestrationControlHarness,
     )
     from mozaiksai.core.session.build_binding import RunBuildBinding
+    from mozaiksai.core.workflow.generator_support import app_validation_strategy
     from tests.test_coding_worker import ScopedRefinementCodingWorker, _FakeArtifactStore
 
+    if operator is None:
+        monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
+    else:
+        monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", operator)
+    monkeypatch.setattr(app_validation_strategy, "docker_app_validation_available", lambda: docker_available)
+    monkeypatch.setattr(app_validation_strategy, "local_app_validation_available", lambda: local_available)
+    validation_status = "skipped" if expected == "skip" else "passed"
+
     async def validate(**kwargs):
+        assert kwargs["validation_strategy"] == expected
         assert kwargs["app_id"] == "tracker"
-        assert kwargs["files"]["app.json"] == '{"appId":"tracker"}'
-        assert kwargs["files"]["modules/x/backend/service.py"] == "VALUE = 2\n"
+        assert kwargs["files"] == {
+            "app.json": '{"appId":"tracker"}',
+            "modules/x/backend/service.py": "VALUE = 2\n",
+            "brand/theme_config.json": '{"accent":"coral"}',
+        }
         return {
-            "validation_status": "passed",
-            "app_bundle_acceptance_result": {"status": "passed", "passed": True},
-            "app_validation_result": {"validation_status": "passed", "validation_strategy": "local"},
+            "validation_status": validation_status,
+            "app_bundle_acceptance_result": {
+                "status": "pending" if expected == "skip" else "passed", "passed": expected != "skip",
+            },
+            "app_validation_result": {"validation_status": validation_status, "validation_strategy": expected},
         }
 
+    validator = AsyncMock(side_effect=validate)
     store = _FakeArtifactStore()
-    worker = ScopedRefinementCodingWorker(candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path)
+    worker = ScopedRefinementCodingWorker(candidate_validation_runner=validator, artifact_store=store, output_root=tmp_path)
     harness = OrchestrationControlHarness(coding_worker=worker)
     binding = RunBuildBinding(target_app_id="tracker", build_registry_id="registry", build_id="revision", phase="refinement")
     request = _make_refinement_request(app_id="factory").model_copy(update={"target_app_id": "tracker", "build_record_id": "parent"})
@@ -744,15 +772,36 @@ async def test_surface_finalization_reuses_validation_and_saves_complete_target_
     result = await harness.finalize_surface_output(
         plan=plan, result=SurfacePlanExecutionResult(status="success", all_files={"modules/x/backend/service.py": "VALUE = 2\n"}),
         refinement_request=request, routing_decision=_make_routing_decision(), run_build_binding=binding,
-        workspace_files={"app.json": '{"appId":"tracker"}', "modules/x/backend/service.py": "VALUE = 1\n"},
+        workspace_files={
+            "app.json": '{"appId":"tracker"}',
+            "modules/x/backend/service.py": "VALUE = 1\n",
+            "brand/theme_config.json": '{"accent":"coral"}',
+        },
     )
-    assert result.status == "validated"
+    if expected is None:
+        assert result.status == "failed"
+        assert "Unsupported app validation strategy" in result.error
+        validator.assert_not_awaited()
+        assert store.calls == []
+        return
+    validator.assert_awaited_once()
+    assert result.status == ("planned" if expected == "skip" else "validated"), result.error
+    assert result.plan.validation_strategy == expected
+    assert len(store.calls) == 1
     assert store.calls[0]["app_id"] == "tracker"
     assert store.calls[0]["parent_build_record_id"] == "parent"
+    assert store.calls[0]["app_validation_strategy"] == expected
+    assert store.calls[0]["app_validation_status"] == validation_status
+    assert store.calls[0]["validation_status"].value == validation_status
+    assert store.calls[0]["lifecycle_status"].value == "draft"
     metadata = store.calls[0]["commit_metadata"]["metadata"]
     assert all(metadata[key] == value for key, value in binding.model_dump().items())
     with zipfile.ZipFile(metadata["artifact_path"]) as archive:
-        assert set(archive.namelist()) == {"app.json", "modules/x/backend/service.py"}
+        assert {name: archive.read(name).decode() for name in archive.namelist()} == {
+            "app.json": '{"appId":"tracker"}',
+            "modules/x/backend/service.py": "VALUE = 2\n",
+            "brand/theme_config.json": '{"accent":"coral"}',
+        }
 
 
 @pytest.mark.asyncio

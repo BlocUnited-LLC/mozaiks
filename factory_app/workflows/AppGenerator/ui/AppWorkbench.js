@@ -270,19 +270,15 @@ const AppWorkbench = ({
       if (themeSource != null) {
         triggerPayload.coding_request = {
           files: { [THEME_FILE_PATH]: themeSource },
-          ...(validationStrategy === 'local' ? { validation_strategy: 'local' } : {}),
         };
       }
     } else if (limitToSelectedFile && selectedPath && scopeFiles[selectedPath] != null) {
       triggerPayload.coding_request = {
         files: scopeFiles,
-        ...(validationStrategy === 'local' ? { validation_strategy: 'local' } : {}),
       };
     } else {
       // Missing explicit files asks the existing harness to propose a safe scope.
-      triggerPayload.coding_request = {
-        ...(validationStrategy === 'local' ? { validation_strategy: 'local' } : {}),
-      };
+      triggerPayload.coding_request = {};
     }
 
     if (harnessAction && typeof harnessAction === 'object') {
@@ -594,11 +590,14 @@ const AppWorkbench = ({
           {codingResult && (
             <div role="status" aria-label="Refinement result" className={`mt-3 rounded-xl border px-3 py-3 text-xs ${codingResultTone}`}>
               <div className="font-semibold">{codingResultMessage}</div>
-              {codingResult.plan?.summary && <div className="mt-1">{codingResult.plan.summary}</div>}
-              <div className="mt-1">
-                Status: {codingResult.status}
-                {savedDraftId ? ` • Draft ${savedDraftId}` : ''}
-              </div>
+              <details className="mt-2">
+                <summary className="cursor-pointer">Refinement details</summary>
+                {codingResult.plan?.summary && <div className="mt-1">{codingResult.plan.summary}</div>}
+                <div className="mt-1 break-words [overflow-wrap:anywhere]">
+                  Status: {codingResult.status}
+                  {savedDraftId ? ` • Draft ${savedDraftId}` : ''}
+                </div>
+              </details>
               {savedDraftId && codingResult.status !== 'validated' && (
                 <div className="mt-1">The editor and preview still show version {artifactVersionId}. Inspect the saved draft below.</div>
               )}
@@ -673,9 +672,10 @@ const AppWorkbench = ({
             </details>
 
             {artifactReview.coding_summary && (
-              <div className="mt-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-[var(--color-text-muted)]">
-                {artifactReview.coding_summary}
-              </div>
+              <details className="mt-3 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer">Change summary</summary>
+                <p className="mt-2 break-words [overflow-wrap:anywhere]">{artifactReview.coding_summary}</p>
+              </details>
             )}
 
             {artifactReview.validation_blocker && (

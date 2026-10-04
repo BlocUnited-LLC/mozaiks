@@ -1975,7 +1975,7 @@ test('app build review route stays responsive across desktop and mobile widths',
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: testInfo.outputPath('saved-build-review.png'), fullPage: true });
 
-  await main.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+  await main.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
   await expect(main.getByText('Saved build ver-16', { exact: true })).toBeVisible();
   await expect(main.getByText('Saved build ver-17', { exact: true })).toHaveCount(0);
   await expect(main.getByText('Required runtime checks have not passed.', { exact: true })).toBeVisible();
@@ -2054,10 +2054,10 @@ test('saved build review ignores a late response from an earlier selection', asy
   try {
     await page.goto(`/apps/${APP_ID}/activity`);
     await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
-    await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+    await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
     await expect.poll(() => oldRequested).toBe(true);
     await expect(page.getByText('Saved build ver-17', { exact: true })).toBeHidden();
-    await page.getByLabel('Opened version', { exact: true }).selectOption('ver-17');
+    await page.getByLabel('Starting version', { exact: true }).selectOption('ver-17');
     await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
     releaseOld();
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -2088,7 +2088,7 @@ test('saved build review retains preview ownership when switching versions', asy
   await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Open draft preview', exact: true })).toBeVisible();
   expect(commands).toEqual(['allocate:ver-17', 'sync:sandbox-ver-17', 'start:sandbox-ver-17']);
-  await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+  await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
   await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Open draft preview', exact: true })).toBeVisible();
@@ -2153,6 +2153,8 @@ test('saved build review preserves candidate source through a failed selection a
   await page.getByRole('button', { name: 'Apply change', exact: true }).click();
   await expect(page.getByText('Draft validated and saved for review.', { exact: true })).toBeVisible();
   await expect(page.getByText('Version candidate-a2', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeHidden();
+  await page.getByRole('region', { name: 'Artifact review', exact: true }).getByText('Change summary', { exact: true }).click();
   await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Accept artifact', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Activate this draft', exact: true })).toHaveCount(0);
@@ -2167,9 +2169,9 @@ test('saved build review preserves candidate source through a failed selection a
   await expect(page.getByText('Strategy: docker', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
   await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(1);
-  await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+  await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
   await expect(page.getByText('Version B temporarily unavailable.', { exact: true })).toBeVisible();
-  await page.getByLabel('Opened version', { exact: true }).selectOption('ver-17');
+  await page.getByLabel('Starting version', { exact: true }).selectOption('ver-17');
   await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
   await expect(page.getByText('Version candidate-a2', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Candidate A2 review evidence', { exact: true })).toBeVisible();
@@ -2187,7 +2189,7 @@ test('saved build review preserves candidate source through a failed selection a
   await expect.poll(() => acceptedVersions).toEqual(['candidate-a2']);
 
   failOtherVersion = false;
-  await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+  await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
   await expect(page.getByText('Version ver-16', { exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Start draft preview', exact: true }).click();
   await expect.poll(() => receipts.filter(item => item.action === 'sync').length).toBe(3);
@@ -2221,7 +2223,7 @@ for (const actionLabel of ['Apply change', 'Redesign theme']) {
       await page.getByPlaceholder('Describe the change').fill('Update the opened draft.');
       await page.getByRole('button', { name: actionLabel, exact: true }).click();
       await expect.poll(() => triggerRequested).toBe(true);
-      await page.getByLabel('Opened version', { exact: true }).selectOption('ver-16');
+      await page.getByLabel('Starting version', { exact: true }).selectOption('ver-16');
       await expect(page.getByText('Saved build ver-16', { exact: true })).toBeVisible();
       releaseResponse();
       await expect(page.getByRole('button', { name: 'Apply change', exact: true })).toBeEnabled();

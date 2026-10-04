@@ -128,7 +128,7 @@ export default function AppBuildReviewPage() {
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-3">
-              <label htmlFor="saved-build-version" className="text-sm font-medium text-foreground">Opened version</label>
+              <label htmlFor="saved-build-version" className="text-sm font-medium text-foreground">Starting version</label>
               <select
                 id="saved-build-version"
                 className="min-w-0 max-w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"

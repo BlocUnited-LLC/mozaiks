@@ -347,7 +347,7 @@ class OrchestrationControlHarness:
             raw_user_request=refinement_request.raw_user_request, change_class=plan.change_class,
             source_surface=refinement_request.source_surface,
             files={path: workspace_files.get(path, "") for path in owned_paths},
-            baseline_files=workspace_files, validation_strategy="local",
+            baseline_files=workspace_files,
         )
         proposal = StagedPatchProposal(
             proposal_id=run_build_binding.build_id, provider_id="contract_surface_regeneration",

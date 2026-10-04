@@ -47,6 +47,7 @@ def test_build_request_scopes_baseline_files_and_preserves_context():
     assert request.baseline_files["app/security/secrets.yaml"] == "secret policy"
     assert request.raw_user_request == "Add a support panel"
     assert request.metadata["approved_plan_digest"] == "b" * 64
+    assert request.validation_strategy is None
 
 
 def test_prohibited_path_wins_over_allowed_scope():
