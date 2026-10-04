@@ -16,9 +16,14 @@ Covers:
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import (
     _extract_top_level_imports,
+    scan_requirements,
 )
+from mozaiksai.version import __version__
 
 
 class TestExtractTopLevelImports:
@@ -86,3 +91,38 @@ class TestExtractTopLevelImports:
 
     def test_string_only_returns_empty(self):
         assert _extract_top_level_imports('"just a string"') == set()
+
+
+class TestScanRequirements:
+    def test_recorded_bundle_lists_only_framework_and_third_party_packages(self):
+        fixture = Path(__file__).parent / "fixtures" / "runtime_smoke_good_bundle_fdfa818e.json"
+        files = json.loads(fixture.read_text(encoding="utf-8"))["files"]
+
+        assert scan_requirements(files) == f"mozaiks=={__version__}\nhttpx\nPyYAML\n"
+
+    def test_bundle_root_directories_are_not_dependencies(self):
+        files = {
+            "main.py": (
+                "import services.integrations.client\n"
+                "import modules.tasks.backend.handler\n"
+                "import config.settings\n"
+                "import data.contract\n"
+                "import ui.pages\n"
+                "import httpx\n"
+            ),
+            "services/integrations/client.py": "",
+            "modules/tasks/backend/handler.py": "",
+            "config/settings.yaml": "",
+            "data/contract.json": "{}",
+            "ui/pages/home.yaml": "",
+        }
+
+        assert scan_requirements(files) == f"mozaiks=={__version__}\nhttpx\n"
+
+    def test_bundle_root_python_file_is_not_a_dependency(self):
+        files = {
+            "main.py": "import helpers\nimport requests\n",
+            "helpers.py": "def helper():\n    pass\n",
+        }
+
+        assert scan_requirements(files) == f"mozaiks=={__version__}\nrequests\n"

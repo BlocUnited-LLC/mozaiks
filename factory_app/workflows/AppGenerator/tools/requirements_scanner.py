@@ -13,6 +13,8 @@ from __future__ import annotations
 import ast
 import sys
 
+from mozaiksai.version import __version__
+
 # sys.stdlib_module_names is Python 3.10+; fall back to a curated set.
 try:
     _STDLIB: frozenset[str] = frozenset(sys.stdlib_module_names)  # type: ignore[attr-defined]
@@ -95,13 +97,24 @@ def scan_requirements(files_map: dict[str, str]) -> str:
     Excludes:
     - stdlib modules
     - framework packages (mozaiksai, ag2, ...)
+    - directories and .py modules at the bundle root
     - relative/internal imports
     - names starting with _ (private / test artifacts)
 
     Applies known import-name → PyPI-name mappings and sorts alphabetically.
-    Returns a comment-only string when no third-party packages are detected.
+    Always includes the version of Mozaiks running the generator.
     """
     packages: set[str] = set()
+    local_roots: set[str] = set()
+
+    for path in files_map:
+        if not isinstance(path, str):
+            continue
+        root, separator, _ = path.replace("\\", "/").partition("/")
+        if separator and root:
+            local_roots.add(root)
+        elif root.endswith(".py"):
+            local_roots.add(root.removesuffix(".py"))
 
     for path, content in files_map.items():
         if not isinstance(path, str) or not path.endswith(".py"):
@@ -114,14 +127,18 @@ def scan_requirements(files_map: dict[str, str]) -> str:
                 continue
             if raw in _STDLIB:
                 continue
-            if raw in _FRAMEWORK_ROOTS or any(raw.startswith(r + ".") for r in _FRAMEWORK_ROOTS):
+            if (
+                raw in local_roots
+                or raw in _FRAMEWORK_ROOTS
+                or any(raw.startswith(r + ".") for r in _FRAMEWORK_ROOTS)
+            ):
                 continue
             packages.add(_IMPORT_TO_PYPI.get(raw, raw))
 
     # mozaiks is always required — it's the runtime that loads and serves the app bundle.
     packages.discard("mozaiks")
     extras = sorted(packages, key=str.lower)
-    lines = ["mozaiks", *extras]
+    lines = [f"mozaiks=={__version__}", *extras]
     return "\n".join(lines) + "\n"
 
 
