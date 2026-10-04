@@ -548,13 +548,13 @@ async def test_app_wide_platform_boundary_on_mongo_preserves_crud_and_refuses_fo
     ("tasks", workspace_contract(tenancy="app_wide")),  # an app module's own alias handle
 ])
 async def test_module_alias_handles_refuse_driver_option_routes_on_mongo(module_id, workspace, mongo):
-    """Each module's bounded alias handle forwards only documented options (follow-up to #798).
+    """Each module's bounded alias handle forwards only driver-defined options (follow-up to #798).
 
-    The handle wraps a real driver collection. Left unchecked, the installed
-    driver merges an unexpected keyword into the command document, or lifts a
-    ``$query`` filter envelope, and the operation reaches a collection or
-    database the module must not touch. The handle now refuses those before the
-    driver builds a command, while legitimate options keep working.
+    The handle wraps a real driver collection. It refuses an unexpected option,
+    a surplus positional argument, or a raw query command envelope in a read
+    filter before the driver builds a command, so the operation cannot reach a
+    collection or database the module must not touch, while a driver-defined
+    option still works.
     """
     other_db = f"{mongo.database}_handle_other"
     ctx = MongoPersistenceContext(

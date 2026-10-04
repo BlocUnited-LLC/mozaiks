@@ -14,21 +14,27 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
-- Bounded module collection handles now forward only the options MongoDB defines
-  for each operation. Previously the handle passed a caller's keyword and
-  positional arguments straight to the driver; the driver merges an option it
-  does not recognize into the command it sends to the server, and a few of those
-  fields are read as the collection or database to act on (a raw query command
-  envelope in a read filter had the same effect). An app running beside
-  owner-scoped collections could therefore be steered to a collection or
-  database outside its boundary. Each method now accepts an explicit allow-list
-  of options (sessions, comments, projections, sorts, upserts, index hints, time
-  limits, `skip`/`limit` for counts, `allowDiskUse`/`batchSize` for
-  aggregations, and the like) and refuses any other option, surplus positional
-  argument, or query envelope before the driver builds a command. Which
-  collections a handle may open, the aggregation-stage validator, and the
-  owner-scoped facade (which already used explicit signatures and forwarded no
-  caller options) are unchanged, and every legitimate option keeps working.
+- Bounded module collection handles now accept only the arguments the installed
+  MongoDB driver defines for each operation. Previously the handle passed a
+  caller's keyword and positional arguments straight to the driver, which passes
+  a keyword it does not recognize into the server command it builds; an
+  unchecked argument, or a raw query command envelope in a read filter, could
+  change what that command addressed, so an app running beside owner-scoped
+  collections could reach data outside its boundary. Each method now takes its
+  primary arguments (filter, update, document, pipeline and so on) by position
+  or by the driver's keyword, never both, plus only the options the driver
+  defines for that operation, and refuses anything else before the driver
+  builds a command. Every option that existing callers in this repository and
+  its factory templates pass is still accepted. An option the driver does not
+  define for an operation is now refused even where the server would accept it,
+  for example `hint` on an aggregation or `let` on a count. Aggregation
+  pipelines, on bounded handles and on owner-scoped collections, are copied
+  once into plain documents (a stage that is not a document, or a key that is
+  not a string, is refused), and that copy is both what the stage validator
+  checks and what the driver sends. Which collections a handle may open and
+  which aggregation stages are allowed are unchanged. Bounded handles prevent
+  mistakes; they are not a sandbox against hostile code running in the host
+  process.
 
 - JWT and Keycloak authentication now require an audience at startup and
   verify it and an access-token type on every bearer token (`AUTH_AUDIENCE` for JWT,
