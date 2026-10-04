@@ -24,7 +24,7 @@ permissions:
 actions:
 - id: create_post
   api_surface: public
-  description: Create a new post visible to the user's network.
+  description: Create a public post readable by other members.
   handler_method: create_post
   input_schema:
     type: object
@@ -42,6 +42,7 @@ actions:
         type: string
         enum:
         - public
+        description: Defaults to public. This reference supports public posts only.
   output_schema:
     type: object
     required:

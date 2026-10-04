@@ -25,7 +25,7 @@ permissions:
 actions:
   - id: create_post
     api_surface: public
-    description: Create a new post visible to the user's network.
+    description: Create a post with the selected visibility.
     handler_method: create_post
     input_schema:
       type: object
@@ -35,7 +35,13 @@ actions:
         # body — at most 5000 characters, enforced by the service.
         body: { type: string }
         media_urls: { type: array, items: { type: string } }
-        visibility: { type: string, enum: [public, friends, private] }
+        visibility:
+          type: string
+          enum: [public, friends, private]
+          description: >
+            Defaults to public. Public posts are readable by other members;
+            private and friends posts are readable only by their author.
+            Sharing posts with friends is not implemented.
     output_schema:
       type: object
       required: [success]

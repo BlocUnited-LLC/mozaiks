@@ -55,6 +55,11 @@ def render_reference_files(
     for action in manifest["actions"]:
         if action["id"] in {"create_post", "list_posts"}:
             action["input_schema"]["properties"]["visibility"]["enum"] = ["public"]
+        if action["id"] == "create_post":
+            action["description"] = "Create a public post readable by other members."
+            action["input_schema"]["properties"]["visibility"]["description"] = (
+                "Defaults to public. This reference supports public posts only."
+            )
     files["modules/user_posts/module.yaml"] = yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True)
 
     contract = json.loads((reference_root / "app/data/contract.json").read_text(encoding="utf-8"))

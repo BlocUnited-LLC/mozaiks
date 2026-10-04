@@ -68,7 +68,7 @@ class UserPostsService:
             "created_at": now,
         })
 
-        return {"success": True, "post": {k: v for k, v in doc.items() if k != "app_id"}}
+        return {"success": True, "post": doc}
 
     async def get_post(self, ctx, *, post_id: str) -> dict:
         post = await self._posts.get(ctx, post_id=post_id)
@@ -213,7 +213,7 @@ class UserPostsService:
             "created_at": now,
         })
 
-        return {"success": True, "comment": {k: v for k, v in doc.items() if k != "app_id"}}
+        return {"success": True, "comment": doc}
 
     async def delete_comment(self, ctx, *, comment_id: str) -> dict:
         user_id = actor_id(ctx)

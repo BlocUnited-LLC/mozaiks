@@ -54,12 +54,17 @@ def test_social_derivative_has_no_drift():
     assert {path.name for path in (APP / "modules/user_posts/contracts").iterdir()} == {"events.yaml"}
 
 
-def test_reference_manifest_only_narrows_canonical_public_visibility():
+def test_reference_manifest_only_narrows_canonical_public_visibility_and_description():
     source = ROOT / "factory_app/build_context/social/templates/modules/user_posts/module.yaml"
     expected = yaml.safe_load(source.read_text(encoding="utf-8"))
     for action in expected["actions"]:
         if action["id"] in {"create_post", "list_posts"}:
             action["input_schema"]["properties"]["visibility"]["enum"] = ["public"]
+        if action["id"] == "create_post":
+            action["description"] = "Create a public post readable by other members."
+            action["input_schema"]["properties"]["visibility"]["description"] = (
+                "Defaults to public. This reference supports public posts only."
+            )
     actual = yaml.safe_load((APP / "modules/user_posts/module.yaml").read_text(encoding="utf-8"))
     assert actual == expected
 
