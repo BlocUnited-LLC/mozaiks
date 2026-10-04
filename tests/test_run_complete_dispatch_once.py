@@ -40,7 +40,7 @@ class _FakePersistence:
         self.completed: list[str] = []
         self.failed: list[str] = []
 
-    async def chat_session_exists(self, chat_id, app_id, workflow_name=None):  # noqa: ANN001
+    async def chat_has_resumable_run(self, chat_id, app_id, workflow_name=None):  # noqa: ANN001
         return False
 
     async def assert_chat_resumable(self, chat_id, app_id) -> None:  # noqa: ANN001

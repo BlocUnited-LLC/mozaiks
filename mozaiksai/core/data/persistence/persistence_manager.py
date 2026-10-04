@@ -30,7 +30,7 @@ from uuid import uuid4
 from pymongo import ReturnDocument, UpdateOne
 
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.core_config import get_mongo_client
+from mozaiksai.core.core_config import current_mongo_client, get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
@@ -208,6 +208,9 @@ class PersistenceManager:
 
     def __init__(self):
         self.client: Any | None = None
+        # The process client this manager bound itself; a caller-supplied
+        # client is never this object, so it is never replaced.
+        self._process_client: Any | None = None
         self._init_lock = asyncio.Lock()
         logger.info("PersistenceManager created (lazy init)")
 
@@ -272,13 +275,22 @@ class PersistenceManager:
                 migrated,
             )
 
+    def _holds_usable_client(self) -> bool:
+        # Managers held by module and router singletons outlive a host, and
+        # host shutdown closes the process client. A process client this
+        # manager bound is rebound once it is no longer the open one; a client
+        # a caller supplied is theirs and is kept.
+        if self.client is None:
+            return False
+        return self.client is not self._process_client or self.client is current_mongo_client()
+
     async def _ensure_client(self) -> None:
-        if self.client is not None:
+        if self._holds_usable_client():
             return
         async with self._init_lock:
-            if self.client is not None:
+            if self._holds_usable_client():
                 return
-            self.client = get_mongo_client()
+            self.client = self._process_client = get_mongo_client()
             try:
                 # Primary chat session collection (canonical)
                 coll = self.client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
@@ -954,17 +966,21 @@ class AG2PersistenceManager:
             if status is not WorkflowStatus.IN_PROGRESS:
                 raise ChatSessionTerminalError(status)
 
-    async def chat_session_exists(
+    async def chat_has_resumable_run(
         self,
         chat_id: str,
         app_id: str,
         workflow_name: str | None = None,
     ) -> bool:
-        """Return whether an in-progress session exists for this app/workflow.
+        """Return whether this app/workflow chat has an in-progress run to resume.
 
-        This is intentionally separate from ``assert_chat_resumable``: an
-        absent session is valid when starting a new run, while a present
-        in-progress session must be resumed after a process restart.
+        This is intentionally separate from ``assert_chat_resumable``: a chat
+        with no run yet is valid when starting a new run, while one that already
+        ran and is still in progress must be resumed after a process restart.
+        Sessions are created in progress before their first run, so a run
+        counts as started once the run stream holds an event. The first user
+        message is written there just before its run starts, so a process that
+        stops between the two leaves a chat this reports as resumable.
         """
         if not app_id:
             raise ValueError("app_id is required")
@@ -976,7 +992,9 @@ class AG2PersistenceManager:
         doc = await coll.find_one(query, {"status": 1})
         if not isinstance(doc, dict):
             return False
-        return WorkflowStatus(doc.get("status")) is WorkflowStatus.IN_PROGRESS
+        if WorkflowStatus(doc.get("status")) is not WorkflowStatus.IN_PROGRESS:
+            return False
+        return bool(await self.load_run_events(chat_id=chat_id, app_id=app_id))
 
     async def mark_chat_completed(self, chat_id: str, app_id: str | None = None) -> bool:
         return await self._mark_chat_terminal(chat_id, app_id, WorkflowStatus.COMPLETED)

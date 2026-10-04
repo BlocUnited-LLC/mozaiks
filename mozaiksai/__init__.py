@@ -7,17 +7,14 @@ The canonical host entrypoints live in ``mozaiksai.hosts``:
 - ``mozaiksai.hosts.platform``  — headless app host
 - ``mozaiksai.hosts.studio``    — local/private Studio management host
 
-Start via the CLI::
+Every host authenticates its HTTP and WebSocket routes through the configured
+auth adapter. Start one via the CLI::
 
     mozaiks serve ./my-app
     mozaiks serve ./my-app --host studio
-
-`create_mozaiks_app()` remains available as a convenience factory for isolated
-runtime-only embeddings, smoke tests, and scripts. It is not the canonical
-full-stack entrypoint.
+    mozaiks serve ./my-app --host runtime
 """
 
-from mozaiksai.factory import create_mozaiks_app
 from mozaiksai.version import __version__
 
-__all__ = ["__version__", "create_mozaiks_app"]
+__all__ = ["__version__"]

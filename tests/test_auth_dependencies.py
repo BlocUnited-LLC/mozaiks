@@ -343,12 +343,13 @@ class TestRequireUserIntegration:
         response = client.get("/protected", headers={"Authorization": "Bearer bad"})
         assert response.status_code == 401
 
-    def test_access_token_query_param_accepted(self):
+    def test_access_token_query_param_rejected(self):
+        # A token the adapter would accept still fails when it rides in the URL.
         claims = _claims(user_id="u2")
         client = self._client(claims=claims)
         response = client.get("/protected?access_token=valid-token")
-        assert response.status_code == 200
-        assert response.json()["user_id"] == "u2"
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Missing authorization token"
 
 
 class TestRequireRoleIntegration:

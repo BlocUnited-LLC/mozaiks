@@ -193,23 +193,16 @@ def _no_auth_dev_override_principal(request: Request, principal: UserPrincipal) 
     )
 
 
-def _extract_token(
-    authorization: HTTPAuthorizationCredentials | None,
-    request: Request,
-) -> str | None:
-    """
-    Extract bearer token from Authorization header or query param.
+def _extract_token(authorization: HTTPAuthorizationCredentials | None) -> str | None:
+    """Extract the bearer token from the Authorization header.
 
-    Priority:
-    1. Authorization: Bearer <token> header
-    2. ?access_token=<token> query param (for WebSocket upgrade)
+    HTTP routes never read a token from the URL: query strings land in access
+    logs, browser history, and Referer headers. WebSocket handshakes use the
+    bearer subprotocol instead (see ``websocket_auth``).
     """
     if authorization and authorization.credentials:
         return authorization.credentials
-
-    # Fallback to query param (useful for WS upgrade requests)
-    token = request.query_params.get("access_token")
-    return token if token else None
+    return None
 
 
 async def _validate_and_attach(
@@ -280,7 +273,7 @@ async def require_user(
         request.state.workspace_id = principal.workspace_id
         return principal
 
-    token = _extract_token(authorization, request)
+    token = _extract_token(authorization)
     if not token:
         raise HTTPException(status_code=401, detail="Missing authorization token")
 
@@ -364,7 +357,7 @@ async def optional_user(
     if not is_auth_enabled():
         return await require_user(request, authorization)
 
-    token = _extract_token(authorization, request)
+    token = _extract_token(authorization)
     if not token:
         return None
 

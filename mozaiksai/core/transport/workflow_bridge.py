@@ -355,17 +355,18 @@ class WorkflowBridgeMixin:
             try:
                 async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
                     # A process restart removes the in-memory AG2 callback.
-                    # If the durable session is still in progress, persist the
-                    # user's reply and use AG2's process-boundary resume path
-                    # instead of accidentally starting a second run.
+                    # If the chat's run already started and is still in
+                    # progress, persist the user's reply and use AG2's
+                    # process-boundary resume path instead of accidentally
+                    # starting a second run.
                     if (
                         not is_resume_request
                         and isinstance(message, str)
                         and message.strip()
                     ):
                         pm = self._get_or_create_persistence_manager()
-                        session_exists = getattr(pm, "chat_session_exists", None)
-                        if callable(session_exists) and await session_exists(
+                        has_resumable_run = getattr(pm, "chat_has_resumable_run", None)
+                        if callable(has_resumable_run) and await has_resumable_run(
                             chat_id,
                             app_id,
                             workflow_name,

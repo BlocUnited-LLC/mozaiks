@@ -111,14 +111,13 @@ def _context(**updates):
 async def test_live_materialized_outcomes_through_mozaiks_runtime(tmp_path, monkeypatch):
     from urllib.parse import urlsplit
 
-    from mozaiksai.core.core_config import close_mongo_client
     from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
     from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
     from mozaiksai.core.tokens.manager import get_usage_emission_stats
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
     from mozaiksai.core.usage import get_runtime_usage_ledger
     from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
     from mozaiksai.core.workflow.workflow_manager import initialize_workflows
-    from mozaiksai.factory import create_mozaiks_app
 
     assert urlsplit(os.environ["MONGO_URI"]).hostname in {"localhost", "127.0.0.1"}
     entry = _entry()
@@ -165,13 +164,17 @@ async def test_live_materialized_outcomes_through_mozaiks_runtime(tmp_path, monk
         path.write_text(file["content"], encoding="utf-8")
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))
     initialize_workflows(base_path=str(tmp_path))
-    create_mozaiks_app(workflow_dir=str(tmp_path), debug=False)
+    # The runtime host serves the catalog bound above, so it is imported only now.
+    from mozaiksai.hosts.runtime import app
+
+    monkeypatch.setattr(SimpleTransport, "_instance", None)
     pm = AG2PersistenceManager()
     usage = []
     get_event_dispatcher().register_handler("chat.usage_delta", usage.append)
     before_usage = get_usage_emission_stats()
     reports = []
-    try:
+    # Real host startup builds the transport the orchestration reports through.
+    async with app.router.lifespan_context(app):
         for case, expected, attempts in (
             ("ready", "ready", 1), ("repair", "ready", 2),
             ("exception", "blocked", 1), ("unknown", "blocked", 1),
@@ -217,8 +220,6 @@ async def test_live_materialized_outcomes_through_mozaiks_runtime(tmp_path, monk
         after_usage = get_usage_emission_stats()
         assert after_usage["dropped_missing_context"] == before_usage["dropped_missing_context"]
         assert after_usage["failed"] == before_usage["failed"]
-    finally:
-        close_mongo_client()
 
 
 @pytest.mark.parametrize("change", [
