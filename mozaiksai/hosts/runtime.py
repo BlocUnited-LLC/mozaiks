@@ -39,7 +39,7 @@ from mozaiksai.core.auth import (
     require_user_scope,
 )
 from mozaiksai.core.auth.dependencies import (
-    acts_for_any_user,
+    is_shared_development_identity,
     validate_path_app_id,
     validate_path_id,
 )
@@ -1258,7 +1258,7 @@ async def handle_component_action(
     if simple_transport is None:
         raise HTTPException(status_code=503, detail="Transport service is not available")
 
-    if not acts_for_any_user(principal):
+    if not is_shared_development_identity(principal):
         coll = await _chat_coll()
         owned = await coll.find_one(
             {"_id": chat_id, "user_id": principal.user_id, **build_app_scope_filter(app_id)},

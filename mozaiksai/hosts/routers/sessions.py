@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import (
-    acts_for_any_user,
+    is_shared_development_identity,
     validate_path_id,
     validate_user_id_against_principal,
 )
@@ -279,7 +279,7 @@ async def general_chat_transcript_fallback(
         )
         if transcript:
             owner = str(transcript.get("user_id") or "")
-            if not acts_for_any_user(principal) and owner and owner != principal.user_id:
+            if not is_shared_development_identity(principal) and owner and owner != principal.user_id:
                 raise HTTPException(status_code=403, detail="Forbidden")
             payload = dict(transcript)
             payload["created_at"] = _json_timestamp(payload.get("created_at"))

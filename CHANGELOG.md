@@ -189,6 +189,10 @@ This project follows a practical pre-1.0 changelog format:
   entitlement gates enforced. They get no admin, Studio management or billing
   fulfillment access, and the programmatic workflow trigger needs an internal
   API key for them.
+- With authentication on, a validated token whose subject is literally
+  `anonymous` acts only as itself. It no longer names the user a request acts
+  for or sees other owners' chats and sessions; only the development identity
+  of a host without authentication does.
 
 - Module entitlement gates are keyed only by the caller's verified identity:
   the token's user, the tenant the token is bound to, and the workspace the

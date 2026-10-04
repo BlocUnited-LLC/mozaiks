@@ -869,6 +869,18 @@ def test_only_the_shared_development_identity_names_other_users() -> None:
         validate_user_id_against_principal(hosted_dev_user, body_user_id="victim")
 
 
+def test_a_token_whose_subject_is_anonymous_acts_only_as_itself() -> None:
+    """The one change with authentication on: the user id "anonymous" in a
+    validated token used to let the caller name any user and see every owner."""
+    token_user = _principal(provenance="token_validated")
+
+    assert not is_shared_development_identity(token_user)
+    assert resolve_scope_from_principal(token_user, default_user_id="demo-user") == ("default", "anonymous")
+    with pytest.raises(HTTPException) as refused:
+        validate_user_id_against_principal(token_user, path_user_id="victim")
+    assert refused.value.status_code == 403
+
+
 @pytest.mark.parametrize(
     ("principal", "sees_every_owner"),
     [
@@ -876,8 +888,9 @@ def test_only_the_shared_development_identity_names_other_users() -> None:
         (_principal(provenance="anonymous"), False),
         (_principal("mallory", provenance="dev_override"), False),
         (_principal("owner", provenance="token_validated"), False),
+        (_principal(provenance="token_validated"), False),
     ],
-    ids=["shared_development_identity", "visitor", "persona", "token_user"],
+    ids=["shared_development_identity", "visitor", "persona", "token_user", "token_subject_anonymous"],
 )
 def test_chat_listing_scopes_every_principal_but_the_shared_development_identity(
     monkeypatch, principal, sees_every_owner

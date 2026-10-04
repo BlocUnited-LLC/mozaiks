@@ -524,7 +524,7 @@ def resolve_scope_from_principal(
     when the caller names none; every other principal acts as itself.
     """
     effective_user_id = user_id
-    if acts_for_any_user(principal) and not effective_user_id:
+    if is_shared_development_identity(principal) and not effective_user_id:
         effective_user_id = str(default_user_id or "").strip() or None
 
     resolved_user_id = validate_user_id_against_principal(principal, body_user_id=effective_user_id)
@@ -545,8 +545,10 @@ def is_shared_development_identity(principal: object) -> bool:
 
     It stands for nobody in particular: a caller with development access (this
     machine under ``AUTH_ANON_ACCESS=local``, any client under ``open``) names
-    the user it acts for. Anonymous visitors and token-validated principals
-    act only as themselves.
+    the user it acts for, and routes that scope records to their owner skip
+    that scope for it. Anonymous visitors and token-validated principals act
+    only as themselves, including a token whose subject is literally
+    "anonymous".
     """
     return (
         isinstance(principal, UserPrincipal)
@@ -554,26 +556,6 @@ def is_shared_development_identity(principal: object) -> bool:
         and principal.user_id == ANONYMOUS_USER_ID
     )
 
-
-def _token_subject_is_anonymous(principal: object) -> bool:
-    # Unchanged auth-on behaviour, kept apart so that the one auth-on change
-    # (a token whose subject is literally "anonymous" no longer acts for other
-    # users) is reviewed on its own.
-    return (
-        isinstance(principal, UserPrincipal)
-        and principal.is_authenticated
-        and principal.user_id == ANONYMOUS_USER_ID
-    )
-
-
-def acts_for_any_user(principal: object) -> bool:
-    """True when the principal names the user it acts for and sees every owner's records.
-
-    Only the shared development identity does (see
-    :func:`is_shared_development_identity`); routes that scope records to their
-    owner skip that scope for it and nobody else.
-    """
-    return is_shared_development_identity(principal) or _token_subject_is_anonymous(principal)
 
 
 def validate_user_id_against_principal(
@@ -596,7 +578,7 @@ def validate_user_id_against_principal(
     jwt_user_id = principal.user_id
 
     # Shared development identity — the caller names the user.
-    if acts_for_any_user(principal):
+    if is_shared_development_identity(principal):
         user_id = path_user_id or body_user_id
         if not user_id:
             raise HTTPException(status_code=400, detail="user_id is required")

@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import (
-    acts_for_any_user,
+    is_shared_development_identity,
     validate_path_id,
     validate_user_id_against_principal,
 )
@@ -176,7 +176,7 @@ async def list_chats(
     try:
         coll = await runtime_app._chat_coll()
         query: dict[str, Any] = {"workflow_name": workflow_name, **build_app_scope_filter(app_id)}
-        if not acts_for_any_user(principal):
+        if not is_shared_development_identity(principal):
             query["user_id"] = principal.user_id
         docs = await coll.find(query).sort("created_at", -1).to_list(length=20)
         return {"chat_ids": [doc.get("_id") for doc in docs]}
@@ -198,7 +198,7 @@ async def chat_exists(
     try:
         coll = await runtime_app._chat_coll()
         query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
-        if not acts_for_any_user(principal):
+        if not is_shared_development_identity(principal):
             query["user_id"] = principal.user_id
         doc = await coll.find_one(query, {"_id": 1, "transport_purpose": 1})
         if doc and _is_ask_carrier_session(doc):
@@ -226,7 +226,7 @@ async def chat_meta(
         coll = await runtime_app._chat_coll()
         projection = {"cache_seed": 1, "workflow_ui_state.last_artifact": 1, "status": 1, "_id": 1, "workflow_name": 1}
         query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
-        if not acts_for_any_user(principal):
+        if not is_shared_development_identity(principal):
             query["user_id"] = principal.user_id
         doc = await coll.find_one(query, projection)
         if not doc:
