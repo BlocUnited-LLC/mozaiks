@@ -200,7 +200,7 @@ class TestInjectBackendSurfaceMap:
 def _valid_page(name: str = "Dashboard", route: str = "/dashboard") -> dict:
     return {
         "name": name,
-        "route": route,
+        "ui_surface": "declarative_page", "route": route,
         "sections": [
             {"primitive": "StatGrid", "intent": "Show KPIs"}
         ]
@@ -263,25 +263,25 @@ class TestCanonicalExperienceSpec:
             _canonical_experience_spec(spec, surface_map=self._surface_map())
 
     def test_page_missing_sections_raises(self):
-        page = {"name": "Home", "route": "/home"}
+        page = {"name": "Home", "ui_surface": "declarative_page", "route": "/home"}
         spec = {"navigation_model": "sidebar", "pages": [page]}
         with pytest.raises(ValueError, match="sections"):
             _canonical_experience_spec(spec, surface_map=self._surface_map())
 
     def test_page_empty_sections_raises(self):
-        page = {"name": "Home", "route": "/home", "sections": []}
+        page = {"name": "Home", "ui_surface": "declarative_page", "route": "/home", "sections": []}
         spec = {"navigation_model": "sidebar", "pages": [page]}
         with pytest.raises(ValueError, match="sections"):
             _canonical_experience_spec(spec, surface_map=self._surface_map())
 
     def test_section_missing_primitive_raises(self):
-        page = {"name": "Home", "route": "/home", "sections": [{"intent": "x"}]}
+        page = {"name": "Home", "ui_surface": "declarative_page", "route": "/home", "sections": [{"intent": "x"}]}
         spec = {"navigation_model": "sidebar", "pages": [page]}
         with pytest.raises(ValueError, match="primitive"):
             _canonical_experience_spec(spec, surface_map=self._surface_map())
 
     def test_section_missing_intent_raises(self):
-        page = {"name": "Home", "route": "/home", "sections": [{"primitive": "StatGrid"}]}
+        page = {"name": "Home", "ui_surface": "declarative_page", "route": "/home", "sections": [{"primitive": "StatGrid"}]}
         spec = {"navigation_model": "sidebar", "pages": [page]}
         with pytest.raises(ValueError, match="intent"):
             _canonical_experience_spec(spec, surface_map=self._surface_map())
@@ -298,7 +298,7 @@ class TestCanonicalExperienceSpec:
         assert result["brand_direction"] == ""
 
     def test_non_dict_section_raises(self):
-        page = {"name": "Home", "route": "/home", "sections": ["not-a-dict"]}
+        page = {"name": "Home", "ui_surface": "declarative_page", "route": "/home", "sections": ["not-a-dict"]}
         spec = {"navigation_model": "sidebar", "pages": [page]}
         with pytest.raises(ValueError):
             _canonical_experience_spec(spec, surface_map=self._surface_map())

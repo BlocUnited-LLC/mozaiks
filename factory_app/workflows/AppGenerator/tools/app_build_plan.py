@@ -31,7 +31,6 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
-    _page_stems,
 )
 
 try:
@@ -1402,13 +1401,10 @@ def _normalize_page_task_dependencies(
                 if facade_task_id not in deps:
                     deps.insert(0, facade_task_id)  # type: ignore[attr-defined]
                 item["depends_on"] = deps
-            owned_stems = {
-                stem for path in item.get("owned_paths") or []
-                if (stem := _page_stem_from_path(normalize_app_path(str(path))))
-            }
+            owned_paths = {normalize_app_path(str(path)) for path in item.get("owned_paths") or []}
             dependencies = _normalize_string_list(item.get("depends_on"))
             for page in pages or []:
-                if not owned_stems.intersection(_page_stems(page)):
+                if planned_page_path(page) not in owned_paths:
                     continue
                 for source in _iter_page_data_sources(page):
                     contract_task = module_contract_by_pack.get(source["module_id"])

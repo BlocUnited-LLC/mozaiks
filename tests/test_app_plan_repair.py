@@ -252,8 +252,8 @@ def _coverage_context() -> _Context:
             "capability_packs": [],
             "experience_spec": {
                 "pages": [
-                    {"name": "Dashboard", "route": "/dashboard"},
-                    {"name": "Habits", "route": "/habits"},
+                    {"name": "Dashboard", "ui_surface": "declarative_page", "route": "/dashboard"},
+                    {"name": "Habits", "ui_surface": "declarative_page", "route": "/habits"},
                 ]
             },
         }
@@ -284,7 +284,7 @@ def _plan_missing_coverage() -> dict[str, Any]:
             }
         ],
         # The planner invented a page nobody approved and dropped one that was.
-        "pages": [{"name": "Dashboard", "route": "/dashboard"}, {"name": "Settings", "route": "/settings"}],
+        "pages": [{"name": "Dashboard", "ui_surface": "declarative_page", "route": "/dashboard"}, {"name": "Settings", "ui_surface": "declarative_page", "route": "/settings"}],
         "build_tasks": [
             {
                 "task_id": "t_contract",
@@ -618,8 +618,8 @@ def _plan_with_two_page_bundles() -> dict[str, Any]:
             }
         ],
         "pages": [
-            {"name": "Dashboard", "route": "/dashboard"},
-            {"name": "Habits", "route": "/habits"},
+            {"name": "Dashboard", "ui_surface": "declarative_page", "route": "/dashboard"},
+            {"name": "Habits", "ui_surface": "declarative_page", "route": "/habits"},
         ],
         "build_tasks": [
             {
@@ -680,7 +680,7 @@ def test_a_page_file_with_no_approved_page_is_dropped() -> None:
         {
             "design_surface_map": _design_surface_map(),
             "capability_packs": [],
-            "experience_spec": {"pages": [{"name": "Dashboard", "route": "/dashboard"}]},
+            "experience_spec": {"pages": [{"name": "Dashboard", "ui_surface": "declarative_page", "route": "/dashboard"}]},
         }
     )
 
@@ -704,7 +704,7 @@ def test_a_bundle_task_left_with_nothing_is_removed() -> None:
         {
             "design_surface_map": _design_surface_map(),
             "capability_packs": [],
-            "experience_spec": {"pages": [{"name": "Dashboard", "route": "/dashboard"}]},
+            "experience_spec": {"pages": [{"name": "Dashboard", "ui_surface": "declarative_page", "route": "/dashboard"}]},
         }
     )
 
@@ -726,7 +726,7 @@ def test_non_page_assets_are_not_dropped() -> None:
         {
             "design_surface_map": _design_surface_map(),
             "capability_packs": [],
-            "experience_spec": {"pages": [{"name": "Dashboard", "route": "/dashboard"}]},
+            "experience_spec": {"pages": [{"name": "Dashboard", "ui_surface": "declarative_page", "route": "/dashboard"}]},
         }
     )
 

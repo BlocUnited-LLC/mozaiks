@@ -176,3 +176,179 @@ test('concept review stays concise and preserves declared review actions on desk
     await page.close();
   }
 });
+
+test('subscription review keeps a no-billing decision compact and preserves paid approval', async (t) => {
+  const review = path.join(root, 'factory_app/workflows/SubscriptionContractDesigner/ui/SubscriptionContractDesigner/SubscriptionContractReview.jsx');
+  const bundle = await build({
+    stdin: {resolveDir: shell, loader: 'jsx', contents: `
+      import React from 'react';
+      import { createRoot } from 'react-dom/client';
+      import SubscriptionContractReview from ${JSON.stringify(review)};
+      window.submissions = [];
+      const paid = new URLSearchParams(location.search).has('paid');
+      createRoot(document.getElementById('root')).render(
+        <main style={{maxWidth: 640, margin: '0 auto', padding: 12}}>
+          <SubscriptionContractReview payload={{app_name: 'Quiet Focus', contract_required: paid,
+            rationale: 'The approved app scope has no billing or paid feature requirements.',
+            plans: paid ? [{plan_id: 'pro', label: 'Pro', description: 'Paid access'}] : [],
+            validation_notes: ['No config/subscriptions.yaml will be generated.'],
+            forbidden_outputs: ['Do not add billing facades or token wallets.']}}
+            onResponse={value => window.submissions.push(value)} />
+        </main>
+      );
+    `},
+    bundle: true, write: false, jsx: 'automatic', loader: {'.js': 'jsx', '.png': 'dataurl'},
+    nodePaths: [path.join(shell, 'node_modules')],
+    alias: {'@mozaiks/chat-ui': path.join(root, 'chat-ui/src')},
+  });
+  const styles = await postcss([tailwindcss()]).process(
+    (await fs.readFile(path.join(shell, 'styles.css'), 'utf8')) + `\n@source "${review.replaceAll('\\', '/')}";`,
+    {from: path.join(shell, 'styles.css')},
+  );
+  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>${styles.css}
+      :root {--mz-background:0 0% 100%;--mz-foreground:0 0% 10%;--mz-card:0 0% 100%;--mz-border:0 0% 80%;
+        --mz-primary:170 80% 25%;--mz-primary-foreground:0 0% 100%;--mz-muted:0 0% 96%;--mz-muted-foreground:0 0% 35%;
+        --mz-radius:8px;--mz-font-sans:Arial;--mz-font-heading:Arial;}
+    </style></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>`;
+  const server = http.createServer((req, res) => {
+    const script = req.url === '/fixture.js';
+    res.setHeader('Content-Type', script ? 'text/javascript' : 'text/html');
+    res.end(script ? bundle.outputFiles[0].text : html);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const browser = await chromium.launch({headless: true});
+  t.after(() => browser.close());
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const screenshots = path.join(shell, 'test-results/subscription-review');
+  await fs.mkdir(screenshots, {recursive: true});
+  for (const viewport of [{width: 1440, height: 900}, {width: 390, height: 844}]) {
+    const page = await browser.newPage({viewport});
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(url);
+    await expect(page.getByRole('heading', {name: 'Quiet Focus', exact: true})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'No subscriptions', exact: true})).toBeVisible();
+    const proceed = page.getByRole('button', {name: 'Continue', exact: true});
+    await expect(proceed).toBeEnabled();
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
+    const buttonBox = await proceed.boundingBox();
+    assert.ok(buttonBox.y + buttonBox.height < Math.min(viewport.height, 300), 'Continue stays near the summary');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    for (const label of ['Plans', 'Token Wallets', 'Add-Ons', 'Gated Actions']) {
+      await expect(page.getByText(label, {exact: true})).toHaveCount(0);
+    }
+    await expect(page.getByLabel('Requested changes')).toBeHidden();
+    await expect(page.getByText('The approved app scope has no billing or paid feature requirements.', {exact: true})).toBeHidden();
+    await expect(page.getByText('No config/subscriptions.yaml will be generated.', {exact: true})).toBeHidden();
+    await expect(page.locator('details[open]')).toHaveCount(0);
+    await page.screenshot({path: path.join(screenshots, `${viewport.width}.png`), fullPage: true});
+    await page.getByText('Technical details', {exact: true}).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('No config/subscriptions.yaml will be generated.', {exact: true})).toBeVisible();
+    await expect(page.getByText('Do not add billing facades or token wallets.', {exact: true})).toBeVisible();
+    await proceed.click();
+    await expect(page.getByTestId('confirm-subscription-contract-cta')).toBeDisabled();
+    assert.deepEqual(await page.evaluate(() => window.submissions), [
+      {action: 'confirm', approved: true, status: 'approved'},
+    ]);
+
+    await page.reload();
+    await page.getByText('Request changes', {exact: true}).click();
+    const changes = page.getByTestId('request-subscription-contract-changes-cta');
+    await expect(changes).toBeDisabled();
+    await page.getByLabel('Requested changes').fill('  Include a paid team plan.  ');
+    await changes.click();
+    assert.deepEqual(await page.evaluate(() => window.submissions), [
+      {action: 'request_changes', approved: false, status: 'changes_requested', requested_changes: 'Include a paid team plan.'},
+    ]);
+
+    await page.goto(`${url}?paid`);
+    await expect(page.getByRole('heading', {name: 'Pro', exact: true})).toBeVisible();
+    const confirm = page.getByTestId('confirm-subscription-contract-cta');
+    await expect(confirm).toBeDisabled();
+    await page.getByTestId('confirm-subscription-contract-checkbox').check();
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    assert.deepEqual(await page.evaluate(() => window.submissions), [
+      {action: 'confirm', approved: true, status: 'approved'},
+    ]);
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+});
+
+test('task batch status explains actual counts without claiming the app is ready', async (t) => {
+  const component = path.join(root, 'chat-ui/src/core/ui/SystemStatusCard.js');
+  const bundle = await build({
+    stdin: {resolveDir: shell, loader: 'jsx', contents: `
+      import React, {useState} from 'react';
+      import {createRoot} from 'react-dom/client';
+      import SystemStatusCard from ${JSON.stringify(component)};
+      function Fixture() {
+        const [payload, setPayload] = useState({});
+        window.setStatus = setPayload;
+        return <SystemStatusCard payload={payload} />;
+      }
+      createRoot(document.getElementById('root')).render(<Fixture />);
+    `},
+    bundle: true, write: false, jsx: 'automatic', loader: {'.js': 'jsx'},
+    nodePaths: [path.join(shell, 'node_modules')],
+  });
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Type', req.url === '/fixture.js' ? 'text/javascript' : 'text/html');
+    res.end(req.url === '/fixture.js' ? bundle.outputFiles[0].text
+      : '<!doctype html><html><body><div id="root"></div><script src="/fixture.js"></script></body></html>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const browser = await chromium.launch({headless: true});
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.waitForFunction(() => typeof window.setStatus === 'function');
+  const setBatch = async (phase, counts) => {
+    await page.evaluate(({phase, counts}) => window.setStatus({
+      batch_id: 'document_tasks', phase, status: phase === 'completed' ? 'complete' : phase,
+      agent: 'System', message: `Task batch document_tasks ${phase}.`, ...counts,
+    }), {phase, counts});
+  };
+  await setBatch('started', {task_count: 4});
+  await expect(page.getByText('Working on 4 tasks.', {exact: true})).toBeVisible();
+  await expect(page.getByText('Task batch document_tasks started.', {exact: true})).toBeHidden();
+  await expect(page.getByText('System', {exact: true})).toHaveCount(0);
+  await expect(page.getByText('Started', {exact: true})).toHaveCount(0);
+  await page.getByText('Technical details', {exact: true}).click();
+  await expect(page.getByText('Task batch document_tasks started.', {exact: true})).toBeVisible();
+  await page.getByText('Technical details', {exact: true}).click();
+  await setBatch('completed', {task_count: 4, failure_count: 0});
+  await expect(page.getByText('4 tasks completed.', {exact: true})).toBeVisible();
+  await expect(page.getByText('Complete', {exact: true})).toHaveCount(0);
+  assert.doesNotMatch(await page.getByRole('status').innerText(), /app.*ready|100%/i);
+  for (const phase of ['partial', 'completed_with_errors']) {
+    await setBatch(phase, {task_count: 4, failure_count: 1});
+    await expect(page.getByText('Some tasks need attention.', {exact: true})).toBeVisible();
+    await expect(page.getByText('1 of 4 tasks did not complete.', {exact: true})).toBeVisible();
+  }
+  await setBatch('failed', {task_count: 4});
+  await expect(page.getByText('This step stopped.', {exact: true})).toBeVisible();
+  await expect(page.getByText('4 tasks in this step.', {exact: true})).toBeVisible();
+  await setBatch('started', {task_count: null});
+  await expect(page.getByText('Working on this step.', {exact: true})).toBeVisible();
+  assert.doesNotMatch(await page.getByRole('status').innerText(), /0 tasks|%|batch/i);
+  await setBatch('partial', {task_count: 1, failure_count: 1});
+  await expect(page.getByText('1 of 1 task did not complete.', {exact: true})).toBeVisible();
+
+  // Ordinary status cards retain their existing message, stage, and real progress.
+  await page.evaluate(() => window.setStatus({agent: 'Importer', status: 'working',
+    message: 'Reading the selected file.', progress_stage: 'loading_rows', progress_percent: 25}));
+  await expect(page.getByText('Importer', {exact: true})).toBeVisible();
+  await expect(page.getByText('Reading the selected file.', {exact: true})).toBeVisible();
+  await expect(page.getByText('Loading Rows', {exact: true})).toBeVisible();
+  await expect(page.getByText('25%', {exact: true})).toBeVisible();
+  await expect(page.locator('details')).toHaveCount(0);
+  assert.deepEqual(errors, []);
+});

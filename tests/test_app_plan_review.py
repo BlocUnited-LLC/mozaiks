@@ -41,11 +41,11 @@ def _plan():
     return plan
 
 
-def _context():
+def _context(ui_surface="declarative_page"):
     return ContextVariablesBridge({
         "build_mode": "initial", "app_plan_attempts": 0, "app_plan_outcome": "blocked",
         "design_surface_map": {"surfaces": [{"surface_id": "reports", "surface_kind": "module", "owner": "app", "primary_entities": ["Report"]}]},
-        "experience_spec": {"pages": [{"name": "Reports", "route": "/reports"}]},
+        "experience_spec": {"pages": [{"name": "Reports", "ui_surface": ui_surface, "route": "/reports"}]},
         "data_contract": {"version": "1", "surfaces": [{
             "surface_id": "reports", "surface_kind": "module", "collections": [{
                 "name": "reports", "entity": "Report", "scope": "app", "tenancy": "per_user",
@@ -74,10 +74,38 @@ def test_complete_plan_is_cached_without_losing_typed_fields():
     assert context.get("app_build_plan")["revenue_model"] == "free"
 
 
+@pytest.mark.parametrize(("approved", "proposed"), [
+    ("custom_react_page", "declarative_page"),
+    ("declarative_page", "custom_react_page"),
+])
+def test_plan_cannot_change_an_approved_rendering_contract(approved, proposed):
+    plan = _plan()
+    plan["pages"][0]["ui_surface"] = proposed
+    context = _context(approved)
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "needs_revision"
+    assert "must preserve approved ui_surface" in result["error"]
+    assert approved in result["error"]
+    assert not context.get("app_plan_ready")
+    assert not context.get("app_task_batch_items")
+
+
+def test_saved_design_without_renderer_requires_design_reentry():
+    plan = _plan()
+    context = _context()
+    experience = detach(context.get("experience_spec"))
+    experience["pages"][0].pop("ui_surface")
+    context.set("experience_spec", experience)
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "needs_revision"
+    assert "revise DesignDocs before app planning" in result["error"]
+    assert not context.get("app_plan_ready")
+
+
 def test_custom_page_plan_materializes_the_approved_surface_without_a_phantom_yaml():
     plan = _plan()
     plan["pages"][0]["ui_surface"] = "custom_react_page"
-    context = _context()
+    context = _context("custom_react_page")
 
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
 
@@ -97,9 +125,9 @@ def test_custom_bundle_cannot_split_registry_and_components_across_workers():
     second = {**task, "task_id": "custom-page", "owned_paths": ["ui/pages/custom/reports.jsx"]}
     plan["build_tasks"].append(second)
     with pytest.raises(ValueError, match="complete custom route"):
-        validate_plan_coverage(plan, _context())
+        validate_plan_coverage(plan, _context("custom_react_page"))
 
-    context = _context()
+    context = _context("custom_react_page")
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
     assert result["outcome"] == "ready", result
     accepted = detach(context.get("app_build_plan"))
@@ -117,10 +145,10 @@ def test_custom_page_cannot_take_over_selected_pack_registry(monkeypatch, regist
     before = deepcopy(plan["build_tasks"])
     monkeypatch.setattr(app_plan_review, "pack_owned_output_paths", lambda context: frozenset({registry_path}))
     with pytest.raises(ValueError, match="selected-pack registry ownership"):
-        app_plan_review._repair_coverage(plan, _context())
+        app_plan_review._repair_coverage(plan, _context("custom_react_page"))
     assert plan["build_tasks"] == before
     with pytest.raises(ValueError, match="selected-pack registry ownership"):
-        validate_plan_coverage(plan, _context())
+        validate_plan_coverage(plan, _context("custom_react_page"))
 
 
 def test_review_queues_synthesized_module_workers_with_actual_prerequisites():
@@ -215,7 +243,7 @@ def test_incomplete_plan_reports_every_missing_file(filename):
 
 def test_approved_page_cannot_disappear():
     context = _context()
-    context.set("experience_spec", {"pages": [{"name": "Reports", "route": "/reports"}, {"name": "Dashboard", "route": "/dashboard"}]})
+    context.set("experience_spec", {"pages": [{"name": "Reports", "ui_surface": "declarative_page", "route": "/reports"}, {"name": "Dashboard", "ui_surface": "declarative_page", "route": "/dashboard"}]})
     with pytest.raises(ValueError, match="approved name/route inventory"):
         validate_plan_coverage(_plan(), context)
 
@@ -573,7 +601,7 @@ def test_custom_page_structural_label_uses_only_the_approved_route(defect):
     task = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
     task.update(surface_id="page_named_label", surface_kind="ui_only", capability_pack_id=None,
                 owned_paths=["app.json", "ui/pages/custom/reports.jsx", "ui/route_manifest.json", "ui/index.js"])
-    context = _context()  # The approved ExperienceSpec has no rendering-surface field.
+    context = _context("custom_react_page")  # The approved ExperienceSpec has no rendering-surface field.
     if defect == "unapproved_route":
         plan["pages"][0]["route"] = "/invented"
         task["owned_paths"][1] = "ui/pages/custom/invented.jsx"

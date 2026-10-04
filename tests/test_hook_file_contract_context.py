@@ -122,18 +122,31 @@ class TestInjectCookieCutterContractsContext:
 
         agent = _FakeAgent(name="AppPlanAgent")
         agent.context_variables = ContextVariablesBridge({"experience_spec": {"pages": [
-            {"name": "Book List", "route": "/library/books"},
-            {"name": "Start Here", "route": "/"},
+            {"name": "Book List", "ui_surface": "declarative_page", "route": "/library/books"},
+            {"name": "Start Here", "ui_surface": "declarative_page", "route": "/"},
         ]}})
         self.mod.inject_cookie_cutter_contracts_context(agent, [])
         assert "`Book List` (`/library/books`) -> `ui/pages/books.yaml`" in agent.system_message
         assert "`Start Here` (`/`) -> `ui/pages/start_here.yaml`" in agent.system_message
         assert "case-sensitive" in agent.system_message
 
-        agent.context_variables.set("experience_spec", {"pages": [{"name": "Archive", "route": "/archive"}]})
+        agent.context_variables.set("experience_spec", {"pages": [{"name": "Archive", "ui_surface": "declarative_page", "route": "/archive"}]})
         self.mod.inject_cookie_cutter_contracts_context(agent, [])
         assert "`Archive` (`/archive`) -> `ui/pages/archive.yaml`" in agent.system_message
         assert "`ui/pages/books.yaml`" not in agent.system_message
+
+    def test_planner_receives_custom_page_and_registry_ownership(self):
+        agent = _FakeAgent(name="AppPlanAgent", context_variables={"experience_spec": {"pages": [
+            {"name": "Focus", "route": "/focus", "ui_surface": "custom_react_page"},
+            {"name": "History", "route": "/history", "ui_surface": "declarative_page"},
+        ]}})
+        self.mod.inject_cookie_cutter_contracts_context(agent, [])
+        message = agent.system_message
+        assert "`Focus` (`/focus`) -> `ui/pages/custom/focus.jsx`" in message
+        assert "`History` (`/history`) -> `ui/pages/history.yaml`" in message
+        assert "One page_bundle task must own all" in message
+        assert "`ui/route_manifest.json` and `ui/index.js`" in message
+        assert "`ui/pages/focus.yaml`" not in message
 
     @pytest.mark.parametrize("name", ["AppPlanAgent", "AppSchemaAgent"])
     def test_page_contract_distinguishes_design_hints_from_runtime_bindings(self, name):

@@ -7,7 +7,9 @@ context reduced to the keys the save path reads, plus later live outputs
 appended when a run exposed a save defect (c65f5d0f, 2026-09-30; 4da11a24,
 2026-10-01). Outputs recorded before entity/tenancy/owner_field became required
 carry LABELLED defaults: each value the model did not write is listed with the
-rule that chose it.
+rule that chose it. The ui_surface schema migration similarly labels each
+existing declarative realization; original body hashes identify the captured
+outputs, not these current-contract replay inputs.
 
 The live model changes a rejected design at most once and then resubmits it
 unchanged until the run is blocked, so a rejection is only right when what to

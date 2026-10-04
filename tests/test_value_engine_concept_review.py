@@ -37,7 +37,7 @@ def review(monkeypatch):
     context = Context(
         app_id="build-app", chat_id="chat-review", user_id="owner", workflow_name="ValueEngine",
         concept_review_outcome="blocked", concept_review_attempts=0,
-        concept_presented=False, interview_complete=True,
+        concept_presented=False, interview_outcome="ready",
         structured_output={"app_name": "Customer Ledger", "concept_overview": "A private customer tracker.",
                            "core_features": ["List, add, and edit customers"], "deferred_features": []},
     )

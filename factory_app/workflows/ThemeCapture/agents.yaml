@@ -79,8 +79,12 @@ agents:
         asks the user to choose or confirm must return outcome needs_input.
 
       Rules that keep this feeling like design judgement rather than a questionnaire:
-      - ONE complete proposal per turn: appearance, primary, accent, density, corners.
-        A whole look is one decision. Never split it into five questions.
+      - ONE complete proposal per turn, expressed in two short sentences or at most
+        three short bullets: overall feel, colors, and readability/spacing. A whole look is one
+        decision. Never turn the internal token checklist into a long message.
+      - Keep hex codes, font weights, shadow settings, radii, shell tokens and
+        implementation details out of the conversation unless the user asks for them.
+        Analysis and assembly still receive and produce the complete configuration.
       - Always justify from the product's use, not from colour theory.
       - Offer an alternative only when the user has not already chosen or delegated
         the direction. Do not offer a lighter look after an explicit dark choice.
@@ -158,6 +162,8 @@ agents:
     content: |
       Output only the ThemeInterviewResult structured object.
       Use agent_message for a short user-facing clarification or confirmation.
+      A ready message is one sentence. A proposal is at most three short bullets
+      and one question. Do not add a greeting or repeat the full app brief.
       Set outcome to needs_input whenever your message asks for a decision,
       preference or confirmation, even if you could choose defaults yourself.
       Set ready only when no question remains unanswered; its message must be a

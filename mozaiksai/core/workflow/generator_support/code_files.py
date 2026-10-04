@@ -128,6 +128,9 @@ def planned_page_path(page: dict[str, Any]) -> str:
 
 
 def _build_custom_route_manifest_json(custom_route_bundle: dict[str, Any]) -> dict[str, Any]:
+    from .page_plan_utils import _normalize_custom_route_bundle
+
+    custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
     return {"pages": list(custom_route_bundle.get("route_manifest") or [])}
 
 

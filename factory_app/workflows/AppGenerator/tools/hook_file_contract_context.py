@@ -12,7 +12,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import _ALLOWED_TAS
 from mozaiksai.core.runtime.persistence.adapter import PersistenceCollection
 from mozaiksai.core.runtime.persistence.naming import collection_name_for
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import _page_file_stem
+from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 
 logger = logging.getLogger(__name__)
@@ -141,9 +141,15 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         if pages:
             lines.append("Exact case-sensitive page paths from the approved ExperienceSpec; copy these into page_bundle owned_paths, preserving display names separately:")
             lines.extend(
-                f"- `{page['name']}` (`{page['route']}`) -> `ui/pages/{_page_file_stem(page)}.yaml`"
+                f"- `{page['name']}` (`{page['route']}`) -> `{planned_page_path(page)}`"
                 for page in pages
             )
+            if any(page.get("ui_surface") == "custom_react_page" for page in pages):
+                lines.append(
+                    "Preserve each approved ui_surface. One page_bundle task must own all "
+                    "custom page files together with `ui/route_manifest.json` and `ui/index.js`; "
+                    "do not emit a declarative YAML substitute for an approved custom route."
+                )
         lines.append("")
         lines.append(
             "Plan only with the active AppGenerator task vocabulary: "

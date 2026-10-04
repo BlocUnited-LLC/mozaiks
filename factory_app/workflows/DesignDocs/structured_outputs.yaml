@@ -360,6 +360,12 @@ models:
       route:
         type: str
         description: Primary route path for the page.
+      ui_surface:
+        type: literal
+        values:
+        - declarative_page
+        - custom_react_page
+        description: Required rendering decision preserved by app planning. Use declarative_page for shipped primitive composition; custom_react_page for required local state, event handlers, canvas, or other behavior the shipped primitives cannot express. This grants no additional routes or module actions.
       layout:
         type: literal
         values:
@@ -374,7 +380,7 @@ models:
       sections:
         type: list
         items: UIPageSection
-        description: Ordered list of primitive sections composing the page.
+        description: Ordered primitive composition hints. A custom React page may have no sections; preserve its required interaction in intent, never invent primitive config to imitate that interaction.
 
   ExperienceSpec:
     type: model

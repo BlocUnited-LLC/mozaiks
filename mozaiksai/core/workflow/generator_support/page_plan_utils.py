@@ -7,7 +7,7 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -165,6 +165,27 @@ def _normalize_route_auth(route_auth: Any) -> Any:
     if "params" in route_auth:
         route_auth["params"] = _key_value_entries_to_dict(route_auth.get("params"))
     return _strip_none(route_auth)
+
+
+def _normalize_custom_route_bundle(bundle: Any) -> Any:
+    bundle = _strip_none(_to_plain(bundle))
+    if not isinstance(bundle, dict):
+        return bundle
+    route_manifest = bundle.get("route_manifest")
+    if isinstance(route_manifest, list):
+        normalized_routes: list[Any] = []
+        for entry in route_manifest:
+            entry = _strip_none(_to_plain(entry))
+            if isinstance(entry, dict):
+                meta = entry.get("meta")
+                if isinstance(meta, dict) and "routeAuth" in meta:
+                    meta["routeAuth"] = _normalize_route_auth(meta.get("routeAuth"))
+            normalized_routes.append(entry)
+        bundle["route_manifest"] = normalized_routes
+    page_files = bundle.get("page_files")
+    if isinstance(page_files, list):
+        bundle["page_files"] = [_strip_none(_to_plain(entry)) for entry in page_files]
+    return _strip_none(bundle)
 
 
 def _slug(value: str) -> str:
@@ -894,7 +915,9 @@ def validate_planned_custom_routes(
             routes = document.get("pages") if isinstance(document, dict) else None
             if not isinstance(routes, list) or any(not isinstance(route, dict) for route in routes):
                 raise ValueError("pages must be a list of route objects")
-            return routes
+            # Compare preserved entries in the same canonical runtime shape;
+            # older archives can still contain typed nulls or key/value lists.
+            return cast(list[dict[str, Any]], _normalize_custom_route_bundle({"route_manifest": routes})["route_manifest"])
         except (ValueError, TypeError) as exc:
             raise ValueError(f"{manifest_path}: {exc}") from exc
 

@@ -68,10 +68,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _normalize_config_actions as _normalize_config_actions,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    _normalize_page_section as _normalize_page_section,
-)
-from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    _normalize_route_auth,
+    _normalize_custom_route_bundle,
     _strip_none,
     _to_plain,
     compile_page_data_sources,
@@ -79,6 +76,9 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     module_action_index_from_context,
     resolve_modal_action_targets,
     workflow_names_from_context,
+)
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _normalize_page_section as _normalize_page_section,
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     normalize_page_schema as _normalize_page_schema,
@@ -170,27 +170,6 @@ def _normalize_list(value: Any) -> list[Any]:
     if not isinstance(value, list):
         return []
     return list(value)
-
-
-def _normalize_custom_route_bundle(bundle: Any) -> Any:
-    bundle = _strip_none(_to_plain(bundle))
-    if not isinstance(bundle, dict):
-        return bundle
-    route_manifest = bundle.get("route_manifest")
-    if isinstance(route_manifest, list):
-        normalized_routes: list[Any] = []
-        for entry in route_manifest:
-            entry = _strip_none(_to_plain(entry))
-            if isinstance(entry, dict):
-                meta = entry.get("meta")
-                if isinstance(meta, dict) and "routeAuth" in meta:
-                    meta["routeAuth"] = _normalize_route_auth(meta.get("routeAuth"))
-            normalized_routes.append(entry)
-        bundle["route_manifest"] = normalized_routes
-    page_files = bundle.get("page_files")
-    if isinstance(page_files, list):
-        bundle["page_files"] = [_strip_none(_to_plain(entry)) for entry in page_files]
-    return _strip_none(bundle)
 
 
 def _normalize_shell_config(shell_config: Any) -> Any:

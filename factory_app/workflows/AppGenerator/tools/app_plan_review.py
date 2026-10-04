@@ -455,6 +455,26 @@ def _approved_page_inventory(context: Any) -> list[dict[str, Any]]:
     return list((detach(context.get("experience_spec")) or {}).get("pages") or [])
 
 
+def _validate_page_realizations(plan: dict[str, Any], context: Any) -> None:
+    """A plan implements the approved rendering contract; it cannot re-decide it."""
+    planned = {page.get("route"): page for page in plan.get("pages") or []}
+    for approved in _approved_page_inventory(context):
+        surface = approved.get("ui_surface")
+        if surface not in {"declarative_page", "custom_react_page"}:
+            raise ValueError(
+                f"Approved page {approved.get('route')!r} needs an explicit ui_surface "
+                "in ExperienceSpec; revise DesignDocs before app planning."
+            )
+        candidate = planned.get(approved.get("route"))
+        if candidate is not None and candidate.get("ui_surface") != surface:
+            raise ValueError(
+                f"Page {approved['route']!r} must preserve approved ui_surface {surface!r}; "
+                f"received {candidate.get('ui_surface')!r}. Update the plan and page_bundle "
+                f"ownership to implement {planned_page_path(approved)!r}; changing the "
+                "rendering decision requires revising the approved ExperienceSpec."
+            )
+
+
 def _required_module_paths(pack: dict[str, Any], context: Any) -> dict[str, set[str]]:
     module_id = _pack_id_from_descriptor(pack)
     required = {
@@ -599,6 +619,14 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
     ]
     if expected:
         planned = plan.get("pages") or []
+        approved_by_route = {page["route"]: page for page in approved_pages}
+        for page in planned:
+            # Selected pack descriptors can add pages after the model's plan is
+            # checked. Their rendering contract comes from the approved design.
+            approved_page = approved_by_route.get(page.get("route"))
+            if approved_page is not None and not page.get("ui_surface"):
+                page["ui_surface"] = approved_page["ui_surface"]
+                repairs.append(f"{page['route']}: copied approved ui_surface for constructed page")
         by_route = {page.get("route"): page for page in planned}
         by_name = {page.get("name"): page for page in planned}
         if {(p.get("name"), p.get("route")) for p in planned} != set(expected):
@@ -608,10 +636,11 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                 existing = by_route.get(route) or by_name.get(name) or {}
                 page = {
                     key: value for key, value in approved_page.items()
-                    if key in {"name", "route", "purpose", "design_intent", "primary_entities", "primary_actions"}
+                    if key in {"name", "route", "purpose", "design_intent", "primary_entities", "primary_actions", "ui_surface"}
                 }
                 page.update(existing)
                 page["name"], page["route"] = name, route
+                page["ui_surface"] = approved_page["ui_surface"]
                 rebuilt.append(page)
             plan["pages"] = rebuilt
             repairs.append(f"pages -> approved inventory {sorted(expected)}")
@@ -1183,13 +1212,9 @@ def _approved_surface_ids(context: Any) -> set[str]:
     return approved
 
 
-def _owns_only_approved_pages(task: dict[str, Any], context: Any, plan: dict[str, Any]) -> bool:
+def _owns_only_approved_pages(task: dict[str, Any], context: Any) -> bool:
     """Resolve the rendering choice only for an already approved page route."""
-    proposed = {page.get("route"): page for page in plan.get("pages") or []}
-    pages = [
-        {**page, "ui_surface": page.get("ui_surface") or proposed.get(page.get("route"), {}).get("ui_surface")}
-        for page in _approved_page_inventory(context)
-    ]
+    pages = _approved_page_inventory(context)
     return bool(
         task.get("task_type") == "page_bundle"
         and task.get("capability_pack_id") is None
@@ -1251,7 +1276,7 @@ def _label_page_tasks(plan: dict[str, Any], context: Any) -> list[str]:
             (surface_id == "page_bundle" and surface_kind == "ui_only")
             or surface_id in approved
             or not _normalized_owned_paths(task)
-            or not _owns_only_approved_pages(task, context, plan)
+            or not _owns_only_approved_pages(task, context)
         ):
             continue
         task["surface_id"], task["surface_kind"] = "page_bundle", "ui_only"
@@ -1417,6 +1442,7 @@ def _merge_closes_cycle(
 
 def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None:
     """Reject invented scope before repairs or identity advice can obscure it."""
+    _validate_page_realizations(plan, context)
     validate_surface_ownership(
         detach(context.get("design_surface_map")) or {},
         context_variables=context, data_contract=detach(context.get("data_contract")),
@@ -1434,7 +1460,7 @@ def _validate_plan_surface_inventory(plan: dict[str, Any], context: Any) -> None
             if (
                 is_task and surface_id == "page_bundle"
                 and entry.get("surface_kind") == "ui_only"
-                and _owns_only_approved_pages(entry, context, plan)
+                and _owns_only_approved_pages(entry, context)
             ):
                 continue
             if (
@@ -1563,6 +1589,7 @@ def validate_plan_origins(plan: dict[str, Any], context: Any) -> None:
 
 
 def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
+    _validate_page_realizations(plan, context)
     tasks = plan.get("build_tasks") or []
     if not tasks:
         raise ValueError("A build plan must declare materializing build_tasks, not just a page or capability inventory")

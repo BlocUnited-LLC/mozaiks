@@ -226,6 +226,7 @@ async def test_theme_capture_auto_tool_succeeds_through_real_runtime_path(
 
 
 @pytest.mark.parametrize(("workflow", "interview_agent", "ready_agent"), [
+    ("ValueEngine", "ValueInterviewAgent", "ResearchAgent"),
     ("ThemeCapture", "ThemeInterviewAgent", "ThemeAnalysisAgent"),
     ("AppGenerator", "InterviewAgent", "AppPlanAgent"),
 ])
@@ -292,6 +293,7 @@ async def test_typed_interview_readiness_reaches_chat_and_routes_through_auto_to
 
 
 @pytest.mark.parametrize(("workflow", "agent"), [
+    ("ValueEngine", "ValueInterviewAgent"),
     ("ThemeCapture", "ThemeInterviewAgent"),
     ("AppGenerator", "InterviewAgent"),
 ])

@@ -461,7 +461,8 @@
         "intent": "Shows a list of tasks with options to filter and sort",
         "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"selection\": \"single\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      },
      {
       "name": "Users",
@@ -481,7 +482,8 @@
         "intent": "Modal for creating or editing a user",
         "config_hint": "{\"title\": \"User Management\", \"size\": \"medium\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      }
     ]
    },
@@ -746,7 +748,8 @@
         "intent": "Shows a list of tasks with options to filter and sort",
         "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"selection\": \"single\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      },
      {
       "name": "Users",
@@ -766,7 +769,8 @@
         "intent": "Modal for creating or editing a user",
         "config_hint": "{\"title\": \"User Management\", \"size\": \"medium\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      }
     ]
    },
@@ -1031,7 +1035,8 @@
         "intent": "Shows a list of tasks with options to filter and sort",
         "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"selection\": \"single\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      },
      {
       "name": "Users",
@@ -1051,7 +1056,8 @@
         "intent": "Modal for creating or editing a user",
         "config_hint": "{\"title\": \"User Management\", \"size\": \"medium\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      }
     ]
    },
@@ -1316,7 +1322,8 @@
         "intent": "Shows a list of tasks with options to filter and sort",
         "config_hint": "{\"columns\": [\"task_id\", \"title\", \"completed\", \"created_at\"], \"selection\": \"single\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      },
      {
       "name": "Users",
@@ -1336,7 +1343,8 @@
         "intent": "Modal for creating or editing a user",
         "config_hint": "{\"title\": \"User Management\", \"size\": \"medium\"}"
        }
-      ]
+      ],
+      "ui_surface": "declarative_page"
      }
     ]
    },
@@ -1574,5 +1582,6 @@
     }
    }
   }
- ]
+ ],
+ "fixture_schema_migration": "Fixture schema migration: ui_surface=declarative_page makes the prior declarative rendering assumption explicit; this field was not emitted by the recorded model."
 }

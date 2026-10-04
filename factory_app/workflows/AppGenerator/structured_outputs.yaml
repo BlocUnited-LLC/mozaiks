@@ -151,9 +151,10 @@ models:
         - declarative_page
         - custom_react_page
         description: >
-          Persistent app UI surface type. Use declarative_page by default; use
-          custom_react_page only when shipped page primitives cannot express the
-          route.
+          Persistent app UI surface type, copied exactly from the approved
+          ExperienceSpec page. Declarative pages use shipped primitives; custom
+          React pages implement declared behavior beyond those primitives. Changing
+          this decision requires an updated approved ExperienceSpec.
       page_type_hint:
         type: literal
         values:

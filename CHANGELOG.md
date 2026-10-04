@@ -318,6 +318,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- DesignDocs now declares each page's existing canonical rendering surface.
+  App planning preserves it and uses the shared materializer for prompt paths,
+  preventing an approved interactive custom page from becoming static YAML.
+  Existing pre-production designs without the field must revisit DesignDocs.
+
+- ValueEngine intake now records strict, bounded readiness through its auto tool
+  instead of parsing a completion word from chat. Complete briefs proceed to
+  research without another confirmation; concise product language replaces
+  implementation jargon, while explicit concept approval remains required.
+
 - Factory interviews use typed readiness and retain explicit brand preferences
   across workflow transitions. Custom interactive page plans now own their React
   files and shared route registry together, using the same deterministic registry

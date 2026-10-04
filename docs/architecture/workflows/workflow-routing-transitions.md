@@ -406,6 +406,21 @@ into `brownfield_repo_input`, which asks which repo to analyze before
 `ExistingAppDiscovery` starts. The selected internal value (`light_integration`
 or `full_migration`) becomes downstream scope context.
 
+### Concept intake readiness
+
+ValueEngine intake returns a strict `ValueInterviewResult` with `agent_message`
+and `outcome: needs_input | ready`. Its workflow-local `record_value_interview`
+auto tool validates the output before the existing outcome wrapper records
+`interview_outcome` and the bounded `interview_attempts` counter. Both have only
+deterministic tool writer authority. `ready` routes to research; `needs_input`
+returns to the user; invalid output or exhausted attempts fails the workflow.
+Conversation text never changes readiness. A sufficient user brief advances
+without another confirmation or implementation vocabulary in the chat.
+
+Readiness starts concept research only. The separate structured concept review
+still requires owner approval before downstream generation. No sequence,
+entrypoint, or app authorization boundary changes with this intake contract.
+
 ### Discovery human continuation
 
 `ExistingAppDiscovery/transition_graph.yaml` explicitly routes human replies

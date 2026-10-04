@@ -1,5 +1,6 @@
 """Typed page serialization has one normalization path before runtime validation."""
 
+import json
 from copy import deepcopy
 
 import pytest
@@ -133,3 +134,48 @@ def test_typed_action_and_route_auth_payloads_keep_runtime_object_shape(page_mod
     assert children[0]["config"]["action"]["payload"] == {"count": 0, "enabled": False, "query": ""}
     assert children[1]["config"]["action"]["context_variables"] == {"record_id": "record-1"}
     assert document["meta"]["routeAuth"]["params"] == {"record_id": "record-1"}
+
+
+@pytest.mark.parametrize("params,expected", [
+    ([], {}),
+    ([{"key": "deal_id", "value": "$route.dealId"}, {"key": "view", "value": ""}],
+     {"deal_id": "$route.dealId", "view": ""}),
+])
+def test_typed_custom_route_auth_materializes_the_same_runtime_mapping_as_save(
+    page_models, monkeypatch, tmp_path, params, expected,
+):
+    from tests.test_appgenerator_save_app_schema import (
+        _Context,
+        _custom_route_bundle,
+        save_app_schema_module,
+    )
+
+    bundle = _custom_route_bundle()
+    bundle["page_files"][0]["path"] = "ui/pages/custom/room.jsx"
+    bundle["route_manifest"][0]["path"] = "/deals/:dealId/room"
+    bundle["route_manifest"][0]["meta"]["routeAuth"] = {
+        "module": "deal_access", "action": "authorize_deal_route", "params": params,
+    }
+    typed = page_models["AppSchemaOutput"].model_validate({
+        "agent_message": "Prepared the approved page.", "manifest": None, "pages": [],
+        "custom_route_bundle": bundle, "theme_config_patch": None,
+        "shell_config": None, "asset_manifest": None,
+    }).model_dump(mode="json")
+    before = deepcopy(typed)
+    files = extract_code_file_map_from_payload(typed)
+    rendered = json.loads(files["ui/route_manifest.json"])
+    route_auth = rendered["pages"][0]["meta"]["routeAuth"]
+    # The shell enumerates this object to form action input. An array would
+    # submit numeric keys instead of deal_id and view.
+    assert route_auth == {"module": "deal_access", "action": "authorize_deal_route", "params": expected}
+    assert typed == before
+
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    save_app_schema_module.save_app_schema(
+        manifest={"app_name": "Deal Room", "version": "1.0.0", "default_route": "/deals/:dealId/room",
+                  "pages": [], "custom_routes": ["deal-room"]},
+        pages=[], custom_route_bundle=typed["custom_route_bundle"], context_variables=_Context(),
+    )
+    saved = json.loads((tmp_path / "ui/route_manifest.json").read_text(encoding="utf-8"))
+    assert rendered == saved
+    assert typed == before

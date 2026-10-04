@@ -1,20 +1,7 @@
-"""
-Hook: Inject the Buildable Menu into ValueInterviewAgent.
+"""Inject a compact implementation catalog for grounded product recommendations.
 
-An advisor can only recommend what it knows exists. ValueInterviewAgent had no
-catalog in scope at all, so it could not say "I'd add the messaging pack here" —
-it did not know ``messaging`` was a thing. Lacking an inventory, the only move
-left to it was generic product-discovery questioning, which is why the
-conversation read as an interview rather than as expertise.
-
-This injects a compact [BUILDABLE MENU] block naming the real identifiers the
-generator consumes: domain priors, capability packs, module archetypes, and
-revenue models. Every proposal the agent makes can then reference something
-that actually gets built.
-
-Deliberately compact. The full catalogs run to thousands of lines and belong to
-AppPlanAgent, which makes the binding decisions. The interview only needs enough
-to propose credibly and to avoid promising what cannot be built.
+Catalog identifiers guide feasibility internally; interview messages describe
+user-visible behavior. Binding decisions remain with the app planning stage.
 """
 
 from __future__ import annotations
@@ -36,8 +23,7 @@ _ROUTING_PATH = workflow_context_path("AppGenerator", "capability_routing.yaml")
 _DOMAINS_PATH = workflow_context_path("AppGenerator", "domain_catalogs.yaml")
 _ARCHETYPES_PATH = workflow_context_path("AppGenerator", "module_archetypes.yaml")
 
-# Capability packs are the most quotable unit in a proposal, so they carry
-# their own use_when/avoid_when text straight from the catalog.
+# Carry capability selection boundaries directly from the canonical catalog.
 _MAX_DOMAINS = 40
 _MAX_MODULES_PER_DOMAIN = 6
 
@@ -67,8 +53,8 @@ def _format_packs(routing: dict[str, Any]) -> str:
     if not packs:
         return ""
     lines = [
-        "CAPABILITY PACKS — whole feature areas you can offer by name. Selecting a",
-        "pack is cheap and fast; it is the strongest kind of proposal you can make.",
+        "CAPABILITY PACKS — internal choices for implementing feature areas.",
+        "Explain their user-visible behavior without exposing pack identifiers.",
     ]
     for pack in packs:
         pack_id = _first_line(pack.get("id"))
@@ -94,9 +80,9 @@ def _format_archetypes(archetypes_doc: dict[str, Any]) -> str:
     if not isinstance(archetypes, dict) or not archetypes:
         return ""
     lines = [
-        "MODULE ARCHETYPES — the shapes a generated module can take. Name the shape",
-        "when it clarifies the proposal (\"a workflow module, so submissions move",
-        "through review states\").",
+        "MODULE ARCHETYPES — internal implementation shapes, not user-facing labels.",
+        "The workflow archetype is deterministic state transitions, not an AI",
+        "workflow. Describe the product behavior without exposing these names.",
     ]
     for name, spec in archetypes.items():
         if not isinstance(spec, dict):
@@ -184,8 +170,8 @@ def _build_menu(routing: dict[str, Any] | None,
                 domains_doc: dict[str, Any] | None,
                 archetypes_doc: dict[str, Any] | None) -> str:
     blocks: list[str] = [
-        "This is what Mozaiks can actually build. Ground every recommendation in it:\n"
-        "propose real things by name, and never promise anything absent from this list.",
+        "Use this implementation catalog to ground product recommendations.\n"
+        "Keep its identifiers internal; preserve the user's requested behavior.",
     ]
     if routing:
         packs = _format_packs(routing)

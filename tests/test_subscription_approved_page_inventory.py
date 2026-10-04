@@ -24,8 +24,8 @@ def _context(route: str, *, phase: str = "genesis", **overrides: object) -> Stru
         "app_id": "pricing-test",
         "chat_id": "pricing-chat",
         "experience_spec": {"pages": [
-            {"name": "Dashboard", "route": "/dashboard"},
-            {"name": "Pricing", "route": "/pricing"},
+            {"name": "Dashboard", "ui_surface": "declarative_page", "route": "/dashboard"},
+            {"name": "Pricing", "ui_surface": "declarative_page", "route": "/pricing"},
         ]},
         **overrides,
     })

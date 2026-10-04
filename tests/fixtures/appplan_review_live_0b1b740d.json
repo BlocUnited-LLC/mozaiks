@@ -819,7 +819,8 @@
        "intent": "Display completion rates and pending tasks stats.",
        "primitive": "SummaryStrip"
       }
-     ]
+     ],
+     "ui_surface": "declarative_page"
     },
     {
      "intent": "Use billing_portal for list_plans, open_billing_portal.",
@@ -833,7 +834,8 @@
        "intent": "Use billing_portal for list_plans, open_billing_portal.",
        "primitive": "PageHeader"
       }
-     ]
+     ],
+     "ui_surface": "declarative_page"
     },
     {
      "intent": "Use billing_portal for get_subscription_status, list_plans, start_subscription_checkout, open_billing_portal.",
@@ -847,7 +849,8 @@
        "intent": "Use billing_portal for get_subscription_status, list_plans, start_subscription_checkout, open_billing_portal.",
        "primitive": "PageHeader"
       }
-     ]
+     ],
+     "ui_surface": "declarative_page"
     },
     {
      "intent": "Use billing_portal for get_usage_status, get_token_status, start_token_top_up.",
@@ -861,7 +864,8 @@
        "intent": "Use billing_portal for get_usage_status, get_token_status, start_token_top_up.",
        "primitive": "PageHeader"
       }
-     ]
+     ],
+     "ui_surface": "declarative_page"
     }
    ]
   },
@@ -1375,7 +1379,7 @@
      "header": "X-MozaiksPay-Contract-Version",
      "mismatch_error_code": "contract_version_mismatch"
     },
-    "description": "Machine-readable interface spec for the MozaiksPay provider API. Consumed by generated SaaS apps via mozaikspay_client.py. Served by the selected MozaiksPay-compatible provider. The hosted MozaiksPay service is the default provider implementation, but self-hosted or alternative providers may satisfy this same app-facing contract.\nThis file defines ONLY the public interface \u2014 request shape, response shape, auth scheme, and which fields are forbidden from responses. No payment provider logic, fee calculations, or subscription business rules belong here.\n",
+    "description": "Machine-readable interface spec for the MozaiksPay provider API. Consumed by generated SaaS apps via mozaikspay_client.py. Served by the selected MozaiksPay-compatible provider. The hosted MozaiksPay service is the default provider implementation, but self-hosted or alternative providers may satisfy this same app-facing contract.\nThis file defines ONLY the public interface — request shape, response shape, auth scheme, and which fields are forbidden from responses. No payment provider logic, fee calculations, or subscription business rules belong here.\n",
     "drift_guard": {
      "consumer": "generated-saas-apps",
      "description": "Changes to this file must be reflected in: - The selected provider server implementation - The generated client template (templates/services/integrations/mozaikspay_client.py) - The generated billing_portal schemas (templates/modules/billing_portal/backend/schemas.py) If any of these diverge, generated SaaS apps will break silently at runtime.\n",
@@ -1831,7 +1835,7 @@
       "400": "Invalid request body (missing return_url, unsafe URL, etc.).",
       "401": "Missing or invalid MozaiksPay API key or client credentials.",
       "403": "MozaiksPay credential app or user/tenant/workspace scope does not allow this request.",
-      "404": "No subscription found for this scope (subscription_status only \u2014 not an HTTP 404)."
+      "404": "No subscription found for this scope (subscription_status only — not an HTTP 404)."
      }
     },
     "schema_version": "mozaiks.provider_api_contract.v1",
@@ -1998,5 +2002,6 @@
   "live_page_inventory": "action ids of modules/tasks/module.yaml admitted for bc-1 (context.set envelope 51)",
   "plan": "AG2NetworkKnowledge wal.jsonl envelope 47 (AppPlanAgent packet)",
   "sha": "0b1b740d"
- }
+ },
+ "fixture_schema_migration": "Fixture schema migration: ui_surface=declarative_page makes the prior declarative rendering assumption explicit; this field was not emitted by the recorded model."
 }

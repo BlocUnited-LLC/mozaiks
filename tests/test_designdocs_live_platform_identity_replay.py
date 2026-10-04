@@ -7,6 +7,9 @@ module named ``user_management`` (entity User, a users collection with
 password_hash, create_user/delete_user, a Users page at /users). Live, every
 attempt was refused because ``created_at`` was typed ``date``, which the
 ownership check did not count as bounded; the channel closed workflow_failed.
+
+The fixture explicitly labels its later ui_surface schema migration; the
+capture identity is retained, without claiming the model emitted that field.
 """
 
 from __future__ import annotations
@@ -143,13 +146,12 @@ def _plan_from_saved_design(context: ContextVariablesBridge) -> dict:
     )
     plan["pages"] = [
         {
-            "name": page["name"], "route": page["route"], "purpose": page["intent"],
+            "name": page["name"], "ui_surface": "declarative_page", "route": page["route"], "purpose": page["intent"],
             "primary_entities": list(facade_pages.get(page["route"], {}).get("primary_entities") or (
                 ["Task"] if page["route"] == "/dashboard" else []
             )),
             "primary_actions": list(facade_pages.get(page["route"], {}).get("primary_actions") or []),
-            "ui_layout": "full-width", "ui_surface": "declarative_page",
-            "page_type_hint": facade_pages.get(page["route"], {}).get("page_type_hint") or "analytics_dashboard",
+            "ui_layout": "full-width", "page_type_hint": facade_pages.get(page["route"], {}).get("page_type_hint") or "analytics_dashboard",
             "sections_hint": [],
         }
         for page in experience["pages"]
