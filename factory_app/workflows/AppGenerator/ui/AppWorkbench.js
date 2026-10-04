@@ -64,6 +64,7 @@ const AppWorkbench = ({
   const [refinementRequest, setRefinementRequest] = useState('');
   const [limitToSelectedFile, setLimitToSelectedFile] = useState(false);
   const [refinementResult, setRefinementResult] = useState(null);
+  const [pendingHarness, setPendingHarness] = useState(null);
   const [refinementError, setRefinementError] = useState(null);
   const [artifactReview, setArtifactReview] = useState(payload?.review || null);
   const [artifactReviewBusy, setArtifactReviewBusy] = useState(false);
@@ -156,6 +157,7 @@ const AppWorkbench = ({
     setActiveArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
     setReviewArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
     setRefinementResult(null);
+    setPendingHarness(null);
     setRefinementError(null);
   }, [payload?.artifact_version_id, payload?.artifactVersionId]);
 
@@ -276,6 +278,11 @@ const AppWorkbench = ({
         files: scopeFiles,
         ...(validationStrategy === 'local' ? { validation_strategy: 'local' } : {}),
       };
+    } else {
+      // Missing explicit files asks the existing harness to propose a safe scope.
+      triggerPayload.coding_request = {
+        ...(validationStrategy === 'local' ? { validation_strategy: 'local' } : {}),
+      };
     }
 
     if (harnessAction && typeof harnessAction === 'object') {
@@ -286,13 +293,14 @@ const AppWorkbench = ({
 
   // Shared handler for any refinement response. Saved candidates remain
   // inspectable even when validation prevents advancing the preview baseline.
-  const handleRefinementResponse = (response) => {
+  const handleRefinementResponse = (response, submission = null) => {
     if (!response) {
       if (currentWorkflowError) setRefinementError(currentWorkflowError);
       return;
     }
     const result = refinementOutput(response);
     if (result) {
+      setPendingHarness(null);
       const nextVersionId = result?.metadata?.build_record_id;
       if (nextVersionId) setReviewArtifactVersionId(nextVersionId);
       if (result?.status === 'validated' && nextVersionId) {
@@ -306,9 +314,18 @@ const AppWorkbench = ({
       return;
     }
     if (response.execution_mode === 'harness_decision') {
-      setRefinementResult(response);
+      // A routing question does not replace the active candidate's evidence.
+      setPendingHarness({ response, submission });
     }
   };
+
+  const pendingSubmission = pendingHarness?.submission;
+  const pendingRequest = pendingSubmission?.triggerPayload?.refinement_request;
+  const currentHarnessDecision = pendingSubmission?.selection === selectionRef.current
+    && pendingSubmission?.buildRegistryId === buildRegistryId
+    && pendingRequest?.artifact_version_id === artifactVersionId
+    && pendingRequest?.raw_user_request === refinementRequest.trim()
+      ? pendingHarness?.response?.harness_decision : null;
 
   // AppReview can hand an already finished inline refinement to this surface.
   // It must use the same saved-draft/validation rules as a request made here.
@@ -328,12 +345,14 @@ const AppWorkbench = ({
     }
     const selection = selectionRef.current;
     refinementSelectionRef.current = selection;
+    setPendingHarness(null);
+    const triggerPayload = buildRefinementTriggerPayload();
     const response = await startWorkflow(
       null,
       {},
-      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload() }
+      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: triggerPayload }
     );
-    if (selectionRef.current === selection) handleRefinementResponse(response);
+    if (selectionRef.current === selection) handleRefinementResponse(response, { triggerPayload, selection, buildRegistryId });
   };
 
   const handleThemeRefinement = async () => {
@@ -348,12 +367,14 @@ const AppWorkbench = ({
     }
     const selection = selectionRef.current;
     refinementSelectionRef.current = selection;
+    setPendingHarness(null);
+    const triggerPayload = buildRefinementTriggerPayload(null, 'theme_config');
     const response = await startWorkflow(
       null,
       {},
-      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload(null, 'theme_config') }
+      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: triggerPayload }
     );
-    if (selectionRef.current === selection) handleRefinementResponse(response);
+    if (selectionRef.current === selection) handleRefinementResponse(response, { triggerPayload, selection, buildRegistryId });
   };
 
   const handleHarnessDecisionAction = async (action) => {
@@ -369,18 +390,42 @@ const AppWorkbench = ({
     }
     if (!action || !refinementRequest.trim() || !artifactVersionId) return;
     setRefinementError(null);
+    if (!currentHarnessDecision?.actions?.some(item => item.action_id === action.action_id)) {
+      setRefinementError('This scope decision is no longer current. Submit the change again.');
+      return;
+    }
+    const triggerPayload = {
+      ...pendingSubmission.triggerPayload,
+      harness_action: { action_id: action.action_id },
+      ...(pendingHarness.response.change_request_id ? { change_request_id: pendingHarness.response.change_request_id } : {}),
+      ...(pendingHarness.response.revision_id ? { revision_id: pendingHarness.response.revision_id } : {}),
+    };
+    if (['run_recommended_workflow', 'confirm_recommended_workflow'].includes(action.action_id)) {
+      delete triggerPayload.coding_request;
+    } else if (action.action_id === 'apply_proposed_scope') {
+      const paths = currentHarnessDecision.selected_paths || [];
+      if (!paths.length || paths.some(path => !Object.hasOwn(filesMap, path))) {
+        setRefinementError('The proposed files are unavailable in this version. Submit the change again.');
+        return;
+      }
+      triggerPayload.coding_request = {
+        ...(triggerPayload.coding_request || {}),
+        files: Object.fromEntries(paths.map(path => [path, filesMap[path]])),
+      };
+    }
     const selection = selectionRef.current;
     refinementSelectionRef.current = selection;
+    setPendingHarness(null);
     const response = await startWorkflow(
       null,
       {},
-      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: buildRefinementTriggerPayload({ action_id: action.action_id }) }
+      { trigger_source: 'refinement', build_registry_id: buildRegistryId, trigger_payload: triggerPayload }
     );
-    if (selectionRef.current === selection) handleRefinementResponse(response);
+    if (selectionRef.current === selection) handleRefinementResponse(response, { triggerPayload, selection, buildRegistryId });
   };
 
   const handleArtifactReviewAction = async (action) => {
-    if (!reviewArtifactVersionId || !action) return;
+    if (!reviewArtifactVersionId || !action || refinementStarting) return;
     const identity = reviewIdentity;
     const selection = selectionRef.current;
     const isCurrent = () => selectionRef.current === selection && reviewIdentityRef.current === identity;
@@ -566,10 +611,10 @@ const AppWorkbench = ({
             </div>
           )}
 
-          {!codingResult && refinementResult?.harness_decision && (
+          {currentHarnessDecision && (
             <div className="mt-3">
               <HarnessDecisionCard
-                decision={refinementResult.harness_decision}
+                decision={currentHarnessDecision}
                 busy={refinementStarting}
                 error={refinementError || currentWorkflowError}
                 onAction={handleHarnessDecisionAction}
@@ -673,8 +718,8 @@ const AppWorkbench = ({
                 {artifactReview.can_accept && (
                   <button
                     type="button"
-                    className={toolbarBtn(!artifactReviewBusy)}
-                    disabled={artifactReviewBusy}
+                    className={toolbarBtn(!artifactReviewBusy && !refinementStarting)}
+                    disabled={artifactReviewBusy || refinementStarting}
                     onClick={() => handleArtifactReviewAction('accept')}
                   >
                     {artifactReviewBusy ? 'Working...' : 'Accept artifact'}
@@ -683,8 +728,8 @@ const AppWorkbench = ({
                 {artifactReview.can_reject && (
                   <button
                     type="button"
-                    className={toolbarBtn(!artifactReviewBusy)}
-                    disabled={artifactReviewBusy}
+                    className={toolbarBtn(!artifactReviewBusy && !refinementStarting)}
+                    disabled={artifactReviewBusy || refinementStarting}
                     onClick={() => handleArtifactReviewAction('reject')}
                   >
                     {artifactReviewBusy ? 'Working...' : 'Reject artifact'}
@@ -693,8 +738,8 @@ const AppWorkbench = ({
                 {artifactReview.can_promote && (
                   <button
                     type="button"
-                    className={toolbarBtn(!artifactReviewBusy)}
-                    disabled={artifactReviewBusy}
+                    className={toolbarBtn(!artifactReviewBusy && !refinementStarting)}
+                    disabled={artifactReviewBusy || refinementStarting}
                     onClick={() => handleArtifactReviewAction('promote')}
                   >
                     {artifactReviewBusy ? 'Working...' : 'Activate this draft'}

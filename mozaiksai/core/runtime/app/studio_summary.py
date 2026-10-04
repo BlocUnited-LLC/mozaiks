@@ -339,6 +339,8 @@ def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
             else f"/apps/{app_id}/overview"
         )
     )
+    if lifecycle_state == "review" and app_id and current_build_run.get("artifact_version_id"):
+        destination = f"/apps/{app_id}/activity"
     return {
         "build_registry_id": str(app_record.get("build_registry_id") or ""),
         "app_id": app_id,

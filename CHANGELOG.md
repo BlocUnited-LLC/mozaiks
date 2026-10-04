@@ -330,6 +330,17 @@ This project follows a practical pre-1.0 changelog format:
   directly from Studio. Version switches preserve preview cleanup and reject
   late results from a previously opened version. Parent refreshes preserve a
   newer draft's files and review evidence.
+  Review-ready apps link directly to their saved builds without restarting a
+  previous build conversation.
+- Passive chat navigation starts only verified empty sessions. Saved execution,
+  pending input, unreadable state or native AG2 state never triggers an automatic
+  restart or synthetic reply; explicit user input keeps its existing route.
+- Entire-app refinement asks the existing harness to propose file scope. Scope
+  and workflow approvals are bound to the saved request, artifact and revision,
+  then consumed once through the session store before continuing. Selected-file
+  requests that need a broader plan stop without generating outside that scope.
+  Pending decisions preserve the current candidate's review evidence, and review
+  actions wait until the submitted refinement finishes.
 - Studio drafts show the registered app's current build and approved description.
   The workbench opens on preview, keeps required continuation and review actions
   visible, and offers code, downloads, and diagnostics on demand. Historical chat

@@ -67,6 +67,20 @@ async def test_mongo_ag2_knowledge_store_scopes_paths_to_app_and_chat() -> None:
 
 
 @pytest.mark.asyncio
+async def test_native_root_presence_keeps_app_and_chat_scope_without_mutation() -> None:
+    collection = _Collection()
+    collection.find_one_result = {"_id": "saved-native-record"}
+    store = MongoAG2KnowledgeStore(app_id="app-1", chat_id="chat-1", collection=collection)
+    assert await store.exists("/") is True
+    query = collection.find_one_calls[0][0]
+    assert query == {
+        "app_id": "app-1", "chat_id": "chat-1",
+        "$or": [{"path": "/"}, {"path": {"$regex": "^/"}}],
+    }
+    assert collection.update_calls == collection.append_calls == collection.delete_calls == []
+
+
+@pytest.mark.asyncio
 async def test_mongo_ag2_knowledge_store_lists_virtual_children() -> None:
     collection = _Collection()
     collection.find_docs = [

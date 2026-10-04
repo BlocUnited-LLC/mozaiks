@@ -472,6 +472,22 @@ class TestRecommendLifecycleNextStep:
 # ---------------------------------------------------------------------------
 
 class TestBuildAppListEntry:
+    @pytest.mark.parametrize("chat_id", [None, "previous-build-chat"])
+    def test_review_with_saved_artifact_opens_review_without_resuming_chat(self, chat_id):
+        result = build_app_list_entry({
+            "app_id": "build-app", "lifecycle_state": "review",
+            "current_build_run": {
+                "artifact_version_id": "saved-version",
+                "active_chat_id": chat_id, "active_workflow_id": "AppGenerator",
+            },
+        })
+        assert result["destination"] == "/apps/build-app/activity"
+        assert result["current_build_run"]["artifact_version_id"] == "saved-version"
+
+    def test_review_without_saved_artifact_keeps_building_destination(self):
+        result = build_app_list_entry({"app_id": "build-app", "lifecycle_state": "review"})
+        assert result["destination"] == "/apps/build-app/building"
+
     @pytest.mark.parametrize("binding", [{}, {"active_chat_id": "orphaned-chat"}])
     def test_missing_run_binding_opens_registered_building_surface(self, binding):
         result = build_app_list_entry({"app_id": "build-app", "lifecycle_state": "building", **binding})

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -269,6 +270,9 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
         "contract_surface_enabled",
         lambda: False,
     )
+    no_inline = AsyncMock(side_effect=AssertionError("Explicit workflow action must bypass inline planning"))
+    monkeypatch.setattr(studio_app.get_orchestration_control_harness(), "prepare_coding_request", no_inline)
+    monkeypatch.setattr(studio_app.get_orchestration_control_harness(), "prepare_contract_surface_request", no_inline)
 
     client = TestClient(studio_app.app)
     response = client.post(
@@ -290,6 +294,8 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     )
 
     assert response.status_code == 200
+    no_inline.assert_not_awaited()
+    assert "coding_request" not in captured_prepare["trigger_payload"]
     assert response.json() == {
         "execution_mode": "workflow",
         "chat_id": "chat_refine_1",
@@ -343,7 +349,9 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "target_app_id": "app_1",
             "user_id": captured_prepare["user_id"],
             "requested_workflow_id": None,
-            "extra": {"files_manifest": [entry.model_dump(mode="python") for entry in _BaselineStore.versions["av_123"].files_manifest]},
+            "extra": {
+                "files_manifest": [entry.model_dump(mode="python") for entry in _BaselineStore.versions["av_123"].files_manifest],
+            },
         },
     }
     assert "change_class" not in captured_prepare
@@ -377,7 +385,9 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                 "target_app_id": "app_1",
                 "user_id": "demo-user",
                 "requested_workflow_id": None,
-                "extra": {"files_manifest": [entry.model_dump(mode="python") for entry in _BaselineStore.versions["av_123"].files_manifest]},
+                "extra": {
+                    "files_manifest": [entry.model_dump(mode="python") for entry in _BaselineStore.versions["av_123"].files_manifest],
+                    },
             },
             "change_intent": {
                 "change_class": "feature",
@@ -888,7 +898,8 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
     assert persisted_changes[0]["router_decision"]["execution_mode"] == "coding_worker"
 
 
-def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypatch):
+@pytest.mark.parametrize("confirmation", ["exact", "restore", "race", "changed_request", "changed_artifact", "changed_paths", "malformed"])
+def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypatch, confirmation):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
@@ -897,6 +908,8 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     from mozaiksai.hosts import studio as studio_app
 
     persisted_changes: list[dict] = []
+    proposal_count = 0
+    execution_count = 0
 
     async def fail_prepare(**kwargs):  # noqa: ANN003
         raise AssertionError("workflow launch should not run for coding worker execution")
@@ -916,6 +929,9 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
             return SimpleNamespace(id="rs_scope_1")
 
     async def _fake_propose(**kwargs):  # noqa: ANN003
+        nonlocal proposal_count
+        proposal_count += 1
+        assert proposal_count == 1, "Approval must not authorize a freshly proposed scope"
         return ScopeProposal.model_validate(
             {
                 "resolution": "scoped_files",
@@ -937,10 +953,13 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
         }
 
     async def _fake_execute(request):  # noqa: ANN001
+        nonlocal execution_count
+        execution_count += 1
         assert sorted(request.files.keys()) == [
             "app/ui/components/ExportPanel.jsx",
             "app/ui/pages/Dashboard.jsx",
         ]
+        assert request.files["app/ui/pages/Dashboard.jsx"] == "export default function Dashboard() {}"
         child = _BaselineStore.versions[request.build_record_id].model_copy(deep=True, update={"id": "av_child_multi_1"})
         child.commit_metadata.metadata.update(request.run_build_binding.model_dump())
         _BaselineStore.versions[child.id] = child
@@ -1045,34 +1064,152 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     assert first_body["execution_mode"] == "harness_decision"
     assert first_body["harness_decision"]["decision_type"] == "clarify_scope"
     assert first_body["harness_decision"]["actions"][0]["action_id"] == "apply_proposed_scope"
+    assert first_body["change_request_id"] == "cr_scope_1"
+    assert first_body["revision_id"]
+    confirmed_files = dict.fromkeys(first_body["harness_decision"]["selected_paths"], "untrusted browser content")
+    if confirmation == "changed_paths":
+        confirmed_files = {"Dockerfile": "FROM untrusted"}
 
-    second = client.post(
-        "/api/workflows/trigger",
-        json={
+    confirmation_body = {
             "build_registry_id": "appreg_1",
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
                     "artifact_kind": "app_bundle",
                     "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_scope_1",
-                    "raw_user_request": "Update the dashboard and export panel copy",
+                    "artifact_version_id": "av_123" if confirmation == "changed_artifact" else "av_scope_1",
+                    "raw_user_request": "Different change" if confirmation == "changed_request" else "Update the dashboard and export panel copy",
                     "source_surface": "app_build",
                 },
-                "coding_request": {
+                "change_request_id": first_body["change_request_id"],
+                "revision_id": first_body["revision_id"],
+                "coding_request": "invalid" if confirmation == "malformed" else {
                     "validation_strategy": "skip",
+                    **({"files": confirmed_files} if confirmation != "restore" else {}),
                 },
                 "harness_action": {
                     "action_id": "apply_proposed_scope",
                 },
             },
-        },
-    )
+        }
+    if confirmation == "race":
+        import httpx
 
-    assert second.status_code == 200
+        from mozaiksai.core.session.router import SessionRouter
+
+        original_resolve = SessionRouter.resolve_pending_harness_decision
+
+        async def race_confirmations():
+            both_ready = asyncio.Event()
+            arrivals = 0
+
+            async def delayed_resolve(self, **kwargs):
+                nonlocal arrivals
+                arrivals += 1
+                if arrivals == 2:
+                    both_ready.set()
+                await asyncio.wait_for(both_ready.wait(), timeout=5)
+                return await original_resolve(self, **kwargs)
+
+            monkeypatch.setattr(SessionRouter, "resolve_pending_harness_decision", delayed_resolve)
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=studio_app.app), base_url="http://testserver") as parallel:
+                return await asyncio.gather(*(
+                    parallel.post("/api/workflows/trigger", json=confirmation_body) for _ in range(2)
+                ))
+
+        responses = asyncio.run(race_confirmations())
+        assert sorted(response.status_code for response in responses) == [200, 409]
+        assert execution_count == 1
+        assert proposal_count == 1
+        return
+    second = client.post("/api/workflows/trigger", json=confirmation_body)
+
+    assert proposal_count == 1
+    if confirmation not in {"exact", "restore"}:
+        assert second.status_code == (400 if confirmation == "malformed" else 409), second.text
+        assert len(persisted_changes) == 1
+        return
+    assert second.status_code == 200, second.text
     second_body = second.json()
     assert second_body["execution_mode"] == "coding_worker"
     assert second_body["coding_worker"]["metadata"]["build_record_id"] == "av_child_multi_1"
+    assert execution_count == 1
+    replay = client.post("/api/workflows/trigger", json=confirmation_body)
+    assert replay.status_code == 409, replay.text
+    assert execution_count == 1
+    snapshot = asyncio.run(studio_app.get_session_router().for_target("app_1").get_session_snapshot(
+        app_id="factory", user_id="demo-user",
+    ))
+    assert snapshot["pending_harness_decision"] is None
+    assert snapshot["lifecycle_state"] == "active"
+
+
+@pytest.mark.parametrize("change_class", ["design", "feature", "core"])
+def test_selected_file_scope_rejects_broader_classification_before_generation(monkeypatch, _owned_build_target, change_class):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    harness = studio.get_orchestration_control_harness()
+    monkeypatch.setattr(harness, "_config_loader", lambda: ControlPlaneConfig(
+        enabled=True, classifier={"enabled": True}, coding={"enabled": True}, contract_surface={"enabled": True},
+    ))
+    classifier = AsyncMock(side_effect=_async_classifier(
+        change_class=change_class, rationale="Requires broader contracts", confidence=0.95, signals=[],
+    ))
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(classify=classifier))
+    planner = AsyncMock(side_effect=AssertionError("Must not plan beyond the selected file"))
+    coder = AsyncMock(side_effect=AssertionError("Must not call coding for an ineligible class"))
+    launcher = AsyncMock(side_effect=AssertionError("Must not launch a wider workflow"))
+    monkeypatch.setattr(harness, "prepare_contract_surface_request", planner)
+    monkeypatch.setattr(harness._coding_worker, "execute", coder)
+    monkeypatch.setattr(studio, "prepare_routed_workflow_launch", launcher)
+    response = TestClient(studio.app).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {
+            "refinement_request": {
+                "artifact_kind": "app_bundle", "artifact_key": "app_bundle", "artifact_version_id": "av_123",
+                "raw_user_request": "Polish this page", "source_surface": "app_workbench",
+            },
+            "coding_request": {"files": {"app/ui/pages/Dashboard.jsx": "browser content"}},
+        },
+    })
+    assert response.status_code == 409, response.text
+    assert "selected files" in response.json()["detail"]
+    classifier.assert_awaited_once()
+    planner.assert_not_awaited()
+    coder.assert_not_awaited()
+    launcher.assert_not_awaited()
+    _owned_build_target.begin_refinement_run.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["apply_proposed_scope", "run_recommended_workflow", "confirm_recommended_workflow"])
+def test_scope_confirmation_requires_pending_decision(monkeypatch, _owned_build_target, action):
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    classify = AsyncMock(side_effect=AssertionError("Unbound confirmation must fail before classification"))
+    monkeypatch.setattr(studio.get_orchestration_control_harness(), "route_refinement_request", classify)
+    response = TestClient(studio.app).post("/api/workflows/trigger", json={
+        "build_registry_id": "appreg_1", "trigger_source": "refinement",
+        "trigger_payload": {
+            "refinement_request": {
+                "artifact_kind": "app_bundle", "artifact_key": "app_bundle", "artifact_version_id": "av_123",
+                "raw_user_request": "Edit this page", "source_surface": "app_workbench",
+            },
+            "harness_action": {"action_id": action},
+            "coding_request": {"files": {"app/ui/pages/Dashboard.jsx": "browser content"}},
+        },
+    })
+    assert response.status_code == 409, response.text
+    assert "scope is no longer current" in response.json()["detail"]
+    classify.assert_not_awaited()
+    _owned_build_target.begin_refinement_run.assert_not_awaited()
 
 
 def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(monkeypatch):
@@ -1133,6 +1270,8 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     assert response.status_code == 200
     assert response.json() == {
         "execution_mode": "harness_decision",
+        "change_request_id": "cr_core_1",
+        "revision_id": response.json()["revision_id"],
         "chat_id": None,
         "workflow_id": "ValueEngine",
         "requested_workflow_id": "ValueEngine",
@@ -1167,7 +1306,9 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     }
 
 
-def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(monkeypatch):
+@pytest.mark.parametrize("continuation", ["run_recommended_workflow", "confirm_recommended_workflow"])
+@pytest.mark.parametrize("mutation", [None, "request", "artifact", "revision", "action", "context", "route"])
+def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(monkeypatch, mutation, continuation):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
@@ -1175,64 +1316,17 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     reset_auth_adapter()
     from mozaiksai.hosts import studio as studio_app
 
-    persisted_state = {
-        "active_change_request_id": None,
-        "active_revision_id": None,
-    }
+    expected_workflow = "ValueEngine" if continuation == "confirm_recommended_workflow" else "AppGenerator"
+    expected_sequence = "full_rebuild" if continuation == "confirm_recommended_workflow" else "app_revision"
     create_calls: list[dict] = []
     captured_prepare: dict = {}
-    captured_pending_harness_decision: dict = {}
-
-    async def fake_get_session_snapshot(*, app_id, user_id):  # noqa: ANN001
-        return {
-            "session_id": f"session_router::{app_id}::{user_id}",
-            "app_id": app_id,
-            "user_id": user_id,
-            "active_change_request_id": persisted_state["active_change_request_id"],
-            "active_revision_id": persisted_state["active_revision_id"],
-        }
-
-    async def fake_persist_revision_intent(*, trigger, decision, pending_harness_decision=None):  # noqa: ANN001
-        if pending_harness_decision is not None:
-            captured_pending_harness_decision.update(
-                {
-                    "trigger_source": pending_harness_decision.trigger_source,
-                    "requested_workflow_id": pending_harness_decision.requested_workflow_id,
-                    "journey_id": pending_harness_decision.journey_id,
-                    "context_variables": dict(pending_harness_decision.context_variables or {}),
-                    "trigger_payload": dict(pending_harness_decision.trigger_payload or {}),
-                }
-            )
-        persisted_state["active_change_request_id"] = (
-            str(
-                decision.context_seed.get("change_request_id")
-                or getattr(pending_harness_decision, "change_request_id", None)
-                or ""
-            ).strip()
-            or None
-        )
-        persisted_state["active_revision_id"] = (
-            str(
-                decision.context_seed.get("revision_id")
-                or getattr(pending_harness_decision, "revision_id", None)
-                or ""
-            ).strip()
-            or "rev_core_1"
-        )
-        return {
-            "session_id": f"session_router::{trigger.app_id}::{trigger.user_id}",
-            "app_id": trigger.app_id,
-            "user_id": trigger.user_id,
-            "active_change_request_id": persisted_state["active_change_request_id"],
-            "active_revision_id": persisted_state["active_revision_id"],
-        }
 
     async def fake_prepare_routed_workflow_launch(**kwargs):
         captured_prepare.update(kwargs)
         return SimpleNamespace(
-            workflow_id="ValueEngine",
+            workflow_id=expected_workflow,
             routing_decision=SimpleNamespace(
-                requested_workflow_id="ValueEngine",
+                requested_workflow_id=expected_workflow,
                 explanation="Core concept change detected for app bundle; restarting from ValueEngine.",
                 is_full_restart=True,
                 rerouted_by_dependency=False,
@@ -1244,7 +1338,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
         return SimpleNamespace(
             chat_id="chat_value_1",
             workflow_id=launch.workflow_id,
-            requested_workflow_id="ValueEngine",
+            requested_workflow_id=expected_workflow,
             journey_id=None,
             websocket_url="/ws/ValueEngine/app_1/chat_value_1/demo-user",
             trigger_source="refinement",
@@ -1263,28 +1357,20 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
         async def update_change_request_router_decision(self, **kwargs):
             return True
 
-    router_double = SimpleNamespace(
-        get_session_snapshot=fake_get_session_snapshot,
-        persist_revision_intent=fake_persist_revision_intent,
-    )
-    router_double.for_target = lambda target: router_double
-
-    monkeypatch.setattr(studio_app, "get_session_router", lambda: router_double)
     monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fake_prepare_routed_workflow_launch)
     monkeypatch.setattr(studio_app, "launch_prepared_workflow", fake_launch_prepared_workflow)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
-    monkeypatch.setattr(
-        studio_app.get_orchestration_control_harness()._refinement_resolver,
-        "_classifier",
-        SimpleNamespace(
-            classify=_async_classifier(
-                change_class="core",
-                rationale="Adding blockchain changes the product direction.",
-                confidence=0.94,
-                signals=["concept_shift", "new_capability"],
-            )
-        ),
-    )
+    classifier = AsyncMock(side_effect=_async_classifier(
+        change_class="core" if continuation == "confirm_recommended_workflow" else "patch", rationale="Adding blockchain changes the product direction.",
+        confidence=0.94, signals=["concept_shift", "new_capability"],
+    ))
+    harness = studio_app.get_orchestration_control_harness()
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(classify=classifier))
+    no_inline = AsyncMock(side_effect=AssertionError("Workflow continuation must bypass inline planning"))
+    monkeypatch.setattr(harness._scope_proposer, "propose", AsyncMock(return_value=ScopeProposal(
+        resolution="workflow", selected_paths=[], rationale="A workflow is needed.", confidence=0.95,
+        clarification_question=None, signals=[],
+    )))
 
     client = TestClient(studio_app.app)
     first = client.post(
@@ -1300,6 +1386,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
                     "raw_user_request": "Add blockchain support to the product.",
                     "source_surface": "app_build",
                 },
+                "coding_request": {},
             },
         },
     )
@@ -1307,43 +1394,53 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     assert first.status_code == 200
     assert first.json()["execution_mode"] == "harness_decision"
     assert create_calls and len(create_calls) == 1
+    target_router = studio_app.get_session_router().for_target("app_1")
+    persisted_state = asyncio.run(target_router.get_session_snapshot(app_id="factory", user_id="demo-user"))
+    captured_pending_harness_decision = persisted_state["pending_harness_decision"]
     assert persisted_state["active_change_request_id"] == "cr_core_1"
     assert persisted_state["active_revision_id"]
-    assert captured_pending_harness_decision["trigger_source"] == "refinement"
-    assert captured_pending_harness_decision["requested_workflow_id"] is None
-    assert captured_pending_harness_decision["journey_id"] == "full_rebuild"
-    assert captured_pending_harness_decision["context_variables"] == {}
-    assert captured_pending_harness_decision["trigger_payload"]["change_request_id"] == "cr_core_1"
-    assert captured_pending_harness_decision["trigger_payload"]["revision_id"] == persisted_state["active_revision_id"]
-    assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["build_family"] == "app_bundle"
     assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["build_record_id"] == "av_core_1"
 
-    second = client.post(
-        "/api/workflows/trigger",
-        json={
-            "build_registry_id": "appreg_1",
-            "trigger_source": "refinement",
-            "trigger_payload": {
-                "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_core_1",
-                    "raw_user_request": "Add blockchain support to the product.",
-                    "source_surface": "app_build",
-                },
-                "harness_action": {
-                    "action_id": "confirm_recommended_workflow",
-                },
-            },
-        },
+    monkeypatch.setattr(harness, "prepare_coding_request", no_inline)
+    monkeypatch.setattr(harness, "prepare_contract_surface_request", no_inline)
+    confirmed = json.loads(first.request.content)
+    trigger = confirmed["trigger_payload"]
+    trigger.update(
+        change_request_id=first.json()["change_request_id"], revision_id=first.json()["revision_id"],
+        harness_action={"action_id": continuation}, coding_request={},
     )
-
-    assert second.status_code == 200
+    if mutation == "request":
+        trigger["refinement_request"]["raw_user_request"] = "A different product direction"
+    elif mutation == "artifact":
+        trigger["refinement_request"]["artifact_version_id"] = "av_123"
+    elif mutation == "revision":
+        trigger["revision_id"] = "stale-revision"
+    elif mutation == "action":
+        trigger["harness_action"]["action_id"] = "apply_proposed_scope"
+    elif mutation == "context":
+        confirmed["context_variables"] = {"extra_scope": "different request"}
+    elif mutation == "route":
+        classifier.side_effect = _async_classifier(
+            change_class="feature" if continuation == "confirm_recommended_workflow" else "core", rationale="Different route", confidence=0.95, signals=[],
+        )
+    second = client.post("/api/workflows/trigger", json=confirmed)
+    no_inline.assert_not_awaited()
+    if mutation is not None:
+        assert second.status_code == 409, second.text
+        assert classifier.await_count == (2 if mutation == "route" else 1)
+        assert not captured_prepare
+        return
+    assert second.status_code == 200, second.text
     assert second.json()["execution_mode"] == "workflow"
     assert len(create_calls) == 1
-    assert captured_prepare["journey_id"] == "full_rebuild"
+    assert classifier.await_count == 2
+    assert "coding_request" not in captured_prepare["trigger_payload"]
+    assert captured_prepare["journey_id"] == expected_sequence
     assert captured_prepare["trigger_payload"]["change_request_id"] == "cr_core_1"
     assert captured_prepare["trigger_payload"]["revision_id"] == persisted_state["active_revision_id"]
+    replay = client.post("/api/workflows/trigger", json=confirmed)
+    assert replay.status_code == 409, replay.text
+    assert classifier.await_count == 2
 
 
 def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch):
@@ -1587,7 +1684,8 @@ def _build_review_store(
     )
 
 
-def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("app_name, expected_title", [("FocusSprint", "FocusSprint"), (None, "Saved app"), ("  ", "Saved app")])
+def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, tmp_path: Path, _owned_build_target, app_name, expected_title):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
@@ -1597,6 +1695,7 @@ def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, 
 
     store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
+    _owned_build_target.get_app_record.return_value["app"]["name"] = app_name
 
     client = TestClient(studio_app.app)
     response = client.get("/api/studio/build/artifacts/av_child_1/bundle?build_registry_id=appreg_1")
@@ -1609,6 +1708,8 @@ def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, 
     assert body["generated_files"]["package.json"] == '{"name":"demo"}\n'
     assert body["workbench"]["artifact_version_id"] == "av_child_1"
     assert body["workbench"]["build_family"] == "app_bundle"
+    assert body["workbench"]["title"] == expected_title
+    assert "description" not in body["workbench"]
     assert body["review"]["changed_file_count"] == 1
     assert body["review"]["selected_paths"] == ["src/App.jsx"]
     assert body["change_request"]["classification"] == "patch"

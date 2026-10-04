@@ -1594,6 +1594,38 @@ for (const lifecycle of ['building', 'needs_revision']) {
   });
 }
 
+for (const chatId of [null, 'previous-build-chat']) {
+  test(`review-ready overview opens its saved build with chat ${chatId}`, async ({ page }) => {
+    await mockOverviewProgress(page, {
+      lifecycle: 'review',
+      currentBuildRun: {
+        build_id: 'q-build', phase: 'refinement', status: 'review',
+        artifact_version_id: 'ver-17', active_chat_id: chatId, active_workflow_id: 'AppGenerator',
+      },
+    });
+    await page.route('**/api/studio/build/history?**', route => route.fulfill({
+      json: buildAppStudioPayload(APP_ID).buildHistory,
+    }));
+    const mutations = [];
+    page.on('request', request => {
+      if (request.method() === 'POST') mutations.push(new URL(request.url()).pathname);
+    });
+    await page.goto(`/apps/${APP_ID}/overview`);
+    const main = page.locator('main');
+    const review = main.getByRole('link', { name: 'Review builds', exact: true });
+    await expect(review).toHaveAttribute('href', `/apps/${APP_ID}/activity`);
+    await expect(main.getByText('Preview your saved version, request changes, then accept and activate it when ready.')).toBeVisible();
+    await expect(main.getByRole('link', { name: 'Continue Build', exact: true })).toHaveCount(0);
+    await expect(main.getByText(/A build conversation link is not available/)).toHaveCount(0);
+    await review.click();
+    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start draft preview', exact: true })).toBeVisible();
+    // The shell reads onboarding status through a POST module action.
+    expect(mutations.filter(path => path !== '/api/modules/user_onboarding/get_onboarding_status')).toEqual([]);
+    await expectNoHorizontalOverflow(page);
+  });
+}
+
 for (const missingField of ['active_chat_id', 'active_workflow_id']) {
   test(`app overview without ${missingField} opens Building without inventing a resume`, async ({ page }) => {
     await mockOverviewProgress(page, { currentBuildRun: null, description: null });

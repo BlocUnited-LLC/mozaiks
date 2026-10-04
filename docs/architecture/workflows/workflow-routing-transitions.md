@@ -334,6 +334,11 @@ controls. Refinement acceptance and activation remain separate, server-authorize
 actions. A genesis artifact can already be the current version; the user still
 reviews it and explicitly activates it. Delivery confirmation remains visible
 when the workflow requires it.
+When a registry run is in `review` and names a saved artifact, the app's primary
+Studio action opens its existing Build Review page, even if the earlier build
+conversation is still recorded. Opening that page loads the saved version; it
+does not start a workflow or allocate a preview. Drafts without a saved artifact
+retain their existing build conversation or Building destination.
 Build and integration warning details start collapsed, with their count visible;
 failed and skipped checks remain visible. Expanding integration warnings reveals
 the full list without changing the validation result or promotion gate.

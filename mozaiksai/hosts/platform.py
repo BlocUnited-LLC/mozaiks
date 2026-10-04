@@ -2722,6 +2722,10 @@ async def websocket_endpoint(
             local_transport = runtime_app.simple_transport
             if not local_transport:
                 return
+            if await local_transport._passive_start_rejection(
+                chat_id=active_chat_id, app_id=app_id, user_id=user_id, workflow_name=workflow_name,
+            ) is not None:
+                return
 
             for _ in range(20):
                 conn = local_transport.connections.get(active_chat_id)

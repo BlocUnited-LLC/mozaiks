@@ -632,7 +632,9 @@ export default function AppOverviewPage() {
 
   const appAction = getAppPrimaryAction(snapshot.app)
   const primaryAction = appAction.href === `/apps/${encodeURIComponent(appId)}/overview` ? null : appAction
-  const nextStep = isBuilding
+  const nextStep = primaryAction?.kind === 'review'
+    ? 'Preview your saved version, request changes, then accept and activate it when ready.'
+    : isBuilding
     ? primaryAction?.kind === 'build'
       ? 'Open the build conversation to follow progress, review results, and respond when needed.'
       : 'Open Building to review saved progress. A build conversation link is not available.'

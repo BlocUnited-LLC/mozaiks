@@ -76,6 +76,29 @@ User submits a change request on an existing artifact
 
 The Refinement Engine does not replace the factory. It routes to it.
 
+The Workbench's **Entire app** option submits an unscoped coding request to this
+existing harness. A patch may resolve to a safe file scope; a multi-file proposal
+uses the target-scoped `PendingHarnessDecision` for confirmation. Confirmation
+must match the saved change request, revision, source artifact, request text, and
+displayed paths. The server reloads file contents from the verified artifact;
+approval does not rerun scope selection. Every continuation action must belong to
+the saved decision. The existing session router consumes that exact decision with
+a conditional update before classification or execution, so replayed or concurrent
+confirmations cannot start work twice. A workflow continuation explicitly bypasses
+inline coding and contract-surface generation; a changed workflow recommendation
+requires a new decision rather than reusing the previous approval. If execution
+fails after admission, the user submits a new request; the consumed approval is
+not restored.
+
+**Limit to selected file** is a hard boundary. If classification requires design,
+feature, or core work beyond the eligible patch lane, Studio rejects the request
+before planning, allocating a refinement build, or generating files. The user can
+narrow the request or remove the file limit and submit a broader request. This
+does not change classification to accommodate the selected file. While Apply is
+pending, review mutations are disabled; the previous candidate's source and
+validation evidence remain available if the new request fails or asks for scope
+confirmation.
+
 ---
 
 ## Checkpoint Chain

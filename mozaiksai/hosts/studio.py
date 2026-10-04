@@ -1940,7 +1940,7 @@ async def get_build_artifact_bundle(
 ):
     validate_path_id(artifact_version_id, "artifact_version_id")
     host_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
-    app_id, _ = await _resolve_studio_artifact_scope(principal, app_id=host_app_id, build_registry_id=build_registry_id)
+    app_id, owner_user_id = await _resolve_studio_artifact_scope(principal, app_id=host_app_id, build_registry_id=build_registry_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_build_record(
         app_id=app_id,
@@ -1968,6 +1968,12 @@ async def get_build_artifact_bundle(
         version=version,
         artifact_store=artifact_store,
     )
+    app_record = (await _get_app_registry_service().get_app_record(
+        app_id=app_id, owner_user_id=owner_user_id,
+    )).get("app") or {}
+    workbench_title = str(app_record.get("name") or "").strip() or (
+        "Saved app" if version.build_family == "app_bundle" else "Saved workflow"
+    )
 
     return {
         "app_id": app_id,
@@ -1983,8 +1989,7 @@ async def get_build_artifact_bundle(
             "app_id": host_app_id,
             "target_app_id": app_id,
             "build_registry_id": build_registry_id,
-            "title": f"Artifact Workbench · {version.build_key} v{version.version_number}",
-            "description": "Inspect a persisted artifact bundle and launch scoped coding refinement from explicit file scope.",
+            "title": workbench_title,
             "artifact_version_id": version.id,
             "build_family": version.build_family,
             "build_key": version.build_key,
@@ -2615,6 +2620,42 @@ async def _fail_inline_refinement(*, binding: RunBuildBinding, user_id: str) -> 
         logger.exception("Could not record inline refinement failure for build=%s", binding.build_id)
 
 
+def _confirmed_refinement_decision(
+    snapshot: dict[str, Any] | None,
+    request: RefinementRequest,
+    *,
+    action_id: str,
+    change_request_id: str | None,
+    revision_id: str | None,
+) -> dict[str, Any]:
+    """Bind an approval to the existing target-scoped pending decision."""
+    pending = (snapshot or {}).get("pending_harness_decision") or {}
+    stored_request = (pending.get("trigger_payload") or {}).get("refinement_request")
+    actions = pending.get("actions") or []
+    if (
+        not isinstance(stored_request, dict)
+        or not change_request_id or pending.get("change_request_id") != change_request_id
+        or not revision_id or pending.get("revision_id") != revision_id
+        or not pending.get("decision_id")
+        or not any(action.get("action_id") == action_id for action in actions)
+    ):
+        raise HTTPException(status_code=409, detail="The proposed scope is no longer current. Submit the change again.")
+    try:
+        previous = RefinementRequest.model_validate(stored_request)
+    except ValidationError as exc:
+        raise HTTPException(status_code=409, detail="The proposed scope is unavailable. Submit the change again.") from exc
+    if any(
+        getattr(previous, field) != getattr(request, field)
+        for field in (
+            "app_id", "target_app_id", "user_id", "request_kind", "declared_change_class",
+            "build_family", "build_key", "build_record_id", "raw_user_request",
+            "requested_workflow_id", "source_surface",
+        )
+    ):
+        raise HTTPException(status_code=409, detail="The proposed scope belongs to a different request or artifact. Submit the change again.")
+    return pending
+
+
 @app.post("/api/workflows/trigger")
 async def trigger_workflow(
     body: WorkflowTriggerRequest,
@@ -2645,6 +2686,9 @@ async def trigger_workflow(
     surface_result = None
     persisted_change_request_id = str(trigger_payload.get("change_request_id") or "").strip() or None
     persisted_revision_id = str(trigger_payload.get("revision_id") or "").strip() or None
+    action_payload = trigger_payload.get("harness_action")
+    action_id = str(action_payload.get("action_id") or "").strip() if isinstance(action_payload, dict) else None
+    workflow_continuation = action_id in {"run_recommended_workflow", "confirm_recommended_workflow"}
 
     if body.trigger_source == "refinement":
         from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
@@ -2677,11 +2721,8 @@ async def trigger_workflow(
         )
         if not allowed:
             raise HTTPException(status_code=403, detail=reason or "Workflow prerequisites not met")
-        maybe_action = trigger_payload.get("harness_action")
-        if isinstance(maybe_action, dict) and (
-            not str(trigger_payload.get("change_request_id") or "").strip()
-            or not str(trigger_payload.get("revision_id") or "").strip()
-        ):
+        session_snapshot = None
+        if action_id:
             try:
                 session_snapshot = await session_router.get_session_snapshot(
                     app_id=app_id,
@@ -2761,20 +2802,80 @@ async def trigger_workflow(
             if not snapshot or snapshot.get("active_revision_id") != persisted_revision_id:
                 raise HTTPException(status_code=409, detail="Refinement revision is no longer active")
 
+        pending_decision = None
+        if action_id:
+            pending_decision = _confirmed_refinement_decision(
+                session_snapshot, refinement_request, action_id=action_id,
+                change_request_id=persisted_change_request_id, revision_id=persisted_revision_id,
+            )
+            if body.context_variables != (pending_decision.get("context_variables") or {}):
+                raise HTTPException(status_code=409, detail="The decision belongs to a different request context. Submit the change again.")
         coding_payload = trigger_payload.get("coding_request")
+        if workflow_continuation:
+            # Explicit workflow continuation must not try inline generation first.
+            coding_payload = None
+            trigger_payload.pop("coding_request", None)
+        if coding_payload is not None and not isinstance(coding_payload, dict):
+            raise HTTPException(status_code=400, detail="Invalid coding_request")
+        if action_id == "apply_proposed_scope":
+            confirmed_paths = (pending_decision or {}).get("selected_paths")
+            if not isinstance(confirmed_paths, list) or not confirmed_paths or any(
+                not isinstance(path, str) or not path for path in confirmed_paths
+            ):
+                raise HTTPException(status_code=409, detail="The proposed scope has no available files. Submit the change again.")
+            supplied_files = coding_payload.get("files") if isinstance(coding_payload, dict) else None
+            if supplied_files is not None and (
+                not isinstance(supplied_files, dict) or set(supplied_files) != set(confirmed_paths)
+            ):
+                raise HTTPException(status_code=409, detail="The submitted files do not match the proposed scope.")
+            coding_payload = {**(coding_payload or {}), "files": dict.fromkeys(confirmed_paths, "")}
+            trigger_payload["coding_request"] = coding_payload
+        if isinstance(coding_payload, dict) and "files" in coding_payload and not isinstance(coding_payload["files"], dict):
+            raise HTTPException(status_code=400, detail="Refinement file scope must be an object")
+        explicit_paths = list((coding_payload or {}).get("files") or {})
+        if explicit_paths:
+            if not orchestration_control.coding_enabled():
+                raise HTTPException(status_code=409, detail="Selected-file refinement is unavailable. The file scope has not been widened.")
+            baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
+            if skipped:
+                raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+            if any(path not in baseline_files for path in explicit_paths):
+                raise HTTPException(status_code=400, detail="Refinement file scope is not in the selected artifact")
+            coding_payload = {**coding_payload, "files": {path: baseline_files[path] for path in explicit_paths}}
+            trigger_payload["coding_request"] = coding_payload
         if orchestration_control.coding_enabled() and isinstance(coding_payload, dict):
             try:
                 resolve_coding_validation_strategy(coding_payload.get("validation_strategy"))
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if pending_decision is not None:
+            try:
+                await session_router.resolve_pending_harness_decision(
+                    app_id=app_id, user_id=user_id,
+                    decision_id=pending_decision["decision_id"], action_id=action_id,
+                    expected_pending_decision=pending_decision,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail="This decision has already been handled or replaced. Submit the change again.") from exc
         try:
             refinement_decision = await orchestration_control.route_refinement_request(refinement_request)
         except Exception as exc:
             logger.error("refinement_classification_failed: %s", exc, exc_info=True)
             raise HTTPException(status_code=503, detail="Refinement classification unavailable") from exc
+        if workflow_continuation and pending_decision is not None and (
+            refinement_decision.workflow_id != pending_decision.get("recommended_workflow_id")
+            or refinement_decision.workflow_sequence != pending_decision.get("journey_id")
+        ):
+            raise HTTPException(status_code=409, detail="The recommended workflow has changed. Submit the change again to review the new route.")
         harness_decision = orchestration_control.build_harness_decision(refinement_decision)
+        if explicit_paths and refinement_decision.change_intent.change_class.value != "patch":
+            raise HTTPException(
+                status_code=409,
+                detail="This change needs a broader plan than the selected files allow. Narrow the request, or clear the file limit and submit it for a broader review. No files were changed.",
+            )
         if (
-            orchestration_control.contract_surface_enabled()
+            not workflow_continuation
+            and orchestration_control.contract_surface_enabled()
             and refinement_decision.change_intent.change_class.value in {"feature", "design"}
             and refinement_request.build_family == "app_bundle"
         ):
@@ -2832,16 +2933,8 @@ async def trigger_workflow(
         resolved_change_class = refinement_decision.change_intent.change_class.value
         resolved_artifact_kind = refinement_request.build_family
         resolved_artifact_version_id = refinement_request.build_record_id
-        if orchestration_control.coding_enabled() and isinstance(trigger_payload.get("coding_request"), dict):
+        if not workflow_continuation and orchestration_control.coding_enabled() and isinstance(trigger_payload.get("coding_request"), dict):
             coding_payload = dict(trigger_payload["coding_request"])
-            if coding_payload.get("files"):
-                baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
-                if skipped:
-                    raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
-                requested_paths = coding_payload["files"]
-                if not isinstance(requested_paths, dict) or any(path not in baseline_files for path in requested_paths):
-                    raise HTTPException(status_code=400, detail="Refinement file scope is not in the selected artifact")
-                coding_payload["files"] = {path: baseline_files[path] for path in requested_paths}
             coding_request = orchestration_control.build_coding_request(
                 refinement_request=refinement_request,
                 routing_decision=refinement_decision,
@@ -3057,6 +3150,8 @@ async def trigger_workflow(
             logger.warning("Failed to persist prelaunch revision intent: %s", session_err)
         return {
             "execution_mode": "harness_decision",
+            "change_request_id": persisted_change_request_id,
+            "revision_id": persisted_revision_id,
             "chat_id": None,
             "workflow_id": harness_decision.recommended_workflow_id or refinement_decision.workflow_id,
             "requested_workflow_id": body.workflow_id or (harness_decision.recommended_workflow_id if harness_decision else None),

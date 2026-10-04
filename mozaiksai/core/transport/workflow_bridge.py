@@ -23,6 +23,7 @@ from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.runtime.composition.extensions import get_workflow_lifecycle_hooks
 from mozaiksai.core.runtime.persistence.distributed_lock import (
     ChatLeaseLostError,
@@ -227,6 +228,75 @@ class WorkflowBridgeMixin:
 
         return updated
 
+    async def _passive_start_rejection(
+        self, *, chat_id: str, app_id: str, user_id: str | None, workflow_name: str,
+    ) -> dict[str, Any] | None:
+        """Admit only an owned, empty chat; observation never resumes a run.
+
+        Scheduling callers may precheck, but the execution bridge repeats this
+        check under the chat lease before launching a no-input start.
+        """
+        from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
+        from mozaiksai.core.data.models import WorkflowUIState
+        from mozaiksai.core.session import get_session_router_for_chat
+
+        reason = "saved_state"
+        try:
+            if not user_id:
+                raise ValueError("Missing connection identity")
+            pm = self._get_or_create_persistence_manager()
+            coll = await pm._coll()
+            doc = await coll.find_one(
+                {"_id": chat_id, **build_app_scope_filter(app_id),
+                 "user_id": user_id, "workflow_name": workflow_name},
+                {"status": 1, "workflow_ui_state": 1},
+            )
+            if not isinstance(doc, dict):
+                raise ValueError("Owned workflow session is unavailable")
+            # Existing platform hooks revalidate the saved target/build binding.
+            await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=chat_id)
+            live_run = self.get_live_ag2_workflow_run(chat_id)
+            if live_run is not None or self._input_request_registries.get(chat_id):
+                # A connected human waiter must receive an explicit response,
+                # never a synthetic resume signal caused by passive navigation.
+                return {"status": "success", "chat_id": chat_id, "route": "passive_reopen"}
+            state = doc.get("workflow_ui_state", {})
+            ui_state = WorkflowUIState.model_validate(state, strict=True)
+            if ui_state.schema_version != 1:
+                raise ValueError("Unsupported workflow UI state version")
+            status = doc.get("status")
+            empty_ui = (
+                ui_state.pending_input_request is None
+                and ui_state.last_artifact is None
+                and not ui_state.tool_calls
+            )
+            if isinstance(status, int) and not isinstance(status, bool) and status == 0 and empty_ui:
+                events = await pm.load_run_events(chat_id=chat_id, app_id=app_id)
+                if not isinstance(events, list):
+                    raise ValueError("Invalid workflow event history")
+                if not events and not await get_ag2_adapter().has_persisted_execution(app_id=app_id, chat_id=chat_id):
+                    return None
+        except Exception as exc:
+            reason = "state_unavailable"
+            logger.warning("PASSIVE_START_INSPECTION_FAILED chat=%s type=%s", chat_id, type(exc).__name__)
+
+        message = (
+            "This saved workflow was not restarted automatically. Automatic continuation is unavailable."
+            if reason == "saved_state" else
+            "This chat was not started because its saved state could not be verified."
+        )
+        try:
+            await self.send_error(
+                error_message=message, error_code="WORKFLOW_REOPEN_UNAVAILABLE", chat_id=chat_id,
+                extra_data={"app_id": app_id, "user_id": user_id, "workflow_name": workflow_name},
+            )
+        except Exception as exc:
+            logger.debug("PASSIVE_START_NOTICE_UNDELIVERED chat=%s type=%s", chat_id, type(exc).__name__)
+        return {
+            "status": "error", "chat_id": chat_id, "route": "passive_reopen",
+            "error_code": "WORKFLOW_REOPEN_UNAVAILABLE", "message": message,
+        }
+
     async def handle_user_input_from_api(
         self,
         chat_id: str,
@@ -249,6 +319,13 @@ class WorkflowBridgeMixin:
                 and initial_agent_name_override.strip()
                 and not (isinstance(message, str) and message.strip())
             )
+            passive_start = not is_resume_request and not (isinstance(message, str) and message.strip())
+            if passive_start:
+                rejection = await self._passive_start_rejection(
+                    chat_id=chat_id, app_id=app_id, user_id=user_id, workflow_name=workflow_name,
+                )
+                if rejection is not None:
+                    return rejection
 
             # Load workflow-declared lifecycle hooks (modular, per-workflow)
             lifecycle = get_workflow_lifecycle_hooks(workflow_name)
@@ -296,7 +373,7 @@ class WorkflowBridgeMixin:
                         raise
                     return await self._reject_chat_lease_lost(chat_id=chat_id)
 
-            if has_active_session and active_callbacks:
+            if has_active_session and active_callbacks and not passive_start:
                 rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
                 if rejection is not None:
                     return rejection
@@ -354,6 +431,12 @@ class WorkflowBridgeMixin:
             # boundary, so releasing on context exit lands on that boundary.
             try:
                 async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+                    if passive_start:
+                        rejection = await self._passive_start_rejection(
+                            chat_id=chat_id, app_id=app_id, user_id=user_id, workflow_name=workflow_name,
+                        )
+                        if rejection is not None:
+                            return rejection
                     # A process restart removes the in-memory AG2 callback.
                     # If the chat's run already started and is still in
                     # progress, persist the user's reply and use AG2's
@@ -964,6 +1047,9 @@ class WorkflowBridgeMixin:
                         app_id=app_id,
                         initial_agent_name_override=initial_agent_name_override,
                     )
+                    if result.get("route") == "passive_reopen":
+                        # Observation/refusal is not an execution outcome.
+                        return result
                     run_status = str(result.get("run_status") or "").strip().lower()
                     execution_accepted = result.get("status") == "success"
                     if execution_accepted and not run_status:

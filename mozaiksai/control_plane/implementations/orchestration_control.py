@@ -399,10 +399,9 @@ class OrchestrationControlHarness:
 
         refinement_request = RefinementRequest.model_validate(refinement_payload)
         routing_decision = RefinementRoutingDecision.model_validate(routing_payload)
-        confirmed_action = None
         maybe_action = refinement_request.extra.get("harness_action")
-        if isinstance(maybe_action, dict):
-            confirmed_action = str(maybe_action.get("action_id") or "").strip() or None
+        if isinstance(maybe_action, dict) and maybe_action.get("action_id") == "apply_proposed_scope" and not request.files:
+            raise ValueError("Confirmed scope requires the files from the pending decision")
         if request.files:
             explicit_paths = sorted(request.files.keys())
             decision = self._decision_policy.for_scope_resolution(
@@ -447,9 +446,6 @@ class OrchestrationControlHarness:
         metadata["selected_file_paths"] = sorted(resolved_files.keys())
         metadata["explicit_file_count"] = len(resolved_files)
         if decision.decision_type != "auto_patch":
-            if confirmed_action == "apply_proposed_scope" and resolved_files:
-                metadata["confirmed_scope_action"] = confirmed_action
-                return request.model_copy(update={"files": resolved_files, "metadata": metadata}), decision
             return None, decision
         return request.model_copy(update={"files": resolved_files, "metadata": metadata}), decision
 

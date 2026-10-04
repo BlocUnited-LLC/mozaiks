@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mozaiksai.core.transport.workflow_bridge import WorkflowBridgeMixin
+
 
 class _FakeWebSocket:
     def __init__(self, *, query_params: dict | None = None) -> None:
@@ -45,13 +47,24 @@ class _MemoryCollection:
                 return
 
 
-class _FakeTransport:
+class _FakeTransport(WorkflowBridgeMixin):
     def __init__(self, *, connections: dict[str, dict] | None = None) -> None:
         self.connections = dict(connections or {})
         self.handle_websocket_calls: list[dict] = []
         self.api_calls: list[dict] = []
         self.ui_events: list[tuple[dict, str]] = []
         self._background_tasks: dict[str, object] = {}
+        self._input_request_registries = {}
+        self.errors = []
+
+    def _get_or_create_persistence_manager(self):
+        return self.persistence
+
+    def get_live_ag2_workflow_run(self, chat_id):
+        return None
+
+    async def send_error(self, **kwargs):
+        self.errors.append(kwargs)
 
     async def handle_websocket(self, **kwargs) -> None:  # noqa: ANN003
         self.handle_websocket_calls.append(kwargs)
@@ -178,6 +191,12 @@ def _patch_runtime_websocket_harness(
     monkeypatch.setattr(runtime_app.persistence_manager, "create_chat_session", fake_create_chat_session)
     monkeypatch.setattr(runtime_app.persistence_manager, "get_or_assign_cache_seed", fake_get_or_assign_cache_seed)
     monkeypatch.setattr(runtime_app.persistence_manager, "load_run_history", fake_load_run_history)
+    monkeypatch.setattr(runtime_app.persistence_manager, "load_run_events", fake_load_run_history)
+    monkeypatch.setattr(runtime_app.persistence_manager, "_coll", fake_chat_coll)
+    transport.persistence = runtime_app.persistence_manager
+    from mozaiksai.core.adapters import ag2_orchestration
+    native_presence = AsyncMock(return_value=False)
+    monkeypatch.setattr(ag2_orchestration, "get_ag2_adapter", lambda: SimpleNamespace(has_persisted_execution=native_presence))
     monkeypatch.setattr(runtime_app.persistence_manager, "get_session_version", AsyncMock(return_value=None))
     monkeypatch.setattr(runtime_app.asyncio, "create_task", fake_create_task)
 
@@ -213,12 +232,50 @@ def _patch_runtime_websocket_harness(
         added_workflows=added_workflows,
         removed_sessions=removed_sessions,
         scheduled_coroutines=scheduled_coroutines,
+        native_presence=native_presence,
     )
 
 
 async def _drain_scheduled_coroutines(scheduled_coroutines: list) -> None:
     for coro in scheduled_coroutines:
         await coro
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["runtime", "platform"])
+@pytest.mark.parametrize("saved_state", ["native", "pending_ui", "native_error", "fresh"])
+async def test_passive_socket_observes_saved_run_without_starting_it(monkeypatch, host, saved_state):
+    from mozaiksai.hosts import platform
+
+    doc = {
+        "_id": "chat_agent_1", "app_id": "app_1", "user_id": "user_1",
+        "workflow_name": "AgentGenerator", "status": 0, "messages": [],
+    }
+    if saved_state == "pending_ui":
+        doc["workflow_ui_state"] = {"tool_calls": {"saved": {"awaiting_response": True}}}
+    harness = _patch_runtime_websocket_harness(
+        monkeypatch, chat_docs=[doc], resume_resolution={"chat_id": "chat_agent_1", "session_state": {}},
+        workflow_startup_mode="AgentDriven",
+    )
+    harness.native_presence.return_value = saved_state == "native"
+    if saved_state == "native_error":
+        harness.native_presence.side_effect = RuntimeError("unavailable")
+    endpoint = harness.runtime_app.websocket_endpoint
+    if host == "platform":
+        monkeypatch.setattr(platform, "_resolve_requested_workflow_name", lambda name: name)
+        monkeypatch.setattr(platform, "is_runnable_workflow_name", lambda name: True)
+        monkeypatch.setattr(platform, "authenticate_websocket_with_path_binding", harness.runtime_app.authenticate_websocket_with_path_binding)
+        endpoint = platform.websocket_endpoint
+    websocket = _FakeWebSocket()
+    await endpoint(websocket=websocket, workflow_name="AgentGenerator", app_id="app_1", chat_id="chat_agent_1", user_id="user_1")
+    await _drain_scheduled_coroutines(harness.scheduled_coroutines)
+    assert websocket.closed == []
+    assert harness.transport.handle_websocket_calls[0]["chat_id"] == "chat_agent_1"
+    assert len(harness.transport.api_calls) == (1 if saved_state == "fresh" else 0)
+    assert bool(harness.transport.connections["chat_agent_1"].get("autostarted")) == (saved_state == "fresh")
+    assert harness.collection._docs["chat_agent_1"] == doc
+    if saved_state != "fresh":
+        assert harness.transport.errors[0]["error_code"] == "WORKFLOW_REOPEN_UNAVAILABLE"
 
 
 @pytest.mark.asyncio

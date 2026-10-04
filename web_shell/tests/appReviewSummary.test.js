@@ -120,7 +120,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
           {id:'download_complete', label:'Download Bundle', approved:true},
           {id:'close', label:'Return to editor'},
         ]} : {}),
-        generated_files:{'README.md':'Original contents'}, app_validation_status:'passed',
+        generated_files:{'README.md':'Original contents', 'notes.md':'Original notes'}, app_validation_status:'passed',
         app_validation_strategy_used:'parent-only-strategy',
         app_validation_result:{warnings:['Parent evidence only']}, integration_tests_passed:true,
         integration_test_result:{passed:true, warnings:['Custom page bindings need review.']}};
@@ -145,7 +145,13 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     app_bundle_acceptance_result:{status:scenario.validation, passed:scenario.validation==='passed'},
     app_validation_result:{validation_status:scenario.validation, validation_strategy:'local'},
   });
-  const triggerResult = () => ({
+  const triggerResult = () => scenario.decision ? ({
+    execution_mode:'harness_decision', change_request_id:'change-1', revision_id:'revision-1',
+    harness_decision:{decision_type:'clarify_scope', message:'Confirm these two files.',
+      selected_paths:['README.md','notes.md'], actions:[{
+        action_id:scenario.decision, action_type:'confirm_scope', label:'Continue with this scope',
+      }]},
+  }) : ({
     execution_mode:scenario.mode || 'coding_worker',
     ...(scenario.mode === 'surface_regeneration' ? {surface_result:{
       status:{validated:'success', planned:'partial', failed:'failed'}[scenario.status],
@@ -185,6 +191,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     res.setHeader('Content-Type','application/json');
     if (req.url === '/fixture-response') {res.end('{"accepted":true}'); return;}
     if (req.url === '/fixture-trigger') {
+      if (scenario.hold) { scenario.release = () => res.end(JSON.stringify(triggerResult())); return; }
       res.end(JSON.stringify(triggerResult()));
       return;
     }
@@ -202,6 +209,78 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
   t.after(() => new Promise(resolve => {server.closeAllConnections(); server.close(resolve);}));
   const browser = await chromium.launch({headless:true});
   t.after(() => browser.close());
+  await t.test('Entire app proposes scope; confirmation sends only displayed paths and binds the pending request', async () => {
+    scenario = {decision:'apply_proposed_scope'};
+    requests.length = 0;
+    const page = await browser.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${server.address().port}`);
+      await page.getByRole('textbox', {name:'App change request'}).fill('Update both documents.');
+      await page.getByRole('button', {name:'Apply change',exact:true}).click();
+      await expect(page.getByRole('button', {name:'Continue with this scope'})).toBeVisible();
+      const initial = JSON.parse(requests.find(r => r.url==='/fixture-trigger').body)[2].trigger_payload;
+      assert.deepEqual(initial.coding_request, {});
+      await page.getByRole('button', {name:'Split',exact:true}).click();
+      await page.getByRole('checkbox', {name:'Limit to selected file'}).check();
+      // Changing a UI selection must not change the already displayed proposal.
+      await page.getByRole('button', {name:'Continue with this scope'}).click();
+      await expect.poll(() => requests.filter(r => r.url==='/fixture-trigger').length).toBe(2);
+      const confirmed = JSON.parse(requests.filter(r => r.url==='/fixture-trigger')[1].body)[2].trigger_payload;
+      assert.equal(confirmed.change_request_id, 'change-1');
+      assert.equal(confirmed.revision_id, 'revision-1');
+      assert.deepEqual(confirmed.refinement_request, initial.refinement_request);
+      assert.deepEqual(confirmed.coding_request.files, {'README.md':'Original contents', 'notes.md':'Original notes'});
+      await page.getByRole('textbox', {name:'App change request'}).fill('A different request.');
+      await expect(page.getByRole('button', {name:'Continue with this scope'})).toHaveCount(0);
+      assert.equal(requests.filter(r => r.url==='/fixture-trigger').length, 2);
+    } finally { await page.close(); }
+  });
+  await t.test('selected file is explicit and workflow continuation removes inline coding', async () => {
+    scenario = {decision:'run_recommended_workflow'};
+    requests.length = 0;
+    const page = await browser.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${server.address().port}`);
+      await page.getByRole('button', {name:'Split',exact:true}).click();
+      await page.getByRole('checkbox', {name:'Limit to selected file'}).check();
+      await page.getByRole('textbox', {name:'App change request'}).fill('Update the selected document.');
+      await page.getByRole('button', {name:'Apply change',exact:true}).click();
+      await expect(page.getByRole('button', {name:'Continue with this scope'})).toBeVisible();
+      assert.deepEqual(JSON.parse(requests.find(r=>r.url==='/fixture-trigger').body)[2].trigger_payload.coding_request.files,
+        {'README.md':'Original contents'});
+      await page.getByRole('button', {name:'Continue with this scope'}).click();
+      await expect.poll(() => requests.filter(r=>r.url==='/fixture-trigger').length).toBe(2);
+      const payload = JSON.parse(requests.filter(r=>r.url==='/fixture-trigger')[1].body)[2].trigger_payload;
+      assert.equal(Object.hasOwn(payload,'coding_request'),false);
+      assert.equal(payload.harness_action.action_id,'run_recommended_workflow');
+    } finally { await page.close(); }
+  });
+  await t.test('pending Apply disables review mutations and a scope question preserves completed candidate evidence', async () => {
+    scenario = {status:'validated', validation:'passed', saved:true};
+    requests.length = 0;
+    const page = await browser.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${server.address().port}/?initial=true`);
+      const panel = page.getByRole('region', {name:'Artifact review'});
+      await expect(panel.getByRole('button', {name:'Accept artifact',exact:true})).toBeEnabled();
+      scenario.hold = true;
+      await page.getByRole('textbox', {name:'App change request'}).fill('Update both documents.');
+      await page.getByRole('button', {name:'Apply change',exact:true}).click();
+      await expect.poll(() => typeof scenario.release).toBe('function');
+      await expect(panel.getByRole('button', {name:'Accept artifact',exact:true})).toBeDisabled();
+      await expect(panel.getByRole('button', {name:'Reject artifact',exact:true})).toBeDisabled();
+      await expect(page.getByLabel('Preview version')).toHaveText('candidate');
+      scenario.decision = 'apply_proposed_scope';
+      scenario.release();
+      scenario.release = null;
+      await expect(page.getByRole('button', {name:'Continue with this scope'})).toBeVisible();
+      await expect(panel.getByRole('button', {name:'Accept artifact',exact:true})).toBeEnabled();
+      await expect(page.getByRole('status', {name:'Refinement result'})).toContainText('Draft validated and saved for review.');
+      await expect(page.getByText('Validation passed', {exact:true})).toBeVisible();
+      await expect(page.getByLabel('Preview version')).toHaveText('candidate');
+      assert.ok(!requests.some(r=>r.method==='POST' && r.url.includes('/candidate/')));
+    } finally { if (scenario.release) scenario.release(); await page.close(); }
+  });
   await t.test('preview and changes lead; code and export are opt-in; activation requires its own click', async () => {
     scenario = {status:'validated', validation:'passed', saved:true, promotion:true};
     accepted = false;
