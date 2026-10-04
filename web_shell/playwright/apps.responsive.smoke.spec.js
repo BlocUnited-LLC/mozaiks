@@ -1492,7 +1492,7 @@ async function mockOverviewProgress(page, {
   revenue = null,
   cost = 0,
 } = {}) {
-  // The Q failure shape: current registry run, no legacy build request/plan,
+  // A current registry run without a separately saved build request or plan,
   // and no deployed runtime history. Top-level chat fields are deliberately stale.
   const summary = {
     app: {
