@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -293,6 +294,26 @@ def test_recorded_bundle_on_the_platform_host_serves_no_factory_workflows(
     assert started[0] == 404, started
 
 
+def test_recorded_bundle_with_its_own_workflows_serves_exactly_those(
+    tmp_path, mongo_uri, identity_provider,
+) -> None:
+    app_root = _recorded_bundle(tmp_path / "app")
+    factory_root = resolve_factory_workflows_root()
+    assert factory_root is not None
+    shutil.copytree(factory_root / "RuntimeSmoke", tmp_path / "workflows" / "RuntimeSmoke")
+
+    with _platform_host(
+        app_root, mongo_uri=mongo_uri, issuer=identity_provider["issuer"], log_path=tmp_path / "host.log",
+    ) as base:
+        status, health = _request(f"{base}/api/health")
+        listed = _request(f"{base}/api/workflows", token=identity_provider["token"]())
+
+    assert status == 200
+    assert health["workflows"] == {"total_workflows": 1, "loaded_workflows": 1, "error_workflows": 0}
+    assert listed[0] == 200
+    assert [workflow["name"] for workflow in listed[1]["workflows"]] == ["RuntimeSmoke"]
+
+
 def _fresh_scaffold(target_dir: Path, *, starter: bool) -> Path:
     from mozaiks_cli.commands.init import create_scaffold
 
@@ -313,26 +334,24 @@ def test_fresh_init_scaffold_binds_its_own_workflow_root(monkeypatch, tmp_path, 
     assert defaults["MOZAIKS_WORKFLOWS_PATH"] == str(own_root)
 
 
-def test_fresh_init_scaffold_on_the_platform_host_serves_its_own_workflows(
+def test_fresh_init_scaffold_starts_on_the_platform_host_with_no_factory_workflows(
     tmp_path, mongo_uri, identity_provider,
 ) -> None:
     from mozaiksai.core.secrets.app_secrets import load_secret_contract
     from mozaiksai.core.secrets.contract import SecretContractError
 
-    workspace = _fresh_scaffold(tmp_path / "atlas", starter=True)
+    workspace = _fresh_scaffold(tmp_path / "atlas", starter=False)
     try:
         load_secret_contract(app_root=workspace / "app")
     except SecretContractError as exc:
         pytest.skip(f"a fresh scaffold's app/security/secrets.yaml does not load yet (#797): {exc}")
-    token = identity_provider["token"](app_id=None)
 
     with _platform_host(
         workspace / "app", mongo_uri=mongo_uri, issuer=identity_provider["issuer"], log_path=tmp_path / "host.log",
     ) as base:
         status, health = _request(f"{base}/api/health")
-        listed = _request(f"{base}/api/workflows", token=token)
+        listed = _request(f"{base}/api/workflows", token=identity_provider["token"](app_id=None))
 
     assert status == 200
-    assert health["workflows"]["total_workflows"] == 1
-    assert listed[0] == 200
-    assert [workflow["name"] for workflow in listed[1]["workflows"]] == ["HelloWorkflow"]
+    assert health["workflows"]["total_workflows"] == 0
+    assert listed == (200, {"workflows": []})
