@@ -28,13 +28,20 @@ required_checks:
     severity: high
     control_area: permissions
     rule: >-
-      Action permissions must resolve to module.yaml permissions entries. A non-public action
-      without permissions needs one unless declared contracts already protect it: an internal
-      surface with an explicit empty list, or an authenticated (absent or null) surface in an app
-      whose app.json and config/auth.yaml declare sign-in, when every data/contract.json collection
-      of its module is per_user or per_workspace or its entitlement_gate is a capability the
-      default plan does not grant. Operator (admin_internal) actions always need a permission.
-      The finding is medium when sign-in bounds the caller but the module declares no collections.
+      Action permissions must be a list of ids that resolve to module.yaml permissions entries. An
+      action without permissions needs one unless its api_surface is exactly public or
+      public_readonly, exactly internal with an explicit empty permissions list, or absent or null
+      in an app whose app.json authRequired and valid config/auth.yaml declare sign-in, when every
+      collection its module reaches is per_user or per_workspace with an owner_field. A module
+      reaches the data/contract.json collections declared for it or shared with it, and every
+      collection its code, or code it imports, addresses through ctx.persistence or
+      app_data_from_context. Every other surface value, including admin_internal, needs a
+      permission. The finding is high without sign-in, for app_wide reach without a restricting
+      gate, and for reach that no declared ownership scopes or that cannot be resolved, including
+      an app without a valid data/contract.json. It is medium for app_wide reach behind a
+      restricting gate, an entitlement_gate that the default plan of a valid
+      config/subscriptions.yaml does not grant, and for a module that reaches no collection and
+      has no restricting gate.
   - id: tenant_scope_for_persistent_modules
     severity: high
     control_area: tenant_isolation

@@ -406,21 +406,26 @@ This project follows a practical pre-1.0 changelog format:
   field no longer fail with Mongo error 54. Session feedback, which those
   workspaces dropped silently while reporting success, is now stored.
 
-- SecurityReadiness no longer reports a signed-in module action as missing a
-  permission when the bundle's own contracts already protect it (#817). The
-  permission rule now reads what the runtime enforces: sign-in (`app.json`
-  `authRequired` with a valid `config/auth.yaml`), collection ownership in
-  `data/contract.json`, and entitlement gates in `config/subscriptions.yaml`.
-  An action on the authenticated surface without permissions is reported as
-  high when the app declares no sign-in or when any signed-in user can reach
-  records its module does not own per user or per workspace, and as medium
-  when its module declares no collections at all. A gate protects only when
-  the default plan does not grant it. Operator-only actions, malformed
-  surfaces and undeclared permission ids are reported as before. On a recorded
-  generated app, six high findings for owner-scoped create, read, update,
-  delete and a paid summary no longer appear. Tests dispatch every changed
-  case through the module router and executor against a real database with
-  two users, so the scanner is checked against what each caller can reach.
+- SecurityReadiness reports a signed-in module action without permissions by
+  the records it can reach, not only by its module's own collections (#817).
+  Runtime persistence does not bind a module to its own collections, so the
+  rule reads sign-in (`app.json` `authRequired` with a valid
+  `config/auth.yaml`), collection ownership in `data/contract.json`,
+  entitlement gates in `config/subscriptions.yaml`, and every collection the
+  module's code addresses through `ctx.persistence` and
+  `app_data_from_context`, including code it imports from other modules. Such
+  an action is no longer reported when everything its module reaches is owned
+  per user or per workspace. It is reported as high when the app declares no
+  sign-in, when it reaches `app_wide` records without a gate the default plan
+  withholds, or when it reaches records that no declared ownership scopes or
+  uses persistence the scanner cannot resolve. It is reported as medium when
+  an entitlement gate restricts shared records by plan only, or when its
+  module reaches no collection. The scanner reads only the app root the
+  runtime binds, reports surface values the loader rejects, and no longer
+  raises on a malformed data contract. On a recorded generated app, six high
+  findings for owner-scoped create, read, update, delete and a paid summary
+  no longer appear. Dispatch tests on a real database check the verdicts for
+  owner-scoped, per-workspace, shared, cross-module and no-sign-in variants.
   [Generated Action Protection](docs/architecture/app/generated-action-protection.md)
   holds the decision table.
 
