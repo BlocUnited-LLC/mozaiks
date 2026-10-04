@@ -419,6 +419,8 @@ async def runtime_lifespan(_: FastAPI):
 
 register_app_lifespan(app, runtime_lifespan)
 
+_PUBLIC_WORKFLOW_COUNTS = ("total_workflows", "loaded_workflows", "error_workflows")
+
 
 @app.get("/api/health/live")
 async def health_liveness():
@@ -496,12 +498,16 @@ async def health_check():
     except Exception as exc:
         raise HTTPException(status_code=503, detail="MongoDB unreachable") from exc
 
+    # Counts only: workflow names, handler metadata and the workflow root's
+    # filesystem path describe the deployment and are not for an
+    # unauthenticated caller. Signed-in callers list workflows via /api/workflows.
     status = workflow_status_summary()
+    workflows = {key: status.get(key, 0) for key in _PUBLIC_WORKFLOW_COUNTS}
 
     return {
         "status": "healthy",
         "timestamp": datetime.now(UTC).isoformat(),
-        "workflows": status,
+        "workflows": workflows,
         "transport": "initialized" if simple_transport else "not_initialized",
     }
 

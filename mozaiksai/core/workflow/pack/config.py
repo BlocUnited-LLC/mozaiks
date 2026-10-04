@@ -36,8 +36,8 @@ def _workflows_root() -> Path:
 
     Resolution order:
       1. MOZAIKS_WORKFLOWS_PATH
-      2. workspace-root workflows for the active app
-      3. repo-local factory workflows fallback
+      2. workspace-root workflows for the active app, present or not
+      3. repo-local factory workflows when no app is active
     """
     return primary_workflows_root()
 

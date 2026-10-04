@@ -236,7 +236,9 @@ def _get_configured_entry_point() -> str | None:
 def _resolve_requested_workflow_name(requested_workflow_name: str | None) -> str:
     ordered_names = get_ordered_workflow_names()
     if not ordered_names:
-        raise HTTPException(status_code=503, detail="No runnable workflows are currently loaded.")
+        # An app that declares no workflows serves none; that is permanent, not
+        # a temporary outage.
+        raise HTTPException(status_code=404, detail="Workflow not found")
 
     requested = str(requested_workflow_name or "").strip()
     if requested and requested not in NON_RUNNABLE_WORKFLOW_IDS:

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
 from mozaiksai.core.workflow.startup_messages import (
     resolve_workflow_launch_behavior,
     should_autostart_empty_workflow,
@@ -39,6 +42,16 @@ def test_resolve_requested_workflow_uses_loaded_name_when_known(monkeypatch) -> 
     monkeypatch.setattr(platform_app, "_get_configured_entry_point", lambda: "AppGenerator")
 
     assert platform_app._resolve_requested_workflow_name("valueengine") == "ValueEngine"
+
+
+def test_resolve_requested_workflow_is_not_found_when_the_app_serves_none(monkeypatch) -> None:
+    monkeypatch.setattr(platform_app, "get_ordered_workflow_names", lambda: [])
+    monkeypatch.setattr(platform_app, "_get_configured_entry_point", lambda: "ValueEngine")
+
+    with pytest.raises(HTTPException) as exc:
+        platform_app._resolve_requested_workflow_name("DesignDocs")
+
+    assert exc.value.status_code == 404
 
 
 def test_empty_workflow_autostart_modes_include_userdriven() -> None:

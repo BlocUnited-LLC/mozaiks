@@ -82,6 +82,16 @@ This project follows a practical pre-1.0 changelog format:
 - Self-hosted subscription grant and revoke actions are internal-only; HTTP
   callers cannot assign themselves paid entitlements.
 
+- An app workspace without its own `workflows/` folder now serves no
+  workflows. Hosts other than Studio previously fell back to the packaged
+  Factory workflows for such an app, so a generated app's container loaded
+  them. Studio still serves the Factory workflows, an app with its own
+  `workflows/` serves those, and an app registry that extends
+  `mozaiks.default_workflow_registry` still resolves the default workflows.
+  `/api/health` now reports workflow counts only, without workflow names,
+  handler metadata or filesystem paths, and the platform host answers 404, not
+  503, when a chat is started for a workflow it does not serve.
+
 - Runtime persistence enforces declared user/workspace ownership for every
   module read, write, and aggregation using authenticated identity. Inserts
   stamp the declared owner field and reject conflicting values; client-selected
