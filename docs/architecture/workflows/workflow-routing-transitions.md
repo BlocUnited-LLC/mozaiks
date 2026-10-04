@@ -328,6 +328,20 @@ routes against the reviewed bundle rather than an ambient app workspace.
 If the trigger response is `harness_decision`, the chat shell must feed it into
 the shared pending harness decision UI before launching any downstream workflow.
 
+The App Workbench opens on the draft preview and change request. Code, raw
+diffs, validation commands, and export tools remain available through explicit
+controls; accepting and activating a draft remain separate, server-authorized
+actions. Delivery confirmation remains visible when the workflow requires it.
+A failed preview attempt stops status observation and keeps its original error
+until an explicit retry, stop, or version change. Preview errors are shown as
+collapsed plain-text details. The chat typing indicator follows current loading
+state: historical tool output cannot restart it after an interactive request or
+terminal event has stopped activity.
+Scoped refinement preserves the exported bundle's root `.env.example`,
+`.env.staging.example`, and `.env.production.example` templates. Actual environment
+files and nested credential paths remain blocked; the existing deployment
+acceptance checks still reject real secret values in those templates.
+
 ## Dependencies
 
 Dependencies are hard prerequisites and belong on workflow entries:

@@ -509,7 +509,9 @@ class ArtifactPreviewSessionManager:
                     return await self._fail(state, "Preview image cannot stop the canonical runtime; rebuild the configured sandbox image", token)
                 if state.has_requirements:
                     install = await adapter.run_command(
-                        session_id=session_id, command="python -m pip install --user -c /opt/mozaiks/preview-constraints.txt -r requirements.txt",
+                        # The disposable image uses Debian Python; permit only
+                        # this sandbox user's constrained dependency install.
+                        session_id=session_id, command="python -m pip install --user --break-system-packages -c /opt/mozaiks/preview-constraints.txt -r requirements.txt",
                         cwd=self._workdir(state.provider), timeout_seconds=300,
                     )
                     if not install.success:

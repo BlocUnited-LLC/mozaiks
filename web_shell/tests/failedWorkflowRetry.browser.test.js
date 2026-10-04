@@ -54,7 +54,7 @@ for (const scenario of [
   { name: 'failed session with tool output only', failed: true, loading: false, output: true, expected: false },
   { name: 'retry launching', failed: true, launching: true, loading: true, output: true, expected: false },
   { name: 'active session loading', loading: true, expected: true },
-  { name: 'active session awaiting first agent text', output: true, expected: true },
+  { name: 'historical tool output after activity stopped', output: true, expected: false },
   { name: 'idle session', expected: false },
 ]) {
   test(`typing indicator: ${scenario.name}`, async () => {
@@ -177,6 +177,7 @@ test('failed workflow retry uses the existing authenticated launch path', async 
     };
     function Fixture() {
       const [messages, setMessages] = useState([]);
+      const [loading, setLoading] = useState(false);
       const [scope, setScope] = useState({ appId: 'execution-host', userId: 'operator', chatId: 'failed-chat',
         workflowName: 'ExampleWorkflow', surface: 'studio', mode: 'workflow', blocked: false });
       const retry = useFailedWorkflowRetry(scope);
@@ -186,10 +187,11 @@ test('failed workflow retry uses the existing authenticated launch path', async 
         window.fixture.observe = retry.observeSessionMeta;
         window.fixture.retry = retry.retry;
         window.fixture.setMessages = setMessages;
+        window.fixture.setLoading = setLoading;
       });
       return <main style={{ height: '100vh', maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
         <ChatInterface messages={messages} onSendMessage={() => {}} workflowName={scope.workflowName}
-          loading={false} connectionStatus="disconnected" conversationMode={scope.mode}
+          loading={loading} connectionStatus="disconnected" conversationMode={scope.mode}
           hideHeader={true} plainContainer={true}
           failedWorkflowRetry={retry.available ? retry : null} />
       </main>;
@@ -249,6 +251,31 @@ test('failed workflow retry uses the existing authenticated launch path', async 
       chat_id: 'failed-chat', app_id: 'execution-host', workflow_name: 'ExampleWorkflow', ...patch }), patch);
   }
   const retryButton = page => page.getByRole('button', { name: 'Retry failed workflow', exact: true });
+
+  await t.test('only current activity shows typing after interactive output or completion', async () => {
+    const page = await open();
+    const history = [
+      {id:'progress', sender:'agent', content:'8 tasks completed.', metadata:{event_type:'tool_progress'}},
+      {id:'tool-message', sender:'agent', content:'Your app bundle is ready.', metadata:{type:'tool_call_agent_message'}},
+    ];
+    const typing = page.getByRole('status', {name:'Assistant is typing', exact:true});
+    await page.evaluate(messages => window.fixture.setMessages(messages), history);
+    assert.equal(await typing.count(), 0, 'completed tool output is not ongoing work');
+    await page.evaluate(() => window.fixture.setLoading(true));
+    await typing.waitFor({state:'visible'});
+    await page.evaluate(() => window.fixture.setLoading(false));
+    await typing.waitFor({state:'detached'});
+    assert.equal(await page.getByText('Your app bundle is ready.', {exact:true}).isVisible(), true);
+    await page.evaluate(messages => window.fixture.setMessages([...messages,
+      {id:'thinking', sender:'agent', content:'', isThinking:true}]), history);
+    const thinking = page.getByRole('status', {name:'Assistant activity',exact:true});
+    await thinking.waitFor({state:'visible'});
+    assert.equal(await typing.count(), 0, 'the explicit thinking bubble remains independent');
+    await page.evaluate(messages => window.fixture.setMessages(messages), history);
+    await thinking.waitFor({state:'detached'});
+    assert.equal(await typing.count(), 0, 'clearing current activity cannot resurrect historical typing');
+    await page.close();
+  });
 
   for (const status of [0, 1, 'failed', 'paused', null]) {
     await t.test(`does not offer retry for unconfirmed terminal status ${status}`, async () => {

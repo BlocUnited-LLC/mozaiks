@@ -488,38 +488,9 @@ const ModernChatInterface = ({
     return !isEmptyContent || chat.isThinking || hasStructured || hasToolCall || hasAttachment || hasTrace || isSystem;
   });
 
-  // Show a typing indicator when workflow has produced any inline tool call or
-  // tool progress but no agent text has arrived yet.
-  // This covers the before-chat → first-agent gap where before_chat hooks emit
-  // UI surfaces, run_complete clears loading=false, and then DiscoveryHostAgent
-  // (or any first agent) starts its run with no stream chunks yet.
-  const showTypingIndicator = !failedWorkflowRetry && (loading || (() => {
-    if (!Array.isArray(messages) || connectionStatus === 'error') return false;
-    let hasWorkflowOutput = false;
-    let hasAgentText = false;
-    for (const msg of messages) {
-      if (!msg || msg.metadata?.hideInTranscript) continue;
-      // Tool progress or inline tool calls count as visible workflow output.
-      if (
-        msg.toolCall
-        || msg.metadata?.event_type === 'tool_progress'
-      ) {
-        hasWorkflowOutput = true;
-      }
-      if (
-        msg.sender === 'agent'
-        && !msg.isThinking
-        // tool_call_agent_message = planning text before a tool call — not the final response
-        && msg.metadata?.type !== 'tool_call_agent_message'
-        && msg.content
-        && String(msg.content).trim().length > 0
-      ) {
-        hasAgentText = true;
-      }
-    }
-    // Only fire in workflow mode — ask mode doesn't have this gap
-    return conversationMode === 'workflow' && hasWorkflowOutput && !hasAgentText;
-  })());
+  // Historical tool output does not imply current activity. Interactive UI
+  // requests and terminal events clear loading through the shared subscriber.
+  const showTypingIndicator = !failedWorkflowRetry && loading;
   const renderedMessages = (() => {
     // Determine the last chat index with a primary content message
     let lastContentIndex = -1;
@@ -622,7 +593,7 @@ const ModernChatInterface = ({
           </section>
         </div>
       )}
-      {/* Typing indicator slot: shown while loading, or when a UI surface arrived before any agent text */}
+      {/* Current run activity; historical messages never restart this indicator. */}
       {showTypingIndicator && (
         <div className="flex justify-start px-0 message-container">
           <div className="mt-1 px-2 py-1 rounded-md bg-transparent text-[rgba(var(--color-primary-light-rgb),0.7)] flex items-center gap-1 text-xs font-mono tracking-wide typing-indicator" aria-label="Assistant is typing" role="status">

@@ -272,12 +272,12 @@ async def save_value_manifest(
             author_user_id=str(user_id), revision_mode=str(build_mode or "").strip().lower() == "revision",
         )
         if outcome == "approved":
-            named = await AppRegistryService().apply_approved_concept_name(
+            named = await AppRegistryService().apply_approved_concept_identity(
                 owner_user_id=str(user_id), execution_app_id=str(execution_app_id),
-                binding=binding, name=app_name,
+                binding=binding, name=app_name, description=concept_overview,
             )
             if not named["success"]:
-                return {"success": False, "outcome": "blocked", "error": "The registered build changed before its name could be saved"}
+                return {"success": False, "outcome": "blocked", "error": "The registered build changed before its identity could be saved"}
     except ValidationError:
         return {"success": False, "outcome": "blocked", "error": "Invalid structured concept review"}
     except Exception as exc:

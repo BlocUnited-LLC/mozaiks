@@ -109,7 +109,12 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       const delivery = new URLSearchParams(location.search).get('delivery') || 'files';
       const payload = {artifact_version_id:'baseline', build_registry_id:'owned-build',
         refinement_result:window.initialRefinement,
-        files:delivery==='files' ? [{name:'app.zip'}] : [],
+        files:delivery==='files' || delivery==='continue' ? [{name:'app.zip'}] : [],
+        ...(delivery==='continue' ? {actions:[
+          {id:'continue', label:'Continue', approved:true},
+          {id:'close', label:'Close'},
+          {id:'export_to_github', label:'Export to GitHub'},
+        ]} : {}),
         stage:delivery==='confirm' || delivery==='custom-confirm' ? 'confirm' : 'files_ready',
         ...(delivery==='custom-confirm' ? {actions:[
           {id:'download_complete', label:'Download Bundle', approved:true},
@@ -133,6 +138,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     }}],
   });
   let scenario;
+  let accepted = false;
   const requests = [];
   const candidateValidation = () => scenario.missingProof ? {validation_status:"passed"} : ({
     validation_status:scenario.validation, validation_strategy:'local',
@@ -160,8 +166,8 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     review_status: id === 'baseline' ? 'validated' : scenario.status,
     changed_file_count: id === 'baseline' ? 0 : 1,
     changed_files: id === 'baseline' ? [] : [{path:'README.md', change_type:'modified', diff_preview:'-Original contents\n+Candidate contents'}],
-    can_accept: id !== 'baseline' && scenario.status === 'validated',
-    can_reject: id !== 'baseline', can_promote:false,
+    can_accept: id !== 'baseline' && scenario.status === 'validated' && !accepted,
+    can_reject: id !== 'baseline', can_promote:scenario.promotion === true && accepted,
     validation_blocker: id !== 'baseline' && scenario.status !== 'validated' ? 'Validation has not passed.' : null,
   });
   const server = http.createServer(async (req, res) => {
@@ -181,17 +187,66 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       res.end(JSON.stringify(triggerResult()));
       return;
     }
-    const match = req.url.match(/^\/api\/studio\/build\/artifacts\/(baseline|candidate)\/(review|reject|accept)\?build_registry_id=owned-build$/);
+    const match = req.url.match(/^\/api\/studio\/build\/artifacts\/(baseline|candidate)\/(review|reject|accept|promote)\?build_registry_id=owned-build$/);
     if (!match) { res.statusCode=404; res.end('{"detail":"Unexpected fixture route"}'); return; }
     if (scenario.reviewError && match[1] === 'candidate') {
       res.statusCode=503; res.end('{"detail":"Saved draft review is unavailable."}'); return;
     }
+    if (scenario.promotion && match[2] === 'accept') accepted = true;
     res.end(JSON.stringify({review:review(match[1])}));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => {server.closeAllConnections(); server.close(resolve);}));
   const browser = await chromium.launch({headless:true});
   t.after(() => browser.close());
+  await t.test('preview and changes lead; code and export are opt-in; activation requires its own click', async () => {
+    scenario = {status:'validated', validation:'passed', saved:true, promotion:true};
+    accepted = false;
+    requests.length = 0;
+    const page = await browser.newPage({viewport:{width:390, height:844}});
+    try {
+      await page.goto(`http://127.0.0.1:${server.address().port}`);
+      await expect(page.getByLabel('Preview version')).toHaveText('baseline');
+      await expect(page.getByLabel('Editor contents')).toHaveCount(0);
+      await expect(page.getByRole('textbox', {name:'App change request'})).toBeVisible();
+      await expect(page.getByText('Download and export details', {exact:true})).toBeVisible();
+      await expect(page.getByText('app.zip', {exact:true})).toBeHidden();
+      assert.ok(!requests.some(r => r.method === 'POST'));
+      await page.getByRole('textbox', {name:'App change request'}).fill('Change the README.');
+      await page.getByRole('button', {name:'Apply change',exact:true}).click();
+      const panel = page.getByRole('region', {name:'Artifact review'});
+      await expect(panel.getByRole('button', {name:'Accept artifact',exact:true})).toBeVisible();
+      await expect(panel.getByText('-Original contents\n+Candidate contents', {exact:true})).toBeHidden();
+      await expect(panel.getByRole('button', {name:'Activate this draft',exact:true})).toHaveCount(0);
+      await panel.getByText('Code changes (1)', {exact:true}).click();
+      await expect(panel.getByText('-Original contents\n+Candidate contents', {exact:true})).toBeVisible();
+      await panel.getByRole('button', {name:'Accept artifact',exact:true}).click();
+      await expect(panel.getByRole('button', {name:'Activate this draft',exact:true})).toBeVisible();
+      assert.ok(!requests.some(r => r.url.includes('/promote?')));
+      await panel.getByRole('button', {name:'Activate this draft',exact:true}).click();
+      await expect.poll(() => requests.filter(r => r.url.includes('/candidate/promote?')).length).toBe(1);
+      assert.equal(requests.filter(r => r.url === '/fixture-trigger').length, 1);
+    } finally { accepted = false; await page.close(); }
+  });
+  await t.test('Continue remains visible while export fields are collapsed and requires acknowledgement', async () => {
+    scenario = {status:'planned', validation:'pending', saved:true};
+    requests.length = 0;
+    const page = await browser.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${server.address().port}/?delivery=continue`);
+      const proceed = page.getByRole('button', {name:'Continue',exact:true});
+      await expect(proceed).toBeVisible();
+      await expect(page.getByRole('textbox', {name:'Repository Name'})).toBeHidden();
+      await expect(page.getByRole('button', {name:'Export to GitHub',exact:true})).toBeHidden();
+      assert.ok(!requests.some(r => r.url === '/fixture-response'));
+      await page.getByText('Download and export details', {exact:true}).click();
+      await expect(page.getByRole('textbox', {name:'Repository Name'})).toBeVisible();
+      await proceed.click();
+      await expect.poll(() => requests.filter(r => r.url === '/fixture-response').length).toBe(1);
+      assert.equal(JSON.parse(requests.find(r => r.url === '/fixture-response').body).action,'continue');
+      assert.ok(!requests.some(r => r.url.includes('/promote?') || r.url.includes('/download?')));
+    } finally { await page.close(); }
+  });
   for (const delivery of ['empty', 'confirm', 'custom-confirm']) {
     await t.test(`original delivery actions: ${delivery}`, async () => {
       scenario = {status:'planned', validation:'pending', saved:true};
@@ -255,6 +310,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
         await expect(page.getByRole('button', {name:'Download Bundle',exact:true})).toHaveCount(0);
         const advances = item.status === 'validated' && item.saved;
         await expect(page.getByLabel('Preview version')).toHaveText(advances ? 'candidate' : 'baseline');
+        await page.getByRole('button', {name:'Split',exact:true}).click();
         await expect(page.getByLabel('Editor contents')).toHaveText(advances ? 'Candidate contents' : 'Original contents');
         if (item.saved && !advances) await expect(result).toContainText('The editor and preview still show version baseline.');
         if (item.status === 'failed') await expect(result).toContainText('Required checks failed.');
@@ -265,7 +321,9 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
           if (item.reviewError) await expect(panel.getByRole('alert')).toHaveText('Saved draft review is unavailable.');
           else {
             await expect(panel).toContainText('Version candidate');
-            await expect(panel).toContainText('-Original contents\n+Candidate contents');
+            await expect(panel.getByText('-Original contents\n+Candidate contents', {exact:true})).toBeHidden();
+            await panel.getByText('Code changes (1)', {exact:true}).click();
+            await expect(panel.getByText('-Original contents\n+Candidate contents', {exact:true})).toBeVisible();
             if (advances) {
               await page.getByRole('button', {name:'Accept artifact', exact:true}).click();
               await expect.poll(() => requests.filter(r => r.method === 'POST' && r.url.includes('/candidate/accept')).length).toBe(1);
@@ -299,6 +357,7 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
         await expect(page.getByLabel('Preview version')).toHaveText(validation === 'passed' ? 'candidate' : 'baseline');
         await expect(page.getByText('Parent evidence only', {exact:true})).toHaveCount(0);
         await expect(page.getByText(validation === 'passed' ? 'Validation passed' : 'Validation skipped', {exact:true})).toBeVisible();
+        await page.getByRole('button', {name:'Split',exact:true}).click();
         await expect(page.getByLabel('Editor contents')).toHaveText(validation === 'passed' ? 'Candidate contents' : 'Original contents');
         await page.getByRole('button', {name:'Review patch',exact:true}).click();
         await expect(page.getByRole('region', {name:'Artifact review'})).toContainText('Version candidate');

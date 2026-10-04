@@ -34,7 +34,7 @@ function buildDownloadUrl(payload, file) {
   throw new Error('This artifact has no authorized download URL.');
 }
 
-export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
+export default function DownloadCenter({ payload = {}, onResponse, onCancel, collapseDetails = false }) {
   const files = Array.isArray(payload.files) ? payload.files : [];
   const actions = normalizePrimitiveActions(payload, onResponse ? fallbackActions : []);
   const exportAction = actions.find((action) => action.id === 'export_to_github') || null;
@@ -48,6 +48,7 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState('');
   const submissionInFlight = useRef(false);
+  const Details = collapseDetails ? 'details' : 'div';
 
   async function triggerBrowserDownloads() {
     const downloadableFiles = files.filter(Boolean);
@@ -135,6 +136,15 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
     }
   }
 
+  const exportControl = exportAction ? (
+    <Button
+      label={exportAction.label}
+      variant={exportAction.variant}
+      disabled={isSubmitting}
+      onClick={() => handleAction(exportAction)}
+    />
+  ) : null;
+
   return (
     <SurfaceCard
       title={payload.title || 'Download center'}
@@ -150,6 +160,8 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
         ) : null}
         {submissionError ? <Alert message={submissionError} variant="destructive" /> : null}
 
+        <Details className="space-y-3">
+          {collapseDetails && <summary className="cursor-pointer text-sm text-muted-foreground">Download and export details</summary>}
         <div className="space-y-2">
           {files.map((file, index) => (
             <div key={`${file?.name || index}`} className="rounded-md border border-border/60 bg-muted/30 px-3 py-3">
@@ -200,6 +212,9 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
           </div>
         ) : null}
 
+        {collapseDetails && exportControl}
+        </Details>
+
         <div className="flex flex-wrap gap-3">
           {primaryActions.map((action) => (
             <Button
@@ -210,14 +225,7 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
               onClick={() => handleAction(action)}
             />
           ))}
-          {exportAction ? (
-            <Button
-              label={exportAction.label}
-              variant={exportAction.variant}
-              disabled={isSubmitting}
-              onClick={() => handleAction(exportAction)}
-            />
-          ) : null}
+          {!collapseDetails && exportControl}
           {onCancel ? (
             <Button label="Cancel" variant="ghost" disabled={isSubmitting} onClick={() => onCancel({ status: 'cancelled', action: 'cancel' })} />
           ) : null}

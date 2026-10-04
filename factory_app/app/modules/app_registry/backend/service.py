@@ -232,19 +232,21 @@ class AppRegistryService:
         )
         return {"success": True, "app": app}
 
-    async def apply_approved_concept_name(
+    async def apply_approved_concept_identity(
         self, *, owner_user_id: str, execution_app_id: str, binding: RunBuildBinding, name: str,
+        description: str | None = None,
     ) -> dict[str, Any]:
-        """Name the existing build target after its concept review is persisted."""
+        """Project approved identity onto the bound target, preserving explicit metadata."""
         approved_name = normalize_optional_text(name)
         if approved_name is None or is_generic_app_name(approved_name):
             raise ValueError("An approved concept requires a specific product name")
         if not normalize_optional_text(execution_app_id):
             raise ValueError("execution_app_id is required")
-        app = await self.repo.update_concept_name(
+        app = await self.repo.update_concept_identity(
             owner_user_id=owner_user_id, execution_app_id=execution_app_id,
             build_registry_id=binding.build_registry_id, app_id=binding.target_app_id,
             expected_build_id=binding.build_id, name=approved_name,
+            description=normalize_optional_text(description),
         )
         return {"success": app is not None, "app": app}
 

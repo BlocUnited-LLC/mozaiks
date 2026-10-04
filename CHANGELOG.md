@@ -324,6 +324,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Studio drafts show the registered app's current build and approved description.
+  The workbench opens on preview, keeps required continuation and review actions
+  visible, and offers code, downloads, and diagnostics on demand. Historical chat
+  messages no longer keep the typing indicator active after the run pauses.
+- Draft preview dependency installation works with the disposable image's Debian
+  Python, retaining the sandbox user and pinned runtime dependency constraints.
+  Failed previews preserve their original error until retry or dismissal.
+- Scoped refinement preserves the three canonical exported environment templates;
+  real credential files remain blocked and template values still pass deployment
+  validation before acceptance.
 - Generated apps receive their shared API helper before build validation. Preview
   requests default to the app's own origin, and frontend build errors enter the
   existing bounded repair path or finish with a failure explanation.

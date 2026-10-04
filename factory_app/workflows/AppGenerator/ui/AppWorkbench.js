@@ -59,7 +59,7 @@ const AppWorkbench = ({
     return candidates.find((candidate) => candidate && typeof candidate === 'object') || {};
   }, [payload]);
   const layoutCfg = config?.layout || {};
-  const defaultView = layoutCfg.defaultView || 'split';
+  const defaultView = layoutCfg.defaultView || 'preview-only';
   const [view, setView] = useState(defaultView);
   const [refinementRequest, setRefinementRequest] = useState('');
   const [limitToSelectedFile, setLimitToSelectedFile] = useState(false);
@@ -156,7 +156,7 @@ const AppWorkbench = ({
     const agentMsg = payload?.agent_message || payload?.description || null;
     if (agentMsg && typeof agentMsg === 'string') return agentMsg;
     if (validationStatus === 'passed') {
-      return 'Validation passed. Review code, preview, and export.';
+      return 'Try your app, request changes, then review it for activation.';
     }
     if (validationStatus === 'skipped') {
       return 'This draft has not been validated. Required checks must pass before export or activation.';
@@ -381,12 +381,12 @@ const AppWorkbench = ({
   return (
     <div className={panelClass}>
       <div className="px-4 py-3 border-b border-white/10 bg-black/40">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-white font-bold font-heading text-sm">{headerText}</div>
             <div className="text-xs text-[var(--color-text-muted)] mt-1">{subtitle}</div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             <button type="button" className={toolbarBtn(showSplit)} onClick={() => setView('split')} title="Split view">
               <LayoutGrid className="w-4 h-4" /> Split
             </button>
@@ -474,7 +474,7 @@ const AppWorkbench = ({
           />
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+            {(showCode || showSplit || limitToSelectedFile) && <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
               <input
                 type="checkbox"
                 checked={limitToSelectedFile}
@@ -482,7 +482,7 @@ const AppWorkbench = ({
                 disabled={!selectedPath || refinementStarting}
               />
               Limit to selected file
-            </label>
+            </label>}
             <button
               type="button"
               className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}
@@ -496,7 +496,7 @@ const AppWorkbench = ({
               className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}
               disabled={!canApplyScopedRefinement || refinementStarting}
               onClick={handleThemeRefinement}
-              title="Routes through ThemeCapture for design-level changes; uses the coding worker for small patches."
+              title="Change your app's colors, fonts, or visual identity."
             >
               {refinementStarting ? 'Applying...' : 'Redesign theme'}
             </button>
@@ -556,24 +556,27 @@ const AppWorkbench = ({
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-white">Artifact Review</div>
-                <div className="mt-1 text-xs text-[var(--color-text-muted)]">Version {reviewArtifactVersionId}</div>
-                <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-                  Lifecycle: {artifactReview.lifecycle_status} · Validation: {artifactReview.validation_status} · Review: {artifactReview.review_status}
-                </div>
+                <div className="text-sm font-semibold text-white">Review this draft</div>
+                <div className="mt-1 text-xs text-[var(--color-text-muted)]">Accept the draft when you are satisfied. Activation is a separate step.</div>
               </div>
               <div className="text-[10px] text-[var(--color-text-muted)]">
                 {artifactReview.changed_file_count || 0} changed file{artifactReview.changed_file_count === 1 ? '' : 's'}
               </div>
             </div>
 
+            <details className="mt-3 text-xs text-[var(--color-text-muted)]">
+              <summary className="cursor-pointer">Version and check details</summary>
+              <div className="mt-2 break-words [overflow-wrap:anywhere]">Version {reviewArtifactVersionId}</div>
+              <div className="mt-1">
+                Lifecycle: {artifactReview.lifecycle_status} · Validation: {artifactReview.validation_status} · Review: {artifactReview.review_status}
+              </div>
             {artifactReview.selected_paths?.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {artifactReview.selected_paths.map((path) => (
                   <button
                     key={path}
                     type="button"
-                    onClick={() => setSelectedPath(path)}
+                    onClick={() => { setSelectedPath(path); setView('code-only'); }}
                     className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] text-[var(--color-text-muted)] transition hover:bg-white/10"
                   >
                     {path}
@@ -581,6 +584,7 @@ const AppWorkbench = ({
                 ))}
               </div>
             )}
+            </details>
 
             {artifactReview.coding_summary && (
               <div className="mt-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-[var(--color-text-muted)]">
@@ -595,7 +599,9 @@ const AppWorkbench = ({
             )}
 
             {(artifactValidationCommands.length > 0 || artifactValidationFallbacks.length > 0) && (
-              <div className="mt-3 grid gap-2 text-xs text-[var(--color-text-muted)] sm:grid-cols-2">
+              <details className="mt-3 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer">Validation commands</summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 {artifactValidationCommands.slice(0, 4).map((item) => (
                   <div key={`${item.kind}:${item.command}`} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
                     <div className="break-all font-mono text-[11px] text-white">{item.command}</div>
@@ -609,6 +615,7 @@ const AppWorkbench = ({
                   </div>
                 ))}
               </div>
+              </details>
             )}
 
             {(artifactReview.can_accept || artifactReview.can_reject || artifactReview.can_promote) && (
@@ -640,21 +647,23 @@ const AppWorkbench = ({
                     disabled={artifactReviewBusy}
                     onClick={() => handleArtifactReviewAction('promote')}
                   >
-                    {artifactReviewBusy ? 'Working...' : 'Promote to app root'}
+                    {artifactReviewBusy ? 'Working...' : 'Activate this draft'}
                   </button>
                 )}
               </div>
             )}
 
             {artifactReview.changed_files?.length > 0 && (
-              <div className="mt-4 space-y-3">
+              <details className="mt-4 text-xs text-[var(--color-text-muted)]">
+                <summary className="cursor-pointer">Code changes ({artifactReview.changed_file_count || artifactReview.changed_files.length})</summary>
+              <div className="mt-3 space-y-3">
                 {artifactReview.changed_files.slice(0, 6).map((file) => (
                   <div key={`${file.change_type}:${file.path}`} className="rounded-xl border border-white/10 bg-black/30 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <button
                         type="button"
-                        onClick={() => setSelectedPath(file.path)}
-                        className="font-mono text-xs text-white transition hover:text-[var(--color-primary)]"
+                        onClick={() => { setSelectedPath(file.path); setView('code-only'); }}
+                        className="min-w-0 break-words [overflow-wrap:anywhere] font-mono text-xs text-white transition hover:text-[var(--color-primary)]"
                       >
                         {file.path}
                       </button>
@@ -670,6 +679,7 @@ const AppWorkbench = ({
                   </div>
                 ))}
               </div>
+              </details>
             )}
           </div>
         )}
@@ -678,7 +688,8 @@ const AppWorkbench = ({
         {canShowExportActions && (
           <div className="pt-2">
             <ExportActions
-              payload={exportPayload}
+              payload={{ ...exportPayload, title: 'Finish this step' }}
+              collapseDetails
               onResponse={onResponse}
               toolName={toolName}
               toolCallId={toolCallId}

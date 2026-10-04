@@ -8,9 +8,12 @@ deletions become scope violations instead of accepted changes.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import stat
 import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -58,7 +61,9 @@ def test_materialize_rejects_unsafe_paths(tmp_path: Path, bad_path: str) -> None
 
 @pytest.mark.parametrize(
     "secret_path",
-    [".env", ".env.local", ".env.production", "secrets/.env.example", "config/secrets.yaml", "keys/id_rsa", "certs/server.pem"],
+    [".env", ".env.local", ".env.production", ".env.staging", ".env.private.example",
+     "secrets/.env.example", "secrets/.env.production.example", "config/.env.staging.example",
+     "config/secrets.yaml", "keys/id_rsa", "certs/server.pem"],
 )
 def test_materialize_rejects_secret_paths(tmp_path: Path, secret_path: str) -> None:
     with pytest.raises(ValueError, match="WORKSPACE_SECRET_PATH"):
@@ -79,6 +84,66 @@ def test_bundle_environment_example_is_preserved(tmp_path: Path) -> None:
     harvest = harvest_coding_workspace(workspace)
     assert harvest.clean
     assert {entry.path: entry.content for entry in harvest.files} == files
+
+
+@pytest.mark.asyncio
+async def test_verified_export_candidate_preserves_canonical_environment_templates(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+        generate_deployment_artifacts,
+    )
+    from mozaiksai.core.artifacts.content_store import read_verified_artifact_bundle
+    from mozaiksai.core.artifacts.models import BuildRecord, canonical_bundle_archive_path
+
+    files = {
+        "app.json": '{"appId":"example","appName":"Example"}',
+        "requirements.txt": "mozaiks==0.2.0\nbson\n",
+        **generate_deployment_artifacts(
+            app_id="example", include_dockerfiles=True, include_workflow=False, include_compose=False,
+        )["artifacts"],
+    }
+    archive_path = tmp_path / "export.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    record = BuildRecord(
+        id="export", app_id="example", build_family="app_bundle", build_key="app_bundle",
+        version_number=1, lineage_root_id="export",
+        files_manifest=[{
+            "path": canonical_bundle_archive_path("Export"), "content_type": "application/zip",
+            "sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+        }],
+        commit_metadata={"metadata": {"bundle_name": "Export", "artifact_path": str(archive_path)}},
+    )
+    verified = await read_verified_artifact_bundle(record)
+    with zipfile.ZipFile(io.BytesIO(verified)) as archive:
+        candidate = {name: archive.read(name).decode() for name in archive.namelist()}
+    candidate["requirements.txt"] = "mozaiks==0.2.0\n"
+    workspace = materialize_coding_workspace(candidate, workspace_root=tmp_path / "candidate")
+    harvest = harvest_coding_workspace(workspace)
+    assert harvest.clean
+    assert {entry.path: entry.content for entry in harvest.files} == candidate
+    assert set(candidate) == set(files)
+    assert {name for name in files if candidate[name] != files[name]} == {"requirements.txt"}
+
+
+@pytest.mark.parametrize("path", [".env.example", ".env.staging.example", ".env.production.example"])
+def test_environment_template_allowance_keeps_deployment_secret_value_gate(path: str) -> None:
+    from factory_app.workflows.AppGenerator.tools.app_validation import (
+        _requires_deployment_artifacts,
+    )
+    from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+        generate_deployment_artifacts,
+        validate_generated_deployment_bundle,
+    )
+
+    artifacts = generate_deployment_artifacts(
+        app_id="example", include_dockerfiles=True, include_workflow=False, include_compose=False,
+    )["artifacts"]
+    assert _requires_deployment_artifacts(artifacts, {})
+    assert validate_generated_deployment_bundle(artifacts, include_dockerfiles=True, include_workflow=False) == []
+    artifacts[path] = artifacts[path].replace("OPENAI_API_KEY=\n", "OPENAI_API_KEY=not-an-empty-placeholder\n")
+    errors = validate_generated_deployment_bundle(artifacts, include_dockerfiles=True, include_workflow=False)
+    assert any(f"secret variable OPENAI_API_KEY in {path}" in error for error in errors)
 
 
 # ---------------------------------------------------------------------------

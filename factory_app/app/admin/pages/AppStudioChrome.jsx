@@ -213,7 +213,7 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
     <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-md shadow-black/8">
 
       {/* ── Banner strip ──────────────────────────────────────────────────── */}
-      <div className="relative h-36 sm:h-48">
+      <div className={bannerSrc ? 'relative h-36 sm:h-48' : 'flex justify-end px-5 pt-4 sm:px-6'}>
 
         {bannerSrc ? (
           <img
@@ -222,17 +222,9 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
             aria-hidden="true"
             className="h-full w-full object-cover"
           />
-        ) : (
-          /* No image: bold gradient so the strip looks intentional */
-          <>
-            <div className="absolute inset-0 bg-gradient-to-br from-primary/70 via-primary/30 to-secondary/60" />
-            <div className="absolute left-0 top-0 h-24 w-1/2 rounded-br-full bg-background/10 blur-2xl" />
-            <div className="absolute bottom-0 right-0 h-20 w-1/3 rounded-tl-full bg-secondary/10 blur-2xl" />
-          </>
-        )}
+        ) : null}
 
-        {/* Change cover — label wraps input, always visible bottom-right */}
-        <label className="absolute bottom-3 right-3 flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/25 bg-black/45 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/65 hover:text-white">
+        <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-card/90 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent ${bannerSrc ? 'absolute bottom-3 right-3' : ''}`}>
           <CameraIcon className="h-3.5 w-3.5 shrink-0" />
           {bannerSrc ? 'Change cover' : 'Add cover'}
           <input
@@ -247,13 +239,12 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
       {/* ── Identity strip ────────────────────────────────────────────────── */}
       <div className="px-5 pb-5 sm:px-6 sm:pb-6">
 
-        {/* Logo row — negative margin pulls it up over the banner edge */}
-        <div className="-mt-12 mb-4">
+        <div className={bannerSrc ? '-mt-12 mb-4' : 'mb-3'}>
           <div className="relative shrink-0 inline-block">
             <AppIdentityMark
               summary={summary}
               appId={appId}
-              size="lg"
+              size={bannerSrc ? 'lg' : 'md'}
               logoOverride={logoPreview}
               className="border-4 border-card bg-card shadow-lg shadow-black/20"
             />
@@ -275,8 +266,8 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
 
         {/* App name + tagline + description */}
         <div className="space-y-1">
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-2xl font-bold leading-tight tracking-tight text-foreground">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h2 className="min-w-0 break-words text-2xl font-bold leading-tight tracking-tight text-foreground">
               {appName}
             </h2>
             {lifecycleLabel ? (
@@ -296,8 +287,8 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
               {description}
             </p>
           ) : (
-            <p className="text-sm italic text-muted-foreground/40">
-              App description appears after the concept brief is captured.
+            <p className="text-sm text-muted-foreground">
+              App description is not available.
             </p>
           )}
         </div>

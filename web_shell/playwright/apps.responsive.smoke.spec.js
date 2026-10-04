@@ -102,6 +102,9 @@ const appsPayload = {
       name: 'Campaign Revision Workbench',
       description: 'Release revision blocked on stakeholder feedback.',
       status: 'needs_revision',
+      chat_app_id: 'factory-session-app',
+      active_chat_id: 'campaign-revision-chat',
+      active_workflow_id: 'AppGenerator',
       created_at: '2025-02-01T09:00:00Z',
       updated_at: '2025-02-04T18:25:00Z',
     },
@@ -1460,7 +1463,7 @@ test('app overview route stays responsive across desktop and mobile widths', asy
   await expect(main.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
   await expect(main.getByText('Campaign Revision Workbench').first()).toBeVisible();
   await expect(main.getByText('Next step').first()).toBeVisible();
-  await expect(main.getByRole('link', { name: 'Continue Build' }).first()).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Continue Build' })).toHaveCount(0);
   await expect(main.getByRole('heading', { name: 'Approval required' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
   await expect(main.getByText('Runtime cost').first()).toBeVisible();
@@ -1478,6 +1481,124 @@ test('app overview route stays responsive across desktop and mobile widths', asy
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
+
+async function mockOverviewProgress(page, {
+  lifecycle = 'building',
+  currentBuildRun = {
+    build_id: 'q-build', phase: 'genesis', status: lifecycle,
+    active_chat_id: 'q-chat', active_workflow_id: 'AppGenerator',
+  },
+  description = 'A focus timer that tracks completed sessions.',
+  revenue = null,
+  cost = 0,
+} = {}) {
+  // The Q failure shape: current registry run, no legacy build request/plan,
+  // and no deployed runtime history. Top-level chat fields are deliberately stale.
+  const summary = {
+    app: {
+      ...getWorkspaceApp(), name: 'FocusSprint', description,
+      status: lifecycle, lifecycle_state: lifecycle,
+      lifecycle_label: lifecycle === 'needs_revision' ? 'Needs Revision' : lifecycle === 'active' ? 'Active' : 'Building',
+      chat_app_id: 'factory-session-app',
+      active_chat_id: currentBuildRun ? 'stale-chat' : null,
+      active_workflow_id: currentBuildRun ? 'ValueEngine' : null,
+      current_build_run: currentBuildRun,
+    },
+    financials: { total_revenue_usd: revenue },
+  };
+  const responses = [
+    ['**/api/modules/user_onboarding/get_onboarding_status**', buildOnboardingStatusPayload({ dismissed: true })],
+    ['**/api/studio/overview?**', summary],
+    ['**/api/studio/build?**', { build: { plan_state: 'not_started', approval_state: 'not_started' } }],
+    ['**/api/studio/build/history?**', { artifact_versions: [] }],
+    ['**/api/admin/stats*', { tracked_chats: 0 }],
+    ['**/api/admin/runs*', { runs: [] }],
+    ['**/api/admin/usage?**', { totals: { estimated_cost_usd: cost } }],
+    ['**/api/studio/analytics/**', { metrics: {}, insights: [] }],
+    [`**/api/studio/apps/${APP_ID}/context`, {
+      context_readiness: { status: 'missing' }, context_graph_status: { available: false, node_count: 0, edge_count: 0 },
+    }],
+  ];
+  for (const [pattern, body] of responses) {
+    await page.route(pattern, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }));
+  }
+}
+
+for (const lifecycle of ['building', 'needs_revision']) {
+  test(`app overview shows current ${lifecycle} progress before optional diagnostics`, async ({ page }, testInfo) => {
+    await mockOverviewProgress(page, { lifecycle });
+    await page.goto(`/apps/${APP_ID}/overview`);
+    const main = page.locator('main');
+    await expect(main.getByRole('heading', { name: 'FocusSprint' })).toBeVisible();
+    await expect(main.getByText('A focus timer that tracks completed sessions.')).toBeVisible();
+    await expect(main.getByText('Current step: App Generator')).toBeVisible();
+    const resume = main.getByRole('link', { name: 'Continue Build', exact: true });
+    await expect(resume).toHaveAttribute('href', '/chat?workflow=AppGenerator&mode=workflow&chat_id=q-chat&app_id=factory-session-app');
+    await expect(resume).toBeInViewport({ ratio: 1 });
+    expect(await resume.evaluate(link => {
+      const rect = link.getBoundingClientRect();
+      return link.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+    })).toBe(true);
+    await expect(main.getByText('Not started', { exact: true })).toHaveCount(0);
+    await expect(main.getByText(/No builds yet|No build sessions yet|AI-Powered Workflows|concept brief is captured/)).toHaveCount(0);
+    await expect(main.getByRole('heading', { name: 'App intelligence' })).toBeHidden();
+    await expect(main.getByRole('group', { name: 'Revenue', exact: true })).toBeHidden();
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({ path: testInfo.outputPath(`overview-${lifecycle}.png`), fullPage: true });
+
+    const details = main.locator('details').filter({ has: page.locator('summary', { hasText: 'Runtime and source details' }) });
+    await expect(details).not.toHaveAttribute('open', '');
+    await details.locator('summary').click();
+    await expect(main.getByRole('heading', { name: 'App intelligence' })).toBeVisible();
+    await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
+    const margin = main.getByRole('group', { name: 'Margin', exact: true });
+    await expect(margin).toContainText('Pending');
+    await expect(margin).not.toContainText('$0.00');
+    await expectNoHorizontalOverflow(page);
+  });
+}
+
+for (const missingField of ['active_chat_id', 'active_workflow_id']) {
+  test(`app overview without ${missingField} opens Building without inventing a resume`, async ({ page }) => {
+    await mockOverviewProgress(page, { currentBuildRun: null, description: null });
+    // An incomplete saved binding must not synthesize ValueEngine or resume a new chat.
+    await page.route('**/api/studio/overview?**', route => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify({ app: {
+        ...getWorkspaceApp(), name: 'FocusSprint', description: null,
+        status: 'building', lifecycle_state: 'building', lifecycle_label: 'Building',
+        active_chat_id: 'orphan-chat', active_workflow_id: 'AppGenerator', [missingField]: null, current_build_run: {},
+      } }),
+    }));
+    await page.goto(`/apps/${APP_ID}/overview`);
+    const main = page.locator('main');
+    await expect(main.getByText('App description is not available.')).toBeVisible();
+    await expect(main.getByText('Latest saved build progress.')).toHaveCount(0);
+    await expect(main.getByRole('link', { name: 'Continue Build' })).toHaveCount(0);
+    const building = main.getByRole('link', { name: 'Open Building', exact: true });
+    await expect(building).toHaveAttribute('href', `/apps/${APP_ID}/building`);
+    await building.click();
+    await expect(page).toHaveURL(new RegExp(`/apps/${APP_ID}/building$`));
+    await expect(main.getByRole('heading', { name: 'Building', exact: true })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+}
+
+for (const [revenue, cost, expected] of [[100, 40, '$60.00'], [null, 40, 'Pending'], [100, null, 'Pending']]) {
+  test(`active app overview preserves runtime metrics with revenue ${revenue} and cost ${cost}`, async ({ page }) => {
+    await mockOverviewProgress(page, { lifecycle: 'active', currentBuildRun: null, revenue, cost });
+    await page.goto(`/apps/${APP_ID}/overview`);
+    const main = page.locator('main');
+    await expect(main.getByRole('group', { name: 'Revenue', exact: true })).toBeVisible();
+    await expect(main.getByRole('group', { name: 'Runtime Cost', exact: true })).toBeVisible();
+    await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
+    await expect(main.locator('summary', { hasText: 'Runtime and source details' })).toHaveCount(0);
+    const margin = main.getByRole('group', { name: 'Margin', exact: true });
+    await expect(margin).toContainText(expected);
+    if (expected === 'Pending') await expect(margin).not.toContainText('%');
+    await expect(main.getByRole('link', { name: 'Open App Studio' })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  });
+}
 
 test('app building route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/building`);

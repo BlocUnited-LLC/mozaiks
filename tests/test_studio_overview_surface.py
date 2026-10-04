@@ -126,7 +126,8 @@ def test_app_overview_page_fetches_summary_endpoint() -> None:
     assert "getAppLogoSrc" in chrome_source
     assert "getAppDescription" in chrome_source
     assert "AppDashboardBanner" in chrome_source
-    assert "App description appears after the concept brief is captured." in chrome_source
+    assert "App description is not available." in chrome_source
+    assert "App description appears after the concept brief is captured." not in chrome_source
     assert "showBanner" in source
     assert "if (demoMode && isStudioDemoApp(appId))" in hook_source
     assert "build_registry_id=${encodeURIComponent(buildRegistryId)}" in hook_source
@@ -186,4 +187,69 @@ def test_app_overview_summary_reads_app_identity_metadata(tmp_path: Path) -> Non
     assert summary["app"]["description"] == "Coordinates customer follow-up, account review, and team handoffs."
     assert summary["app"]["tagline"] == "Customer operations in one place"
     assert summary["app"]["value_proposition"] == "A focused workspace for teams to act on customer signals faster."
+
+
+def test_overview_projects_bound_current_build_without_studio_identity_leaking(tmp_path: Path) -> None:
+    from mozaiksai.core.runtime.app.studio_summary import build_app_overview_summary
+
+    for relative in ("config/ai.json", "config/shell.json", "ui/route_manifest.json"):
+        path = tmp_path / relative
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+    (tmp_path / "brand").mkdir()
+    (tmp_path / "app.json").write_text(json.dumps({
+        "appId": "factory-host", "appName": "Host name", "description": "Host description",
+        "tagline": "Host tagline", "value_proposition": "Host value", "preset": "host-preset",
+    }), encoding="utf-8")
+    (tmp_path / "brand" / "theme_config.json").write_text(
+        json.dumps({"identity": {"tagline": "AI-Powered Workflows"}}), encoding="utf-8",
+    )
+    record = {
+        "app_id": "focus-app", "build_registry_id": "appreg-focus", "name": "FocusSprint",
+        "description": "Focus sessions and a personal task list.", "lifecycle_state": "building",
+        "chat_app_id": "factory-host", "active_chat_id": "old-chat", "active_workflow_id": "ValueEngine",
+        "current_build_run": {"build_id": "build-current", "phase": "genesis", "status": "building",
+                              "active_chat_id": "repair-chat", "active_workflow_id": "AppGenerator"},
+    }
+
+    summary = build_app_overview_summary(tmp_path, app_record=record)
+
+    assert summary["app"]["id"] == summary["app"]["app_id"] == "focus-app"
+    assert summary["app"]["name"] == "FocusSprint"
+    assert summary["app"]["description"] == record["description"]
+    assert summary["app"]["build_registry_id"] == "appreg-focus"
+    assert summary["app"]["lifecycle_state"] == "building"
+    assert summary["app"]["current_build_run"] == record["current_build_run"]
+    assert summary["app"]["current_build_run"] is not record["current_build_run"]
+    assert summary["app"]["active_chat_id"] == "repair-chat"
+    assert summary["app"]["active_workflow_id"] == "AppGenerator"
+    assert summary["app"]["destination"] == (
+        "/chat?workflow=AppGenerator&mode=workflow&chat_id=repair-chat&app_id=factory-host"
+    )
+    assert summary["app"]["tagline"] is None
+    assert summary["app"]["value_proposition"] is None
+    assert summary["app"]["preset"] == "unknown"
+    assert summary["theme"]["tagline"] is None
+    assert summary["theme"]["logo_alt"] is None
+
+    unnamed = build_app_overview_summary(tmp_path, app_record={"app_id": "new-target", "lifecycle_state": "draft"})
+    assert unnamed["app"]["name"] is None
+    assert unnamed["app"]["description"] is None
+
+
+def test_overview_keeps_same_workspace_identity_when_registry_description_is_empty(tmp_path: Path) -> None:
+    from mozaiksai.core.runtime.app.studio_summary import build_app_overview_summary
+
+    for relative in ("config/ai.json", "config/shell.json", "ui/route_manifest.json", "brand/theme_config.json"):
+        path = tmp_path / relative
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+    (tmp_path / "app.json").write_text(json.dumps({
+        "appId": "owned-app", "appName": "Workspace name", "description": "Workspace description",
+        "tagline": "Workspace tagline",
+    }), encoding="utf-8")
+    summary = build_app_overview_summary(tmp_path, app_record={"app_id": "owned-app", "lifecycle_state": "active"})
+    assert summary["app"]["name"] == "Workspace name"
+    assert summary["app"]["description"] == "Workspace description"
+    assert summary["app"]["tagline"] == "Workspace tagline"
 

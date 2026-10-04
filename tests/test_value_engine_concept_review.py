@@ -46,7 +46,7 @@ class Context(dict):
 @pytest.fixture(autouse=True)
 def approved_name_writer(monkeypatch):
     writer = AsyncMock(return_value={"success": True})
-    monkeypatch.setattr(AppRegistryService, "apply_approved_concept_name", writer, raising=False)
+    monkeypatch.setattr(AppRegistryService, "apply_approved_concept_identity", writer, raising=False)
     return writer
 
 
@@ -102,6 +102,7 @@ async def test_approval_is_structured_bound_to_draft_and_persisted(review):
     args = review.name_writer.await_args.kwargs
     assert args["owner_user_id"] == "owner"
     assert args["execution_app_id"] == "factory-test"
+    assert args["description"] == "A private customer tracker."
     assert args["binding"].model_dump() == review.context["run_build_binding"]
     assert args["name"] == "Customer Ledger"
 

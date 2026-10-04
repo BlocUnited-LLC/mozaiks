@@ -472,6 +472,12 @@ class TestRecommendLifecycleNextStep:
 # ---------------------------------------------------------------------------
 
 class TestBuildAppListEntry:
+    @pytest.mark.parametrize("binding", [{}, {"active_chat_id": "orphaned-chat"}])
+    def test_missing_run_binding_opens_registered_building_surface(self, binding):
+        result = build_app_list_entry({"app_id": "build-app", "lifecycle_state": "building", **binding})
+        assert result["destination"] == "/apps/build-app/building"
+        assert result["active_workflow_id"] is None
+
     @pytest.mark.parametrize("name,status,source", [
         (None, "provisional", "provisional"), ("FocusSprint", "named", "value_engine_concept"),
     ])
