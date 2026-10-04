@@ -14,12 +14,34 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
-- Updated the AG2 runtime dependency to `1.1.1` for every AG2 extra. AG2
-  `1.0.5` is affected by six AG2 security advisories: GHSA-hf3x-42qp-4rq6,
-  GHSA-qrjx-72xx-xhmh, GHSA-fxhh-6rm2-v2pp and GHSA-2h3q-9p6m-4hm4 (fixed in
-  `1.1.0`), and GHSA-2h4w-29cv-2cmv and GHSA-rppm-w5cw-6qcg (fixed in
-  `1.1.1`). Mozaiks pins AG2 exactly, so installations could not take the fixes
-  on their own. No Mozaiks code or configuration changes are required.
+- Updated the AG2 runtime dependency from `1.0.5` to `1.1.2` for every AG2
+  extra. Mozaiks pins AG2 exactly, so installations could not take upstream
+  fixes on their own. AG2 `1.0.5` is affected by eight AG2 security advisories,
+  all fixed in `1.1.2`; `1.1.1` is still affected by the first two below.
+  Mozaiks' own code is not exposed to any of them:
+  - GHSA-42mf-vpmr-gw5r (critical, fixed in `1.1.2`): `blocked` and `ignore`
+    command filters on the local shell could be bypassed. Mozaiks attaches
+    `SandboxShellTool` with no filter, so there is none to bypass. That tool,
+    used by six AppGenerator agents, is an unrestricted shell on the host by
+    design.
+  - GHSA-3ccw-g7ph-hrcr (high, fixed in `1.1.2`): a network-served AG2 Hub did
+    not bind control operations to the authenticated connection. Mozaiks runs
+    its Hub in process only.
+  - GHSA-2h4w-29cv-2cmv (high, fixed in `1.1.1`): newline injection bypassed
+    `SandboxShellTool`'s `allowed` and `readonly` options. Mozaiks sets neither.
+  - GHSA-rppm-w5cw-6qcg (medium, fixed in `1.1.1`): tool approval and dispatch
+    were keyed by name, so two tools with one name both ran. Mozaiks uses no
+    approval middleware, and no shipped workflow gives an agent two tools with
+    one name.
+  - GHSA-hf3x-42qp-4rq6 (high, fixed in `1.1.0`): path traversal in skill
+    archive installation. Mozaiks never installs skills.
+  - GHSA-qrjx-72xx-xhmh (high, fixed in `1.1.0`): path traversal in
+    `DiskKnowledgeStore`, which Mozaiks does not use.
+  - GHSA-fxhh-6rm2-v2pp (medium, fixed in `1.1.0`): `FilesystemToolkit` listed
+    files outside its base path. Mozaiks does not use it.
+  - GHSA-2h3q-9p6m-4hm4 (medium, fixed in `1.1.0`): subtasks shared their
+    parent's tool-approval state. Mozaiks uses no subtasks or approval
+    middleware.
 
 - JWT and Keycloak authentication now require an audience at startup and
   verify it and an access-token type on every bearer token (`AUTH_AUDIENCE` for JWT,
@@ -73,6 +95,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Workflow context declarations reject keys that start with `ag:` or `a2a:`:
+  `context_variables.yaml` definitions and agent views, and `tools.yaml`
+  outcome keys. AG2 reserves those prefixes and drops such keys from A2A,
+  AG-UI, A2UI, and NLIP transports, so a declared key passed validation and
+  then never reached a remote agent. No shipped workflow uses either prefix.
 - Artifact preview ownership and capacity now persist in MongoDB across Studio
   workers and restarts. Preview allocation uses a bounded queue and positive
   shared limits; interrupted updates require cleanup before reuse. Operators
