@@ -175,15 +175,15 @@ class _FakePersistenceManager:
         self.completed: list[dict[str, str]] = []
         self.failed: list[dict[str, str]] = []
         self.status = 0
-        self.persisted_session = False
+        self.resumable_run = False
 
-    async def chat_session_exists(
+    async def chat_has_resumable_run(
         self,
         chat_id: str,
         app_id: str,
         workflow_name: str | None = None,
     ) -> bool:
-        return self.persisted_session
+        return self.resumable_run
 
     async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
         from mozaiksai.core.data.models import WorkflowStatus
@@ -353,7 +353,7 @@ async def test_handle_user_input_from_api_clears_persisted_pending_input_before_
 async def test_handle_user_input_from_api_resumes_persisted_session_after_restart(monkeypatch) -> None:
     persistence_manager = _FakePersistenceManager()
     persistence_manager.pending_input_request = None
-    persistence_manager.persisted_session = True
+    persistence_manager.resumable_run = True
     adapter = _FakeAdapter()
     transport = _DummyTransport(persistence_manager)
 

@@ -226,8 +226,9 @@ This project follows a practical pre-1.0 changelog format:
   its first message. It was treated as a run interrupted by a restart, and
   the resume failed because no run existed yet, so a first message sent to a
   newly started chat over HTTP failed without reaching a model.
-  Persistence managers that outlive a host also bind the new database client
-  when the host is started again in the same process.
+  Persistence managers that outlive a host also bind the new process database
+  client when the host is started again in the same process; a client the
+  caller supplied is left in place.
 
 - `scripts/run_live_workflow_smoke.py` runs on the runtime host
   (`mozaiksai.hosts.runtime`) with its real startup and shutdown, forcing an
