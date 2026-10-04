@@ -25,7 +25,11 @@ permissions:
 actions:
   - id: create_post
     api_surface: public
-    description: Create a post with the selected visibility.
+    description: >
+      Create a post with the selected visibility, defaulting to public.
+      Public posts are readable by other members; private and friends posts
+      are readable only by their author. Sharing posts with friends is not
+      implemented.
     handler_method: create_post
     input_schema:
       type: object
@@ -38,10 +42,6 @@ actions:
         visibility:
           type: string
           enum: [public, friends, private]
-          description: >
-            Defaults to public. Public posts are readable by other members;
-            private and friends posts are readable only by their author.
-            Sharing posts with friends is not implemented.
     output_schema:
       type: object
       required: [success]

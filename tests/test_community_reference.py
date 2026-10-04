@@ -62,9 +62,6 @@ def test_reference_manifest_only_narrows_canonical_public_visibility_and_descrip
             action["input_schema"]["properties"]["visibility"]["enum"] = ["public"]
         if action["id"] == "create_post":
             action["description"] = "Create a public post readable by other members."
-            action["input_schema"]["properties"]["visibility"]["description"] = (
-                "Defaults to public. This reference supports public posts only."
-            )
     actual = yaml.safe_load((APP / "modules/user_posts/module.yaml").read_text(encoding="utf-8"))
     assert actual == expected
 

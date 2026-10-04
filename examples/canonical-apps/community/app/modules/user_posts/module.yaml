@@ -42,7 +42,6 @@ actions:
         type: string
         enum:
         - public
-        description: Defaults to public. This reference supports public posts only.
   output_schema:
     type: object
     required:
