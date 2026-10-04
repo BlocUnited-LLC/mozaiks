@@ -54,6 +54,20 @@ This project follows a practical pre-1.0 changelog format:
   The local Keycloak realm uses a distinct `mozaiks-api` audience, and existing
   persistent realms can add that client and mapper without deleting data.
 
+- The package no longer exports `create_mozaiks_app` or ships
+  `mozaiksai.factory`. The sub-application it built served a chat-start route
+  and a WebSocket that did not check sign-in, whatever the auth settings said.
+  Run one of the hosts instead (`mozaiks serve`, with `--host runtime`,
+  `platform` or `studio`); each authenticates through the configured adapter.
+  The setup guide now describes running a host beside an existing backend
+  rather than mounting one inside it.
+
+- HTTP routes no longer accept a bearer token in an `?access_token=` query
+  parameter; send it in the `Authorization` header. Tokens in URLs end up in
+  logs and browser history. The WebSocket opt-in
+  `MOZAIKS_WS_ALLOW_QUERY_TOKEN` is unchanged and still covers only the
+  handshake.
+
 - E2B preview template uploads exclude local environment files, dependencies,
   caches, browser reports, and runtime log output.
 
@@ -207,6 +221,20 @@ This project follows a practical pre-1.0 changelog format:
   application has started" after writing platform state onto the live app. It
   now reports "Module runtime is not available." there, and still dispatches
   through the platform host whenever the process has composed one.
+
+- A chat session created before its first run now starts when it receives
+  its first message. It was treated as a run interrupted by a restart, and
+  the resume failed because no run existed yet, so a first message sent to a
+  newly started chat over HTTP failed without reaching a model.
+  Persistence managers that outlive a host also bind the new database client
+  when the host is started again in the same process.
+
+- `scripts/run_live_workflow_smoke.py` runs on the runtime host
+  (`mozaiksai.hosts.runtime`) with its real startup and shutdown, forcing an
+  exit only when shutdown times out. It is the only launcher of its run, so
+  the host does not also auto-start the session and the prompt and initial
+  agent always arrive. With `AUTH_ENABLED=true` it needs a token for its user
+  in `MOZAIKS_SMOKE_ACCESS_TOKEN` and stops with a clear error without one.
 
 - **`mozaiks add --preset <tier>` works** (#304). The command `mozaiks info`
   recommends always failed with "the following arguments are required:

@@ -30,7 +30,7 @@ from uuid import uuid4
 from pymongo import ReturnDocument, UpdateOne
 
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.core_config import get_mongo_client
+from mozaiksai.core.core_config import current_mongo_client, get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
@@ -273,10 +273,17 @@ class PersistenceManager:
             )
 
     async def _ensure_client(self) -> None:
-        if self.client is not None:
+        # Managers held by module and router singletons outlive a host, and
+        # host shutdown closes the process client. Rebind whenever the held
+        # client is no longer the open one instead of reusing a closed handle.
+        if self.client is not None and self.client is current_mongo_client():
             return
+        if self.client is not None:
+            # The old client's lock may belong to that client's event loop.
+            self.client = None
+            self._init_lock = asyncio.Lock()
         async with self._init_lock:
-            if self.client is not None:
+            if self.client is not None and self.client is current_mongo_client():
                 return
             self.client = get_mongo_client()
             try:
@@ -960,11 +967,13 @@ class AG2PersistenceManager:
         app_id: str,
         workflow_name: str | None = None,
     ) -> bool:
-        """Return whether an in-progress session exists for this app/workflow.
+        """Return whether this app/workflow chat has an in-progress run to resume.
 
-        This is intentionally separate from ``assert_chat_resumable``: an
-        absent session is valid when starting a new run, while a present
-        in-progress session must be resumed after a process restart.
+        This is intentionally separate from ``assert_chat_resumable``: a chat
+        with no run yet is valid when starting a new run, while one that already
+        ran and is still in progress must be resumed after a process restart.
+        Sessions are created in progress before their first run, so the run
+        stream, not the session document, shows whether a run has started.
         """
         if not app_id:
             raise ValueError("app_id is required")
@@ -976,7 +985,9 @@ class AG2PersistenceManager:
         doc = await coll.find_one(query, {"status": 1})
         if not isinstance(doc, dict):
             return False
-        return WorkflowStatus(doc.get("status")) is WorkflowStatus.IN_PROGRESS
+        if WorkflowStatus(doc.get("status")) is not WorkflowStatus.IN_PROGRESS:
+            return False
+        return bool(await self.load_run_events(chat_id=chat_id, app_id=app_id))
 
     async def mark_chat_completed(self, chat_id: str, app_id: str | None = None) -> bool:
         return await self._mark_chat_terminal(chat_id, app_id, WorkflowStatus.COMPLETED)

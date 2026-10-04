@@ -387,4 +387,7 @@ MOZAIKS_WS_ALLOW_QUERY_TOKEN=true   # never set this in production or staging
 Leave it `false` (the default) everywhere else. Production browser clients do not need
 it.
 
+The flag covers the WebSocket handshake only. HTTP routes read the token from the
+`Authorization: Bearer` header and never from the URL, whatever the flag says.
+
 ---

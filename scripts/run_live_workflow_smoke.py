@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -19,7 +20,7 @@ from typing import Any
 import uvicorn
 import websockets
 from dotenv import load_dotenv
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -28,6 +29,11 @@ if str(REPO_ROOT) not in sys.path:
 
 DEFAULT_ACTIVE_WORKFLOW = "RuntimeSmoke"
 DEFAULT_FACTORY_WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
+SMOKE_ACCESS_TOKEN_ENV = "MOZAIKS_SMOKE_ACCESS_TOKEN"
+_CONNECTION_REGISTRATION_TIMEOUT_SECONDS = 20.0
+_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 10.0
+_SERVER_SHUTDOWN_TIMEOUT_SECONDS = 30.0
+_FORCED_SHUTDOWN_GRACE_SECONDS = 5.0
 
 
 def _configure_event_loop_policy() -> None:
@@ -116,15 +122,41 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _build_uvicorn_config(app: Any, port: int, *, lifespan: str = "off") -> uvicorn.Config:
+def _build_uvicorn_config(app: Any, port: int) -> uvicorn.Config:
+    # The host's lifespan owns transport, database, and lock startup; the smoke
+    # runs it exactly as `mozaiks serve` does. A graceful-shutdown timeout lets
+    # uvicorn cancel lingering connection tasks and still run lifespan shutdown.
     return uvicorn.Config(
         app,
         host="127.0.0.1",
         port=port,
         log_level="warning",
         access_log=False,
-        lifespan=lifespan,
+        lifespan="on",
+        timeout_graceful_shutdown=int(_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS),
     )
+
+
+def _websocket_auth_subprotocols(access_token: str | None) -> list[str] | None:
+    """Return the websocket subprotocol offer the host's configured auth requires.
+
+    With authentication disabled the host binds the path user and needs no
+    credential. With it enabled, the smoke presents a real bearer token the
+    way a browser client does; it never turns authentication off to pass.
+    """
+    from mozaiksai.core.auth import is_auth_enabled
+    from mozaiksai.core.auth.websocket_auth import WS_BEARER_SUBPROTOCOL
+
+    if not is_auth_enabled():
+        return None
+    token = str(access_token or "").strip()
+    if not token:
+        raise RuntimeError(
+            "Authentication is enabled for the runtime host: set "
+            f"{SMOKE_ACCESS_TOKEN_ENV} to a token issued to the smoke user_id"
+        )
+    encoded = base64.urlsafe_b64encode(token.encode("utf-8")).decode("ascii").rstrip("=")
+    return [WS_BEARER_SUBPROTOCOL, encoded]
 
 
 def _require_env() -> None:
@@ -151,12 +183,58 @@ async def _verify_mongo_available() -> None:
         raise RuntimeError("MongoDB is configured but unreachable") from None
 
 
-async def _wait_for_server(server: uvicorn.Server, timeout_seconds: float = 20.0) -> None:
+async def _wait_for_server(
+    server: uvicorn.Server,
+    serve_task: asyncio.Task[Any],
+    timeout_seconds: float = 20.0,
+) -> None:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     while not getattr(server, "started", False):
+        if serve_task.done():
+            # uvicorn returns without starting when lifespan startup fails.
+            raise RuntimeError("The runtime host failed to start")
         if asyncio.get_running_loop().time() >= deadline:
             raise TimeoutError("Timed out waiting for the smoke server to start")
         await asyncio.sleep(0.1)
+
+
+async def _stop_server(
+    server: uvicorn.Server,
+    serve_task: asyncio.Task[Any],
+    *,
+    timeout_seconds: float = _SERVER_SHUTDOWN_TIMEOUT_SECONDS,
+) -> None:
+    """Stop uvicorn through normal lifespan shutdown; force it only after a timeout.
+
+    ``force_exit`` makes uvicorn skip the host's lifespan shutdown, so it is
+    the fallback for a shutdown that hangs, never the first request.
+    """
+    server.should_exit = True
+    done, _ = await asyncio.wait({serve_task}, timeout=timeout_seconds)
+    if not done:
+        server.force_exit = True
+        done, _ = await asyncio.wait({serve_task}, timeout=_FORCED_SHUTDOWN_GRACE_SECONDS)
+    if not done:
+        serve_task.cancel()
+    with contextlib.suppress(BaseException):
+        await serve_task
+
+
+async def _wait_for_transport_connection(
+    transport: Any,
+    chat_id: str,
+    timeout_seconds: float = _CONNECTION_REGISTRATION_TIMEOUT_SECONDS,
+) -> Any:
+    """Return the ws_id once the host's transport has registered this chat's socket."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    while True:
+        ws_id = (transport.connections.get(chat_id) or {}).get("ws_id")
+        if ws_id is not None:
+            return ws_id
+        if loop.time() >= deadline:
+            raise TimeoutError(f"The runtime host never registered the websocket for chat {chat_id}")
+        await asyncio.sleep(0.05)
 
 
 def _extract_json_object_from_text(value: Any) -> dict[str, Any]:
@@ -801,16 +879,19 @@ async def run_live_workflow_smoke(
     tool_response_payloads: dict[str, Any] | None = None,
     default_input_reply: str | None = None,
     assistant_reply_rules: list[dict[str, str]] | None = None,
+    access_token: str | None = None,
 ) -> SmokeResult:
     load_dotenv(REPO_ROOT / ".env")
     _require_env()
+    websocket_subprotocols = _websocket_auth_subprotocols(
+        access_token if access_token is not None else os.getenv(SMOKE_ACCESS_TOKEN_ENV)
+    )
 
     effective_root = (workflows_root or _resolve_default_workflows_root()).resolve()
     _ensure_workflow_exists(effective_root, workflow_name)
 
     # Force the smoke run to target the intended workflows root regardless of caller env.
     os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(effective_root)
-    os.environ["WORKFLOW_DIR"] = str(effective_root)
 
     await _verify_mongo_available()
 
@@ -819,7 +900,6 @@ async def run_live_workflow_smoke(
     from mozaiksai.core.session.launcher import create_routed_chat_session
     from mozaiksai.core.transport.simple_transport import SimpleTransport
     from mozaiksai.core.workflow.workflow_manager import get_workflow_manager, initialize_workflows
-    from mozaiksai.factory import create_mozaiks_app
 
     SimpleTransport._instance = None
     initialize_workflows(base_path=str(effective_root))
@@ -838,11 +918,6 @@ async def run_live_workflow_smoke(
             {"chat_session_fields": bind_factory_session}, source="mozaiks.studio", prepend=True,
         )
 
-    app = create_mozaiks_app(workflow_dir=str(effective_root), debug=False)
-    port = _find_free_port()
-    server = uvicorn.Server(_build_uvicorn_config(app, port))
-    serve_task = asyncio.create_task(server.serve())
-
     pm = AG2PersistenceManager()
     resolved_app_id = str(app_id or f"live-smoke-{uuid.uuid4().hex[:8]}").strip()
     if not resolved_app_id:
@@ -856,8 +931,16 @@ async def run_live_workflow_smoke(
     completed_successfully = False
     workflow_result: dict[str, Any] | None = None
 
+    # The runtime host serves the catalog bound above, so it is imported only now.
+    from mozaiksai.hosts.runtime import app
+
+    port = _find_free_port()
+    server = uvicorn.Server(_build_uvicorn_config(app, port))
+    serve_task = asyncio.create_task(server.serve())
+
     try:
-        await _wait_for_server(server)
+        await _wait_for_server(server, serve_task)
+        transport = app.state.simple_transport
         await create_routed_chat_session(
             persistence_manager=pm,
             chat_id=chat_id,
@@ -869,15 +952,49 @@ async def run_live_workflow_smoke(
             trigger_meta=_build_trigger_meta(workflow_name, journey_id),
         )
 
+        async def _launch_once_connected() -> Any:
+            ws_id = await _wait_for_transport_connection(transport, chat_id)
+            # The host decides on auto-start before it registers the socket, so
+            # the claim has done its job. Holding it longer would refuse the
+            # scripted replies as CHAT_BUSY when the run pauses for input.
+            if transport._background_tasks.get(chat_id) is asyncio.current_task():
+                transport._background_tasks.pop(chat_id, None)
+            return await transport._run_workflow_background(
+                chat_id=chat_id,
+                workflow_name=workflow_name,
+                app_id=app_id,
+                user_id=user_id,
+                ws_id=ws_id,
+                initial_message=prompt,
+                initial_agent_name_override=initial_agent,
+            )
+
+        # The host's websocket auto-starts an empty session unless a run already
+        # owns the chat. Claiming that slot before connecting makes this runner the
+        # only launch owner, so the prompt and initial agent are neither raced nor
+        # dropped. The launch waits until the host has registered the socket, so
+        # nothing writes the session while the handler is still checking it.
+        run_task: asyncio.Task[Any] = asyncio.create_task(_launch_once_connected())
+        transport._background_tasks[chat_id] = run_task
+
         ws_url = f"ws://127.0.0.1:{port}/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"
-        run_task: asyncio.Task | None = None
-        async with websockets.connect(
-            ws_url,
-            open_timeout=20,
-            close_timeout=5,
-            max_size=2**20,
-            ping_interval=None,
-        ) as websocket:
+        try:
+            websocket = await websockets.connect(
+                ws_url,
+                subprotocols=websocket_subprotocols,
+                open_timeout=20,
+                close_timeout=5,
+                max_size=2**20,
+                ping_interval=None,
+            )
+        except InvalidStatus as refused:
+            run_task.cancel()
+            raise RuntimeError(
+                f"The runtime host refused the smoke websocket (HTTP {refused.response.status_code}): "
+                f"check that workflow {workflow_name!r} is served and, when authentication is enabled, "
+                f"that the token is valid and issued to user_id {user_id!r}"
+            ) from refused
+        async with websocket:
             reply_state: dict[str, Any] = {}
 
             async def _pending_input_provider() -> dict[str, Any] | None:
@@ -908,22 +1025,6 @@ async def run_live_workflow_smoke(
                     enriched["assistant_message"] = assistant_message
                 return enriched
 
-            ws_conn = app.state.transport.connections.get(chat_id) or {}
-            ws_id = ws_conn.get("ws_id")
-            if ws_id is None:
-                raise RuntimeError(f"WebSocket connection metadata missing ws_id for chat {chat_id}")
-
-            run_task = asyncio.create_task(
-                app.state.transport._run_workflow_background(
-                    chat_id=chat_id,
-                    workflow_name=workflow_name,
-                    app_id=app_id,
-                    user_id=user_id,
-                    ws_id=ws_id,
-                    initial_message=prompt,
-                    initial_agent_name_override=initial_agent,
-                )
-            )
             collect_task = asyncio.create_task(
                 _collect_events(
                     websocket,
@@ -960,7 +1061,7 @@ async def run_live_workflow_smoke(
                 events = collect_task.result()
                 workflow_result = await _await_workflow_with_pending_input_fallback(
                     workflow_wait_task=workflow_wait_task,
-                    transport=app.state.transport,
+                    transport=transport,
                     pending_input_provider=_pending_input_provider,
                     events=events,
                     reply_state=reply_state,
@@ -1039,16 +1140,9 @@ async def run_live_workflow_smoke(
                 await coll.delete_many({"app_id": app_id})
             except Exception:
                 pass
-        server.should_exit = True
-        if hasattr(server, "force_exit"):
-            server.force_exit = True
+        await _stop_server(server, serve_task)
         try:
-            await asyncio.wait_for(serve_task, timeout=15)
-        except BaseException:
-            serve_task.cancel()
-            with contextlib.suppress(BaseException):
-                await serve_task
-        try:
+            # Lifespan shutdown closes the client; a forced exit skips it.
             from mozaiksai.core.core_config import close_mongo_client
 
             close_mongo_client()
@@ -1069,7 +1163,13 @@ async def run_live_workflow_smoke(
 
 def main() -> int:
     _configure_event_loop_policy()
-    parser = argparse.ArgumentParser(description="Run live AG2 runtime smoke against a real workflow + LLM")
+    parser = argparse.ArgumentParser(
+        description="Run live AG2 runtime smoke against a real workflow + LLM on the runtime host",
+        epilog=(
+            f"With authentication enabled, set {SMOKE_ACCESS_TOKEN_ENV} to a bearer token "
+            "issued to --user-id; the host rejects the smoke without one."
+        ),
+    )
     parser.add_argument(
         "--app-id",
         default=None,

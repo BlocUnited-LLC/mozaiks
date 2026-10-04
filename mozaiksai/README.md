@@ -171,6 +171,12 @@ python scripts/run_live_workflow_smoke.py --workflow RuntimeUIPrimitiveSmoke --w
 python scripts/run_live_workflow_smoke.py --workflow AgentGenerator --workflows-root factory_app/workflows --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt --tool-response-file factory_app/workflows/AgentGenerator/smoke_responses.json --timeout-seconds 300
 ```
 
+The harness serves the runtime host (`mozaiksai.hosts.runtime`) in process,
+with its normal startup, shutdown, and configured authentication. With
+`AUTH_ENABLED=true` (the default), set `MOZAIKS_SMOKE_ACCESS_TOKEN` to a token
+issued to the smoke `--user-id`. For a local run without an identity provider,
+set `AUTH_ENABLED=false`.
+
 For real multi-turn workflows that pause on AG2 input requests, the same
 harness can answer the canonical response-required lane with scripted replies:
 

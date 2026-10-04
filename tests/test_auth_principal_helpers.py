@@ -34,11 +34,8 @@ Covers:
 
   _extract_token:
     - authorization header present with credentials → returned
-    - authorization None, access_token in query params → returned
-    - authorization with credentials takes priority over query param
-    - authorization present but empty credentials → query param fallback
-    - both missing → None
-    - query param present but empty string → None
+    - authorization present but empty credentials → None
+    - authorization missing → None
 
   validate_user_id_against_principal:
     - anonymous with path_user_id → path_user_id returned
@@ -83,12 +80,6 @@ class _FakeAuth:
     """Minimal stub for HTTPAuthorizationCredentials."""
     def __init__(self, credentials: str):
         self.credentials = credentials
-
-
-class _FakeRequest:
-    """Minimal stub for fastapi.Request with query_params."""
-    def __init__(self, params: dict | None = None):
-        self.query_params = params or {}
 
 
 # ---------------------------------------------------------------------------
@@ -234,35 +225,13 @@ class TestValidateTenantAndWorkspaceId:
 
 class TestExtractToken:
     def test_authorization_header_credentials_returned(self):
-        auth = _FakeAuth("my-jwt-token")
-        req = _FakeRequest()
-        assert _extract_token(auth, req) == "my-jwt-token"
+        assert _extract_token(_FakeAuth("my-jwt-token")) == "my-jwt-token"
 
-    def test_no_auth_falls_back_to_query_param(self):
-        req = _FakeRequest({"access_token": "ws-token"})
-        assert _extract_token(None, req) == "ws-token"
+    def test_empty_credentials_return_none(self):
+        assert _extract_token(_FakeAuth("")) is None
 
-    def test_auth_header_takes_priority_over_query_param(self):
-        auth = _FakeAuth("header-token")
-        req = _FakeRequest({"access_token": "query-token"})
-        assert _extract_token(auth, req) == "header-token"
-
-    def test_both_missing_returns_none(self):
-        req = _FakeRequest()
-        assert _extract_token(None, req) is None
-
-    def test_auth_with_empty_credentials_falls_back_to_query_param(self):
-        auth = _FakeAuth("")  # falsy credentials
-        req = _FakeRequest({"access_token": "ws-token"})
-        assert _extract_token(auth, req) == "ws-token"
-
-    def test_query_param_empty_string_returns_none(self):
-        req = _FakeRequest({"access_token": ""})
-        assert _extract_token(None, req) is None
-
-    def test_auth_none_and_no_query_param_returns_none(self):
-        req = _FakeRequest({"other_param": "value"})
-        assert _extract_token(None, req) is None
+    def test_missing_authorization_returns_none(self):
+        assert _extract_token(None) is None
 
 
 # ---------------------------------------------------------------------------

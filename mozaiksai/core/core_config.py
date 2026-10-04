@@ -38,6 +38,11 @@ def get_mongo_client() -> AsyncIOMotorClient:
     return _mongo_client
 
 
+def current_mongo_client() -> AsyncIOMotorClient | None:
+    """Return the open process client, if any, without resolving configuration."""
+    return _mongo_client
+
+
 def close_mongo_client() -> None:
     """Close the process-scoped Mongo client and clear the cached handle."""
     global _mongo_client, _mongo_client_conn_str

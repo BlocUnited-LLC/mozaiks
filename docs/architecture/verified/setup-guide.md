@@ -1,7 +1,7 @@
 # Setting Up mozaiksai
 
-Follow the steps below to either run the canonical Mozaiks hosts in this repo
-or embed the runtime substrate into another backend.
+Follow the steps below to run the canonical Mozaiks hosts and connect a
+frontend to them.
 
 ---
 
@@ -18,19 +18,18 @@ source .venv/bin/activate  # or .\.venv\Scripts\Activate.ps1 on PowerShell
 pip install -e .
 ```
 
-Use standalone package embedding only when you are intentionally integrating
-the runtime substrate into another backend.
+The package exposes no mountable sub-application. Every supported entrypoint
+is one of the hosts below, and each one authenticates its HTTP and WebSocket
+routes through the configured auth adapter.
 
 ---
 
 ## 2. Integration Points
 
-There are two valid integration modes.
-
 ### Step 2.1 --- Use the canonical repo hosts
 
-If you are running this repo directly, the canonical entrypoints are the root
-host files:
+If you are running this repo directly, the builder path starts the hosts for
+you:
 
 ```bash
 # Builder path
@@ -38,35 +37,32 @@ python -m mozaiks quickstart --dir ./mozaiks-workspace
 
 # Or launch Studio against an existing workspace
 python -m mozaiks studio --dir ./mozaiks-workspace --open
-``` 
+```
 
 Use this mode when you want the layered repo architecture as-is.
 
-### Step 2.2 --- Embed the runtime substrate into another backend
+### Step 2.2 --- Run a host next to your own backend
 
-If you are integrating `mozaiksai` into an external backend, mount the
-runtime-only convenience factory explicitly:
+To use `mozaiksai` alongside an existing backend, run a host as its own
+process and route to it, rather than mounting it inside your application:
 
-```python
-# your-services/main.py
-import os
-from fastapi import FastAPI
-from mozaiksai import create_mozaiks_app
-
-app = FastAPI()
-
-# Canonical shared generation-core path for this repo layout
-os.environ["MOZAIKS_WORKFLOWS_PATH"] = "./factory_app/workflows"
-
-@app.get("/api/users")
-def get_users():
-    ...
-
-app.mount("/ai", create_mozaiks_app(workflow_dir="./factory_app/workflows"))
+```bash
+mozaiks serve ./my-app                  # platform host (default)
+mozaiks serve ./my-app --host runtime   # workflow runtime only
+mozaiks serve ./my-app --host studio    # Studio management host
 ```
 
-This `/ai` mount pattern is for external embedding mode only. In the canonical
-repo hosts above, `mozaiksai` is already composed into the selected root host.
+| Host | Module | Use it for |
+|------|--------|------------|
+| runtime | `mozaiksai.hosts.runtime:app` | Workflows, agents, transport, and persistence only |
+| platform | `mozaiksai.hosts.platform:app` | A full app: runtime plus modules, pages, and shell |
+| studio | `mozaiksai.hosts.studio:app` | The management interface for building and reviewing apps |
+
+Put your existing backend and the host behind the same reverse proxy if the
+browser should see one origin. Keep `AUTH_ENABLED=true` (the default) and
+configure the issuer as described in [Authentication setup](auth-setup.md):
+the hosts then reject chat starts and WebSocket connections that do not carry
+a valid token for the user named in the path.
 
 ### Step 2.3 --- Add the Chat Widget to Your Frontend
 
@@ -86,17 +82,17 @@ function App() {
 
       {/* Floating chat button - expands on click */}
       <ChatWidget
-        endpoint="ws://localhost:8000/ai"
-        userId={user?.id || 'anonymous'}
+        endpoint="ws://localhost:8000"
+        userId={user.id}
       />
     </>
   );
 }
 ```
 
-Use the `/ai` endpoint only when you mounted the runtime that way. If you are
-running the canonical repo hosts directly, point the widget at that host's base
-URL instead of assuming an `/ai` prefix.
+Point the widget at the base URL of the host you started (or the path your
+reverse proxy routes to it). `userId` must be the signed-in user the token was
+issued to; the host closes a connection whose token names someone else.
 
 Or embed a specific workflow directly using `WorkflowChat`:
 
@@ -282,7 +278,7 @@ Pass brand assets directly to the components:
 
 ```jsx
 <ChatWidget
-  endpoint="ws://localhost:8000/ai"
+  endpoint="ws://localhost:8000"
   userId={user.id}
   brandName="Acme Support"
   logo="/logo.svg"
