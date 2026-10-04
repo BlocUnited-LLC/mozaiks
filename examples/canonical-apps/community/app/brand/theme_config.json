@@ -1,0 +1,44 @@
+{
+  "theme": {
+    "primary": "stone",
+    "variant": "default",
+    "radius": "large",
+    "font": "system",
+    "font_heading": "system",
+    "appearance": "light",
+    "density": "comfortable",
+    "content_width": "comfortable",
+    "branding": {
+      "app_name": "Common Ground",
+      "logo_url": "/assets/common-ground-mark.svg",
+      "favicon_url": "/assets/common-ground-mark.svg"
+    }
+  },
+  "identity": {
+    "name": "Common Ground",
+    "app_name": "Common Ground",
+    "tagline": "A little space for good conversation."
+  },
+  "assets": {
+    "logo": "common-ground-mark.svg",
+    "wordmark": "common-ground-wordmark.svg",
+    "favicon": "common-ground-mark.svg"
+  },
+  "fonts": {
+    "body": { "family": "system-ui", "fallbacks": "sans-serif" },
+    "heading": { "family": "system-ui", "fallbacks": "sans-serif" },
+    "logo": { "family": "system-ui", "fallbacks": "sans-serif" }
+  },
+  "colors": {
+    "primary": { "main": "#B44924", "light": "#B44924", "dark": "#81331B", "name": "terracotta" },
+    "secondary": { "main": "#52634A", "light": "#DEE5D8", "dark": "#35422F" },
+    "accent": { "main": "#B44924", "light": "#F6D5C5", "dark": "#81331B" },
+    "background": { "base": "#FAF8F3", "surface": "#FFFFFF", "elevated": "#F1EEE6", "overlay": "rgba(37, 42, 33, 0.45)" },
+    "border": { "subtle": "#E5DFD3", "strong": "#BEB6A8", "accent": "#B44924" },
+    "text": { "primary": "#252A21", "secondary": "#59604F", "muted": "#69705F", "onAccent": "#FFFFFF" }
+  },
+  "shadows": { "elevated": "0 8px 28px rgba(37, 42, 33, 0.06)" },
+  "ui": {
+    "shell": { "frame": { "maxWidth": "1152px" }, "header": { "height": "4.5rem" } }
+  }
+}

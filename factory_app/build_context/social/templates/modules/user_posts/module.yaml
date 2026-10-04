@@ -38,7 +38,7 @@ actions:
         visibility: { type: string, enum: [public, friends, private] }
     output_schema:
       type: object
-      required: [success, post]
+      required: [success]
       properties:
         success: { type: boolean }
         post: { type: object }
@@ -60,7 +60,7 @@ actions:
       type: object
       required: [post]
       properties:
-        post: { type: object }
+        post: { type: [object, "null"] }
     permissions: [user_posts.read]
 
   - id: delete_post
@@ -100,7 +100,7 @@ actions:
       properties:
         posts: { type: array }
         count: { type: integer }
-        next_cursor: { type: string }
+        next_cursor: { type: [string, "null"] }
     permissions: [user_posts.read]
 
   - id: list_user_posts
@@ -122,7 +122,7 @@ actions:
       properties:
         posts: { type: array }
         count: { type: integer }
-        next_cursor: { type: string }
+        next_cursor: { type: [string, "null"] }
     permissions: [user_posts.read]
 
   - id: react_to_post
@@ -166,7 +166,7 @@ actions:
       required: [success, comment]
       properties:
         success: { type: boolean }
-        comment: { type: object }
+        comment: { type: [object, "null"] }
         error: { type: string }
     permissions: [user_posts.create]
     emits: [domain.social.post.commented]
@@ -208,7 +208,7 @@ actions:
       properties:
         comments: { type: array }
         count: { type: integer }
-        next_cursor: { type: string }
+        next_cursor: { type: [string, "null"] }
     permissions: [user_posts.read]
 
   - id: get_reaction_summary
@@ -227,7 +227,7 @@ actions:
       properties:
         total: { type: integer }
         by_type: { type: object }
-        viewer_reaction: { type: string }
+        viewer_reaction: { type: [string, "null"] }
     permissions: [user_posts.read]
 
 capabilities:

@@ -1,0 +1,28 @@
+{
+  "pages": [
+    {
+      "path": "/login", "component": "LoginPage", "label": "Sign in",
+      "navigation": { "include": false },
+      "meta": { "requiresAuth": false, "appShell": false, "title": "Sign in" }
+    },
+    {
+      "path": "/auth/callback", "component": "AuthCallbackPage", "label": "Completing sign in",
+      "navigation": { "include": false },
+      "meta": { "requiresAuth": false, "appShell": false, "title": "Completing sign in" }
+    },
+    {
+      "id": "community", "path": "/community", "component": "CommunityFeedPage",
+      "label": "Community", "shell_mode": "standard",
+      "navigation": { "scope": "global", "order": 10 },
+      "meta": { "requiresAuth": true, "title": "Community" },
+      "purpose": "Member-authored posts with persisted reactions and conversations."
+    },
+    {
+      "id": "community-post", "path": "/community/:postId", "component": "CommunityPostPage",
+      "label": "Conversation", "shell_mode": "standard",
+      "navigation": { "include": false },
+      "meta": { "requiresAuth": true, "title": "Conversation" },
+      "purpose": "Deep-linked post detail and an interactive comment thread."
+    }
+  ]
+}

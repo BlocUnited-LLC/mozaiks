@@ -1,0 +1,85 @@
+{
+  "version": "1",
+  "app_id": "common-ground",
+  "surfaces": [
+    {
+      "surface_id": "user_posts",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "module_id": "user_posts",
+          "name": "posts",
+          "entity": "Post",
+          "scope": "app",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "ownership": {"surface_id": "user_posts", "surface_kind": "module"},
+          "fields": [
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "post_id", "type": "string", "required": true},
+            {"name": "author_id", "type": "string", "required": true},
+            {"name": "body", "type": "string", "required": true},
+            {"name": "body_preview", "type": "string", "required": true},
+            {"name": "media_urls", "type": "array", "required": true},
+            {"name": "visibility", "type": "string", "required": true, "enum": ["public"]},
+            {"name": "status", "type": "string", "required": true, "enum": ["published", "deleted"]},
+            {"name": "reaction_count", "type": "integer", "required": true},
+            {"name": "comment_count", "type": "integer", "required": true},
+            {"name": "created_at", "type": "string", "required": true},
+            {"name": "updated_at", "type": "string", "required": true}
+          ],
+          "indexes": [
+            {"name": "posts_by_id", "keys": [["app_id", 1], ["post_id", 1]], "unique": true},
+            {"name": "posts_by_author_created", "keys": [["app_id", 1], ["author_id", 1], ["created_at", -1]]},
+            {"name": "posts_by_status_created", "keys": [["app_id", 1], ["status", 1], ["visibility", 1], ["created_at", -1]]}
+          ]
+        },
+        {
+          "module_id": "user_posts",
+          "name": "reactions",
+          "entity": "Reaction",
+          "scope": "app",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "ownership": {"surface_id": "user_posts", "surface_kind": "module"},
+          "fields": [
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "post_id", "type": "string", "required": true},
+            {"name": "user_id", "type": "string", "required": true},
+            {"name": "reaction_type", "type": "string", "required": true},
+            {"name": "created_at", "type": "string", "required": true}
+          ],
+          "indexes": [
+            {"name": "reactions_by_post_user", "keys": [["app_id", 1], ["post_id", 1], ["user_id", 1]], "unique": true},
+            {"name": "reactions_by_user", "keys": [["app_id", 1], ["user_id", 1], ["created_at", -1]]},
+            {"name": "reactions_by_post_type", "keys": [["app_id", 1], ["post_id", 1], ["reaction_type", 1]]}
+          ]
+        },
+        {
+          "module_id": "user_posts",
+          "name": "comments",
+          "entity": "Comment",
+          "scope": "app",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "ownership": {"surface_id": "user_posts", "surface_kind": "module"},
+          "fields": [
+            {"name": "app_id", "type": "string", "required": true},
+            {"name": "comment_id", "type": "string", "required": true},
+            {"name": "post_id", "type": "string", "required": true},
+            {"name": "author_id", "type": "string", "required": true},
+            {"name": "body", "type": "string", "required": true},
+            {"name": "created_at", "type": "string", "required": true}
+          ],
+          "indexes": [
+            {"name": "comments_by_id", "keys": [["app_id", 1], ["comment_id", 1]], "unique": true},
+            {"name": "comments_by_post_created", "keys": [["app_id", 1], ["post_id", 1], ["created_at", 1]]},
+            {"name": "comments_by_author", "keys": [["app_id", 1], ["author_id", 1], ["created_at", -1]]}
+          ]
+        }
+      ]
+    }
+  ],
+  "shared_collections": [],
+  "policies": {"default_scope_field": "app_id", "allow_destructive_migrations": false}
+}
