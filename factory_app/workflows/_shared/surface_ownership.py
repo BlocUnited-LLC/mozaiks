@@ -1793,6 +1793,27 @@ def normalize_surface_ownership(
                 and collection.get("entity") in (owner_surface.get("primary_entities") or [])
                 and not _identifiers([collection.get("entity")]) & _identifiers(rule.entity_names)
             )
+            if (
+                rule.platform_capability == "authentication" and scoped
+                and owner_id == group_id and owner_surface.get("owner") == "app"
+                and owner_surface.get("surface_kind") == "module"
+                and collection.get("entity") in (owner_surface.get("primary_entities") or [])
+                and not _is_platform_entity_record(collection, rule)
+                and name.casefold() not in _identifiers(rule.collection_names)
+                and unknown and not state_fields & identity_fields
+                and not _matches_surface({**owner_surface, "surface_id": ""}, rule)
+            ):
+                # A reserved identifier does not authorize moving domain data to another module.
+                raise ValueError(
+                    f"Surface {owner_id!r} uses an identifier reserved for {rule.owner}, but "
+                    f"collection {name!r} declares app entity {collection.get('entity')!r} "
+                    f"with domain fields {sorted(unknown)} and no identity state. "
+                    "Choose an app-specific surface_id outside the reserved platform identifiers. "
+                    "Update that surface_map entry, its data_contract surface group and collection "
+                    "ownership.surface_id, and all matching page module/action bindings and design references. "
+                    "Preserve the app entity, collection, fields, indexes, actions and owned pages; "
+                    "do not delete them or reassign them to an unrelated module."
+                )
             if rule.facade_module and (app_entity or not (
                 name.casefold() in _identifiers(rule.collection_names) or rule_side(owner_id)
                 or bool(group_id) and rule_side(group_id)

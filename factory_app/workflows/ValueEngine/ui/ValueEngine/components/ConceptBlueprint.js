@@ -37,13 +37,14 @@ const ConceptDetails = ({ title, children }) => (
 const ConceptBlueprintContent = ({ payload = {}, onResponse, toolCallId, sourceWorkflowName, generatedWorkflowName }) => {
   const [feedback, setFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState('');
   const [reviewError, setReviewError] = useState('');
   const reviewActions = normalizePrimitiveActions(payload).filter((action) =>
     ['approve', 'request_changes', 'cancel'].includes(action.id));
   const changeActions = reviewActions.filter((action) => action.id === 'request_changes');
   const submitReview = async (action) => {
     if (!onResponse || submitting || submitted) return;
+    if (action.id === 'request_changes' && !feedback.trim()) return;
     setSubmitting(true);
     setReviewError('');
     try {
@@ -53,7 +54,7 @@ const ConceptBlueprintContent = ({ payload = {}, onResponse, toolCallId, sourceW
         review_id: payload.review_id,
         rationale: feedback.trim(),
       });
-      setSubmitted(true);
+      setSubmitted(action.id);
     } catch (error) {
       const message = error?.message;
       // The response adapter supplies these user-facing messages without server/provider details.
@@ -67,7 +68,9 @@ const ConceptBlueprintContent = ({ payload = {}, onResponse, toolCallId, sourceW
   const reviewButton = (action) => {
     const Icon = { approve: Check, request_changes: PencilLine, cancel: X }[action.id];
     return (
-      <button key={action.id} type="button" disabled={submitting} onClick={() => submitReview(action)}
+      <button key={action.id} type="button"
+        disabled={submitting || (action.id === 'request_changes' && !feedback.trim())}
+        onClick={() => submitReview(action)}
         className={`inline-flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 font-sans text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${action.id === 'approve' ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-foreground'}`}>
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />{action.label}
       </button>
@@ -95,7 +98,9 @@ const ConceptBlueprintContent = ({ payload = {}, onResponse, toolCallId, sourceW
 
       {onResponse && payload.review_id && reviewActions.length > 0 && (
         <section aria-label="Concept review" className="space-y-3 px-5 pt-4">
-          {submitted ? <p role="status" className="text-sm text-muted-foreground">Review submitted</p> : (
+          {submitted ? <p role="status" className="text-sm text-muted-foreground">
+            {submitted === 'request_changes' ? 'Updating your concept…' : 'Review submitted'}
+          </p> : (
             <>
               <div className="flex flex-wrap gap-2">{reviewActions.filter((action) => action.id !== 'request_changes').map(reviewButton)}</div>
               {reviewError && <p role="alert" className="text-sm text-destructive">{reviewError}</p>}

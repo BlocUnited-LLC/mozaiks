@@ -133,6 +133,12 @@ test('concept review stays concise and preserves declared review actions on desk
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     await page.keyboard.press('Enter');
     await page.getByText('Request changes', {exact: true}).click();
+    const requestChanges = page.getByRole('button', {name: 'Request Changes', exact: true});
+    await expect(requestChanges).toBeDisabled();
+    await page.getByLabel('Requested changes').fill('   ');
+    await expect(requestChanges).toBeDisabled();
+    assert.equal(await page.evaluate(() => window.submissions.length), 0);
+    await expect(approve).toBeEnabled();
     await page.getByLabel('Requested changes').fill('Add status filtering.');
     await page.evaluate(() => {window.holdReview = true;});
     await page.getByRole('button', {name: 'Request Changes', exact: true}).click();
@@ -140,7 +146,7 @@ test('concept review stays concise and preserves declared review actions on desk
     await expect(page.getByRole('button', {name: 'Request Changes', exact: true})).toBeDisabled();
     assert.equal(await page.evaluate(() => window.submissions.length), 1);
     await page.evaluate(() => {window.holdReview = false; window.finishReview();});
-    await page.getByRole('status').filter({hasText: 'Review submitted'}).waitFor();
+    await page.getByRole('status').filter({hasText: 'Updating your concept…'}).waitFor();
     assert.deepEqual(JSON.parse(await page.getByLabel('Review response').textContent()), {
       action: 'request_changes', approved: false, review_id: 'review-1', rationale: 'Add status filtering.',
     });

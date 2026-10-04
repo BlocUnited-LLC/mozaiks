@@ -818,3 +818,63 @@ def test_run_complete_reports_a_closed_channel_by_its_close_reason() -> None:
         "error": "max_turns", "close_reason": "max_turns",
     }
     assert json.loads(json.dumps(event)) == event
+
+
+@pytest.mark.asyncio
+async def test_design_docs_exhausted_save_reports_its_last_rejection() -> None:
+    """A real rejected save must survive the retry budget and reach the browser event."""
+    from factory_app.workflows.DesignDocs.tools.save_design_doc import save_design_docs_bundle
+    from mozaiksai.core.workflow.agents.factory import _wrap_tool_with_context
+    from mozaiksai.core.workflow.declarative.contracts import ToolOutcomeSpec
+    from mozaiksai.core.workflow.validation.tool_outcomes import wrap_tool_outcome
+    from tests.factory_context import factory_context
+
+    root = APPGEN.parent / "DesignDocs"
+    config = {
+        name: yaml.safe_load((root / f"{name}.yaml").read_text(encoding="utf-8"))
+        for name in ("orchestrator", "context_variables", "transition_graph", "tools")
+    }
+    rules = config["transition_graph"]["transition_rules"]
+    policy = build_context_authority_policy(
+        workflow_name="DesignDocs", definitions=config["context_variables"]["definitions"],
+        transition_rules=rules,
+    )
+    tool = next(t for t in config["tools"]["tools"] if t["function"] == "save_design_docs_bundle")
+    contract = ToolOutcomeSpec.model_validate(tool["outcome"])
+    bridge = ContextVariablesBridge(factory_context({
+        "design_docs_save_outcome": "blocked", "design_docs_save_attempts": 0,
+        "design_docs_save_feedback": "",
+    }), authority_policy=policy)
+    agent = _DeterministicAgent("DesignDocsAgent", body="A malformed design proposal.")
+    agent._mozaiks_context_bridge = bridge
+    agent._mozaiks_tool_outcome = contract
+    invoke = _wrap_tool_with_context(wrap_tool_outcome(save_design_docs_bundle, contract), bridge)
+    rejections = []
+
+    async def output_hook(agent_name: str, envelope: Any) -> None:
+        assert agent_name == "DesignDocsAgent"
+        rejections.append(await invoke())
+
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="DesignDocs", app_id="design-failure", chat_id="design-failure",
+        agents={agent.name: agent}, initial_agent_name=agent.name,
+        initial_message="Generate the design.", transition_rules=rules,
+        context_variables=bridge.snapshot(), context_authority_policy=policy,
+        max_turns=config["orchestrator"]["max_turns"], agent_output_handler=output_hook,
+        failure_message_key=config["orchestrator"].get("failure_message_key"),
+        knowledge_store=MemoryKnowledgeStore(), idle_timeout_seconds=60.0,
+    ))
+    try:
+        assert result.status is RunStatus.FAILED
+        assert result.close_reason == "workflow_failed"
+        assert len(rejections) == contract.max_attempts + 1
+        assert rejections[-1]["outcome_error"] == "attempts_exhausted"
+        assert result.failure_message == rejections[-2]["error"]
+        event = _run_complete_event(
+            workflow_name="DesignDocs", chat_id="design-failure", runner_result=result, pause_agent=None,
+        )
+        assert event["error"] == rejections[-2]["error"]
+        assert event["run_completed"] is False
+    finally:
+        if result.live_run is not None:
+            await result.live_run.close()

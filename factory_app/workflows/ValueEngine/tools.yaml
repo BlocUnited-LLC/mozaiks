@@ -70,12 +70,12 @@ tools:
       approved: false
       payload_schema:
         type: object
-        required: [action, approved, review_id]
+        required: [action, approved, review_id, rationale]
         properties:
           action: {type: string, enum: [request_changes]}
           approved: {type: boolean, const: false}
           review_id: {type: string}
-          rationale: {type: string}
+          rationale: {type: string, minLength: 1, maxLength: 4000, pattern: '\S'}
         additionalProperties: false
     - id: cancel
       label: Cancel

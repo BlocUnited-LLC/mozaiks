@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, StrictBool, StrictStr, ValidationError
+from pydantic import BaseModel, Field, StrictBool, StrictStr, ValidationError, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,13 @@ class ConceptReviewResponse(BaseModel):
     approved: StrictBool
     review_id: StrictStr
     rationale: StrictStr = Field(default="", max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_feedback(self) -> "ConceptReviewResponse":
+        self.rationale = self.rationale.strip()
+        if self.action == "request_changes" and not self.rationale:
+            raise ValueError("Requested changes require feedback")
+        return self
 
 
 def _set_context_value(context_variables: Any | None, key: str, value: Any) -> None:

@@ -421,6 +421,16 @@ Readiness starts concept research only. The separate structured concept review
 still requires owner approval before downstream generation. No sequence,
 entrypoint, or app authorization boundary changes with this intake contract.
 
+Concept review `request_changes` requires nonblank feedback. The review tool
+persists it as `concept_review_feedback` and returns `changes_requested`, which
+routes directly back to `GapAnalysisAgent` without another chat message. The
+revised concept is a new draft with a fresh review ID and no approved scope until
+the owner approves that draft. Cancellation, stale or invalid responses, and the
+existing three-attempt review limit still fail closed.
+
+DesignDocs uses its existing `design_docs_save_feedback` as the terminal failure
+explanation, so a rejected design reports the actionable reason in the workflow UI.
+
 ### Discovery human continuation
 
 `ExistingAppDiscovery/transition_graph.yaml` explicitly routes human replies

@@ -372,7 +372,10 @@ agents:
       Your structured output is a proposed concept, not an approved contract.
       The save_value_manifest auto tool persists the draft and waits for an explicit structured user review.
       Only that review can approve the handoff. Never infer approval from chat prose or emit approval state yourself.
-      If changes were requested, revise the blueprint using concept_review_feedback and the user's next message.
+      If changes were requested, immediately revise the blueprint using the supplied
+      concept_review_feedback and existing user requirements. Do not wait for another
+      chat message or ask the user to repeat submitted feedback. The revised draft
+      still requires its own explicit structured approval before generation continues.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-

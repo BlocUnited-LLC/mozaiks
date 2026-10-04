@@ -44,6 +44,13 @@ in for state and event handlers. One page task owns the custom JSX files,
 to a `ui_only` surface; persisted changes and reads remain bound to approved
 module actions and ownership policies.
 
+App-owned domain surfaces must use identifiers outside the platform ownership
+catalog's reserved names. For example, focus-session statistics cannot claim the
+platform authentication identifier `user_sessions`. Design validation returns
+rename guidance: update the surface ID, collection ownership and matching page
+bindings together while preserving domain data, actions and pages. It does not
+silently move those records into another module or weaken identity ownership.
+
 This is a pre-production contract replacement. A saved ExperienceSpec without
 `ui_surface` must re-enter DesignDocs through the existing design/build journey
 before app planning. There is no renderer guess or promotion compatibility path.

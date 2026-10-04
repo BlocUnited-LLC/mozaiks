@@ -125,9 +125,11 @@ def _workflow_contracts():
 
 @pytest.mark.parametrize("action,expected", [
     ("approve", RunStatus.COMPLETED), ("cancel", RunStatus.FAILED),
-    ("request_changes", RunStatus.PAUSED), ("invalid", RunStatus.FAILED),
+    ("request_changes", RunStatus.COMPLETED), ("invalid", RunStatus.FAILED),
+    ("blank_changes", RunStatus.FAILED), ("changes_then_cancel", RunStatus.FAILED),
+    ("repeated_changes", RunStatus.FAILED), ("changes_then_stale", RunStatus.FAILED),
 ])
-async def test_review_outcome_drives_native_ag2_graph_and_resumes(review, action, expected):
+async def test_review_outcome_drives_native_ag2_graph_without_extra_chat(review, action, expected):
     config, contract = _workflow_contracts()
     policy = build_context_authority_policy(
         workflow_name="ValueEngine", definitions=config["context_variables"]["definitions"],
@@ -135,10 +137,11 @@ async def test_review_outcome_drives_native_ag2_graph_and_resumes(review, action
     )
     bridge = ContextVariablesBridge(dict(review.context), authority_policy=policy)
     review.context = bridge
-    review.respond(action=action, approved=action == "approve")
+    asks = []
 
     class ScriptedAgent(Agent):
         async def ask(self, *args, **kwargs):
+            asks.append(bridge.get("concept_review_feedback"))
             return SimpleNamespace(body="Proposed concept, awaiting its structured review.")
 
     agents = {name: ScriptedAgent(name, prompt="Propose a concept.") for name in
@@ -150,6 +153,21 @@ async def test_review_outcome_drives_native_ag2_graph_and_resumes(review, action
 
     async def before_packet(agent_name, packet):
         assert agent_name == "GapAnalysisAgent"
+        next_action = action
+        invalid = None
+        if action in {"request_changes", "changes_then_cancel", "changes_then_stale", "repeated_changes"}:
+            next_action = "request_changes" if not review.emitted or action == "repeated_changes" else "approve"
+            if review.emitted:
+                assert bridge.get("concept_review_feedback") == "Keep the scope small."
+                assert not bridge.get("value_manifest")["approved_scope"]
+                if action == "changes_then_cancel":
+                    next_action = "cancel"
+                elif action == "changes_then_stale":
+                    invalid = {"review_id": review.emitted[0][1]["review_id"]}
+        elif action == "blank_changes":
+            next_action = "request_changes"
+            invalid = {"rationale": " \n\t "}
+        review.respond(action=next_action, approved=next_action == "approve", invalid=invalid)
         await invoke()
 
     result = await runner.AG2NetworkRunner().run(runner.AG2NetworkRunnerRequest(
@@ -162,21 +180,52 @@ async def test_review_outcome_drives_native_ag2_graph_and_resumes(review, action
     live_run = result.live_run
     try:
         assert result.status is expected, result.error
-        if action == "request_changes":
-            review.respond()
-            result = await live_run.continue_with_user_message("Use the feedback to revise the concept.")
-            assert result.status is RunStatus.COMPLETED, result.error
+        if action in {"request_changes", "changes_then_cancel", "changes_then_stale"}:
             assert result.context_variables["concept_review_attempts"] == 2
             assert len(review.emitted) == 2
             assert review.emitted[0][1]["review_id"] != review.emitted[1][1]["review_id"]
+            assert asks[1] == "Keep the scope small."
+        elif action == "repeated_changes":
+            assert result.context_variables["concept_review_attempts"] == contract.max_attempts
+            assert len(review.emitted) == contract.max_attempts
+            assert result.context_variables["concept_review_outcome"] == "blocked"
+        elif action == "blank_changes":
+            review.store.finish_concept_review.assert_not_awaited()
+            assert len(review.emitted) == 1
         assert result.context_variables["app_id"] == "factory-test"
         assert result.context_variables["run_build_binding"]["target_app_id"] == "build-app"
         if result.status is RunStatus.COMPLETED:
             assert result.context_variables["value_manifest"]["status"] == "approved"
             assert result.context_variables["concept_review_feedback"] == "Keep the scope small."
+        else:
+            assert result.context_variables["value_manifest"]["status"] != "approved"
+            assert result.context_variables["value_manifest"]["approved_scope"] == []
     finally:
         if live_run is not None:
             await live_run.close()
+
+
+@pytest.mark.parametrize("rationale", ["", " ", "\n\t"])
+async def test_blank_change_request_cannot_finish_review(review, rationale):
+    review.respond(action="request_changes", approved=False, invalid={"rationale": rationale})
+    result = await module.save_value_manifest(review.context)
+    assert result["outcome"] == "blocked"
+    review.store.finish_concept_review.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["approve", "cancel"])
+async def test_approval_and_cancel_do_not_require_a_note(review, action):
+    review.respond(action=action, approved=action == "approve", invalid={"rationale": ""})
+    result = await module.save_value_manifest(review.context)
+    assert result["outcome"] == {"approve": "approved", "cancel": "cancelled"}[action]
+
+
+async def test_change_feedback_is_trimmed_before_persistence_and_agent_context(review):
+    review.respond(action="request_changes", approved=False, invalid={"rationale": "  Keep sign-in. \n"})
+    result = await module.save_value_manifest(review.context)
+    assert result["outcome"] == "changes_requested"
+    assert review.store.finish_concept_review.await_args.kwargs["feedback"] == "Keep sign-in."
+    assert review.context["concept_review_feedback"] == "Keep sign-in."
 
 
 async def test_review_attempt_budget_fails_closed_without_another_prompt(review):

@@ -158,8 +158,9 @@ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMe
             <div className="message-header">
               <span className="msg-sender-chip agent">{agentName || 'Agent'}</span>
             </div>
-            <div className="message-body w-full flex items-center gap-2.5 pt-0.5">
-              <div className="flex items-center gap-1.5">
+            <div className="message-body w-full flex items-center gap-2.5 pt-0.5" role="status" aria-live="polite" aria-label="Assistant activity">
+              <span>Working on this step…</span>
+              <div className="flex items-center gap-1.5" aria-hidden="true">
                 <div className="w-1.5 h-1.5 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:0ms] opacity-80"></div>
                 <div className="w-1.5 h-1.5 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:160ms] opacity-80"></div>
                 <div className="w-1.5 h-1.5 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:320ms] opacity-80"></div>

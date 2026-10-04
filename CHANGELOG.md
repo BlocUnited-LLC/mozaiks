@@ -218,6 +218,12 @@ This project follows a practical pre-1.0 changelog format:
 - Studio concept and app review screens put the decision before supporting details.
   The default workspace uses readable body text and quieter panels while retaining
   the Mozaiks wordmark; generated previews keep their own app branding.
+- Submitting concept feedback immediately generates a new reviewable draft;
+  the revised concept still requires explicit approval. Design failures retain
+  their concrete rejection details when bounded retries end.
+- Domain data assigned a reserved platform-authentication surface identifier
+  receives explicit rename guidance before any ownership reassignment.
+  Chat working indicators now include visible, accessible status text.
 - New-app entry creates an owned Studio draft before launching the build journey.
   Transition preflight resolves that target without creating or resuming a run.
 - Export and activation require completed acceptance and app-build validation.

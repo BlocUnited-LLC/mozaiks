@@ -55,12 +55,12 @@ transition_rules:
   termination_reason: workflow_complete
 
 - source_agent: GapAnalysisAgent
-  target_agent: user
+  target_agent: GapAnalysisAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: concept_review_outcome
   condition_value: changes_requested
-  transition_target: RevertToUserTarget
+  transition_target: AgentTarget
 
 - source_agent: GapAnalysisAgent
   target_agent: terminate
